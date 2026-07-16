@@ -23,6 +23,7 @@ import {
   REVERB_WET_MAX,
   REVERB_WET_MIN,
 } from './effects-params'
+import { SYNTH_PARAMETER_LIMITS } from './synth-params'
 
 const EqBandSchema = z.object({
   id: z.string(),
@@ -31,6 +32,39 @@ const EqBandSchema = z.object({
   gainDb: z.number(),
   q: z.number(),
   enabled: z.boolean(),
+})
+
+const SynthWaveSchema = z.enum(['sine', 'square', 'sawtooth', 'triangle'])
+const SynthEnvelopeUpdateSchema = z.object({
+  attackSec: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max).optional(),
+  decaySec: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max).optional(),
+  sustain: z.number().min(SYNTH_PARAMETER_LIMITS.sustain.min).max(SYNTH_PARAMETER_LIMITS.sustain.max).optional(),
+  releaseSec: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max).optional(),
+})
+const SynthOscillatorUpdateSchema = z.object({
+  wave: SynthWaveSchema.optional(),
+  octave: z.number().int().min(SYNTH_PARAMETER_LIMITS.oscillatorOctave.min).max(SYNTH_PARAMETER_LIMITS.oscillatorOctave.max).optional(),
+  semitone: z.number().int().min(SYNTH_PARAMETER_LIMITS.oscillatorSemitone.min).max(SYNTH_PARAMETER_LIMITS.oscillatorSemitone.max).optional(),
+  detuneCents: z.number().min(SYNTH_PARAMETER_LIMITS.oscillatorDetuneCents.min).max(SYNTH_PARAMETER_LIMITS.oscillatorDetuneCents.max).optional(),
+  level: z.number().min(SYNTH_PARAMETER_LIMITS.oscillatorLevel.min).max(SYNTH_PARAMETER_LIMITS.oscillatorLevel.max).optional(),
+})
+const SynthFilterUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  mode: z.enum(['lowpass', 'highpass', 'bandpass', 'notch']).optional(),
+  frequencyHz: z.number().min(SYNTH_PARAMETER_LIMITS.filterFrequencyHz.min).max(SYNTH_PARAMETER_LIMITS.filterFrequencyHz.max).optional(),
+  q: z.number().min(SYNTH_PARAMETER_LIMITS.filterQ.min).max(SYNTH_PARAMETER_LIMITS.filterQ.max).optional(),
+  keyTracking: z.number().min(SYNTH_PARAMETER_LIMITS.filterKeyTracking.min).max(SYNTH_PARAMETER_LIMITS.filterKeyTracking.max).optional(),
+  envelopeAmountOctaves: z.number().min(SYNTH_PARAMETER_LIMITS.filterEnvelopeAmountOctaves.min).max(SYNTH_PARAMETER_LIMITS.filterEnvelopeAmountOctaves.max).optional(),
+  envelope: SynthEnvelopeUpdateSchema.optional(),
+})
+const SynthLfoUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  wave: SynthWaveSchema.optional(),
+  frequencyHz: z.number().min(SYNTH_PARAMETER_LIMITS.lfoFrequencyHz.min).max(SYNTH_PARAMETER_LIMITS.lfoFrequencyHz.max).optional(),
+  pitchCents: z.number().min(SYNTH_PARAMETER_LIMITS.lfoPitchCents.min).max(SYNTH_PARAMETER_LIMITS.lfoPitchCents.max).optional(),
+  filterOctaves: z.number().min(SYNTH_PARAMETER_LIMITS.lfoFilterOctaves.min).max(SYNTH_PARAMETER_LIMITS.lfoFilterOctaves.max).optional(),
+  amp: z.number().min(SYNTH_PARAMETER_LIMITS.lfoAmp.min).max(SYNTH_PARAMETER_LIMITS.lfoAmp.max).optional(),
+  pan: z.number().min(SYNTH_PARAMETER_LIMITS.lfoPan.min).max(SYNTH_PARAMETER_LIMITS.lfoPan.max).optional(),
 })
 
 export const CreateTrackCommandSchema = z.object({
@@ -104,14 +138,28 @@ export const SetReverbParamsCommandSchema = z.object({
 export const SetSynthParamsCommandSchema = z.object({
   type: z.literal('setSynthParams'),
   trackIndex: z.number().int().min(1),
-  wave1: z.enum(['sine', 'square', 'sawtooth', 'triangle']).optional(),
-  wave2: z.enum(['sine', 'square', 'sawtooth', 'triangle']).optional(),
-  gain: z.number().min(0).max(1.5).optional(),
-  attackMs: z.number().min(0).max(500).optional(),
-  releaseMs: z.number().min(0).max(500).optional(),
+  oscillators: z.tuple([SynthOscillatorUpdateSchema.optional(), SynthOscillatorUpdateSchema.optional()]).optional(),
+  ampEnvelope: SynthEnvelopeUpdateSchema.optional(),
+  filter: SynthFilterUpdateSchema.optional(),
+  lfo: SynthLfoUpdateSchema.optional(),
+  pan: z.number().min(SYNTH_PARAMETER_LIMITS.pan.min).max(SYNTH_PARAMETER_LIMITS.pan.max).optional(),
+  polyphony: z.number().int().min(SYNTH_PARAMETER_LIMITS.polyphony.min).max(SYNTH_PARAMETER_LIMITS.polyphony.max).optional(),
+  retrigger: z.boolean().optional(),
+  wave1: SynthWaveSchema.optional(),
+  wave2: SynthWaveSchema.optional(),
+  gain: z.number().min(SYNTH_PARAMETER_LIMITS.gain.min).max(SYNTH_PARAMETER_LIMITS.gain.max).optional(),
+  attackMs: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min * 1000).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max * 1000).optional(),
+  releaseMs: z.number().min(SYNTH_PARAMETER_LIMITS.envelopeSeconds.min * 1000).max(SYNTH_PARAMETER_LIMITS.envelopeSeconds.max * 1000).optional(),
 }).refine(
   (input) =>
-    input.wave1 !== undefined
+    input.oscillators !== undefined
+    || input.ampEnvelope !== undefined
+    || input.filter !== undefined
+    || input.lfo !== undefined
+    || input.pan !== undefined
+    || input.polyphony !== undefined
+    || input.retrigger !== undefined
+    || input.wave1 !== undefined
     || input.wave2 !== undefined
     || input.gain !== undefined
     || input.attackMs !== undefined

@@ -7,7 +7,6 @@ import {
 } from '~/lib/timeline-midi-bounds'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
-import { clampMidiVelocity, midiPitchFrequency } from '~/lib/midi-note-audio'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { isClipKindCompatibleWithTrack } from '@daw-browser/shared'
@@ -40,8 +39,8 @@ type UseTimelineMidiOverlayReturn = {
 }
 
 type LiveNote = {
-  oscs: OscillatorNode[]
-  gain: GainNode
+  trackId: string
+  noteInstanceId: number
 }
 
 function readMidiBounds(value: unknown): TimelineMidiBounds | null {
@@ -128,38 +127,14 @@ export function useTimelineMidiOverlay(
       const entry = activeLiveNotes.get(pitch)
       if (!entry) return
       activeLiveNotes.delete(pitch)
-      const ctx = options.audioEngine.getAudioContext()
-      if (!ctx) {
-        for (const osc of entry.oscs) {
-          try { osc.stop() } catch {}
-        }
-        try { entry.gain.disconnect() } catch {}
-        return
-      }
-      const now = ctx.currentTime
-      try {
-        entry.gain.gain.cancelScheduledValues(now)
-        const current = entry.gain.gain.value
-        entry.gain.gain.setValueAtTime(current, now)
-        entry.gain.gain.linearRampToValueAtTime(0, now + 0.05)
-        for (const osc of entry.oscs) {
-          try { osc.stop(now + 0.06) } catch {}
-        }
-      } catch {}
-      for (const osc of entry.oscs) {
-        osc.onended = () => {
-          try { entry.gain.disconnect() } catch {}
-        }
-      }
+      options.audioEngine.releaseSynthPreviewNote(entry.trackId, entry.noteInstanceId)
     } catch {}
   }
 
   const stopAllLiveNotes = () => {
-    try {
-      for (const pitch of Array.from(activeLiveNotes.keys())) {
-        stopLiveNote(pitch)
-      }
-    } catch {}
+    for (const pitch of Array.from(activeLiveNotes.keys())) {
+      stopLiveNote(pitch)
+    }
   }
 
   const closeMidiEditor = () => setMidiEditorClipId(null)
@@ -178,72 +153,39 @@ export function useTimelineMidiOverlay(
     schedulePersistMidiCard()
   }
 
-  const previewDrumRackNote = (trackId: string, pitch: number, velocity: number) => {
+  const previewInstrumentNote = (trackId: string, pitch: number, velocity: number) => {
     const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
-    if (instrumentKind === 'synth') return false
-    if (options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)) return true
-    return instrumentKind === 'drum-rack'
+    if (instrumentKind === 'drum-rack') return options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
+    if (instrumentKind === 'sampler') return options.audioEngine.previewSamplerNote(trackId, pitch, velocity)
+    if (instrumentKind === 'synth') return options.audioEngine.previewSynthNote(trackId, pitch, velocity) !== undefined
+    return false
   }
 
   const auditionNote = (pitch: number, velocity = 0.9, durSec = 0.35) => {
     try {
       options.audioEngine.ensureAudio()
-      const ctx = options.audioEngine.getAudioContext()
-      if (!ctx) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      if (previewDrumRackNote(trackId, pitch, velocity)) return
-      const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
-      if (!synthGain) return
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      const start = ctx.currentTime
-      const end = start + Math.max(0.05, durSec)
-      const amp = clampMidiVelocity(velocity)
-      osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(midiPitchFrequency(pitch), start)
-      gain.gain.setValueAtTime(0, start)
-      gain.gain.linearRampToValueAtTime(amp, start + 0.01)
-      gain.gain.linearRampToValueAtTime(0, end)
-      osc.connect(gain)
-      gain.connect(synthGain)
-      osc.start(start)
-      osc.stop(end)
+      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'synth') {
+        options.audioEngine.previewSynthNote(trackId, pitch, velocity, durSec)
+        return
+      }
+      previewInstrumentNote(trackId, pitch, velocity)
     } catch {}
   }
 
   const startLiveNote = (pitch: number, velocity = 0.9) => {
     try {
       options.audioEngine.ensureAudio()
-      const ctx = options.audioEngine.getAudioContext()
-      if (!ctx || activeLiveNotes.has(pitch)) return
+      if (activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
-      if (previewDrumRackNote(trackId, pitch, velocity)) return
-      const synthGain = options.audioEngine.getTrackSynthGainNode(trackId)
-      if (!synthGain) return
-      const osc1 = ctx.createOscillator()
-      const osc2 = ctx.createOscillator()
-      const gain = ctx.createGain()
-      const start = ctx.currentTime
-      const synth = options.audioEngine.getTrackSynthPreviewState(trackId)
-      const wave1 = synth?.wave1 ?? 'sawtooth'
-      const wave2 = synth?.wave2 ?? wave1
-      const targetAmp = clampMidiVelocity(velocity) / 2
-      try { osc1.type = wave1 } catch {}
-      try { osc2.type = wave2 } catch {}
-      const freq = midiPitchFrequency(pitch)
-      const epsilon = 1e-4
-      osc1.frequency.setValueAtTime(freq, start)
-      osc2.frequency.setValueAtTime(freq, start)
-      gain.gain.setValueAtTime(epsilon, start)
-      gain.gain.exponentialRampToValueAtTime(Math.max(epsilon, targetAmp), start + 0.01)
-      osc1.connect(gain)
-      osc2.connect(gain)
-      gain.connect(synthGain)
-      osc1.start(start)
-      osc2.start(start)
-      activeLiveNotes.set(pitch, { oscs: [osc1, osc2], gain })
+      if (options.audioEngine.getTrackInstrumentKind(trackId) !== 'synth') {
+        previewInstrumentNote(trackId, pitch, velocity)
+        return
+      }
+      const noteInstanceId = options.audioEngine.startSynthPreviewNote(trackId, pitch, velocity)
+      if (noteInstanceId !== undefined) activeLiveNotes.set(pitch, { trackId, noteInstanceId })
     } catch {}
   }
 

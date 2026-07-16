@@ -1,7 +1,7 @@
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec, type AudioRuntime, type AudioRuntimeOptions } from './audio-runtime'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, type ArpParams, type AutomationEnvelope, type ReverbParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { assert, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, type ArpParams, type AutomationEnvelope, type ReverbParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
@@ -415,13 +415,29 @@ export class AudioEngine {
     return this.audioCtx
   }
 
-  getTrackSynthGainNode(trackId: string) {
+  triggerSynthNote(input: {
+    trackId: string
+    pitch: number
+    velocity?: number
+    when: number
+    durationSec: number
+  }) {
     this.ensureAudio()
-    return this.instrumentRuntime.getTrackSynthGainNode(trackId)
+    return this.instrumentRuntime.triggerSynthNote(input)
   }
 
-  getTrackSynthPreviewState(trackId: string) {
-    return this.instrumentRuntime.getTrackSynthPreviewState(trackId)
+  previewSynthNote(trackId: string, pitch: number, velocity?: number, durationSec?: number) {
+    this.ensureAudio()
+    return this.instrumentRuntime.previewSynthNote(trackId, pitch, velocity, durationSec)
+  }
+
+  startSynthPreviewNote(trackId: string, pitch: number, velocity?: number) {
+    this.ensureAudio()
+    return this.instrumentRuntime.startSynthPreviewNote(trackId, pitch, velocity)
+  }
+
+  releaseSynthPreviewNote(trackId: string, noteInstanceId: number) {
+    this.instrumentRuntime.releaseSynthPreviewNote(trackId, noteInstanceId)
   }
 
   getTrackInstrumentKind(trackId: string): TrackInstrumentParams['kind'] | undefined {
@@ -451,8 +467,8 @@ export class AudioEngine {
     return this.clock.timelineToCtxTime(timelineSec)
   }
 
-  setTrackSynth(trackId: string, params: SynthParamsInput) {
-    this.instrumentRuntime.setTrackSynth(trackId, params)
+  setTrackSynth(trackId: string, params: SynthParamsInput, instanceId?: string) {
+    this.instrumentRuntime.setTrackSynth(trackId, params, instanceId)
   }
 
   setTrackInstrument(trackId: string, input: SetTrackInstrumentInput) {
@@ -641,9 +657,7 @@ export class AudioEngine {
       if (!envelope.enabled) continue
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
-      const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
+      const bindings = this.resolveAutomationBindings(envelope)
       scheduleAutomationEnvelope(bindings, envelope, window, (timeSec) => this.timelineToCtxTime(timeSec), fallback)
     }
   }
@@ -655,9 +669,7 @@ export class AudioEngine {
       if (!envelope.enabled) continue
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
-      const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
+      const bindings = this.resolveAutomationBindings(envelope)
       applyAutomationEnvelopeAtTime(bindings, envelope, timeSec, now, fallback)
     }
   }
@@ -666,9 +678,7 @@ export class AudioEngine {
     const now = this.audioCtx?.currentTime ?? 0
     for (const envelope of envelopes) {
       if (targetKeys && !targetKeys.has(envelope.targetKey)) continue
-      const bindings = envelope.target.kind === 'master'
-        ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
+      const bindings = this.resolveAutomationBindings(envelope)
       for (const binding of bindings) binding.param.cancelScheduledValues(now)
     }
   }
@@ -677,13 +687,20 @@ export class AudioEngine {
     this.instrumentRuntime.disposeTrack(id)
   }
 
+  private resolveAutomationBindings(envelope: AutomationEnvelope) {
+    return envelope.target.kind === 'master'
+      ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
+      : parseSynthAutomationKey(envelope.parameterId)
+        ? this.instrumentRuntime.resolveSynthAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
+  }
+
   private stopClipSources() {
     this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = this.sources.snapshot()
     // Reset tracking immediately so subsequent schedules are isolated
     this.sources.clear()
-    this.instrumentRuntime.clearActiveOscillators()
 
     // Quick master fade to avoid clicks
     const ctx = this.audioCtx
@@ -713,7 +730,14 @@ export class AudioEngine {
 
   private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
-    return this.instrumentRuntime.scheduleMidiClip(track, clip, startLimitSec ?? playheadSec, nowCtx, endLimitSec)
+    return this.instrumentRuntime.scheduleMidiClip(
+      track,
+      clip,
+      startLimitSec ?? playheadSec,
+      nowCtx,
+      endLimitSec,
+      { scheduleVoiceAutomation: false },
+    )
   }
   scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions): ScheduleResult {
     return this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)

@@ -81,7 +81,7 @@ const recognizeLocalAutomationEnvelope = (value: unknown): RecognizedLocalAutoma
   const envelope = normalizeLocalAutomationEnvelope(value)
   if (!envelope) return null
   const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
-  if (!descriptor || (descriptor.owner !== 'mixer' && descriptor.owner !== 'sampler' && descriptor.owner !== 'granular' && !envelope.target.effectInstanceId)) return null
+  if (!descriptor || (descriptor.owner !== 'mixer' && descriptor.owner !== 'sampler' && descriptor.owner !== 'granular' && descriptor.owner !== 'synth' && !envelope.target.effectInstanceId)) return null
   return {
     envelope: {
       ...envelope,

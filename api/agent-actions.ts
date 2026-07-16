@@ -23,7 +23,7 @@ import type {
   SetTrackVolumeCommandSchema,
   AgentCommand,
 } from '@daw-browser/shared'
-import { buildClipCreatePayload, createInstrumentInstanceId, getPersistableAudioSourceMetadata, normalizeEqParams, normalizeSynthParams, resolveAgentMixTargetIndices, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { buildClipCreatePayload, createInstrumentInstanceId, getPersistableAudioSourceMetadata, mergeSynthParams, normalizeEqParams, normalizeSynthParams, resolveAgentMixTargetIndices, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
 import { listSortedClipsForTrack, resolveTrackClip, selectTrackClips, trackAtIndex as trackAtIndexImpl } from './indexing'
@@ -496,7 +496,7 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setSynthParams(input: Omit<SetSynthParamsInput, 'type'>) {
-      const { trackIndex, ...updates } = input
+      const { trackIndex, wave1, wave2, attackMs, releaseMs, ...updates } = input
       const track = await trackAtIndex(trackIndex)
       if (!track) return { error: `No track at index ${trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Target track is not an instrument track' }
@@ -504,9 +504,17 @@ export function createAgentActions(context: AgentActionContext) {
         projectId: context.projectId,
         trackId: track._id,
       })
-      const params = normalizeSynthParams({
-        ...normalizeSynthParams(row?.params ?? {}),
+      const params = mergeSynthParams(normalizeSynthParams(row?.params), {
         ...updates,
+        oscillators: [
+          { ...updates.oscillators?.[0], ...(wave1 === undefined ? {} : { wave: wave1 }) },
+          { ...updates.oscillators?.[1], ...(wave2 === undefined ? {} : { wave: wave2 }) },
+        ],
+        ampEnvelope: {
+          ...updates.ampEnvelope,
+          ...(attackMs === undefined ? {} : { attackSec: attackMs / 1000 }),
+          ...(releaseMs === undefined ? {} : { releaseSec: releaseMs / 1000 }),
+        },
       })
       const result = await context.convex.mutation(context.convexApi.effects.setSynthParams, {
         projectId: context.projectId,

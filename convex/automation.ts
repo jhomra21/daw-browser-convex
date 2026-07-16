@@ -7,8 +7,28 @@ import {
   normalizeAutomationPoints,
   parseInstrumentAutomationKey,
   parseGranularAutomationKey,
+  parseSynthAutomationKey,
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+
+type InstrumentEffectRow = {
+  type: string;
+  instanceId?: string;
+  params: unknown;
+};
+
+export const readAutomationTrackInstrument = (rows: readonly InstrumentEffectRow[]) => {
+  const instrumentRow = rows.find((entry) => entry.type === "instrument");
+  if (instrumentRow) return normalizeTrackInstrumentParams(instrumentRow.params);
+  const legacySynthRow = rows.find((entry) => entry.type === "synth");
+  return legacySynthRow
+    ? normalizeTrackInstrumentParams({
+        kind: "synth",
+        instanceId: legacySynthRow.instanceId,
+        params: legacySynthRow.params,
+      })
+    : undefined;
+};
 
 const automationPointValidator = v.object({
   id: v.string(),
@@ -47,7 +67,7 @@ const normalizeEnvelopeInput = async (
     throw new Error("Mixer automation cannot reference an effect instance.");
   }
   if (descriptor.owner !== "mixer" && !input.effectInstanceId) {
-    if (descriptor.owner !== "sampler" && descriptor.owner !== "granular") throw new Error("Effect automation requires an effect instance.");
+    if (descriptor.owner !== "sampler" && descriptor.owner !== "granular" && descriptor.owner !== "synth") throw new Error("Effect automation requires an effect instance.");
   }
   const trackId = input.targetKind === "track"
     ? await normalizeTrackId(ctx, input.projectId, input.trackId)
@@ -55,18 +75,18 @@ const normalizeEnvelopeInput = async (
   if (input.targetKind === "track" && !trackId) throw new Error("Track automation requires a track id.");
   const instrumentKey = parseInstrumentAutomationKey(input.parameterId);
   const granularKey = parseGranularAutomationKey(input.parameterId);
-  const instrumentAutomation = instrumentKey ?? granularKey;
+  const synthKey = parseSynthAutomationKey(input.parameterId);
+  const instrumentAutomation = instrumentKey ?? granularKey ?? synthKey;
   if (instrumentAutomation) {
     if (input.targetKind !== "track" || input.effectInstanceId || instrumentAutomation.trackId !== String(trackId)) {
       throw new Error("Instrument automation identity does not match its target.");
     }
     const instrumentRows = await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect();
-    const instrumentRow = instrumentRows.find((entry) => entry.type === "instrument");
-    const instrument = instrumentRow ? normalizeTrackInstrumentParams(instrumentRow.params) : undefined;
+    const instrument = readAutomationTrackInstrument(instrumentRows);
     if (
       !instrument
       || instrument.instanceId !== instrumentAutomation.instanceId
-      || instrument.kind !== (granularKey ? "granular" : "sampler")
+      || instrument.kind !== (granularKey ? "granular" : synthKey ? "synth" : "sampler")
     ) {
       throw new Error("Instrument automation instance does not belong to this track.");
     }

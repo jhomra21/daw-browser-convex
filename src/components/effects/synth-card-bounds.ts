@@ -14,10 +14,10 @@ export function clampSynthCardBounds(
   viewportWidth = window.innerWidth,
   viewportHeight = window.innerHeight,
 ): SynthCardBounds {
-  const minW = Math.max(360, Math.min(640, viewportWidth - 40))
-  const minH = Math.max(320, Math.min(420, viewportHeight - 80))
-  const maxW = Math.max(minW, viewportWidth - 12)
-  const maxH = Math.max(minH, viewportHeight - 24)
+  const maxW = Math.max(240, viewportWidth - 12)
+  const maxH = Math.max(220, viewportHeight - 24)
+  const minW = Math.min(520, maxW)
+  const minH = Math.min(420, maxH)
   const w = clamp(bounds.w, minW, maxW)
   const h = clamp(bounds.h, minH, maxH)
   const maxX = Math.max(0, viewportWidth - w)
@@ -35,8 +35,8 @@ export function createInitialSynthCardBounds(
   viewportWidth = window.innerWidth,
   viewportHeight = window.innerHeight,
 ): SynthCardBounds {
-  const initialW = Math.min(640, viewportWidth - 40)
-  const initialH = Math.min(420, viewportHeight - 80)
+  const initialW = Math.min(640, Math.max(240, viewportWidth - 12))
+  const initialH = Math.min(560, Math.max(220, viewportHeight - 24))
 
   return clampSynthCardBounds(
     {

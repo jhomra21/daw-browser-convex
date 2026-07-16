@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, trackCreationIndex } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, synthAutomationKey, trackCreationIndex } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffectInstance } from "~/lib/local-effects";
@@ -38,11 +38,14 @@ export const rebaseTrackAutomationEnvelope = (
 ) => {
   const samplerKey = parseInstrumentAutomationKey(envelope.parameterId);
   const granularKey = parseGranularAutomationKey(envelope.parameterId);
+  const synthKey = parseSynthAutomationKey(envelope.parameterId);
   const parameterId = samplerKey
     ? instrumentAutomationKey(trackId, samplerKey.instanceId, samplerKey.parameterId)
     : granularKey
       ? granularAutomationKey(trackId, granularKey.instanceId, granularKey.parameterId)
-      : envelope.parameterId;
+      : synthKey
+        ? synthAutomationKey(trackId, synthKey.instanceId, synthKey.parameterId)
+        : envelope.parameterId;
   const target: AutomationEnvelope["target"] = {
     kind: "track",
     trackId,

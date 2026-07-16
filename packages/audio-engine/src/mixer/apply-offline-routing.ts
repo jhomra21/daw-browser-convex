@@ -131,7 +131,7 @@ const resolveFxAutomationBindings = (
   effectInstanceId?: string,
 ): AutomationAudioBinding[] => {
   const descriptor = getAutomationParameterDescriptor(parameterId)
-  if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'compressor') return []
+  if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'synth' || descriptor.owner === 'compressor') return []
   if (effectInstanceId) {
     if (isStaticWorkletKind(descriptor.owner)) return resolveStaticWorkletAutomationBinding(nodes.staticWorkletByInstanceId.get(effectInstanceId), parameterId)
     if (descriptor.owner === 'eq') return resolveEqAutomationBindings(nodes.eqByInstanceId.get(effectInstanceId) ?? new Map(), parameterId)

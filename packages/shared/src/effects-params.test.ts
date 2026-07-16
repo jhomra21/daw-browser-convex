@@ -34,6 +34,7 @@ import {
   REVERB_WET_MAX,
   serializeNormalizedEqParams,
 } from './effects-params'
+import { normalizeSynthParams } from './synth-params'
 import { parseSharedTimelineOperation } from './shared-timeline-operations'
 
 describe('EQ params', () => {
@@ -156,6 +157,21 @@ describe('EQ params', () => {
           }],
         },
       },
+    })
+  })
+})
+
+describe('Synth params', () => {
+  test('defaults non-finite gain and envelope values', () => {
+    const defaults = normalizeSynthParams({})
+
+    expect(normalizeSynthParams({
+      gain: Number.NaN,
+      attackMs: Number.POSITIVE_INFINITY,
+      releaseMs: Number.NEGATIVE_INFINITY,
+    })).toMatchObject({
+      gain: defaults.gain,
+      ampEnvelope: { attackSec: defaults.ampEnvelope.attackSec, releaseSec: defaults.ampEnvelope.releaseSec },
     })
   })
 })

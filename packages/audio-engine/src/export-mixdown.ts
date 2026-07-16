@@ -7,12 +7,17 @@ import {
   type ArpParams,
   type AutomationEnvelope,
   type DrumRackParams,
+  normalizeSynthParams,
   type SynthParamsInput,
+  type SynthAutomationParameterId,
   type TrackInstrumentParams,
   parseInstrumentAutomationKey,
   parseGranularAutomationKey,
+  parseSynthAutomationKey,
+  SYNTH_AUTOMATION_DESCRIPTORS,
 } from '@daw-browser/shared'
-import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
+import { createSynthOutputChain, scheduleSynthVoice, type SynthVoiceHandle } from './synth-voice'
+import { chooseSynthVoiceVictim, isSynthVoiceSoundingAt, pruneSynthVoiceAllocations } from './synth-voice-allocation'
 import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { scheduleSamplerVoice, type SamplerResolvedBuffers } from './sampler-runtime'
 import { resetSamplerRoundRobin, selectSamplerZone } from './sampler-core'
@@ -214,40 +219,91 @@ const readTrackInstrument = (
   fxCfg: NonNullable<ExportFx['trackFx']>[string] | undefined,
 ): TrackInstrumentParams | undefined => fxCfg?.instrument
 
-function renderOfflineSynthEvents(input: {
+function createOfflineSynthTrack(input: {
   ctx: OfflineAudioContext
   destination: AudioNode
-  events: ReturnType<typeof getScheduledMidiEvents>
   rangeStartSec: number
   synth: SynthParamsInput | undefined
-  midi: NonNullable<Track<AudioBuffer>['clips'][number]['midi']>
+  automationEnvelopes: readonly AutomationEnvelope[]
 }) {
-  const voice = getSynthVoiceConfig({ synth: input.synth, midi: input.midi })
-  for (const event of input.events) {
-    const when = Math.max(0, event.startSec - input.rangeStartSec)
-    const noteDur = event.endSec - event.startSec
-    if (noteDur <= 0) continue
-
-    const oscs = createSynthVoiceOscillators(input.ctx, {
-      startTime: when,
-      pitch: event.pitch,
-      wave1: voice.wave1,
-      wave2: voice.wave2,
-    })
-    const gain = input.ctx.createGain()
-    const peakGain = (getSynthVoiceVelocity(event.velocity) * voice.clipGain * voice.synthGain) / oscs.length
-    const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
-      startTime: when,
-      durationSec: noteDur,
-      attackSec: voice.attackSec,
-      releaseSec: voice.releaseSec,
-      peakGain,
-    })
-    for (const osc of oscs) osc.connect(gain)
-    gain.connect(input.destination)
-    for (const osc of oscs) {
-      try { osc.start(when) } catch {}
-      try { osc.stop(envelope.endTime) } catch {}
+  const synth = normalizeSynthParams(input.synth)
+  const { output: outputGain, outputPan } = createSynthOutputChain(
+    input.ctx,
+    input.destination,
+    synth.gain,
+    synth.pan,
+    0,
+  )
+  const outputBindings = {
+    'output.gain': outputGain.gain,
+    'output.pan': outputPan.pan,
+  }
+  for (const envelope of input.automationEnvelopes) {
+    const key = parseSynthAutomationKey(envelope.parameterId)
+    if (!key || !envelope.enabled) continue
+    const param = key.parameterId === 'output.gain'
+      ? outputBindings['output.gain']
+      : key.parameterId === 'output.pan'
+        ? outputBindings['output.pan']
+        : undefined
+    if (!param) continue
+    scheduleAutomationEnvelope(
+      [{ param, valueToAudioValue: (value) => value }],
+      envelope,
+      {
+        playheadSec: input.rangeStartSec,
+        startLimitSec: input.rangeStartSec,
+        endLimitSec: Number.POSITIVE_INFINITY,
+      },
+      (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
+      SYNTH_AUTOMATION_DESCRIPTORS[key.parameterId].defaultValue,
+    )
+  }
+  let voices: SynthVoiceHandle[] = []
+  let nextId = 1
+  const envelopes = new Map<SynthAutomationParameterId, AutomationEnvelope>()
+  for (const envelope of input.automationEnvelopes) {
+    const key = parseSynthAutomationKey(envelope.parameterId)
+    if (key && envelope.enabled) envelopes.set(key.parameterId, envelope)
+  }
+  return {
+    scheduleEvents: (
+      events: readonly (ReturnType<typeof getScheduledMidiEvents>[number] & {
+        clipGain: number | undefined
+      })[],
+    ) => {
+      for (const event of events) {
+        const when = Math.max(0, event.startSec - input.rangeStartSec)
+        const noteDur = event.endSec - event.startSec
+        if (noteDur <= 0) continue
+        voices = pruneSynthVoiceAllocations(voices, when)
+        if (!synth.retrigger && voices.some((voice) => voice.pitch === event.pitch && isSynthVoiceSoundingAt(voice, when))) continue
+        const victim = chooseSynthVoiceVictim(voices, synth.polyphony, when)
+        if (victim) {
+          voices = voices.filter((voice) => voice !== victim)
+          victim.stop(when)
+        }
+        const id = nextId
+        nextId += 1
+        voices.push(scheduleSynthVoice(input.ctx, {
+          id,
+          noteInstanceId: id,
+          pitch: event.pitch,
+          velocity: event.velocity,
+          clipGain: event.clipGain,
+          when,
+          durationSec: noteDur,
+          params: synth,
+          destination: outputPan,
+          timelineStartSec: event.startSec,
+          timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
+          automationEnvelopes: envelopes,
+          onEnded: (ended) => {
+            const index = voices.indexOf(ended)
+            if (index >= 0) voices.splice(index, 1)
+          },
+        }))
+      }
     }
   }
 }
@@ -725,6 +781,38 @@ async function renderSourceIsolatedMixdownFromPrepared(
         })
         : undefined
       if (granularRuntime) granularRuntimes.push(granularRuntime)
+      const synthParams = instrument?.kind === 'synth'
+        ? instrument.params
+        : instrument
+          ? undefined
+          : fxCfg?.synth
+      const synthTrack = synthParams || (!instrument && synthParams === undefined && track.kind === 'instrument')
+        ? createOfflineSynthTrack({
+            ctx,
+            destination: trackInput,
+            rangeStartSec: prepared.range.startSec,
+            synth: synthParams,
+            automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => {
+              const key = parseSynthAutomationKey(envelope.parameterId)
+              return key?.trackId === track.id && key.instanceId === (instrument?.kind === 'synth' ? instrument.instanceId : undefined)
+            }),
+          })
+        : undefined
+      if (synthTrack) {
+        const events = track.clips.flatMap((clip) => {
+          const midi = clip.midi
+          if (!midi || !Array.isArray(midi.notes)) return []
+          return getScheduledMidiEvents({
+            clip,
+            bpm: prepared.bpm,
+            notes: midi.notes,
+            rangeStartSec: prepared.range.startSec,
+            rangeEndSec: prepared.range.sourceEndSec,
+            arp: fxCfg?.arp,
+          }).map((event) => ({ ...event, clipGain: midi.gain }))
+        }).toSorted((left, right) => left.startSec - right.startSec)
+        synthTrack.scheduleEvents(events)
+      }
 
       for (const clip of track.clips) {
         const midi = clip.midi
@@ -772,15 +860,6 @@ async function renderSourceIsolatedMixdownFromPrepared(
                 automationEnvelopes,
               })
             }
-          } else {
-            renderOfflineSynthEvents({
-              ctx,
-              destination: trackInput,
-              events,
-              rangeStartSec: prepared.range.startSec,
-              synth: instrument?.kind === 'synth' ? instrument.params : fxCfg?.synth,
-              midi,
-            })
           }
           continue
         }

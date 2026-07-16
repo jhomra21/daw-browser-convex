@@ -10,7 +10,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
-import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -62,6 +62,7 @@ import {
   getAudioEffectDeviceCatalogEntry,
 } from "~/lib/device-catalog";
 import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
+import { createSynthAutomationState, overlaySynthAutomationValues } from "~/components/timeline/synth-automation";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -128,6 +129,11 @@ type EffectsPanelInstrumentSectionProps = {
   };
   audioEngine: AudioEngine;
   targetId: string;
+  synthAutomationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
+  synthAutomationParameterIds?: ReadonlyMap<string, string>;
+  synthAutomationDisplayParams?: SynthParams;
+  onSelectSynthAutomationParameter?: (parameterId: string) => void;
+  onManualSynthAutomationOverride?: (parameterId: string) => void;
 };
 
 const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
@@ -206,7 +212,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
     >
       {(params) => (
         <Synth
-          params={params()}
+          params={props.synthAutomationDisplayParams ?? params()}
           onChange={(updates) => {
             if (!props.instrument.canWrite) return;
             props.instrument.state.synth.change(updates);
@@ -221,6 +227,15 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
           }}
           disabled={!props.instrument.canWrite}
           variant="compact"
+          automationRangesByParameterId={props.synthAutomationRangesByParameterId}
+          onAutomationParameterTouch={(parameterId) => {
+            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+            if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
+          }}
+          onManualAutomationOverride={(parameterId) => {
+            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+            if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
+          }}
         />
       )}
     </Show>
@@ -758,6 +773,11 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
 type EffectsPanelFloatingSynthProps = {
   synth: EffectsPanelInstrumentDevice["synth"];
   canWrite: boolean;
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
+  automationParameterIds?: ReadonlyMap<string, string>;
+  evaluatedValuesByTargetKey?: ReadonlyMap<string, number>;
+  onAutomationParameterTouch?: (parameterId: string) => void;
+  onManualAutomationOverride?: (parameterId: string) => void;
 };
 
 const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (props) => {
@@ -767,7 +787,11 @@ const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (pr
     <Show when={props.canWrite ? card() : undefined}>
       {(expandedCard) => (
         <SynthCard
-          params={expandedCard().params}
+          params={overlaySynthAutomationValues(
+            expandedCard().params,
+            props.automationParameterIds ?? new Map(),
+            props.evaluatedValuesByTargetKey,
+          )}
           onChange={expandedCard().onChange}
           onReset={expandedCard().onReset}
           x={expandedCard().x}
@@ -776,6 +800,9 @@ const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (pr
           h={expandedCard().h}
           onChangeBounds={props.synth.updateCardBounds}
           onClose={props.synth.close}
+          automationRangesByParameterId={props.automationRangesByParameterId}
+          onAutomationParameterTouch={props.onAutomationParameterTouch}
+          onManualAutomationOverride={props.onManualAutomationOverride}
         />
       )}
     </Show>
@@ -828,6 +855,32 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     }
     return ranges;
   });
+  const synthAutomation = createMemo(() => {
+    const synthInstanceId = instrument.synth.instanceId();
+    return createSynthAutomationState(
+      props.selectedFXTarget === "master" ? undefined : props.selectedFXTarget,
+      synthInstanceId,
+      props.automationEnvelopes ?? [],
+    );
+  });
+  const floatingSynthAutomation = createMemo(() => {
+    const card = instrument.synth.expandedCard();
+    const targetId = card?.targetId;
+    return {
+      targetId,
+      ...createSynthAutomationState(targetId, card?.instanceId, props.automationEnvelopes ?? []),
+    };
+  });
+  const canWriteFloatingSynth = () => {
+    const targetId = floatingSynthAutomation().targetId;
+    return targetId ? controller.canWriteEffectsTarget(targetId) : false;
+  };
+  const synthAutomationDisplayParams = createMemo(() => {
+    const params = instrument.synth.params();
+    return params
+      ? overlaySynthAutomationValues(params, synthAutomation().parameterIds, props.evaluatedValuesByTargetKey)
+      : undefined;
+  });
 
   createEffect(() => {
     if (props.isOpen) return;
@@ -865,6 +918,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         }}
                         audioEngine={props.audioEngine}
                         targetId={props.selectedFXTarget}
+                        synthAutomationRangesByParameterId={synthAutomation().ranges}
+                        synthAutomationParameterIds={synthAutomation().parameterIds}
+                        synthAutomationDisplayParams={synthAutomationDisplayParams()}
+                        onSelectSynthAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
+                        onManualSynthAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
                       />
                     </Show>
                     <EffectsPanelEffectCards
@@ -906,7 +964,23 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
         <EffectsPanelClosedFooter onOpen={props.onOpen} clipTab={props.clipTab} />
       </Show>
 
-      <EffectsPanelFloatingSynth synth={instrument.synth} canWrite={canWriteCurrentTargetEffects()} />
+      <EffectsPanelFloatingSynth
+        synth={instrument.synth}
+        canWrite={canWriteFloatingSynth()}
+        automationRangesByParameterId={floatingSynthAutomation().ranges}
+        automationParameterIds={floatingSynthAutomation().parameterIds}
+        evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+        onAutomationParameterTouch={(parameterId) => {
+          const { targetId, parameterIds } = floatingSynthAutomation();
+          const automationParameterId = parameterIds.get(parameterId);
+          if (targetId && automationParameterId) props.onSelectAutomationParameter?.(targetId, automationParameterId);
+        }}
+        onManualAutomationOverride={(parameterId) => {
+          const { targetId, parameterIds } = floatingSynthAutomation();
+          const automationParameterId = parameterIds.get(parameterId);
+          if (targetId && automationParameterId) props.onManualAutomationOverride?.(targetId, automationParameterId);
+        }}
+      />
     </>
   );
 };

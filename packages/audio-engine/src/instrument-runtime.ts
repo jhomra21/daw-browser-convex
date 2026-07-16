@@ -3,10 +3,9 @@ import { createSynthRuntime } from './synth-runtime'
 import { createSamplerRuntime, type SamplerNoteMiss, type SamplerResolvedBuffers } from './sampler-runtime'
 import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
 import type { SourceRegistry } from './source-registry'
-import type { ArpParams, AutomationEnvelope, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { parseGranularAutomationKey } from '@daw-browser/shared'
+import { parseGranularAutomationKey, type ArpParams, type AutomationEnvelope, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { getScheduledMidiEvents } from './audio-scheduling'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -22,7 +21,7 @@ type InstrumentRuntimeOptions = {
 }
 
 export type SetTrackInstrumentInput =
-  | { instrument: { kind: 'synth'; params: Extract<TrackInstrumentParams, { kind: 'synth' }>['params'] } }
+  | { instrument: Pick<Extract<TrackInstrumentParams, { kind: 'synth' }>, 'kind' | 'params'> & { instanceId?: string } }
   | { instrument: { kind: 'drum-rack'; params: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>['params'] }; buffers?: DrumRackResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
@@ -32,7 +31,11 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
   let samplerAssetUseListener: ((assetKey: string, active: boolean) => void) | undefined
   const activeKinds = new Map<string, TrackInstrumentParams['kind']>()
   const arpeggiators = new Map<string, ArpParams>()
-  const synthRuntime = createSynthRuntime({ ...options, getArpeggiator: (trackId) => arpeggiators.get(trackId) })
+  const synthRuntime = createSynthRuntime({
+    ...options,
+    getArpeggiator: (trackId) => arpeggiators.get(trackId),
+    getAutomationEnvelopes: options.getAutomationEnvelopes,
+  })
   const drumRackRuntime = createDrumRackRuntime({ ...options, getArpeggiator: (trackId) => arpeggiators.get(trackId) })
   const samplerRuntime = createSamplerRuntime({
     ...options,
@@ -85,12 +88,12 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     }
   }
 
-  const setTrackSynth = (trackId: string, params: SynthParamsInput) => {
+  const setTrackSynth = (trackId: string, params: SynthParamsInput, instanceId?: string) => {
     disposeGranular(trackId)
     drumRackRuntime.clearTrackDrumRack(trackId)
     samplerRuntime.disposeTrack(trackId)
     activeKinds.set(trackId, 'synth')
-    synthRuntime.setTrackSynth(trackId, params)
+    synthRuntime.setTrackSynth(trackId, params, instanceId)
   }
 
   const clearTrackSynth = (trackId: string) => {
@@ -109,7 +112,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
   return {
     setTrackInstrument: (trackId: string, input: SetTrackInstrumentInput) => {
       if (input.instrument.kind === 'synth') {
-        setTrackSynth(trackId, input.instrument.params)
+        setTrackSynth(trackId, input.instrument.params, input.instrument.instanceId)
         return
       }
       synthRuntime.disposeTrack(trackId)
@@ -121,7 +124,6 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
         return
       }
       if (input.instrument.kind === 'granular') {
-        synthRuntime.disposeTrack(trackId)
         drumRackRuntime.clearTrackDrumRack(trackId)
         samplerRuntime.disposeTrack(trackId)
         activeKinds.set(trackId, 'granular')
@@ -169,9 +171,33 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       arpeggiators.delete(trackId)
     },
     getTrackInstrumentKind: (trackId: string) => activeKinds.get(trackId),
-    getTrackSynthGainNode: synthRuntime.getTrackSynthGainNode,
-    getTrackSynthPreviewState: synthRuntime.getTrackSynthPreviewState,
-    scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean => {
+    triggerSynthNote: (input: {
+      trackId: string
+      pitch: number
+      velocity?: number
+      when: number
+      durationSec: number
+    }) => activeKinds.get(input.trackId) === 'synth' ? synthRuntime.triggerNote(input) : undefined,
+    previewSynthNote: (trackId: string, pitch: number, velocity?: number, durationSec?: number) => (
+      activeKinds.get(trackId) === 'synth' ? synthRuntime.previewNote(trackId, pitch, velocity, durationSec) : undefined
+    ),
+    startSynthPreviewNote: (trackId: string, pitch: number, velocity?: number) => (
+      activeKinds.get(trackId) === 'synth' ? synthRuntime.startPreviewNote(trackId, pitch, velocity) : undefined
+    ),
+    releaseSynthPreviewNote: (trackId: string, noteInstanceId: number) => {
+      if (activeKinds.get(trackId) === 'synth') synthRuntime.releasePreviewNote(trackId, noteInstanceId)
+    },
+    resolveSynthAutomationBindings: (trackId: string, parameterId: string) => (
+      synthRuntime.resolveAutomationBindings(trackId, parameterId)
+    ),
+    scheduleMidiClip: (
+      track: RuntimeTrack,
+      clip: RuntimeClip,
+      playheadSec: number,
+      nowCtx: number,
+      endLimitSec?: number,
+      scheduleOptions?: { scheduleVoiceAutomation?: boolean },
+    ): boolean => {
       if (activeKinds.get(track.id) === 'drum-rack') return drumRackRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
       if (activeKinds.get(track.id) === 'sampler') return samplerRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
       if (activeKinds.get(track.id) === 'granular') {
@@ -198,7 +224,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
         }
         return events.length > 0
       }
-      return synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
+      return synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec, scheduleOptions)
     },
     previewDrumRackPad: drumRackRuntime.previewPad,
     previewDrumRackNote: drumRackRuntime.previewNote,
@@ -230,7 +256,6 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       samplerRuntime.disposeTrack(trackId)
       disposeGranular(trackId)
     },
-    clearActiveOscillators: synthRuntime.clearActiveOscillators,
     clear: () => {
       activeKinds.clear()
       arpeggiators.clear()

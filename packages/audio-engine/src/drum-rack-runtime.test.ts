@@ -16,6 +16,7 @@ type TestParam = {
   cancelScheduledValues: (time: number) => void
   linearRampToValueAtTime: (value: number, time: number) => void
   exponentialRampToValueAtTime: (value: number, time: number) => void
+  setTargetAtTime: (value: number, time: number, timeConstant: number) => void
 }
 
 type TestSource = {
@@ -51,6 +52,9 @@ const createMutableParam = (initial = 0): TestParam => {
     exponentialRampToValueAtTime: (value) => {
       param.value = value
     },
+    setTargetAtTime: (value) => {
+      param.value = value
+    },
   }
   return param
 }
@@ -61,6 +65,7 @@ const createTestAudio = () => {
   const pans: TestPan[] = []
   const ctx = Object.assign(Object.create(null), {
     currentTime: 0,
+    sampleRate: 48_000,
     createBufferSource: () => {
       const source: TestSource = {
         playbackRate: createMutableParam(1),
@@ -93,9 +98,17 @@ const createTestAudio = () => {
     createOscillator: () => ({
       type: 'sine',
       frequency: createMutableParam(440),
+      detune: createMutableParam(),
       connect: () => {},
       start: () => {},
       stop: () => {},
+    }),
+    createBiquadFilter: () => ({
+      type: 'lowpass',
+      frequency: createMutableParam(),
+      detune: createMutableParam(),
+      Q: createMutableParam(),
+      connect: () => {},
     }),
   })
   return { ctx, sources, gains, pans }
@@ -139,6 +152,12 @@ describe('Instrument runtime', () => {
     })
 
     expect(runtime.scheduleMidiClip(createTrack(), createMidiClip(36), 0, 0, 1)).toBe(true)
+    expect(runtime.triggerSynthNote({
+      trackId: 'track-1',
+      pitch: 60,
+      when: 0,
+      durationSec: 1,
+    })).toBeUndefined()
 
     runtime.setTrackInstrument('track-1', {
       instrument: { kind: 'synth', params: createDefaultSynthParams() },

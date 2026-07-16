@@ -394,7 +394,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
         if (normalizedKind === "instrument") {
           const instrument = normalizeTrackInstrumentParams(row.params);
-          if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular")) continue;
+          if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular" && instrument.kind !== "synth")) continue;
           const entries = grouped.get(row.targetId) ?? [];
           entries.push({ id: instrument.instanceId, kind: instrument.kind, index: row.index ?? entries.length });
           grouped.set(row.targetId, entries);

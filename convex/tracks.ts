@@ -18,7 +18,7 @@ import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -36,6 +36,8 @@ const rebaseRestoredAutomationParameter = (trackId: string, parameterId: string)
   if (samplerKey) return instrumentAutomationKey(trackId, samplerKey.instanceId, samplerKey.parameterId);
   const granularKey = parseGranularAutomationKey(parameterId);
   if (granularKey) return granularAutomationKey(trackId, granularKey.instanceId, granularKey.parameterId);
+  const synthKey = parseSynthAutomationKey(parameterId);
+  if (synthKey) return synthAutomationKey(trackId, synthKey.instanceId, synthKey.parameterId);
   return parameterId;
 };
 

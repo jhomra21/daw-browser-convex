@@ -40,4 +40,19 @@ describe('instrument identity', () => {
     expect(first?.instanceId).toBe('instrument:granular')
     expect(first?.params).toMatchObject({ version: 1, zone: params.zone })
   })
+
+  test('synth normalization rejects non-finite persisted legacy values', () => {
+    expect(normalizeTrackInstrumentParams({
+      kind: 'synth',
+      instanceId: 'instrument:synth',
+      params: {
+        gain: Number.NaN,
+        attackMs: Number.POSITIVE_INFINITY,
+        releaseMs: Number.NEGATIVE_INFINITY,
+      },
+    })?.params).toMatchObject({
+      gain: 0.8,
+      ampEnvelope: { attackSec: 0.005, releaseSec: 0.12 },
+    })
+  })
 })

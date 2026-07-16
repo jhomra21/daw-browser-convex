@@ -4,7 +4,7 @@ import type { AudioSourceMetadata } from './audio-source-metadata'
 import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
 import { normalizeClipColor } from './clip-color'
 import type { SharedClipFadesInput, SharedTimelineClipCreatePayload } from './shared-timeline-operations'
-import type { SynthWave } from './effects-params'
+import type { SynthWave } from './synth-params'
 
 export type ClipTimingSnapshot = {
   leftPadSec?: number

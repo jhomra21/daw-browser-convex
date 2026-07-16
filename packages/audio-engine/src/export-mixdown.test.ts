@@ -1,11 +1,17 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import { createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
-import { automationTargetKey, createDefaultDelayParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from './export-fidelity'
+
+const originalOfflineAudioContext = globalThis.OfflineAudioContext
+
+afterEach(() => {
+  Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: originalOfflineAudioContext })
+})
 
 const channel = (
   id: string,
@@ -190,6 +196,147 @@ describe('runtime-only cue routing', () => {
       range: { mode: 'custom', startSec: 0, endSec: 1 },
       cueTrackIds: ['track-1'],
     })).rejects.toThrow('Cue routing is live-only and cannot be exported.')
+  })
+})
+
+describe('offline default synth scheduling', () => {
+  test('renders fresh instrument tracks with default synth params and skips explicit non-synth instruments', async () => {
+    type Event = { kind: 'set' | 'ramp' | 'cancel'; value?: number; time: number }
+    type Param = {
+      value: number
+      events: Event[]
+      setValueAtTime: (value: number, time: number) => void
+      linearRampToValueAtTime: (value: number, time: number) => void
+      exponentialRampToValueAtTime: (value: number, time: number) => void
+      setTargetAtTime: (value: number, time: number, timeConstant: number) => void
+      cancelScheduledValues: (time: number) => void
+      cancelAndHoldAtTime: (time: number) => void
+    }
+    const param = (): Param => {
+      const events: Event[] = []
+      return {
+        value: 0,
+        events,
+        setValueAtTime: (value, time) => { events.push({ kind: 'set', value, time }) },
+        linearRampToValueAtTime: (value, time) => { events.push({ kind: 'ramp', value, time }) },
+        exponentialRampToValueAtTime: (value, time) => { events.push({ kind: 'ramp', value, time }) },
+        setTargetAtTime: (value, time) => { events.push({ kind: 'ramp', value, time }) },
+        cancelScheduledValues: (time) => { events.push({ kind: 'cancel', time }) },
+        cancelAndHoldAtTime: (time) => { events.push({ kind: 'cancel', time }) },
+      }
+    }
+    class FakeOfflineAudioContext {
+      readonly destination = { channelCount: 2, connect: () => {}, disconnect: () => {} }
+      readonly oscillators: Array<{ starts: number[]; stops: number[]; frequency: Param; detune: Param }> = []
+      readonly sampleRate: number
+
+      constructor(_channels: number, length: number, sampleRate: number) {
+        this.sampleRate = sampleRate
+        this.length = length
+      }
+
+      readonly length: number
+
+      createGain() {
+        return { gain: param(), connect: () => {}, disconnect: () => {} }
+      }
+
+      createStereoPanner() {
+        return { pan: param(), connect: () => {}, disconnect: () => {} }
+      }
+
+      createBiquadFilter() {
+        return { type: 'lowpass' as BiquadFilterType, frequency: param(), detune: param(), Q: param(), connect: () => {}, disconnect: () => {} }
+      }
+
+      createOscillator() {
+        const oscillator = {
+          type: 'sine' as OscillatorType,
+          frequency: param(),
+          detune: param(),
+          starts: [] as number[],
+          stops: [] as number[],
+          connect: () => {},
+          disconnect: () => {},
+          start: (when: number) => { oscillator.starts.push(when) },
+          stop: (when: number) => { oscillator.stops.push(when) },
+          onended: undefined as (() => void) | undefined,
+        }
+        this.oscillators.push(oscillator)
+        return oscillator
+      }
+
+      createBuffer(channels: number, length: number, sampleRate: number) {
+        const data = Array.from({ length: channels }, () => new Float32Array(length))
+        return {
+          numberOfChannels: channels,
+          length,
+          sampleRate,
+          duration: length / sampleRate,
+          getChannelData: (channel: number) => {
+            const channelData = data[channel]
+            if (!channelData) throw new Error('Missing channel')
+            return channelData
+          },
+        }
+      }
+
+      async startRendering() {
+        return this.createBuffer(2, this.length, this.sampleRate)
+      }
+
+      close() {}
+    }
+    const contexts: FakeOfflineAudioContext[] = []
+    class RecordingOfflineAudioContext extends FakeOfflineAudioContext {
+      constructor(channels: number, length: number, sampleRate: number) {
+        super(channels, length, sampleRate)
+        contexts.push(this)
+      }
+    }
+    Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: RecordingOfflineAudioContext })
+    const midi = {
+      wave: 'sine' as const,
+      notes: [{ pitch: 60, beat: 0, length: 0.5, velocity: 0.8 }],
+    }
+    const track = (kind: 'audio' | 'instrument'): Track<AudioBuffer> => ({
+      id: 'track-1',
+      name: 'Track 1',
+      volume: 1,
+      kind,
+      clips: [{
+        id: 'clip-1',
+        name: 'Clip 1',
+        color: '#fff',
+        startSec: 0,
+        duration: 1,
+        midi,
+      }],
+    })
+
+    await renderMixdown({
+      tracks: [track('instrument')],
+      bpm: 60,
+      range: { mode: 'custom', startSec: 0, endSec: 1 },
+    })
+    await renderMixdown({
+      tracks: [track('instrument')],
+      bpm: 60,
+      range: { mode: 'custom', startSec: 0, endSec: 1 },
+      fx: {
+        masterFxInstances: [],
+        trackFx: {
+          'track-1': {
+            instances: [],
+            instrument: { kind: 'drum-rack', instanceId: 'instrument:drum-rack:1', params: createDefaultDrumRackParams() },
+          },
+        },
+      },
+    })
+
+    expect(contexts[0]?.oscillators).toHaveLength(3)
+    expect(contexts[0]?.oscillators.every((oscillator) => oscillator.starts.includes(0))).toBe(true)
+    expect(contexts[1]?.oscillators).toHaveLength(0)
   })
 })
 

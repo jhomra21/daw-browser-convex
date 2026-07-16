@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
+import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
   normalizeEqParamsForUpdate,
   normalizeCompressorParamsForUpdate,
@@ -115,13 +116,6 @@ const delayParamsValidator = v.object({
   lowCutHz: v.number(),
   highCutHz: v.number(),
 })
-
-const trackInstrumentValidator = v.union(
-  v.object({ kind: v.literal('synth'), instanceId: v.string(), params: v.any() }),
-  v.object({ kind: v.literal('drum-rack'), instanceId: v.string(), params: v.any() }),
-  v.object({ kind: v.literal('sampler'), instanceId: v.string(), params: v.any() }),
-  v.object({ kind: v.literal('granular'), instanceId: v.string(), params: v.any() }),
-)
 
 const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
 const processorEffectValidator = v.union(v.literal("utility"), v.literal("gate"), v.literal("limiter"), v.literal("spectral"))
@@ -599,23 +593,7 @@ export const setSynthParams = mutation({
     projectId: v.string(),
     trackId: v.id('tracks'),
     instanceId: v.string(),
-    params: v.object({
-      wave1: v.union(
-        v.literal('sine'),
-        v.literal('square'),
-        v.literal('sawtooth'),
-        v.literal('triangle'),
-      ),
-      wave2: v.union(
-        v.literal('sine'),
-        v.literal('square'),
-        v.literal('sawtooth'),
-        v.literal('triangle'),
-      ),
-      gain: v.optional(v.number()),
-      attackMs: v.optional(v.number()),
-      releaseMs: v.optional(v.number()),
-    }),
+    params: v.union(synthParamsValidator, legacySynthParamsValidator),
   },
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -822,13 +800,7 @@ export const serverSetSynthParams = mutation({
     projectId: v.string(),
     trackId: v.string(),
     instanceId: v.string(),
-    params: v.object({
-      wave1: v.union(v.literal('sine'), v.literal('square'), v.literal('sawtooth'), v.literal('triangle')),
-      wave2: v.union(v.literal('sine'), v.literal('square'), v.literal('sawtooth'), v.literal('triangle')),
-      gain: v.optional(v.number()),
-      attackMs: v.optional(v.number()),
-      releaseMs: v.optional(v.number()),
-    }),
+    params: v.union(synthParamsValidator, legacySynthParamsValidator),
   },
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)

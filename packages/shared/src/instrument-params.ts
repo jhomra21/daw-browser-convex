@@ -4,8 +4,7 @@ import {
   serializeSynthParams,
   type SynthParams,
   type SynthParamsInput,
-  type SynthWave,
-} from './effects-params'
+} from './synth-params'
 import {
   createDefaultDrumRackParams,
   normalizeDrumRackParams,
@@ -112,29 +111,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
 
-const isSynthWave = (value: unknown): value is SynthWave => (
-  value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle'
-)
-
-const readOptionalNumber = (value: unknown) => typeof value === 'number' ? value : undefined
-
-const readSynthParamsInput = (value: unknown): SynthParamsInput => {
-  if (!isRecord(value)) return {}
-  return {
-    wave1: isSynthWave(value.wave1) ? value.wave1 : undefined,
-    wave2: isSynthWave(value.wave2) ? value.wave2 : undefined,
-    gain: readOptionalNumber(value.gain),
-    attackMs: readOptionalNumber(value.attackMs),
-    releaseMs: readOptionalNumber(value.releaseMs),
-  }
-}
-
 export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentParams | undefined {
   if (!isRecord(value) || !isInstrumentKind(value.kind)) return undefined
   const instanceId = typeof value.instanceId === 'string' && value.instanceId ? value.instanceId : undefined
   if (!instanceId) return undefined
   if (value.kind === 'synth') {
-    return { kind: value.kind, instanceId, params: normalizeSynthParams(readSynthParamsInput(value.params)) }
+    return { kind: value.kind, instanceId, params: normalizeSynthParams(value.params) }
   }
   if (value.kind === 'sampler') {
     return { kind: value.kind, instanceId, params: normalizeSamplerParams(isRecord(value.params) ? value.params : {}) }

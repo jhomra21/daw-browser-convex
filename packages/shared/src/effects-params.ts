@@ -1331,45 +1331,6 @@ export function areAudioEffectInstanceOrdersEqual(
   ))
 }
 
-export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'
-
-export type SynthParams = {
-  wave1: SynthWave
-  wave2: SynthWave
-  gain: number
-  attackMs: number
-  releaseMs: number
-}
-
-export type SynthParamsInput = Partial<SynthParams>
-
-export function createDefaultSynthParams(): SynthParams {
-  return {
-    wave1: 'sawtooth',
-    wave2: 'sawtooth',
-    gain: 0.8,
-    attackMs: 5,
-    releaseMs: 30,
-  }
-}
-
-export function normalizeSynthParams(input: SynthParamsInput): SynthParams {
-  const wave1 = input.wave1 ?? 'sawtooth'
-  const wave2 = input.wave2 ?? wave1
-
-  return {
-    wave1,
-    wave2,
-    gain: typeof input.gain === 'number' ? clamp(input.gain, 0, 1.5) : 0.8,
-    attackMs: typeof input.attackMs === 'number' ? clamp(input.attackMs, 0, 200) : 5,
-    releaseMs: typeof input.releaseMs === 'number' ? clamp(input.releaseMs, 0, 200) : 30,
-  }
-}
-
-export function serializeSynthParams(params: SynthParams): string {
-  return JSON.stringify(params)
-}
-
 export type ArpeggiatorPattern = 'up' | 'down' | 'updown' | 'random'
 export type ArpeggiatorRate = '1/4' | '1/8' | '1/16' | '1/32'
 

@@ -18,6 +18,7 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,
   createDefaultSynthParams,
+  mergeSynthParams,
   INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
   createInstrumentInstanceId,
@@ -29,6 +30,7 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   type SamplerParams,
   type SamplerZone,
   type SynthParams,
+  type SynthParamsUpdate,
   type TrackInstrumentParams } from "@daw-browser/shared";
 import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -72,8 +74,9 @@ type ExpandedSynthBounds = SynthCardBounds & {
 };
 
 type ExpandedSynthCard = ExpandedSynthBounds & {
+  instanceId: string;
   params: SynthParams;
-  onChange: (updates: Partial<SynthParams>) => void;
+  onChange: (updates: SynthParamsUpdate) => void;
   onReset: () => void;
 };
 
@@ -94,10 +97,11 @@ type EffectsPanelInstrumentDevice = {
     toggle: (enabled: boolean) => void;
   };
   synth: {
-    change: (updates: Partial<SynthParams>) => void;
+    change: (updates: SynthParamsUpdate) => void;
     close: () => void;
     expandedCard: Accessor<ExpandedSynthCard | null>;
     isExpandedForCurrentTarget: Accessor<boolean>;
+    instanceId: Accessor<string | undefined>;
     open: () => void;
     openForTarget: (targetId: Track["id"]) => void;
     params: Accessor<SynthParams | undefined>;
@@ -322,7 +326,7 @@ export function createEffectsPanelInstrumentDevice(
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
       if (params.kind === "synth") {
-        context.audioEngine().setTrackSynth(targetId, params.params);
+        context.audioEngine().setTrackInstrument(targetId, { instrument: params });
         return;
       }
       if (params.kind === "drum-rack") {
@@ -372,11 +376,11 @@ export function createEffectsPanelInstrumentDevice(
     arpState.update((prev) => ({ ...prev, enabled }));
   }
 
-  function handleSynthChange(updates: Partial<SynthParams>): void {
+  function handleSynthChange(updates: SynthParamsUpdate): void {
     instrumentState.update((prev) => ({
       kind: "synth",
       instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
-      params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
+      params: mergeSynthParams(prev.kind === "synth" ? prev.params : createDefaultSynthParams(), updates),
     }));
   }
 
@@ -399,10 +403,17 @@ export function createEffectsPanelInstrumentDevice(
   function updateSynthCardBounds(next: SynthCardBounds): void {
     const current = expandedSynth();
     if (!current) return;
+    const clamped = clampSynthCardBounds(next);
+    if (
+      current.x === clamped.x
+      && current.y === clamped.y
+      && current.w === clamped.w
+      && current.h === clamped.h
+    ) return;
 
     setExpandedSynth({
       targetId: current.targetId,
-      ...clampSynthCardBounds(next),
+      ...clamped,
     });
   }
 
@@ -580,15 +591,20 @@ export function createEffectsPanelInstrumentDevice(
   const expandedSynthCard = createMemo<ExpandedSynthCard | null>(() => {
     const current = expandedSynth();
     if (!current) return null;
+    const instrument = instrumentState.readForTarget(current.targetId);
+    const instanceId = instrument?.kind === "synth"
+      ? instrument.instanceId
+      : ensureSynthInstanceId(current.targetId);
 
     return {
       ...current,
+      instanceId,
       params: getSynthParamsForTarget(current.targetId),
       onChange: (updates) => {
         instrumentState.updateForTarget(current.targetId, (prev) => ({
           kind: "synth",
           instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
-          params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
+          params: mergeSynthParams(prev.kind === "synth" ? prev.params : createDefaultSynthParams(), updates),
         }));
       },
       onReset: () => {
@@ -603,6 +619,10 @@ export function createEffectsPanelInstrumentDevice(
   const synthParams = createMemo(() => {
     const current = instrumentState.params();
     return current?.kind === "synth" ? current.params : undefined;
+  });
+  const synthInstanceId = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "synth" ? current.instanceId : undefined;
   });
   const drumRackParams = createMemo(() => {
     const current = instrumentState.params();
@@ -655,6 +675,7 @@ export function createEffectsPanelInstrumentDevice(
       close: closeSynthCard,
       expandedCard: expandedSynthCard,
       isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
+      instanceId: synthInstanceId,
       open: openSynthCard,
       openForTarget: openSynthForTarget,
       params: synthParams,

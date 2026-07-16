@@ -314,6 +314,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       audioEffects,
     },
     spectrum,
+    canWriteEffectsTarget,
     canWriteCurrentTargetEffects,
     isCurrentTargetReadOnly,
     close,

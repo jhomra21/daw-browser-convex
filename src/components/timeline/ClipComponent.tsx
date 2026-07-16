@@ -12,7 +12,11 @@ import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
-import type { ClipFades } from "@daw-browser/timeline-core/clip-fades";
+import {
+  normalizeClipFades,
+  normalizedFadeGainAtClipTime,
+  type ClipFades,
+} from "@daw-browser/timeline-core/clip-fades";
 import ClipFadeOverlay from "./ClipFadeOverlay";
 import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -52,11 +56,11 @@ type ClipComponentProps = {
   onCommitFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
 };
 
-// these values center waveform in clips container
 const MIN_CLIP_PX = 6;
 const WAVEFORM_PAD_Y = 6;
-const AUDIO_WAVEFORM_BOX_H = 34;
-const AUDIO_WAVEFORM_TOP_PX = 8;
+const CLIP_TITLE_HEADER_H = 20;
+const AUDIO_WAVEFORM_PADDING_Y = 4;
+const AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION = 0.9;
 const DOUBLE_TAP_MS = 700;
 const DOUBLE_TAP_DISTANCE_PX = 8;
 const SELECTED_TAP_MS = 700;
@@ -323,14 +327,14 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const waveformBoxH = Math.max(
-      16,
-      Math.min(AUDIO_WAVEFORM_BOX_H, cssH - 16),
-    );
-    const waveformTop = Math.min(
-      Math.max(WAVEFORM_PAD_Y, AUDIO_WAVEFORM_TOP_PX),
-      Math.max(WAVEFORM_PAD_Y, cssH - waveformBoxH - WAVEFORM_PAD_Y),
-    );
+    const waveformTop = CLIP_TITLE_HEADER_H + AUDIO_WAVEFORM_PADDING_Y;
+    const waveformBoxH = cssH - waveformTop - AUDIO_WAVEFORM_PADDING_Y;
+    const duration = Math.max(0, props.clip.duration);
+    const fades = normalizeClipFades(props.clip.fades, duration);
+    const hasEffectiveFade = fades.fadeInStartSec > 0
+      || fades.fadeInSec > 0
+      || fades.fadeOutSec > 0
+      || fades.fadeOutEndSec > 0;
 
     drawWaveformPeaks({
       ctx,
@@ -343,6 +347,14 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       cssH,
       fillStyle: contentColor,
       boundaryStyle: timelineGridMajor,
+      maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
+      amplitudeScaleAtColumn: hasEffectiveFade && duration > 0
+        ? (column) => normalizedFadeGainAtClipTime(
+          fades,
+          duration,
+          ((padPx + column + 0.5) / cssW) * duration,
+        )
+        : undefined,
     });
   }
 
@@ -463,7 +475,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
       <canvas
         ref={(el) => (canvasRef = el || undefined)}
-        class="absolute inset-0 pointer-events-none z-10"
+        class="absolute inset-0 size-full pointer-events-none z-10"
       />
       <ClipFadeOverlay
         clip={props.clip}
@@ -531,6 +543,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
           "absolute left-0 right-0 top-0 z-20 pointer-events-none",
           isGhost() ? "bg-background/20" : "bg-background/35",
         )}
+        style={{ height: `${CLIP_TITLE_HEADER_H}px` }}
       >
         <div class="truncate p-1 text-xs leading-none text-foreground">
           {props.clip.name}

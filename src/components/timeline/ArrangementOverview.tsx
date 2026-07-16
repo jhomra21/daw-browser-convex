@@ -1,0 +1,139 @@
+import { createMemo, type Component, For, onCleanup } from 'solid-js'
+import type { Track } from '@daw-browser/timeline-core/types'
+import { useAppPreferences } from '~/context/app-preferences'
+import { resolveClipColor } from '~/lib/clip-color'
+import { ARRANGEMENT_OVERVIEW_HEIGHT } from '~/lib/timeline-utils'
+import type { TimelineRange } from '~/lib/timeline-view'
+
+type ArrangementOverviewProps = {
+  durationSec: number
+  width: number
+  tracks: Track[]
+  visibleRange: TimelineRange
+  onPreviewVisibleRange: (range: TimelineRange) => void
+  onCommitVisibleRange: (range: TimelineRange) => void
+}
+
+type DragMode = 'pan' | 'start' | 'end' | null
+
+type OverviewPath = {
+  color: string
+  d: string
+}
+
+const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
+  const appPreferences = useAppPreferences()
+  let root: HTMLDivElement | undefined
+  let pointerId: number | undefined
+  let dragMode: DragMode = null
+  let baseline: TimelineRange | undefined
+  let startX = 0
+  let rootLeft = 0
+  const rows = createMemo(() => props.tracks.filter((track) => track.channelRole !== 'return'))
+  const duration = () => Math.max(1, props.durationSec)
+  const overviewPaths = createMemo<OverviewPath[]>(() => {
+    const trackRows = rows()
+    const rowCount = Math.max(1, trackRows.length)
+    const durationSec = duration()
+    const tokens = appPreferences.appearance.themeTokens()
+    const paths: OverviewPath[] = []
+
+    for (let index = 0; index < trackRows.length; index++) {
+      const track = trackRows[index]
+      const y = 2 + index * 36 / rowCount
+      const height = Math.max(1, 32 / rowCount)
+      const pathByColor = new Map<string, string[]>()
+
+      for (const clip of track.clips) {
+        const x = clip.startSec / durationSec * 100
+        const width = Math.max(0, clip.duration / durationSec * 100)
+        const color = resolveClipColor(clip.color, tokens)
+        const rectangle = `M${x} ${y}h${width}v${height}h-${width}z`
+        const rectangles = pathByColor.get(color) ?? []
+        rectangles.push(rectangle)
+        pathByColor.set(color, rectangles)
+      }
+
+      for (const [color, rectangles] of pathByColor) paths.push({ color, d: rectangles.join('') })
+    }
+
+    return paths
+  })
+  const rangeX = () => props.visibleRange.startSec / duration() * props.width
+  const rangeWidth = () => Math.max(4, (props.visibleRange.endSec - props.visibleRange.startSec) / duration() * props.width)
+  const pointToTime = (clientX: number) => {
+    if (props.width <= 0) return 0
+    return Math.min(duration(), Math.max(0, (clientX - rootLeft) / props.width * duration()))
+  }
+  const finish = () => {
+    const capturedPointerId = pointerId
+    pointerId = undefined
+    dragMode = null
+    baseline = undefined
+    rootLeft = 0
+    if (root && capturedPointerId !== undefined && root.hasPointerCapture(capturedPointerId)) {
+      root.releasePointerCapture(capturedPointerId)
+    }
+  }
+  const onPointerDown = (event: PointerEvent) => {
+    event.stopPropagation()
+    if (pointerId !== undefined || event.button !== 0 || !root) return
+    rootLeft = root.getBoundingClientRect().left
+    const x = event.clientX - rootLeft
+    const left = rangeX()
+    const right = left + rangeWidth()
+    const edge = 6
+    baseline = props.visibleRange
+    startX = x
+    pointerId = event.pointerId
+    root.setPointerCapture(event.pointerId)
+    if (Math.abs(x - left) <= edge) dragMode = 'start'
+    else if (Math.abs(x - right) <= edge) dragMode = 'end'
+    else if (x > left && x < right) dragMode = 'pan'
+    else {
+      const visibleDuration = baseline.endSec - baseline.startSec
+      const center = pointToTime(event.clientX)
+      props.onCommitVisibleRange({ startSec: center - visibleDuration / 2, endSec: center + visibleDuration / 2 })
+      finish()
+    }
+    event.preventDefault()
+  }
+  const onPointerMove = (event: PointerEvent) => {
+    event.stopPropagation()
+    if (event.pointerId !== pointerId || !baseline || !dragMode || props.width <= 0) return
+    const deltaSec = (event.clientX - rootLeft - startX) / props.width * duration()
+    if (dragMode === 'pan') props.onPreviewVisibleRange({ startSec: baseline.startSec + deltaSec, endSec: baseline.endSec + deltaSec })
+    if (dragMode === 'start') props.onPreviewVisibleRange({ startSec: baseline.startSec + deltaSec, endSec: baseline.endSec })
+    if (dragMode === 'end') props.onPreviewVisibleRange({ startSec: baseline.startSec, endSec: baseline.endSec + deltaSec })
+  }
+  const onPointerUp = (event: PointerEvent) => {
+    event.stopPropagation()
+    if (event.pointerId !== pointerId) return
+    if (baseline) props.onCommitVisibleRange(props.visibleRange)
+    finish()
+  }
+  const onPointerCancel = (event: PointerEvent) => {
+    event.stopPropagation()
+    if (event.pointerId !== pointerId) return
+    if (baseline) props.onPreviewVisibleRange(baseline)
+    finish()
+  }
+  onCleanup(() => {
+    finish()
+  })
+  return (
+    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 cursor-pointer border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel}>
+      <svg class="absolute inset-0 h-full w-full" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <For each={overviewPaths()}>{(path) => (
+          <path d={path.d} fill={path.color} />
+        )}</For>
+      </svg>
+      <div class="absolute top-0 bottom-0 z-10 cursor-grab border border-neutral-300/80 active:cursor-grabbing" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }}>
+        <div class="absolute -left-1.5 top-0 bottom-0 z-10 w-3 cursor-ew-resize" />
+        <div class="absolute -right-1.5 top-0 bottom-0 z-10 w-3 cursor-ew-resize" />
+      </div>
+    </div>
+  )
+}
+
+export default ArrangementOverview

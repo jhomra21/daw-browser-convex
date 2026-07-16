@@ -52,6 +52,11 @@ export type TransportControlsProps = {
   onToggleMetronome: () => void;
   gridEnabled: boolean;
   onToggleGrid: () => void;
+  zoom: {
+    onIn: () => void
+    onOut: () => void
+    onFit: () => void
+  }
   gridDenominator: number;
   onChangeGridDenominator: (n: number) => void;
   loopEnabled: boolean;

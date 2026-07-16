@@ -2,7 +2,7 @@ import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
 
 import { SAMPLE_DRAG_DATA_TYPE } from '~/lib/sample-drag-data'
-import { RULER_HEIGHT } from '~/lib/timeline-utils'
+import { clientYToTimelineTrackY } from '~/lib/timeline-utils'
 import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 
 type UseTimelineDragDropOptions = {
@@ -36,8 +36,7 @@ export function useTimelineDragDrop(
   const updateDropTarget = (clientY: number) => {
     const scrollElement = options.scrollElement()
     if (!scrollElement) return
-    const rect = scrollElement.getBoundingClientRect()
-    const y = clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT
+    const y = clientYToTimelineTrackY(clientY, scrollElement)
     const laneIndex = trackIndexAtY(options.trackLayout(), y)
     if (laneIndex >= 0) {
       setDropTargetLane(laneIndex)

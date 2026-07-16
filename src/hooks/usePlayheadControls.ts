@@ -12,9 +12,10 @@ type Options = {
   loopEnabled?: Accessor<boolean>
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
+  pixelsPerSecond: Accessor<number>
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
@@ -45,7 +46,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
 
   const moveScrub = (clientX: number) => {
     if (!scrubbing || !scrollEl) return
-    const sec = clientXToSec(clientX, scrollEl)
+    const sec = clientXToSec(clientX, scrollEl, pixelsPerSecond())
     playback.setPlayhead(sec, tracks())
   }
 
@@ -55,7 +56,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
 
   const startScrub = (clientX: number, options?: { listen?: boolean }) => {
     if (!scrollEl) return
-    const sec = clientXToSec(clientX, scrollEl)
+    const sec = clientXToSec(clientX, scrollEl, pixelsPerSecond())
     playback.setPlayhead(sec, tracks())
     scrubbing = true
     if (options?.listen === false || scrubListenersActive) return

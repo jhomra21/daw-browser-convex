@@ -25,7 +25,6 @@ import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
-import { PPS } from '~/lib/timeline-utils'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { Track, Clip, TrackId } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -34,6 +33,7 @@ import type { TimelineSelectionController } from './useTimelineSelectionState'
 
 type ClipDragHandlers = {
   onClipPointerDown: (trackId: Track['id'], clipId: string, event: PointerEvent) => void
+  isDragging: () => boolean
 }
 
 type ClipDragOptions = {
@@ -60,6 +60,7 @@ type ClipDragOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  pixelsPerSecond: Accessor<number>
   // buffer cache to prime newly created duplicates
   audioBufferCache: ClipBuffers
   // Notify timeline that a set of clip moves has been committed (drop finished)
@@ -295,7 +296,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
     const rect = scroll.getBoundingClientRect()
-    const leftPx = clip.startSec * PPS - (scroll.scrollLeft || 0)
+    const leftPx = clip.startSec * options.pixelsPerSecond() - (scroll.scrollLeft || 0)
     dragDeltaX = event.clientX - (rect.left + leftPx)
     beginPointerDrag(event)
   }
@@ -320,6 +321,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       gridEnabled: options.gridEnabled(),
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
+      pixelsPerSecond: options.pixelsPerSecond(),
     })
 
     // If duplicating and Ctrl released, cancel
@@ -442,6 +444,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       gridEnabled: options.gridEnabled(),
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
+      pixelsPerSecond: options.pixelsPerSecond(),
     })
     let laneIdx = initialLaneIdx
 
@@ -647,5 +650,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
   return {
     onClipPointerDown,
+    isDragging: () => dragging,
   }
 }

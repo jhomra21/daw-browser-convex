@@ -3,7 +3,6 @@ import type { Accessor } from 'solid-js'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { assert, isLocalId, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
-import { PPS } from '~/lib/timeline-utils'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import type { TimelineTrackRow } from '~/lib/timeline-repository/types'
@@ -70,6 +69,7 @@ type UseTimelineActionsOptions = {
     openMidiEditorFor: (clipId: string) => void
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     getScrollElement: () => HTMLDivElement | undefined
+    pixelsPerSecond: Accessor<number>
   }
 }
 
@@ -664,7 +664,7 @@ export function useTimelineActions(
     try {
       const scrollElement = options.navigation.getScrollElement()
       if (!scrollElement) return
-      const centerLeft = Math.max(0, startSec * PPS - (scrollElement.clientWidth / 2))
+      const centerLeft = Math.max(0, startSec * options.navigation.pixelsPerSecond() - (scrollElement.clientWidth / 2))
       scrollElement.scrollLeft = Math.floor(centerLeft)
     } catch {}
   }

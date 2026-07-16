@@ -3,7 +3,7 @@ import type { ClipMediaCache } from "~/lib/clip-buffer-cache";
 import type { BatchClipCreateItem } from "~/lib/clip-create";
 import type { DuplicatedClipPlacement, MultiDragSnapshot } from "~/lib/clip-drag-placement";
 import { createTimelineTrackIndex, type TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
-import { PPS, quantizeSecToGrid } from "~/lib/timeline-utils";
+import { quantizeSecToGrid } from "~/lib/timeline-utils";
 import { trackLayoutDropIndexAtClientY, type TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import type { Clip, Track, TrackId } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types";
@@ -91,11 +91,12 @@ export const readDragPointer = (input: {
   gridEnabled: boolean;
   bpm: number;
   gridDenominator: number;
+  pixelsPerSecond: number;
 }) => {
   const rect = input.scroll.getBoundingClientRect();
   const x = input.event.clientX - rect.left - input.dragDeltaX + (input.scroll.scrollLeft || 0);
   const laneIdx = trackLayoutDropIndexAtClientY(input.trackLayout, input.event.clientY, input.scroll);
-  const rawStart = Math.max(0, x / PPS);
+  const rawStart = Math.max(0, x / input.pixelsPerSecond);
   return {
     desiredStart: input.gridEnabled
       ? quantizeSecToGrid(rawStart, input.bpm, input.gridDenominator, "round")

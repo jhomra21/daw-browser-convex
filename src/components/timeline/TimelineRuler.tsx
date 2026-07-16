@@ -1,11 +1,14 @@
-import { type Component, For, Show, onCleanup } from 'solid-js'
-import { PPS, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
+import { createMemo, type Component, For, Show, onCleanup } from 'solid-js'
+import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
+import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 
 type TimelineRulerProps = {
   durationSec: number
   bpm: number
   denom: number
   gridEnabled: boolean
+  pixelsPerSecond: number
+  visibleRange: { startSec: number; endSec: number }
   onPointerDown: (e: PointerEvent) => void
   loopEnabled?: boolean
   loopStartSec?: number
@@ -19,15 +22,12 @@ type Marker = {
 }
 
 const TimelineRuler: Component<TimelineRulerProps> = (props) => {
-  // Use identical math to GridOverlay so lines align perfectly
-  const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 0)
-  const secondsPerBar = () => secondsPerBeat() * 4
-  const gridStepSec = () => secondsPerBeat() * (4 / Math.max(1, props.denom || 4))
-  const barStepPx = () => Math.max(0.5, secondsPerBar() * PPS)
+  const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled))
+  const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
-  const rulerWidthPx = () => Math.max(0, props.durationSec * PPS)
-  const loopStartPx = () => Math.max(0, (props.loopStartSec ?? 0) * PPS)
-  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), (props.loopEndSec ?? 0) * PPS))
+  const rulerWidthPx = () => Math.max(0, props.durationSec * props.pixelsPerSecond)
+  const loopStartPx = () => Math.max(0, (props.loopStartSec ?? 0) * props.pixelsPerSecond)
+  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), (props.loopEndSec ?? 0) * props.pixelsPerSecond))
   const loopWidthPx = () => Math.max(0, loopEndPx() - loopStartPx())
   const showLoop = () => props.loopEnabled && loopWidthPx() > 1
 
@@ -60,7 +60,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const rect = rootEl?.getBoundingClientRect()
     if (!rect) return 0
     const x = clientX - rect.left
-    return Math.max(0, x / PPS)
+    return Math.max(0, x / props.pixelsPerSecond)
   }
 
   const onPointerMove = (e: PointerEvent) => {
@@ -120,7 +120,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const sec = clientXToSecLocal(e.clientX)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
-    const xPx = (sec * PPS)
+    const xPx = (sec * props.pixelsPerSecond)
     const near = 6 // px threshold for grabbing edges
     const hasLoop = props.loopEnabled && (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0) > 0.05
     if (hasLoop && Math.abs(xPx - startPx) <= near) {
@@ -146,7 +146,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const inTopHalf = (e.clientY - rect.top) <= (RULER_HEIGHT / 2)
     if (!inTopHalf || !props.loopEnabled) { rootEl.style.cursor = '' ; return }
     const sec = clientXToSecLocal(e.clientX)
-    const xPx = sec * PPS
+    const xPx = sec * props.pixelsPerSecond
     const startPx = loopStartPx()
     const endPx = loopEndPx()
     const near = 6
@@ -185,7 +185,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       } as const
     }
 
-    const fiveSecPx = PPS * 5
+    const fiveSecPx = props.pixelsPerSecond * 5
     return {
       background: `
         /* 5s lines */
@@ -200,62 +200,76 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     } as const
   }
 
-  const majorMarkers = () => {
+  const majorMarkers = createMemo(() => {
     if (props.gridEnabled) {
-      const step = secondsPerBar()
+      const step = intervals().majorSec
       if (!(Number.isFinite(step) && step > 0)) return [] as Marker[]
-      const count = Math.ceil(props.durationSec / step)
+      const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
+      const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
       const rulerWidth = rulerWidthPx()
-      return Array.from({ length: count + 1 }, (_, idx) => {
-        const positionPx = idx * step * PPS
+      const pixelsPerSecond = props.pixelsPerSecond
+      const bpm = props.bpm
+      return Array.from({ length: last - first + 1 }, (_, index) => {
+        const idx = first + index
+        const positionPx = idx * step * pixelsPerSecond
         if (positionPx > rulerWidth) return null
-        return { positionPx, label: `${idx + 1}` }
+        return { positionPx, label: `${musicalBarLabelAtTime(idx * step, bpm)}` }
       }).filter(Boolean) as Marker[]
     }
 
-    const step = 5
-    const count = Math.ceil(props.durationSec / step)
+    const step = intervals().majorSec
+    const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
+    const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
-    return Array.from({ length: count + 1 }, (_, idx) => {
-      const positionPx = idx * step * PPS
+    const pixelsPerSecond = props.pixelsPerSecond
+    return Array.from({ length: last - first + 1 }, (_, index) => {
+      const idx = first + index
+      const positionPx = idx * step * pixelsPerSecond
       if (positionPx > rulerWidth) return null
       const seconds = idx * step
       return { positionPx, label: `${seconds}s` }
     }).filter(Boolean) as Marker[]
-  }
+  })
 
-  const minorMarkers = () => {
+  const minorMarkers = createMemo(() => {
     const majors = majorMarkers()
     const majorLookup = new Set(majors.map(m => Math.round(m.positionPx)))
 
     if (props.gridEnabled) {
-      const stepSec = gridStepSec()
+      const stepSec = intervals().minorSec
       if (!(Number.isFinite(stepSec) && stepSec > 0)) return [] as Marker[]
-      const count = Math.ceil(props.durationSec / stepSec)
+      const first = Math.max(0, Math.floor(props.visibleRange.startSec / stepSec) - 1)
+      const last = Math.min(Math.ceil(props.durationSec / stepSec), Math.ceil(props.visibleRange.endSec / stepSec) + 1)
       const rulerWidth = rulerWidthPx()
-      return Array.from({ length: count + 1 }, (_, idx) => {
-        const positionPx = idx * stepSec * PPS
+      const pixelsPerSecond = props.pixelsPerSecond
+      return Array.from({ length: last - first + 1 }, (_, index) => {
+        const idx = first + index
+        const positionPx = idx * stepSec * pixelsPerSecond
         if (positionPx > rulerWidth) return null
         if (majorLookup.has(Math.round(positionPx))) return null
         return { positionPx }
       }).filter(Boolean) as Marker[]
     }
 
-    const count = Math.ceil(props.durationSec)
+    const step = intervals().minorSec
+    const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
+    const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
-    return Array.from({ length: count + 1 }, (_, idx) => {
-      const positionPx = idx * PPS
+    const pixelsPerSecond = props.pixelsPerSecond
+    return Array.from({ length: last - first + 1 }, (_, index) => {
+      const idx = first + index
+      const positionPx = idx * step * pixelsPerSecond
       if (positionPx > rulerWidth) return null
       if (majorLookup.has(Math.round(positionPx))) return null
       return { positionPx }
     }).filter(Boolean) as Marker[]
-  }
+  })
 
   return (
     <div
       data-timeline-ruler="1"
-      class="sticky top-0 z-30 border-b border-border bg-timeline-surface"
-      style={{ width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
+      class="sticky z-30 border-b border-border bg-timeline-surface"
+      style={{ top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`, width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}
       onPointerMove={onLocalPointerMove}

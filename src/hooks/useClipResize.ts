@@ -6,7 +6,7 @@ import { calculateAudioLeftResizeTiming } from '~/lib/audio-left-resize-timing'
 import { audioWarpEqual, isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
-import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
+import { quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { clipFadesEqual, transformClipFadesForDuration, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -35,6 +35,7 @@ type ClipResizeOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  pixelsPerSecond: Accessor<number>
   rescheduleChangedClips: (clipIds: string[]) => void
   projectId: Accessor<string | undefined>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -42,6 +43,7 @@ type ClipResizeOptions = {
 
 type ClipResizeHandlers = {
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => void
+  isResizing: () => boolean
 }
 
 export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
@@ -139,7 +141,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left + (scroll.scrollLeft || 0)
-    const pointerSec = Math.max(0, x / PPS)
+    const pointerSec = Math.max(0, x / options.pixelsPerSecond())
 
     if (resizing.edge === 'left') {
       const right = resizeFixedRight
@@ -410,5 +412,6 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
   return {
     onClipResizeStart,
+    isResizing: () => clipResizing,
   }
 }

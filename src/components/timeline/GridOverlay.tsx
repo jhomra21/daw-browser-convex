@@ -1,19 +1,18 @@
-import { type Component, Show } from 'solid-js'
-import { PPS } from '~/lib/timeline-utils'
+import { createMemo, type Component, Show } from 'solid-js'
+import { selectTimelineGridIntervals } from '~/lib/timeline-view'
 
 type GridOverlayProps = {
   durationSec: number
   bpm: number
   denom: number
   enabled: boolean
+  pixelsPerSecond: number
 }
 
 const GridOverlay: Component<GridOverlayProps> = (props) => {
-  const secondsPerBeat = () => 60 / Math.max(1e-6, props.bpm || 0)
-  const gridStepSec = () => secondsPerBeat() * (4 / Math.max(1, props.denom || 4))
-  // Use fractional pixels to avoid cumulative drift at high resolutions (e.g., 1/16 at 120 BPM => 12.5px)
-  const gridStepPx = () => Math.max(0.5, gridStepSec() * PPS)
-  const barStepPx = () => Math.max(0.5, secondsPerBeat() * 4 * PPS)
+  const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.enabled))
+  const gridStepPx = () => Math.max(0.5, intervals().minorSec * props.pixelsPerSecond)
+  const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
   const backgroundStyle = () => {
     const minor = gridStepPx()
@@ -46,7 +45,7 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
       <div
         class="absolute left-0 top-0 pointer-events-none z-10"
         style={{
-          width: `${Math.max(0, props.durationSec * PPS)}px`,
+          width: `${Math.max(0, props.durationSec * props.pixelsPerSecond)}px`,
           height: '100%',
           ...backgroundStyle(),
         }}

@@ -7,7 +7,7 @@ import { isLocalId } from '@daw-browser/shared'
 import { canTrackReceiveAudioClip, getTrackChannelRole } from '@daw-browser/timeline-core/track-routing'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from '~/lib/sample-drag-data'
-import { clientXToSec, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned, RULER_HEIGHT } from '~/lib/timeline-utils'
+import { clientXToSec, clientYToTimelineTrackY, calcNonOverlapStart, quantizeSecToGrid, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
@@ -43,6 +43,7 @@ type TimelineClipImportOptions = {
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
+  pixelsPerSecond: Accessor<number>
   createTimelineTrack: CreateTimelineTrack
   removeCreatedCloudTrack: (track: Track | undefined) => Promise<void>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -147,8 +148,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     const scroll = getScrollElement()
     if (!scroll) return null
 
-    const rect = scroll.getBoundingClientRect()
-    const y = clientY - rect.top + (scroll.scrollTop || 0) - RULER_HEIGHT
+    const y = clientYToTimelineTrackY(clientY, scroll)
     const laneIdx = trackIndexAtY(trackLayout(), y)
     const snapshot = tracks()
     const row = laneIdx >= 0 ? trackLayout()[laneIdx] : undefined
@@ -169,7 +169,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return {
       track: targetTrack.track,
       autoCreatedTrack: targetTrack.autoCreated ? targetTrack.track : undefined,
-      startSec: resolveClipStartSec(targetTrack.track, clientXToSec(clientX, scroll), duration),
+      startSec: resolveClipStartSec(targetTrack.track, clientXToSec(clientX, scroll, options.pixelsPerSecond()), duration),
     }
   }
 
@@ -267,7 +267,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     await handleFilesInternal(
       file,
       targetTrack.track.id,
-      clientXToSec(event.clientX, scroll),
+      clientXToSec(event.clientX, scroll, options.pixelsPerSecond()),
       targetTrack.autoCreated ? targetTrack.track : undefined,
     )
   }

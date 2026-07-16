@@ -11,7 +11,6 @@ import {
   type AutomationPoint,
   type AutomationTarget,
 } from '@daw-browser/shared'
-import { PPS } from '~/lib/timeline-utils'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 
 type AutomationLaneProps = {
@@ -21,6 +20,7 @@ type AutomationLaneProps = {
   envelope: AutomationEnvelope | undefined
   durationSec: number
   heightPx: number
+  pixelsPerSecond: number
   onPreview: (envelope: AutomationEnvelope | undefined) => void
   onCommit: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   onCancelPreview: (targetKey: string) => void
@@ -131,7 +131,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (ordered.length === 0) return ''
     const commands: string[] = []
     ordered.forEach((point, index) => {
-      const x = point.timeSec * PPS
+      const x = point.timeSec * props.pixelsPerSecond
       const y = valueToY(point.value)
       if (index === 0) {
         commands.push(`M ${x} ${y}`)
@@ -149,7 +149,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
   const pointFromClientPosition = (clientX: number, clientY: number): AutomationPoint | null => {
     const rect = root?.getBoundingClientRect()
     if (!rect) return null
-    const timeSec = Math.max(0, Math.min(props.durationSec, (clientX - rect.left) / PPS))
+    const timeSec = Math.max(0, Math.min(props.durationSec, (clientX - rect.left) / props.pixelsPerSecond))
     return {
       id: crypto.randomUUID(),
       timeSec,
@@ -359,9 +359,9 @@ export default function AutomationLane(props: AutomationLaneProps) {
               onPointerLeave={() => setHoveredPointId((current) => current === point.id ? null : current)}
               class="cursor-grab"
             >
-              <circle cx={point.timeSec * PPS} cy={valueToY(point.value)} r="10" fill="transparent" />
+              <circle cx={point.timeSec * props.pixelsPerSecond} cy={valueToY(point.value)} r="10" fill="transparent" />
               <circle
-                cx={point.timeSec * PPS}
+                cx={point.timeSec * props.pixelsPerSecond}
                 cy={valueToY(point.value)}
                 r={selectedPointId() === point.id ? 5 : 4}
                 fill={AUTOMATION_LINE_COLOR}

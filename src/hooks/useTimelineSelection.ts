@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 
-import { PPS, quantizeSecToGrid, RULER_HEIGHT } from "~/lib/timeline-utils";
+import { quantizeSecToGrid, TIMELINE_HEADER_HEIGHT } from "~/lib/timeline-utils";
 import {
   extendTimelineRangeSelectionToPoint,
   normalizeTimelineRangeSelection,
@@ -23,6 +23,7 @@ type TimelineSelectionOptions = {
   selection: TimelineSelectionController;
   bpm: Accessor<number>;
   gridDenominator: Accessor<number>;
+  pixelsPerSecond: Accessor<number>;
   startScrub: (clientX: number, options?: { listen?: boolean }) => void;
   moveScrub: (clientX: number) => void;
   stopScrub: () => void;
@@ -130,7 +131,7 @@ export function useTimelineSelection(
     const scrollEl = pointerOptions.element;
     const clickedTrackId = pointerOptions.trackId;
     const rows = pointerOptions.rows ?? trackLayout();
-    const rulerOffsetPx = pointerOptions.rulerOffsetPx ?? RULER_HEIGHT;
+    const rulerOffsetPx = pointerOptions.rulerOffsetPx ?? TIMELINE_HEADER_HEIGHT;
     const currentRange = selection.rangeSelection();
     if (!event.shiftKey || !currentRange || !scrollEl) return false;
     const { x, y } = timelinePointerCoordinates(event, scrollEl, rulerOffsetPx);
@@ -139,7 +140,7 @@ export function useTimelineSelection(
       clickedTrackId ??
       (trackIndex >= 0 ? rows[trackIndex]?.trackId : undefined);
     const nextRange = extendTimelineRangeSelectionToPoint(currentRange, {
-      timeSec: quantizeSecToGrid(x / PPS, bpm(), gridDenominator()),
+      timeSec: quantizeSecToGrid(x / options.pixelsPerSecond(), bpm(), gridDenominator()),
       trackIds: rangeTrackIdsThroughDisplayOrder(
         displayTrackIds(),
         currentRange.trackIds,
@@ -219,7 +220,7 @@ export function useTimelineSelection(
 
   let currentScrollEl: HTMLDivElement | undefined;
   let currentRows: readonly TimelineTrackLayoutRow[] = [];
-  let currentRulerOffsetPx = RULER_HEIGHT;
+  let currentRulerOffsetPx = TIMELINE_HEADER_HEIGHT;
   const onLaneDragMove = (event: PointerEvent, scrollEl: HTMLDivElement) => {
     currentScrollEl = scrollEl;
 
@@ -258,8 +259,8 @@ export function useTimelineSelection(
         : (rangeTrackIds[0] ?? null);
     const snappedRange = snapTimeRangeToGridColumns(
       {
-        startSec: x / PPS,
-        endSec: (x + width) / PPS,
+        startSec: x / options.pixelsPerSecond(),
+        endSec: (x + width) / options.pixelsPerSecond(),
       },
       bpm(),
       gridDenominator(),
@@ -289,7 +290,7 @@ export function useTimelineSelection(
     marqueeActive = false;
     currentScrollEl = undefined;
     currentRows = [];
-    currentRulerOffsetPx = RULER_HEIGHT;
+    currentRulerOffsetPx = TIMELINE_HEADER_HEIGHT;
   };
 
   const laneDrag = useDrag({

@@ -25,8 +25,10 @@ import {
   type TrackDropTarget,
 } from "~/lib/track-group-ops";
 import {
+  ARRANGEMENT_OVERVIEW_HEIGHT,
   GROUP_INDENT_PX,
-  RULER_HEIGHT,
+  TIMELINE_HEADER_HEIGHT,
+  clientYToTimelineTrackY,
   clampAutomationLaneHeight,
 } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
@@ -451,9 +453,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     if (movingReturns) return undefined;
     const scrollElement = sidebar().scrollElement();
     if (!scrollElement) return undefined;
-    const rect = scrollElement.getBoundingClientRect();
-    const localY =
-      clientY - rect.top + (scrollElement.scrollTop || 0) - RULER_HEIGHT;
+    const localY = clientYToTimelineTrackY(clientY, scrollElement);
     const row = trackLayoutRowAtY(sidebar().trackLayout.scrollingRows, localY);
     if (!row) return undefined;
     const track = sidebar().trackById.get(row.trackId);
@@ -721,19 +721,27 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
       </div>
 
-      <div
-        class="sticky top-0 z-40 border-b border-border bg-timeline-surface"
-        style={{ height: `${RULER_HEIGHT}px` }}
-      />
+      <div class="sticky top-0 z-40 bg-timeline-surface">
+        <div
+          class="pointer-events-none border-b border-border"
+          style={{ height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }}
+        />
+        <div
+          class="border-b border-border"
+          style={{
+            height: `${TIMELINE_HEADER_HEIGHT - ARRANGEMENT_OVERVIEW_HEIGHT}px`,
+          }}
+        />
+      </div>
       <Show when={scrollingDragTarget()}>
           {(target) => {
             const row = () => layoutByTrackId().get(target().trackId);
             const top = () => {
               const current = row();
-              if (!current) return RULER_HEIGHT;
+              if (!current) return TIMELINE_HEADER_HEIGHT;
               if (target().zone === "below")
-                return RULER_HEIGHT + current.topPx + current.heightPx;
-              return RULER_HEIGHT + current.topPx;
+                return TIMELINE_HEADER_HEIGHT + current.topPx + current.heightPx;
+              return TIMELINE_HEADER_HEIGHT + current.topPx;
             };
             return (
               <div

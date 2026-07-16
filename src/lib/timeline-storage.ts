@@ -1,12 +1,14 @@
 import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo/persisted-history'
 import type { PersistedHistory } from '~/lib/undo/types'
 import type { TrackId, TrackSend } from '@daw-browser/timeline-core/types'
+import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
 const LOOP_KEY_PREFIX = 'mb:loop:'
+const TIMELINE_SCALE_KEY_PREFIX = 'mb:timeline-scale:'
 const HISTORY_KEY_PREFIX = 'mb:history:'
 
 export type LocalMixPatch = Partial<{
@@ -188,6 +190,27 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
   }
   try {
     localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
+  } catch {}
+}
+
+export const loadTimelineScale = (rid?: string): number => {
+  if (!rid || !canUseLocalStorage()) return DEFAULT_PIXELS_PER_SECOND
+  try {
+    const raw = localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`)
+    if (raw === null) return DEFAULT_PIXELS_PER_SECOND
+    return clampPixelsPerSecond(Number(raw))
+  } catch {
+    return DEFAULT_PIXELS_PER_SECOND
+  }
+}
+
+export const saveTimelineScale = (rid: string | undefined, value: number) => {
+  if (!rid || !canUseLocalStorage() || !Number.isFinite(value)) return
+  try {
+    localStorage.setItem(
+      `${TIMELINE_SCALE_KEY_PREFIX}${rid}`,
+      String(clampPixelsPerSecond(value)),
+    )
   } catch {}
 }
 

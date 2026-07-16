@@ -1,5 +1,4 @@
 import { type Component, createMemo } from 'solid-js'
-import { PPS } from '~/lib/timeline-utils'
 
 const INNER_PADDING_TOP = 6
 const INNER_PADDING_BOTTOM = 6
@@ -13,13 +12,14 @@ type RecordingPreviewProps = {
   startSec: number
   points: RecordingPoint[]
   heightPx: number
+  pixelsPerSecond: number
 }
 
 const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
   const dimensions = createMemo(() => {
     const pts = props.points
     const last = pts[pts.length - 1]
-    const widthPx = Math.max(6, Math.ceil(last.offset * PPS) + 4)
+    const widthPx = Math.max(6, Math.ceil(last.offset * props.pixelsPerSecond) + 4)
     const heightPx = Math.max(12, props.heightPx - 4)
     const innerHeight = Math.max(1, heightPx - INNER_PADDING_TOP - INNER_PADDING_BOTTOM)
     return { widthPx, heightPx, innerHeight }
@@ -34,7 +34,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     const combined = Array.from({length: vertexCount * 2 + 2})
     for (let i = 0; i < vertexCount; i++) {
       const point = pts[i]
-      const x = Math.max(0, point.offset * PPS)
+      const x = Math.max(0, point.offset * props.pixelsPerSecond)
       const amp = Math.min(1, Math.max(0, point.amplitude))
       const yTop = midY - amp * gain
       const yBottom = midY + amp * gain
@@ -53,7 +53,7 @@ const RecordingPreview: Component<RecordingPreviewProps> = (props) => {
     <div
       class="pointer-events-none absolute top-2 overflow-hidden border border-red-500/70 bg-red-500/15 shadow-md shadow-red-500/20"
       style={{
-        left: `${props.startSec * PPS}px`,
+        left: `${props.startSec * props.pixelsPerSecond}px`,
         width: widthStyle(),
         height: heightStyle(),
       }}

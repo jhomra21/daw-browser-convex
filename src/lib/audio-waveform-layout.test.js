@@ -5,7 +5,7 @@ import {
   getSourceBeatOffsetAnchorX,
   getSourceBeatOffsetFromAnchorX,
 } from '~/lib/audio-waveform-layout'
-import { PPS } from '~/lib/timeline-utils'
+import { DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { getAudioBufferPlaybackParams } from '@daw-browser/audio-engine/audio-scheduling'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 
@@ -116,9 +116,9 @@ describe('getAudioWaveformLayout', () => {
     expect(getAudioWaveformLayout(createClip({}), 400)).toEqual({
       sourceDurationSec: 4,
       padPx: 0,
-      drawCols: 4 * PPS,
+      drawCols: 4 * DEFAULT_PIXELS_PER_SECOND,
       audioStartPx: 0,
-      audioEndPx: 4 * PPS,
+      audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 4,
     })
@@ -137,10 +137,10 @@ describe('getAudioWaveformLayout', () => {
       ),
     ).toEqual({
       sourceDurationSec: 5,
-      padPx: 0.5 * PPS,
-      drawCols: 2 * PPS,
-      audioStartPx: 0.5 * PPS,
-      audioEndPx: 2.5 * PPS,
+      padPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
+      drawCols: 2 * DEFAULT_PIXELS_PER_SECOND,
+      audioStartPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
+      audioEndPx: 2.5 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 1.25,
       sourceEndSec: 3.25,
     })
@@ -204,9 +204,9 @@ describe('getAudioWaveformLayout', () => {
       ),
     ).toEqual({
       sourceDurationSec: 2,
-      padPx: 0.5 * PPS,
+      padPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
       drawCols: 75,
-      audioStartPx: 0.5 * PPS,
+      audioStartPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
       audioEndPx: 125,
       sourceStartSec: 1.25,
       sourceEndSec: 2,
@@ -225,9 +225,9 @@ describe('getAudioWaveformLayout', () => {
     expect(layout.sourceDurationSec).toBe(3)
     expect(layout.sourceStartSec).toBe(2)
     expect(layout.sourceEndSec).toBe(3)
-    expect(layout.drawCols).toBe(PPS)
-    expect(layout.audioStartPx).toBe(0.25 * PPS)
-    expect(layout.audioEndPx).toBe(1.25 * PPS)
+    expect(layout.drawCols).toBe(DEFAULT_PIXELS_PER_SECOND)
+    expect(layout.audioStartPx).toBe(0.25 * DEFAULT_PIXELS_PER_SECOND)
+    expect(layout.audioEndPx).toBe(1.25 * DEFAULT_PIXELS_PER_SECOND)
   })
 
   test('returns an empty draw window when playback has no audio', () => {
@@ -258,9 +258,9 @@ describe('getAudioWaveformLayout', () => {
     ).toEqual({
       sourceDurationSec: 4,
       padPx: 0,
-      drawCols: 4 * PPS,
+      drawCols: 4 * DEFAULT_PIXELS_PER_SECOND,
       audioStartPx: 0,
-      audioEndPx: 4 * PPS,
+      audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 4,
     })
@@ -278,10 +278,10 @@ describe('getAudioWaveformLayout', () => {
       ),
     ).toEqual({
       sourceDurationSec: 3,
-      padPx: PPS,
-      drawCols: 3 * PPS,
-      audioStartPx: PPS,
-      audioEndPx: 4 * PPS,
+      padPx: DEFAULT_PIXELS_PER_SECOND,
+      drawCols: 3 * DEFAULT_PIXELS_PER_SECOND,
+      audioStartPx: DEFAULT_PIXELS_PER_SECOND,
+      audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 3,
     })
@@ -302,9 +302,9 @@ describe('getAudioWaveformLayout', () => {
     ).toEqual({
       sourceDurationSec: 8,
       padPx: 0,
-      drawCols: 4 * PPS,
+      drawCols: 4 * DEFAULT_PIXELS_PER_SECOND,
       audioStartPx: 0,
-      audioEndPx: 4 * PPS,
+      audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 2,
     })
@@ -324,10 +324,10 @@ describe('getAudioWaveformLayout', () => {
       ),
     ).toEqual({
       sourceDurationSec: 8,
-      padPx: 0.5 * PPS,
-      drawCols: 3.5 * PPS,
-      audioStartPx: 0.5 * PPS,
-      audioEndPx: 4 * PPS,
+      padPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
+      drawCols: 3.5 * DEFAULT_PIXELS_PER_SECOND,
+      audioStartPx: 0.5 * DEFAULT_PIXELS_PER_SECOND,
+      audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 3.5,
     })

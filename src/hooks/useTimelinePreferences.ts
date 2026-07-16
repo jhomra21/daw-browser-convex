@@ -5,12 +5,15 @@ import {
   loadGridSettings,
   loadLoopSettings,
   loadMixSyncFlag,
+  loadTimelineScale,
   saveBpm,
   saveGridSettings,
   saveLoopSettings,
   saveMixSyncFlag,
+  saveTimelineScale,
 } from '~/lib/timeline-storage'
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
+import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { isLocalId } from '@daw-browser/shared'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
 
@@ -38,6 +41,10 @@ type UseTimelinePreferencesReturn = {
   loopStartSec: Accessor<number>
   loopEndSec: Accessor<number>
   setLoopRegion: (start: number, end: number) => void
+  pixelsPerSecond: Accessor<number>
+  previewPixelsPerSecond: (value: number) => void
+  commitPixelsPerSecond: (value: number) => void
+  setPixelsPerSecond: (value: number) => void
 }
 
 export function useTimelinePreferences(
@@ -101,6 +108,20 @@ export function useTimelinePreferences(
     saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
     onSaveAsyncError: onLocalSaveError,
   })
+  const scaleState = useProjectPersistedState<number>({
+    projectId: options.projectId,
+    createInitial: () => DEFAULT_PIXELS_PER_SECOND,
+    load: (projectId) => {
+      if (isLocalId('project', projectId)) return DEFAULT_PIXELS_PER_SECOND
+      return loadTimelineScale(projectId)
+    },
+    loadAsync: (projectId) => loadLocalState<number>(projectId, 'timelineScale'),
+    save: (projectId, value) => {
+      if (!isLocalId('project', projectId)) saveTimelineScale(projectId, value)
+    },
+    saveAsync: (projectId, value) => saveLocalState(projectId, 'timelineScale', value),
+    onSaveAsyncError: onLocalSaveError,
+  })
 
   const syncMix = syncMixState.value
   const setSyncMix = syncMixState.setValue
@@ -111,6 +132,7 @@ export function useTimelinePreferences(
   const loopEnabled = () => loopState.value().enabled
   const loopStartSec = () => loopState.value().startSec
   const loopEndSec = () => loopState.value().endSec
+  const pixelsPerSecond = () => clampPixelsPerSecond(scaleState.value())
 
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
@@ -150,6 +172,15 @@ export function useTimelinePreferences(
       endSec: nextEnd,
     }))
   }
+  const previewPixelsPerSecond = (value: number) => {
+    scaleState.setValueSilently(clampPixelsPerSecond(value))
+  }
+
+  const commitPixelsPerSecond = (value: number) => {
+    scaleState.commitValue(clampPixelsPerSecond(value))
+  }
+
+  const setPixelsPerSecond = commitPixelsPerSecond
 
   return {
     sidebarWidth,
@@ -168,5 +199,9 @@ export function useTimelinePreferences(
     loopStartSec,
     loopEndSec,
     setLoopRegion,
+    pixelsPerSecond,
+    previewPixelsPerSecond,
+    commitPixelsPerSecond,
+    setPixelsPerSecond,
   }
 }

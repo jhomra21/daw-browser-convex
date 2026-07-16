@@ -18,6 +18,7 @@ type UseRoomPersistedStateReturn<TValue> = {
   isHydrated: Accessor<boolean>
   setValue: RoomPersistedSetter<TValue>
   setValueSilently: RoomPersistedSetter<TValue>
+  commitValue: (value: TValue) => void
 }
 
 export function useProjectPersistedState<TValue>(
@@ -109,6 +110,23 @@ export function useProjectPersistedState<TValue>(
     return resolved
   }
 
+  const commitValue = (value: TValue) => {
+    syncHydratedValue()
+    const projectId = options.projectId()
+    if (!projectId) return
+    valueRevision += 1
+    setAsyncHydrated(true)
+    setCurrentValue(() => value)
+    options.save(projectId, value)
+    if (!options.saveAsync) return
+    ensureProjectFlusher(projectId)
+    const save = options.saveAsync(projectId, value)
+    void save.catch((error) => {
+      options.onSaveAsyncError?.(error)
+    })
+    trackAsyncSave(projectId, save)
+  }
+
   onCleanup(() => {
     const cleanupEntries = Array.from(registeredFlushers.entries())
     registeredFlushers.clear()
@@ -123,5 +141,6 @@ export function useProjectPersistedState<TValue>(
     isHydrated: asyncHydrated,
     setValue: setPersistedValue,
     setValueSilently: applyValue,
+    commitValue,
   }
 }

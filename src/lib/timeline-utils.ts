@@ -2,8 +2,9 @@ import { calcNonOverlappingStart, willClipsOverlap } from '@daw-browser/timeline
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 // Timeline constants
-export const PPS = 100 // pixels per second
+export const ARRANGEMENT_OVERVIEW_HEIGHT = 48 // px
 export const RULER_HEIGHT = 32 // px
+export const TIMELINE_HEADER_HEIGHT = ARRANGEMENT_OVERVIEW_HEIGHT + RULER_HEIGHT
 export const LANE_HEIGHT = 96 // px per track lane
 export const COLLAPSED_LANE_HEIGHT = 32 // px per collapsed track lane
 export const GROUP_INDENT_PX = 16
@@ -26,15 +27,15 @@ export function timelineDurationSec(tracks: Track[]) {
   return Math.max(30, maxEnd + 5)
 }
 
-export function clientXToSec(clientX: number, scrollRef: HTMLDivElement) {
+export function clientXToSec(clientX: number, scrollRef: HTMLDivElement, pixelsPerSecond: number) {
   const rect = scrollRef.getBoundingClientRect()
   const x = clientX - rect.left + (scrollRef.scrollLeft || 0)
-  return Math.max(0, x / PPS)
+  return Math.max(0, x / pixelsPerSecond)
 }
 
-export function clientYToTimelineTrackY(clientY: number, scrollRef: HTMLDivElement) {
+export function clientYToTimelineTrackY(clientY: number, scrollRef: HTMLDivElement, headerHeight = TIMELINE_HEADER_HEIGHT) {
   const rect = scrollRef.getBoundingClientRect()
-  return clientY - rect.top + (scrollRef.scrollTop || 0) - RULER_HEIGHT
+  return clientY - rect.top + (scrollRef.scrollTop || 0) - headerHeight
 }
 
 export function willOverlap(clips: Clip[], excludeId: string | null, start: number, duration: number) {

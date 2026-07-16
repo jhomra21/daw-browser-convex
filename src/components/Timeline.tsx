@@ -14,7 +14,8 @@ import type {
 } from "@daw-browser/timeline-core/types";
 import { clipFadesEqual, type ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
-import { RULER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
+import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
+import { useTimelineViewport } from "~/hooks/useTimelineViewport";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
@@ -169,6 +170,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopStartSec,
     loopEndSec,
     setLoopRegion,
+    pixelsPerSecond,
+    previewPixelsPerSecond,
+    commitPixelsPerSecond,
   } = useTimelinePreferences({
     projectId,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
@@ -310,6 +314,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopEnabled,
     loopStartSec,
     loopEndSec,
+    pixelsPerSecond,
   });
 
   function rescheduleChangedClips(clipIds: string[]) {
@@ -564,6 +569,17 @@ const Timeline: Component<TimelineProps> = (props) => {
   let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
+  let isClipDragging = () => false;
+  let isClipResizing = () => false;
+  const duration = () => timelineDurationSec(renderTracks());
+  const timelineViewport = useTimelineViewport({
+    pixelsPerSecond,
+    previewPixelsPerSecond,
+    commitPixelsPerSecond,
+    durationSec: duration,
+    rightSidebarWidth: sidebarWidth,
+    canZoom: () => !isClipDragging() && !isClipResizing(),
+  });
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,
@@ -654,6 +670,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       openMidiEditorFor,
       ensureClipBuffer: clipBuffers.preload,
       getScrollElement: () => scrollRef,
+      pixelsPerSecond,
     },
   });
 
@@ -714,6 +731,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     bpm,
     gridEnabled,
     gridDenominator,
+    pixelsPerSecond,
     createTimelineTrack,
     removeCreatedCloudTrack,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
@@ -751,7 +769,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   ) => boolean = () => false;
 
-  const { onClipPointerDown } = useClipDrag({
+  const clipDrag = useClipDrag({
     placementTracks: () => placementTracks(),
     trackLayout,
     resolvedTracks: () => resolvedTracks(),
@@ -774,6 +792,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     bpm,
     gridEnabled,
     gridDenominator,
+    pixelsPerSecond,
     audioBufferCache: clipBuffers,
     onCommitMoves: (ids) => {
       rescheduleChangedClips(ids);
@@ -784,8 +803,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     onRangeSelectionPointerDown: (trackId, event) =>
       extendRangeSelectionToPointer(event, { element: scrollRef, trackId }),
   });
+  const onClipPointerDown = clipDrag.onClipPointerDown;
+  isClipDragging = clipDrag.isDragging;
 
-  const { onClipResizeStart } = useClipResize({
+  const clipResize = useClipResize({
     tracks: renderTracks,
     setDraftClipTiming: projection.setDraftClipTiming,
     commitClipTiming: projection.commitClipTiming,
@@ -798,10 +819,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     bpm,
     gridEnabled,
     gridDenominator,
+    pixelsPerSecond,
     rescheduleChangedClips,
     projectId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
+  const onClipResizeStart = clipResize.onClipResizeStart;
+  isClipResizing = clipResize.isResizing;
 
   const commitClipFades = async (
     clipId: string,
@@ -884,6 +908,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     bpm,
     gridDenominator,
+    pixelsPerSecond,
     startScrub,
     moveScrub,
     stopScrub,
@@ -1056,7 +1081,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       kind: "scrolling",
       element: scrollRef,
       rows: trackLayoutModel().scrollingRows,
-      rulerOffsetPx: RULER_HEIGHT,
+      rulerOffsetPx: TIMELINE_HEADER_HEIGHT,
     });
   };
   const handleMasterPointerDown: JSX.EventHandler<
@@ -1089,7 +1114,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     input.value = "";
   };
 
-  const duration = () => timelineDurationSec(renderTracks());
   const dashboardSamplesEnabled = () => props.dashboardView() === "samples";
   const dashboardSamples = useProjectSamples({
     projectId,
@@ -1376,6 +1400,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleMetronome: () => setMetronomeEnabled((prev) => !prev),
     gridEnabled: gridEnabled(),
     onToggleGrid: () => setGridEnabled((prev) => !prev),
+    zoom: {
+      onIn: timelineViewport.zoomIn,
+      onOut: timelineViewport.zoomOut,
+      onFit: timelineViewport.zoomToFit,
+    },
     gridDenominator: gridDenominator(),
     onChangeGridDenominator: setGridDenominator,
     loopEnabled: loopEnabled(),
@@ -1617,10 +1646,19 @@ const Timeline: Component<TimelineProps> = (props) => {
         scrollRef={(el) => {
           scrollRef = el;
           setScrollElement(el);
+          timelineViewport.bind(el);
         }}
         bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
         leftBrowser={timelineBrowser()}
         durationSec={duration()}
+        pixelsPerSecond={pixelsPerSecond()}
+        viewport={{
+          visibleRange: timelineViewport.visibleRange(),
+          width: timelineViewport.usableWidth(),
+          previewVisibleRange: timelineViewport.previewVisibleRange,
+          commitVisibleRange: timelineViewport.commitVisibleRange,
+          onWheel: timelineViewport.onWheel,
+        }}
         sidebarWidth={sidebarWidth()}
         tracks={renderTracks()}
         dropAtNewTrack={dropAtNewTrack() || browserDropAtNewTrack()}

@@ -7,6 +7,7 @@ const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
 const BPM_KEY_PREFIX = 'mb:bpm:'
 const LOOP_KEY_PREFIX = 'mb:loop:'
+const TIMELINE_SCALE_KEY_PREFIX = 'mb:timeline-scale:'
 const HISTORY_KEY_PREFIX = 'mb:history:'
 
 export type LocalMixPatch = Partial<{
@@ -188,6 +189,26 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
   }
   try {
     localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
+  } catch {}
+}
+
+export const loadTimelineScale = (rid?: string): number => {
+  if (!rid || !canUseLocalStorage()) return 100
+  try {
+    const value = Number(localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`))
+    return Number.isFinite(value) ? Math.min(800, Math.max(0.25, value)) : 100
+  } catch {
+    return 100
+  }
+}
+
+export const saveTimelineScale = (rid: string | undefined, value: number) => {
+  if (!rid || !canUseLocalStorage() || !Number.isFinite(value)) return
+  try {
+    localStorage.setItem(
+      `${TIMELINE_SCALE_KEY_PREFIX}${rid}`,
+      String(Math.min(800, Math.max(0.25, value))),
+    )
   } catch {}
 }
 

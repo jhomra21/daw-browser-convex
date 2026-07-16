@@ -1,6 +1,6 @@
 import { type Component, For, Show, createMemo } from 'solid-js'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
-import { LANE_HEIGHT, PPS } from '~/lib/timeline-utils'
+import { LANE_HEIGHT } from '~/lib/timeline-utils'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
@@ -17,6 +17,7 @@ type TimelineOverlaysProps = {
     tracks: RuntimeTrack[]
     trackLookup: TimelineTrackIndex<AudioBuffer>
     durationSec: number
+    pixelsPerSecond: number
     bpm: number
     gridDenominator: number
     gridEnabled: boolean
@@ -91,7 +92,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
             class="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${preview().topPx}px`, height: `${preview().heightPx}px` }}
           >
-            <RecordingPreview startSec={preview().start} points={preview().points} heightPx={preview().heightPx} />
+            <RecordingPreview startSec={preview().start} points={preview().points} heightPx={preview().heightPx} pixelsPerSecond={props.timeline.pixelsPerSecond} />
           </div>
         )}
       </Show>
@@ -103,6 +104,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       )}
       <GridOverlay
         durationSec={props.timeline.durationSec}
+        pixelsPerSecond={props.timeline.pixelsPerSecond}
         bpm={props.timeline.bpm}
         denom={props.timeline.gridDenominator}
         enabled={props.timeline.gridEnabled}
@@ -114,9 +116,9 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
               <div
                 class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
                 style={{
-                  left: `${range().startSec * PPS}px`,
+                  left: `${range().startSec * props.timeline.pixelsPerSecond}px`,
                   top: `${row.topPx}px`,
-                  width: `${(range().endSec - range().startSec) * PPS}px`,
+                  width: `${(range().endSec - range().startSec) * props.timeline.pixelsPerSecond}px`,
                   height: `${row.heightPx}px`,
                 }}
               />
@@ -128,11 +130,11 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
         <>
           <div
             class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
-            style={{ left: `${props.timeline.loopStartSec * PPS}px` }}
+            style={{ left: `${props.timeline.loopStartSec * props.timeline.pixelsPerSecond}px` }}
           />
           <div
             class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
-            style={{ left: `${props.timeline.loopEndSec * PPS}px` }}
+            style={{ left: `${props.timeline.loopEndSec * props.timeline.pixelsPerSecond}px` }}
           />
         </>
       )}
@@ -144,7 +146,7 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           />
         )}
       </Show>
-      <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * PPS}px` }} />
+      <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * props.timeline.pixelsPerSecond}px` }} />
       <Show when={midiClip()}>
         {(clip) => (
           <MidiEditorCard

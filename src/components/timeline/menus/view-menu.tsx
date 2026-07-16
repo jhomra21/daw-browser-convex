@@ -47,6 +47,19 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
           <span>Grid</span>
         </MenubarItem>
         <MenubarSeparator />
+        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onIn}>
+          <span class="w-4" />
+          <span>Zoom In</span>
+        </MenubarItem>
+        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onOut}>
+          <span class="w-4" />
+          <span>Zoom Out</span>
+        </MenubarItem>
+        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onFit}>
+          <span class="w-4" />
+          <span>Zoom to Fit</span>
+        </MenubarItem>
+        <MenubarSeparator />
         <div class="px-2 pb-1 pt-1 text-xs text-muted-foreground">
           Grid Resolution
         </div>

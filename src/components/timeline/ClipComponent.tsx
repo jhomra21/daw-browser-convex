@@ -8,7 +8,7 @@ import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
-import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
+import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
@@ -50,6 +50,7 @@ type ClipComponentProps = {
   onRemoveMissingMedia: (trackId: Track["id"], clipId: string) => void;
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
+  pixelsPerSecond: number;
   viewportRedrawVersion: number;
   rangeOverlap: ClipRangeOverlap | null;
   canEditFades: () => boolean;
@@ -82,7 +83,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     | undefined;
 
   const clipWidthPx = () =>
-    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * PPS));
+    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * props.pixelsPerSecond));
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
@@ -401,8 +402,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       )}
       style={{
         top: "0px",
-        left: `${props.clip.startSec * PPS}px`,
-        width: `${Math.max(MIN_CLIP_PX, props.clip.duration * PPS)}px`,
+        left: `${props.clip.startSec * props.pixelsPerSecond}px`,
+        width: `${Math.max(MIN_CLIP_PX, props.clip.duration * props.pixelsPerSecond)}px`,
         height: `${LANE_HEIGHT - 1}px`,
         ...clipVisualColors(),
       }}
@@ -489,8 +490,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
           <div
             class="absolute inset-y-0 z-0 pointer-events-none bg-timeline-background"
             style={{
-              left: `${props.rangeOverlap.offsetSec * PPS}px`,
-              width: `${Math.max(1, props.rangeOverlap.durationSec * PPS)}px`,
+              left: `${props.rangeOverlap.offsetSec * props.pixelsPerSecond}px`,
+              width: `${Math.max(1, props.rangeOverlap.durationSec * props.pixelsPerSecond)}px`,
             }}
           >
             <div class="absolute inset-0 bg-blue-500/25" />
@@ -498,8 +499,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
           <div
             class="absolute inset-y-0 z-20 pointer-events-none border-x border-blue-400"
             style={{
-              left: `${props.rangeOverlap.offsetSec * PPS}px`,
-              width: `${Math.max(1, props.rangeOverlap.durationSec * PPS)}px`,
+              left: `${props.rangeOverlap.offsetSec * props.pixelsPerSecond}px`,
+              width: `${Math.max(1, props.rangeOverlap.durationSec * props.pixelsPerSecond)}px`,
             }}
           />
         </>

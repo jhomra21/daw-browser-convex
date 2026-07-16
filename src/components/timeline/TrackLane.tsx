@@ -2,7 +2,6 @@ import { createMemo, type Accessor, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { useAppPreferences } from '~/context/app-preferences'
 import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
-import { PPS } from '~/lib/timeline-utils'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
@@ -30,6 +29,7 @@ type TrackLaneProps = {
   onAddMidiClip?: (trackId: Track['id']) => void
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
+  pixelsPerSecond: number
   viewportRedrawVersion: number
   canEditClipFades: (clipId: string) => boolean
   onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void
@@ -117,6 +117,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
                   parameterId={selection.parameterId}
                   envelope={props.automation.envelopeForSelection(selection)}
                   durationSec={props.automation.durationSec}
+                  pixelsPerSecond={props.pixelsPerSecond}
                   heightPx={props.automation.laneHeightPx}
                   onPreview={props.automation.onPreview}
                   onCommit={props.automation.onCommit}
@@ -133,8 +134,8 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             <div
               class="absolute top-1 bottom-1 rounded-sm border"
               style={{
-                left: `${segment.startSec * PPS}px`,
-                width: `${Math.max(2, (segment.endSec - segment.startSec) * PPS)}px`,
+                left: `${segment.startSec * props.pixelsPerSecond}px`,
+                width: `${Math.max(2, (segment.endSec - segment.startSec) * props.pixelsPerSecond)}px`,
                 ...segmentVisualColors(segment.color),
               }}
             />
@@ -158,6 +159,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               onRemoveMissingMedia={props.onRemoveMissingMedia}
               ensureClipBuffer={props.ensureClipBuffer}
               bpm={props.bpm}
+              pixelsPerSecond={props.pixelsPerSecond}
               viewportRedrawVersion={props.viewportRedrawVersion}
               canEditFades={() => props.canEditClipFades(clip.id)}
               onCommitFades={props.onCommitClipFades}

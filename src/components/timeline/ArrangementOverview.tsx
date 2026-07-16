@@ -109,13 +109,16 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
     finish()
   })
   return (
-    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerFinish} onPointerCancel={onPointerFinish} onLostPointerCapture={onPointerFinish}>
+    <div ref={(element) => { root = element }} class="sticky top-0 left-0 z-40 shrink-0 cursor-pointer border-b border-border bg-timeline-surface" style={{ width: `${props.width}px`, height: `${ARRANGEMENT_OVERVIEW_HEIGHT}px` }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerFinish} onPointerCancel={onPointerFinish} onLostPointerCapture={onPointerFinish}>
       <svg class="absolute inset-0 h-full w-full" viewBox="0 0 100 40" preserveAspectRatio="none">
         <For each={overviewPaths()}>{(path) => (
           <path d={path.d} fill={path.color} />
         )}</For>
       </svg>
-      <div class="absolute top-0 bottom-0 z-10 border border-neutral-300/80" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }} />
+      <div class="absolute top-0 bottom-0 z-10 cursor-grab border border-neutral-300/80 active:cursor-grabbing" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }}>
+        <div class="absolute -left-1.5 top-0 bottom-0 z-10 w-3 cursor-ew-resize" />
+        <div class="absolute -right-1.5 top-0 bottom-0 z-10 w-3 cursor-ew-resize" />
+      </div>
     </div>
   )
 }

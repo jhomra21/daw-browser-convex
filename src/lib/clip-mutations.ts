@@ -1,11 +1,12 @@
 import { normalizeClipTimingPatch } from '@daw-browser/shared'
 import { toCloudClipId } from '~/lib/cloud-id-args'
+import type { convexApi, convexClient } from '~/lib/convex'
 import type { AudioWarp } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
+type ConvexClientType = typeof convexClient
 
-type ConvexApiType = typeof import('~/lib/convex').convexApi
+type ConvexApiType = typeof convexApi
 
 type PersistClipTimingInput = {
   clipId: string

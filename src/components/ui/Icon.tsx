@@ -1,4 +1,6 @@
-import { Component, JSX, splitProps, createUniqueId } from "solid-js";
+import type { Component, JSX} from "solid-js";
+import { Dynamic } from "solid-js/web";
+import { Show, splitProps, createUniqueId } from "solid-js";
 
 type IconName = "google" | "solidjs" | "convex" | "file-audio" | "play" | "pause" | "stop" | "metronome" | "repeat" | "grid" | "user" | "log-out" | "log-in" | "house" | "sidebar-open" | "sidebar-closed";
 
@@ -18,12 +20,12 @@ const normalizeSize = (size?: number | string) =>
 
 const GoogleIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 256 262"
       xmlns="http://www.w3.org/2000/svg"
       preserveAspectRatio="xMidYMid"
@@ -43,7 +45,7 @@ const GoogleIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
 
 const SolidJSIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   const uid = `solid-${createUniqueId()}`;
   const idA = `${uid}-a`;
   const idB = `${uid}-b`;
@@ -53,8 +55,8 @@ const SolidJSIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 256 239"
       xmlns="http://www.w3.org/2000/svg"
       preserveAspectRatio="xMidYMid"
@@ -98,12 +100,12 @@ const SolidJSIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>
 
 const ConvexIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="28 28 128 132"
       xmlns="http://www.w3.org/2000/svg"
       preserveAspectRatio="xMidYMid"
@@ -123,13 +125,13 @@ const ConvexIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
 
 const FileAudioIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -150,13 +152,13 @@ const FileAudioIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElemen
 
 const PlayIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -175,13 +177,13 @@ const PlayIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 
 const PauseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -201,13 +203,13 @@ const PauseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
 
 const StopIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -226,13 +228,13 @@ const StopIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 
 const MetronomeIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -254,13 +256,13 @@ const MetronomeIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElemen
 
 const RepeatIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -282,13 +284,13 @@ const RepeatIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
 
 const GridIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
 
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -311,12 +313,12 @@ const GridIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 
 const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -336,12 +338,12 @@ const UserIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> =
 
 const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -362,12 +364,12 @@ const LogOutIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>
 
 const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -388,12 +390,12 @@ const LogInIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
 
 const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -413,12 +415,12 @@ const HouseIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> 
 
 const SidebarOpenIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -441,12 +443,12 @@ const SidebarOpenIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElem
 
 const SidebarClosedIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
-  const s = normalizeSize(local.size);
+  const s = () => normalizeSize(local.size);
   return (
     <svg
       {...rest}
-      width={s}
-      height={s}
+      width={s()}
+      height={s()}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       class={local.class}
@@ -486,16 +488,19 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
 
 const Icon: Component<IconProps> = (allProps) => {
   const [props, rest] = splitProps(allProps, ["name", "size", "class", "title", "ariaLabel"]);
-  const Svg = registry[props.name];
-  if (!Svg) return null;
   return (
-    <Svg
-      size={props.size}
-      class={props.class}
-      title={props.title}
-      ariaLabel={props.ariaLabel}
-      {...rest}
-    />
+    <Show when={registry[props.name]}>
+      {(Svg) => (
+        <Dynamic
+          component={Svg()}
+          size={props.size}
+          class={props.class}
+          title={props.title}
+          ariaLabel={props.ariaLabel}
+          {...rest}
+        />
+      )}
+    </Show>
   );
 };
 

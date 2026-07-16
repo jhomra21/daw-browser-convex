@@ -4,6 +4,7 @@ import {
   For,
   Show,
   type Setter,
+  untrack,
 } from "solid-js";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -17,21 +18,15 @@ import {
 } from "@daw-browser/timeline-core/track-routing";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
-import type { TrackDropTarget } from "~/lib/track-group-ops";
 import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
 import {
   DEFAULT_AUTOMATION_LANE_HEIGHT,
   GROUP_INDENT_PX,
   GROUP_RAIL_WIDTH,
   LANE_HEIGHT,
-  clampAutomationLaneHeight,
 } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import { parseHexColor } from "~/lib/color";
-import {
-  TIMELINE_DEFAULT_GROUP_COLOR,
-  TIMELINE_DEFAULT_TRACK_COLOR,
-} from "~/lib/preferences/app-preferences";
 import { trackColorForClip } from "~/lib/clip-color";
 import type { TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 import TimelineContextMenu from "./context-menu/timeline-context-menu";
@@ -129,6 +124,8 @@ type TrackSidebarRowProps = {
 };
 
 const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
+  const model = untrack(() => props.model);
+  const track = untrack(() => props.track);
   const {
     activeVolumeDrag,
     ancestorGroupColorBandsByTrackId,
@@ -168,9 +165,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     finishTrackDrag,
     cancelTrackDrag,
     updateVolumeFromPointer,
-  } = props.model;
-  const sidebar = props.model.sidebar;
-  const track = props.track;
+  } = model;
+  const sidebar = model.sidebar;
 
   const lockedByOther =
     !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;
@@ -217,8 +213,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       },
       selectedAutomationSelection().parameterId,
     );
-  const selectedAutomationEnvelope = () =>
-    automation().envelopes.byTargetKey.get(selectedAutomationTargetKey());
+
   const automationMeta = () => automationMetaByTrackId().get(track.id);
   const automationVisible = () =>
     automation().lanes.visibleByTrackId[track.id] === true;

@@ -135,7 +135,7 @@ const SharedChat: Component<SharedChatProps> = (props) => {
             <Show when={rateError()}>
               <div class="text-xs text-warning-foreground">{rateError()}</div>
             </Show>
-            <button class="text-muted-foreground hover:text-foreground" onClick={props.onClose}>✕</button>
+            <button class="text-muted-foreground hover:text-foreground" onClick={() => props.onClose()}>✕</button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto px-3 py-2" ref={() => { try { if (props.isOpen) requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom())) } catch {} }}>

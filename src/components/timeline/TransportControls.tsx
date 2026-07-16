@@ -141,9 +141,9 @@ const TransportBar: Component<{ transport: TransportBarController }> = (
               if (event.button !== 0) return;
               transport().beginTempoDrag(event);
             }}
-            onPointerMove={transport().updateTempoDrag}
-            onPointerUp={transport().endTempoDrag}
-            onPointerCancel={transport().endTempoDrag}
+            onPointerMove={(event) => transport().updateTempoDrag(event)}
+            onPointerUp={(event) => transport().endTempoDrag(event)}
+            onPointerCancel={(event) => transport().endTempoDrag(event)}
           />
           <span class="text-xs text-muted-foreground">BPM</span>
         </label>
@@ -325,7 +325,7 @@ const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midi
 const TransportControls: Component<TransportControlsProps> = (props) => {
   const tempo = useTransportTempoController({
     bpm: () => props.bpm,
-    onChangeBpm: props.onChangeBpm,
+    onChangeBpm: (bpm) => props.onChangeBpm(bpm),
   });
   return (
     <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-border bg-timeline-background p-2">

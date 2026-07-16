@@ -1,5 +1,6 @@
 import { buildLocalClip, createManyClips } from '~/lib/clip-create'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
+import type { convexApi, convexClient } from '~/lib/convex'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
@@ -40,8 +41,8 @@ import {
 import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 
 export type Deps = {
-  convexClient: typeof import('~/lib/convex').convexClient
-  convexApi: typeof import('~/lib/convex').convexApi
+  convexClient: typeof convexClient
+  convexApi: typeof convexApi
   getTracks: () => Track[]
   getHistoryEntries: () => HistoryEntry[]
   projectId: string

@@ -5,6 +5,8 @@ import {
   Show,
   onCleanup,
   onMount,
+  type Accessor,
+  type Component,
   type JSX,
 } from "solid-js";
 import GridOverlay from "~/components/timeline/GridOverlay";
@@ -280,16 +282,16 @@ export default function TimelineWorkspace(props: Props) {
       onSelect: props.automation.actions.toggleMasterVisibility,
     },
   ];
-  const renderTrackLane = (
-    row: TimelineTrackLayoutRow,
-    layout: TimelineTrackLayoutRow,
-    isDropTarget = false,
-  ) => {
-    const track = () => trackById().get(row.trackId);
+  const RenderTrackLane: Component<{
+    row: TimelineTrackLayoutRow;
+    layout: TimelineTrackLayoutRow;
+    isDropTarget?: Accessor<boolean>;
+  }> = (laneProps) => {
+    const track = () => trackById().get(laneProps.row.trackId);
     const visibleTargetKeys = () =>
-      props.automation.lanes.visibleTargetKeysByTrackId[row.trackId] ?? [];
+      props.automation.lanes.visibleTargetKeysByTrackId[laneProps.row.trackId] ?? [];
     const laneHeight = () =>
-      props.automation.lanes.heightsByLaneOwnerKey[row.trackId] ??
+      props.automation.lanes.heightsByLaneOwnerKey[laneProps.row.trackId] ??
       DEFAULT_AUTOMATION_LANE_HEIGHT;
     return (
       <Show when={track()}>
@@ -297,10 +299,10 @@ export default function TimelineWorkspace(props: Props) {
           <TrackLane
             track={visibleTrack()}
             groupClipOverview={
-              groupClipOverviewByTrackId().get(row.trackId) ?? []
+              groupClipOverviewByTrackId().get(laneProps.row.trackId) ?? []
             }
-            layout={layout}
-            isDropTarget={isDropTarget}
+            layout={laneProps.layout}
+            isDropTarget={laneProps.isDropTarget}
             selectedClipIds={props.selection.selectedClipIds()}
             rangeSelection={props.selection.rangeSelection()}
             onClipPointerDown={props.onClipPointerDown}
@@ -326,7 +328,7 @@ export default function TimelineWorkspace(props: Props) {
             automation={{
               projectId: props.automation.projectId,
               visible:
-                props.automation.lanes.visibleByTrackId[row.trackId] === true,
+                props.automation.lanes.visibleByTrackId[laneProps.row.trackId] === true,
               selections: visibleTargetKeys().flatMap((targetKey) => {
                 const selection =
                   props.automation.lanes.selectionByTargetKey.get(targetKey);
@@ -338,7 +340,7 @@ export default function TimelineWorkspace(props: Props) {
                   automationTargetKey(
                     {
                       kind: "track",
-                      trackId: row.trackId,
+                      trackId: laneProps.row.trackId,
                       effectInstanceId: selection.effectInstanceId,
                     },
                     selection.parameterId,
@@ -392,7 +394,7 @@ export default function TimelineWorkspace(props: Props) {
               style={{
                 width: `${props.durationSec * PPS}px`,
               }}
-              onPointerDown={props.onLanePointerDown}
+               onPointerDown={(event) => props.onLanePointerDown(event)}
             >
               <TimelineRuler
                 durationSec={props.durationSec}
@@ -414,15 +416,21 @@ export default function TimelineWorkspace(props: Props) {
                 }}
               >
                 <For each={props.trackLayout.scrollingRows}>
-                  {(row, i) =>
-                    renderTrackLane(
-                      row,
-                      row,
-                      props.browserDropTargetTrackId === row.trackId ||
+                  {(row, i) => {
+                    const isDropTarget = createMemo(
+                      () =>
+                        props.browserDropTargetTrackId === row.trackId ||
                         (props.browserDropTargetTrackId === null &&
                           props.dropTargetLane === i()),
-                    )
-                  }
+                    );
+                    return (
+                      <RenderTrackLane
+                        row={row}
+                        layout={row}
+                        isDropTarget={isDropTarget}
+                      />
+                    );
+                  }}
                 </For>
                 <TimelineOverlays
                   timeline={{
@@ -467,11 +475,15 @@ export default function TimelineWorkspace(props: Props) {
                     props.returnSectionRef(element);
                   }}
                   style={{ height: `${returnAreaHeight()}px` }}
-                  onPointerDown={props.onReturnPointerDown}
+                   onPointerDown={(event) => props.onReturnPointerDown(event)}
                 >
                   <For each={props.trackLayout.returnRows}>
-                    {(row) => (
-                      <div
+                    {(row) => {
+                      const isDropTarget = createMemo(
+                        () => props.browserDropTargetTrackId === row.trackId,
+                      );
+                      return (
+                        <div
                         class="absolute left-0 right-0"
                         data-track-id={row.trackId}
                         style={{
@@ -479,13 +491,14 @@ export default function TimelineWorkspace(props: Props) {
                           height: `${row.heightPx}px`,
                         }}
                       >
-                        {renderTrackLane(
-                          row,
-                          { ...row, topPx: 0 },
-                          props.browserDropTargetTrackId === row.trackId,
-                        )}
+                        <RenderTrackLane
+                          row={row}
+                          layout={{ ...row, topPx: 0 }}
+                          isDropTarget={isDropTarget}
+                        />
                       </div>
-                    )}
+                      );
+                    }}
                   </For>
                   <GridOverlay
                     durationSec={props.durationSec}
@@ -538,7 +551,7 @@ export default function TimelineWorkspace(props: Props) {
                   <div
                     class="relative overflow-hidden bg-timeline-background"
                     style={{ height: `${masterBaseHeight()}px` }}
-                    onPointerDown={props.onMasterPointerDown}
+                     onPointerDown={(event) => props.onMasterPointerDown(event)}
                   >
                     <GridOverlay
                       durationSec={props.durationSec}

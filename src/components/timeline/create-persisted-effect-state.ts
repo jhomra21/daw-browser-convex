@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   onCleanup,
+  untrack,
   type Accessor,
 } from 'solid-js'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
@@ -155,7 +156,7 @@ export function createPersistedEffectState<TRow, TParams>(
           if (!pendingCommit || pendingCommit.serialized !== serialized) return
           options.onParamsCommitted?.(pendingCommit.targetId, pendingCommit.previous, pendingCommit.next, context)
           pendingCommitByTarget.delete(key)
-          const current = draftByTarget()[key]
+          const current = untrack(() => draftByTarget()[key])
           if (!current || options.serializeParams(current) === serialized) {
             persistAttemptByTarget.delete(key)
             persistContextByTarget.delete(key)
@@ -163,7 +164,7 @@ export function createPersistedEffectState<TRow, TParams>(
         },
         (error) => {
           if (persistAttemptByTarget.get(key) !== attempt) return
-          const current = draftByTarget()[key]
+          const current = untrack(() => draftByTarget()[key])
           if (!current) return
           if (options.serializeParams(current) !== serialized) return
           options.onPersistError?.(error)

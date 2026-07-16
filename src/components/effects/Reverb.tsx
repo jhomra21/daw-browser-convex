@@ -1,4 +1,4 @@
-import { type JSX } from 'solid-js'
+import type { JSX } from 'solid-js'
 import EffectShell from '~/components/effects/EffectShell'
 import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
 import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'

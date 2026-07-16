@@ -91,8 +91,8 @@ describe('offline true-peak limiter', () => {
   })
 
   test('uses a linked gain envelope for stereo and releases after a transient', () => {
-    const left = new Array(8_192).fill(0.2)
-    const right = new Array(8_192).fill(0.2)
+    const left = Array.from<number>({ length: 8_192 }).fill(0.2)
+    const right = Array.from<number>({ length: 8_192 }).fill(0.2)
     left[1_000] = 1
     const audio = audioBuffer([left, right])
     limitTruePeakInPlace(audio, -3)
@@ -104,7 +104,7 @@ describe('offline true-peak limiter', () => {
   })
 
   test('reports a ceiling-constrained result for incompatible high-crest loudness targets', () => {
-    const samples = new Array(48_000 * 4).fill(0.001)
+    const samples = Array.from<number>({ length: 48_000 * 4 }).fill(0.001)
     samples[48_000 * 2] = 1
     const audio = audioBuffer([samples])
     const report = applyExportNormalization(audio, {
@@ -119,7 +119,7 @@ describe('offline true-peak limiter', () => {
   })
 
   test('reports measured peaks without enforcing a true-peak ceiling when limiting is disabled', () => {
-    const audio = audioBuffer([new Array(48_000).fill(1)])
+    const audio = audioBuffer([Array.from<number>({ length: 48_000 }).fill(1)])
     expect(() => applyExportNormalization(audio, {
       mode: 'loudness',
       targetLufs: -36,

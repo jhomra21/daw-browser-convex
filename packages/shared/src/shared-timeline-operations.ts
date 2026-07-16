@@ -1,6 +1,5 @@
 import type {
   ArpeggiatorParams,
-  AudioEffectInstance,
   AudioEffectKind,
   AudioEffectOrderItem,
   AutoFilterParamsEnvelope,
@@ -25,7 +24,6 @@ import type {
   UtilityParamsEnvelope,
 } from './effects-params'
 import {
-  audioEffectOrderItemKind,
   isAudioEffectKind,
   isAudioEffectInstance,
   isCompressorDetectorMode,

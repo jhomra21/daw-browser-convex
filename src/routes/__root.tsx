@@ -11,16 +11,16 @@ const isChunkLoadError = (error: unknown) => {
 }
 
 const AppErrorFallback = (props: { error: unknown }) => {
-  const chunkLoadError = isChunkLoadError(props.error)
+  const chunkLoadError = () => isChunkLoadError(props.error)
 
   return (
     <div class="flex min-h-screen items-center justify-center bg-neutral-950 p-6 text-neutral-100">
       <div class="max-w-md border border-neutral-800 bg-neutral-900 p-5 shadow-2xl shadow-black/40">
         <h2 class="text-lg font-semibold">
-          {chunkLoadError ? 'Connection needed to finish loading' : 'Something went wrong'}
+          {chunkLoadError() ? 'Connection needed to finish loading' : 'Something went wrong'}
         </h2>
         <p class="mt-2 text-sm text-neutral-400">
-          {chunkLoadError
+          {chunkLoadError()
             ? 'This part of the app was not cached yet. Reconnect, then reload once to finish updating the local app shell.'
             : String(props.error instanceof Error ? props.error.message : props.error)}
         </p>

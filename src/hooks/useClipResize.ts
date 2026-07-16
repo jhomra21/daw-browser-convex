@@ -1,6 +1,7 @@
 import { onCleanup, type Accessor } from 'solid-js'
 
-import { persistClipTiming, persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
+import type { convexApi, convexClient } from '~/lib/convex'
+import { persistClipTimingAndAudioWarp } from '~/lib/clip-mutations'
 import { calculateAudioLeftResizeTiming } from '~/lib/audio-left-resize-timing'
 import { audioWarpEqual, isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -9,6 +10,7 @@ import { PPS, quantizeSecToGrid } from '~/lib/timeline-utils'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { clipFadesEqual, transformClipFadesForDuration, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
+import type { HistoryEntry } from '~/lib/undo/types'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -26,8 +28,8 @@ type ClipResizeOptions = {
   commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; fades?: ClipFades; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
   selection: TimelineSelectionController
-  convexClient: typeof import('~/lib/convex').convexClient
-  convexApi: typeof import('~/lib/convex').convexApi
+  convexClient: typeof convexClient
+  convexApi: typeof convexApi
   userId: Accessor<string | undefined>
   getScrollElement: () => HTMLDivElement | undefined
   bpm: Accessor<number>
@@ -35,7 +37,7 @@ type ClipResizeOptions = {
   gridDenominator: Accessor<number>
   rescheduleChangedClips: (clipIds: string[]) => void
   projectId: Accessor<string | undefined>
-  historyPush: (entry: import('~/lib/undo/types').HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+  historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 }
 
 type ClipResizeHandlers = {

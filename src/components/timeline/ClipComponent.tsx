@@ -10,7 +10,7 @@ import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT, PPS } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
-import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 import {
   normalizeClipFades,
@@ -100,7 +100,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
     projectBpm: () => props.bpm,
-    ensureClipBuffer: props.ensureClipBuffer,
+    ensureClipBuffer: async (clipId, sampleUrl) => {
+      await props.ensureClipBuffer?.(clipId, sampleUrl);
+    },
   });
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
   const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);

@@ -55,7 +55,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
             bpmDetection: props.bpmDetection,
             ensureClipBuffer: props.ensureClipBuffer,
             canWrite: canWrite(),
-            onWarpChange: (audioWarp) => props.onWarpChange(props.clip, audioWarp),
+            onWarpChange: (clip, audioWarp) => props.onWarpChange(clip, audioWarp),
             onGainChange: (gain) => props.onGainChange(props.clip, gain),
           }}
         />

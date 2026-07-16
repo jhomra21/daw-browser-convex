@@ -23,14 +23,14 @@ const TimelineChrome: Component<TimelineChromeProps> = (props) => (
       type="file"
       accept="audio/*"
       class="hidden"
-      onChange={props.onFileInput}
+      onChange={(event) => props.onFileInput(event)}
     />
     <input
       ref={props.archiveInputRef}
       type="file"
       accept=".dawproject,application/vnd.dawproject,application/zip"
       class="hidden"
-      onChange={props.onArchiveInput}
+      onChange={(event) => props.onArchiveInput(event)}
     />
 
     <TransportControls {...props.transport} />

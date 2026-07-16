@@ -1,4 +1,4 @@
-import { type Component } from "solid-js";
+import type { Component } from "solid-js";
 import { Button } from "~/components/ui/button";
 import { BOTTOM_PANEL_FOOTER_HEIGHT_PX } from "~/lib/bottom-panel-layout";
 import { cn } from "~/lib/utils";

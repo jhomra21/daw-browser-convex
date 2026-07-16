@@ -1,11 +1,9 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, buildClipCreatePayload, normalizeAudioWarp, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, trackCreationIndex, type AutomationEnvelope, type ClipCreateSnapshot } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, trackCreationIndex } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
-import { buildTrackEffectMutationInput } from "~/lib/effect-track-args";
-import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
+import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
-import { automationTargetKey, granularAutomationKey, instrumentAutomationKey, isLocalId, parseGranularAutomationKey, parseInstrumentAutomationKey } from "@daw-browser/shared";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { buildTrackCreateMutationInput, buildTrackDeleteMutationInput, buildTrackMixMutationInput, buildTrackVolumeMutationInput } from "~/lib/track-mutation-args";

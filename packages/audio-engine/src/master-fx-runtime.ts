@@ -352,12 +352,14 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       removeCandidateResources(candidate.resources, instance.id)
       if (isStaticWorkletInstance(instance)) {
         const faultGeneration = options.getFaultGeneration()
-        let created: StaticWorkletNodeChain | undefined
-        created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
-          if (!created) return
-          bypassStaticWorklet(ctx, masterGain, destination, instance.id, created, revision)
+        const createdHolder: { chain: StaticWorkletNodeChain | undefined } = { chain: undefined }
+        const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
+          const chain = createdHolder.chain
+          if (!chain) return
+          bypassStaticWorklet(ctx, masterGain, destination, instance.id, chain, revision)
           options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `master:effect:${instance.id}`)
         })
+        createdHolder.chain = created
         if (stale()) {
           disconnectStaticWorkletNodeChain(created)
           discard()

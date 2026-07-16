@@ -1,8 +1,7 @@
 import type { AudioEffectRuntimeInstance, ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
-import type { ExportAudioFormat } from '@daw-browser/shared'
-import { formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeCompressorParams,
+import { type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeCompressorParams,
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
   normalizeEnsembleParamsEnvelope, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
   normalizeLoFiParamsEnvelope, normalizePhaserParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams,
@@ -23,7 +22,6 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { readInstrumentParamsFromEffectRow } from '~/lib/effect-row-instrument-params'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
-import { automationEnvelopeFromRow, type AutomationEnvelope } from '@daw-browser/shared'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
 

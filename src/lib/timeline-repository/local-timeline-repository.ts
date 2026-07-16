@@ -1,9 +1,8 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp, normalizeTrackRouting } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
-import { normalizeTrackRouting } from '@daw-browser/shared'
 import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,

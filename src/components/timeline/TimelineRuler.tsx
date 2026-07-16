@@ -205,18 +205,20 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       const step = secondsPerBar()
       if (!(Number.isFinite(step) && step > 0)) return [] as Marker[]
       const count = Math.ceil(props.durationSec / step)
+      const rulerWidth = rulerWidthPx()
       return Array.from({ length: count + 1 }, (_, idx) => {
         const positionPx = idx * step * PPS
-        if (positionPx > rulerWidthPx()) return null
+        if (positionPx > rulerWidth) return null
         return { positionPx, label: `${idx + 1}` }
       }).filter(Boolean) as Marker[]
     }
 
     const step = 5
     const count = Math.ceil(props.durationSec / step)
+    const rulerWidth = rulerWidthPx()
     return Array.from({ length: count + 1 }, (_, idx) => {
       const positionPx = idx * step * PPS
-      if (positionPx > rulerWidthPx()) return null
+      if (positionPx > rulerWidth) return null
       const seconds = idx * step
       return { positionPx, label: `${seconds}s` }
     }).filter(Boolean) as Marker[]
@@ -230,18 +232,20 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       const stepSec = gridStepSec()
       if (!(Number.isFinite(stepSec) && stepSec > 0)) return [] as Marker[]
       const count = Math.ceil(props.durationSec / stepSec)
+      const rulerWidth = rulerWidthPx()
       return Array.from({ length: count + 1 }, (_, idx) => {
         const positionPx = idx * stepSec * PPS
-        if (positionPx > rulerWidthPx()) return null
+        if (positionPx > rulerWidth) return null
         if (majorLookup.has(Math.round(positionPx))) return null
         return { positionPx }
       }).filter(Boolean) as Marker[]
     }
 
     const count = Math.ceil(props.durationSec)
+    const rulerWidth = rulerWidthPx()
     return Array.from({ length: count + 1 }, (_, idx) => {
       const positionPx = idx * PPS
-      if (positionPx > rulerWidthPx()) return null
+      if (positionPx > rulerWidth) return null
       if (majorLookup.has(Math.round(positionPx))) return null
       return { positionPx }
     }).filter(Boolean) as Marker[]

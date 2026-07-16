@@ -1,4 +1,4 @@
-import { type Component, createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX, untrack } from 'solid-js'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
@@ -8,10 +8,9 @@ import { getCachedSupportedExportAudioFormats, probeSupportedExportAudioFormats 
 import { useExportContext } from '~/context/export'
 import type { ExportOutput } from '~/lib/export/run-export-job'
 import ExportProgressStatus from '~/components/export/ExportProgressStatus'
-import { createCustomExportRange, type ExportSampleRate } from '~/lib/export/export-settings'
+import { createCustomExportRange, type ExportSampleRate, loadPersistedExportSettings, savePersistedExportSettings } from '~/lib/export/export-settings'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from '@daw-browser/audio-engine/export-fidelity'
-import { loadPersistedExportSettings, savePersistedExportSettings } from '~/lib/export/export-settings'
 import type { StemMode } from '@daw-browser/audio-engine/export-mixdown'
 
 type ExportSource = 'mixdown' | 'all-stems' | 'selected-stems'
@@ -58,7 +57,7 @@ const ExportField: Component<{ label: string; labelFor?: string; children: JSX.E
 type ExportSelectProps = {
   id: string
   value: string | number
-  onChange: JSX.EventHandlerUnion<HTMLSelectElement, Event>
+  onChange: JSX.EventHandler<HTMLSelectElement, Event>
   children: JSX.Element
 }
 
@@ -68,7 +67,7 @@ const ExportSelect: Component<ExportSelectProps> = (props) => (
       id={props.id}
       class="h-7 w-full appearance-none border border-border bg-app-surface pl-2 pr-7 text-xs text-foreground focus:border-foreground/50 focus:outline-none disabled:opacity-50"
       value={props.value}
-      onChange={props.onChange}
+      onChange={(event) => props.onChange(event)}
     >
       {props.children}
     </select>
@@ -117,14 +116,19 @@ const roundExportTime = (value: number): number => Math.round(value * 100) / 100
 const ExportDialog: Component<Props> = (props) => {
   const persisted = loadPersistedExportSettings()
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
-  const initialRangeMode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
+  const initialRange = untrack(() => ({
+    mode: props.loopEnabled ? 'loop' as const : 'whole' as const,
+    startSec: props.loopEnabled ? props.loopStartSec : 0,
+    lengthSec: props.loopEnabled
+      ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
+      : initialDuration(),
+  }))
+  const initialRangeMode: ExportRangeMode = initialRange.mode
   const [rangeMode, setRangeMode] = createSignal<ExportRangeMode>(initialRangeMode)
   const [source, setSource] = createSignal<ExportSource>('mixdown')
   const [stemMode, setStemMode] = createSignal<StemMode>('reachable-routing')
-  const [renderStartSec, setRenderStartSec] = createSignal(props.loopEnabled ? props.loopStartSec : 0)
-  const [renderLengthSec, setRenderLengthSec] = createSignal(props.loopEnabled
-    ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
-    : initialDuration())
+  const [renderStartSec, setRenderStartSec] = createSignal(initialRange.startSec)
+  const [renderLengthSec, setRenderLengthSec] = createSignal(initialRange.lengthSec)
   const [sampleRate, setSampleRate] = createSignal<ExportSampleRate>(persisted.render.sampleRate)
   const [numberOfChannels, setNumberOfChannels] = createSignal<1 | 2>(persisted.render.numberOfChannels)
   const [normalizationMode, setNormalizationMode] = createSignal<'none' | 'sample-peak' | 'loudness'>(persisted.render.normalization.mode)
@@ -143,6 +147,22 @@ const ExportDialog: Component<Props> = (props) => {
   const [error, setError] = createSignal<string | null>(null)
   const [outputs, setOutputs] = createSignal<readonly ExportOutput[]>([])
   const exportContext = useExportContext()
+  let wasOpen = false
+
+  createEffect(on(
+    () => props.isOpen,
+    (isOpen) => {
+      if (isOpen && !wasOpen) {
+        const mode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
+        setRangeMode(mode)
+        setRenderStartSec(props.loopEnabled ? props.loopStartSec : 0)
+        setRenderLengthSec(props.loopEnabled
+          ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
+          : initialDuration())
+      }
+      wasOpen = isOpen
+    },
+  ))
 
   const renderSettings = () => ({
     sampleRate: sampleRate(),

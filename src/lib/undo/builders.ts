@@ -1,6 +1,5 @@
-import { buildClipHistorySnapshot } from '~/lib/clip-create'
-import type { ClipCreateSnapshot } from '@daw-browser/shared'
-import type { AutomationEnvelope } from '@daw-browser/shared'
+import { buildClipHistorySnapshot } from '~/lib/clip-history-snapshot'
+import type { AutomationEnvelope, ClipCreateSnapshot } from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { ExternalSidechainRoute, Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'

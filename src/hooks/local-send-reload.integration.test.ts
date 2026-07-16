@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, untrack } from 'solid-js'
 
 import { saveLocalProjectState } from '~/lib/local-project-state'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -180,8 +180,7 @@ describe('local send reload path', () => {
           }
           setRenderTracks([sourceTrack, returnTrack, regularTrack])
           setMixerTracks(() => renderTracks)
-
-          expect(getReturnSendTargets(mixerTracks()()).map((track) => track.id)).toEqual([returnTrackId])
+          expect(untrack(() => getReturnSendTargets(mixerTracks()()).map((track) => track.id))).toEqual([returnTrackId])
           controller.updateTrackSends(sourceTrackId, [{
             targetId: returnTrackId,
             amount: 1,

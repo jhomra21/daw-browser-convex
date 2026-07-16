@@ -1,9 +1,9 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from 'solid-js'
 
 import { isLocalId, normalizeMasterVolume, type ProjectRole } from '@daw-browser/shared'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { convexApi } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import type { ProjectMixState } from '~/lib/project-mix-state'
 
@@ -87,10 +87,11 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
       operation: { kind: 'mixer.setMasterVolume', payload: { volume: nextVolume } },
       queuedResult: { status: 'applied' },
     }).catch(() => {
-      if (pendingMasterVolume() !== nextVolume) return
+      if (untrack(() => pendingMasterVolume()) !== nextVolume) return
       setPendingMasterVolume(undefined)
-      options.projectMix.setMasterVolume(committedVolume())
-      options.audioEngine.setMasterVolume(committedVolume())
+      const committed = untrack(committedVolume)
+      options.projectMix.setMasterVolume(committed)
+      options.audioEngine.setMasterVolume(committed)
     })
   }
 

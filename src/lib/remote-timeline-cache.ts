@@ -1,10 +1,9 @@
 import type { FunctionReturnType } from 'convex/server'
 
-import { convexApi } from '~/lib/convex'
-import { normalizeAudioWarp, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import type { convexApi } from '~/lib/convex'
+import { normalizeAudioWarp, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { normalizeTrackChannelRole } from '@daw-browser/shared'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { getDefaultClipColor } from '~/lib/clip-color'

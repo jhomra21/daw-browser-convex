@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
@@ -88,7 +88,7 @@ export type EffectType = TrackEffect | `master-${AudioEffectKind}`
 export type EffectParamsByEffect = {
   utility: UtilityParamsEnvelope
   eq: EqParams
-  autofilter: import('@daw-browser/shared').AutoFilterParamsEnvelope
+  autofilter: AutoFilterParamsEnvelope
   gate: GateParamsEnvelope
   compressor: CompressorParams
   saturator: SaturatorParams
@@ -108,7 +108,7 @@ export type EffectParamsByEffect = {
   arp: ArpeggiatorParams
   'master-utility': UtilityParamsEnvelope
   'master-eq': EqParams
-  'master-autofilter': import('@daw-browser/shared').AutoFilterParamsEnvelope
+  'master-autofilter': AutoFilterParamsEnvelope
   'master-gate': GateParamsEnvelope
   'master-compressor': CompressorParams
   'master-saturator': SaturatorParams

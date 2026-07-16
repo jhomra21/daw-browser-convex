@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
 import { deleteLocalEffect, deleteLocalEffectInstance, getLocalEffect, setLocalEffect, setLocalEffectInstance, type LocalEffectKind, type LocalEffectRow } from "~/lib/local-effects";
 import { isLocalId } from "@daw-browser/shared";
 
@@ -44,10 +44,10 @@ export function createLocalEffectRows<TParams>(input: {
       && isLocalProject()
     );
     void getLocalEffect<TParams>(projectId, targetId, effect).then((row) => {
-      if (!isCurrentScope()) return;
+      if (!untrack(isCurrentScope)) return;
       setRows((prev) => ({ ...prev, [key]: row }));
     }).catch(() => {
-      if (!isCurrentScope()) return;
+      if (!untrack(isCurrentScope)) return;
       setRows((prev) => ({ ...prev, [key]: undefined }));
     });
   });

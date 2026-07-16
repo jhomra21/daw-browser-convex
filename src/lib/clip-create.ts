@@ -1,18 +1,19 @@
-import { getPersistableAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
-import { assert, normalizeAudioWarp, resolveClipSampleUrl } from '@daw-browser/shared'
+import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
+import { assert, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp } from '@daw-browser/shared'
+import type { ClipCreateSnapshot, SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { enqueueSharedAudioClipCreateOnFailure, enqueueSharedTimelineOperationOnFailure, SharedOutboxQueuedError } from '~/lib/shared-outbox'
-import type { SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import { getClipHistoryRef } from '~/lib/undo/refs'
-import type { HistoryClipSnapshot, HistoryEntry } from '~/lib/undo/types'
-import type { Clip, TrackId } from '@daw-browser/timeline-core/types'
+import type { HistoryEntry } from '~/lib/undo/types'
+import type { TrackId } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
-import { buildClipCreatePayload, buildQueuedAudioClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { getDefaultClipColor } from '~/lib/clip-color'
+import { buildClipHistorySnapshot } from '~/lib/clip-history-snapshot'
+
+export { buildClipCreateSnapshot, buildClipHistorySnapshot } from '~/lib/clip-history-snapshot'
 
 type BuildLocalClipInput = {
   id: string
@@ -84,32 +85,6 @@ type BatchClipCreateResult = {
   trackId: TrackId
   clipId: string
   clip: ClipCreateSnapshot
-}
-
-function buildClipSnapshotFields(clip: Clip) {
-  return {
-    startSec: clip.startSec,
-    duration: clip.duration,
-    name: clip.name,
-    gain: clip.gain,
-    fades: clip.fades,
-    sampleUrl: resolveClipSampleUrl(clip),
-    source: getPersistableAudioSourceMetadata({
-      sourceDurationSec: clip.sourceDurationSec,
-      sourceSampleRate: clip.sourceSampleRate,
-      sourceChannelCount: clip.sourceChannelCount,
-    }),
-    sourceAssetKey: clip.sourceAssetKey,
-    sourceKind: clip.sourceKind,
-    color: clip.color,
-    midi: clip.midi,
-    audioWarp: normalizeAudioWarp(clip.audioWarp),
-    timing: {
-      leftPadSec: clip.leftPadSec,
-      bufferOffsetSec: clip.bufferOffsetSec,
-      midiOffsetBeats: clip.midiOffsetBeats,
-    },
-  }
 }
 
 export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
@@ -451,23 +426,6 @@ export function buildCreatedClipSelection(created: readonly BatchClipCreateResul
     trackId: primary.trackId,
     clipIds: created.map((item) => item.clipId),
     primaryClipId: primary.clipId,
-  }
-}
-
-export function buildClipCreateSnapshot(
-  clip: Clip,
-  options?: { preserveHistoryRef?: boolean },
-): ClipCreateSnapshot {
-  return {
-    ...buildClipSnapshotFields(clip),
-    historyRef: options?.preserveHistoryRef === false ? undefined : getClipHistoryRef(clip),
-  }
-}
-
-export function buildClipHistorySnapshot(clip: Clip): HistoryClipSnapshot {
-  return {
-    clipRef: getClipHistoryRef(clip),
-    ...buildClipSnapshotFields(clip),
   }
 }
 

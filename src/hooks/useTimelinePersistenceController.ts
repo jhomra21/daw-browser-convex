@@ -7,7 +7,7 @@ import { flushSharedOutbox } from "~/lib/shared-outbox";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { useCloudSyncTick } from "./useCloudSyncTick";
-import { useLocalProjectActions } from "./useLocalProjectActions";
+import type { useLocalProjectActions } from "./useLocalProjectActions";
 import { useMissingMediaRecovery } from "./useLocalTimelineMediaRecovery";
 
 type LocalProjectActions = ReturnType<typeof useLocalProjectActions>;

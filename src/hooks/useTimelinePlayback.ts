@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { canFallbackToRepitchStretch, LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -279,9 +279,10 @@ export function useTimelinePlayback(audioEngine: TimelinePlaybackAudioEngine, lo
       audioEngine.applyAutomationAtTimelineSec(sec)
     }
   }
-
   const unsubscribeStretchRenderState = audioEngine.subscribeStretchRenderState(() => {
-    if (isPlaying()) retryDeferredStretchWindows(audioEngine.currentTimelineSec, { includeNonImminent: true })
+    untrack(() => {
+      if (isPlaying()) retryDeferredStretchWindows(audioEngine.currentTimelineSec, { includeNonImminent: true })
+    })
   })
 
   onCleanup(() => {

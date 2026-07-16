@@ -1,8 +1,8 @@
 import { For } from 'solid-js'
 import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
-import {
-  type ArpeggiatorParams,
+import type {
+  ArpeggiatorParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
 

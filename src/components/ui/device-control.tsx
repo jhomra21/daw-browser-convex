@@ -21,7 +21,7 @@ export function DeviceToggleButton(props: DeviceToggleButtonProps) {
       disabled={props.disabled}
       aria-pressed={props.active === true}
       aria-label={props.ariaLabel}
-      onClick={props.onClick}
+      onClick={() => props.onClick()}
     >
       {props.label}
     </button>

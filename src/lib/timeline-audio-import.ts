@@ -1,11 +1,9 @@
 import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
-import { buildClipCreatePayload, type ClipCreateSnapshot } from '@daw-browser/shared'
+import { buildClipCreatePayload, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
-import { isLocalProjectAssetKey } from '@daw-browser/shared'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
-import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError, publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import {
@@ -17,6 +15,7 @@ import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, Track, TrackId } from '@daw-browser/timeline-core/types'
+import type { convexApi, convexClient } from '~/lib/convex'
 
 type UploadToR2 = (
   projectId: string,
@@ -25,10 +24,8 @@ type UploadToR2 = (
   durationSec?: number,
 ) => Promise<string | null>
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
-
-type ConvexApiType = typeof import('~/lib/convex').convexApi
-
+type ConvexClientType = typeof convexClient
+type ConvexApiType = typeof convexApi
 type ImportProjectContext = {
   projectId: () => string | undefined
   userId: () => string | undefined

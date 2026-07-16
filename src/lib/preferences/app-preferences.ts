@@ -38,14 +38,18 @@ export const createPersistedAppPreferencesWithInitial = (
   Store<AppPreferences>,
   SetStoreFunction<AppPreferences>
 ] => {
-  if (!canUseLocalStorage()) return createStore(initialPreferences)
-
-  const [preferences, setPreferences] = makePersisted(createStore(initialPreferences), {
+  const [preferences, setPreferences] = createStore(initialPreferences)
+  const store: [Store<AppPreferences>, SetStoreFunction<AppPreferences>] = [
+    preferences,
+    setPreferences,
+  ]
+  if (!canUseLocalStorage()) return store
+  const [persistedPreferences, setPersistedPreferences] = makePersisted(store, {
     name: APP_PREFERENCES_STORAGE_KEY,
     storage: localStorage,
     sync: sameOriginLocalStorageSync,
     serialize: JSON.stringify,
     deserialize: (value) => normalizeAppPreferences(JSON.parse(value))
   })
-  return [preferences, setPreferences]
+  return [persistedPreferences, setPersistedPreferences]
 }

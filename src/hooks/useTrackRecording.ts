@@ -11,7 +11,6 @@ import { isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
-import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   acquireTrackRecordingLock,
   cleanupRecordingSession,
@@ -38,6 +37,7 @@ import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
+import type { convexApi, convexClient } from '~/lib/convex'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/app-preferences'
@@ -46,9 +46,9 @@ import { resolveCalibrationPlatformIdentity, resolveRecordingOffsetFrames } from
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
-type ConvexClientType = typeof import('~/lib/convex').convexClient
+type ConvexClientType = typeof convexClient
 
-type ConvexApiType = typeof import('~/lib/convex').convexApi
+type ConvexApiType = typeof convexApi
 
 type UseTrackRecordingOptions = {
   audioEngine: AudioEngine

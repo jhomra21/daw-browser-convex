@@ -1,6 +1,7 @@
 import { createEffect, onCleanup, type Accessor } from 'solid-js'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import type { convexApi, convexClient } from '~/lib/convex'
 import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
 import { isLocalId } from '@daw-browser/shared'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
@@ -32,14 +33,14 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import { registerSharedOutboxHistoryHandler } from '~/lib/shared-outbox'
 
-type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
+export type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
 type UseTimelineHistoryOptions = {
   projectId: Accessor<string>
   userId: Accessor<string>
   getTracks: () => Track[]
-  convexClient: typeof import('~/lib/convex').convexClient
-  convexApi: typeof import('~/lib/convex').convexApi
+  convexClient: typeof convexClient
+  convexApi: typeof convexApi
   audioEngine: AudioEngine
   replayInstanceEffectParams?: Parameters<typeof execUndo>[1]['replayInstanceEffectParams']
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
@@ -221,7 +222,7 @@ export function useTimelineHistory(
       if (!entry) return
 
       const sourceActions = options.getActions()
-      let workingTracks = cloneHistoryTracks(context.tracks)
+      const workingTracks = cloneHistoryTracks(context.tracks)
       const actions: TimelineHistoryActions = {
         insertLocalTrack: (track, index) => {
           insertTrackIntoHistoryModel(workingTracks, track, index)

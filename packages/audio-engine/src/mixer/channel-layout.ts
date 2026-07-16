@@ -36,7 +36,7 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
   const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))
   const incoming = new Map<string, string[]>()
   for (const entry of graph.channels) {
-    const targets = [...entry.sends.map((send) => send.targetId)]
+    const targets = entry.sends.map((send) => send.targetId)
     if (entry.outputTargetId) targets.push(entry.outputTargetId)
     for (const targetId of targets) {
       assert(channelById.has(targetId), `Missing channel layout target ${targetId}`)

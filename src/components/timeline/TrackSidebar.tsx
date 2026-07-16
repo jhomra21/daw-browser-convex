@@ -13,11 +13,9 @@ import {
   assert,
   automationEnvelopeValueRange,
   automationTargetKey,
-  getAutomationParameterOptionsForTarget,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import {
-  canTrackReceiveAudioClip,
   getTrackChannelRole,
 } from "@daw-browser/timeline-core/track-routing";
 import { TIMELINE_SIDEBAR_MIN_WIDTH } from "~/lib/timeline-layout";
@@ -27,10 +25,7 @@ import {
   type TrackDropTarget,
 } from "~/lib/track-group-ops";
 import {
-  DEFAULT_AUTOMATION_LANE_HEIGHT,
   GROUP_INDENT_PX,
-  GROUP_RAIL_WIDTH,
-  LANE_HEIGHT,
   RULER_HEIGHT,
   clampAutomationLaneHeight,
 } from "~/lib/timeline-utils";
@@ -44,17 +39,11 @@ import {
 import MasterSidebarRow, {
   type MasterSidebarModel,
 } from "~/components/timeline/MasterSidebarRow";
-import AutomationParameterPicker from "./automation-parameter-picker";
-import TimelineContextMenu, {
-  type TimelineContextMenuItem,
-} from "./context-menu/timeline-context-menu";
 import { useAppPreferences } from "~/context/app-preferences";
-import { parseHexColor } from "~/lib/color";
 import {
   TIMELINE_DEFAULT_GROUP_COLOR,
   TIMELINE_DEFAULT_TRACK_COLOR,
 } from "~/lib/preferences/app-preferences";
-import { trackColorForClip } from "~/lib/clip-color";
 import {
   getReturnSendTargets,
   resolveSendTargetId,
@@ -727,7 +716,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     >
       <div
         class="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
-        onPointerDown={sidebar().onSidebarPointerDown}
+        onPointerDown={(event) => sidebar().onSidebarPointerDown(event)}
       >
         <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
       </div>

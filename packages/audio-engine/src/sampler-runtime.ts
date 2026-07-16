@@ -208,7 +208,7 @@ export function createSamplerRuntime(options: Options) {
     remove(trackId, voice)
   }
   const terminateMatching = (trackId: string, when: number, predicate: (voice: Voice) => boolean) => {
-    for (const voice of [...(voices.get(trackId) ?? [])]) {
+    for (const voice of Array.from(voices.get(trackId) ?? [])) {
       if (!predicate(voice)) continue
       voice.gain.gain.cancelScheduledValues(when)
       voice.gain.gain.setValueAtTime(voice.gain.gain.value, when)
@@ -265,7 +265,7 @@ export function createSamplerRuntime(options: Options) {
     return true
   }
   const disposeTrack = (trackId: string) => {
-    for (const voice of [...(voices.get(trackId) ?? [])]) stop(trackId, voice)
+    for (const voice of Array.from(voices.get(trackId) ?? [])) stop(trackId, voice)
     configs.delete(trackId)
   }
 
@@ -287,14 +287,18 @@ export function createSamplerRuntime(options: Options) {
       return ctx ? trigger(trackId, note, velocity, ctx.currentTime, 0.5) : false
     },
     stopClip: (clipId: string) => {
-      for (const [trackId, active] of voices) for (const voice of [...active]) if (voice.clipId === clipId) stop(trackId, voice)
+      for (const [trackId, active] of voices) {
+        for (const voice of Array.from(active)) if (voice.clipId === clipId) stop(trackId, voice)
+      }
     },
     stopAll: () => {
-      for (const [trackId, active] of voices) for (const voice of [...active]) stop(trackId, voice)
+      for (const [trackId, active] of voices) {
+        for (const voice of Array.from(active)) stop(trackId, voice)
+      }
     },
     disposeTrack,
     clear: () => {
-      for (const trackId of [...configs.keys()]) disposeTrack(trackId)
+      for (const trackId of Array.from(configs.keys())) disposeTrack(trackId)
       configs.clear()
     },
   }

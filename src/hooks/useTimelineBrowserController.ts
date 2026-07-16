@@ -1,7 +1,6 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
-import type { TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, TimelineLeftBrowserModel, BrowserTreeRow } from "~/components/timeline/browser/browser-types";
+import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
 import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
@@ -522,7 +521,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         } else {
           await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId: draft.folderId, name });
         }
-        if (renameFolderId() === draft.folderId) clearRenameAssetFolder();
+        if (untrack(renameFolderId) === draft.folderId) clearRenameAssetFolder();
       } finally {
         setRenameFolderBusy(false);
       }
@@ -530,9 +529,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   };
 
   const deleteAssetFolder = (folderId: string) => {
+    const projectId = currentProjectId();
+    const folderHasSamples = Boolean(folderSampleCountById().get(folderId));
     runAssetFolderAction(async () => {
-      const projectId = currentProjectId();
-      if (!projectId || folderSampleCountById().get(folderId)) return;
+      if (!projectId || folderHasSamples) return;
       if (isLocalId("project", projectId)) {
         await deleteEmptyLocalAssetFolder(projectId, folderId);
         assetFolders.refreshFolders();
@@ -649,8 +649,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     },
     onDrop: options.onDeviceDrop,
   });
-
-  return createMemo(() => ({
+  const controller = createMemo(() => ({
     open: options.leftBrowser.open(),
     widthPx: options.leftBrowser.widthPx(),
     activeTab: options.leftBrowser.activeTab(),
@@ -692,4 +691,5 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     onTreeRowExpandedChange: options.leftBrowser.setTreeRowExpanded,
     onResizePointerDown: options.onResizePointerDown,
   }));
+  return controller;
 }

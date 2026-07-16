@@ -1,6 +1,6 @@
 import { normalizeAudioWarp } from '@daw-browser/shared'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { Track } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 
 export const toLocalTimelineClip = (row: TimelineClipRow): RuntimeClip => ({

@@ -32,7 +32,7 @@ const Granular: Component<GranularProps> = (props) => {
       <div class="flex h-full flex-col gap-3 p-3 text-xs text-muted-foreground">
         <div class="flex items-center gap-3">
           <span class="max-w-48 truncate text-foreground">{props.params.zone?.sample.name ?? props.params.zone?.sample.assetKey ?? "No sample"}</span>
-          <button disabled={!props.params.zone || props.status?.state === "ready"} onClick={props.onRetry}>{props.status?.state ?? "missing"}</button>
+          <button disabled={!props.params.zone || props.status?.state === "ready"} onClick={() => props.onRetry()}>{props.status?.state ?? "missing"}</button>
           <span>{Math.round((props.status?.totalBytes ?? 0) / 1048576)} / {Math.round((props.status?.maxBytes ?? props.params.maxDecodedBytes) / 1048576)} MB</span>
         </div>
         <div class="border border-dashed border-border p-2" onDragOver={(event) => { if (props.canWrite && event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) event.preventDefault(); }} onDrop={drop}>

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import {
@@ -439,26 +439,13 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
   ));
-  const owner = getOwner();
-  let evaluatedValuesMemo: Accessor<ReadonlyMap<string, number>> | undefined;
-  const evaluatedValuesByTargetKey = () => {
-    const memo = evaluatedValuesMemo ?? runWithOwner(owner, () => createMemo(() => (
-      evaluatedAutomationValuesByTargetKey(
-        persistedAutomation.envelopes(),
-        options.playheadSec(),
-        overriddenAutomationTargetKeys(),
-      )
-    )));
-    if (!memo) {
-      return evaluatedAutomationValuesByTargetKey(
-        persistedAutomation.envelopes(),
-        options.playheadSec(),
-        overriddenAutomationTargetKeys(),
-      );
-    }
-    evaluatedValuesMemo = memo;
-    return memo();
-  };
+  const evaluatedValuesByTargetKey = createMemo(() => (
+    evaluatedAutomationValuesByTargetKey(
+      persistedAutomation.envelopes(),
+      options.playheadSec(),
+      overriddenAutomationTargetKeys(),
+    )
+  ));
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (
     automationTargetKey({ kind: "track", trackId, effectInstanceId: selection.effectInstanceId }, selection.parameterId)
   );
@@ -544,6 +531,14 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       current[targetKey] === nextHeight ? current : { ...current, [targetKey]: nextHeight }
     ));
   };
+  const selectAutomationParameter = (
+    targetKey: string,
+    selection: AutomationParameterSelection,
+  ) => {
+    selectedAutomationParameters.setValue((current) => (
+      { ...current, [targetKey]: selection }
+    ));
+  };
   const workspace = createMemo<TimelineWorkspaceAutomationModel>(() => ({
     projectId: options.projectId(),
     lanes: {
@@ -596,11 +591,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       resizeMasterLane: (height) => resizeLane("master", height),
       resizeTrackLane: resizeLane,
       overrideTarget: overrideAutomationTarget,
-      selectParameter: (targetKey, selection) => {
-        selectedAutomationParameters.setValue((current) => (
-          { ...current, [targetKey]: selection }
-        ));
-      },
+      selectParameter: selectAutomationParameter,
     },
   }));
 
@@ -614,7 +605,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     overrideCount: () => overriddenAutomationTargetKeys().size,
     workspace,
     effectsPanel: {
-      selectParameter: workspace().actions.selectParameter,
+      selectParameter: selectAutomationParameter,
       overrideTarget: overrideAutomationTarget,
     },
   };

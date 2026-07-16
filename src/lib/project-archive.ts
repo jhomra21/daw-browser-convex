@@ -1,11 +1,10 @@
-import { createLocalProjectId } from '@daw-browser/shared'
+import { createLocalProjectId, normalizeProjectManifest } from '@daw-browser/shared'
 import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
 import { deleteLocalProject, importLocalProject } from '~/lib/local-project-db'
 import {
   buildProjectManifest,
   createRestoredProjectEntry,
 } from '~/lib/project-manifest'
-import { normalizeProjectManifest } from '@daw-browser/shared'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -131,7 +130,7 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
     if (!bytes) throw new Error(`Archive is missing asset bytes for "${asset.name}".`)
     return { asset, bytes }
   })
-  const localAssets = manifest.assets.map(({ cloudKey, ...asset }) => asset)
+  const localAssets = manifest.assets.map(({ cloudKey: _cloudKey, ...asset }) => asset)
   try {
     await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
       const assetBytes = new ArrayBuffer(bytes.byteLength)

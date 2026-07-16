@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import {
   automationTargetKey,
   automationRatioToValue,
@@ -259,7 +259,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         kind: 'item',
         label: 'Add point',
         disabled: !position,
-        onSelect: position ? () => addPointAtPosition(position) : undefined,
+        onSelect: position ? () => untrack(() => addPointAtPosition(position)) : undefined,
       },
       { kind: 'separator' },
       {
@@ -300,9 +300,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
+      const durationSec = props.durationSec
       updateSelectedPoint((point) => ({
         ...point,
-        timeSec: Math.max(0, Math.min(props.durationSec, point.timeSec + direction * timeDelta)),
+        timeSec: Math.max(0, Math.min(durationSec, point.timeSec + direction * timeDelta)),
       }))
       return
     }
@@ -323,7 +324,9 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   const laneElement = (
     <div
-      ref={root}
+      ref={(element) => {
+        root = element
+      }}
       tabIndex={0}
       data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"

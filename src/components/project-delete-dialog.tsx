@@ -25,7 +25,7 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
 
   createEffect(() => {
     if (!props.open) setConfirmation('')
-    props.project?.id
+    void props.project?.id
   })
 
   const confirmDelete = () => {

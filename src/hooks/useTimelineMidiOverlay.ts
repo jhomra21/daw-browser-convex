@@ -1,5 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import {
   clampTimelineMidiBounds,
@@ -97,7 +96,7 @@ export function useTimelineMidiOverlay(
     // clear the timer on cleanup so it never outlives the overlay.
     midiCardPersistTimer = window.setTimeout(() => {
       midiCardPersistTimer = null
-      persistMidiCard()
+      untrack(persistMidiCard)
     }, 250)
   }
 

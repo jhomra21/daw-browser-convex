@@ -115,7 +115,7 @@ const ArrangementOverview: Component<ArrangementOverviewProps> = (props) => {
           <path d={path.d} fill={path.color} />
         )}</For>
       </svg>
-      <div class="absolute top-0 bottom-0 z-10 rounded-sm border-2 border-neutral-300/80" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }} />
+      <div class="absolute top-0 bottom-0 z-10 border border-neutral-300/80" style={{ left: `${rangeX()}px`, width: `${rangeWidth()}px` }} />
     </div>
   )
 }

@@ -33,7 +33,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import { registerSharedOutboxHistoryHandler } from '~/lib/shared-outbox'
 
-type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
+export type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
 type UseTimelineHistoryOptions = {
   projectId: Accessor<string>

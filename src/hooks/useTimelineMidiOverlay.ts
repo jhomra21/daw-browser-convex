@@ -1,5 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
-import type { Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import {
   clampTimelineMidiBounds,
@@ -95,10 +94,9 @@ export function useTimelineMidiOverlay(
     }
     // Debounce card-position writes while the user drags the editor and always
     // clear the timer on cleanup so it never outlives the overlay.
-// oxlint-disable-next-line solid/reactivity -- The scheduled persistence callback deliberately reads current overlay state when it fires.
     midiCardPersistTimer = window.setTimeout(() => {
       midiCardPersistTimer = null
-      persistMidiCard()
+      untrack(persistMidiCard)
     }, 250)
   }
 

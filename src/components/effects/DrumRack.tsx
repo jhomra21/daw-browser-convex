@@ -229,10 +229,10 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     const sample = pad.sample;
     if (!sample) return undefined;
     setLoadingPadId(pad.id);
-// oxlint-disable-next-line solid/reactivity -- The asynchronous sample decode callback deliberately verifies current reactive state after it resolves.
-    const buffer = await loader.load(sample.url, (data) => props.audioEngine.decodeAudioData(data));
-    if (loadingPadId() === pad.id) setLoadingPadId(undefined);
-    if (props.targetId !== targetId) return undefined;
+    const audioEngine = props.audioEngine;
+    const buffer = await loader.load(sample.url, (data) => audioEngine.decodeAudioData(data));
+    if (untrack(loadingPadId) === pad.id) setLoadingPadId(undefined);
+    if (untrack(() => props.targetId) !== targetId) return undefined;
     return buffer ?? undefined;
   };
 
@@ -274,9 +274,9 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     const targetId = props.targetId;
     const assignment = sampleToAssignment(sample);
     props.onAssignSampleToPad(pad.id, assignment);
-// oxlint-disable-next-line solid/reactivity -- The asynchronous sample decode callback deliberately verifies current reactive state after it resolves.
-    const buffer = await loader.load(assignment.url, (data) => props.audioEngine.decodeAudioData(data));
-    if (!buffer || props.targetId !== targetId) return;
+    const audioEngine = props.audioEngine;
+    const buffer = await loader.load(assignment.url, (data) => audioEngine.decodeAudioData(data));
+    if (!buffer || untrack(() => props.targetId) !== targetId) return;
     const key = drumRackSampleKey(assignment);
     if (currentPadSampleKey(pad.id) !== key) return;
     const nextParams = props.params;

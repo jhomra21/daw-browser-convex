@@ -42,7 +42,10 @@ import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
 import { useTimelineMixerController } from "~/hooks/useTimelineMixerController";
 import { useProjectedTimelineModel } from "~/hooks/useProjectedTimelineModel";
 import { useTimelineDragDrop } from "~/hooks/useTimelineDragDrop";
-import { useTimelineHistory } from "~/hooks/useTimelineHistory";
+import {
+  useTimelineHistory,
+  type TimelineHistoryActions,
+} from "~/hooks/useTimelineHistory";
 import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
 import { useTimelineMasterVolume } from "~/hooks/useTimelineMasterVolume";
@@ -180,10 +183,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     rememberTrackProjection: identity.rememberTrackProjection,
     rememberClipHistoryRef: identity.rememberClipHistoryRef,
   });
-  let renderTracks: Accessor<Track[]> = () => [];
+  const [renderTracks, setRenderTracks] = createSignal<Track[]>([]);
+  const [bufferVersion, setBufferVersion] = createSignal(0);
   const selection = useTimelineSelectionState({
     projectId,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     effectsPanel: {
       isOpen: bottomPanel.open,
       setOpen: bottomPanel.setOpen,
@@ -192,7 +196,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const clipBuffers = useClipBuffers({
     audioEngine,
     projectId,
-    tracks: () => resolvedTracks(),
+    tracks: renderTracks,
     onBufferChange: () => setBufferVersion((current) => current + 1),
   });
   const currentLocalProjectMode = createMemo(
@@ -208,7 +212,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     remoteTimelineAvailable: () => Boolean(fullView.data),
     localProjectMode: currentLocalProjectMode,
     userId,
-    renderTracks: () => renderTracks(),
+    renderTracks,
     audioEngine,
     audioBufferCache: clipBuffers.writer,
     localProject,
@@ -263,10 +267,11 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
+  let historyActions: TimelineHistoryActions | undefined = undefined;
   const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
     projectId,
     userId,
-    getTracks: () => resolvedTracks(),
+    getTracks: renderTracks,
     convexClient,
     convexApi,
     audioEngine,
@@ -277,46 +282,51 @@ const Timeline: Component<TimelineProps> = (props) => {
     grantClipWrite,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
-    getActions: () => ({
-      insertLocalTrack: (track, index) =>
-        projection.insertLocalTrack(track, index),
-      removeLocalTrack: (trackId) => projection.removeLocalTrack(trackId),
-      insertLocalClip: (trackId, clip) =>
-        projection.insertLocalClip(trackId, clip),
-      replaceLocalClip: (trackId, clip) =>
-        projection.replaceLocalClip(trackId, clip),
-      removeLocalClips: (clipIds) => projection.removeLocalClips(clipIds),
-      commitClipMoves: (moves) => projection.commitClipMoves(moves),
-      commitClipTiming: (clipId, patch) =>
-        projection.commitClipTiming(clipId, patch),
-      commitClipAudioWarp: (clipId, audioWarp) =>
-        projection.commitClipAudioWarp(clipId, audioWarp),
-      commitClipFades: (clipId, fades) =>
-        projection.commitClipFades(clipId, fades),
-      rescheduleChangedClips,
-      cancelTrackVolumeWrite: (trackId) => cancelTrackVolumeWrite(trackId),
-      cancelTrackRoutingWrite: (trackId) => cancelTrackRoutingWrite(trackId),
-      cancelTrackMixWrite: (trackId) => cancelTrackMixWrite(trackId),
-      applyTrackVolume: (trackId, volume, scope) =>
-        applyTrackVolume(trackId, volume, scope),
-      applyTrackMixState: (trackId, patch, scope) =>
-        applyTrackMixState(trackId, patch, scope),
-      applyTrackRouting: (trackId, routing) =>
-        applyTrackRouting(trackId, {
-          sends: routing.sends ?? [],
-          outputTargetId: routing.outputTargetId,
-        }),
-      applyTrackPatch: (trackId, patch) => {
-        const currentTracks = renderTracks();
-        const track = currentTracks.find((entry) => entry.id === trackId);
-        const index = currentTracks.findIndex((entry) => entry.id === trackId);
-        if (!track || index < 0) return;
-        projection.updateLocalTrack(track, index, patch);
-      },
-      applyAutomationEnvelope: (envelope, targetKey) =>
-        automation.applyEnvelope(envelope, targetKey),
-    }),
+    getActions: () => {
+      const actions = historyActions;
+      if (!actions)
+        throw new Error("Timeline history actions are not initialized.");
+      return actions;
+    },
   });
+
+  // Playback & playhead controls
+  const {
+    isPlaying,
+    playheadSec,
+    handlePause,
+    handleStop,
+    setPlayhead,
+    requestPlay,
+    startScrub,
+    moveScrub,
+    stopScrub,
+    setScrollElement,
+    rescheduleChangedClips: playbackRescheduleChangedClips,
+  } = usePlayheadControls({
+    audioEngine,
+    tracks: renderTracks,
+    ensureClipBuffer: clipBuffers.preload,
+    loopEnabled,
+    loopStartSec,
+    loopEndSec,
+  });
+
+  function rescheduleChangedClips(clipIds: string[]) {
+    if (clipIds.length === 0 || !isPlaying()) return;
+    try {
+      const enabled = loopEnabled();
+      const end = loopEndSec();
+      const lenOk = enabled && end > loopStartSec() + 1e-3;
+      playbackRescheduleChangedClips(
+        renderTracks(),
+        playheadSec(),
+        clipIds,
+        lenOk ? { endLimitSec: end } : undefined,
+      );
+    } catch {}
+  }
+
   const automation = useTimelineAutomationController({
     projectId,
     userId,
@@ -337,8 +347,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         ];
       }),
     audioEngine,
-    isPlaying: () => isPlaying(),
-    playheadSec: () => playheadSec(),
+    isPlaying,
+    playheadSec,
     selectedTrackId: selection.selectedTrackId,
     pushHistory,
   });
@@ -362,7 +372,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     syncMix,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     localMix,
     optimisticTrackIds,
     canWriteTrack,
@@ -371,7 +381,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     serverTrackState,
   });
 
-  const [bufferVersion, setBufferVersion] = createSignal(0);
   const {
     resolvedTracks,
     placementTracks,
@@ -408,7 +417,40 @@ const Timeline: Component<TimelineProps> = (props) => {
     buffers: clipBuffers,
     bufferVersion,
   });
-  renderTracks = resolvedRenderTracks;
+  createEffect(() => {
+    setRenderTracks(resolvedRenderTracks());
+  });
+  historyActions = {
+    insertLocalTrack: (track, index) => projection.insertLocalTrack(track, index),
+    removeLocalTrack: (trackId) => projection.removeLocalTrack(trackId),
+    insertLocalClip: (trackId, clip) => projection.insertLocalClip(trackId, clip),
+    replaceLocalClip: (trackId, clip) => projection.replaceLocalClip(trackId, clip),
+    removeLocalClips: (clipIds) => projection.removeLocalClips(clipIds),
+    commitClipMoves: (moves) => projection.commitClipMoves(moves),
+    commitClipTiming: (clipId, patch) => projection.commitClipTiming(clipId, patch),
+    commitClipAudioWarp: (clipId, audioWarp) =>
+      projection.commitClipAudioWarp(clipId, audioWarp),
+    commitClipFades: (clipId, fades) => projection.commitClipFades(clipId, fades),
+    rescheduleChangedClips,
+    cancelTrackVolumeWrite,
+    cancelTrackRoutingWrite,
+    cancelTrackMixWrite,
+    applyTrackVolume,
+    applyTrackMixState,
+    applyTrackRouting: (trackId, routing) =>
+      applyTrackRouting(trackId, {
+        sends: routing.sends ?? [],
+        outputTargetId: routing.outputTargetId,
+      }),
+    applyTrackPatch: (trackId, patch) => {
+      const currentTracks = renderTracks();
+      const track = currentTracks.find((entry) => entry.id === trackId);
+      const index = currentTracks.findIndex((entry) => entry.id === trackId);
+      if (!track || index < 0) return;
+      projection.updateLocalTrack(track, index, patch);
+    },
+    applyAutomationEnvelope: automation.applyEnvelope,
+  };
   const pendingDeleteTrackClipCount = createMemo(() => {
     const trackId = pendingDeleteTrackId();
     if (!trackId) return 0;
@@ -419,7 +461,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     userId,
     bpm,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     selectedClip: selection.selectedClip,
     canWriteClip,
     projection,
@@ -512,43 +554,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     );
   };
 
-  // Playback & playhead controls
-  const {
-    isPlaying,
-    playheadSec,
-    handlePause,
-    handleStop,
-    setPlayhead,
-    requestPlay,
-    startScrub,
-    moveScrub,
-    stopScrub,
-    setScrollElement,
-    rescheduleChangedClips: playbackRescheduleChangedClips,
-  } = usePlayheadControls({
-    audioEngine,
-    tracks: () => renderTracks(),
-    ensureClipBuffer: clipBuffers.preload,
-    loopEnabled,
-    loopStartSec,
-    loopEndSec,
-  });
-
-  function rescheduleChangedClips(clipIds: string[]) {
-    if (clipIds.length === 0 || !isPlaying()) return;
-    try {
-      const enabled = loopEnabled();
-      const end = loopEndSec();
-      const lenOk = enabled && end > loopStartSec() + 1e-3;
-      playbackRescheduleChangedClips(
-        renderTracks(),
-        playheadSec(),
-        clipIds,
-        lenOk ? { endLimitSec: end } : undefined,
-      );
-    } catch {}
-  }
-
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
@@ -591,7 +596,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     midiKeyboard,
   } = useTimelineMidiOverlay({
     audioEngine,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     projectId,
     selection,
   });
@@ -694,7 +699,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     handleInsertSample,
   } = useTimelineClipImport({
     audioEngine,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     trackLayout,
     removeLocalTrack: projection.removeLocalTrack,
     insertLocalClip: projection.insertLocalClip,
@@ -781,7 +786,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const { onClipResizeStart } = useClipResize({
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     setDraftClipTiming: projection.setDraftClipTiming,
     commitClipTiming: projection.commitClipTiming,
     canWriteClip,
@@ -798,7 +803,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
   });
 
-  const commitClipFades = (clipId: string, fades: ClipFades, baseline: ClipFades) => {
+  const commitClipFades = async (
+    clipId: string,
+    fades: ClipFades,
+    baseline: ClipFades,
+  ) => {
     const clip = trackLookup().clipById.get(clipId);
     const rid = projectId();
     if (!clip || clip.midi || !rid || !canWriteClip(clipId)) {
@@ -814,17 +823,20 @@ const Timeline: Component<TimelineProps> = (props) => {
       projection.commitClipFades(clipId, baseline);
       rescheduleChangedClips([clipId]);
     };
-    void createTimelineClipWriteAdapter({
-      projectId: rid,
-      userId: userId(),
-    }).setFades(clipId, fades).then((applied) => {
+    try {
+      const applied = await createTimelineClipWriteAdapter({
+        projectId: rid,
+        userId: userId(),
+      }).setFades(clipId, fades);
       if (!applied) {
         rollback();
         return;
       }
       pushHistory(buildClipFadesHistoryEntry({ projectId: rid, clip, from: baseline, to: fades }));
       rescheduleChangedClips([clipId]);
-    }).catch(rollback);
+    } catch {
+      rollback();
+    }
   };
 
   const {
@@ -838,7 +850,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     performDeleteTrack,
     requestDeleteTrack,
   } = useTimelineClipActions({
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
     commitClipTiming: projection.commitClipTiming,
@@ -866,7 +878,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const timelineSelection = useTimelineSelection({
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     trackLayout,
     displayTrackIds: () => trackLayoutModel().displayTrackIds,
     selection,
@@ -898,7 +910,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const recordingControls = useTrackRecording({
     audioEngine,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     setTrackLock: projection.setTrackLock,
     clearTrackLock: projection.clearTrackLock,
     removeLocalTrack: projection.removeLocalTrack,
@@ -1273,7 +1285,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     onResizePointerDown: leftBrowserResize.onPointerDown,
     deviceInsertActions,
     canCreateTrack,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     trackLayout,
     returnTrackLayout: () => trackLayoutModel().returnRows,
     returnSectionElement: () => returnSectionRef,
@@ -1300,7 +1312,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   );
   useTimelineAudioLifecycle({
     audioEngine,
-    tracks: () => renderTracks(),
+    tracks: renderTracks,
     bpm,
     metronomeEnabled,
     projectId,
@@ -1522,7 +1534,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     exportDialog: {
       isOpen: exportOpen(),
-      getTracks: () => renderTracks(),
+      getTracks: renderTracks,
       selectedTrackIds: selectedExportTrackIds(),
       bpm: bpm(),
       masterVolume: masterVolume.volume(),

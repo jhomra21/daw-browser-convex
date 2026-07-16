@@ -27,10 +27,19 @@
     {
       "files": [
         "src/types/file-system-access.d.ts",
-        "src/types/user-agent-data.d.ts"
+        "src/types/user-agent-data.d.ts",
+        "src/main.tsx"
       ],
       "rules": {
         "typescript/consistent-type-definitions": "off"
+      }
+    },
+    {
+      "files": [
+        "src/components/Timeline.tsx"
+      ],
+      "rules": {
+        "eslint/no-use-before-define": "error"
       }
     }
   ],

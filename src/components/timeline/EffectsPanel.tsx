@@ -1,6 +1,8 @@
 import {
   type Component,
   Show,
+  Match,
+  Switch,
   For,
   createEffect,
   createMemo,
@@ -394,7 +396,7 @@ const createAudioEffectContextMenuControls = (
   };
 };
 
-const renderEffectsPanelAudioEffectCard = (props: EffectsPanelAudioEffectCardProps) => {
+const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
   const params = () => props.audioEffects.paramsForInstance(props.effect);
   const displayedParams = () => {
     const targetId = props.targetId;
@@ -417,97 +419,77 @@ const renderEffectsPanelAudioEffectCard = (props: EffectsPanelAudioEffectCardPro
     }
     return next;
   };
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "utility") {
-    return <Show when={displayedParams()}>{(value) => <Utility params={normalizeUtilityParamsEnvelope(value()).state} onChange={(updates) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => normalizeUtilityParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.utility.changeInstance(props.effect.id, () => normalizeUtilityParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "gate") {
-    const sourceTrackId = () => props.sidechainRoutes?.find((route) => route.targetTrackId === props.targetId && route.effectInstanceId === props.effect.id)?.sourceTrackId;
-    return <Show when={displayedParams()}>{(value) => <Gate params={normalizeGateParamsEnvelope(value()).state} tracks={props.tracks ?? []} targetId={props.targetId ?? "master"} effectInstanceId={props.effect.id} audioEngine={props.audioEngine} sourceTrackId={sourceTrackId()} onSourceChange={(source) => void props.audioEffects.gate.setSidechainSource(props.effect.id, source)} onChange={(updates) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => normalizeGateParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.gate.changeInstance(props.effect.id, () => normalizeGateParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "limiter") {
-    return <Show when={displayedParams()}>{(value) => <Limiter params={normalizeLimiterParamsEnvelope(value()).state} targetId={props.targetId ?? "master"} effectInstanceId={props.effect.id} audioEngine={props.audioEngine} onChange={(updates) => props.audioEffects.limiter.changeInstance(props.effect.id, (prev) => normalizeLimiterParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.limiter.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.limiter.changeInstance(props.effect.id, () => normalizeLimiterParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "lofi") {
-    return <Show when={displayedParams()}>{(value) => <LoFi params={AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.lofi.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.lofi.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.lofi.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "autofilter") {
-    return <Show when={displayedParams()}>{(value) => <AutoFilter params={AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.autofilter.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.autofilter.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.autofilter.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "chorus") {
-    return <Show when={displayedParams()}>{(value) => <Chorus params={AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.chorus.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.chorus.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.chorus.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "flanger") {
-    return <Show when={displayedParams()}>{(value) => <Flanger params={AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.flanger.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.flanger.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.flanger.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "phaser") {
-    return <Show when={displayedParams()}>{(value) => <Phaser params={AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.phaser.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.phaser.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.phaser.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "tremolo") {
-    return <Show when={displayedParams()}>{(value) => <Tremolo params={AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.tremolo.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.tremolo.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.tremolo.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "autopan") {
-    return <Show when={displayedParams()}>{(value) => <AutoPan params={AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.autopan.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.autopan.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.autopan.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "ensemble") {
-    return <Show when={displayedParams()}>{(value) => <Ensemble params={AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.ensemble.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.ensemble.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.ensemble.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "eq") {
-    return (
+  const sidechainSourceTrackId = () => (
+    props.sidechainRoutes?.find(
+      (route) => route.targetTrackId === props.targetId && route.effectInstanceId === props.effect.id,
+    )?.sourceTrackId
+  );
+  return (
+    <Switch>
+      <Match when={props.effect.kind === "utility"}>
+        <Show when={displayedParams()}>{(value) => <Utility params={normalizeUtilityParamsEnvelope(value()).state} onChange={(updates) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => normalizeUtilityParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.utility.changeInstance(props.effect.id, () => normalizeUtilityParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "gate"}>
+        <Show when={displayedParams()}>{(value) => <Gate params={normalizeGateParamsEnvelope(value()).state} tracks={props.tracks ?? []} targetId={props.targetId ?? "master"} effectInstanceId={props.effect.id} audioEngine={props.audioEngine} sourceTrackId={sidechainSourceTrackId()} onSourceChange={(source) => void props.audioEffects.gate.setSidechainSource(props.effect.id, source)} onChange={(updates) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => normalizeGateParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.gate.changeInstance(props.effect.id, () => normalizeGateParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "limiter"}>
+        <Show when={displayedParams()}>{(value) => <Limiter params={normalizeLimiterParamsEnvelope(value()).state} targetId={props.targetId ?? "master"} effectInstanceId={props.effect.id} audioEngine={props.audioEngine} onChange={(updates) => props.audioEffects.limiter.changeInstance(props.effect.id, (prev) => normalizeLimiterParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.limiter.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.limiter.changeInstance(props.effect.id, () => normalizeLimiterParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "lofi"}>
+        <Show when={displayedParams()}>{(value) => <LoFi params={AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.lofi.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.lofi.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.lofi.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "autofilter"}>
+        <Show when={displayedParams()}>{(value) => <AutoFilter params={AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.autofilter.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.autofilter.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.autofilter.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "chorus"}>
+        <Show when={displayedParams()}>{(value) => <Chorus params={AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.chorus.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.chorus.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.chorus.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "flanger"}>
+        <Show when={displayedParams()}>{(value) => <Flanger params={AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.flanger.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.flanger.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.flanger.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "phaser"}>
+        <Show when={displayedParams()}>{(value) => <Phaser params={AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.phaser.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.phaser.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.phaser.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "tremolo"}>
+        <Show when={displayedParams()}>{(value) => <Tremolo params={AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.tremolo.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.tremolo.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.tremolo.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "autopan"}>
+        <Show when={displayedParams()}>{(value) => <AutoPan params={AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.autopan.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.autopan.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.autopan.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "ensemble"}>
+        <Show when={displayedParams()}>{(value) => <Ensemble params={AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(value()).state} onChange={(updates) => props.audioEffects.ensemble.changeInstance(props.effect.id, (prev) => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.ensemble.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.ensemble.changeInstance(props.effect.id, () => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>;
+      </Match>
+      <Match when={props.effect.kind === "eq"}>
       <Show when={displayedParams()}>
         {(value) => {
           const eq = () => normalizeEqParams(objectParams(value()));
-          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />;
+          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
         }}
       </Show>
-    );
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "saturator") {
-    return (
+      </Match>
+      <Match when={props.effect.kind === "saturator"}>
       <Show when={displayedParams()}>
         {(value) => <Saturator params={normalizeSaturatorParams(objectParams(value()))} onChange={(updates) => props.audioEffects.saturator.changeInstance(props.effect.id, (prev) => normalizeSaturatorParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.saturator.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.saturator.changeInstance(props.effect.id, () => normalizeSaturatorParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
       </Show>
-    );
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "compressor") {
-    return (
+      </Match>
+      <Match when={props.effect.kind === "compressor"}>
       <Show when={displayedParams()}>
         {(value) => <Compressor params={normalizeCompressorParams(objectParams(value()))} audioEngine={props.audioEngine} targetId={props.targetId} effectInstanceId={props.effect.id} onChange={(updates) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => normalizeCompressorParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.compressor.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.compressor.changeInstance(props.effect.id, () => normalizeCompressorParams({}))} />}
       </Show>
-    );
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "delay") {
-    return (
+      </Match>
+      <Match when={props.effect.kind === "delay"}>
       <Show when={displayedParams()}>
         {(value) => <Delay params={normalizeDelayParams(objectParams(value()))} onChange={(updates) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => normalizeDelayParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.delay.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.delay.changeInstance(props.effect.id, () => normalizeDelayParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
       </Show>
-    );
-  }
-// oxlint-disable-next-line solid/reactivity -- This renderer is invoked by the enclosing Show callback, which provides the current reactive effect kind.
-  if (props.effect.kind === "spectral") {
-    const sourceTrackId = () => props.sidechainRoutes?.find((route) => route.targetTrackId === props.targetId && route.effectInstanceId === props.effect.id)?.sourceTrackId;
-    return (
+      </Match>
+      <Match when={props.effect.kind === "spectral"}>
       <Show when={displayedParams()}>
         {(value) => (
           <Spectral
             params={normalizeSpectralParamsEnvelope(value()).state}
             tracks={props.tracks ?? []}
             targetId={props.targetId ?? "master"}
-            sourceTrackId={sourceTrackId()}
+            sourceTrackId={sidechainSourceTrackId()}
             onSourceChange={(source) => void props.audioEffects.spectral.setSidechainSource(props.effect.id, source)}
             onChange={(updates) => props.audioEffects.spectral.changeInstance(props.effect.id, (prev) => normalizeSpectralParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))}
             onToggleEnabled={(enabled) => props.audioEffects.spectral.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))}
@@ -518,20 +500,15 @@ const renderEffectsPanelAudioEffectCard = (props: EffectsPanelAudioEffectCardPro
           />
         )}
       </Show>
-    );
-  }
-  return (
-    <Show when={displayedParams()}>
+      </Match>
+      <Match when={true}>
+        <Show when={displayedParams()}>
       {(value) => <Reverb params={normalizeReverbParams(objectParams(value()))} onChange={(updates) => props.audioEffects.reverb.changeInstance(props.effect.id, (prev) => normalizeReverbParams({ ...prev, ...updates }))} onToggleEnabled={(enabled) => props.audioEffects.reverb.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.reverb.changeInstance(props.effect.id, () => normalizeReverbParams({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}
-    </Show>
+        </Show>
+      </Match>
+    </Switch>
   );
 };
-
-const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => (
-  <Show when={props.effect.kind}>
-    {(kind) => kind() && renderEffectsPanelAudioEffectCard(props)}
-  </Show>
-);
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => {
   const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();

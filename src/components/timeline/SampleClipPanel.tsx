@@ -1,4 +1,4 @@
-import { For, type Component, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, type Component, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import { isStretchQualityWarning, type AudioEngine, type AudioStretchRenderState } from '@daw-browser/audio-engine/audio-engine'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 import { dbToLinearGain, linearGainToDb } from '@daw-browser/shared'
@@ -13,7 +13,7 @@ type SampleClipPanelProps = {
     bpmDetection: BpmDetectionService
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     canWrite: boolean
-    onWarpChange: (audioWarp: AudioWarp) => Promise<boolean> | boolean | void
+    onWarpChange: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void
     onGainChange: (gain: number) => Promise<boolean> | boolean | void
   }
 }
@@ -63,9 +63,8 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   })
 
   createEffect(() => {
-// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
     const unsubscribe = props.audioEngine.subscribeStretchRenderState(() => {
-      setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip))
+      untrack(() => setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip)))
     })
     onCleanup(unsubscribe)
   })
@@ -80,8 +79,10 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   })
 
   const commit = (patch: Partial<AudioWarp>) => {
-    const audioWarp = buildNextAudioWarp(props.sample.projectBpm, props.sample.clip.audioWarp, { sourceBpm: sourceBpm(), ...patch })
-    if (audioWarp) return props.sample.onWarpChange(audioWarp)
+    const sample = props.sample
+    const clip = sample.clip
+    const audioWarp = buildNextAudioWarp(sample.projectBpm, clip.audioWarp, { sourceBpm: sourceBpm(), ...patch })
+    if (audioWarp) return sample.onWarpChange(clip, audioWarp)
     return false
   }
 
@@ -192,11 +193,13 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             type="button"
             disabled={bpmState().status === 'analyzing'}
             onClick={() => {
-// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
-              void props.sample.ensureClipBuffer(props.sample.clip.id, props.sample.clip.sampleUrl).then(() => props.sample.bpmDetection.analyzeClip({
-                clip: props.sample.clip,
-                canWrite: props.sample.canWrite,
-                autoApply: (audioWarp) => Promise.resolve(props.sample.onWarpChange(audioWarp)).then((value) => value !== false),
+              const sample = props.sample
+              const clip = sample.clip
+              const bpmDetection = sample.bpmDetection
+              void sample.ensureClipBuffer(clip.id, clip.sampleUrl).then(() => bpmDetection.analyzeClip({
+                clip,
+                canWrite: sample.canWrite,
+                autoApply: (audioWarp) => Promise.resolve(sample.onWarpChange(clip, audioWarp)).then((value) => value !== false),
               }))
             }}
           >
@@ -224,9 +227,17 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
                 onClick={() => {
                   const state = bpmState()
                   if (state.status !== 'suggested') return
-// oxlint-disable-next-line solid/reactivity -- External audio callbacks run after their owner and deliberately read the latest reactive clip state.
-                  void Promise.resolve(commit({ enabled: true, sourceBpm: state.result.bpm, mode: 'stretch' })).then((value) => {
-                    if (value !== false) props.sample.bpmDetection.markApplied(props.sample.clip.id)
+                  const sample = props.sample
+                  const clip = sample.clip
+                  const bpmDetection = sample.bpmDetection
+                  const audioWarp = buildNextAudioWarp(sample.projectBpm, clip.audioWarp, {
+                    enabled: true,
+                    sourceBpm: state.result.bpm,
+                    mode: 'stretch',
+                  })
+                  if (!audioWarp) return
+                  void Promise.resolve(sample.onWarpChange(clip, audioWarp)).then((value) => {
+                    if (value !== false) bpmDetection.markApplied(clip.id)
                   })
                 }}
               >

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import {
   automationTargetKey,
   automationRatioToValue,
@@ -259,8 +259,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         kind: 'item',
         label: 'Add point',
         disabled: !position,
-// oxlint-disable-next-line solid/reactivity -- This callback is invoked later by an external menu or keyboard event and intentionally reads current state.
-        onSelect: position ? () => addPointAtPosition(position) : undefined,
+        onSelect: position ? () => untrack(() => addPointAtPosition(position)) : undefined,
       },
       { kind: 'separator' },
       {
@@ -301,10 +300,10 @@ export default function AutomationLane(props: AutomationLaneProps) {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
-// oxlint-disable-next-line solid/reactivity -- This callback is invoked later by an external menu or keyboard event and intentionally reads current state.
+      const durationSec = props.durationSec
       updateSelectedPoint((point) => ({
         ...point,
-        timeSec: Math.max(0, Math.min(props.durationSec, point.timeSec + direction * timeDelta)),
+        timeSec: Math.max(0, Math.min(durationSec, point.timeSec + direction * timeDelta)),
       }))
       return
     }

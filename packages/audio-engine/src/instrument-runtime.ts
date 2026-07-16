@@ -237,8 +237,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       synthRuntime.clear()
       drumRackRuntime.clear()
       samplerRuntime.clear()
-      // oxlint-disable-next-line unicorn/no-useless-spread -- disposing each runtime removes it from the map.
-      for (const trackId of [...granularRuntimes.keys()]) disposeGranular(trackId)
+      for (const trackId of Array.from(granularRuntimes.keys())) disposeGranular(trackId)
       granularRevisions.clear()
     },
   }

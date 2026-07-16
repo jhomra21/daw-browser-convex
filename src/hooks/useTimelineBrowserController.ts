@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
 import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
@@ -513,7 +513,6 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       return;
     }
     setRenameFolderBusy(true);
-// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
     runAssetFolderAction(async () => {
       try {
         if (isLocalId("project", projectId)) {
@@ -522,7 +521,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         } else {
           await convexClient.mutation(convexApi.assetFolders.rename, { projectId, folderId: draft.folderId, name });
         }
-        if (renameFolderId() === draft.folderId) clearRenameAssetFolder();
+        if (untrack(renameFolderId) === draft.folderId) clearRenameAssetFolder();
       } finally {
         setRenameFolderBusy(false);
       }
@@ -530,10 +529,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   };
 
   const deleteAssetFolder = (folderId: string) => {
-// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
+    const projectId = currentProjectId();
+    const folderHasSamples = Boolean(folderSampleCountById().get(folderId));
     runAssetFolderAction(async () => {
-      const projectId = currentProjectId();
-      if (!projectId || folderSampleCountById().get(folderId)) return;
+      if (!projectId || folderHasSamples) return;
       if (isLocalId("project", projectId)) {
         await deleteEmptyLocalAssetFolder(projectId, folderId);
         assetFolders.refreshFolders();
@@ -650,8 +649,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     },
     onDrop: options.onDeviceDrop,
   });
-// oxlint-disable-next-line solid/reactivity -- This deferred folder action intentionally reads current reactive controller state when it executes.
-  return createMemo(() => ({
+  const controller = createMemo(() => ({
     open: options.leftBrowser.open(),
     widthPx: options.leftBrowser.widthPx(),
     activeTab: options.leftBrowser.activeTab(),
@@ -693,4 +691,5 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     onTreeRowExpandedChange: options.leftBrowser.setTreeRowExpanded,
     onResizePointerDown: options.onResizePointerDown,
   }));
+  return controller;
 }

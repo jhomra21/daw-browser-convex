@@ -4,6 +4,7 @@ import {
   For,
   Show,
   type Setter,
+  untrack,
 } from "solid-js";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -123,6 +124,8 @@ type TrackSidebarRowProps = {
 };
 
 const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
+  const model = untrack(() => props.model);
+  const track = untrack(() => props.track);
   const {
     activeVolumeDrag,
     ancestorGroupColorBandsByTrackId,
@@ -162,12 +165,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     finishTrackDrag,
     cancelTrackDrag,
     updateVolumeFromPointer,
-// oxlint-disable-next-line solid/reactivity -- The keyed row receives stable model and track objects; reactive fields are read through their existing accessors.
-  } = props.model;
-// oxlint-disable-next-line solid/reactivity -- The keyed row receives stable model and track objects; reactive fields are read through their existing accessors.
-  const sidebar = props.model.sidebar;
-// oxlint-disable-next-line solid/reactivity -- The keyed row receives stable model and track objects; reactive fields are read through their existing accessors.
-  const track = props.track;
+  } = model;
+  const sidebar = model.sidebar;
 
   const lockedByOther =
     !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;

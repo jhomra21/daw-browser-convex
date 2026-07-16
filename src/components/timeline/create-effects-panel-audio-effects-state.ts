@@ -764,10 +764,9 @@ export function createEffectsPanelAudioDevice(
     if (areAudioEffectInstanceOrdersEqual(currentOrder, normalized)) return;
     setOptimisticOrderForTarget(targetId, normalized);
     void applyInstancesToEngine(targetId, normalized).catch(() => undefined);
-    // oxlint-disable-next-line solid/reactivity -- Promise rejection verifies the current reactive order before rolling back this asynchronous write.
-    void persistReorder(targetId, normalized).catch(() => {
-      rollbackOptimisticOrder(targetId, normalized);
-    });
+    void persistReorder(targetId, normalized).catch(() =>
+      untrack(() => rollbackOptimisticOrder(targetId, normalized)),
+    );
   };
 
   function paramsForInstanceForTarget(targetId: string, instance: AudioEffectInstance) {

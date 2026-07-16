@@ -1,4 +1,4 @@
-import { createMemo, type Component, For } from 'solid-js'
+import { createMemo, type Accessor, type Component, For } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { useAppPreferences } from '~/context/app-preferences'
 import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
@@ -20,7 +20,7 @@ type TrackLaneProps = {
   onClipPointerDown: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipPointerUp: (trackId: Track['id'], clipId: string, e: PointerEvent) => void
   onClipResizeStart: (trackId: Track['id'], clipId: string, edge: 'left' | 'right', e: PointerEvent) => void
-  isDropTarget?: boolean
+  isDropTarget?: Accessor<boolean>
   onClipDblClick?: (trackId: Track['id'], clipId: string) => void
   clipContextMenu: ClipContextMenuActions
   onRetryMedia: (clipId: string) => void
@@ -93,7 +93,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
   const laneContainer = () => (
     <div
       class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
-      classList={{ 'bg-green-500/10': props.isDropTarget }}
+      classList={{ 'bg-green-500/10': props.isDropTarget?.() }}
       style={{ top: `${props.layout.topPx}px`, height: `${props.layout.heightPx}px` }}
     >
       <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${props.layout.clipLaneHeightPx - 1}px` }} />

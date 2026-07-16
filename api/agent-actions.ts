@@ -21,7 +21,8 @@ import type {
   SetTimingCommandSchema,
   SetTrackRoutingCommandSchema,
   SetTrackVolumeCommandSchema,
-  AgentCommand} from '@daw-browser/shared';
+  AgentCommand,
+} from '@daw-browser/shared'
 import { buildClipCreatePayload, createInstrumentInstanceId, getPersistableAudioSourceMetadata, normalizeEqParams, normalizeSynthParams, resolveAgentMixTargetIndices, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import { getClipKindFromClip, getClipTargetError } from './clip-targets'
@@ -495,10 +496,10 @@ export function createAgentActions(context: AgentActionContext) {
     },
 
     async setSynthParams(input: Omit<SetSynthParamsInput, 'type'>) {
-      const track = await trackAtIndex(input.trackIndex)
-      if (!track) return { error: `No track at index ${input.trackIndex}` }
+      const { trackIndex, ...updates } = input
+      const track = await trackAtIndex(trackIndex)
+      if (!track) return { error: `No track at index ${trackIndex}` }
       if ((track.kind ?? 'audio') !== 'instrument') return { error: 'Target track is not an instrument track' }
-      const { ...updates } = input
       const row = await context.convex.query(context.convexApi.effects.getSynthForTrack, {
         projectId: context.projectId,
         trackId: track._id,

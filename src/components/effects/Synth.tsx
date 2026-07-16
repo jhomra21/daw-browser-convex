@@ -209,7 +209,7 @@ function OscillatorPanel(props: {
             <option value="sawtooth">Saw</option>
             <option value="triangle">Tri</option>
           </select>
-          <button type="button" class={toggleClass(oscillator().enabled)} disabled={props.disabled} aria-pressed={oscillator().enabled} aria-label={`Enable ${oscillatorLabel()}`} onClick={() => update({ enabled: !oscillator().enabled })}>{oscillator().enabled ? 'On' : 'Off'}</button>
+          <button type="button" class={cn(toggleClass(oscillator().enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={oscillator().enabled} aria-label={`Enable ${oscillatorLabel()}`} onClick={() => update({ enabled: !oscillator().enabled })}>{oscillator().enabled ? 'On' : 'Off'}</button>
         </div>
       )}
     >
@@ -253,7 +253,7 @@ function FilterPanel(props: {
             <option value="bandpass">Band</option>
             <option value="notch">Notch</option>
           </select>
-          <button type="button" class={toggleClass(props.params.filter.enabled)} disabled={props.disabled} aria-pressed={props.params.filter.enabled} aria-label="Enable filter" onClick={() => props.onChange({ filter: { enabled: !props.params.filter.enabled } })}>{props.params.filter.enabled ? 'On' : 'Off'}</button>
+          <button type="button" class={cn(toggleClass(props.params.filter.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.enabled} aria-label="Enable filter" onClick={() => props.onChange({ filter: { enabled: !props.params.filter.enabled } })}>{props.params.filter.enabled ? 'On' : 'Off'}</button>
         </div>
       )}
     >

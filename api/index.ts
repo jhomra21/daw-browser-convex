@@ -3,7 +3,6 @@ import { cors } from 'hono/cors'
 import { createAuth } from './auth'
 import type { ApiBindings } from './app-types'
 import { registerConvexAuthRoutes } from './convex-auth'
-import { registerAgentRoutes } from './routes/agent'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
 import { registerMaintenanceRoutes } from './routes/maintenance'
@@ -130,7 +129,6 @@ app.get('/api/session', (c) => {
 
 registerShareInviteRoutes(app)
 registerConvexAuthRoutes(app)
-registerAgentRoutes(app)
 // Protected route example
 app.get('/api/protected', (c) => {
   const user = c.get('user');

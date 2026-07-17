@@ -29,7 +29,7 @@ import { useClipBuffers } from "~/hooks/useClipBuffers";
 import {
   collectTrackDescendantIds,
   isLocalId,
-  normalizeCommandTrackIndices,automationTargetKey
+  automationTargetKey
 } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
@@ -98,14 +98,6 @@ import {
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
-
-type AgentMixOp = {
-  type: "setMute" | "setSolo";
-  indices: number[];
-  value: boolean;
-  exclusive?: boolean;
-  issuedAt: number;
-};
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -366,7 +358,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     cancelTrackMixWrite,
     applyTrackVolume,
     applyTrackMixState,
-    applyConfirmedTrackMixState,
     applyTrackRouting,
     setTrackVolume,
     handleToggleTrackMute,
@@ -487,50 +478,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     rescheduleChangedClips,
     pushHistory,
   });
-
-  const applyAgentMixOps = (ops: AgentMixOp[]) => {
-    try {
-      if (!projectId() || !Array.isArray(ops) || ops.length === 0) return;
-      const currentTracks = renderTracks();
-      const ownedSet = writableTrackIds();
-      for (const op of ops) {
-        const targets: Track[] = [];
-        for (const index of new Set(
-          normalizeCommandTrackIndices(
-            Array.isArray(op.indices) ? op.indices : undefined,
-          ),
-        )) {
-          if (index < 0 || index >= currentTracks.length) continue;
-          const track = currentTracks[index];
-          if (!track || !ownedSet.has(track.id)) continue;
-          targets.push(track);
-        }
-        if (
-          op.type === "setSolo" &&
-          op.exclusive &&
-          op.value &&
-          targets.length === 1
-        ) {
-          for (const track of currentTracks) {
-            if (!ownedSet.has(track.id)) continue;
-            applyConfirmedTrackMixState(
-              track.id,
-              { soloed: track.id === targets[0].id },
-              op.issuedAt,
-            );
-          }
-          continue;
-        }
-        for (const track of targets) {
-          applyConfirmedTrackMixState(
-            track.id,
-            op.type === "setSolo" ? { soloed: op.value } : { muted: op.value },
-            op.issuedAt,
-          );
-        }
-      }
-    } catch {}
-  };
 
   const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
     const match = trackLookup().clipEntryById.get(clipId);
@@ -1447,16 +1394,11 @@ const Timeline: Component<TimelineProps> = (props) => {
   const panelsProps = () => ({
     chat: {
       bottomOffsetPx: bottomPanel.chatBottomOffsetPx(),
-      agentPanelOpen: bottomPanel.agentPanelOpen(),
       sharedChatOpen: bottomPanel.sharedChatOpen(),
       projectId: projectId(),
       userId: userId(),
-      bpm: bpm(),
-      toggleAgentPanel: bottomPanel.toggleAgentPanel,
       toggleSharedChat: bottomPanel.toggleSharedChat,
-      closeAgentPanel: bottomPanel.closeAgentPanel,
       closeSharedChat: bottomPanel.closeSharedChat,
-      applyAgentMixOps,
     },
     effectsPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "effects",

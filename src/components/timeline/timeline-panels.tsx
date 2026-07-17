@@ -15,22 +15,16 @@ import type { TimelineBottomPanelShellControls } from '~/components/timeline/Tim
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
 
-const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
 export type TimelinePanelsProps = {
   chat: {
     bottomOffsetPx: number
-    agentPanelOpen: boolean
     sharedChatOpen: boolean
     projectId?: string
     userId?: string
-    bpm: number
-    toggleAgentPanel: () => void
     toggleSharedChat: () => void
-    closeAgentPanel: () => void
     closeSharedChat: () => void
-    applyAgentMixOps: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }>) => void
   }
   effectsPanel: {
     isOpen: boolean
@@ -97,13 +91,9 @@ export type TimelinePanelsProps = {
 
 const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
   const floatingButtonOffset = () => props.chat.bottomOffsetPx > 0 ? `${props.chat.bottomOffsetPx}px` : '16px'
-  const canUseAgentChat = () => !props.chat.projectId || !isLocalId('project', props.chat.projectId)
   const canUseSharedChat = () => Boolean(props.chat.projectId && !isLocalId('project', props.chat.projectId))
 
   createEffect(() => {
-    if (!canUseAgentChat() && props.chat.agentPanelOpen) {
-      props.chat.closeAgentPanel()
-    }
     if (!canUseSharedChat() && props.chat.sharedChatOpen) {
       props.chat.closeSharedChat()
     }
@@ -111,44 +101,17 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
 
   return (
     <ExportProvider>
-      <Show when={canUseAgentChat()}>
-        <Button
-          variant="outline"
-          size="sm"
-          class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
-          style={{ bottom: floatingButtonOffset() }}
-          aria-label="Toggle AI Chat"
-          onClick={props.chat.toggleAgentPanel}
-        >
-          AI Chat
-        </Button>
-      </Show>
-
       <Show when={canUseSharedChat()}>
         <Button
           variant="outline"
           size="sm"
-          class="fixed left-24 z-40 bg-muted text-foreground hover:bg-secondary"
+          class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
           style={{ bottom: floatingButtonOffset() }}
           aria-label="Toggle Room Chat"
           onClick={props.chat.toggleSharedChat}
         >
           Room Chat
         </Button>
-      </Show>
-
-      <Show when={canUseAgentChat() && props.chat.agentPanelOpen}>
-        <Suspense fallback={null}>
-          <AgentChat
-            isOpen={props.chat.agentPanelOpen}
-            onClose={props.chat.closeAgentPanel}
-            projectId={props.chat.projectId}
-            userId={props.chat.userId}
-            bpm={props.chat.bpm}
-            bottomOffsetPx={props.chat.bottomOffsetPx}
-            onApplyMixOps={props.chat.applyAgentMixOps}
-          />
-        </Suspense>
       </Show>
 
       <Show when={canUseSharedChat() && props.chat.sharedChatOpen}>

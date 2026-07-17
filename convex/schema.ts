@@ -226,19 +226,6 @@ export default defineSchema({
     .index("by_project_track", ["projectId", "trackId"])
     .index("by_project_target_key", ["projectId", "targetKey"]),
 
-  chatHistories: defineTable({
-    projectId: v.string(),
-    ownerUserId: v.string(),
-    messages: v.array(
-      v.object({
-        role: v.string(),
-        content: v.string(),
-      })
-    ),
-    updatedAt: v.number(),
-  })
-    .index("by_room_owner", ["projectId", "ownerUserId"]),
-
   projectMessages: defineTable({
     projectId: v.string(),
     senderUserId: v.string(),

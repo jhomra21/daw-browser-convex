@@ -34,14 +34,12 @@ describe("normalizeAppPreferences", () => {
       normalizeAppPreferences({
         version: 1,
         appearance: { theme: "dark", themeId: "catppuccin" },
-        agent: { autoApply: true },
         sidebar: { open: false },
         timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
       })
     ).toEqual({
       version: 3,
       appearance: { theme: "dark", themeId: "catppuccin" },
-      agent: { autoApply: true },
       sidebar: { open: false },
       timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" },
       audio: defaultAppPreferences.audio,
@@ -54,13 +52,11 @@ describe("normalizeAppPreferences", () => {
       normalizeAppPreferences({
         version: 1,
         appearance: { theme: "light" },
-        agent: { autoApply: true },
         sidebar: { open: false }
       })
     ).toEqual({
       version: 3,
       appearance: { theme: "light", themeId: "default" },
-      agent: { autoApply: true },
       sidebar: { open: false },
       timeline: defaultAppPreferences.timeline,
       audio: defaultAppPreferences.audio,
@@ -71,14 +67,12 @@ describe("normalizeAppPreferences", () => {
       normalizeAppPreferences({
         version: 1,
         appearance: { theme: "dark", themeId: "unknown" },
-        agent: { autoApply: true },
         sidebar: { open: false },
         timeline: { defaultTrackColor: "red", defaultGroupColor: "#fedcba" }
       })
     ).toEqual({
       version: 3,
       appearance: { theme: "dark", themeId: "default" },
-      agent: { autoApply: true },
       sidebar: { open: false },
       timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" },
       audio: defaultAppPreferences.audio,

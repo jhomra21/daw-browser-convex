@@ -2,7 +2,7 @@
 
 # Collaborative Realtime DAW
 
-Browser-based digital audio workstation built with SolidJS, Convex, Cloudflare Workers, the Web Audio API, and MediaBunny. The app supports local-first projects, cloud/shared projects, timeline editing, recording, mixing, effects, AI-assisted timeline commands, cloud backups, and authenticated R2-backed media storage.
+Browser-based digital audio workstation built with SolidJS, Convex, Cloudflare Workers, the Web Audio API, and MediaBunny. The app supports local-first projects, cloud/shared projects, timeline editing, recording, mixing, effects, cloud backups, and authenticated R2-backed media storage.
 
 ## Table of Contents
 
@@ -21,7 +21,6 @@ Browser-based digital audio workstation built with SolidJS, Convex, Cloudflare W
 - [Authentication](#authentication)
 - [Audio Engine](#audio-engine)
 - [Cloud Backups, Exports, and R2](#cloud-backups-exports-and-r2)
-- [AI and Agent Commands](#ai-and-agent-commands)
 - [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -33,7 +32,7 @@ This repository is a full-stack DAW prototype with a SolidJS single-page app, a 
 The codebase is now split around runtime boundaries:
 
 - `src/` owns the frontend app, UI orchestration, local project flows, hooks, and app adapters.
-- `api/` owns the Cloudflare Worker API, auth/session integration, R2 operations, exports, cloud backups, timeline operation execution, and AI routes.
+- `api/` owns the Cloudflare Worker API, auth/session integration, R2 operations, exports, cloud backups, and timeline operation execution.
 - `convex/` owns realtime data, role checks, mutations, queries, and backend project state.
 - `packages/` owns reusable pure/domain/runtime packages that are checked independently.
 
@@ -206,7 +205,6 @@ Common variables/secrets used by the app and Worker include:
 - `CONVEX_AUTH_PRIVATE_JWK`
 - `CONVEX_AUTH_JWKS`
 - `CONVEX_AUTH_ISSUER`
-- `OPENROUTER_API_KEY`
 - `R2_DELETE_QUEUE_DRAIN_TOKEN`
 - optional `VITE_AUTH_BASE_URL` for testing against a remote Worker origin
 
@@ -275,7 +273,7 @@ Cloud-capable local projects can back up manifests and assets to R2. The app tra
 
 ## Backend API
 
-`api/index.ts` builds the Hono Worker app and registers route modules for auth, samples, cloud backups, exports, timeline operations, share invites/members, agent routes, maintenance, and Convex auth.
+`api/index.ts` builds the Hono Worker app and registers route modules for auth, samples, cloud backups, exports, timeline operations, share invites/members, maintenance, and Convex auth.
 
 Important route groups:
 
@@ -289,7 +287,6 @@ Important route groups:
 - `/api/projects/:projectId/timeline/operations`: shared timeline operation endpoint.
 - `/api/projects/:projectId/members` and `/api/share-invites`: member management and share invites.
 - `/api/exports`: audio export upload/list/delete/stream flows.
-- `/api/agent/execute`, `/api/agent/chat`: validated agent command execution and streamed AI chat.
 - `/api/maintenance/r2-delete-queue/drain`: protected R2 cleanup route.
 
 ## Convex Data Model
@@ -310,7 +307,7 @@ Main tables:
 - `r2DeleteQueue`: retryable queued R2 object deletion.
 - `sharedOperationResults`: durable timeline operation results.
 - `exports`: uploaded export metadata.
-- `chatHistories` and `projectMessages`: agent/chat history.
+- `projectMessages`: Room Chat messages.
 
 Access control uses owner/editor/viewer roles. Writes generally require owner/editor, reads allow project members, and project deletion requires owner.
 
@@ -355,15 +352,6 @@ Current flows:
 - exports upload WAV blobs to project-scoped export keys and can be streamed or deleted later
 - `r2DeleteQueue` retries cleanup with backoff and has a maintenance drain endpoint protected by bearer token
 
-## AI and Agent Commands
-
-The Worker exposes agent routes for command execution and chat:
-
-- shared command envelopes and targets live in `@daw-browser/shared`
-- `/api/agent/execute` validates and executes command payloads
-- `/api/agent/chat` streams AI responses through the AI SDK and OpenRouter provider
-- project chat/history is persisted through Convex tables
-
 ## Deployment
 
 `wrangler.jsonc` configures the Cloudflare Worker, assets, and bindings:
@@ -375,7 +363,7 @@ The Worker exposes agent routes for command execution and chat:
 - `nodejs_compat` compatibility flag
 - SPA asset handling through the Cloudflare Vite plugin
 
-Use Wrangler secrets for private values such as OAuth credentials, Better Auth secret, Convex signing keys, OpenRouter key, and maintenance tokens.
+Use Wrangler secrets for private values such as OAuth credentials, Better Auth secret, Convex signing keys, and maintenance tokens.
 
 ## Troubleshooting
 

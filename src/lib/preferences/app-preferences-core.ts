@@ -37,9 +37,6 @@ export type AppPreferences = {
     theme: AppTheme
     themeId: DawThemeId
   }
-  agent: {
-    autoApply: boolean
-  }
   sidebar: {
     open: boolean
   }
@@ -57,9 +54,6 @@ export const defaultAppPreferences: AppPreferences = {
   appearance: {
     theme: "system",
     themeId: DEFAULT_DAW_THEME_ID
-  },
-  agent: {
-    autoApply: false
   },
   sidebar: {
     open: true
@@ -204,7 +198,6 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
   if (value.version !== 1 && value.version !== 2 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isRecord(value.appearance) ? value.appearance : {}
-  const agent = isRecord(value.agent) ? value.agent : {}
   const sidebar = isRecord(value.sidebar) ? value.sidebar : {}
   const timeline = isRecord(value.timeline) ? value.timeline : {}
   const audio = value.version !== 1 && isRecord(value.audio) ? value.audio : {}
@@ -215,9 +208,6 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
     appearance: {
       theme: parseAppTheme(appearance.theme),
       themeId: parseThemeId(appearance.themeId)
-    },
-    agent: {
-      autoApply: parseBoolean(agent.autoApply, defaultAppPreferences.agent.autoApply)
     },
     sidebar: {
       open: parseBoolean(sidebar.open, defaultAppPreferences.sidebar.open)

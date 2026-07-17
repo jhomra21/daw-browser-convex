@@ -38,10 +38,6 @@ type AppPreferencesContextValue = {
     commitThemeSelection: (selection: AppTheme | DawThemeId) => void
     cancelThemePreview: () => void
   }
-  agent: {
-    autoApply: () => boolean
-    toggleAutoApply: () => void
-  }
   sidebar: {
     open: () => boolean
     setOpen: (open: boolean) => void
@@ -161,10 +157,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     })
   }
 
-  const toggleAgentAutoApply = () => {
-    setPreferences("agent", "autoApply", (autoApply) => !autoApply)
-  }
-
   const setSidebarOpen = (open: boolean) => {
     if (preferences.sidebar.open === open) return
     setPreferences("sidebar", "open", open)
@@ -217,10 +209,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           previewThemeSelection,
           commitThemeSelection,
           cancelThemePreview
-        },
-        agent: {
-          autoApply: () => preferences.agent.autoApply,
-          toggleAutoApply: toggleAgentAutoApply
         },
         sidebar: {
           open: () => preferences.sidebar.open,

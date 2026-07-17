@@ -48,6 +48,10 @@
     "src/lib/timeline-repository/types.ts": [
       "types"
     ],
+    "api/control-oauth.ts": [
+      "exports",
+      "types"
+    ],
     "src/components/ui/**/*.tsx": [
       "exports",
       "types"

@@ -45,6 +45,7 @@
     "wrangler": "4.98.0"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.6.23",
     "@daw-browser/audio-engine": "workspace:*",
     "@daw-browser/control": "workspace:*",
     "@daw-browser/shared": "workspace:*",
@@ -54,7 +55,7 @@
     "@solid-primitives/storage": "^4.3.4",
     "@tanstack/solid-query": "^5.90.23",
     "@tanstack/solid-router": "^1.163.3",
-    "better-auth": "^1.5.2",
+    "better-auth": "1.6.23",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.32.0",

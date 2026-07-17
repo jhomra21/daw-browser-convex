@@ -1,6 +1,15 @@
 import { betterAuth } from "better-auth";
+import { jwt } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { Kysely } from "kysely";
 import { D1Dialect } from "kysely-d1";
+import {
+  CONTROL_ACCESS_TOKEN_SECONDS,
+  CONTROL_OAUTH_SCOPES,
+  CONTROL_REFRESH_TOKEN_SECONDS,
+  getControlOAuthOrigin,
+  getControlOAuthResource,
+} from "./control-oauth";
 
 type AuthDatabaseBinding = {
   prepare?: unknown;
@@ -12,6 +21,8 @@ function hasAuthEnvBindings(env: Env): boolean {
 }
 
 function buildAuth(env: Env) {
+  const controlOrigin = getControlOAuthOrigin(env.BETTER_AUTH_URL, "http://localhost");
+  const controlResource = getControlOAuthResource(env.BETTER_AUTH_URL, "http://localhost");
   return betterAuth({
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -40,6 +51,9 @@ function buildAuth(env: Env) {
         await env.daw_convex_auth_kv.delete(key);
       },
     },
+    session: {
+      storeSessionInDatabase: true,
+    },
     socialProviders: {
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
@@ -50,6 +64,31 @@ function buildAuth(env: Env) {
       //   clientSecret: env.GITHUB_CLIENT_SECRET,
       // },
     },
+    plugins: [
+      jwt({
+        jwt: {
+          issuer: controlOrigin,
+          audience: controlResource,
+        },
+      }),
+      oauthProvider({
+        scopes: CONTROL_OAUTH_SCOPES,
+        validAudiences: [controlResource],
+        accessTokenExpiresIn: CONTROL_ACCESS_TOKEN_SECONDS,
+        refreshTokenExpiresIn: CONTROL_REFRESH_TOKEN_SECONDS,
+        grantTypes: ["authorization_code", "refresh_token"],
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
+        clientRegistrationDefaultScopes: ["control:read"],
+        clientRegistrationAllowedScopes: CONTROL_OAUTH_SCOPES,
+        consentPage: `${controlOrigin}/oauth/consent`,
+        loginPage: `${controlOrigin}/Login`,
+        storeTokens: "hashed",
+        rateLimit: {
+          register: false,
+        },
+      }),
+    ],
   });
 }
 

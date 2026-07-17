@@ -48,6 +48,8 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
   && left.oscillators[1].level === right.oscillators[1].level
   && left.oscillators[1].enabled === right.oscillators[1].enabled
   && left.oscillators[1].detuneCents === right.oscillators[1].detuneCents
+  && left.noise.enabled === right.noise.enabled
+  && left.noise.level === right.noise.level
   && left.filter.enabled === right.filter.enabled
   && left.filter.mode === right.filter.mode
   && left.filter.frequencyHz === right.filter.frequencyHz
@@ -164,6 +166,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       when: input.when,
       durationSec: input.durationSec,
       clipId: input.clipId,
+      seedKey: input.trackId,
       params: state.params,
       destination: state.outputPan,
       timelineStartSec: input.timelineStartSec,
@@ -279,6 +282,12 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
             smooth(voice.bindings.oscillatorDetunes[index], nextParams.oscillators[index].detuneCents, now)
           }
         }
+        if (previousParams.noise.enabled !== nextParams.noise.enabled) {
+          smooth(voice.bindings.noiseGate, nextParams.noise.enabled ? 1 : 0, now)
+        }
+        if (previousParams.noise.level !== nextParams.noise.level) {
+          smooth(voice.bindings.noiseLevel, nextParams.noise.level, now)
+        }
         if (previousParams.lfo.enabled !== nextParams.lfo.enabled || previousParams.lfo.frequencyHz !== nextParams.lfo.frequencyHz) {
           smooth(voice.bindings.lfoRate, nextParams.lfo.frequencyHz, now)
         }
@@ -336,6 +345,8 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
               ? voice.bindings.oscillatorLevels[1]
               : key.parameterId === 'osc2.detune'
                 ? voice.bindings.oscillatorDetunes[1]
+                : key.parameterId === 'noise.level'
+                  ? voice.bindings.noiseLevel
                 : key.parameterId === 'filter.frequency'
                   ? voice.bindings.filterFrequency
                   : key.parameterId === 'filter.q'

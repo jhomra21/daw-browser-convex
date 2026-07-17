@@ -222,6 +222,7 @@ const readTrackInstrument = (
 function createOfflineSynthTrack(input: {
   ctx: OfflineAudioContext
   destination: AudioNode
+  trackId: string
   rangeStartSec: number
   synth: SynthParamsInput | undefined
   automationEnvelopes: readonly AutomationEnvelope[]
@@ -293,6 +294,7 @@ function createOfflineSynthTrack(input: {
           clipGain: event.clipGain,
           when,
           durationSec: noteDur,
+          seedKey: input.trackId,
           params: synth,
           destination: outputPan,
           timelineStartSec: event.startSec,
@@ -790,6 +792,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         ? createOfflineSynthTrack({
             ctx,
             destination: trackInput,
+            trackId: track.id,
             rangeStartSec: prepared.range.startSec,
             synth: synthParams,
             automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => {

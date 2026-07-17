@@ -45,6 +45,10 @@ export const synthParamsValidator = v.object({
     amp: v.number(),
     pan: v.number(),
   }),
+  noise: v.optional(v.object({
+    enabled: v.boolean(),
+    level: v.number(),
+  })),
   gain: v.number(),
   pan: v.number(),
   polyphony: v.number(),

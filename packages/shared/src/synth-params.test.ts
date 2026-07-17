@@ -41,6 +41,7 @@ describe('synth parameter contract', () => {
         envelope: { attackSec: 0, decaySec: 0.15, sustain: 0, releaseSec: 0.15 },
       },
       lfo: { enabled: false, wave: 'sine', frequencyHz: 0.01, pitchCents: 1200, filterOctaves: -6, amp: 1, pan: 0 },
+      noise: { enabled: false, level: 0.25 },
       gain: 1.5, pan: -1, polyphony: 10, retrigger: true,
     })
   })
@@ -68,11 +69,13 @@ describe('synth parameter contract', () => {
       oscillators: [{ level: 0.2 }],
       filter: { envelope: { releaseSec: 2 } },
       lfo: { frequencyHz: 7 },
+      noise: { enabled: true, level: 2 },
     })
     expect(next.oscillators[0].level).toBe(0.2)
     expect(next.oscillators[1]).toEqual(current.oscillators[1])
     expect(next.filter.envelope).toEqual({ ...current.filter.envelope, releaseSec: 2 })
     expect(next.lfo).toEqual({ ...current.lfo, frequencyHz: 7 })
+    expect(next.noise).toEqual({ enabled: true, level: 1 })
   })
 
   test('defaults missing v2 oscillator enabled state and persists disabled oscillators', () => {
@@ -103,5 +106,16 @@ describe('synth parameter contract', () => {
     expect(next.oscillators[0].enabled).toBe(false)
     expect(next.oscillators[0].level).toBe(defaults.oscillators[0].level)
     expect(JSON.parse(serializeSynthParams(next)).oscillators[0].enabled).toBe(false)
+  })
+
+  test('strictly parses old v2 noise omissions and persists complete noise state', () => {
+    const defaults = createDefaultSynthParams()
+    const { noise: _noise, ...oldV2 } = defaults
+    const parsed = parseStrictSynthParams(oldV2)
+    const enabled = mergeSynthParams(defaults, { noise: { enabled: true, level: 0.6 } })
+
+    expect(parsed?.noise).toEqual(defaults.noise)
+    expect(parseStrictSynthParams({ ...defaults, noise: { enabled: true } })).toBeUndefined()
+    expect(JSON.parse(serializeSynthParams(enabled)).noise).toEqual({ enabled: true, level: 0.6 })
   })
 })

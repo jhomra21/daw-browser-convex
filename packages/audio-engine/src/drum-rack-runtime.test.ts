@@ -21,8 +21,10 @@ type TestParam = {
 
 type TestSource = {
   buffer?: AudioBuffer
+  loop?: boolean
   playbackRate: TestParam
   connect: (node: unknown) => void
+  disconnect: () => void
   start: (when: number, offset: number, duration: number) => void
   stop: (when?: number) => void
   onended?: () => void
@@ -70,7 +72,8 @@ const createTestAudio = () => {
       const source: TestSource = {
         playbackRate: createMutableParam(1),
         connect: () => {},
-        start: (when, offset, duration) => {
+        disconnect: () => {},
+        start: (when, offset = 0, duration = 0) => {
           source.starts.push({ when, offset, duration })
         },
         stop: () => {},
@@ -78,6 +81,12 @@ const createTestAudio = () => {
       }
       sources.push(source)
       return source
+    },
+    createBuffer: (channels: number, length: number) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length))
+      return Object.assign(Object.create(null), {
+        getChannelData: (channel: number) => data[channel] ?? new Float32Array(),
+      })
     },
     createGain: () => {
       const gain: TestGain = {
@@ -165,7 +174,7 @@ describe('Instrument runtime', () => {
 
     expect(runtime.getTrackInstrumentKind('track-1')).toBe('synth')
     expect(runtime.scheduleMidiClip(createTrack(), createMidiClip(36), 0, 0, 1)).toBe(true)
-    expect(audio.sources).toHaveLength(1)
+    expect(audio.sources).toHaveLength(2)
   })
 })
 

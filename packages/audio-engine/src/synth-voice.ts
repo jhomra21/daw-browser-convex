@@ -11,6 +11,7 @@ import { scheduleAutomationEnvelope } from './automation'
 
 const EPSILON = 1e-4
 const STEAL_FADE_SEC = 0.006
+const NOISE_BUFFER_FRAMES = 16_384
 
 type SynthEnvelopePlan = {
   startTime: number
@@ -33,6 +34,8 @@ export type SynthVoiceBindings = {
   oscillatorLevels: readonly [AudioParam | undefined, AudioParam | undefined]
   oscillatorGates: readonly [AudioParam | undefined, AudioParam | undefined]
   oscillatorDetunes: readonly [AudioParam | undefined, AudioParam | undefined]
+  noiseLevel: AudioParam
+  noiseGate: AudioParam
   filterFrequency: AudioParam
   filterDetune: AudioParam
   filterQ: AudioParam
@@ -53,7 +56,7 @@ export type SynthVoiceHandle = {
   releaseTime: number
   effectiveEndTime: number
   releaseStartedAt?: number
-  sources: OscillatorNode[]
+  sources: AudioScheduledSourceNode[]
   oscillatorSources: readonly [OscillatorNode | undefined, OscillatorNode | undefined]
   nodes: AudioNode[]
   amplitude: GainNode
@@ -83,6 +86,7 @@ type SynthVoiceScheduleOptions = {
   when: number
   durationSec: number
   clipId?: string
+  seedKey?: string
   params: SynthParams
   destination: AudioNode
   timelineStartSec?: number
@@ -93,6 +97,40 @@ type SynthVoiceScheduleOptions = {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+
+const hashNoiseSeedKey = (seedKey: string | undefined) => {
+  const key = seedKey ?? ''
+  let value = 0
+  for (let index = 0; index < key.length; index += 1) {
+    value = Math.imul(value ^ key.charCodeAt(index), 0x01000193) >>> 0
+  }
+  return value
+}
+
+const noiseSeed = (voiceId: number, pitch: number, seedKey?: string) => {
+  let value = (Math.imul(voiceId, 0x9E3779B1) ^ Math.imul(pitch, 0x85EBCA77) ^ hashNoiseSeedKey(seedKey)) >>> 0
+  value ^= value >>> 16
+  return value === 0 ? 0xA341316C : value >>> 0
+}
+
+const nextNoiseSample = (state: number) => {
+  let value = state >>> 0
+  value ^= value << 13
+  value ^= value >>> 17
+  value ^= value << 5
+  return value >>> 0
+}
+
+export const createSynthNoiseBuffer = (ctx: Pick<BaseAudioContext, 'createBuffer' | 'sampleRate'>, voiceId: number, pitch: number, seedKey?: string): AudioBuffer => {
+  const buffer = ctx.createBuffer(1, NOISE_BUFFER_FRAMES, ctx.sampleRate)
+  const samples = buffer.getChannelData(0)
+  let state = noiseSeed(voiceId, pitch, seedKey)
+  for (let index = 0; index < samples.length; index += 1) {
+    state = nextNoiseSample(state)
+    samples[index] = state / 0xFFFF_FFFF * 2 - 1
+  }
+  return buffer
+}
 
 export const midiPitchFrequency = (pitch: number) => 440 * 2 ** ((pitch - 69) / 12)
 
@@ -371,7 +409,8 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
   output.connect(options.destination)
 
   const baseFrequency = midiPitchFrequency(pitch)
-  const sources: OscillatorNode[] = []
+  const sources: AudioScheduledSourceNode[] = []
+  const oscillatorSourceNodes: OscillatorNode[] = []
   const oscillatorSources: [OscillatorNode | undefined, OscillatorNode | undefined] = [undefined, undefined]
   const oscillatorLevelNodes: GainNode[] = []
   const oscillatorGateNodes: GainNode[] = []
@@ -393,6 +432,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     source.start(when)
     source.stop(ampPlan.releaseEndTime)
     sources.push(source)
+    oscillatorSourceNodes.push(source)
     oscillatorSources[index] = source
     oscillatorLevelNodes.push(level)
     oscillatorGateNodes.push(gate)
@@ -400,9 +440,22 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     oscillatorGates[index] = gate.gain
     oscillatorDetunes[index] = source.detune
   }
-  const lfo = scheduleLfo(ctx, params.lfo, when, sources, filter, amplitudeModulation, pan)
+  const noise = ctx.createBufferSource()
+  const noiseLevel = ctx.createGain()
+  const noiseGate = ctx.createGain()
+  noise.buffer = createSynthNoiseBuffer(ctx, options.id, pitch, options.seedKey)
+  noise.loop = true
+  noiseLevel.gain.setValueAtTime(params.noise.level, when)
+  noiseGate.gain.setValueAtTime(params.noise.enabled ? 1 : 0, when)
+  noise.connect(noiseLevel)
+  noiseLevel.connect(noiseGate)
+  noiseGate.connect(filter)
+  noise.start(when)
+  noise.stop(ampPlan.releaseEndTime)
+  sources.push(noise)
+  const lfo = scheduleLfo(ctx, params.lfo, when, oscillatorSourceNodes, filter, amplitudeModulation, pan)
   lfo.node.stop(ampPlan.releaseEndTime)
-  const nodes: AudioNode[] = [filter, amplitude, amplitudeModulation, pan, output, ...sources, ...oscillatorLevelNodes, ...oscillatorGateNodes, ...lfo.nodes]
+  const nodes: AudioNode[] = [filter, amplitude, amplitudeModulation, pan, output, ...sources, noiseLevel, noiseGate, ...oscillatorLevelNodes, ...oscillatorGateNodes, ...lfo.nodes]
   nodes.push(lfo.node)
   const endableSources = [...sources, lfo.node]
   let endedSources = 0
@@ -437,6 +490,8 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       oscillatorLevels,
       oscillatorGates,
       oscillatorDetunes,
+      noiseLevel: noiseLevel.gain,
+      noiseGate: noiseGate.gain,
       filterFrequency: filter.frequency,
       filterDetune: filter.detune,
       filterQ: filter.Q,
@@ -578,6 +633,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       'osc1.detune': oscillatorDetunes[0],
       'osc2.level': oscillatorLevels[1],
       'osc2.detune': oscillatorDetunes[1],
+      'noise.level': noiseLevel.gain,
       'filter.frequency': filter.frequency,
       'filter.q': filter.Q,
       'lfo.rate': lfo.node?.frequency,

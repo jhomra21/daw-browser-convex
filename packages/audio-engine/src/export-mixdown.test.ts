@@ -228,6 +228,7 @@ describe('offline default synth scheduling', () => {
     class FakeOfflineAudioContext {
       readonly destination = { channelCount: 2, connect: () => {}, disconnect: () => {} }
       readonly oscillators: Array<{ starts: number[]; stops: number[]; frequency: Param; detune: Param }> = []
+      readonly bufferSources: Array<{ starts: number[]; stops: number[]; loop: boolean; buffer: unknown }> = []
       readonly sampleRate: number
 
       constructor(_channels: number, length: number, sampleRate: number) {
@@ -264,6 +265,22 @@ describe('offline default synth scheduling', () => {
         }
         this.oscillators.push(oscillator)
         return oscillator
+      }
+
+      createBufferSource() {
+        const source = {
+          buffer: null,
+          loop: false,
+          starts: Array<number>(),
+          stops: Array<number>(),
+          connect: () => {},
+          disconnect: () => {},
+          start: (when: number) => { source.starts.push(when) },
+          stop: (when: number) => { source.stops.push(when) },
+          onended: undefined,
+        }
+        this.bufferSources.push(source)
+        return source
       }
 
       createBuffer(channels: number, length: number, sampleRate: number) {
@@ -336,6 +353,9 @@ describe('offline default synth scheduling', () => {
 
     expect(contexts[0]?.oscillators).toHaveLength(3)
     expect(contexts[0]?.oscillators.every((oscillator) => oscillator.starts.includes(0))).toBe(true)
+    expect(contexts[0]?.bufferSources).toHaveLength(1)
+    expect(contexts[0]?.bufferSources[0]?.starts).toEqual([0])
+    expect(contexts[0]?.bufferSources[0]?.loop).toBe(true)
     expect(contexts[1]?.oscillators).toHaveLength(0)
   })
 })

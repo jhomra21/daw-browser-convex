@@ -27,6 +27,20 @@ type TestOscillator = {
   type: OscillatorType
 }
 
+type TestBufferSource = {
+  onended?: () => void
+  buffer: AudioBuffer | null
+  connections: unknown[]
+  disconnects: number
+  loop: boolean
+  connect: (destination: unknown) => void
+  disconnect: () => void
+  starts: number[]
+  stops: number[]
+  start: (when: number) => void
+  stop: (when: number) => void
+}
+
 type TestGain = {
   connections: unknown[]
   disconnects: number
@@ -56,6 +70,7 @@ type TestParam = {
 
 const createTestAudio = () => {
   const oscillators: TestOscillator[] = []
+  const bufferSources: TestBufferSource[] = []
   const param = (): TestParam => {
     const events: ParamEvent[] = []
     return {
@@ -91,6 +106,28 @@ const createTestAudio = () => {
       }
       oscillators.push(oscillator)
       return oscillator
+    },
+    createBuffer: (channels: number, length: number) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length))
+      return {
+        getChannelData: (channel: number) => data[channel] ?? new Float32Array(),
+      }
+    },
+    createBufferSource: () => {
+      const source: TestBufferSource = {
+        buffer: null,
+        connections: [],
+        disconnects: 0,
+        loop: false,
+        connect: (destination) => { source.connections.push(destination) },
+        disconnect: () => { source.disconnects += 1 },
+        starts: [],
+        stops: [],
+        start: (when) => { source.starts.push(when) },
+        stop: (when) => { source.stops.push(when) },
+      }
+      bufferSources.push(source)
+      return source
     },
     createGain: () => {
       const events: ParamEvent[] = []
@@ -160,7 +197,7 @@ const createTestAudio = () => {
       return pan
     },
   })
-  return { ctx, oscillators, gains, filters, pans }
+  return { ctx, oscillators, bufferSources, gains, filters, pans }
 }
 
 const createTrack = (id: string): Track<AudioBuffer> => ({
@@ -215,11 +252,12 @@ describe('synth runtime characterization', () => {
   })
 
   test('removes ended oscillators and their gain node from active state', () => {
-    const { runtime, sources, oscillators } = createRuntime()
+    const { runtime, sources, oscillators, bufferSources } = createRuntime()
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
 
-    expect(sources.snapshot()).toHaveLength(2)
+    expect(sources.snapshot()).toHaveLength(3)
     for (const oscillator of oscillators) oscillator.onended?.()
+    for (const source of bufferSources) source.onended?.()
 
     expect(sources.snapshot()).toHaveLength(0)
     runtime.stopAll()
@@ -237,7 +275,7 @@ describe('synth runtime characterization', () => {
   })
 
   test('routes amp LFO through a unit-gain modulation stage after the ADSR envelope', () => {
-    const { ctx, gains, oscillators, pans, runtime } = createRuntime()
+    const { ctx, gains, oscillators, bufferSources, pans, runtime } = createRuntime()
     const params = createDefaultSynthParams()
     runtime.setTrackSynth('track-1', {
       ...params,
@@ -268,6 +306,7 @@ describe('synth runtime characterization', () => {
     expect(amplitudeModulation?.gain.events).toContainEqual({ kind: 'set', value: 1, time: 0 })
 
     for (const oscillator of oscillators) oscillator.onended?.()
+    for (const source of bufferSources) source.onended?.()
     expect(amplitudeModulation?.disconnects).toBe(1)
   })
 
@@ -319,7 +358,7 @@ describe('synth runtime characterization', () => {
     ))
 
     expect(oscillators).toHaveLength(3)
-    expect(oscillatorGates).toHaveLength(2)
+    expect(oscillatorGates).toHaveLength(3)
     expect(firstGate).toBeDefined()
     expect(secondGate).toBeDefined()
 
@@ -336,6 +375,49 @@ describe('synth runtime characterization', () => {
     expect(firstGate?.gain.events).toContainEqual({ kind: 'cancel', time: 0.1 })
     expect(firstGate?.gain.events).toContainEqual({ kind: 'ramp', value: 1, time: 0.1 })
     expect(secondGate?.gain.events).toEqual([{ kind: 'set', value: 1, time: 0 }])
+  })
+
+  test('gates and smoothly enables held noise without recreating its source', () => {
+    const { ctx, bufferSources, gains, filters, runtime } = createRuntime()
+    const initial = createDefaultSynthParams()
+    runtime.setTrackSynth('track-1', { ...initial, noise: { enabled: false, level: 0.25 } })
+    runtime.startPreviewNote('track-1', 60)
+
+    const voiceFilter = filters.at(-1)
+    const noiseGate = gains.find((gain) => (
+      gain.connections.includes(voiceFilter)
+      && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0)
+    ))
+    const noiseLevel = gains.find((gain) => (
+      gain.connections.includes(noiseGate)
+      && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.25)
+    ))
+
+    expect(bufferSources).toHaveLength(1)
+    expect(noiseGate).toBeDefined()
+    ctx.currentTime = 0.1
+    runtime.setTrackSynth('track-1', { ...initial, noise: { enabled: true, level: 0.6 } })
+
+    expect(bufferSources).toHaveLength(1)
+    expect(noiseGate?.gain.events).toContainEqual({ kind: 'ramp', value: 1, time: 0.1 })
+    expect(noiseLevel?.gain.events).toContainEqual({ kind: 'ramp', value: 0.6, time: 0.1 })
+  })
+
+  test('resolves noise level automation while disabled noise remains gated', () => {
+    const { gains, runtime } = createRuntime()
+    runtime.triggerNote({ trackId: 'track-1', pitch: 60, when: 0, durationSec: 1 })
+    const bindings = runtime.resolveAutomationBindings(
+      'track-1',
+      'synth-instrument:track-1:instrument:synth:1:noise.level',
+    )
+
+    expect(bindings).toHaveLength(1)
+    bindings[0]?.param.setValueAtTime(0.7, 0)
+    expect(gains.some((gain) => (
+      gain.gain.events.some((event) => event.kind === 'set' && event.value === 0)
+      && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.7)
+    ))).toBe(false)
+    expect(gains.some((gain) => gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.7))).toBe(true)
   })
 
   test('cancels a future voice before its start without scheduling an audible steal fade', () => {
@@ -356,7 +438,7 @@ describe('synth runtime characterization', () => {
   })
 
   test('disconnects every voice node after its oscillators end', () => {
-    const { runtime, oscillators, gains, filters, pans } = createRuntime()
+    const { runtime, oscillators, bufferSources, gains, filters, pans } = createRuntime()
     const initialGainCount = gains.length
     const initialFilterCount = filters.length
     const initialPanCount = pans.length
@@ -375,8 +457,10 @@ describe('synth runtime characterization', () => {
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
 
     for (const oscillator of oscillators) oscillator.onended?.()
+    for (const source of bufferSources) source.onended?.()
 
     expect(oscillators.every((oscillator) => oscillator.disconnects === 1)).toBe(true)
+    expect(bufferSources.every((source) => source.disconnects === 1)).toBe(true)
     expect(gains.slice(initialGainCount).every((gain) => gain.disconnects === 1)).toBe(true)
     expect(filters.slice(initialFilterCount).every((filter) => filter.disconnects === 1)).toBe(true)
     expect(pans.slice(initialPanCount).every((pan) => pan.disconnects === 1)).toBe(true)
@@ -389,7 +473,7 @@ describe('synth runtime characterization', () => {
 
     runtime.stopClip('clip-1')
 
-    expect(sources.snapshot()).toHaveLength(2)
+    expect(sources.snapshot()).toHaveLength(3)
     runtime.stopAll()
     expect(sources.snapshot()).toHaveLength(0)
   })

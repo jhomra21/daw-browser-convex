@@ -23,7 +23,7 @@ export function createSynthAutomationState(
     parameterIds.set(parameterId, synthAutomationKey(targetId, instanceId, parameterId));
   }
   for (const envelope of automationEnvelopes) {
-    if (envelope.target.kind !== "track" || envelope.target.trackId !== targetId) continue;
+    if (!envelope.enabled || envelope.target.kind !== "track" || envelope.target.trackId !== targetId) continue;
     const key = parseSynthAutomationKey(envelope.parameterId);
     if (!key || key.instanceId !== instanceId || envelope.points.length === 0) continue;
     const range = automationEnvelopeValueRange(envelope);
@@ -92,6 +92,10 @@ export function overlaySynthAutomationValues(
       filterOctaves: valueFor("lfo.filterDepth", normalized.lfo.filterOctaves),
       amp: valueFor("lfo.ampDepth", normalized.lfo.amp),
       pan: valueFor("lfo.panDepth", normalized.lfo.pan),
+    },
+    noise: {
+      ...normalized.noise,
+      level: valueFor("noise.level", normalized.noise.level),
     },
   };
 }

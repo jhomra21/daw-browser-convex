@@ -67,6 +67,10 @@ const SynthLfoUpdateSchema = z.object({
   amp: z.number().min(SYNTH_PARAMETER_LIMITS.lfoAmp.min).max(SYNTH_PARAMETER_LIMITS.lfoAmp.max).optional(),
   pan: z.number().min(SYNTH_PARAMETER_LIMITS.lfoPan.min).max(SYNTH_PARAMETER_LIMITS.lfoPan.max).optional(),
 })
+const SynthNoiseUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  level: z.number().min(SYNTH_PARAMETER_LIMITS.noiseLevel.min).max(SYNTH_PARAMETER_LIMITS.noiseLevel.max).optional(),
+})
 
 export const CreateTrackCommandSchema = z.object({
   type: z.literal('createTrack'),
@@ -143,6 +147,7 @@ export const SetSynthParamsCommandSchema = z.object({
   ampEnvelope: SynthEnvelopeUpdateSchema.optional(),
   filter: SynthFilterUpdateSchema.optional(),
   lfo: SynthLfoUpdateSchema.optional(),
+  noise: SynthNoiseUpdateSchema.optional(),
   pan: z.number().min(SYNTH_PARAMETER_LIMITS.pan.min).max(SYNTH_PARAMETER_LIMITS.pan.max).optional(),
   polyphony: z.number().int().min(SYNTH_PARAMETER_LIMITS.polyphony.min).max(SYNTH_PARAMETER_LIMITS.polyphony.max).optional(),
   retrigger: z.boolean().optional(),
@@ -157,6 +162,7 @@ export const SetSynthParamsCommandSchema = z.object({
     || input.ampEnvelope !== undefined
     || input.filter !== undefined
     || input.lfo !== undefined
+    || input.noise !== undefined
     || input.pan !== undefined
     || input.polyphony !== undefined
     || input.retrigger !== undefined

@@ -15,6 +15,7 @@ export const SYNTH_PARAMETER_LIMITS = {
   lfoFilterOctaves: { min: -6, max: 6 },
   lfoAmp: { min: 0, max: 1 },
   lfoPan: { min: 0, max: 1 },
+  noiseLevel: { min: 0, max: 1 },
   gain: { min: 0, max: 1.5 },
   pan: { min: -1, max: 1 },
   polyphony: { min: 1, max: 128 },
@@ -59,12 +60,18 @@ export type SynthLfoParams = {
   pan: number
 }
 
+export type SynthNoiseParams = {
+  enabled: boolean
+  level: number
+}
+
 export type SynthParams = {
   version: typeof SYNTH_STATE_VERSION
   oscillators: [SynthOscillatorParams, SynthOscillatorParams]
   ampEnvelope: SynthEnvelopeParams
   filter: SynthFilterParams
   lfo: SynthLfoParams
+  noise: SynthNoiseParams
   gain: number
   pan: number
   polyphony: number
@@ -81,6 +88,7 @@ export type SynthParamsUpdate = {
   ampEnvelope?: Partial<SynthEnvelopeParams>
   filter?: Partial<Omit<SynthFilterParams, 'envelope'>> & { envelope?: Partial<SynthEnvelopeParams> }
   lfo?: Partial<SynthLfoParams>
+  noise?: Partial<SynthNoiseParams>
   gain?: number
   pan?: number
   polyphony?: number
@@ -142,6 +150,7 @@ export const createDefaultSynthParams = (): SynthParams => ({
     envelope: { attackSec: 0.005, decaySec: 0.15, sustain: 0, releaseSec: 0.15 },
   },
   lfo: { enabled: false, wave: 'sine', frequencyHz: 5, pitchCents: 0, filterOctaves: 0, amp: 0, pan: 0 },
+  noise: { enabled: false, level: 0.25 },
   gain: 0.8,
   pan: 0,
   polyphony: 32,
@@ -175,6 +184,7 @@ const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => 
   const oscillators = Array.isArray(input.oscillators) ? input.oscillators : []
   const filterInput = isRecord(input.filter) ? input.filter : {}
   const lfoInput = isRecord(input.lfo) ? input.lfo : {}
+  const noiseInput = isRecord(input.noise) ? input.noise : {}
   return {
     version: SYNTH_STATE_VERSION,
     oscillators: [
@@ -199,6 +209,10 @@ const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => 
       filterOctaves: number(lfoInput.filterOctaves, defaults.lfo.filterOctaves, SYNTH_PARAMETER_LIMITS.lfoFilterOctaves.min, SYNTH_PARAMETER_LIMITS.lfoFilterOctaves.max),
       amp: number(lfoInput.amp, defaults.lfo.amp, SYNTH_PARAMETER_LIMITS.lfoAmp.min, SYNTH_PARAMETER_LIMITS.lfoAmp.max),
       pan: number(lfoInput.pan, defaults.lfo.pan, SYNTH_PARAMETER_LIMITS.lfoPan.min, SYNTH_PARAMETER_LIMITS.lfoPan.max),
+    },
+    noise: {
+      enabled: typeof noiseInput.enabled === 'boolean' ? noiseInput.enabled : defaults.noise.enabled,
+      level: number(noiseInput.level, defaults.noise.level, SYNTH_PARAMETER_LIMITS.noiseLevel.min, SYNTH_PARAMETER_LIMITS.noiseLevel.max),
     },
     gain: number(input.gain, defaults.gain, SYNTH_PARAMETER_LIMITS.gain.min, SYNTH_PARAMETER_LIMITS.gain.max),
     pan: number(input.pan, defaults.pan, SYNTH_PARAMETER_LIMITS.pan.min, SYNTH_PARAMETER_LIMITS.pan.max),
@@ -229,6 +243,12 @@ const isCompleteSynthOscillator = (value: unknown): boolean => (
   && isFiniteNumber(value.level)
 )
 
+const isCompleteSynthNoise = (value: unknown): boolean => (
+  isRecord(value)
+  && typeof value.enabled === 'boolean'
+  && isFiniteNumber(value.level)
+)
+
 const isCompleteSynthParams = (value: Record<string, unknown>): boolean => (
   value.version === SYNTH_STATE_VERSION
   && Array.isArray(value.oscillators)
@@ -252,6 +272,7 @@ const isCompleteSynthParams = (value: Record<string, unknown>): boolean => (
   && isFiniteNumber(value.lfo.filterOctaves)
   && isFiniteNumber(value.lfo.amp)
   && isFiniteNumber(value.lfo.pan)
+  && (value.noise === undefined || isCompleteSynthNoise(value.noise))
   && isFiniteNumber(value.gain)
   && isFiniteNumber(value.pan)
   && isFiniteNumber(value.polyphony)
@@ -320,6 +341,7 @@ export const mergeSynthParams = (current: SynthParams, update: SynthParamsUpdate
       envelope: { ...base.filter.envelope, ...update.filter?.envelope },
     },
     lfo: { ...base.lfo, ...update.lfo },
+    noise: { ...base.noise, ...update.noise },
     gain: update.gain ?? base.gain,
     pan: update.pan ?? base.pan,
     polyphony: update.polyphony ?? base.polyphony,

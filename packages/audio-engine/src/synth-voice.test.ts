@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createDefaultSynthParams } from '@daw-browser/shared'
 import {
   createSynthEnvelopePlan,
+  createSynthNoiseBuffer,
   evaluateSynthParamsAtNote,
   estimateSynthEnvelopeLevel,
   getSynthCutoffLimit,
@@ -12,6 +13,22 @@ import {
 } from './synth-voice'
 
 describe('synth envelope planning', () => {
+  test('creates deterministic bounded white-noise buffers per voice identity and seed key', () => {
+    const createBuffer = () => {
+      const samples = new Float32Array(16_384)
+      return Object.assign(Object.create(null), { getChannelData: () => samples })
+    }
+    const context = { createBuffer, sampleRate: 48_000 }
+    const first = createSynthNoiseBuffer(context, 1, 60, 'track-a')
+    const repeat = createSynthNoiseBuffer(context, 1, 60, 'track-a')
+    const differentTrack = createSynthNoiseBuffer(context, 1, 60, 'track-b')
+
+    expect(first.getChannelData(0)).toHaveLength(16_384)
+    expect(Array.from(first.getChannelData(0))).toEqual(Array.from(repeat.getChannelData(0)))
+    expect(Array.from(first.getChannelData(0))).not.toEqual(Array.from(differentTrack.getChannelData(0)))
+    expect(first.getChannelData(0).every((sample) => sample >= -1 && sample <= 1)).toBe(true)
+  })
+
   test('plans ADSR and releases from interrupted attack and decay levels', () => {
     const envelope = { attackSec: 0.1, decaySec: 0.2, sustain: 0.4, releaseSec: 0.3 }
     const attack = createSynthEnvelopePlan(1, 0.05, envelope)

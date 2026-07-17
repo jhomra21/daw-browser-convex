@@ -30,12 +30,30 @@ describe("expanded synth automation state", () => {
     );
   });
 
+  test("ignores disabled envelopes when deriving ranges and parameter ids", () => {
+    const disabledNoise = {
+      ...envelope("track-a", "instrument:synth:a", 0.6),
+      parameterId: synthAutomationKey("track-a", "instrument:synth:a", "noise.level"),
+      enabled: false,
+    };
+
+    const cardAutomation = createSynthAutomationState("track-a", "instrument:synth:a", [
+      disabledNoise,
+    ]);
+
+    expect(cardAutomation.ranges.has("noise.level")).toBe(false);
+    expect(cardAutomation.parameterIds.get("noise.level")).toBe(
+      synthAutomationKey("track-a", "instrument:synth:a", "noise.level"),
+    );
+  });
+
   test("overlays evaluated values onto normalized synth display params without mutating persisted params", () => {
     const params = createDefaultSynthParams();
     const parameterIds = new Map([
       ["output.gain", synthAutomationKey("track-a", "instrument:synth:a", "output.gain")],
       ["filter.frequency", synthAutomationKey("track-a", "instrument:synth:a", "filter.frequency")],
       ["lfo.ampDepth", synthAutomationKey("track-a", "instrument:synth:a", "lfo.ampDepth")],
+      ["noise.level", synthAutomationKey("track-a", "instrument:synth:a", "noise.level")],
     ]);
     const evaluated = new Map([
       [automationTargetKey(
@@ -50,6 +68,10 @@ describe("expanded synth automation state", () => {
         { kind: "track", trackId: "track-a" },
         synthAutomationKey("track-a", "instrument:synth:a", "lfo.ampDepth"),
       ), 0.25],
+      [automationTargetKey(
+        { kind: "track", trackId: "track-a" },
+        synthAutomationKey("track-a", "instrument:synth:a", "noise.level"),
+      ), 0.6],
     ]);
 
     const display = overlaySynthAutomationValues(params, parameterIds, evaluated);
@@ -58,6 +80,7 @@ describe("expanded synth automation state", () => {
       gain: 0.3,
       filter: { frequencyHz: 600 },
       lfo: { amp: 0.25 },
+      noise: { level: 0.6 },
     });
     expect(params.gain).toBe(0.8);
     expect(params.filter.frequencyHz).toBe(12000);

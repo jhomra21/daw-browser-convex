@@ -34,19 +34,20 @@ import {
 } from './effects-params'
 import { instrumentAutomationKey, parseInstrumentAutomationKey, SAMPLER_AUTOMATION_DESCRIPTORS, SAMPLER_AUTOMATION_PARAMETER_IDS } from './sampler-automation'
 import { GRANULAR_AUTOMATION_DESCRIPTORS, GRANULAR_AUTOMATION_PARAMETER_IDS, granularAutomationKey, parseGranularAutomationKey } from './granular-automation'
+import { parseSynthAutomationKey, SYNTH_AUTOMATION_DESCRIPTORS, SYNTH_AUTOMATION_PARAMETER_IDS, synthAutomationKey } from './synth-automation'
 
 export type AutomationParameterDescriptor = {
   id: string
   label: string
   group: string
   device: string
-  owner: 'mixer' | 'sampler' | 'granular' | AudioEffectKind | 'spectral'
+  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | AudioEffectKind | 'spectral'
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
   defaultValue: number
   scale: 'linear' | 'log'
-  unit?: 'db' | 'hz' | 'percent' | 'seconds' | 'milliseconds' | 'semitones' | 'cents'
+  unit?: 'db' | 'hz' | 'percent' | 'seconds' | 'milliseconds' | 'semitones' | 'cents' | 'octaves'
 }
 
 export type AutomationParameterOption = {
@@ -68,7 +69,7 @@ export type AutomationEffectInstance = {
 
 export type AutomationInstrumentInstance = {
   id: string
-  kind: 'sampler' | 'granular'
+  kind: 'sampler' | 'granular' | 'synth'
 }
 
 export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance
@@ -222,7 +223,7 @@ export const getAutomationParameterOptionsForTarget = (
   return [
     { id: 'volume', parameterId: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
     ...effects.flatMap((effect): AutomationTargetParameterOption[] => {
-      if (effect.kind === 'sampler' || effect.kind === 'granular') {
+      if (effect.kind === 'sampler' || effect.kind === 'granular' || effect.kind === 'synth') {
         if (!trackId) return []
         if (effect.kind === 'sampler') {
           return SAMPLER_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
@@ -233,12 +234,19 @@ export const getAutomationParameterOptionsForTarget = (
             device: 'Sampler',
           }))
         }
-        return GRANULAR_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
+        if (effect.kind === 'granular') return GRANULAR_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
           id: granularAutomationKey(trackId, effect.id, parameterId),
           parameterId: granularAutomationKey(trackId, effect.id, parameterId),
           label: parameterId,
           group: 'Instrument',
           device: 'Granular',
+        }))
+        return SYNTH_AUTOMATION_PARAMETER_IDS.map((parameterId) => ({
+          id: synthAutomationKey(trackId, effect.id, parameterId),
+          parameterId: synthAutomationKey(trackId, effect.id, parameterId),
+          label: parameterId,
+          group: 'Instrument',
+          device: 'Synth',
         }))
       }
       const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
@@ -310,6 +318,23 @@ export const getAutomationParameterDescriptor = (
       unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
     }
   }
+  const synth = parseSynthAutomationKey(parameterId)
+  if (synth) {
+    const descriptor = SYNTH_AUTOMATION_DESCRIPTORS[synth.parameterId]
+    return {
+      id: parameterId,
+      label: synth.parameterId,
+      group: 'Instrument',
+      device: 'Synth',
+      owner: 'synth',
+      targetKinds: ['track'],
+      min: descriptor.min,
+      max: descriptor.max,
+      defaultValue: descriptor.defaultValue,
+      scale: descriptor.unit === 'hz' || descriptor.unit === 'seconds' ? 'log' : 'linear',
+      unit: descriptor.unit === 'ratio' ? 'percent' : descriptor.unit,
+    }
+  }
   const eq = parseEqBandParameterId(parameterId)
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
@@ -334,7 +359,7 @@ export const isAutomationParameterOwnedByTarget = (
   if (!descriptor || !descriptor.targetKinds.includes(target.kind)) return false
   return descriptor.owner === 'mixer'
     ? target.effectInstanceId === undefined
-    : descriptor.owner === 'sampler' || descriptor.owner === 'granular'
+    : descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'synth'
       ? target.effectInstanceId === undefined
       : target.effectInstanceId !== undefined
 }

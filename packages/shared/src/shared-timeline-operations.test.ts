@@ -71,17 +71,46 @@ describe('shared timeline operations', () => {
         params: { wave1: 'sine', wave2: 'square' },
       },
     }
-    expect(parseSharedTimelineOperation(operation)).toEqual({
+    expect(parseSharedTimelineOperation(operation)).toMatchObject({
       kind: 'effects.setSynthParams',
       payload: {
         trackId: 'track-1',
         instanceId: 'instrument:synth-1',
-        params: { wave1: 'sine', wave2: 'square' },
+        params: {
+          version: 2,
+          oscillators: [{ wave: 'sine' }, { wave: 'square' }],
+        },
       },
     })
     expect(parseSharedTimelineOperation({
       kind: 'effects.setSynthParams',
       payload: { trackId: 'track-1', params: operation.payload.params },
+    })).toBeNull()
+  })
+
+  test('rejects malformed synth operations while preserving complete legacy payloads', () => {
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setSynthParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'instrument:synth-1',
+        params: { version: 2, oscillators: [] },
+      },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.setSynthParams',
+      payload: {
+        trackId: 'track-1',
+        instanceId: 'instrument:synth-1',
+        params: { wave1: 'sine' },
+      },
+    })).toBeNull()
+    expect(parseSharedTimelineOperation({
+      kind: 'instruments.setTrackInstrument',
+      payload: {
+        trackId: 'track-1',
+        instrument: { kind: 'synth', instanceId: 'instrument:synth-1', params: { wave1: 'sine' } },
+      },
     })).toBeNull()
   })
 

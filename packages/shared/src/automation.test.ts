@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
+import { synthAutomationKey } from './synth-automation'
 import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
@@ -251,6 +252,22 @@ describe('automation helpers', () => {
     expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:grainSize')).toMatchObject({ owner: 'granular', unit: 'milliseconds' })
     expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:pitch')).toMatchObject({ owner: 'granular', unit: 'semitones' })
     expect(getAutomationParameterDescriptor('instrument:track-1:instrument:granular:one:position')).toMatchObject({ owner: 'granular', unit: 'percent' })
+  })
+
+  test('discovers synth instances through collision-free parameter identities', () => {
+    const parameterId = synthAutomationKey('track-1', 'instrument:synth:one', 'filter.frequency')
+    expect(getAutomationParameterDescriptor(parameterId)).toMatchObject({
+      owner: 'synth',
+      min: 20,
+      max: 20_000,
+      unit: 'hz',
+      targetKinds: ['track'],
+    })
+    const options = getAutomationParameterOptionsForTarget(
+      [{ id: 'instrument:synth:one', kind: 'synth' }],
+      'track-1',
+    )
+    expect(options.some((option) => option.parameterId === parameterId)).toBe(true)
   })
 
   test('computes envelope value ranges with optional bounds', () => {

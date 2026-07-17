@@ -1,234 +1,493 @@
-import { For, createMemo } from 'solid-js'
-import EffectShell from '~/components/effects/EffectShell'
-import Knob from '~/components/ui/knob'
+import { createEffect, createSignal, createUniqueId, on, Show, type JSX } from 'solid-js'
 import type {
+  SynthAutomationParameterId,
+  SynthEnvelopeParams,
+  SynthFilterMode,
+  SynthOscillatorParams,
   SynthParams,
+  SynthParamsUpdate,
   SynthWave,
 } from '@daw-browser/shared'
+import { createDefaultSynthParams, isSynthFilterMode, isSynthWave, SYNTH_PARAMETER_LIMITS } from '@daw-browser/shared'
+import EffectShell from '~/components/effects/EffectShell'
+import {
+  createSynthEnvelopePath,
+  createSynthFilterResponsePath,
+  createSynthWavePath,
+} from '~/components/effects/synth-visualizations'
+import Knob from '~/components/ui/knob'
 import { cn } from '~/lib/utils'
-
 
 type SynthProps = {
   params: SynthParams
-  onChange: (updates: Partial<SynthParams>) => void
+  onChange: (updates: SynthParamsUpdate) => void
   onReset?: () => void
-  onExpand?: () => void
   disabled?: boolean
-  variant?: 'compact' | 'expanded'
   class?: string
+  instanceId?: string
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: SynthAutomationParameterId) => void
+  onManualAutomationOverride?: (parameterId: SynthAutomationParameterId) => void
 }
 
-const WAVEFORMS: { value: SynthWave; label: string; icon: string }[] = [
-  { value: 'sine', label: 'Sine', icon: '~' },
-  { value: 'square', label: 'Square', icon: '[]' },
-  { value: 'sawtooth', label: 'Sawtooth', icon: '/|' },
-  { value: 'triangle', label: 'Triangle', icon: '/\\' },
-]
+type AutomationProps = Pick<SynthProps,
+  'automationRangesByParameterId' | 'onAutomationParameterTouch' | 'onManualAutomationOverride'
+>
+type EnvelopeTab = 'amp' | 'filter'
+type SourceTab = 'lfo' | 'voice' | 'noise'
 
-export default function Synth(props: SynthProps) {
-  const variant = () => props.variant ?? 'compact'
-  const wvW = () => (variant() === 'expanded' ? 240 : 120)
-  const wvH = () => (variant() === 'expanded' ? 64 : 28)
-  const envW = () => (variant() === 'expanded' ? 360 : 220)
-  const envH = () => (variant() === 'expanded' ? 80 : 48)
+const envelopeTabs = ['amp', 'filter'] satisfies readonly EnvelopeTab[]
+const sourceTabs = ['lfo', 'voice', 'noise'] satisfies readonly SourceTab[]
+
+const formatFrequency = (frequencyHz: number) => (
+  frequencyHz >= 1000 ? `${(frequencyHz / 1000).toFixed(1)} kHz` : `${Math.round(frequencyHz)} Hz`
+)
+const formatSeconds = (seconds: number) => (
+  seconds < 1 ? `${Math.round(seconds * 1000)} ms` : `${seconds.toFixed(2)} s`
+)
+const formatPercent = (value: number) => `${Math.round(value * 100)}%`
+const formatCents = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)} ct`
+const formatOctaves = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} oct`
+
+function SynthPanel(props: {
+  title: string
+  children: JSX.Element
+  headerActions?: JSX.Element
+  class?: string
+}) {
+  return (
+    <section class={cn('flex min-w-0 flex-col bg-app-surface', props.class)}>
+      <header class="flex min-h-7 items-center justify-between gap-1 border-b border-border bg-muted/40 px-2">
+        <h3 class="truncate text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{props.title}</h3>
+        {props.headerActions}
+      </header>
+      <div class="min-h-0 flex-1 p-2">{props.children}</div>
+    </section>
+  )
+}
+
+function WaveformIcon(props: { wave: SynthWave }) {
+  return (
+    <svg class="h-3 w-5" viewBox="0 0 24 12" aria-hidden="true">
+      <path d={createSynthWavePath(props.wave, 24, 12)} fill="none" stroke="currentColor" stroke-width="1.5" />
+    </svg>
+  )
+}
+
+function WaveformButtons(props: {
+  value: SynthWave
+  label: string
+  disabled?: boolean
+  onChange: (wave: SynthWave) => void
+}) {
+  const buttonClass = (wave: SynthWave) => cn(
+    'flex h-6 w-7 select-none items-center justify-center border-l border-border first:border-l-0 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    props.value === wave ? 'bg-cyan-500/20 text-cyan-200' : 'bg-muted text-muted-foreground hover:bg-secondary',
+  )
+  return (
+    <div class="flex overflow-hidden border border-border" role="group" aria-label={props.label}>
+      <button type="button" class={buttonClass('sine')} disabled={props.disabled} aria-pressed={props.value === 'sine'} aria-label={`${props.label}: sine`} onClick={() => props.onChange('sine')}><WaveformIcon wave="sine" /></button>
+      <button type="button" class={buttonClass('square')} disabled={props.disabled} aria-pressed={props.value === 'square'} aria-label={`${props.label}: square`} onClick={() => props.onChange('square')}><WaveformIcon wave="square" /></button>
+      <button type="button" class={buttonClass('sawtooth')} disabled={props.disabled} aria-pressed={props.value === 'sawtooth'} aria-label={`${props.label}: sawtooth`} onClick={() => props.onChange('sawtooth')}><WaveformIcon wave="sawtooth" /></button>
+      <button type="button" class={buttonClass('triangle')} disabled={props.disabled} aria-pressed={props.value === 'triangle'} aria-label={`${props.label}: triangle`} onClick={() => props.onChange('triangle')}><WaveformIcon wave="triangle" /></button>
+    </div>
+  )
+}
+
+function WavePreview(props: { wave: SynthWave; color: string }) {
+  return (
+    <svg class="h-9 w-full" viewBox="0 0 220 36" preserveAspectRatio="none" aria-hidden="true">
+      <line class="stroke-border" x1="0" y1="18" x2="220" y2="18" stroke-width="1" />
+      <path d={createSynthWavePath(props.wave, 220, 36)} stroke={props.color} stroke-width="2" fill="none" />
+    </svg>
+  )
+}
+
+function EnvelopePreview(props: { envelope: SynthEnvelopeParams; color: string }) {
+  return (
+    <svg class="h-full min-h-0 w-full" viewBox="0 0 220 64" preserveAspectRatio="none" aria-hidden="true">
+      <path
+        d={createSynthEnvelopePath(props.envelope, 220, 64)}
+        stroke={props.color}
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        vector-effect="non-scaling-stroke"
+        fill="none"
+      />
+    </svg>
+  )
+}
+
+function FilterPreview(props: { mode: SynthFilterMode; frequencyHz: number; q: number }) {
+  return (
+    <svg class="h-9 w-full" viewBox="0 0 240 36" preserveAspectRatio="none" aria-hidden="true">
+      <line class="stroke-border" x1="6" y1="18" x2="234" y2="18" stroke-width="1" />
+      <path d={createSynthFilterResponsePath(props.mode, props.frequencyHz, props.q, 240, 36)} stroke="#c084fc" stroke-width="2" fill="none" />
+    </svg>
+  )
+}
+
+function SynthKnob(props: {
+  label: string
+  visibleLabel?: string
+  value: number
+  valueLabel: string
+  resetValue: number
+  min: number
+  max: number
+  step: number
+  parameterId?: SynthAutomationParameterId
+  logarithmic?: boolean
+  zeroAwareLogarithmic?: boolean
+  bipolar?: boolean
+  disabled?: boolean
+  automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
+  onAutomationParameterTouch?: (parameterId: SynthAutomationParameterId) => void
+  onManualAutomationOverride?: (parameterId: SynthAutomationParameterId) => void
+  onValueChange: (value: number) => void
+}) {
+  const automationRange = () => props.parameterId ? props.automationRangesByParameterId?.get(props.parameterId) : undefined
+  return (
+    <Knob
+      label={props.label}
+      visibleLabel={props.visibleLabel}
+      ariaLabel={props.label}
+      value={props.value}
+      valueLabel={props.valueLabel}
+      resetValue={props.resetValue}
+      min={props.min}
+      max={props.max}
+      step={props.step}
+      logarithmic={props.logarithmic}
+      zeroAwareLogarithmic={props.zeroAwareLogarithmic}
+      bipolar={props.bipolar}
+      disabled={props.disabled}
+      automationRange={automationRange()}
+      automated={Boolean(automationRange())}
+      onAutomationSelect={() => {
+        if (props.parameterId) props.onAutomationParameterTouch?.(props.parameterId)
+      }}
+      onValueChange={(value) => {
+        if (props.parameterId) props.onManualAutomationOverride?.(props.parameterId)
+        props.onValueChange(value)
+      }}
+    />
+  )
+}
+
+function NativeSelect(props: {
+  ariaLabel: string
+  class: string
+  disabled?: boolean
+  value: string
+  onChange: (value: string) => void
+  children: JSX.Element
+}) {
+  let changedByPointer = false
+  return (
+    <select
+      class={cn(
+        'transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70',
+        props.class,
+      )}
+      aria-label={props.ariaLabel}
+      disabled={props.disabled}
+      value={props.value}
+      onPointerDown={() => { changedByPointer = true }}
+      onKeyDown={() => { changedByPointer = false }}
+      onBlur={() => { changedByPointer = false }}
+      onChange={(event) => {
+        props.onChange(event.currentTarget.value)
+        if (changedByPointer) event.currentTarget.blur()
+        changedByPointer = false
+      }}
+    >
+      {props.children}
+    </select>
+  )
+}
+
+function OscillatorPanel(props: {
+  index: 0 | 1
+  params: SynthParams
+  defaults: SynthParams
+  onChange: (updates: SynthParamsUpdate) => void
+  disabled?: boolean
+} & AutomationProps) {
+  const oscillator = () => props.params.oscillators[props.index]
+  const isFirst = () => props.index === 0
+  const update = (updates: Partial<SynthOscillatorParams>) => (
+    props.onChange({ oscillators: isFirst() ? [updates] : [undefined, updates] })
+  )
+  const defaults = () => props.defaults.oscillators[props.index]
+  const oscillatorLabel = () => `Oscillator ${props.index + 1}`
+  const levelParameterId = (): SynthAutomationParameterId => isFirst() ? 'osc1.level' : 'osc2.level'
+  const detuneParameterId = (): SynthAutomationParameterId => isFirst() ? 'osc1.detune' : 'osc2.detune'
 
   return (
-    <EffectShell
-      title="Synth"
-      typeLabel="Instrument"
-      onReset={props.onReset}
-      disabled={props.disabled}
-      class={cn(variant() === 'expanded' ? 'min-w-160' : 'min-w-72', props.class)}
-      actionsBeforeReset={
-        props.onExpand ? (
-          <button
-            class="bg-transparent px-2 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={props.disabled}
-            onClick={() => props.onExpand?.()}
+    <SynthPanel
+      title={`Osc ${props.index + 1}`}
+      headerActions={(
+        <div class="flex items-center gap-1">
+          <NativeSelect
+            class="h-6 max-w-13 border border-border bg-muted px-1 text-2xs text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            ariaLabel={`${oscillatorLabel()} waveform`}
+            disabled={props.disabled || !oscillator().enabled}
+            value={oscillator().wave}
+            onChange={(value) => {
+              if (isSynthWave(value)) update({ wave: value })
+            }}
           >
-            Expand
-          </button>
-        ) : undefined
-      }
+            <option value="sine">Sin</option>
+            <option value="square">Sq</option>
+            <option value="sawtooth">Saw</option>
+            <option value="triangle">Tri</option>
+          </NativeSelect>
+          <button type="button" class={cn(toggleClass(oscillator().enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={oscillator().enabled} aria-label={`${oscillatorLabel()} enabled`} onClick={() => update({ enabled: !oscillator().enabled })}>{oscillator().enabled ? 'On' : 'Off'}</button>
+        </div>
+      )}
     >
-      {/* Oscillator controls */}
-      <div class="px-2 py-2 border-b border-border/50">
-        <div class="grid gap-3" style={{ 'grid-template-columns': '1fr 1fr' }}>
-          {/* Osc 1 */}
-          <div class="flex flex-col gap-1">
-            <div class="text-2xs text-muted-foreground">Osc 1</div>
-            <div class="flex items-center gap-1 flex-wrap">
-              <For each={WAVEFORMS}>{(wf) => (
-                <button
-                  class={cn(
-                    'border border-border px-2 py-0.5 text-2xs transition-colors',
-                    props.params.wave1 === wf.value
-                      ? 'border-blue-400/30 bg-blue-500/20 text-blue-300'
-                      : 'bg-muted text-muted-foreground hover:bg-secondary',
-                  )}
-                  onClick={() => props.onChange({ wave1: wf.value })}
-                  disabled={props.disabled}
-                  title={wf.label}
-                >
-                  <span class="font-mono text-sm">{wf.icon}</span>
-                </button>
-              )}</For>
-            </div>
-            <div class="mt-1 flex items-center">
-              <div class="bg-muted/70 border border-border/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
-                <WavePreview wave={props.params.wave1} width={wvW()} height={wvH()} />
-              </div>
-            </div>
-          </div>
-          {/* Osc 2 */}
-          <div class="flex flex-col gap-1">
-            <div class="text-2xs text-muted-foreground">Osc 2</div>
-            <div class="flex items-center gap-1 flex-wrap">
-              <For each={WAVEFORMS}>{(wf) => (
-                <button
-                  class={cn(
-                    'border border-border px-2 py-0.5 text-2xs transition-colors',
-                    props.params.wave2 === wf.value
-                      ? 'border-green-400/30 bg-green-500/20 text-green-300'
-                      : 'bg-muted text-muted-foreground hover:bg-secondary',
-                  )}
-                  onClick={() => props.onChange({ wave2: wf.value })}
-                  disabled={props.disabled}
-                  title={wf.label}
-                >
-                  <span class="font-mono text-sm">{wf.icon}</span>
-                </button>
-              )}</For>
-            </div>
-            <div class="mt-1 flex items-center">
-              <div class="bg-muted/70 border border-border/70 flex items-center justify-center" style={{ width: `${wvW()}px`, height: `${wvH()}px` }}>
-                <WavePreview wave={props.params.wave2} width={wvW()} height={wvH()} />
-              </div>
-            </div>
-          </div>
+      <div class="flex h-full flex-col gap-1.5">
+        <div class={cn('border-y border-border/60 bg-background/40', !oscillator().enabled && 'opacity-50')}><WavePreview wave={oscillator().wave} color={isFirst() ? '#67e8f9' : '#86efac'} /></div>
+        <div class="grid grid-cols-4 gap-1 justify-items-center">
+          <SynthKnob label="Level" value={oscillator().level} valueLabel={formatPercent(oscillator().level)} resetValue={defaults().level} {...SYNTH_PARAMETER_LIMITS.oscillatorLevel} step={0.01} parameterId={levelParameterId()} disabled={props.disabled || !oscillator().enabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(level) => update({ level })} />
+          <SynthKnob label="Octave" visibleLabel="Oct" value={oscillator().octave} valueLabel={`${oscillator().octave > 0 ? '+' : ''}${oscillator().octave} oct`} resetValue={defaults().octave} {...SYNTH_PARAMETER_LIMITS.oscillatorOctave} step={1} bipolar disabled={props.disabled || !oscillator().enabled} onValueChange={(octave) => update({ octave })} />
+          <SynthKnob label="Semitone" visibleLabel="Semi" value={oscillator().semitone} valueLabel={`${oscillator().semitone > 0 ? '+' : ''}${oscillator().semitone} st`} resetValue={defaults().semitone} {...SYNTH_PARAMETER_LIMITS.oscillatorSemitone} step={1} bipolar disabled={props.disabled || !oscillator().enabled} onValueChange={(semitone) => update({ semitone })} />
+          <SynthKnob label="Detune" value={oscillator().detuneCents} valueLabel={formatCents(oscillator().detuneCents)} resetValue={defaults().detuneCents} {...SYNTH_PARAMETER_LIMITS.oscillatorDetuneCents} step={1} bipolar parameterId={detuneParameterId()} disabled={props.disabled || !oscillator().enabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(detuneCents) => update({ detuneCents })} />
         </div>
       </div>
+    </SynthPanel>
+  )
+}
 
-      {/* Controls */}
-      <div class="px-3 py-3 flex flex-1 items-center justify-evenly gap-4">
-        <Knob
-          label="Gain"
-          valueLabel={props.params.gain.toFixed(2)}
-          value={props.params.gain}
-          min={0}
-          max={1.5}
-          step={0.05}
-          onValueChange={(gain) => props.onChange({ gain })}
-          disabled={props.disabled}
-        />
-        <Knob
-          label="Attack"
-          valueLabel={`${props.params.attackMs}ms`}
-          value={props.params.attackMs}
-          min={0}
-          max={200}
-          step={1}
-          unit="ms"
-          onValueChange={(attackMs) => props.onChange({ attackMs })}
-          disabled={props.disabled}
-        />
-        <Knob
-          label="Release"
-          valueLabel={`${props.params.releaseMs}ms`}
-          value={props.params.releaseMs}
-          min={0}
-          max={200}
-          step={1}
-          unit="ms"
-          onValueChange={(releaseMs) => props.onChange({ releaseMs })}
-          disabled={props.disabled}
-        />
+function FilterPanel(props: {
+  params: SynthParams
+  defaults: SynthParams
+  onChange: (updates: SynthParamsUpdate) => void
+  disabled?: boolean
+} & AutomationProps) {
+  const filterDisabled = () => props.disabled || !props.params.filter.enabled
+  return (
+    <SynthPanel
+      title="Filter"
+      headerActions={(
+        <div class="flex items-center gap-1">
+          <NativeSelect
+            class="h-6 max-w-15 border border-border bg-muted px-1 text-2xs text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            ariaLabel="Filter mode"
+            disabled={props.disabled}
+            value={props.params.filter.mode}
+            onChange={(value) => {
+              if (isSynthFilterMode(value)) props.onChange({ filter: { mode: value } })
+            }}
+          >
+            <option value="lowpass">Low</option>
+            <option value="highpass">High</option>
+            <option value="bandpass">Band</option>
+            <option value="notch">Notch</option>
+          </NativeSelect>
+          <button type="button" class={cn(toggleClass(props.params.filter.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.enabled} aria-label="Filter enabled" onClick={() => props.onChange({ filter: { enabled: !props.params.filter.enabled } })}>{props.params.filter.enabled ? 'On' : 'Off'}</button>
+        </div>
+      )}
+    >
+      <div class="flex h-full flex-col gap-1.5">
+        <div class={cn('border-y border-border/60 bg-background/40', !props.params.filter.enabled && 'opacity-50')}><FilterPreview mode={props.params.filter.mode} frequencyHz={props.params.filter.frequencyHz} q={props.params.filter.q} /></div>
+        <div class="grid grid-cols-4 gap-1 justify-items-center">
+          <SynthKnob label="Cutoff" value={props.params.filter.frequencyHz} valueLabel={formatFrequency(props.params.filter.frequencyHz)} resetValue={props.defaults.filter.frequencyHz} {...SYNTH_PARAMETER_LIMITS.filterFrequencyHz} step={1} logarithmic parameterId="filter.frequency" disabled={filterDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(frequencyHz) => props.onChange({ filter: { frequencyHz } })} />
+          <SynthKnob label="Resonance" visibleLabel="Q" value={props.params.filter.q} valueLabel={props.params.filter.q.toFixed(2)} resetValue={props.defaults.filter.q} {...SYNTH_PARAMETER_LIMITS.filterQ} step={0.01} logarithmic parameterId="filter.q" disabled={filterDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(q) => props.onChange({ filter: { q } })} />
+          <SynthKnob label="Key tracking" visibleLabel="Key" value={props.params.filter.keyTracking} valueLabel={formatPercent(props.params.filter.keyTracking)} resetValue={props.defaults.filter.keyTracking} {...SYNTH_PARAMETER_LIMITS.filterKeyTracking} step={0.01} disabled={filterDisabled()} onValueChange={(keyTracking) => props.onChange({ filter: { keyTracking } })} />
+          <SynthKnob label="Envelope amount" visibleLabel="Env" value={props.params.filter.envelopeAmountOctaves} valueLabel={formatOctaves(props.params.filter.envelopeAmountOctaves)} resetValue={props.defaults.filter.envelopeAmountOctaves} {...SYNTH_PARAMETER_LIMITS.filterEnvelopeAmountOctaves} step={0.01} bipolar parameterId="filter.envAmount" disabled={filterDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(envelopeAmountOctaves) => props.onChange({ filter: { envelopeAmountOctaves } })} />
+        </div>
       </div>
+    </SynthPanel>
+  )
+}
 
-      {/* Envelope preview */}
-      <div class="px-2 pb-2">
-        <div class="flex items-center justify-center">
-          <div class="bg-muted/70 border border-border/70" style={{ width: `${envW()}px`, height: `${envH()}px` }}>
-            <EnvelopePreview attackMs={props.params.attackMs} releaseMs={props.params.releaseMs} width={envW()} height={envH()} />
-          </div>
+function EnvelopeDrawer(props: {
+  envelope: SynthEnvelopeParams
+  defaults: SynthEnvelopeParams
+  disabled?: boolean
+  previewColor: string
+  parameterPrefix: 'amp' | 'filter'
+  onChange: (updates: Partial<SynthEnvelopeParams>) => void
+} & AutomationProps) {
+  const parameterId = (field: 'attack' | 'decay' | 'sustain' | 'release'): SynthAutomationParameterId => `${props.parameterPrefix}.${field}`
+  return (
+    <div class="grid h-28 grid-cols-[minmax(8rem,1fr)_auto] gap-2 px-2 py-1.5">
+      <div class="h-full min-h-0 min-w-0 border-y border-border/60 bg-background/40"><EnvelopePreview envelope={props.envelope} color={props.previewColor} /></div>
+      <div class="grid grid-cols-4 gap-1 justify-items-center">
+        <SynthKnob label="Attack" visibleLabel="A" value={props.envelope.attackSec} valueLabel={formatSeconds(props.envelope.attackSec)} resetValue={props.defaults.attackSec} {...SYNTH_PARAMETER_LIMITS.envelopeSeconds} step={0.001} logarithmic zeroAwareLogarithmic parameterId={parameterId('attack')} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(attackSec) => props.onChange({ attackSec })} />
+        <SynthKnob label="Decay" visibleLabel="D" value={props.envelope.decaySec} valueLabel={formatSeconds(props.envelope.decaySec)} resetValue={props.defaults.decaySec} {...SYNTH_PARAMETER_LIMITS.envelopeSeconds} step={0.001} logarithmic zeroAwareLogarithmic parameterId={parameterId('decay')} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(decaySec) => props.onChange({ decaySec })} />
+        <SynthKnob label="Sustain" visibleLabel="S" value={props.envelope.sustain} valueLabel={formatPercent(props.envelope.sustain)} resetValue={props.defaults.sustain} {...SYNTH_PARAMETER_LIMITS.sustain} step={0.01} parameterId={parameterId('sustain')} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(sustain) => props.onChange({ sustain })} />
+        <SynthKnob label="Release" visibleLabel="R" value={props.envelope.releaseSec} valueLabel={formatSeconds(props.envelope.releaseSec)} resetValue={props.defaults.releaseSec} {...SYNTH_PARAMETER_LIMITS.envelopeSeconds} step={0.001} logarithmic zeroAwareLogarithmic parameterId={parameterId('release')} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(releaseSec) => props.onChange({ releaseSec })} />
+      </div>
+    </div>
+  )
+}
+
+function LfoDrawer(props: {
+  params: SynthParams
+  defaults: SynthParams
+  onChange: (updates: SynthParamsUpdate) => void
+  disabled?: boolean
+} & AutomationProps) {
+  const lfoDisabled = () => props.disabled || !props.params.lfo.enabled
+  return (
+    <div class="flex h-28 min-w-0 items-center gap-2 overflow-x-auto px-2 py-1.5">
+      <div class="flex shrink-0 items-center gap-1">
+        <WaveformButtons value={props.params.lfo.wave} label="LFO waveform" disabled={lfoDisabled()} onChange={(wave) => props.onChange({ lfo: { wave } })} />
+        <button type="button" class={cn(toggleClass(props.params.lfo.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.lfo.enabled} aria-label="LFO enabled" onClick={() => props.onChange({ lfo: { enabled: !props.params.lfo.enabled } })}>{props.params.lfo.enabled ? 'On' : 'Off'}</button>
+      </div>
+      <div class="grid min-w-max flex-1 grid-cols-5 gap-1 justify-items-center">
+        <SynthKnob label="Rate" value={props.params.lfo.frequencyHz} valueLabel={formatFrequency(props.params.lfo.frequencyHz)} resetValue={props.defaults.lfo.frequencyHz} {...SYNTH_PARAMETER_LIMITS.lfoFrequencyHz} step={0.01} logarithmic parameterId="lfo.rate" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(frequencyHz) => props.onChange({ lfo: { frequencyHz } })} />
+        <SynthKnob label="Pitch" value={props.params.lfo.pitchCents} valueLabel={formatCents(props.params.lfo.pitchCents)} resetValue={props.defaults.lfo.pitchCents} {...SYNTH_PARAMETER_LIMITS.lfoPitchCents} step={1} bipolar parameterId="lfo.pitchDepth" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(pitchCents) => props.onChange({ lfo: { pitchCents } })} />
+        <SynthKnob label="Filter depth" visibleLabel="Filter" value={props.params.lfo.filterOctaves} valueLabel={formatOctaves(props.params.lfo.filterOctaves)} resetValue={props.defaults.lfo.filterOctaves} {...SYNTH_PARAMETER_LIMITS.lfoFilterOctaves} step={0.01} bipolar parameterId="lfo.filterDepth" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(filterOctaves) => props.onChange({ lfo: { filterOctaves } })} />
+        <SynthKnob label="Amp depth" visibleLabel="Amp" value={props.params.lfo.amp} valueLabel={formatPercent(props.params.lfo.amp)} resetValue={props.defaults.lfo.amp} {...SYNTH_PARAMETER_LIMITS.lfoAmp} step={0.01} parameterId="lfo.ampDepth" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(amp) => props.onChange({ lfo: { amp } })} />
+        <SynthKnob label="Pan depth" visibleLabel="Pan" value={props.params.lfo.pan} valueLabel={formatPercent(props.params.lfo.pan)} resetValue={props.defaults.lfo.pan} {...SYNTH_PARAMETER_LIMITS.lfoPan} step={0.01} parameterId="lfo.panDepth" disabled={lfoDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(pan) => props.onChange({ lfo: { pan } })} />
+      </div>
+    </div>
+  )
+}
+
+function VoiceDrawer(props: {
+  params: SynthParams
+  defaults: SynthParams
+  onChange: (updates: SynthParamsUpdate) => void
+  disabled?: boolean
+} & AutomationProps) {
+  return (
+    <div class="flex h-28 items-center gap-3 px-2 py-1.5">
+      <div class="grid flex-1 grid-cols-3 gap-1 justify-items-center">
+        <SynthKnob label="Polyphony" visibleLabel="Voices" value={props.params.polyphony} valueLabel={`${props.params.polyphony} voices`} resetValue={props.defaults.polyphony} {...SYNTH_PARAMETER_LIMITS.polyphony} step={1} disabled={props.disabled} onValueChange={(polyphony) => props.onChange({ polyphony })} />
+        <SynthKnob label="Gain" value={props.params.gain} valueLabel={formatPercent(props.params.gain)} resetValue={props.defaults.gain} {...SYNTH_PARAMETER_LIMITS.gain} step={0.01} parameterId="output.gain" disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(gain) => props.onChange({ gain })} />
+        <SynthKnob label="Pan" value={props.params.pan} valueLabel={formatPercent((props.params.pan + 1) / 2)} resetValue={props.defaults.pan} {...SYNTH_PARAMETER_LIMITS.pan} step={0.01} bipolar parameterId="output.pan" disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(pan) => props.onChange({ pan })} />
+      </div>
+      <button type="button" class={cn(toggleClass(props.params.retrigger), 'min-w-16 shrink-0')} disabled={props.disabled} aria-pressed={props.params.retrigger} aria-label="Retrigger voices" onClick={() => props.onChange({ retrigger: !props.params.retrigger })}>Retrig {props.params.retrigger ? 'On' : 'Off'}</button>
+    </div>
+  )
+}
+
+function NoiseDrawer(props: {
+  params: SynthParams
+  defaults: SynthParams
+  onChange: (updates: SynthParamsUpdate) => void
+  disabled?: boolean
+} & AutomationProps) {
+  const noiseDisabled = () => props.disabled || !props.params.noise.enabled
+  return (
+    <div class="flex h-28 items-center gap-3 px-2 py-1.5">
+      <svg class={cn('h-12 min-w-0 flex-1 border-y border-border/60 bg-background/40', noiseDisabled() && 'opacity-50')} viewBox="0 0 220 48" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 26 L8 12 L16 33 L24 17 L32 39 L40 9 L48 29 L56 14 L64 36 L72 20 L80 41 L88 8 L96 31 L104 15 L112 38 L120 10 L128 28 L136 18 L144 40 L152 12 L160 34 L168 16 L176 37 L184 11 L192 30 L200 14 L208 35 L220 19" fill="none" stroke="#f8fafc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+      </svg>
+      <button type="button" class={cn(toggleClass(props.params.noise.enabled), 'w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.noise.enabled} aria-label="Noise enabled" onClick={() => props.onChange({ noise: { enabled: !props.params.noise.enabled } })}>{props.params.noise.enabled ? 'On' : 'Off'}</button>
+      <SynthKnob label="Level" value={props.params.noise.level} valueLabel={formatPercent(props.params.noise.level)} resetValue={props.defaults.noise.level} {...SYNTH_PARAMETER_LIMITS.noiseLevel} step={0.01} parameterId="noise.level" disabled={noiseDisabled()} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} onValueChange={(level) => props.onChange({ noise: { level } })} />
+    </div>
+  )
+}
+
+export default function Synth(props: SynthProps) {
+  const defaults = createDefaultSynthParams()
+  const [envelopeTab, setEnvelopeTab] = createSignal<EnvelopeTab>('amp')
+  const [sourceTab, setSourceTab] = createSignal<SourceTab>('lfo')
+  const [lastFilterEnvelopeAmount, setLastFilterEnvelopeAmount] = createSignal(1)
+  const id = createUniqueId()
+  createEffect(on(() => props.instanceId, () => {
+    setLastFilterEnvelopeAmount(1)
+  }))
+  createEffect(() => {
+    const amount = props.params.filter.envelopeAmountOctaves
+    if (amount !== 0) setLastFilterEnvelopeAmount(amount)
+  })
+  const tabClass = (selected: boolean) => cn(
+    'min-h-7 select-none border-r border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    selected ? 'bg-cyan-500/15 text-cyan-200' : 'text-muted-foreground hover:bg-secondary',
+  )
+  const filterEnvelopeDisabled = () => props.disabled || !props.params.filter.enabled || props.params.filter.envelopeAmountOctaves === 0
+  const updateFilterEnvelopeAmount = (envelopeAmountOctaves: number) => {
+    if (envelopeAmountOctaves !== 0) setLastFilterEnvelopeAmount(envelopeAmountOctaves)
+    props.onChange({ filter: { envelopeAmountOctaves } })
+  }
+
+  return (
+    <EffectShell title="Synth" typeLabel="Instrument" onReset={props.onReset} disabled={props.disabled} class={cn('min-w-[53rem] max-w-[56rem]', props.class)}>
+      <div class="flex min-h-0 flex-1 flex-col">
+        <div class="grid min-h-0 grid-cols-3 divide-x divide-border">
+          <OscillatorPanel index={0} params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} />
+          <OscillatorPanel index={1} params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} />
+          <FilterPanel params={props.params} defaults={defaults} onChange={(updates) => {
+            if (updates.filter?.envelopeAmountOctaves !== undefined && updates.filter.envelopeAmountOctaves !== 0) {
+              setLastFilterEnvelopeAmount(updates.filter.envelopeAmountOctaves)
+            }
+            props.onChange(updates)
+          }} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} />
+        </div>
+        <div class="grid grid-cols-2 divide-x divide-border border-t border-border">
+          <section class="min-w-0">
+            <div class="flex min-h-7 border-b border-border" role="tablist" aria-label="Synth envelopes">
+              <button id={`${id}-amp-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'amp')} aria-selected={envelopeTab() === 'amp'} aria-controls={`${id}-amp-env-panel`} tabIndex={envelopeTab() === 'amp' ? 0 : -1} onClick={() => setEnvelopeTab('amp')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Amp Env</button>
+              <button id={`${id}-filter-env-tab`} type="button" role="tab" class={tabClass(envelopeTab() === 'filter')} aria-selected={envelopeTab() === 'filter'} aria-controls={`${id}-filter-env-panel`} tabIndex={envelopeTab() === 'filter' ? 0 : -1} onClick={() => setEnvelopeTab('filter')} onKeyDown={(event) => handleRovingTabKey(event, envelopeTabs, envelopeTab(), setEnvelopeTab)}>Filter Env</button>
+              <Show when={envelopeTab() === 'filter'}>
+                <button type="button" class={cn(toggleClass(props.params.filter.envelopeAmountOctaves !== 0), 'ml-auto mr-1 my-0.5 w-9 shrink-0')} disabled={props.disabled} aria-pressed={props.params.filter.envelopeAmountOctaves !== 0} aria-label="Filter envelope enabled" onClick={() => {
+                  if (props.params.filter.envelopeAmountOctaves === 0) {
+                    updateFilterEnvelopeAmount(lastFilterEnvelopeAmount())
+                  } else {
+                    setLastFilterEnvelopeAmount(props.params.filter.envelopeAmountOctaves)
+                    updateFilterEnvelopeAmount(0)
+                  }
+                }}>{props.params.filter.envelopeAmountOctaves === 0 ? 'Off' : 'On'}</button>
+              </Show>
+            </div>
+            <Show when={envelopeTab() === 'amp'}>
+              <div id={`${id}-amp-env-panel`} role="tabpanel" aria-labelledby={`${id}-amp-env-tab`}><EnvelopeDrawer envelope={props.params.ampEnvelope} defaults={defaults.ampEnvelope} disabled={props.disabled} previewColor="#a3e635" parameterPrefix="amp" onChange={(ampEnvelope) => props.onChange({ ampEnvelope })} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div>
+            </Show>
+            <Show when={envelopeTab() === 'filter'}>
+              <div id={`${id}-filter-env-panel`} role="tabpanel" aria-labelledby={`${id}-filter-env-tab`}><EnvelopeDrawer envelope={props.params.filter.envelope} defaults={defaults.filter.envelope} disabled={filterEnvelopeDisabled()} previewColor="#c084fc" parameterPrefix="filter" onChange={(envelope) => props.onChange({ filter: { envelope } })} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div>
+            </Show>
+          </section>
+          <section class="min-w-0">
+            <div class="flex min-h-7 border-b border-border" role="tablist" aria-label="Synth modulation and sources">
+              <button id={`${id}-lfo-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'lfo')} aria-selected={sourceTab() === 'lfo'} aria-controls={`${id}-lfo-panel`} tabIndex={sourceTab() === 'lfo' ? 0 : -1} onClick={() => setSourceTab('lfo')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>LFO</button>
+              <button id={`${id}-voice-out-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'voice')} aria-selected={sourceTab() === 'voice'} aria-controls={`${id}-voice-out-panel`} tabIndex={sourceTab() === 'voice' ? 0 : -1} onClick={() => setSourceTab('voice')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Voice / Out</button>
+              <button id={`${id}-noise-tab`} type="button" role="tab" class={tabClass(sourceTab() === 'noise')} aria-selected={sourceTab() === 'noise'} aria-controls={`${id}-noise-panel`} tabIndex={sourceTab() === 'noise' ? 0 : -1} onClick={() => setSourceTab('noise')} onKeyDown={(event) => handleRovingTabKey(event, sourceTabs, sourceTab(), setSourceTab)}>Noise</button>
+            </div>
+            <Show when={sourceTab() === 'lfo'}><div id={`${id}-lfo-panel`} role="tabpanel" aria-labelledby={`${id}-lfo-tab`}><LfoDrawer params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div></Show>
+            <Show when={sourceTab() === 'voice'}><div id={`${id}-voice-out-panel`} role="tabpanel" aria-labelledby={`${id}-voice-out-tab`}><VoiceDrawer params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div></Show>
+            <Show when={sourceTab() === 'noise'}><div id={`${id}-noise-panel`} role="tabpanel" aria-labelledby={`${id}-noise-tab`}><NoiseDrawer params={props.params} defaults={defaults} onChange={props.onChange} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} /></div></Show>
+          </section>
         </div>
       </div>
     </EffectShell>
   )
 }
 
-function WavePreview(props: { wave: SynthWave; width?: number; height?: number }) {
-  const w = () => props.width ?? 180
-  const h = () => props.height ?? 36
-  const pad = 4
-  const N = 80
-  const makePath = (phase: number) => {
-    const width = w()
-    const height = h()
-    const mid = height / 2
-    const amp = (height - pad * 2) / 2
-    const points: Array<[number, number]> = []
-    for (let i = 0; i <= N; i++) {
-      let t = i / N
-      t = (t + phase) % 1
-      let yNorm = 0
-      switch (props.wave) {
-        case 'sine': yNorm = Math.sin(t * Math.PI * 2); break
-        case 'square': yNorm = t < 0.5 ? 1 : -1; break
-        case 'sawtooth': yNorm = 2 * t - 1; break
-        default: yNorm = 1 - 4 * Math.abs(t - 0.5) // triangle
-      }
-      const x = pad + (i / N) * (width - pad * 2)
-      const y = mid - yNorm * amp
-      points.push([x, y])
-    }
-    return points.map(([x, y], idx) => `${idx === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
-  }
-  const d1 = createMemo(() => makePath(0))
-  return (
-    <svg width={w()} height={h()} viewBox={`0 0 ${w()} ${h()}`}>
-      <path d={d1()} stroke="#60a5fa" stroke-opacity="0.9" stroke-width="2" fill="none" />
-      <line x1="0" y1={h() / 2} x2={w()} y2={h() / 2} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-    </svg>
+function toggleClass(enabled: boolean): string {
+  return cn(
+    'min-h-6 select-none border border-border px-1.5 text-2xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
+    enabled ? 'bg-cyan-500/20 text-cyan-200' : 'bg-muted text-muted-foreground',
   )
 }
 
-function EnvelopePreview(props: { attackMs: number; releaseMs: number; holdMs?: number; width?: number; height?: number }) {
-  const w = () => props.width ?? 220
-  const h = () => props.height ?? 48
-  const pad = 6
-  const computed = createMemo(() => {
-    const attack = Math.max(0, props.attackMs || 0)
-    const release = Math.max(0, props.releaseMs || 0)
-    const totalTarget = 800
-    const baseHold = typeof props.holdMs === 'number' ? Math.max(0, props.holdMs) : totalTarget
-    const hold = Math.max(0, (baseHold > 0 ? baseHold : totalTarget) - attack - release)
-    const total = Math.max(1, attack + hold + release)
-    const x = (ms: number) => pad + (ms / total) * (w() - pad * 2)
-    const y = (amp: number) => pad + (1 - Math.max(0, Math.min(1, amp))) * (h() - pad * 2)
-    const pts: Array<[number, number]> = []
-    const A_STEPS = 24
-    for (let i = 0; i <= A_STEPS; i++) {
-      const t = i / A_STEPS
-      const amp = Math.pow(t, 0.5)
-      pts.push([x(t * attack), y(amp)])
-    }
-    pts.push([x(attack + hold), y(1)])
-    const R_STEPS = 24
-    for (let i = 1; i <= R_STEPS; i++) {
-      const t = i / R_STEPS
-      const amp = Math.pow(1 - t, 0.5)
-      pts.push([x(attack + hold + t * release), y(amp)])
-    }
-    const d = pts.map(([xx, yy], idx) => `${idx === 0 ? 'M' : 'L'}${xx.toFixed(2)},${yy.toFixed(2)}`).join(' ')
-    return { d, y0: y(0), y1: y(1) }
-  })
-  return (
-    <svg width={w()} height={h()} viewBox={`0 0 ${w()} ${h()}`}>
-      <rect x={0} y={0} width={w()} height={h()} fill="none" />
-      <path d={computed().d} stroke="#a3e635" stroke-width="2" fill="none" />
-      <line x1={pad} y1={computed().y0} x2={w() - pad} y2={computed().y0} stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-      <line x1={pad} y1={computed().y1} x2={w() - pad} y2={computed().y1} stroke="rgba(255,255,255,0.15)" stroke-width="1" />
-    </svg>
-  )
+function handleRovingTabKey<T extends string>(
+  event: KeyboardEvent & { currentTarget: HTMLButtonElement },
+  tabs: readonly T[],
+  selectedTab: T,
+  onSelect: (tab: T) => void,
+) {
+  const selectedIndex = tabs.indexOf(selectedTab)
+  const nextIndex = event.key === 'ArrowLeft'
+    ? (selectedIndex + tabs.length - 1) % tabs.length
+    : event.key === 'ArrowRight'
+      ? (selectedIndex + 1) % tabs.length
+      : event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabs.length - 1
+          : undefined
+  if (nextIndex === undefined) return
+  event.preventDefault()
+  onSelect(tabs[nextIndex])
+  event.currentTarget.parentElement
+    ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]
+    ?.focus()
 }

@@ -39,4 +39,13 @@ describe('knob value mapping', () => {
     expect(valueToKnobFraction(50, 0, 100, true)).toBe(0.5)
     expect(knobValueFromDrag(50, 24, 0, 100, true, false)).toBe(60)
   })
+
+  test('preserves zero while mapping zero-inclusive envelope times perceptually', () => {
+    expect(valueToKnobFraction(0, 0, 60, true, true)).toBe(0)
+    expect(valueToKnobFraction(0.001, 0, 60, true, true)).toBeCloseTo(0.08)
+    expect(valueToKnobFraction(1, 0, 60, true, true)).toBeLessThan(0.7)
+    expect(knobValueFromDrag(0, 0, 0, 60, true, false, true)).toBe(0)
+    expect(knobValueFromDrag(0, 24, 0, 60, true, false, true)).toBeGreaterThan(0)
+    expect(knobValueFromDrag(1, 0, 0, 60, true, false, true)).toBeCloseTo(1)
+  })
 })

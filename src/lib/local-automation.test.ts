@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { automationTargetKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
-import { normalizeLocalAutomationEnvelopes } from './local-automation'
+import 'fake-indexeddb/auto'
+import { automationTargetKey, synthAutomationKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
+import { loadLocalAutomationEnvelopes, normalizeLocalAutomationEnvelopes, setLocalAutomationEnvelope } from './local-automation'
 
 const envelope = (input: Partial<AutomationEnvelope> & Pick<AutomationEnvelope, 'id' | 'target' | 'targetKey' | 'parameterId' | 'updatedAt'>): AutomationEnvelope => ({
   projectId: 'project-1',
@@ -49,5 +50,47 @@ describe('normalizeLocalAutomationEnvelopes', () => {
 
     expect(rows).toHaveLength(1)
     expect(rows[0]?.targetKey).toBe(automationTargetKey({ kind: 'master' }, 'volume'))
+  })
+
+  test('recognizes and normalizes synth instrument envelopes without an effect instance target', () => {
+    const target: AutomationTarget = { kind: 'track', trackId: 'track:one' }
+    const parameterId = synthAutomationKey('track:one', 'instrument:synth:one', 'amp.release')
+    const rows = normalizeLocalAutomationEnvelopes([
+      envelope({
+        id: 'synth-envelope',
+        target,
+        targetKey: 'legacy:synth',
+        parameterId,
+        updatedAt: 1,
+        points: [{ id: 'point', timeSec: 0, value: 0.3, interpolation: 'hold' }],
+      }),
+    ])
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: 'synth-envelope',
+        parameterId,
+        targetKey: automationTargetKey(target, parameterId),
+      }),
+    ])
+  })
+
+  test('saves and loads synth instrument envelopes without an effect instance target', async () => {
+    const target: AutomationTarget = { kind: 'track', trackId: 'track:local-synth' }
+    const parameterId = synthAutomationKey('track:local-synth', 'instrument:synth:local', 'filter.frequency')
+    await setLocalAutomationEnvelope('project:local-synth', envelope({
+      id: 'saved-synth-envelope',
+      target,
+      targetKey: 'legacy:synth',
+      parameterId,
+      updatedAt: 1,
+    }))
+
+    await expect(loadLocalAutomationEnvelopes('project:local-synth')).resolves.toEqual([
+      expect.objectContaining({
+        id: 'saved-synth-envelope',
+        targetKey: automationTargetKey(target, parameterId),
+      }),
+    ])
   })
 })

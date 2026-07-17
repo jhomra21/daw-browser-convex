@@ -1,33 +1,31 @@
 import { getScheduledMidiEvents } from './audio-scheduling'
-import { createSynthVoiceOscillators, getSynthVoiceConfig, getSynthVoiceVelocity, scheduleSynthVoiceEnvelope } from './synth-voice'
-import { createDefaultSynthParams, normalizeSynthParams, type ArpParams, type SynthParamsInput } from '@daw-browser/shared'
-import { disconnectAudioNodes } from './effects/chain'
-import { stopAndDisconnectSource, type SourceRegistry } from './source-registry'
+import { createSynthOutputChain, getSynthFilterCutoff, scheduleSynthVoice, type SynthAutomationEnvelopes, type SynthVoiceHandle } from './synth-voice'
+import { chooseSynthVoiceVictim, isSynthVoiceSoundingAt } from './synth-voice-allocation'
+import {
+  createDefaultSynthParams,
+  normalizeSynthParams,
+  parseSynthAutomationKey,
+  type ArpParams,
+  type AutomationEnvelope,
+  type SynthParams,
+  type SynthParamsInput,
+  type SynthAutomationParameterId,
+} from '@daw-browser/shared'
+import type { AutomationAudioBinding } from './automation'
+import type { SourceRegistry } from './source-registry'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
 
-type ActiveNote = {
-  trackId: string
-  clipId: string
-  oscs: OscillatorNode[]
-  remainingOscillators: number
-  gain: GainNode
-  amp: number
-  startCtx: number
-  endCtx: number
-  releaseStartCtx: number
-  attackSec: number
-  releaseSec: number
-}
-
-type TrackSynthConfig = {
-  wave1: OscillatorType
-  wave2: OscillatorType
-  gain: number
-  attackMs: number
-  releaseMs: number
+type TrackSynthRuntimeState = {
+  instanceId?: string
+  params: SynthParams
+  output: GainNode
+  outputPan: StereoPannerNode
+  voices: SynthVoiceHandle[]
+  allocation: SynthVoiceHandle[]
+  nextVoiceId: number
 }
 
 type SynthRuntimeOptions = {
@@ -38,174 +36,349 @@ type SynthRuntimeOptions = {
   ensureTrackInput: (trackId: string) => GainNode
   sources: SourceRegistry
   getArpeggiator?: (trackId: string) => ArpParams | undefined
+  getAutomationEnvelopes?: () => readonly AutomationEnvelope[]
 }
 
+const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === right || (
+  left.gain === right.gain
+  && left.pan === right.pan
+  && left.oscillators[0].level === right.oscillators[0].level
+  && left.oscillators[0].enabled === right.oscillators[0].enabled
+  && left.oscillators[0].wave === right.oscillators[0].wave
+  && left.oscillators[0].octave === right.oscillators[0].octave
+  && left.oscillators[0].semitone === right.oscillators[0].semitone
+  && left.oscillators[0].detuneCents === right.oscillators[0].detuneCents
+  && left.oscillators[1].level === right.oscillators[1].level
+  && left.oscillators[1].enabled === right.oscillators[1].enabled
+  && left.oscillators[1].wave === right.oscillators[1].wave
+  && left.oscillators[1].octave === right.oscillators[1].octave
+  && left.oscillators[1].semitone === right.oscillators[1].semitone
+  && left.oscillators[1].detuneCents === right.oscillators[1].detuneCents
+  && left.noise.enabled === right.noise.enabled
+  && left.noise.level === right.noise.level
+  && left.filter.enabled === right.filter.enabled
+  && left.filter.mode === right.filter.mode
+  && left.filter.frequencyHz === right.filter.frequencyHz
+  && left.filter.q === right.filter.q
+  && left.filter.keyTracking === right.filter.keyTracking
+  && left.filter.envelopeAmountOctaves === right.filter.envelopeAmountOctaves
+  && left.ampEnvelope.attackSec === right.ampEnvelope.attackSec
+  && left.ampEnvelope.decaySec === right.ampEnvelope.decaySec
+  && left.ampEnvelope.sustain === right.ampEnvelope.sustain
+  && left.ampEnvelope.releaseSec === right.ampEnvelope.releaseSec
+  && left.filter.envelope.attackSec === right.filter.envelope.attackSec
+  && left.filter.envelope.decaySec === right.filter.envelope.decaySec
+  && left.filter.envelope.sustain === right.filter.envelope.sustain
+  && left.filter.envelope.releaseSec === right.filter.envelope.releaseSec
+  && left.lfo.enabled === right.lfo.enabled
+  && left.lfo.wave === right.lfo.wave
+  && left.lfo.frequencyHz === right.lfo.frequencyHz
+  && left.lfo.pitchCents === right.lfo.pitchCents
+  && left.lfo.filterOctaves === right.lfo.filterOctaves
+  && left.lfo.amp === right.lfo.amp
+  && left.lfo.pan === right.lfo.pan
+  && left.polyphony === right.polyphony
+  && left.retrigger === right.retrigger
+)
+
 export function createSynthRuntime(options: SynthRuntimeOptions) {
-  const configs = new Map<string, TrackSynthConfig>()
-  const activeOscillatorsByTrack = new Map<string, Set<OscillatorNode>>()
-  const gainNodes = new Map<string, GainNode>()
-  const activeNotesByTrack = new Map<string, Set<ActiveNote>>()
-  const arpeggiators = new Map<string, ArpParams>()
-
-  const computeCurrentAmp = (note: ActiveNote, nowCtx: number) => {
-    const { startCtx, endCtx, releaseStartCtx, attackSec, amp } = note
-    if (nowCtx <= startCtx) return 0
-    const attackEnd = startCtx + Math.max(0.001, attackSec)
-    if (nowCtx <= attackEnd) {
-      const t = (nowCtx - startCtx) / Math.max(0.001, attackSec)
-      return amp * Math.max(0, Math.min(1, t))
-    }
-    if (nowCtx <= releaseStartCtx) return amp
-    if (nowCtx >= endCtx) return 0
-    const relDur = Math.max(0.001, endCtx - releaseStartCtx)
-    const t = (nowCtx - releaseStartCtx) / relDur
-    return amp * Math.max(0, Math.min(1, 1 - t))
+  const states = new Map<string, TrackSynthRuntimeState>()
+  const smooth = (param: AudioParam | undefined, value: number, now: number) => {
+    if (!param) return
+    param.cancelScheduledValues(now)
+    param.setTargetAtTime(value, now, 0.01)
   }
-
-  const stopActiveNote = (note: ActiveNote) => {
-    for (const oscillator of note.oscs) {
-      stopAndDisconnectSource(oscillator)
-      options.sources.remove(note.clipId, oscillator)
-    }
-    disconnectAudioNodes([note.gain])
-
-    const trackOscs = activeOscillatorsByTrack.get(note.trackId)
-    if (trackOscs) {
-      for (const oscillator of note.oscs) trackOscs.delete(oscillator)
-      if (trackOscs.size === 0) activeOscillatorsByTrack.delete(note.trackId)
-    }
-
-    const notes = activeNotesByTrack.get(note.trackId)
-    if (notes) {
-      notes.delete(note)
-      if (notes.size === 0) activeNotesByTrack.delete(note.trackId)
-    }
-  }
-
-  const stopClip = (clipId: string) => {
-    for (const notes of Array.from(activeNotesByTrack.values())) {
-      for (const note of Array.from(notes)) {
-        if (note.clipId === clipId) stopActiveNote(note)
-      }
-    }
-  }
-
-  const stopAll = () => {
-    for (const notes of Array.from(activeNotesByTrack.values())) {
-      for (const note of Array.from(notes)) stopActiveNote(note)
-    }
-  }
-
-  const retargetActiveNotesForTrack = (trackId: string) => {
-    const ctx = options.getAudioContext()
-    if (!ctx) return
-    const synth = configs.get(trackId)
-    if (!synth) return
-    const notes = activeNotesByTrack.get(trackId)
-    if (!notes || notes.size === 0) return
-    const now = ctx.currentTime
-    const attackSec = Math.max(0.001, (synth.attackMs ?? 5) / 1000)
-    const releaseSec = Math.max(0.001, (synth.releaseMs ?? 30) / 1000)
-    const EPS = 1e-4
-    for (const note of Array.from(notes)) {
-      const param = note.gain.gain
-      try { param.cancelScheduledValues(now) } catch {}
-      const currentAmp = Math.max(EPS, computeCurrentAmp(note, now))
-      try { param.setValueAtTime(currentAmp, now) } catch {}
-
-      const attackEndNew = note.startCtx + attackSec
-      const releaseStartNew = Math.max(attackEndNew, note.endCtx - releaseSec)
-
-      if (now < attackEndNew) {
-        try { param.exponentialRampToValueAtTime(Math.max(EPS, note.amp), attackEndNew) } catch {}
-      }
-      if (releaseStartNew > Math.max(now, attackEndNew)) {
-        try { param.setValueAtTime(Math.max(EPS, note.amp), releaseStartNew) } catch {}
-      }
-      try { param.exponentialRampToValueAtTime(EPS, note.endCtx) } catch {}
-      try { param.setValueAtTime(0, note.endCtx + 1e-4) } catch {}
-
-      note.attackSec = attackSec
-      note.releaseSec = releaseSec
-      note.releaseStartCtx = releaseStartNew
-    }
-  }
-
-  const ensureTrackSynthGainNode = (trackId: string): GainNode => {
+  const ensureState = (trackId: string): TrackSynthRuntimeState | undefined => {
     options.ensureAudio()
-    const trackInput = options.ensureTrackInput(trackId)
     const ctx = options.getAudioContext()
-    if (!ctx) return trackInput
-    let node = gainNodes.get(trackId)
-    if (!node) {
-      node = ctx.createGain()
-      const synth = configs.get(trackId)
-      node.gain.value = synth?.gain ?? 0.8
-      node.connect(trackInput)
-      gainNodes.set(trackId, node)
+    if (!ctx) return undefined
+    let state = states.get(trackId)
+    if (!state) {
+      const params = createDefaultSynthParams()
+      const { output, outputPan } = createSynthOutputChain(ctx, options.ensureTrackInput(trackId), params.gain, params.pan, ctx.currentTime)
+      state = { params, output, outputPan, voices: [], allocation: [], nextVoiceId: 1 }
+      states.set(trackId, state)
     }
-    return node
+    return state
   }
-
+  const enforcePolyphony = (state: TrackSynthRuntimeState, now: number) => {
+    const allocated = state.allocation
+      .filter((voice) => voice.effectiveEndTime > now)
+      .toSorted((left, right) => (
+        left.scheduledStartTime - right.scheduledStartTime || left.id - right.id
+      ))
+    const current = allocated.filter((voice) => voice.scheduledStartTime <= now)
+    while (true) {
+      const victim = chooseSynthVoiceVictim(current, state.params.polyphony + 1, now)
+      if (!victim) break
+      victim.stop(now)
+      current.splice(current.indexOf(victim), 1)
+    }
+    for (const voice of allocated) {
+      if (voice.scheduledStartTime <= now || voice.effectiveEndTime <= voice.scheduledStartTime) continue
+      const victim = chooseSynthVoiceVictim(current, state.params.polyphony, voice.scheduledStartTime)
+      if (victim) {
+        victim.stop(voice.scheduledStartTime)
+        current.splice(current.indexOf(victim), 1)
+      }
+      current.push(voice)
+    }
+    state.allocation = current
+  }
+  const removeVoice = (trackId: string, voice: SynthVoiceHandle) => {
+    const state = states.get(trackId)
+    if (!state) return
+    state.voices = state.voices.filter((candidate) => candidate !== voice)
+    state.allocation = state.allocation.filter((candidate) => candidate !== voice)
+    if (voice.clipId) for (const source of voice.sources) options.sources.remove(voice.clipId, source)
+  }
+  const triggerNote = (input: {
+    trackId: string
+    pitch: number
+    velocity?: number
+    clipGain?: number
+    when: number
+    durationSec: number
+    clipId?: string
+    timelineStartSec?: number
+    automationEnvelopes?: SynthAutomationEnvelopes
+    scheduleVoiceAutomation?: boolean
+    deferPolyphonyEnforcement?: boolean
+  }): number | undefined => {
+    const state = ensureState(input.trackId)
+    const ctx = options.getAudioContext()
+    if (!state || !ctx) return undefined
+    if (!state.params.retrigger) {
+      const legato = state.voices.find((voice) => voice.pitch === input.pitch && isSynthVoiceSoundingAt(voice, input.when))
+      if (legato) return legato.noteInstanceId
+    }
+    const noteInstanceId = state.nextVoiceId
+    state.nextVoiceId += 1
+    const voice = scheduleSynthVoice(ctx, {
+      id: noteInstanceId,
+      noteInstanceId,
+      pitch: input.pitch,
+      velocity: input.velocity,
+      clipGain: input.clipGain,
+      when: input.when,
+      durationSec: input.durationSec,
+      clipId: input.clipId,
+      seedKey: input.trackId,
+      params: state.params,
+      destination: state.outputPan,
+      timelineStartSec: input.timelineStartSec,
+      timelineToCtxTime: input.timelineStartSec === undefined
+        ? undefined
+        : ((timelineStartSec) => (timelineSec: number) => input.when + (timelineSec - timelineStartSec))(input.timelineStartSec),
+      automationEnvelopes: input.automationEnvelopes ?? getTrackAutomationEnvelopes(input.trackId, state.instanceId),
+      scheduleVoiceAutomation: input.scheduleVoiceAutomation,
+      onEnded: (ended) => removeVoice(input.trackId, ended),
+    })
+    state.voices.push(voice)
+    state.allocation.push(voice)
+    if (!input.deferPolyphonyEnforcement) enforcePolyphony(state, ctx.currentTime)
+    if (input.clipId) for (const source of voice.sources) options.sources.add(input.clipId, source)
+    return noteInstanceId
+  }
+  const stopVoice = (voice: SynthVoiceHandle, when: number) => voice.stop(when)
+  const getTrackAutomationEnvelopes = (trackId: string, instanceId: string | undefined): SynthAutomationEnvelopes => {
+    const envelopes = new Map<SynthAutomationParameterId, AutomationEnvelope>()
+    for (const envelope of options.getAutomationEnvelopes?.() ?? []) {
+      const key = parseSynthAutomationKey(envelope.parameterId)
+      if (envelope.enabled && key?.trackId === trackId && key.instanceId === instanceId) envelopes.set(key.parameterId, envelope)
+    }
+    return envelopes
+  }
   const disposeTrack = (trackId: string) => {
-    const synthGain = gainNodes.get(trackId)
-    disconnectAudioNodes([synthGain])
-    gainNodes.delete(trackId)
-    configs.delete(trackId)
-    arpeggiators.delete(trackId)
-
-    const notes = activeNotesByTrack.get(trackId)
-    if (notes) for (const note of Array.from(notes)) stopActiveNote(note)
-    activeNotesByTrack.delete(trackId)
-    activeOscillatorsByTrack.delete(trackId)
+    const state = states.get(trackId)
+    if (state) {
+      for (const voice of state.voices) stopVoice(voice, 0)
+      try { state.output.disconnect() } catch {}
+      try { state.outputPan.disconnect() } catch {}
+    }
+    states.delete(trackId)
+  }
+  const stopClip = (clipId: string) => {
+    const now = options.getAudioContext()?.currentTime ?? 0
+    for (const state of states.values()) {
+      for (const voice of state.voices) {
+        if (voice.clipId === clipId) {
+          voice.stop(now)
+          for (const source of voice.sources) options.sources.remove(clipId, source)
+        }
+      }
+    }
+  }
+  const stopAll = () => {
+    const now = options.getAudioContext()?.currentTime ?? 0
+    for (const state of states.values()) {
+      for (const voice of state.voices) {
+        voice.stop(now)
+        if (voice.clipId) for (const source of voice.sources) options.sources.remove(voice.clipId, source)
+      }
+    }
   }
 
   return {
-    setTrackSynth: (trackId: string, params: SynthParamsInput) => {
-      const synth = normalizeSynthParams(params)
-      const { wave1, wave2, gain, attackMs, releaseMs } = synth
-      configs.set(trackId, { wave1, wave2, gain, attackMs, releaseMs })
-      const gainNode = gainNodes.get(trackId)
-      if (gainNode) {
-        try { gainNode.gain.value = gain } catch {}
+    setTrackSynth: (trackId: string, params: SynthParamsInput, instanceId?: string) => {
+      const state = ensureState(trackId)
+      if (!state) return
+      const nextParams = normalizeSynthParams(params)
+      const previousParams = state.params
+      if (synthParamsEqual(previousParams, nextParams)) {
+        state.instanceId = instanceId ?? state.instanceId
+        state.params = nextParams
+        return
       }
-      const activeNotes = activeNotesByTrack.get(trackId)
-      if (activeNotes) {
-        for (const note of activeNotes) {
-          const [osc1, osc2] = note.oscs
-          if (osc1) {
-            try { osc1.type = wave1 } catch {}
+      state.params = nextParams
+      state.instanceId = instanceId ?? state.instanceId
+      const now = options.getAudioContext()?.currentTime ?? 0
+      if (previousParams.gain !== nextParams.gain) smooth(state.output.gain, nextParams.gain, now)
+      if (previousParams.pan !== nextParams.pan) smooth(state.outputPan.pan, nextParams.pan, now)
+      const envelopesChanged = (
+        previousParams.ampEnvelope.attackSec !== nextParams.ampEnvelope.attackSec
+        || previousParams.ampEnvelope.decaySec !== nextParams.ampEnvelope.decaySec
+        || previousParams.ampEnvelope.sustain !== nextParams.ampEnvelope.sustain
+        || previousParams.ampEnvelope.releaseSec !== nextParams.ampEnvelope.releaseSec
+        || previousParams.filter.envelopeAmountOctaves !== nextParams.filter.envelopeAmountOctaves
+        || previousParams.filter.envelope.attackSec !== nextParams.filter.envelope.attackSec
+        || previousParams.filter.envelope.decaySec !== nextParams.filter.envelope.decaySec
+        || previousParams.filter.envelope.sustain !== nextParams.filter.envelope.sustain
+        || previousParams.filter.envelope.releaseSec !== nextParams.filter.envelope.releaseSec
+      )
+      const lfoWasEnabled = previousParams.lfo.enabled
+      for (const voice of state.voices) {
+        const filterEnabled = nextParams.filter.enabled
+        if (previousParams.filter.enabled !== filterEnabled || previousParams.filter.mode !== nextParams.filter.mode) {
+          voice.filter.type = filterEnabled ? nextParams.filter.mode : 'allpass'
+        }
+        if (
+          previousParams.filter.enabled !== filterEnabled
+          || previousParams.filter.frequencyHz !== nextParams.filter.frequencyHz
+          || previousParams.filter.keyTracking !== nextParams.filter.keyTracking
+        ) {
+          smooth(
+            voice.bindings.filterFrequency,
+            filterEnabled
+              ? getSynthFilterCutoff(nextParams.filter.frequencyHz, voice.pitch, nextParams.filter.keyTracking, options.getAudioContext()?.sampleRate ?? 44_100)
+              : getSynthFilterCutoff(20_000, voice.pitch, 0, options.getAudioContext()?.sampleRate ?? 44_100),
+            now,
+          )
+        }
+        if (previousParams.filter.enabled !== filterEnabled || previousParams.filter.q !== nextParams.filter.q) {
+          smooth(voice.bindings.filterQ, filterEnabled ? nextParams.filter.q : 0.0001, now)
+        }
+        for (const index of [0, 1] as const) {
+          if (previousParams.oscillators[index].enabled !== nextParams.oscillators[index].enabled) {
+            smooth(voice.bindings.oscillatorGates[index], nextParams.oscillators[index].enabled ? 1 : 0, now)
           }
-          if (osc2) {
-            try { osc2.type = wave2 } catch {}
+          if (previousParams.oscillators[index].level !== nextParams.oscillators[index].level) {
+            smooth(voice.bindings.oscillatorLevels[index], nextParams.oscillators[index].level, now)
+          }
+          if (previousParams.oscillators[index].detuneCents !== nextParams.oscillators[index].detuneCents) {
+            smooth(voice.bindings.oscillatorDetunes[index], nextParams.oscillators[index].detuneCents, now)
           }
         }
+        if (previousParams.noise.enabled !== nextParams.noise.enabled) {
+          smooth(voice.bindings.noiseGate, nextParams.noise.enabled ? 1 : 0, now)
+        }
+        if (previousParams.noise.level !== nextParams.noise.level) {
+          smooth(voice.bindings.noiseLevel, nextParams.noise.level, now)
+        }
+        if (previousParams.lfo.enabled !== nextParams.lfo.enabled || previousParams.lfo.frequencyHz !== nextParams.lfo.frequencyHz) {
+          smooth(voice.bindings.lfoRate, nextParams.lfo.frequencyHz, now)
+        }
+        const lfoEnabled = nextParams.lfo.enabled
+        if (previousParams.lfo.enabled !== lfoEnabled || previousParams.lfo.pitchCents !== nextParams.lfo.pitchCents) smooth(voice.bindings.lfoDepths.pitch, lfoEnabled ? nextParams.lfo.pitchCents : 0, now)
+        if (previousParams.lfo.enabled !== lfoEnabled || previousParams.lfo.filterOctaves !== nextParams.lfo.filterOctaves) smooth(voice.bindings.lfoDepths.filter, lfoEnabled ? nextParams.lfo.filterOctaves * 1200 : 0, now)
+        if (previousParams.lfo.enabled !== lfoEnabled || previousParams.lfo.amp !== nextParams.lfo.amp) smooth(voice.bindings.lfoDepths.amp, lfoEnabled ? nextParams.lfo.amp : 0, now)
+        if (previousParams.lfo.enabled !== lfoEnabled || previousParams.lfo.pan !== nextParams.lfo.pan) smooth(voice.bindings.lfoDepths.pan, lfoEnabled ? nextParams.lfo.pan : 0, now)
+        if (envelopesChanged) {
+          voice.retargetEnvelopes(
+            now,
+            nextParams.ampEnvelope,
+            nextParams.filter.envelope,
+            nextParams.filter.enabled ? nextParams.filter.envelopeAmountOctaves : 0,
+          )
+        }
+        if (!lfoWasEnabled && lfoEnabled) {
+          voice.rescheduleLfoAutomation(getTrackAutomationEnvelopes(trackId, state.instanceId), now)
+        }
       }
-      retargetActiveNotesForTrack(trackId)
-    },
-    setTrackArpeggiator: (trackId: string, params: ArpParams) => {
-      arpeggiators.set(trackId, params)
-    },
-    clearTrackArpeggiator: (trackId: string) => {
-      arpeggiators.delete(trackId)
+      enforcePolyphony(state, now)
     },
     clearTrackSynth: (trackId: string) => {
-      configs.delete(trackId)
-      const gainNode = gainNodes.get(trackId)
-      if (gainNode) {
-        try { gainNode.gain.value = createDefaultSynthParams().gain } catch {}
-      }
+      disposeTrack(trackId)
     },
-    getTrackSynthGainNode: ensureTrackSynthGainNode,
-    getTrackSynthPreviewState: (trackId: string) => {
-      const synth = configs.get(trackId)
-      if (!synth) return null
-      return {
-        wave1: synth.wave1,
-        wave2: synth.wave2,
-      }
+    triggerNote,
+    previewNote: (trackId: string, pitch: number, velocity = 0.9, durationSec = 0.5) => {
+      const ctx = options.getAudioContext()
+      return ctx ? triggerNote({ trackId, pitch, velocity, when: ctx.currentTime, durationSec }) : undefined
     },
-    scheduleMidiClip: (track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, endLimitSec?: number): boolean => {
+    startPreviewNote: (trackId: string, pitch: number, velocity = 0.9) => {
+      const ctx = options.getAudioContext()
+      return ctx ? triggerNote({ trackId, pitch, velocity, when: ctx.currentTime, durationSec: 86_400 }) : undefined
+    },
+    resolveAutomationBindings: (trackId: string, parameterId: string): AutomationAudioBinding[] => {
+      const state = states.get(trackId)
+      const key = parseSynthAutomationKey(parameterId)
+      if (!state || !key || key.instanceId !== state.instanceId) return []
+      if (key.parameterId === 'output.gain') return [{ param: state.output.gain, valueToAudioValue: (value) => value }]
+      if (key.parameterId === 'output.pan') return [{ param: state.outputPan.pan, valueToAudioValue: (value) => value }]
+      if (!state.params.lfo.enabled && key.parameterId.startsWith('lfo.')) return []
+      const sampleRate = options.getAudioContext()?.sampleRate ?? 44_100
+      return state.voices.flatMap((voice): AutomationAudioBinding[] => {
+        const binding = key.parameterId === 'osc1.level'
+          ? voice.bindings.oscillatorLevels[0]
+          : key.parameterId === 'osc1.detune'
+            ? voice.bindings.oscillatorDetunes[0]
+            : key.parameterId === 'osc2.level'
+              ? voice.bindings.oscillatorLevels[1]
+              : key.parameterId === 'osc2.detune'
+                ? voice.bindings.oscillatorDetunes[1]
+                : key.parameterId === 'noise.level'
+                  ? voice.bindings.noiseLevel
+                : key.parameterId === 'filter.frequency'
+                  ? voice.bindings.filterFrequency
+                  : key.parameterId === 'filter.q'
+                    ? voice.bindings.filterQ
+                    : key.parameterId === 'lfo.rate'
+                      ? voice.bindings.lfoRate
+                      : key.parameterId === 'lfo.pitchDepth'
+                        ? voice.bindings.lfoDepths.pitch
+                        : key.parameterId === 'lfo.filterDepth'
+                          ? voice.bindings.lfoDepths.filter
+                          : key.parameterId === 'lfo.ampDepth'
+                            ? voice.bindings.lfoDepths.amp
+                            : key.parameterId === 'lfo.panDepth'
+                              ? voice.bindings.lfoDepths.pan
+                              : undefined
+        if (!binding) return []
+        return [{
+          param: binding,
+          valueToAudioValue: (value) => (
+            key.parameterId === 'filter.frequency'
+              ? getSynthFilterCutoff(value, voice.pitch, state.params.filter.keyTracking, sampleRate)
+              : key.parameterId === 'lfo.filterDepth'
+                ? value * 1200
+                : value
+          ),
+        }]
+      })
+    },
+    releasePreviewNote: (trackId: string, noteInstanceId: number) => {
+      const voice = states.get(trackId)?.voices.find((candidate) => candidate.noteInstanceId === noteInstanceId)
+      const when = options.getAudioContext()?.currentTime
+      if (voice && when !== undefined) voice.release(when)
+    },
+    scheduleMidiClip: (
+      track: RuntimeTrack,
+      clip: RuntimeClip,
+      playheadSec: number,
+      nowCtx: number,
+      endLimitSec?: number,
+      scheduleOptions?: { scheduleVoiceAutomation?: boolean },
+    ): boolean => {
       const ctx = options.getAudioContext()
       if (!ctx) return false
       const midi = clip.midi
@@ -217,99 +390,36 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         notes: midi.notes,
         rangeStartSec: playheadSec,
         rangeEndSec: endLimitSec,
-        arp: options.getArpeggiator?.(track.id) ?? arpeggiators.get(track.id),
+        arp: options.getArpeggiator?.(track.id),
       })
-      const voice = getSynthVoiceConfig({ synth: configs.get(track.id), midi })
-
-      for (const note of scheduledNotes) {
+      const state = states.get(track.id)
+      const automationEnvelopes = state ? getTrackAutomationEnvelopes(track.id, state.instanceId) : new Map()
+      for (const note of scheduledNotes.toSorted((left, right) => left.startSec - right.startSec)) {
         const durationSec = note.endSec - note.startSec
         if (durationSec <= 0) continue
-
-        const startCtx = Math.max(nowCtx, options.timelineToCtxTime(note.startSec))
-        const oscs = createSynthVoiceOscillators(ctx, {
-          startTime: startCtx,
-          pitch: note.pitch,
-          wave1: voice.wave1,
-          wave2: voice.wave2,
-        })
-        let trackOscs = activeOscillatorsByTrack.get(track.id)
-        if (!trackOscs) {
-          trackOscs = new Set<OscillatorNode>()
-          activeOscillatorsByTrack.set(track.id, trackOscs)
-        }
-        for (const osc of oscs) trackOscs.add(osc)
-        const gain = ctx.createGain()
-        const peakGain = (getSynthVoiceVelocity(note.velocity) * voice.clipGain) / oscs.length
-        const envelope = scheduleSynthVoiceEnvelope(gain.gain, {
-          startTime: startCtx,
-          durationSec,
-          attackSec: voice.attackSec,
-          releaseSec: voice.releaseSec,
-          peakGain,
-        })
-        for (const osc of oscs) osc.connect(gain)
-        gain.connect(ensureTrackSynthGainNode(track.id))
-
-        for (const osc of oscs) {
-          try { osc.start(startCtx) } catch {}
-          try { osc.stop(envelope.endTime) } catch {}
-        }
-        const noteEntry: ActiveNote = {
+        triggerNote({
           trackId: track.id,
+          pitch: note.pitch,
+          velocity: note.velocity,
+          clipGain: midi.gain,
+          when: Math.max(nowCtx, options.timelineToCtxTime(note.startSec)),
+          durationSec,
           clipId: clip.id,
-          oscs,
-          remainingOscillators: oscs.length,
-          gain,
-          amp: peakGain,
-          startCtx,
-          endCtx: envelope.endTime,
-          releaseStartCtx: envelope.releaseStartTime,
-          attackSec: voice.attackSec,
-          releaseSec: voice.releaseSec,
-        }
-        let notes = activeNotesByTrack.get(track.id)
-        if (!notes) {
-          notes = new Set<ActiveNote>()
-          activeNotesByTrack.set(track.id, notes)
-        }
-        notes.add(noteEntry)
-        const onOscEnded = (osc: OscillatorNode) => {
-          const set = activeOscillatorsByTrack.get(track.id)
-          if (set) {
-            set.delete(osc)
-            if (set.size === 0) activeOscillatorsByTrack.delete(track.id)
-          }
-          options.sources.remove(clip.id, osc)
-          const activeNotes = activeNotesByTrack.get(track.id)
-          if (activeNotes && !activeNotes.has(noteEntry)) return
-          noteEntry.remainingOscillators = Math.max(0, noteEntry.remainingOscillators - 1)
-          if (noteEntry.remainingOscillators > 0) return
-          disconnectAudioNodes([noteEntry.gain])
-          if (activeNotes) {
-            activeNotes.delete(noteEntry)
-            if (activeNotes.size === 0) activeNotesByTrack.delete(track.id)
-          }
-        }
-        for (const osc of oscs) {
-          osc.onended = () => onOscEnded(osc)
-          options.sources.add(clip.id, osc)
-        }
+          timelineStartSec: note.startSec,
+          automationEnvelopes,
+          scheduleVoiceAutomation: scheduleOptions?.scheduleVoiceAutomation,
+          deferPolyphonyEnforcement: true,
+        })
       }
+      if (state) enforcePolyphony(state, ctx.currentTime)
 
       return true
     },
     stopClip,
     stopAll,
     disposeTrack,
-    clearActiveOscillators: () => {
-      activeOscillatorsByTrack.clear()
-    },
     clear: () => {
-      configs.clear()
-      arpeggiators.clear()
-      gainNodes.clear()
-      activeNotesByTrack.clear()
-      activeOscillatorsByTrack.clear()
+      for (const trackId of states.keys()) disposeTrack(trackId)
     },
   }
 }

@@ -10,7 +10,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
-import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -30,7 +30,6 @@ import Phaser from "~/components/effects/Phaser";
 import Tremolo from "~/components/effects/Tremolo";
 import Spectral from "~/components/effects/Spectral";
 import Synth from "~/components/effects/Synth";
-import SynthCard from "~/components/effects/SynthCard";
 import DrumRack from "~/components/effects/DrumRack";
 import Sampler from "~/components/effects/Sampler";
 import Granular from "~/components/effects/Granular";
@@ -62,6 +61,7 @@ import {
   getAudioEffectDeviceCatalogEntry,
 } from "~/lib/device-catalog";
 import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
+import { createSynthAutomationState, overlaySynthAutomationValues } from "~/components/timeline/synth-automation";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -128,12 +128,16 @@ type EffectsPanelInstrumentSectionProps = {
   };
   audioEngine: AudioEngine;
   targetId: string;
+  synthAutomationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
+  synthAutomationParameterIds?: ReadonlyMap<string, string>;
+  synthAutomationDisplayParams?: SynthParams;
+  onSelectSynthAutomationParameter?: (parameterId: string) => void;
+  onManualSynthAutomationOverride?: (parameterId: string) => void;
 };
 
 const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
   <div
     class="flex h-full shrink-0 items-stretch gap-3"
-    classList={{ "pointer-events-none opacity-60": !props.instrument.canWrite }}
   >
     <Show when={props.instrument.state.arp.params()}>
       {(params) => (
@@ -197,16 +201,11 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
       )}
     </Show>
 
-    <Show
-      when={
-        props.instrument.state.synth.isExpandedForCurrentTarget()
-          ? undefined
-          : props.instrument.state.synth.params()
-      }
-    >
+    <Show when={props.instrument.state.synth.params()}>
       {(params) => (
         <Synth
-          params={params()}
+          instanceId={props.instrument.state.synth.instanceId()}
+          params={props.synthAutomationDisplayParams ?? params()}
           onChange={(updates) => {
             if (!props.instrument.canWrite) return;
             props.instrument.state.synth.change(updates);
@@ -215,31 +214,18 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             if (!props.instrument.canWrite) return;
             props.instrument.state.synth.reset();
           }}
-          onExpand={() => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.synth.open();
-          }}
           disabled={!props.instrument.canWrite}
-          variant="compact"
+          automationRangesByParameterId={props.synthAutomationRangesByParameterId}
+          onAutomationParameterTouch={(parameterId) => {
+            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+            if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
+          }}
+          onManualAutomationOverride={(parameterId) => {
+            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+            if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
+          }}
         />
       )}
-    </Show>
-
-    <Show
-      when={
-        !!props.instrument.state.synth.params() &&
-        props.instrument.state.synth.isExpandedForCurrentTarget()
-      }
-    >
-      <div class="flex min-w-48 items-center justify-between border border-border bg-app-surface px-2 py-2 text-muted-foreground">
-        <span class="text-xs">Synth is expanded</span>
-        <button
-          class="border border-border bg-muted px-2 py-1 text-xs text-muted-foreground hover:bg-secondary"
-          onClick={() => props.instrument.state.synth.close()}
-        >
-          Restore
-        </button>
-      </div>
     </Show>
   </div>
 );
@@ -755,33 +741,6 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
   </Show>
 );
 
-type EffectsPanelFloatingSynthProps = {
-  synth: EffectsPanelInstrumentDevice["synth"];
-  canWrite: boolean;
-};
-
-const EffectsPanelFloatingSynth: Component<EffectsPanelFloatingSynthProps> = (props) => {
-  const card = () => props.synth.expandedCard();
-
-  return (
-    <Show when={props.canWrite ? card() : undefined}>
-      {(expandedCard) => (
-        <SynthCard
-          params={expandedCard().params}
-          onChange={expandedCard().onChange}
-          onReset={expandedCard().onReset}
-          x={expandedCard().x}
-          y={expandedCard().y}
-          w={expandedCard().w}
-          h={expandedCard().h}
-          onChangeBounds={props.synth.updateCardBounds}
-          onClose={props.synth.close}
-        />
-      )}
-    </Show>
-  );
-};
-
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const controller = createEffectsPanelController({
     isOpen: () => props.isOpen,
@@ -828,6 +787,20 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     }
     return ranges;
   });
+  const synthAutomation = createMemo(() => {
+    const synthInstanceId = instrument.synth.instanceId();
+    return createSynthAutomationState(
+      props.selectedFXTarget === "master" ? undefined : props.selectedFXTarget,
+      synthInstanceId,
+      props.automationEnvelopes ?? [],
+    );
+  });
+  const synthAutomationDisplayParams = createMemo(() => {
+    const params = instrument.synth.params();
+    return params
+      ? overlaySynthAutomationValues(params, synthAutomation().parameterIds, props.evaluatedValuesByTargetKey)
+      : undefined;
+  });
 
   createEffect(() => {
     if (props.isOpen) return;
@@ -865,6 +838,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         }}
                         audioEngine={props.audioEngine}
                         targetId={props.selectedFXTarget}
+                        synthAutomationRangesByParameterId={synthAutomation().ranges}
+                        synthAutomationParameterIds={synthAutomation().parameterIds}
+                        synthAutomationDisplayParams={synthAutomationDisplayParams()}
+                        onSelectSynthAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
+                        onManualSynthAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
                       />
                     </Show>
                     <EffectsPanelEffectCards
@@ -905,8 +883,6 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       <Show when={!props.isOpen && props.showOpenButton}>
         <EffectsPanelClosedFooter onOpen={props.onOpen} clipTab={props.clipTab} />
       </Show>
-
-      <EffectsPanelFloatingSynth synth={instrument.synth} canWrite={canWriteCurrentTargetEffects()} />
     </>
   );
 };

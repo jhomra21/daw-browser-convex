@@ -4,11 +4,6 @@ import {
   onCleanup,
   type Accessor,
 } from "solid-js";
-import {
-  clampSynthCardBounds,
-  createInitialSynthCardBounds,
-  type SynthCardBounds,
-} from "~/components/effects/synth-card-bounds";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
@@ -18,6 +13,7 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,
   createDefaultSynthParams,
+  mergeSynthParams,
   INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
   createInstrumentInstanceId,
@@ -29,6 +25,7 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   type SamplerParams,
   type SamplerZone,
   type SynthParams,
+  type SynthParamsUpdate,
   type TrackInstrumentParams } from "@daw-browser/shared";
 import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
@@ -67,16 +64,6 @@ type EffectsPanelContext = {
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
 };
 
-type ExpandedSynthBounds = SynthCardBounds & {
-  targetId: string;
-};
-
-type ExpandedSynthCard = ExpandedSynthBounds & {
-  params: SynthParams;
-  onChange: (updates: Partial<SynthParams>) => void;
-  onReset: () => void;
-};
-
 type EffectsPanelInstrumentDevice = {
   addMidiClip: () => Promise<void>;
   addMidiClipToTarget: (targetId: Track["id"], options?: AddMidiClipOptions) => Promise<boolean>;
@@ -94,17 +81,10 @@ type EffectsPanelInstrumentDevice = {
     toggle: (enabled: boolean) => void;
   };
   synth: {
-    change: (updates: Partial<SynthParams>) => void;
-    close: () => void;
-    expandedCard: Accessor<ExpandedSynthCard | null>;
-    isExpandedForCurrentTarget: Accessor<boolean>;
-    open: () => void;
-    openForTarget: (targetId: Track["id"]) => void;
+    change: (updates: SynthParamsUpdate) => void;
+    instanceId: Accessor<string | undefined>;
     params: Accessor<SynthParams | undefined>;
-    readDraftForTarget: (targetId: string) => SynthParams | undefined;
     reset: () => void;
-    syncRemoteForTarget: (targetId: string, params: SynthParams | undefined) => void;
-    updateCardBounds: (next: SynthCardBounds) => void;
   };
   drumRack: {
     assignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
@@ -322,7 +302,7 @@ export function createEffectsPanelInstrumentDevice(
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
       if (params.kind === "synth") {
-        context.audioEngine().setTrackSynth(targetId, params.params);
+        context.audioEngine().setTrackInstrument(targetId, { instrument: params });
         return;
       }
       if (params.kind === "drum-rack") {
@@ -362,8 +342,6 @@ export function createEffectsPanelInstrumentDevice(
     },
   });
 
-  const [expandedSynth, setExpandedSynth] = createSignal<ExpandedSynthBounds | null>(null);
-
   function handleArpChange(updates: Partial<ArpeggiatorParams>): void {
     arpState.update((prev) => ({ ...prev, ...updates }));
   }
@@ -372,43 +350,12 @@ export function createEffectsPanelInstrumentDevice(
     arpState.update((prev) => ({ ...prev, enabled }));
   }
 
-  function handleSynthChange(updates: Partial<SynthParams>): void {
+  function handleSynthChange(updates: SynthParamsUpdate): void {
     instrumentState.update((prev) => ({
       kind: "synth",
       instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
-      params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
+      params: mergeSynthParams(prev.kind === "synth" ? prev.params : createDefaultSynthParams(), updates),
     }));
-  }
-
-  function openSynthForTarget(targetId: Track["id"]): void {
-    const track = getTrackByTargetId(targetId);
-    if (!track || track.kind !== "instrument") return;
-    setExpandedSynth({ targetId, ...createInitialSynthCardBounds() });
-  }
-
-  function openSynthCard(): void {
-    const targetId = getTrackTargetId();
-    if (!targetId) return;
-    openSynthForTarget(targetId);
-  }
-
-  function closeSynthCard(): void {
-    setExpandedSynth(null);
-  }
-
-  function updateSynthCardBounds(next: SynthCardBounds): void {
-    const current = expandedSynth();
-    if (!current) return;
-
-    setExpandedSynth({
-      targetId: current.targetId,
-      ...clampSynthCardBounds(next),
-    });
-  }
-
-  function getSynthParamsForTarget(targetId: string): SynthParams {
-    const current = instrumentState.readForTarget(targetId);
-    return current?.kind === "synth" ? current.params : ensureSynthDefaults(targetId);
   }
 
   function readDrumRackForTarget(targetId: string): DrumRackParams | undefined {
@@ -577,32 +524,13 @@ export function createEffectsPanelInstrumentDevice(
     await addMidiClipToTarget(track.id);
   }
 
-  const expandedSynthCard = createMemo<ExpandedSynthCard | null>(() => {
-    const current = expandedSynth();
-    if (!current) return null;
-
-    return {
-      ...current,
-      params: getSynthParamsForTarget(current.targetId),
-      onChange: (updates) => {
-        instrumentState.updateForTarget(current.targetId, (prev) => ({
-          kind: "synth",
-          instanceId: prev.kind === "synth" ? prev.instanceId : createInstrumentInstanceId(),
-          params: { ...(prev.kind === "synth" ? prev.params : createDefaultSynthParams()), ...updates },
-        }));
-      },
-      onReset: () => {
-        instrumentState.updateForTarget(current.targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(current.targetId) }));
-      },
-    };
-  });
-
-  const isSynthExpandedForCurrentTarget = createMemo(
-    () => expandedSynth()?.targetId === currentTargetId(),
-  );
   const synthParams = createMemo(() => {
     const current = instrumentState.params();
     return current?.kind === "synth" ? current.params : undefined;
+  });
+  const synthInstanceId = createMemo(() => {
+    const current = instrumentState.params();
+    return current?.kind === "synth" ? current.instanceId : undefined;
   });
   const drumRackParams = createMemo(() => {
     const current = instrumentState.params();
@@ -652,27 +580,13 @@ export function createEffectsPanelInstrumentDevice(
     },
     synth: {
       change: handleSynthChange,
-      close: closeSynthCard,
-      expandedCard: expandedSynthCard,
-      isExpandedForCurrentTarget: isSynthExpandedForCurrentTarget,
-      open: openSynthCard,
-      openForTarget: openSynthForTarget,
+      instanceId: synthInstanceId,
       params: synthParams,
-      readDraftForTarget: (targetId) => {
-        const current = instrumentState.readDraftForTarget(targetId);
-        return current?.kind === "synth" ? current.params : undefined;
-      },
       reset: () => {
         const targetId = getTrackTargetId();
         if (!targetId) return;
         instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(targetId) }));
       },
-      syncRemoteForTarget: (targetId, params) => {
-        const instanceId = synthInstanceIdsByTarget.get(targetId) ?? createInstrumentInstanceId();
-        synthInstanceIdsByTarget.set(targetId, instanceId);
-        instrumentState.syncRemoteForTarget(targetId, params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId, params }) : undefined);
-      },
-      updateCardBounds: updateSynthCardBounds,
     },
     drumRack: {
       assignSampleToPad: assignSampleToCurrentDrumRackPad,

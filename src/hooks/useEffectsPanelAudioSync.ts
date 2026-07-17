@@ -255,7 +255,7 @@ export function useEffectsPanelAudioSync(
         if (instrument?.kind === "synth") {
           drumRackBufferSync.clearTrack(track.id);
           samplerBufferSync.clearTrack(track.id);
-          audioEngine.setTrackSynth(track.id, instrument.params);
+          audioEngine.setTrackInstrument(track.id, { instrument });
         } else if (instrument?.kind === "drum-rack") {
           samplerBufferSync.clearTrack(track.id);
           drumRackBufferSync.syncTrack(audioEngine, track.id, instrument.params);

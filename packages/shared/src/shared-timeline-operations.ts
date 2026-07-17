@@ -19,10 +19,10 @@ import type {
   ReverbParamsInput,
   SaturatorParams,
   SaturatorParamsInput,
-  SynthWave,
   TremoloParamsEnvelope,
   UtilityParamsEnvelope,
 } from './effects-params'
+import { parseStrictSynthParams, type SynthParams } from './synth-params'
 import {
   isAudioEffectKind,
   isAudioEffectInstance,
@@ -111,14 +111,6 @@ export type SharedTimelineClipCreatePayload = {
   }
   clipKind?: string
   operationId?: string
-}
-
-type SharedSynthParams = {
-  wave1: SynthWave
-  wave2: SynthWave
-  gain?: number
-  attackMs?: number
-  releaseMs?: number
 }
 
 type SharedReverbParams = Required<Pick<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>> & Omit<ReverbParamsInput, 'enabled' | 'wet' | 'decaySec' | 'preDelayMs'>
@@ -230,7 +222,7 @@ export type SharedTimelineOperation =
     }
   | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId: string } }
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
-  | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SharedSynthParams; instanceId: string } }
+  | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SynthParams; instanceId: string } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string } }
@@ -598,26 +590,7 @@ const readDelayParams = (value: unknown): DelayParams | null => {
   return normalizeDelayParams(params)
 }
 
-const readSynthWave = (value: unknown): SynthWave | null => (
-  value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle' ? value : null
-)
-
-const readSynthParams = (value: unknown): SharedSynthParams | null => {
-  if (!isRecord(value)) return null
-  const wave1 = readSynthWave(value.wave1)
-  const wave2 = readSynthWave(value.wave2)
-  if (!wave1 || !wave2) return null
-  const gain = readOptionalNumber(value.gain)
-  const attackMs = readOptionalNumber(value.attackMs)
-  const releaseMs = readOptionalNumber(value.releaseMs)
-  return {
-    wave1,
-    wave2,
-    ...(gain === undefined ? {} : { gain }),
-    ...(attackMs === undefined ? {} : { attackMs }),
-    ...(releaseMs === undefined ? {} : { releaseMs }),
-  }
-}
+const readSynthParams = (value: unknown): SynthParams | null => parseStrictSynthParams(value) ?? null
 
 const readArpPattern = (value: unknown): ArpeggiatorParams['pattern'] | null => (
   value === 'up' || value === 'down' || value === 'updown' || value === 'random' ? value : null
@@ -1214,6 +1187,15 @@ const parseTrackSynth = (payload: Record<string, unknown>): SharedTimelineOperat
 }
 
 const readTrackInstrumentParams = (value: unknown): TrackInstrumentParams | null => {
+  if (
+    isRecord(value)
+    && value.kind === 'synth'
+    && typeof value.instanceId === 'string'
+    && value.instanceId
+  ) {
+    const params = readSynthParams(value.params)
+    return params ? { kind: 'synth', instanceId: value.instanceId, params } : null
+  }
   return normalizeTrackInstrumentParams(value) ?? null
 }
 

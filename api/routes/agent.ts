@@ -172,7 +172,7 @@ Rules (apply only in Edit mode):
 - Use one-based indices for trackIndex (first track is 1). We will convert internally.
 - Use one-based indices for clipIndices as well (first clip is 1 on its track, sorted by start time). We will convert internally.
 - For setTrackRouting, omit a field to preserve it. Use outputTrackIndex: null to route to master, and sends: [] to clear sends.
-- For setSynthParams, use wave1 and wave2 for oscillator waves. If the user asks for a single synth waveform, set both to the same value.
+- For setSynthParams, use nested oscillators, ampEnvelope, filter, and lfo fields. Legacy wave1 and wave2 remain accepted during migration. If the user asks for a single synth waveform, set both oscillators to the same value.
 - For deleteTrack/moveClip/removeClip/setTiming/removeMany you MUST include a trackIndex.
 - Prefer specifying clipIndex for clip operations; otherwise use clipAtOrAfterSec.
 - For setTrackVolume, if trackIndex is omitted, it applies to the most recently created track.

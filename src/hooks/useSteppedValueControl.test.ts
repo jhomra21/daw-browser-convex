@@ -39,8 +39,8 @@ class CapturedPointerWindow {
   }
 }
 
-const pointerEvent = (clientY: number, shiftKey = false) => ({
-  pointerId: 1,
+const pointerEvent = (clientY: number, shiftKey = false, pointerId = 1) => ({
+  pointerId,
   clientX: 0,
   clientY,
   currentTarget: { setPointerCapture: () => undefined },
@@ -50,6 +50,36 @@ const pointerEvent = (clientY: number, shiftKey = false) => ({
 })
 
 describe('useSteppedValueControl pointer lifecycle', () => {
+  test('does not start a disabled control interaction', () => {
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    const capturedWindow = new CapturedPointerWindow()
+    Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'document', { body: { classList: { add: () => undefined, remove: () => undefined } } })
+
+    try {
+      createRoot((dispose) => {
+        const control = useSteppedValueControl({
+          value: () => 12,
+          min: () => 2,
+          max: () => 24,
+          step: () => 1,
+          disabled: () => true,
+          onValueChange: () => undefined,
+          valueFromDrag: ({ startValue }) => startValue,
+        })
+        Reflect.apply(control.onPointerDown, undefined, [pointerEvent(240)])
+
+        expect(capturedWindow.listenerCount('pointermove')).toBe(0)
+        expect(capturedWindow.listenerCount('pointerup')).toBe(0)
+        dispose()
+      })
+    } finally {
+      Reflect.set(globalThis, 'window', previousWindow)
+      Reflect.set(globalThis, 'document', previousDocument)
+    }
+  })
+
   test('continues emitting pointer moves while the parent value updates', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
@@ -171,6 +201,51 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(capturedWindow.listenerCount('pointerup')).toBe(0)
         expect(capturedWindow.listenerCount('pointercancel')).toBe(0)
         expect(bodyClasses.has('select-none')).toBe(false)
+      })
+    } finally {
+      Reflect.set(globalThis, 'window', previousWindow)
+      Reflect.set(globalThis, 'document', previousDocument)
+    }
+  })
+
+  test('ignores unrelated pointer completion events during an active drag', () => {
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    const capturedWindow = new CapturedPointerWindow()
+    const bodyClasses = new Set<string>()
+    Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'document', {
+      body: {
+        classList: {
+          add: (name: string) => bodyClasses.add(name),
+          remove: (name: string) => bodyClasses.delete(name),
+        },
+      },
+    })
+
+    try {
+      createRoot((dispose) => {
+        const control = useSteppedValueControl({
+          value: () => 12,
+          min: () => 2,
+          max: () => 24,
+          step: () => 1,
+          disabled: () => false,
+          onValueChange: () => undefined,
+          valueFromDrag: ({ startValue }) => startValue,
+        })
+
+        Reflect.apply(control.onPointerDown, undefined, [pointerEvent(240)])
+        capturedWindow.dispatch('pointerup', pointerEvent(240, false, 2))
+        capturedWindow.dispatch('pointercancel', pointerEvent(240, false, 3))
+
+        expect(capturedWindow.listenerCount('pointermove')).toBe(1)
+        expect(bodyClasses.has('select-none')).toBe(true)
+
+        capturedWindow.dispatch('pointerup', pointerEvent(240))
+        expect(capturedWindow.listenerCount('pointermove')).toBe(0)
+        expect(bodyClasses.has('select-none')).toBe(false)
+        dispose()
       })
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)

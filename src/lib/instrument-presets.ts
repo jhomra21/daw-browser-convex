@@ -46,7 +46,15 @@ export const BUILTIN_INSTRUMENT_PRESETS: readonly InstrumentPreset[] = [
     name: "Bright Poly Synth",
     folderId: "synths",
     folderName: "Synths",
-    instrument: synth({ wave1: "sawtooth", wave2: "square", gain: 0.72, attackMs: 8, releaseMs: 95 }),
+    instrument: synth({
+      oscillators: [
+        { wave: "sawtooth", detuneCents: -12, level: 0.7 },
+        { wave: "square", detuneCents: 12, level: 0.42 },
+      ],
+      ampEnvelope: { attackSec: 0.008, releaseSec: 0.22 },
+      filter: { frequencyHz: 6800, q: 0.9 },
+      gain: 0.72,
+    }),
     audioEffects: [
       {
         kind: "delay",
@@ -79,7 +87,15 @@ export const BUILTIN_INSTRUMENT_PRESETS: readonly InstrumentPreset[] = [
     name: "Pluck Arp",
     folderId: "synths",
     folderName: "Synths",
-    instrument: synth({ wave1: "triangle", wave2: "sawtooth", gain: 0.66, attackMs: 0, releaseMs: 80 }),
+    instrument: synth({
+      oscillators: [
+        { wave: "triangle", level: 0.65 },
+        { wave: "sawtooth", octave: 1, level: 0.3 },
+      ],
+      ampEnvelope: { attackSec: 0, decaySec: 0.13, sustain: 0.08, releaseSec: 0.08 },
+      filter: { frequencyHz: 4400, envelopeAmountOctaves: 2.5 },
+      gain: 0.66,
+    }),
     midiEffects: [
       arpeggiator({
         enabled: true,

@@ -1,4 +1,5 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   automationTargetKey,
@@ -16,6 +17,18 @@ type InstrumentEffectRow = {
   type: string;
   instanceId?: string;
   params: unknown;
+};
+
+type SetAutomationEnvelopeRowResult = {
+  changed: boolean;
+  status: "created" | "updated" | "noop";
+  envelopeId: Id<"automationEnvelopes">;
+};
+
+type DeleteAutomationEnvelopeRowResult = {
+  changed: boolean;
+  status: "deleted" | "not-found";
+  envelopeId?: Id<"automationEnvelopes">;
 };
 
 export const readAutomationTrackInstrument = (rows: readonly InstrumentEffectRow[]) => {
@@ -40,7 +53,7 @@ const automationPointValidator = v.object({
 
 const targetKindValidator = v.union(v.literal("track"), v.literal("master"));
 
-const normalizeTrackId = async (ctx: MutationCtx, projectId: string, trackId: string | undefined) => {
+const resolveAutomationTrackId = async (ctx: MutationCtx, projectId: string, trackId: string | undefined) => {
   if (!trackId) return undefined;
   const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
   if (!normalizedTrackId) throw new Error("Invalid automation track id.");
@@ -54,7 +67,7 @@ const normalizeEnvelopeInput = async (
   input: {
     projectId: string;
     targetKind: "track" | "master";
-    trackId?: string;
+    trackId?: Id<"tracks">;
     effectInstanceId?: string;
     parameterId: string;
     points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
@@ -70,9 +83,7 @@ const normalizeEnvelopeInput = async (
   if (descriptor.owner !== "mixer" && !input.effectInstanceId) {
     if (descriptor.owner !== "sampler" && descriptor.owner !== "granular" && descriptor.owner !== "synth") throw new Error("Effect automation requires an effect instance.");
   }
-  const trackId = input.targetKind === "track"
-    ? await normalizeTrackId(ctx, input.projectId, input.trackId)
-    : undefined;
+  const trackId = input.targetKind === "track" ? input.trackId : undefined;
   if (input.targetKind === "track" && !trackId) throw new Error("Track automation requires a track id.");
   const instrumentKey = parseInstrumentAutomationKey(input.parameterId);
   const granularKey = parseGranularAutomationKey(input.parameterId);
@@ -158,13 +169,13 @@ export const setAutomationEnvelopeRow = async (
   input: {
     projectId: string;
     targetKind: "track" | "master";
-    trackId?: string;
+    trackId?: Id<"tracks">;
     effectInstanceId?: string;
     parameterId: string;
     enabled: boolean;
     points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
   },
-) => {
+): Promise<SetAutomationEnvelopeRowResult> => {
   const normalized = await normalizeEnvelopeInput(ctx, input);
   const existing = await ctx.db.query("automationEnvelopes")
     .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
@@ -180,11 +191,17 @@ export const setAutomationEnvelopeRow = async (
     points: normalized.points,
   };
   if (existing) {
-    if (sameEnvelopeState(existing, row)) return { changed: false, value: existing._id };
+    if (sameEnvelopeState(existing, row)) {
+      return { changed: false, status: "noop", envelopeId: existing._id };
+    }
     await ctx.db.patch(existing._id, { ...row, updatedAt: Date.now() });
-    return { changed: true, value: existing._id };
+    return { changed: true, status: "updated", envelopeId: existing._id };
   }
-  return { changed: true, value: await ctx.db.insert("automationEnvelopes", { ...row, updatedAt: Date.now() }) };
+  return {
+    changed: true,
+    status: "created",
+    envelopeId: await ctx.db.insert("automationEnvelopes", { ...row, updatedAt: Date.now() }),
+  };
 };
 
 export const deleteAutomationEnvelopeRow = async (
@@ -192,18 +209,18 @@ export const deleteAutomationEnvelopeRow = async (
   input: {
     projectId: string;
     targetKind: "track" | "master";
-    trackId?: string;
+    trackId?: Id<"tracks">;
     effectInstanceId?: string;
     parameterId: string;
   },
-) => {
+): Promise<DeleteAutomationEnvelopeRowResult> => {
   const normalized = await normalizeEnvelopeInput(ctx, { ...input, points: [] });
   const existing = await ctx.db.query("automationEnvelopes")
     .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
     .unique();
-  if (!existing) return { changed: false, value: null };
+  if (!existing) return { changed: false, status: "not-found" };
   await ctx.db.delete(existing._id);
-  return { changed: true, value: existing._id };
+  return { changed: true, status: "deleted", envelopeId: existing._id };
 };
 
 export const listByProject = query({
@@ -229,9 +246,12 @@ export const serverSetEnvelope = mutation({
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-    const result = await setAutomationEnvelopeRow(ctx, input);
+    const trackId = input.targetKind === "track"
+      ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
+      : undefined;
+    const result = await setAutomationEnvelopeRow(ctx, { ...input, trackId });
     if (result.changed) await advanceProjectRevision(ctx, input.projectId);
-    return result.value;
+    return result.envelopeId;
   },
 });
 
@@ -246,8 +266,11 @@ export const serverDeleteEnvelope = mutation({
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-    const result = await deleteAutomationEnvelopeRow(ctx, input);
+    const trackId = input.targetKind === "track"
+      ? await resolveAutomationTrackId(ctx, input.projectId, input.trackId)
+      : undefined;
+    const result = await deleteAutomationEnvelopeRow(ctx, { ...input, trackId });
     if (result.changed) await advanceProjectRevision(ctx, input.projectId);
-    return result.value;
+    return result.envelopeId ?? null;
   },
 });

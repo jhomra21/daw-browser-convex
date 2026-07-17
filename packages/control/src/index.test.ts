@@ -3,166 +3,367 @@ import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 
 import {
   canonicalJson,
+  controlActionSchemaV1,
   controlCapabilitiesV1,
-  controlCommitRequestSchemaV1,
+  controlCommitResultSchemaV1,
+  controlErrorSchemaV1,
   controlLimitsV1,
+  controlPreviewResultSchemaV1,
+  controlRequestDigestInputV1,
+  findDuplicateCreationClientRefsV1,
   parseControlCommitRequestV1,
+  parseControlPreviewRequestV1,
   projectSnapshotSchemaV1,
+  type ContextualRefV1,
+  type ProcessorTargetV1,
 } from './index'
 
-const commit = (actions: unknown[]) => ({
+const persisted = (id: string): ContextualRefV1 => ({ source: 'persisted', id })
+const client = (clientRef: string): ContextualRefV1 => ({ source: 'client', clientRef })
+const trackTarget = (track: ContextualRefV1): ProcessorTargetV1 => ({
+  kind: 'track',
+  track,
+})
+const masterTarget: ProcessorTargetV1 = { kind: 'master' }
+
+const commit = (actions: unknown[], idempotencyKey = 'request-0001'): {
+  version: string
+  projectId: string
+  expectedRevision?: number
+  idempotencyKey: string
+  actions: unknown[]
+} => ({
   version: 'v1',
+  projectId: 'project-1',
   expectedRevision: 0,
-  idempotencyKey: 'request-1',
+  idempotencyKey,
   actions,
 })
 
-test('parses a curated atomic commit request', () => {
-  const request = parseControlCommitRequestV1(commit([{
-    kind: 'track.create',
-    projectId: 'project-1',
-    client: { clientId: 'new-track' },
-    name: 'Bass',
-    trackKind: 'instrument',
-  }]))
-  expect(request.actions).toHaveLength(1)
+const preview = (actions: unknown[]): {
+  version: string
+  projectId: string
+  expectedRevision?: number
+  actions: unknown[]
+} => ({
+  version: 'v1',
+  projectId: 'project-1',
+  expectedRevision: 0,
+  actions,
 })
 
-test('rejects unknown versions, actions, and malformed actions', () => {
-  expect(() => parseControlCommitRequestV1({
-    ...commit([]),
-    version: 'v2',
-  })).toThrow()
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'timeline.patch',
-    projectId: 'project-1',
-  }]))).toThrow()
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'clip.midi.create',
-    trackId: 'track-1',
-    startSec: 0,
-    duration: 1,
-    wave: 'sine',
-    notes: [{ beat: 0, length: 1, pitch: 128 }],
-  }]))).toThrow()
-})
+const midiNotes = (count: number) => Array.from({ length: count }, (_, index) => ({
+  beat: index / 4,
+  length: 0.25,
+  pitch: 48 + index % 36,
+  velocity: 0.8,
+}))
 
-test('canonical JSON is key-order deterministic', () => {
-  expect(canonicalJson({ b: [true, { z: 1, a: 'value' }], a: null }))
-    .toBe(canonicalJson({ a: null, b: [true, { a: 'value', z: 1 }] }))
-})
+const automationPoints = (count: number) => Array.from({ length: count }, (_, index) => ({
+  id: `point-${index}`,
+  timeSec: index / 10,
+  value: index / Math.max(1, count),
+  interpolation: 'linear',
+}))
 
-test('canonical JSON rejects unsupported values and sparse arrays', () => {
-  const sparse = Array<string>(2)
-  sparse[1] = 'value'
-  expect(() => canonicalJson(Number.POSITIVE_INFINITY)).toThrow()
-  expect(() => canonicalJson(new Date())).toThrow()
-  expect(() => canonicalJson(new Map())).toThrow()
-  expect(() => canonicalJson(sparse)).toThrow()
-})
+const snapshot = {
+  version: 'v1',
+  project: {
+    id: 'project-1',
+    name: 'Project',
+    revision: 1,
+    tempoBpm: 120,
+    timeSignature: { numerator: 4, denominator: 4 },
+    loop: { enabled: false, startSec: 0, endSec: 8 },
+    masterVolume: 0.8,
+    updatedAt: 1,
+  },
+  tracks: [],
+  clips: [],
+  processors: [],
+  automation: [],
+  sidechains: [],
+}
 
-test('enforces aggregate MIDI point limits', () => {
-  const midiNotes = Array.from({ length: controlLimitsV1.maxMidiNotesPerCommit }, (_, index) => ({
-    beat: index / 4,
-    length: 0.25,
-    pitch: 48 + index % 36,
-    velocity: 0.8,
-  }))
-  const midiAction = {
-    kind: 'clip.midi.create',
-    trackId: 'track-1',
-    startSec: 0,
-    duration: 128,
-    wave: 'sine',
-    notes: midiNotes,
-  }
-  const midiCommit = commit([midiAction])
-  expect(() => parseControlCommitRequestV1(midiCommit)).not.toThrow()
-  expect(() => parseControlCommitRequestV1(commit([
-    { ...midiAction, notes: midiNotes.slice(0, 250) },
-    { ...midiAction, notes: midiNotes.slice(250) },
-  ]))).not.toThrow()
-  const fixtureBytes = new TextEncoder().encode(canonicalJson(midiCommit)).byteLength
-  expect(fixtureBytes).toBeLessThan(controlLimitsV1.maxSerializedBodyBytes)
-})
+const planningResult = {
+  version: 'v1',
+  projectId: 'project-1',
+  priorRevision: 4,
+  revision: 5,
+  applied: true,
+  requestDigest: 'digest-1',
+  resolvedRefs: [{ entity: 'track', clientRef: 'new-track', id: 'track-1' }],
+  warnings: [{ code: 'normalized', message: 'A value was normalized.', actionIndex: 0 }],
+  changeSummary: {
+    actionCount: 1,
+    changes: [{ actionIndex: 0, kind: 'track.create', description: 'Create track.' }],
+  },
+}
 
-test('advertises strict processor, automation, and sidechain actions', () => {
-  expect(controlCapabilitiesV1.actionKinds).toContain('effect.upsert')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.set')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('instrument.remove')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('arpeggiator.remove')
-  expect(controlCapabilitiesV1.actionKinds).toContain('instrument.set')
-  expect(controlCapabilitiesV1.actionKinds).toContain('automation.set')
-  expect(controlCapabilitiesV1.actionKinds).toContain('sidechain.set')
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'effect.upsert',
-    target: { master: true },
-    effectKind: 'eq',
-    effectInstanceId: 'eq-1',
-  }]))).not.toThrow()
-})
-
-test('projects core mixer and clip control state', () => {
-  const snapshot = projectSnapshotSchemaV1.parse({
-    version: 'v1',
-    project: {
-      id: 'project-1',
-      name: 'Project',
-      revision: 1,
-      tempoBpm: 120,
-      timeSignature: { numerator: 4, denominator: 4 },
-      loop: { enabled: false, startSec: 0, endSec: 8 },
-      masterVolume: 0.8,
-      updatedAt: 1,
+test('parses persisted and client refs across every target category', () => {
+  const request = parseControlCommitRequestV1(commit([
+    { kind: 'track.create', clientRef: 'new-track', name: 'Bass', trackKind: 'instrument' },
+    { kind: 'track.rename', track: client('new-track'), name: 'Bass Synth' },
+    {
+      kind: 'track.routing.set',
+      track: persisted('track-1'),
+      output: client('new-group'),
+      sends: [{ target: persisted('return-1'), amount: 0.5 }],
     },
-    tracks: [],
-    clips: [{
-      id: 'clip-1',
-      trackId: 'track-1',
-      name: 'MIDI',
+    {
+      kind: 'track.reorder',
+      tracks: [{ track: client('new-track'), index: 0, group: persisted('group-1') }],
+    },
+    { kind: 'track.group.set', track: persisted('track-1'), group: client('new-group') },
+    {
+      kind: 'clip.midi.create',
+      clientRef: 'new-clip',
+      track: client('new-track'),
       startSec: 0,
       duration: 1,
-      gain: 0.9,
-      leftPadSec: 0,
-      bufferOffsetSec: 0,
-      midiOffsetBeats: 0,
-      fades: {
-        fadeInStartSec: 0.05,
-        fadeInSec: 0.1,
-        fadeOutSec: 0.2,
-        fadeOutEndSec: 0.95,
-        fadeInCurve: 0.5,
-        fadeOutCurve: -0.5,
-        fadeInCurvePosition: 0.3,
-        fadeOutCurvePosition: 0.7,
-      },
-      midi: {
-        wave: 'sine',
-        notes: [{ beat: 0, length: 1, pitch: 60 }],
-      },
-    }],
-    processors: [],
-    automation: [],
-    sidechains: [],
-  })
-  expect(snapshot.project.masterVolume).toBe(0.8)
-  expect(snapshot.clips[0]?.midi?.notes).toHaveLength(1)
+      wave: 'sine',
+      notes: [],
+    },
+    { kind: 'clip.move', clip: client('new-clip'), track: persisted('track-2'), startSec: 2 },
+    {
+      kind: 'effect.upsert',
+      target: trackTarget(client('new-track')),
+      clientRef: 'new-effect',
+      effectKind: 'eq',
+    },
+    {
+      kind: 'automation.delete',
+      target: masterTarget,
+      effect: client('new-effect'),
+      parameterId: 'gain',
+    },
+    {
+      kind: 'sidechain.set',
+      source: persisted('track-1'),
+      target: client('new-track'),
+      effect: persisted('compressor-1'),
+    },
+  ]))
+
+  expect(request.projectId).toBe('project-1')
+  expect(request.actions).toHaveLength(10)
+  expect(request.actions.every((action) => !('projectId' in action))).toBe(true)
 })
 
-const routingCommitOfByteLength = (byteLength: number) => {
-  const actions = Array.from({ length: controlLimitsV1.maxActions }, () => ({
-    kind: 'track.routing.set' satisfies 'track.routing.set',
-    trackId: 'track-1',
-    sends: Array.from({ length: 64 }, () => ({ targetTrackId: 'x', amount: 1 })),
+test('does not invent singleton instrument or arpeggiator references', () => {
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'instrument.set',
+    target: trackTarget(client('new-track')),
+    instrumentKind: 'synth',
+  }]))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'instrument.set',
+    target: trackTarget(persisted('track-1')),
+    instrument: persisted('instrument-1'),
+    instrumentKind: 'synth',
+  }]))).toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'arpeggiator.set',
+    target: trackTarget(persisted('track-1')),
+    params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false },
+  }]))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'arpeggiator.set',
+    target: trackTarget(persisted('track-1')),
+    clientRef: 'not-supported',
+    params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false },
+  }]))).toThrow()
+})
+
+test('rejects raw, malformed, ambiguous, and non-strict refs', () => {
+  const invalidTracks = [
+    'track-1',
+    { id: 'track-1' },
+    { source: 'persisted', id: 'track-1', clientRef: 'track-client' },
+    { source: 'client', clientRef: 'track-client', id: 'track-1' },
+    { source: 'magic', id: 'track-1' },
+  ]
+  for (const track of invalidTracks) {
+    expect(() => parseControlCommitRequestV1(commit([{
+      kind: 'track.rename',
+      track,
+      name: 'Invalid',
+    }]))).toThrow()
+  }
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'effect.upsert',
+    target: { kind: 'master', track: persisted('track-1') },
+    effectKind: 'eq',
+  }]))).toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'effect.upsert',
+    target: masterTarget,
+    effect: persisted('effect-1'),
+    clientRef: 'new-effect',
+    effectKind: 'eq',
+  }]))).toThrow()
+})
+
+test('detects duplicate creation client refs with the exported helper and envelope schemas', () => {
+  const actions = controlActionSchemaV1.array().parse([
+    { kind: 'track.create', clientRef: 'shared-ref' },
+    {
+      kind: 'clip.midi.create',
+      clientRef: 'shared-ref',
+      track: persisted('track-1'),
+      startSec: 0,
+      duration: 1,
+      wave: 'sine',
+      notes: [],
+    },
+    { kind: 'effect.upsert', target: masterTarget, clientRef: 'unique-ref', effectKind: 'eq' },
+  ])
+  expect(findDuplicateCreationClientRefsV1(actions)).toEqual(['shared-ref'])
+  expect(() => parseControlCommitRequestV1(commit(actions))).toThrow()
+  expect(() => parseControlPreviewRequestV1(preview(actions))).toThrow()
+})
+
+test('validates optional revisions and strict idempotency keys', () => {
+  const withoutRevision = commit([{ kind: 'track.delete', track: persisted('track-1') }])
+  delete withoutRevision.expectedRevision
+  expect(() => parseControlCommitRequestV1(withoutRevision)).not.toThrow()
+
+  const previewWithoutRevision = preview([{ kind: 'track.delete', track: persisted('track-1') }])
+  delete previewWithoutRevision.expectedRevision
+  expect(() => parseControlPreviewRequestV1(previewWithoutRevision)).not.toThrow()
+
+  for (const idempotencyKey of ['short', 'contains space', 'contains/slash', 'ümlaut-key']) {
+    expect(() => parseControlCommitRequestV1(commit([
+      { kind: 'track.delete', track: persisted('track-1') },
+    ], idempotencyKey))).toThrow()
+  }
+  expect(() => parseControlCommitRequestV1(commit([
+    { kind: 'track.delete', track: persisted('track-1') },
+  ], 'a'.repeat(128)))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([
+    { kind: 'track.delete', track: persisted('track-1') },
+  ], 'a'.repeat(129)))).toThrow()
+})
+
+test('validates strict preview, commit, and error result envelopes', () => {
+  expect(controlPreviewResultSchemaV1.parse({ ...planningResult, snapshot }).snapshot).toBeDefined()
+  expect(controlPreviewResultSchemaV1.parse(planningResult).snapshot).toBeUndefined()
+  expect(controlCommitResultSchemaV1.parse({
+    ...planningResult,
+    revision: 5,
+    applied: true,
+    idempotencyReplay: false,
+  }).revision).toBe(5)
+
+  for (const code of [
+    'invalid-request', 'validation', 'unsupported-action', 'revision-conflict',
+    'idempotency-conflict', 'forbidden', 'authorization', 'not-found',
+    'limit-exceeded', 'approval-required', 'internal',
+  ]) {
+    expect(() => controlErrorSchemaV1.parse({ version: 'v1', code, message: 'Error.' })).not.toThrow()
+  }
+  expect(() => controlPreviewResultSchemaV1.parse({
+    ...planningResult,
+    warnings: Array.from({ length: controlLimitsV1.maxActions + 1 }, () => ({
+      code: 'warning',
+      message: 'Too many warnings.',
+    })),
+  })).toThrow()
+  expect(() => controlCommitResultSchemaV1.parse({
+    ...planningResult,
+    revision: 5,
+    applied: true,
+    idempotencyReplay: false,
+    serverInternal: true,
+  })).toThrow()
+})
+
+test('semantic digest input is canonical and excludes idempotency', () => {
+  const first = parseControlCommitRequestV1(commit([{
+    kind: 'track.rename',
+    track: persisted('track-1'),
+    name: 'Bass',
+  }], 'request-0001'))
+  const second = parseControlCommitRequestV1({
+    actions: [{ name: 'Bass', track: { id: 'track-1', source: 'persisted' }, kind: 'track.rename' }],
+    idempotencyKey: 'request-0002',
+    expectedRevision: 0,
+    projectId: 'project-1',
+    version: 'v1',
+  })
+  const previewRequest = parseControlPreviewRequestV1(preview(first.actions))
+
+  expect(controlRequestDigestInputV1(first)).toBe(controlRequestDigestInputV1(second))
+  expect(controlRequestDigestInputV1(first)).toBe(controlRequestDigestInputV1(previewRequest))
+  expect(controlRequestDigestInputV1(first)).not.toContain('request-0001')
+  expect(controlRequestDigestInputV1(first)).toBe(canonicalJson({
+    actions: first.actions,
+    expectedRevision: 0,
+    projectId: 'project-1',
+    version: 'v1',
   }))
-  const request = commit(actions)
+})
+
+test('enforces MIDI and automation aggregates at exact boundaries for preview and commit', () => {
+  const boundaryActions = [
+    {
+      kind: 'clip.midi.create',
+      track: persisted('track-1'),
+      startSec: 0,
+      duration: 128,
+      wave: 'sine',
+      notes: midiNotes(controlLimitsV1.maxMidiNotesPerCommit),
+    },
+    {
+      kind: 'automation.set',
+      target: masterTarget,
+      parameterId: 'volume',
+      enabled: true,
+      points: automationPoints(controlLimitsV1.maxAutomationPointsPerCommit),
+    },
+  ]
+  expect(() => parseControlCommitRequestV1(commit(boundaryActions))).not.toThrow()
+  expect(() => parseControlPreviewRequestV1(preview(boundaryActions))).not.toThrow()
+
+  const midiOver = [
+    { ...boundaryActions[0], notes: midiNotes(251) },
+    { ...boundaryActions[0], notes: midiNotes(250) },
+  ]
+  const automationOver = [
+    { ...boundaryActions[1], points: automationPoints(501) },
+    { ...boundaryActions[1], points: automationPoints(500) },
+  ]
+  expect(() => parseControlCommitRequestV1(commit(midiOver))).toThrow()
+  expect(() => parseControlPreviewRequestV1(preview(midiOver))).toThrow()
+  expect(() => parseControlCommitRequestV1(commit(automationOver))).toThrow()
+  expect(() => parseControlPreviewRequestV1(preview(automationOver))).toThrow()
+})
+
+test('enforces action count for preview and commit', () => {
+  const boundary = Array.from({ length: controlLimitsV1.maxActions }, () => ({
+    kind: 'track.delete',
+    track: persisted('track-1'),
+  }))
+  expect(() => parseControlCommitRequestV1(commit(boundary))).not.toThrow()
+  expect(() => parseControlPreviewRequestV1(preview(boundary))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([...boundary, boundary[0]]))).toThrow()
+  expect(() => parseControlPreviewRequestV1(preview([...boundary, boundary[0]]))).toThrow()
+})
+
+const requestOfByteLength = (byteLength: number, mode: 'commit' | 'preview') => {
+  const actions = Array.from({ length: controlLimitsV1.maxActions }, () => ({
+    kind: 'track.routing.set',
+    track: persisted('track-1'),
+    sends: Array.from({ length: 16 }, () => ({ target: persisted('x'), amount: 1 })),
+  }))
+  const request = mode === 'commit' ? commit(actions) : preview(actions)
   const baseline = new TextEncoder().encode(canonicalJson(request)).byteLength
   let remaining = byteLength - baseline
   for (const action of actions) {
     for (const send of action.sends) {
       const extension = Math.min(255, Math.max(0, remaining))
-      send.targetTrackId = `x${'x'.repeat(extension)}`
+      if (send.target.source !== 'persisted') throw new Error('Expected a persisted routing target.')
+      send.target.id = `x${'x'.repeat(extension)}`
       remaining -= extension
     }
   }
@@ -170,59 +371,46 @@ const routingCommitOfByteLength = (byteLength: number) => {
   return request
 }
 
-test('accepts the serialized request boundary and rejects one byte over', () => {
-  const exactLimit = routingCommitOfByteLength(controlLimitsV1.maxSerializedBodyBytes)
-  const overLimit = routingCommitOfByteLength(controlLimitsV1.maxSerializedBodyBytes + 1)
-  expect(new TextEncoder().encode(canonicalJson(exactLimit)).byteLength).toBe(controlLimitsV1.maxSerializedBodyBytes)
-  expect(() => parseControlCommitRequestV1(exactLimit)).not.toThrow()
-  expect(new TextEncoder().encode(canonicalJson(overLimit)).byteLength).toBe(controlLimitsV1.maxSerializedBodyBytes + 1)
-  expect(() => parseControlCommitRequestV1(overLimit)).toThrow()
+test('accepts serialized request boundaries and rejects one byte over for preview and commit', () => {
+  const commitLimit = requestOfByteLength(controlLimitsV1.maxSerializedBodyBytes, 'commit')
+  const commitOver = requestOfByteLength(controlLimitsV1.maxSerializedBodyBytes + 1, 'commit')
+  const previewLimit = requestOfByteLength(controlLimitsV1.maxSerializedBodyBytes, 'preview')
+  const previewOver = requestOfByteLength(controlLimitsV1.maxSerializedBodyBytes + 1, 'preview')
+
+  expect(() => parseControlCommitRequestV1(commitLimit)).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commitOver)).toThrow()
+  expect(() => parseControlPreviewRequestV1(previewLimit)).not.toThrow()
+  expect(() => parseControlPreviewRequestV1(previewOver)).toThrow()
 })
 
-test('rejects malformed processor actions and snapshots', () => {
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'effect.upsert',
-    target: { trackId: 'track-1' },
-    effectInstanceId: 'effect-1',
-    effectKind: 'delay',
-    params: { enabled: true, mode: 'sync', timeMs: 1, syncDivision: '1/4', feedback: 0, dryWet: 1, pingPong: false, filterEnabled: false, lowCutHz: 20, highCutHz: 1000, unexpected: true },
-  }]))).toThrow()
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'instrument.add',
-    trackId: 'track-1',
-    instrumentKind: 'synth',
-    instanceId: 'instrument-1',
-    params: { unexpected: true },
-  }]))).toThrow()
-  expect(() => projectSnapshotSchemaV1.parse({
-    version: 'v1',
-    project: {
-      id: 'project-1', name: 'Project', revision: 0, tempoBpm: 120,
-      timeSignature: { numerator: 4, denominator: 4 },
-      loop: { enabled: false, startSec: 0, endSec: 0 },
-      masterVolume: 0.8,
-      updatedAt: 0,
-    },
-    tracks: [],
-    clips: [],
-    effects: [{
-      target: { master: true }, instanceId: 'arp-1', kind: 'arpeggiator', index: 0,
-      params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 2, gate: 0.8, hold: false },
-    }, {
-      target: { trackId: 'track-1' }, instanceId: 'synth-1', kind: 'synth', index: 0,
-      params: { wave1: 'sine', wave2: 'square', gain: 0.8 },
-    }],
-    automation: [],
-    sidechains: [],
-  })).toThrow()
+test('rejects oversized raw requests before trim normalization for preview and commit', () => {
+  const oversizedName = `Name${' '.repeat(controlLimitsV1.maxSerializedBodyBytes)}`
+  const commitRequest = commit([{ kind: 'project.rename', name: oversizedName }])
+  const previewRequest = preview([{ kind: 'project.rename', name: oversizedName }])
+
+  expect(() => parseControlCommitRequestV1(commitRequest)).toThrow('serialized body limit')
+  expect(() => parseControlPreviewRequestV1(previewRequest)).toThrow('serialized body limit')
+  expect(canonicalJson({
+    ...commitRequest,
+    actions: [{ kind: 'project.rename', name: 'Name' }],
+  }).length).toBeLessThan(controlLimitsV1.maxSerializedBodyBytes)
+  expect(() => parseControlCommitRequestV1(new Date())).toThrow('Canonical JSON')
+})
+
+test('preserves the truthful v1 action list and snapshot contract', () => {
+  expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
+  expect(controlCapabilitiesV1.actionKinds).toContain('clip.midi.create')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
+  expect(projectSnapshotSchemaV1.parse(snapshot).project.masterVolume).toBe(0.8)
 })
 
 test('accepts every canonical effect payload and rejects unknown nested fields', () => {
   for (const [effectKind, contract] of Object.entries(AUDIO_EFFECT_CONTRACTS)) {
     const action = {
       kind: 'effect.upsert',
-      target: { trackId: 'track-1' },
-      effectInstanceId: `${effectKind}-1`,
+      target: trackTarget(persisted('track-1')),
+      effect: persisted(`${effectKind}-1`),
       effectKind,
       params: contract.createDefaultParams(),
     }
@@ -232,35 +420,4 @@ test('accepts every canonical effect payload and rejects unknown nested fields',
       params: { ...action.params, unexpected: true },
     }]))).toThrow()
   }
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'instrument.set',
-    target: { trackId: 'track-1' },
-    instanceId: 'synth-1',
-    instrumentKind: 'synth',
-    params: {
-      version: 2,
-      oscillators: [
-        { enabled: true, wave: 'sine', octave: 0, semitone: 0, detuneCents: 0, level: 1 },
-        { enabled: false, wave: 'square', octave: 0, semitone: 0, detuneCents: 0, level: 0 },
-      ],
-      ampEnvelope: { attackSec: 0, decaySec: 0.1, sustain: 1, releaseSec: 0.2 },
-      filter: { enabled: false, mode: 'lowpass', frequencyHz: 1000, q: 1, keyTracking: 0, envelopeAmountOctaves: 0, envelope: { attackSec: 0, decaySec: 0.1, sustain: 1, releaseSec: 0.2 } },
-      lfo: { enabled: false, wave: 'sine', frequencyHz: 1, pitchCents: 0, filterOctaves: 0, amp: 0, pan: 0 },
-      noise: { enabled: false, level: 0 },
-      gain: 1, pan: 0, polyphony: 8, retrigger: true,
-    },
-  }]))).not.toThrow()
-  expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'arpeggiator.set',
-    target: { trackId: 'track-1' },
-    params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false, unexpected: true },
-  }]))).toThrow()
-})
-
-test('rejects more actions than the atomic contract allows', () => {
-  const actions = Array.from({ length: controlLimitsV1.maxActions + 1 }, () => ({
-    kind: 'track.delete',
-    trackId: 'track-1',
-  }))
-  expect(() => controlCommitRequestSchemaV1.parse(commit(actions))).toThrow()
 })

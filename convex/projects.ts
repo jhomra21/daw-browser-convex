@@ -3,7 +3,39 @@ import { v } from "convex/values";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueR2DeleteRows } from "./r2Deletes";
-import { advanceProjectRevision, ensureOwnedProjectRow, getProjectRow } from "./projectRows";
+import { advanceProjectRevision, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";
+
+type RowOperationResult<State extends object> =
+  | { changed: false; value: State & { status: "noop" } }
+  | { changed: true; value: State & { status: "applied" } };
+
+type ProjectTimelineSettingsInput = {
+  tempoBpm?: number;
+  timeSignatureNumerator?: number;
+  timeSignatureDenominator?: number;
+  loopEnabled?: boolean;
+  loopStartSec?: number;
+  loopEndSec?: number;
+};
+
+type ProjectTimelineSettingsState = {
+  tempoBpm: number;
+  timeSignatureNumerator: number;
+  timeSignatureDenominator: number;
+  loopEnabled: boolean;
+  loopStartSec: number;
+  loopEndSec: number;
+};
+
+const noopRowOperation = <State extends object>(state: State): RowOperationResult<State> => ({
+  changed: false,
+  value: { ...state, status: "noop" },
+});
+
+const appliedRowOperation = <State extends object>(state: State): RowOperationResult<State> => ({
+  changed: true,
+  value: { ...state, status: "applied" },
+});
 
 async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
   await Promise.all([
@@ -58,6 +90,65 @@ async function setRoomProjectDeletionPendingAt(
 ) {
   const project = await getProjectRow(ctx, projectId);
   if (project) await ctx.db.patch(project._id, { deletionPendingAt });
+}
+
+export async function setProjectNameRow(
+  ctx: MutationCtx,
+  projectId: string,
+  name: string,
+) {
+  const project = await requireProjectRow(ctx, projectId);
+  const trimmed = name.trim().slice(0, 120);
+  const state = { name: trimmed.length ? trimmed : "Untitled" };
+  if (project.name === state.name) return noopRowOperation(state);
+  await ctx.db.patch(project._id, state);
+  return appliedRowOperation(state);
+}
+
+export async function setProjectTimelineSettingsRow(
+  ctx: MutationCtx,
+  projectId: string,
+  input: ProjectTimelineSettingsInput,
+) {
+  const project = await requireProjectRow(ctx, projectId);
+  const tempoBpm = input.tempoBpm === undefined
+    ? project.tempoBpm
+    : Math.min(300, Math.max(30, Math.round(input.tempoBpm)));
+  const timeSignatureNumerator = input.timeSignatureNumerator === undefined
+    ? project.timeSignatureNumerator
+    : Math.min(32, Math.max(1, Math.round(input.timeSignatureNumerator)));
+  const timeSignatureDenominator = input.timeSignatureDenominator === undefined
+    ? project.timeSignatureDenominator
+    : input.timeSignatureDenominator;
+  if (![1, 2, 4, 8, 16, 32].includes(timeSignatureDenominator)) {
+    throw new Error("Unsupported time signature denominator.");
+  }
+  const loopStartSec = input.loopStartSec === undefined
+    ? project.loopStartSec
+    : Math.max(0, input.loopStartSec);
+  const loopEndSec = input.loopEndSec === undefined
+    ? project.loopEndSec
+    : Math.max(loopStartSec + 0.05, input.loopEndSec);
+
+  const state: ProjectTimelineSettingsState = {
+    tempoBpm,
+    timeSignatureNumerator,
+    timeSignatureDenominator,
+    loopEnabled: input.loopEnabled ?? project.loopEnabled,
+    loopStartSec,
+    loopEndSec,
+  };
+  const changed = (
+    project.tempoBpm !== state.tempoBpm
+    || project.timeSignatureNumerator !== state.timeSignatureNumerator
+    || project.timeSignatureDenominator !== state.timeSignatureDenominator
+    || project.loopEnabled !== state.loopEnabled
+    || project.loopStartSec !== state.loopStartSec
+    || project.loopEndSec !== state.loopEndSec
+  );
+  if (!changed) return noopRowOperation(state);
+  await ctx.db.patch(project._id, state);
+  return appliedRowOperation(state);
 }
 
 export const listMineDetailed = query({
@@ -177,13 +268,8 @@ export const setName = mutation({
   handler: async (ctx, { projectId, name }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
-    const trimmed = name.trim().slice(0, 120);
-    const row = await findOwnedProject(ctx, projectId, userId);
-    const nextName = trimmed.length ? trimmed : "Untitled";
-    if (row && row.name !== nextName) {
-      await ctx.db.patch(row._id, { name: nextName });
-      await advanceProjectRevision(ctx, projectId);
-    }
+    const result = await setProjectNameRow(ctx, projectId, name);
+    if (result.changed) await advanceProjectRevision(ctx, projectId);
     return null;
   },
 });
@@ -203,45 +289,8 @@ export const setTimelineSettings = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const project = await findOwnedProject(ctx, input.projectId, userId);
     if (!project) throw new Error("Only project owners can update project settings.");
-
-    const tempoBpm = input.tempoBpm === undefined
-      ? project.tempoBpm
-      : Math.min(300, Math.max(30, Math.round(input.tempoBpm)));
-    const timeSignatureNumerator = input.timeSignatureNumerator === undefined
-      ? project.timeSignatureNumerator
-      : Math.min(32, Math.max(1, Math.round(input.timeSignatureNumerator)));
-    const timeSignatureDenominator = input.timeSignatureDenominator === undefined
-      ? project.timeSignatureDenominator
-      : input.timeSignatureDenominator;
-    if (![1, 2, 4, 8, 16, 32].includes(timeSignatureDenominator)) {
-      throw new Error("Unsupported time signature denominator.");
-    }
-    const loopStartSec = input.loopStartSec === undefined
-      ? project.loopStartSec
-      : Math.max(0, input.loopStartSec);
-    const loopEndSec = input.loopEndSec === undefined
-      ? project.loopEndSec
-      : Math.max(loopStartSec + 0.05, input.loopEndSec);
-
-    const loopEnabled = input.loopEnabled ?? project.loopEnabled;
-    const changed = (
-      project.tempoBpm !== tempoBpm
-      || project.timeSignatureNumerator !== timeSignatureNumerator
-      || project.timeSignatureDenominator !== timeSignatureDenominator
-      || project.loopEnabled !== loopEnabled
-      || project.loopStartSec !== loopStartSec
-      || project.loopEndSec !== loopEndSec
-    );
-    if (!changed) return null;
-    await ctx.db.patch(project._id, {
-      tempoBpm,
-      timeSignatureNumerator,
-      timeSignatureDenominator,
-      loopEnabled,
-      loopStartSec,
-      loopEndSec,
-    });
-    await advanceProjectRevision(ctx, input.projectId);
+    const result = await setProjectTimelineSettingsRow(ctx, input.projectId, input);
+    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
     return null;
   },
 });

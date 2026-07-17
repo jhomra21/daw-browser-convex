@@ -10,6 +10,10 @@ export type ProjectMixerSettings = {
   masterVolume: number;
 };
 
+type ProjectMasterVolumeRowResult =
+  | { changed: false; value: ProjectMixerSettings & { status: "noop" } }
+  | { changed: true; value: ProjectMixerSettings & { status: "applied" } };
+
 export const effectiveProjectMasterVolume = (value: number | undefined) => (
   value === undefined ? DEFAULT_MASTER_VOLUME : normalizeMasterVolume(value)
 );
@@ -27,34 +31,33 @@ export async function getProjectMixerSettings(
   };
 }
 
-export async function setProjectMasterVolumeForUser(
+export async function setProjectMasterVolumeRow(
   ctx: MutationCtx,
   projectId: string,
-  userId: string,
   volume: number,
-) {
-  await requireMasterBusWriteAccess(ctx, projectId, userId);
+): Promise<ProjectMasterVolumeRowResult> {
   const masterVolume = effectiveProjectMasterVolume(volume);
+  const state = { masterVolume };
   const row = await ctx.db
     .query("projectMixerSettings")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .first();
   if (row) {
-    if (effectiveProjectMasterVolume(row.masterVolume) === masterVolume) return { status: "noop" as const };
+    if (effectiveProjectMasterVolume(row.masterVolume) === masterVolume) {
+      return { changed: false, value: { ...state, status: "noop" } };
+    }
     await ctx.db.patch(row._id, { masterVolume, updatedAt: Date.now() });
-    await advanceProjectRevision(ctx, projectId);
-    return { status: "applied" as const };
+    return { changed: true, value: { ...state, status: "applied" } };
   }
   if (masterVolume === effectiveProjectMasterVolume(undefined)) {
-    return { status: "noop" as const };
+    return { changed: false, value: { ...state, status: "noop" } };
   }
   await ctx.db.insert("projectMixerSettings", {
     projectId,
     masterVolume,
     updatedAt: Date.now(),
   });
-  await advanceProjectRevision(ctx, projectId);
-  return { status: "applied" as const };
+  return { changed: true, value: { ...state, status: "applied" } };
 }
 
 export const get = query({
@@ -70,6 +73,9 @@ export const setMasterVolume = mutation({
   args: { projectId: v.string(), volume: v.number() },
   handler: async (ctx, { projectId, volume }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await setProjectMasterVolumeForUser(ctx, projectId, userId, volume);
+    await requireMasterBusWriteAccess(ctx, projectId, userId);
+    const result = await setProjectMasterVolumeRow(ctx, projectId, volume);
+    if (result.changed) await advanceProjectRevision(ctx, projectId);
+    return { status: result.value.status };
   },
 });

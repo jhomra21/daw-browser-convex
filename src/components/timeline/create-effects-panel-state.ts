@@ -84,9 +84,7 @@ type EffectsPanelInstrumentDevice = {
     change: (updates: SynthParamsUpdate) => void;
     instanceId: Accessor<string | undefined>;
     params: Accessor<SynthParams | undefined>;
-    readDraftForTarget: (targetId: string) => SynthParams | undefined;
     reset: () => void;
-    syncRemoteForTarget: (targetId: string, params: SynthParams | undefined) => void;
   };
   drumRack: {
     assignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
@@ -584,19 +582,10 @@ export function createEffectsPanelInstrumentDevice(
       change: handleSynthChange,
       instanceId: synthInstanceId,
       params: synthParams,
-      readDraftForTarget: (targetId) => {
-        const current = instrumentState.readDraftForTarget(targetId);
-        return current?.kind === "synth" ? current.params : undefined;
-      },
       reset: () => {
         const targetId = getTrackTargetId();
         if (!targetId) return;
         instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(targetId) }));
-      },
-      syncRemoteForTarget: (targetId, params) => {
-        const instanceId = synthInstanceIdsByTarget.get(targetId) ?? createInstrumentInstanceId();
-        synthInstanceIdsByTarget.set(targetId, instanceId);
-        instrumentState.syncRemoteForTarget(targetId, params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId, params }) : undefined);
       },
     },
     drumRack: {

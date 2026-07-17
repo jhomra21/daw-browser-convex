@@ -599,6 +599,29 @@ describe('synth runtime characterization', () => {
     expect(source?.frequency.events.some((event) => event.kind === 'ramp')).toBe(false)
   })
 
+  test('uses updated discrete oscillator settings for the next scheduled voice', () => {
+    const { oscillators, runtime } = createRuntime()
+    const initial = createDefaultSynthParams()
+    runtime.setTrackSynth('track-1', {
+      ...initial,
+      oscillators: [
+        { ...initial.oscillators[0], wave: 'square', octave: 1, semitone: 2 },
+        initial.oscillators[1],
+      ],
+      lfo: { ...initial.lfo, wave: 'triangle' },
+    })
+
+    runtime.triggerNote({ trackId: 'track-1', pitch: 60, when: 0, durationSec: 1 })
+
+    expect(oscillators[0]?.type).toBe('square')
+    expect(oscillators[0]?.frequency.events).toContainEqual({
+      kind: 'set',
+      value: 587.3295358348151,
+      time: 0,
+    })
+    expect(oscillators[2]?.type).toBe('triangle')
+  })
+
   test('updates active voice filter and LFO parameters', () => {
     const { ctx, oscillators, runtime } = createRuntime()
     const initial = createDefaultSynthParams()
@@ -933,6 +956,19 @@ describe('synth runtime characterization', () => {
     runtime.scheduleMidiClip(createTrack('track-1'), clip, 0, 0)
 
     expect([oscillators[0]?.starts[0], oscillators[3]?.starts[0], oscillators[6]?.starts[0]]).toEqual([0, 0.5, 1])
+  })
+
+  test('allocates out-of-order cross-clip voices chronologically at polyphony one', () => {
+    const { oscillators, runtime } = createRuntime()
+    runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), polyphony: 1 })
+    const laterClip = { ...createMidiClip('clip-later'), startSec: 2, duration: 4 }
+    const earlierClip = { ...createMidiClip('clip-earlier'), startSec: 1, duration: 4 }
+
+    runtime.scheduleMidiClip(createTrack('track-1'), laterClip, 0, 0)
+    runtime.scheduleMidiClip(createTrack('track-1'), earlierClip, 0, 0)
+
+    expect(oscillators.slice(0, 3).every((oscillator) => oscillator.stops.includes(4.006))).toBe(false)
+    expect(oscillators.slice(3, 6).every((oscillator) => oscillator.stops.includes(2.006))).toBe(true)
   })
 
   test('reallocates future scheduled voices after a polyphony decrease and keeps them stoppable', () => {

@@ -204,6 +204,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
     <Show when={props.instrument.state.synth.params()}>
       {(params) => (
         <Synth
+          instanceId={props.instrument.state.synth.instanceId()}
           params={props.synthAutomationDisplayParams ?? params()}
           onChange={(updates) => {
             if (!props.instrument.canWrite) return;

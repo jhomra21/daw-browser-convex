@@ -1,4 +1,4 @@
-import { createDefaultSynthParams } from './synth-params'
+import { createDefaultSynthParams, SYNTH_PARAMETER_LIMITS } from './synth-params'
 
 export const SYNTH_AUTOMATION_PARAMETER_IDS = [
   'output.gain',
@@ -39,29 +39,29 @@ export type SynthAutomationDescriptor = {
 const defaults = createDefaultSynthParams()
 
 export const SYNTH_AUTOMATION_DESCRIPTORS: Readonly<Record<SynthAutomationParameterId, SynthAutomationDescriptor>> = {
-  'output.gain': { defaultValue: defaults.gain, min: 0, max: 1.5, unit: 'ratio', rate: 'a-rate' },
-  'output.pan': { defaultValue: defaults.pan, min: -1, max: 1, unit: 'ratio', rate: 'a-rate' },
-  'osc1.level': { defaultValue: defaults.oscillators[0].level, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
-  'osc1.detune': { defaultValue: defaults.oscillators[0].detuneCents, min: -100, max: 100, unit: 'cents', rate: 'a-rate' },
-  'osc2.level': { defaultValue: defaults.oscillators[1].level, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
-  'osc2.detune': { defaultValue: defaults.oscillators[1].detuneCents, min: -100, max: 100, unit: 'cents', rate: 'a-rate' },
-  'noise.level': { defaultValue: defaults.noise.level, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
-  'amp.attack': { defaultValue: defaults.ampEnvelope.attackSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'amp.decay': { defaultValue: defaults.ampEnvelope.decaySec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'amp.sustain': { defaultValue: defaults.ampEnvelope.sustain, min: 0, max: 1, unit: 'ratio', rate: 'note' },
-  'amp.release': { defaultValue: defaults.ampEnvelope.releaseSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'filter.frequency': { defaultValue: defaults.filter.frequencyHz, min: 20, max: 20_000, unit: 'hz', rate: 'a-rate' },
-  'filter.q': { defaultValue: defaults.filter.q, min: 0.0001, max: 30, unit: 'ratio', rate: 'a-rate' },
-  'filter.envAmount': { defaultValue: defaults.filter.envelopeAmountOctaves, min: -6, max: 6, unit: 'octaves', rate: 'note' },
-  'filter.attack': { defaultValue: defaults.filter.envelope.attackSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'filter.decay': { defaultValue: defaults.filter.envelope.decaySec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'filter.sustain': { defaultValue: defaults.filter.envelope.sustain, min: 0, max: 1, unit: 'ratio', rate: 'note' },
-  'filter.release': { defaultValue: defaults.filter.envelope.releaseSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
-  'lfo.rate': { defaultValue: defaults.lfo.frequencyHz, min: 0.01, max: 100, unit: 'hz', rate: 'a-rate' },
-  'lfo.pitchDepth': { defaultValue: defaults.lfo.pitchCents, min: -1200, max: 1200, unit: 'cents', rate: 'a-rate' },
-  'lfo.filterDepth': { defaultValue: defaults.lfo.filterOctaves, min: -6, max: 6, unit: 'octaves', rate: 'a-rate' },
-  'lfo.ampDepth': { defaultValue: defaults.lfo.amp, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
-  'lfo.panDepth': { defaultValue: defaults.lfo.pan, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
+  'output.gain': { defaultValue: defaults.gain, ...SYNTH_PARAMETER_LIMITS.gain, unit: 'ratio', rate: 'a-rate' },
+  'output.pan': { defaultValue: defaults.pan, ...SYNTH_PARAMETER_LIMITS.pan, unit: 'ratio', rate: 'a-rate' },
+  'osc1.level': { defaultValue: defaults.oscillators[0].level, ...SYNTH_PARAMETER_LIMITS.oscillatorLevel, unit: 'ratio', rate: 'a-rate' },
+  'osc1.detune': { defaultValue: defaults.oscillators[0].detuneCents, ...SYNTH_PARAMETER_LIMITS.oscillatorDetuneCents, unit: 'cents', rate: 'a-rate' },
+  'osc2.level': { defaultValue: defaults.oscillators[1].level, ...SYNTH_PARAMETER_LIMITS.oscillatorLevel, unit: 'ratio', rate: 'a-rate' },
+  'osc2.detune': { defaultValue: defaults.oscillators[1].detuneCents, ...SYNTH_PARAMETER_LIMITS.oscillatorDetuneCents, unit: 'cents', rate: 'a-rate' },
+  'noise.level': { defaultValue: defaults.noise.level, ...SYNTH_PARAMETER_LIMITS.noiseLevel, unit: 'ratio', rate: 'a-rate' },
+  'amp.attack': { defaultValue: defaults.ampEnvelope.attackSec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'amp.decay': { defaultValue: defaults.ampEnvelope.decaySec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'amp.sustain': { defaultValue: defaults.ampEnvelope.sustain, ...SYNTH_PARAMETER_LIMITS.sustain, unit: 'ratio', rate: 'note' },
+  'amp.release': { defaultValue: defaults.ampEnvelope.releaseSec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'filter.frequency': { defaultValue: defaults.filter.frequencyHz, ...SYNTH_PARAMETER_LIMITS.filterFrequencyHz, unit: 'hz', rate: 'a-rate' },
+  'filter.q': { defaultValue: defaults.filter.q, ...SYNTH_PARAMETER_LIMITS.filterQ, unit: 'ratio', rate: 'a-rate' },
+  'filter.envAmount': { defaultValue: defaults.filter.envelopeAmountOctaves, ...SYNTH_PARAMETER_LIMITS.filterEnvelopeAmountOctaves, unit: 'octaves', rate: 'note' },
+  'filter.attack': { defaultValue: defaults.filter.envelope.attackSec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'filter.decay': { defaultValue: defaults.filter.envelope.decaySec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'filter.sustain': { defaultValue: defaults.filter.envelope.sustain, ...SYNTH_PARAMETER_LIMITS.sustain, unit: 'ratio', rate: 'note' },
+  'filter.release': { defaultValue: defaults.filter.envelope.releaseSec, ...SYNTH_PARAMETER_LIMITS.envelopeSeconds, unit: 'seconds', rate: 'note' },
+  'lfo.rate': { defaultValue: defaults.lfo.frequencyHz, ...SYNTH_PARAMETER_LIMITS.lfoFrequencyHz, unit: 'hz', rate: 'a-rate' },
+  'lfo.pitchDepth': { defaultValue: defaults.lfo.pitchCents, ...SYNTH_PARAMETER_LIMITS.lfoPitchCents, unit: 'cents', rate: 'a-rate' },
+  'lfo.filterDepth': { defaultValue: defaults.lfo.filterOctaves, ...SYNTH_PARAMETER_LIMITS.lfoFilterOctaves, unit: 'octaves', rate: 'a-rate' },
+  'lfo.ampDepth': { defaultValue: defaults.lfo.amp, ...SYNTH_PARAMETER_LIMITS.lfoAmp, unit: 'ratio', rate: 'a-rate' },
+  'lfo.panDepth': { defaultValue: defaults.lfo.pan, ...SYNTH_PARAMETER_LIMITS.lfoPan, unit: 'ratio', rate: 'a-rate' },
 }
 
 export type SynthAutomationKey = {

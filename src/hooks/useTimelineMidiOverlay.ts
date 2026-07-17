@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import {
   clampTimelineMidiBounds,
@@ -79,23 +79,19 @@ export function useTimelineMidiOverlay(
     return `mb:midi_card:${projectId}`
   }
 
-  const persistMidiCard = () => {
-    if (!canUseLocalStorage()) return
-    try {
-      window.localStorage.setItem(midiCardStorageKey(), JSON.stringify(midiCard()))
-    } catch {}
-  }
-
   const schedulePersistMidiCard = () => {
     if (midiCardPersistTimer) {
       clearTimeout(midiCardPersistTimer)
       midiCardPersistTimer = null
     }
-    // Debounce card-position writes while the user drags the editor and always
-    // clear the timer on cleanup so it never outlives the overlay.
+    const storageKey = midiCardStorageKey()
+    const bounds = midiCard()
     midiCardPersistTimer = window.setTimeout(() => {
       midiCardPersistTimer = null
-      untrack(persistMidiCard)
+      if (!canUseLocalStorage()) return
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(bounds))
+      } catch {}
     }, 250)
   }
 

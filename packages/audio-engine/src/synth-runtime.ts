@@ -44,9 +44,15 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
   && left.pan === right.pan
   && left.oscillators[0].level === right.oscillators[0].level
   && left.oscillators[0].enabled === right.oscillators[0].enabled
+  && left.oscillators[0].wave === right.oscillators[0].wave
+  && left.oscillators[0].octave === right.oscillators[0].octave
+  && left.oscillators[0].semitone === right.oscillators[0].semitone
   && left.oscillators[0].detuneCents === right.oscillators[0].detuneCents
   && left.oscillators[1].level === right.oscillators[1].level
   && left.oscillators[1].enabled === right.oscillators[1].enabled
+  && left.oscillators[1].wave === right.oscillators[1].wave
+  && left.oscillators[1].octave === right.oscillators[1].octave
+  && left.oscillators[1].semitone === right.oscillators[1].semitone
   && left.oscillators[1].detuneCents === right.oscillators[1].detuneCents
   && left.noise.enabled === right.noise.enabled
   && left.noise.level === right.noise.level
@@ -65,6 +71,7 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
   && left.filter.envelope.sustain === right.filter.envelope.sustain
   && left.filter.envelope.releaseSec === right.filter.envelope.releaseSec
   && left.lfo.enabled === right.lfo.enabled
+  && left.lfo.wave === right.lfo.wave
   && left.lfo.frequencyHz === right.lfo.frequencyHz
   && left.lfo.pitchCents === right.lfo.pitchCents
   && left.lfo.filterOctaves === right.lfo.filterOctaves
@@ -76,7 +83,6 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
 
 export function createSynthRuntime(options: SynthRuntimeOptions) {
   const states = new Map<string, TrackSynthRuntimeState>()
-  const arpeggiators = new Map<string, ArpParams>()
   const smooth = (param: AudioParam | undefined, value: number, now: number) => {
     if (!param) return
     param.cancelScheduledValues(now)
@@ -94,10 +100,6 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       states.set(trackId, state)
     }
     return state
-  }
-  const chooseVictim = (state: TrackSynthRuntimeState, when: number) => {
-    state.allocation = state.allocation.filter((voice) => voice.effectiveEndTime > when)
-    return chooseSynthVoiceVictim(state.allocation, state.params.polyphony, when)
   }
   const enforcePolyphony = (state: TrackSynthRuntimeState, now: number) => {
     const allocated = state.allocation
@@ -141,6 +143,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     timelineStartSec?: number
     automationEnvelopes?: SynthAutomationEnvelopes
     scheduleVoiceAutomation?: boolean
+    deferPolyphonyEnforcement?: boolean
   }): number | undefined => {
     const state = ensureState(input.trackId)
     const ctx = options.getAudioContext()
@@ -148,12 +151,6 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     if (!state.params.retrigger) {
       const legato = state.voices.find((voice) => voice.pitch === input.pitch && isSynthVoiceSoundingAt(voice, input.when))
       if (legato) return legato.noteInstanceId
-    }
-    let victim = chooseVictim(state, input.when)
-    while (victim) {
-      victim.stop(input.when)
-      state.allocation = state.allocation.filter((voice) => voice !== victim)
-      victim = chooseVictim(state, input.when)
     }
     const noteInstanceId = state.nextVoiceId
     state.nextVoiceId += 1
@@ -179,6 +176,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     })
     state.voices.push(voice)
     state.allocation.push(voice)
+    if (!input.deferPolyphonyEnforcement) enforcePolyphony(state, ctx.currentTime)
     if (input.clipId) for (const source of voice.sources) options.sources.add(input.clipId, source)
     return noteInstanceId
   }
@@ -199,7 +197,6 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       try { state.outputPan.disconnect() } catch {}
     }
     states.delete(trackId)
-    arpeggiators.delete(trackId)
   }
   const stopClip = (clipId: string) => {
     const now = options.getAudioContext()?.currentTime ?? 0
@@ -310,12 +307,6 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       }
       enforcePolyphony(state, now)
     },
-    setTrackArpeggiator: (trackId: string, params: ArpParams) => {
-      arpeggiators.set(trackId, params)
-    },
-    clearTrackArpeggiator: (trackId: string) => {
-      arpeggiators.delete(trackId)
-    },
     clearTrackSynth: (trackId: string) => {
       disposeTrack(trackId)
     },
@@ -399,7 +390,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         notes: midi.notes,
         rangeStartSec: playheadSec,
         rangeEndSec: endLimitSec,
-        arp: options.getArpeggiator?.(track.id) ?? arpeggiators.get(track.id),
+        arp: options.getArpeggiator?.(track.id),
       })
       const state = states.get(track.id)
       const automationEnvelopes = state ? getTrackAutomationEnvelopes(track.id, state.instanceId) : new Map()
@@ -417,8 +408,10 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
           timelineStartSec: note.startSec,
           automationEnvelopes,
           scheduleVoiceAutomation: scheduleOptions?.scheduleVoiceAutomation,
+          deferPolyphonyEnforcement: true,
         })
       }
+      if (state) enforcePolyphony(state, ctx.currentTime)
 
       return true
     },
@@ -427,7 +420,6 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     disposeTrack,
     clear: () => {
       for (const trackId of states.keys()) disposeTrack(trackId)
-      arpeggiators.clear()
     },
   }
 }

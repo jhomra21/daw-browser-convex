@@ -820,6 +820,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
       for (const clip of track.clips) {
         const midi = clip.midi
         if (midi && Array.isArray(midi.notes)) {
+          if (synthTrack) continue
           const events = getScheduledMidiEvents({
             clip,
             bpm: prepared.bpm,

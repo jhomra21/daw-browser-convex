@@ -19,6 +19,7 @@ import {
   parseControlCommitRequestV1,
   parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
+  parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
   type ContextualRefV1,
   type ProcessorTargetV1,
@@ -346,6 +347,63 @@ test('validates bounded strict control history contracts', () => {
     continueCursor: '_end_cursor',
     isDone: true,
   })).toThrow()
+})
+
+test('accepts opaque project IDs and rejects URL-interpretable project IDs everywhere', () => {
+  const acceptedProjectIds = ['project-1', 'k9zzzzz', 'project:opaque_~id', 'project%20name']
+  for (const projectId of acceptedProjectIds) {
+    expect(() => parseControlCommitRequestV1({ ...commit([{ kind: 'project.rename', name: 'Project' }]), projectId })).not.toThrow()
+    expect(() => parseControlPreviewRequestV1({ ...preview([{ kind: 'project.rename', name: 'Project' }]), projectId })).not.toThrow()
+    expect(() => parseControlSnapshotQueryV1({ projectId })).not.toThrow()
+    expect(() => parseControlHistoryQueryV1({ projectId })).not.toThrow()
+    expect(() => controlPreviewResultSchemaV1.parse({ ...planningResult, projectId })).not.toThrow()
+    expect(() => controlHistoryEntrySchemaV1.parse({
+      id: 'commit-1',
+      projectId,
+      actorSubject: 'user-1',
+      actorRole: 'editor',
+      idempotencyKey: 'history-key',
+      requestDigest: '0'.repeat(64),
+      priorRevision: 1,
+      revision: 2,
+      applied: true,
+      createdAt: 1,
+    })).not.toThrow()
+    expect(() => projectSnapshotSchemaV1.parse({
+      ...snapshot,
+      project: { ...snapshot.project, id: projectId },
+    })).not.toThrow()
+  }
+
+  const forbiddenProjectIds = [
+    '.', '..', 'project/id', 'project\\id', 'project%2fid', 'project%2Fid',
+    'project%5cid', 'project%5Cid', 'project?id', 'project#id',
+    'project%3fid', 'project%23id', 'project%00id', 'project%1Fid', 'project%7fid',
+    'project\nid', `project${String.fromCharCode(127)}id`,
+  ]
+  for (const projectId of forbiddenProjectIds) {
+    expect(() => parseControlCommitRequestV1({ ...commit([{ kind: 'project.rename', name: 'Project' }]), projectId })).toThrow()
+    expect(() => parseControlPreviewRequestV1({ ...preview([{ kind: 'project.rename', name: 'Project' }]), projectId })).toThrow()
+    expect(() => parseControlSnapshotQueryV1({ projectId })).toThrow()
+    expect(() => parseControlHistoryQueryV1({ projectId })).toThrow()
+    expect(() => controlPreviewResultSchemaV1.parse({ ...planningResult, projectId })).toThrow()
+    expect(() => controlHistoryEntrySchemaV1.parse({
+      id: 'commit-1',
+      projectId,
+      actorSubject: 'user-1',
+      actorRole: 'editor',
+      idempotencyKey: 'history-key',
+      requestDigest: '0'.repeat(64),
+      priorRevision: 1,
+      revision: 2,
+      applied: true,
+      createdAt: 1,
+    })).toThrow()
+    expect(() => projectSnapshotSchemaV1.parse({
+      ...snapshot,
+      project: { ...snapshot.project, id: projectId },
+    })).toThrow()
+  }
 })
 
 test('semantic digest input is canonical and excludes idempotency', () => {

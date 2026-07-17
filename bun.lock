@@ -67,6 +67,13 @@
         "zod": "^4.3.6",
       },
     },
+    "packages/control-sdk": {
+      "name": "@daw-browser/control-sdk",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/control": "workspace:*",
+      },
+    },
     "packages/shared": {
       "name": "@daw-browser/shared",
       "version": "0.0.0",
@@ -321,6 +328,8 @@
     "@daw-browser/audio-engine": ["@daw-browser/audio-engine@workspace:packages/audio-engine"],
 
     "@daw-browser/control": ["@daw-browser/control@workspace:packages/control"],
+
+    "@daw-browser/control-sdk": ["@daw-browser/control-sdk@workspace:packages/control-sdk"],
 
     "@daw-browser/shared": ["@daw-browser/shared@workspace:packages/shared"],
 

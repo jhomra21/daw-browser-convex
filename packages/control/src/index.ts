@@ -9,6 +9,21 @@ import {
 export const CONTROL_API_VERSION_V1 = 'v1'
 
 const stableIdSchema = z.string().min(1).max(256)
+const hasAsciiControlCharacter = (value: string) => (
+  Array.from(value).some((character) => {
+    const code = character.charCodeAt(0)
+    return code <= 31 || code === 127
+  })
+)
+const projectIdSchema = stableIdSchema.refine(
+  (projectId) => (
+    projectId !== '.'
+    && projectId !== '..'
+    && !hasAsciiControlCharacter(projectId)
+    && !/[/\\?#]|%(?:[01][0-9a-f]|7f|2f|5c|3f|23)/i.test(projectId)
+  ),
+  'Project IDs must be opaque URL-safe identifiers.',
+)
 const clientRefValueSchema = z.string().min(1).max(256)
 const nameSchema = z.string().trim().min(1).max(120)
 const finiteNumberSchema = z.number().finite()
@@ -32,6 +47,7 @@ export const controlLimitsV1 = {
 }
 
 export const stableIdSchemaV1 = stableIdSchema
+export const projectIdSchemaV1 = projectIdSchema
 export const clientRefSchemaV1 = clientRefValueSchema
 export const contextualRefSchemaV1 = z.discriminatedUnion('source', [
   z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
@@ -344,7 +360,7 @@ const addAggregateIssues = (
 
 const requestBaseShape = {
   version: z.literal(CONTROL_API_VERSION_V1),
-  projectId: stableIdSchema,
+  projectId: projectIdSchema,
   expectedRevision: revisionSchema.optional(),
   actions: z.array(controlActionSchemaV1).min(1).max(controlLimitsV1.maxActions),
 }
@@ -408,7 +424,7 @@ export const controlChangeSummarySchemaV1 = z.object({
 
 const planningResultShape = {
   version: z.literal(CONTROL_API_VERSION_V1),
-  projectId: stableIdSchema,
+  projectId: projectIdSchema,
   priorRevision: revisionSchema,
   requestDigest: requestDigestSchema,
   resolvedRefs: z.array(resolvedRefSchemaV1).max(controlLimitsV1.maxActions),
@@ -429,11 +445,11 @@ export const controlCommitResultSchemaV1 = z.object({
 }).strict()
 
 export const controlSnapshotQuerySchemaV1 = z.object({
-  projectId: stableIdSchema,
+  projectId: projectIdSchema,
 }).strict()
 
 export const controlHistoryQuerySchemaV1 = z.object({
-  projectId: stableIdSchema,
+  projectId: projectIdSchema,
   cursor: opaqueCursorSchema.optional(),
   limit: z.number()
     .int()
@@ -444,7 +460,7 @@ export const controlHistoryQuerySchemaV1 = z.object({
 
 export const controlHistoryEntrySchemaV1 = z.object({
   id: stableIdSchema,
-  projectId: stableIdSchema,
+  projectId: projectIdSchema,
   actorSubject: stableIdSchema,
   actorIssuer: stableIdSchema.optional(),
   actorTokenIdentifier: stableIdSchema.optional(),
@@ -483,7 +499,7 @@ const snapshotTrackSchema = z.object({
 export const projectSnapshotSchemaV1 = z.object({
   version: z.literal(CONTROL_API_VERSION_V1),
   project: z.object({
-    id: stableIdSchema,
+    id: projectIdSchema,
     name: nameSchema,
     revision: z.number().int().nonnegative(),
     tempoBpm: finiteNumberSchema,

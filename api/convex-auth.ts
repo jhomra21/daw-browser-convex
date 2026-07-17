@@ -126,6 +126,22 @@ export const createWorkerConvexClient = async (c: ApiContext, user: Session['use
   createConvexClientWithAuth(c, user, { worker: true })
 )
 
+export const createControlConvexClient = async (
+  c: ApiContext,
+  actor: ConvexControlActorAttribution & { userId: string },
+) => (
+  createConvexClientWithAuth(c, {
+    id: actor.userId,
+    email: '',
+    name: '',
+  }, {
+    actor: {
+      issuer: actor.issuer,
+      tokenIdentifier: actor.tokenIdentifier,
+    },
+  })
+)
+
 export const createMaintenanceWorkerConvexClient = async (c: ApiContext) => (
   createConvexClientWithAuth(c, maintenanceWorkerUser, { worker: true })
 )

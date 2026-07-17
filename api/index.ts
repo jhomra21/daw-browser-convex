@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { createAuth } from './auth'
 import type { ApiBindings } from './app-types'
 import { registerControlOAuthRoutes } from './control-oauth'
+import { registerControlRoutes } from './routes/control'
 import { registerConvexAuthRoutes } from './convex-auth'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
@@ -82,6 +83,7 @@ app.use('/api/auth/*', cors({
 
 registerPublicSampleRoutes(app)
 registerControlOAuthRoutes(app, createAuth)
+registerControlRoutes(app)
 
 // Session middleware - adds user and session to context
 app.use('*', async (c, next) => {

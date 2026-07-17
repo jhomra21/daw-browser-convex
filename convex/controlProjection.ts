@@ -6,6 +6,11 @@ import {
   canonicalControlMidiNotes,
 } from "./controlEffectiveValues";
 import type { MergedTrackDoc } from "./mixerChannels";
+import {
+  getAutomationParameterDescriptor,
+  normalizeAutomationPoints,
+  normalizeTrackInstrumentParams,
+} from "@daw-browser/shared";
 
 type ControlProjectSnapshotInput = {
   project: {
@@ -53,6 +58,29 @@ type ControlProjectSnapshotInput = {
     };
   }>;
   masterVolume: number;
+  effects: Array<{
+    _id: unknown;
+    targetType: string;
+    trackId?: unknown;
+    index: number;
+    type: string;
+    instanceId?: string;
+    params: unknown;
+  }>;
+  automationEnvelopes: Array<{
+    _id: unknown;
+    targetKind: "track" | "master";
+    trackId?: unknown;
+    effectInstanceId?: string;
+    parameterId: string;
+    enabled: boolean;
+    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
+  }>;
+  sidechainRoutes: Array<{
+    sourceTrackId: unknown;
+    targetTrackId: unknown;
+    effectInstanceId: string;
+  }>;
 };
 
 export const compareControlSnapshotText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
@@ -99,6 +127,74 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
         }
         : undefined,
     }));
+  const processors = input.effects.flatMap((effect) => {
+    const target = effect.targetType === "master"
+      ? { master: true }
+      : effect.targetType === "track" && effect.trackId
+        ? { trackId: String(effect.trackId) }
+        : undefined;
+    if (!target) return [];
+    const instrument = effect.type === "instrument"
+      ? normalizeTrackInstrumentParams(effect.params)
+      : effect.type === "synth"
+        ? normalizeTrackInstrumentParams({
+            kind: "synth",
+            instanceId: effect.instanceId,
+            params: effect.params,
+          })
+        : undefined;
+    const processor = instrument
+      ? { kind: "instrument", params: instrument }
+      : effect.type === "arpeggiator"
+        ? { kind: "arpeggiator", params: effect.params }
+        : { kind: effect.type, params: effect.params };
+    return [{ id: String(effect._id), target, instanceId: effect.instanceId, index: effect.index, processor }];
+  }).sort((left, right) => (
+    compareControlSnapshotText(
+      "master" in left.target ? "master" : `track:${left.target.trackId}`,
+      "master" in right.target ? "master" : `track:${right.target.trackId}`,
+    )
+    || left.index - right.index
+    || compareControlSnapshotText(left.processor.kind, right.processor.kind)
+    || compareControlSnapshotText(left.instanceId ?? "", right.instanceId ?? "")
+    || compareControlSnapshotText(String(left.id), String(right.id))
+  )).map(({ id: _id, ...processor }) => processor);
+  const automation = input.automationEnvelopes.flatMap((envelope) => {
+    const descriptor = getAutomationParameterDescriptor(envelope.parameterId);
+    const target = envelope.targetKind === "master"
+      ? { master: true }
+      : envelope.trackId
+        ? { trackId: String(envelope.trackId) }
+        : undefined;
+    if (!target || !descriptor) return [];
+    return [{
+      id: String(envelope._id),
+      target,
+      effectInstanceId: envelope.effectInstanceId,
+      parameterId: envelope.parameterId,
+      enabled: envelope.enabled,
+      points: normalizeAutomationPoints(envelope.points, descriptor),
+    }];
+  }).sort((left, right) => (
+    compareControlSnapshotText(
+      "master" in left.target ? "master" : `track:${left.target.trackId}`,
+      "master" in right.target ? "master" : `track:${right.target.trackId}`,
+    )
+    || compareControlSnapshotText(left.parameterId, right.parameterId)
+    || compareControlSnapshotText(left.effectInstanceId ?? "", right.effectInstanceId ?? "")
+    || compareControlSnapshotText(left.id, right.id)
+  )).map(({ id: _id, ...envelope }) => envelope);
+  const sidechains = [...input.sidechainRoutes]
+    .map((route) => ({
+      sourceTrackId: String(route.sourceTrackId),
+      targetTrackId: String(route.targetTrackId),
+      effectInstanceId: route.effectInstanceId,
+    }))
+    .sort((left, right) => (
+      compareControlSnapshotText(left.targetTrackId, right.targetTrackId)
+      || compareControlSnapshotText(left.effectInstanceId, right.effectInstanceId)
+      || compareControlSnapshotText(left.sourceTrackId, right.sourceTrackId)
+    ));
 
   return projectSnapshotSchemaV1.parse({
     version: "v1",
@@ -121,5 +217,8 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
     },
     tracks,
     clips,
+    processors,
+    automation,
+    sidechains,
   });
 };

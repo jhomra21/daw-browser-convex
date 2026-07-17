@@ -49,6 +49,9 @@ test('projects complete deterministic clip timing, fades, and MIDI notes', () =>
       },
     }],
     masterVolume: 0.8,
+    effects: [],
+    automationEnvelopes: [],
+    sidechainRoutes: [],
   })
   expect(snapshot.clips[0]?.leftPadSec).toBe(0.25)
   expect(snapshot.clips[0]?.fades?.fadeInCurvePosition).toBe(0.2)

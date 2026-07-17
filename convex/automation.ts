@@ -10,6 +10,7 @@ import {
   parseSynthAutomationKey,
 } from "@daw-browser/shared";
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { advanceProjectRevision } from "./projectRows";
 
 type InstrumentEffectRow = {
   type: string;
@@ -115,6 +116,96 @@ const normalizeEnvelopeInput = async (
   };
 };
 
+const sameEnvelopeState = (
+  existing: {
+    targetKind: "track" | "master";
+    trackId?: unknown;
+    effectInstanceId?: string;
+    targetKey: string;
+    parameterId: string;
+    enabled: boolean;
+    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
+  },
+  next: {
+    targetKind: "track" | "master";
+    trackId?: unknown;
+    effectInstanceId?: string;
+    targetKey: string;
+    parameterId: string;
+    enabled: boolean;
+    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
+  },
+) => (
+  existing.targetKind === next.targetKind
+  && String(existing.trackId ?? "") === String(next.trackId ?? "")
+  && existing.effectInstanceId === next.effectInstanceId
+  && existing.targetKey === next.targetKey
+  && existing.parameterId === next.parameterId
+  && existing.enabled === next.enabled
+  && existing.points.length === next.points.length
+  && existing.points.every((point, index) => {
+    const nextPoint = next.points[index];
+    return nextPoint !== undefined
+      && point.id === nextPoint.id
+      && point.timeSec === nextPoint.timeSec
+      && point.value === nextPoint.value
+      && point.interpolation === nextPoint.interpolation;
+  })
+);
+
+export const setAutomationEnvelopeRow = async (
+  ctx: MutationCtx,
+  input: {
+    projectId: string;
+    targetKind: "track" | "master";
+    trackId?: string;
+    effectInstanceId?: string;
+    parameterId: string;
+    enabled: boolean;
+    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" | "hold" }>;
+  },
+) => {
+  const normalized = await normalizeEnvelopeInput(ctx, input);
+  const existing = await ctx.db.query("automationEnvelopes")
+    .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
+    .unique();
+  const row = {
+    projectId: input.projectId,
+    targetKind: input.targetKind,
+    trackId: normalized.trackId,
+    effectInstanceId: input.effectInstanceId,
+    targetKey: normalized.targetKey,
+    parameterId: input.parameterId,
+    enabled: input.enabled,
+    points: normalized.points,
+  };
+  if (existing) {
+    if (sameEnvelopeState(existing, row)) return { changed: false, value: existing._id };
+    await ctx.db.patch(existing._id, { ...row, updatedAt: Date.now() });
+    return { changed: true, value: existing._id };
+  }
+  return { changed: true, value: await ctx.db.insert("automationEnvelopes", { ...row, updatedAt: Date.now() }) };
+};
+
+export const deleteAutomationEnvelopeRow = async (
+  ctx: MutationCtx,
+  input: {
+    projectId: string;
+    targetKind: "track" | "master";
+    trackId?: string;
+    effectInstanceId?: string;
+    parameterId: string;
+  },
+) => {
+  const normalized = await normalizeEnvelopeInput(ctx, { ...input, points: [] });
+  const existing = await ctx.db.query("automationEnvelopes")
+    .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
+    .unique();
+  if (!existing) return { changed: false, value: null };
+  await ctx.db.delete(existing._id);
+  return { changed: true, value: existing._id };
+};
+
 export const listByProject = query({
   args: { projectId: v.string() },
   handler: async (ctx, { projectId }) => {
@@ -138,26 +229,9 @@ export const serverSetEnvelope = mutation({
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-    const normalized = await normalizeEnvelopeInput(ctx, input);
-    const existing = await ctx.db.query("automationEnvelopes")
-      .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
-      .unique();
-    const row = {
-      projectId: input.projectId,
-      targetKind: input.targetKind,
-      trackId: normalized.trackId,
-      effectInstanceId: input.effectInstanceId,
-      targetKey: normalized.targetKey,
-      parameterId: input.parameterId,
-      enabled: input.enabled,
-      points: normalized.points,
-      updatedAt: input.updatedAt,
-    };
-    if (existing) {
-      await ctx.db.patch(existing._id, row);
-      return existing._id;
-    }
-    return await ctx.db.insert("automationEnvelopes", row);
+    const result = await setAutomationEnvelopeRow(ctx, input);
+    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    return result.value;
   },
 });
 
@@ -172,12 +246,8 @@ export const serverDeleteEnvelope = mutation({
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
-    const normalized = await normalizeEnvelopeInput(ctx, { ...input, points: [] });
-    const existing = await ctx.db.query("automationEnvelopes")
-      .withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", normalized.targetKey))
-      .unique();
-    if (!existing) return null;
-    await ctx.db.delete(existing._id);
-    return existing._id;
+    const result = await deleteAutomationEnvelopeRow(ctx, input);
+    if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+    return result.value;
   },
 });

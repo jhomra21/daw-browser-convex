@@ -651,7 +651,9 @@ const setSidechainRouteForUser = async (
         .eq("effectInstanceId", input.effectInstanceId)
     ))
     .collect();
-  if (existing.length === 1 && existing[0]?.sourceTrackId === input.sourceTrackId) return;
+  if (existing.length === 1 && String(existing[0]?.sourceTrackId) === String(input.sourceTrackId)) {
+    return { changed: false, projectId };
+  }
   for (const route of existing) await ctx.db.delete(route._id);
   await ctx.db.insert("sidechainRoutes", {
     projectId,
@@ -659,13 +661,15 @@ const setSidechainRouteForUser = async (
     targetTrackId: input.targetTrackId,
     effectInstanceId: input.effectInstanceId,
   });
+  return { changed: true, projectId };
 };
 
 export const setSidechainRoute = mutation({
   args: { sourceTrackId: v.id("tracks"), targetTrackId: v.id("tracks"), effectInstanceId: v.string() },
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await setSidechainRouteForUser(ctx, { ...input, userId });
+    const result = await setSidechainRouteForUser(ctx, { ...input, userId });
+    if (result.changed) await advanceProjectRevision(ctx, result.projectId);
   },
 });
 
@@ -676,7 +680,8 @@ export const serverSetSidechainRoute = mutation({
     const sourceTrackId = ctx.db.normalizeId("tracks", input.sourceTrackId);
     const targetTrackId = ctx.db.normalizeId("tracks", input.targetTrackId);
     if (!sourceTrackId || !targetTrackId) throw new Error("Sidechain source or target track not found.");
-    await setSidechainRouteForUser(ctx, { ...input, sourceTrackId, targetTrackId, userId });
+    const result = await setSidechainRouteForUser(ctx, { ...input, sourceTrackId, targetTrackId, userId });
+    if (result.changed) await advanceProjectRevision(ctx, result.projectId);
   },
 });
 
@@ -685,19 +690,32 @@ const removeSidechainRouteForUser = async (
   input: { projectId: string; targetTrackId: any; effectInstanceId: string; userId: string },
 ) => {
   await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
+  const target = await ctx.db.get(input.targetTrackId);
+  if (!target || target.projectId !== input.projectId) {
+    throw new Error("Sidechain target track does not belong to this project.");
+  }
+  const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", input.targetTrackId)).collect();
+  const eligibleEffect = effects.find((effect: any) => (
+    effect.targetType === "track"
+    && effect.instanceId === input.effectInstanceId
+    && (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+  ));
+  if (!eligibleEffect) throw new Error("Sidechain target effect does not belong to this project.");
   const routes = await ctx.db.query("sidechainRoutes")
     .withIndex("by_room_target_effect", (q: any) => q.eq("projectId", input.projectId).eq("targetTrackId", input.targetTrackId).eq("effectInstanceId", input.effectInstanceId))
     .collect();
   for (const route of routes) {
     await ctx.db.delete(route._id);
   }
+  return { changed: routes.length > 0, projectId: input.projectId };
 };
 
 export const removeSidechainRoute = mutation({
   args: { projectId: v.string(), targetTrackId: v.id("tracks"), effectInstanceId: v.string() },
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await removeSidechainRouteForUser(ctx, { ...input, userId });
+    const result = await removeSidechainRouteForUser(ctx, { ...input, userId });
+    if (result.changed) await advanceProjectRevision(ctx, result.projectId);
   },
 });
 
@@ -707,7 +725,8 @@ export const serverRemoveSidechainRoute = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const targetTrackId = ctx.db.normalizeId("tracks", input.targetTrackId);
     if (!targetTrackId) throw new Error("Sidechain target track not found.");
-    await removeSidechainRouteForUser(ctx, { ...input, targetTrackId, userId });
+    const result = await removeSidechainRouteForUser(ctx, { ...input, targetTrackId, userId });
+    if (result.changed) await advanceProjectRevision(ctx, result.projectId);
   },
 });
 

@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+  audioEffectAddPayloadSchema,
+  arpeggiatorParamsSchema,
+  instrumentAddPayloadSchema,
+  persistedProcessorSnapshotSchema,
+} from '@daw-browser/shared'
 
 export const CONTROL_API_VERSION_V1 = 'v1'
 
@@ -146,6 +152,87 @@ const masterVolumeActionSchema = z.object({
   projectId: stableIdSchema,
   volume: finiteNumberSchema.min(0).max(2),
 }).strict()
+const processorTargetSchema = z.union([
+  z.object({ trackId: stableIdSchema }).strict(),
+  z.object({ master: z.literal(true) }).strict(),
+])
+const trackProcessorTargetSchema = z.object({ trackId: stableIdSchema }).strict()
+const audioEffectKindSchema = z.enum(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral'])
+const effectUpsertActionSchema = z.object({
+  kind: z.literal('effect.upsert'),
+  target: processorTargetSchema,
+  effectInstanceId: stableIdSchema,
+  effectKind: audioEffectKindSchema,
+  params: z.unknown().optional(),
+}).strict().superRefine((action, context) => {
+  const result = audioEffectAddPayloadSchema.safeParse({
+    effectKind: action.effectKind,
+    ...(action.params === undefined ? {} : { params: action.params }),
+  })
+  if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
+})
+const effectRemoveActionSchema = z.object({
+  kind: z.literal('effect.remove'),
+  target: processorTargetSchema,
+  effectKind: audioEffectKindSchema,
+  effectInstanceId: stableIdSchema.optional(),
+}).strict()
+const effectReorderActionSchema = z.object({
+  kind: z.literal('effect.reorder'),
+  target: processorTargetSchema,
+  order: z.array(z.object({ id: stableIdSchema, kind: audioEffectKindSchema }).strict()).max(64),
+}).strict()
+const instrumentSetActionSchema = z.object({
+  kind: z.literal('instrument.set'),
+  target: trackProcessorTargetSchema,
+  instanceId: stableIdSchema,
+  instrumentKind: z.enum(['synth', 'drum-rack', 'sampler', 'granular']),
+  params: z.unknown().optional(),
+}).strict().superRefine((action, context) => {
+  const result = instrumentAddPayloadSchema.safeParse({
+    instrumentKind: action.instrumentKind,
+    ...(action.params === undefined ? {} : { params: action.params }),
+  })
+  if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
+})
+const arpeggiatorSetActionSchema = z.object({
+  kind: z.literal('arpeggiator.set'),
+  target: trackProcessorTargetSchema,
+  params: arpeggiatorParamsSchema,
+}).strict()
+const automationPointSchema = z.object({
+  id: stableIdSchema,
+  timeSec: secondsSchema,
+  value: finiteNumberSchema,
+  interpolation: z.enum(['linear', 'hold']),
+}).strict()
+const automationSetActionSchema = z.object({
+  kind: z.literal('automation.set'),
+  target: processorTargetSchema,
+  effectInstanceId: stableIdSchema.optional(),
+  parameterId: stableIdSchema,
+  enabled: z.boolean(),
+  points: z.array(automationPointSchema).max(10_000),
+}).strict()
+const automationDeleteActionSchema = z.object({
+  kind: z.literal('automation.delete'),
+  target: processorTargetSchema,
+  effectInstanceId: stableIdSchema.optional(),
+  parameterId: stableIdSchema,
+}).strict()
+const sidechainSetActionSchema = z.object({
+  kind: z.literal('sidechain.set'),
+  projectId: stableIdSchema,
+  sourceTrackId: stableIdSchema,
+  targetTrackId: stableIdSchema,
+  effectInstanceId: stableIdSchema,
+}).strict()
+const sidechainRemoveActionSchema = z.object({
+  kind: z.literal('sidechain.remove'),
+  projectId: stableIdSchema,
+  targetTrackId: stableIdSchema,
+  effectInstanceId: stableIdSchema,
+}).strict()
 
 export const controlActionSchemaV1 = z.union([
   projectRenameActionSchema, projectSettingsActionSchema, trackCreateActionSchema,
@@ -153,6 +240,9 @@ export const controlActionSchemaV1 = z.union([
   trackReorderActionSchema, trackGroupActionSchema, trackDeleteActionSchema,
   clipCreateMidiActionSchema, clipMoveActionSchema, clipTimingActionSchema,
   clipNameActionSchema, clipDeleteActionSchema, masterVolumeActionSchema,
+  effectUpsertActionSchema, effectRemoveActionSchema, effectReorderActionSchema,
+  instrumentSetActionSchema, arpeggiatorSetActionSchema,
+  automationSetActionSchema, automationDeleteActionSchema, sidechainSetActionSchema, sidechainRemoveActionSchema,
 ])
 
 export const controlCommitRequestSchemaV1 = z.object({
@@ -236,6 +326,24 @@ export const projectSnapshotSchemaV1 = z.object({
       notes: z.array(midiNoteSchema),
     }).strict().optional(),
   }).strict()),
+  processors: z.array(z.object({
+    target: processorTargetSchema,
+    instanceId: stableIdSchema.optional(),
+    index: z.number().int().nonnegative(),
+    processor: persistedProcessorSnapshotSchema,
+  }).strict()),
+  automation: z.array(z.object({
+    target: processorTargetSchema,
+    effectInstanceId: stableIdSchema.optional(),
+    parameterId: stableIdSchema,
+    enabled: z.boolean(),
+    points: z.array(automationPointSchema),
+  }).strict()),
+  sidechains: z.array(z.object({
+    sourceTrackId: stableIdSchema,
+    targetTrackId: stableIdSchema,
+    effectInstanceId: stableIdSchema,
+  }).strict()),
 }).strict()
 
 export type ControlActionV1 = z.infer<typeof controlActionSchemaV1>
@@ -252,6 +360,9 @@ export const controlCapabilitiesV1 = {
     'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
     'track.delete', 'clip.midi.create', 'clip.move', 'clip.timing.set',
     'clip.rename', 'clip.delete', 'master.volume.set',
+    'effect.upsert', 'effect.remove', 'effect.reorder',
+    'instrument.set', 'arpeggiator.set',
+    'automation.set', 'automation.delete', 'sidechain.set', 'sidechain.remove',
   ],
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>

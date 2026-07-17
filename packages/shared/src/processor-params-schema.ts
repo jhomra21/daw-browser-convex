@@ -177,7 +177,7 @@ const drumRack = z.object({
   }).strict()),
   selectedPadId: identifier.optional(),
 }).strict()
-const arpeggiator = z.object({
+export const arpeggiatorParamsSchema = z.object({
   enabled: z.boolean(), pattern: z.enum(['up', 'down', 'updown', 'random']),
   rate: z.enum(['1/4', '1/8', '1/16', '1/32']), octaves: finiteNumber, gate: finiteNumber, hold: z.boolean(),
 }).strict()
@@ -237,5 +237,5 @@ export const persistedProcessorSnapshotSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('sampler'), instanceId: identifier, params: sampler }).strict(),
     z.object({ kind: z.literal('granular'), instanceId: identifier, params: granular }).strict(),
   ]) }).strict(),
-  z.object({ kind: z.literal('arpeggiator'), params: arpeggiator }).strict(),
+  z.object({ kind: z.literal('arpeggiator'), params: arpeggiatorParamsSchema }).strict(),
 ])

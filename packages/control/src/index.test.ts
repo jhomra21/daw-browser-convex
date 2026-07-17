@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 
 import {
   canonicalJson,
@@ -85,16 +86,21 @@ test('enforces aggregate MIDI point limits', () => {
   expect(fixtureBytes).toBeLessThan(controlLimitsV1.maxSerializedBodyBytes)
 })
 
-test('excludes deferred effects, automation, and sidechain actions', () => {
+test('advertises strict processor, automation, and sidechain actions', () => {
+  expect(controlCapabilitiesV1.actionKinds).toContain('effect.upsert')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('instrument.add')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('automation.set')
-  expect(controlCapabilitiesV1.actionKinds).not.toContain('sidechain.set')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.set')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('instrument.remove')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('arpeggiator.remove')
+  expect(controlCapabilitiesV1.actionKinds).toContain('instrument.set')
+  expect(controlCapabilitiesV1.actionKinds).toContain('automation.set')
+  expect(controlCapabilitiesV1.actionKinds).toContain('sidechain.set')
   expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'effect.add',
+    kind: 'effect.upsert',
     target: { master: true },
     effectKind: 'eq',
-  }]))).toThrow()
+    effectInstanceId: 'eq-1',
+  }]))).not.toThrow()
 })
 
 test('projects core mixer and clip control state', () => {
@@ -136,6 +142,9 @@ test('projects core mixer and clip control state', () => {
         notes: [{ beat: 0, length: 1, pitch: 60 }],
       },
     }],
+    processors: [],
+    automation: [],
+    sidechains: [],
   })
   expect(snapshot.project.masterVolume).toBe(0.8)
   expect(snapshot.clips[0]?.midi?.notes).toHaveLength(1)
@@ -170,9 +179,9 @@ test('accepts the serialized request boundary and rejects one byte over', () => 
   expect(() => parseControlCommitRequestV1(overLimit)).toThrow()
 })
 
-test('rejects deferred processor actions and snapshots', () => {
+test('rejects malformed processor actions and snapshots', () => {
   expect(() => parseControlCommitRequestV1(commit([{
-    kind: 'effect.add',
+    kind: 'effect.upsert',
     target: { trackId: 'track-1' },
     effectInstanceId: 'effect-1',
     effectKind: 'delay',
@@ -206,6 +215,46 @@ test('rejects deferred processor actions and snapshots', () => {
     automation: [],
     sidechains: [],
   })).toThrow()
+})
+
+test('accepts every canonical effect payload and rejects unknown nested fields', () => {
+  for (const [effectKind, contract] of Object.entries(AUDIO_EFFECT_CONTRACTS)) {
+    const action = {
+      kind: 'effect.upsert',
+      target: { trackId: 'track-1' },
+      effectInstanceId: `${effectKind}-1`,
+      effectKind,
+      params: contract.createDefaultParams(),
+    }
+    expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
+    expect(() => parseControlCommitRequestV1(commit([{
+      ...action,
+      params: { ...action.params, unexpected: true },
+    }]))).toThrow()
+  }
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'instrument.set',
+    target: { trackId: 'track-1' },
+    instanceId: 'synth-1',
+    instrumentKind: 'synth',
+    params: {
+      version: 2,
+      oscillators: [
+        { enabled: true, wave: 'sine', octave: 0, semitone: 0, detuneCents: 0, level: 1 },
+        { enabled: false, wave: 'square', octave: 0, semitone: 0, detuneCents: 0, level: 0 },
+      ],
+      ampEnvelope: { attackSec: 0, decaySec: 0.1, sustain: 1, releaseSec: 0.2 },
+      filter: { enabled: false, mode: 'lowpass', frequencyHz: 1000, q: 1, keyTracking: 0, envelopeAmountOctaves: 0, envelope: { attackSec: 0, decaySec: 0.1, sustain: 1, releaseSec: 0.2 } },
+      lfo: { enabled: false, wave: 'sine', frequencyHz: 1, pitchCents: 0, filterOctaves: 0, amp: 0, pan: 0 },
+      noise: { enabled: false, level: 0 },
+      gain: 1, pan: 0, polyphony: 8, retrigger: true,
+    },
+  }]))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'arpeggiator.set',
+    target: { trackId: 'track-1' },
+    params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false, unexpected: true },
+  }]))).toThrow()
 })
 
 test('rejects more actions than the atomic contract allows', () => {

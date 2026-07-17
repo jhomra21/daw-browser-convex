@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
+import { AUDIO_EFFECT_CONTRACTS } from "@daw-browser/shared";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
@@ -10,6 +11,8 @@ const modules = {
   "./projectMixerSettings.ts": () => import("./projectMixerSettings"),
   "./projects.ts": () => import("./projects"),
   "./tracks.ts": () => import("./tracks"),
+  "./effects.ts": () => import("./effects"),
+  "./automation.ts": () => import("./automation"),
 };
 const newTest = () => convexTest(schema, modules);
 type TestConvex = ReturnType<typeof newTest>;
@@ -175,6 +178,7 @@ test("treats reordered MIDI notes as a no-op but versions material note changes"
   const t = newTest();
   await createProject(t, "project-1");
   const trackId = await seedTrack(t, { projectId: "project-1", index: 0, kind: "instrument" });
+  expect(await projectRevision(t, "project-1")).toBe(0);
   const clipId = await seedMidiClip(t, { projectId: "project-1", trackId });
   const first = [
     { beat: 0, length: 1, pitch: 60, velocity: 0.8 },
@@ -202,4 +206,105 @@ test("treats reordered MIDI notes as a no-op but versions material note changes"
     },
   });
   expect(await projectRevision(t, "project-1")).toBe(2);
+});
+
+test("versions projected effect, automation, and sidechain state only for material writes", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const sourceTrackId = await seedTrack(t, { projectId: "project-1", index: 0 });
+  const targetTrackId = await seedTrack(t, { projectId: "project-1", index: 1 });
+  const user = t.withIdentity({ subject: owner });
+  const gateParams = AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams();
+  const utilityParams = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams();
+
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId: targetTrackId, effect: "gate", instanceId: "gate-1", params: gateParams,
+  });
+  const storedGateParams = await t.run(async (ctx) => {
+    const rows = await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", targetTrackId)).collect();
+    return rows.find((row) => row.instanceId === "gate-1")?.params;
+  });
+  expect(storedGateParams).toEqual(gateParams);
+  expect(await projectRevision(t, "project-1")).toBe(1);
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId: targetTrackId, effect: "gate", instanceId: "gate-1", params: gateParams,
+  });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId: targetTrackId, effect: "utility", instanceId: "utility-1", params: utilityParams,
+  });
+  expect(await projectRevision(t, "project-1")).toBe(2);
+  expect(await user.mutation(api.automation.serverDeleteEnvelope, {
+    projectId: "project-1", targetKind: "track", trackId: targetTrackId, effectInstanceId: "gate-1", parameterId: "gate.thresholdDb",
+  })).toBeNull();
+  expect(await projectRevision(t, "project-1")).toBe(2);
+  await user.mutation(api.effects.serverReorderAudioEffects, {
+    projectId: "project-1", targetType: "track", trackId: targetTrackId,
+    order: [{ id: "gate-1", kind: "gate" }, { id: "utility-1", kind: "utility" }],
+  });
+  expect(await projectRevision(t, "project-1")).toBe(2);
+  await user.mutation(api.effects.serverReorderAudioEffects, {
+    projectId: "project-1", targetType: "track", trackId: targetTrackId,
+    order: [{ id: "utility-1", kind: "utility" }, { id: "gate-1", kind: "gate" }],
+  });
+  expect(await projectRevision(t, "project-1")).toBe(3);
+
+  const automation: {
+    projectId: string; targetKind: "track"; trackId: string; effectInstanceId: string; parameterId: string; enabled: boolean;
+    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" }>;
+  } = {
+    projectId: "project-1", targetKind: "track", trackId: targetTrackId,
+    effectInstanceId: "gate-1", parameterId: "gate.thresholdDb", enabled: true,
+    points: [{ id: "point-1", timeSec: 0, value: -30, interpolation: "linear" }],
+  };
+  await user.mutation(api.automation.serverSetEnvelope, { ...automation, updatedAt: 1 });
+  expect(await projectRevision(t, "project-1")).toBe(4);
+  await user.mutation(api.automation.serverSetEnvelope, { ...automation, updatedAt: 2 });
+  expect(await projectRevision(t, "project-1")).toBe(4);
+  await user.mutation(api.automation.serverSetEnvelope, {
+    ...automation, updatedAt: 3, points: [{ id: "point-1", timeSec: 0, value: -20, interpolation: "linear" }],
+  });
+  expect(await projectRevision(t, "project-1")).toBe(5);
+  await user.mutation(api.tracks.serverSetSidechainRoute, {
+    projectId: "project-1", sourceTrackId, targetTrackId, effectInstanceId: "gate-1",
+  });
+  expect(await projectRevision(t, "project-1")).toBe(6);
+  await user.mutation(api.tracks.serverSetSidechainRoute, {
+    projectId: "project-1", sourceTrackId, targetTrackId, effectInstanceId: "gate-1",
+  });
+  expect(await projectRevision(t, "project-1")).toBe(6);
+  await expect(user.mutation(api.tracks.serverRemoveSidechainRoute, {
+    projectId: "project-1", targetTrackId, effectInstanceId: "missing",
+  })).rejects.toThrow();
+  expect(await projectRevision(t, "project-1")).toBe(6);
+
+  expect(await user.mutation(api.effects.serverRemoveAudioEffect, {
+    projectId: "project-1", targetType: "track", trackId: targetTrackId, effect: "gate", instanceId: "gate-1",
+  })).toEqual({ status: "deleted" });
+  expect(await projectRevision(t, "project-1")).toBe(7);
+  expect(await user.mutation(api.effects.serverRemoveAudioEffect, {
+    projectId: "project-1", targetType: "track", trackId: targetTrackId, effect: "gate", instanceId: "gate-1",
+  })).toEqual({ status: "not-found" });
+  expect(await projectRevision(t, "project-1")).toBe(7);
+});
+
+test("restores an effect chain once and no-ops across operation identities", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0 });
+  const input: {
+    projectId: string; trackId: string; operationId: string;
+    audioEffects: Array<{ id: string; kind: "utility"; params: ReturnType<typeof AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams> }>;
+  } = {
+    projectId: "project-1", trackId,
+    audioEffects: [{ id: "utility-1", kind: "utility", params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() }],
+    operationId: "restore-1",
+  };
+  const user = t.withIdentity({ subject: owner });
+  expect(await user.mutation(api.effects.serverRestoreChain, input)).toEqual({ status: "applied" });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+  expect(await user.mutation(api.effects.serverRestoreChain, input)).toEqual({ status: "applied" });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+  expect(await user.mutation(api.effects.serverRestoreChain, { ...input, operationId: "restore-2" })).toEqual({ status: "noop" });
+  expect(await projectRevision(t, "project-1")).toBe(1);
 });

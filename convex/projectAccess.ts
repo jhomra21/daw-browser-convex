@@ -2,6 +2,7 @@ import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
 import { v } from "convex/values";
 import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
+import { getProjectRow } from "./projectRows";
 
 type RoomSummary = {
   projectId: string;
@@ -24,10 +25,7 @@ export async function isProjectDeletionPending(
   ctx: ProjectAccessCtx,
   projectId: string,
 ) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
+  const project = await getProjectRow(ctx, projectId);
   return project?.deletionPendingAt !== undefined;
 }
 
@@ -35,10 +33,7 @@ async function readAccessibleProjectNameByRoom(
   ctx: ProjectAccessCtx,
   projectId: string,
 ) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
+  const project = await getProjectRow(ctx, projectId);
   if (project?.deletionPendingAt !== undefined) return null;
   return project?.name.trim() ? project.name : "Untitled";
 }
@@ -105,10 +100,7 @@ export async function getProjectRole(
   projectId: string,
   userId: string,
 ): Promise<ProjectRole | null> {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
+  const project = await getProjectRow(ctx, projectId);
   if (!project || project.deletionPendingAt !== undefined) return null;
   if (project.ownerUserId === userId) return "owner";
   const ownerships = await ctx.db

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
+import { requireProjectRow } from "./projectRows";
 
 const readFullTimelineView = async (
   ctx: QueryCtx,
@@ -31,11 +32,7 @@ const readFullTimelineView = async (
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
   ]);
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", q => q.eq("projectId", projectId))
-    .unique();
-  if (!project) throw new Error("Project not found.");
+  const project = await requireProjectRow(ctx, projectId);
 
   return {
     project: {

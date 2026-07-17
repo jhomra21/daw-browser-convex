@@ -1,9 +1,4 @@
 import { z } from 'zod'
-import {
-  audioEffectAddPayloadSchema,
-  instrumentAddPayloadSchema,
-  persistedProcessorSnapshotSchema,
-} from '@daw-browser/shared'
 
 export const CONTROL_API_VERSION_V1 = 'v1'
 
@@ -11,25 +6,13 @@ const stableIdSchema = z.string().min(1).max(256)
 const nameSchema = z.string().trim().min(1).max(120)
 const finiteNumberSchema = z.number().finite()
 const secondsSchema = finiteNumberSchema.min(0)
-const parameterValueSchema = z.union([z.boolean(), z.string().max(4096), finiteNumberSchema])
 const trackRoleSchema = z.enum(['track', 'group', 'return'])
-const automationPointSchema = z.object({
-  id: stableIdSchema,
-  timeSec: secondsSchema,
-  value: finiteNumberSchema,
-  interpolation: z.enum(['linear', 'hold']),
-}).strict()
 const trackReferenceSchema = z.object({ trackId: stableIdSchema }).strict()
-const effectReferenceSchema = z.object({
-  target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-  effectInstanceId: stableIdSchema,
-}).strict()
 
 export const controlLimitsV1 = {
   maxActions: 100,
   maxSerializedBodyBytes: 256 * 1024,
   maxMidiNotesPerCommit: 500,
-  maxAutomationPointsPerCommit: 1_000,
 }
 
 export const stableIdSchemaV1 = stableIdSchema
@@ -45,7 +28,6 @@ export const controlCapabilitiesSchemaV1 = z.object({
     maxActions: z.number().int().positive(),
     maxSerializedBodyBytes: z.number().int().positive(),
     maxMidiNotesPerCommit: z.number().int().positive(),
-    maxAutomationPointsPerCommit: z.number().int().positive(),
   }).strict(),
 }).strict()
 
@@ -119,6 +101,16 @@ const midiNoteSchema = z.object({
   pitch: z.number().int().min(0).max(127),
   velocity: finiteNumberSchema.min(0).max(1).optional(),
 }).strict()
+const clipFadesSnapshotSchema = z.object({
+  fadeInStartSec: secondsSchema.optional(),
+  fadeInSec: secondsSchema,
+  fadeOutSec: secondsSchema,
+  fadeOutEndSec: secondsSchema.optional(),
+  fadeInCurve: finiteNumberSchema,
+  fadeOutCurve: finiteNumberSchema,
+  fadeInCurvePosition: finiteNumberSchema.optional(),
+  fadeOutCurvePosition: finiteNumberSchema.optional(),
+}).strict()
 const clipCreateMidiActionSchema = z.object({
   kind: z.literal('clip.midi.create'),
   client: clientReferenceSchemaV1.optional(),
@@ -143,81 +135,16 @@ const clipTimingActionSchema = z.object({
   gain: finiteNumberSchema.min(0).max(2).optional(),
   fadeInSec: secondsSchema.optional(),
   fadeOutSec: secondsSchema.optional(),
+  leftPadSec: secondsSchema.optional(),
+  bufferOffsetSec: secondsSchema.optional(),
+  midiOffsetBeats: secondsSchema.optional(),
 }).strict().refine((action) => Object.keys(action).length > 2, 'Clip timing action must change a value.')
 const clipNameActionSchema = z.object({ kind: z.literal('clip.rename'), clipId: stableIdSchema, name: nameSchema }).strict()
 const clipDeleteActionSchema = z.object({ kind: z.literal('clip.delete'), clipId: stableIdSchema }).strict()
-const effectAddActionSchema = z.object({
-  kind: z.literal('effect.add'),
-  ...effectReferenceSchema.shape,
-  effectKind: z.string(),
-  params: z.unknown().optional(),
-  index: z.number().int().nonnegative().optional(),
-}).strict().superRefine((action, context) => {
-  const result = audioEffectAddPayloadSchema.safeParse({
-    effectKind: action.effectKind,
-    ...(action.params === undefined ? {} : { params: action.params }),
-  })
-  if (!result.success) context.addIssue({ code: 'custom', message: 'Invalid effect processor parameters.', path: ['params'] })
-})
-const instrumentAddActionSchema = z.object({
-  kind: z.literal('instrument.add'),
-  ...trackReferenceSchema.shape,
-  instrumentKind: z.string(),
-  instanceId: stableIdSchema,
-  params: z.unknown().optional(),
-}).strict().superRefine((action, context) => {
-  const result = instrumentAddPayloadSchema.safeParse({
-    instrumentKind: action.instrumentKind,
-    ...(action.params === undefined ? {} : { params: action.params }),
-  })
-  if (!result.success) context.addIssue({ code: 'custom', message: 'Invalid instrument processor parameters.', path: ['params'] })
-})
-const processorParameterActionSchema = z.object({
-  kind: z.union([z.literal('effect.parameter.set'), z.literal('instrument.parameter.set')]),
-  ...effectReferenceSchema.shape,
-  parameterId: stableIdSchema,
-  value: parameterValueSchema,
-}).strict()
-const effectRemoveActionSchema = z.object({ kind: z.literal('effect.remove'), ...effectReferenceSchema.shape }).strict()
-const instrumentRemoveActionSchema = z.object({
-  kind: z.literal('instrument.remove'),
-  ...trackReferenceSchema.shape,
-  instanceId: stableIdSchema,
-}).strict()
-const effectReorderActionSchema = z.object({
-  kind: z.literal('effect.reorder'),
-  target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-  effectInstanceIds: z.array(stableIdSchema).min(1).max(128),
-}).strict()
-const instrumentReorderActionSchema = z.object({
-  kind: z.literal('instrument.reorder'),
-  ...trackReferenceSchema.shape,
-  instanceIds: z.array(stableIdSchema).min(1).max(128),
-}).strict()
-const automationSetActionSchema = z.object({
-  kind: z.literal('automation.set'),
-  target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-  effectInstanceId: stableIdSchema.optional(),
-  parameterId: stableIdSchema,
-  enabled: z.boolean(),
-  points: z.array(automationPointSchema).max(controlLimitsV1.maxAutomationPointsPerCommit),
-}).strict()
-const automationDeleteActionSchema = z.object({
-  kind: z.literal('automation.delete'),
-  target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-  effectInstanceId: stableIdSchema.optional(),
-  parameterId: stableIdSchema,
-}).strict()
-const sidechainSetActionSchema = z.object({
-  kind: z.literal('sidechain.set'),
-  sourceTrackId: stableIdSchema,
-  targetTrackId: stableIdSchema,
-  effectInstanceId: stableIdSchema,
-}).strict()
-const sidechainRemoveActionSchema = z.object({
-  kind: z.literal('sidechain.remove'),
-  targetTrackId: stableIdSchema,
-  effectInstanceId: stableIdSchema,
+const masterVolumeActionSchema = z.object({
+  kind: z.literal('master.volume.set'),
+  projectId: stableIdSchema,
+  volume: finiteNumberSchema.min(0).max(2),
 }).strict()
 
 export const controlActionSchemaV1 = z.union([
@@ -225,11 +152,7 @@ export const controlActionSchemaV1 = z.union([
   trackRenameActionSchema, trackMixActionSchema, trackRoutingActionSchema,
   trackReorderActionSchema, trackGroupActionSchema, trackDeleteActionSchema,
   clipCreateMidiActionSchema, clipMoveActionSchema, clipTimingActionSchema,
-  clipNameActionSchema, clipDeleteActionSchema, effectAddActionSchema,
-  instrumentAddActionSchema, processorParameterActionSchema, effectRemoveActionSchema,
-  instrumentRemoveActionSchema, effectReorderActionSchema, instrumentReorderActionSchema,
-  automationSetActionSchema, automationDeleteActionSchema,
-  sidechainSetActionSchema, sidechainRemoveActionSchema,
+  clipNameActionSchema, clipDeleteActionSchema, masterVolumeActionSchema,
 ])
 
 export const controlCommitRequestSchemaV1 = z.object({
@@ -239,22 +162,13 @@ export const controlCommitRequestSchemaV1 = z.object({
   actions: z.array(controlActionSchemaV1).min(1).max(controlLimitsV1.maxActions),
 }).strict().superRefine((request, context) => {
   let midiNotes = 0
-  let automationPoints = 0
   for (const action of request.actions) {
     if (action.kind === 'clip.midi.create') midiNotes += action.notes.length
-    if (action.kind === 'automation.set') automationPoints += action.points.length
   }
   if (midiNotes > controlLimitsV1.maxMidiNotesPerCommit) {
     context.addIssue({
       code: 'custom',
       message: `Control commit exceeds ${controlLimitsV1.maxMidiNotesPerCommit} MIDI notes.`,
-      path: ['actions'],
-    })
-  }
-  if (automationPoints > controlLimitsV1.maxAutomationPointsPerCommit) {
-    context.addIssue({
-      code: 'custom',
-      message: `Control commit exceeds ${controlLimitsV1.maxAutomationPointsPerCommit} automation points.`,
       path: ['actions'],
     })
   }
@@ -305,30 +219,22 @@ export const projectSnapshotSchemaV1 = z.object({
     tempoBpm: finiteNumberSchema,
     timeSignature: z.object({ numerator: z.number().int().positive(), denominator: z.number().int().positive() }).strict(),
     loop: z.object({ enabled: z.boolean(), startSec: secondsSchema, endSec: secondsSchema }).strict(),
+    masterVolume: finiteNumberSchema,
     updatedAt: z.number().int().nonnegative(),
   }).strict(),
   tracks: z.array(snapshotTrackSchema),
   clips: z.array(z.object({
     id: stableIdSchema, trackId: stableIdSchema, name: nameSchema, startSec: secondsSchema,
     duration: finiteNumberSchema.positive(), gain: finiteNumberSchema.optional(),
-  }).strict()),
-  effects: z.array(z.object({
-    target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-    instanceId: stableIdSchema,
-    kind: z.string(),
-    index: z.number().int().nonnegative(),
-    params: z.unknown(),
-  }).strict().superRefine((effect, context) => {
-    const result = persistedProcessorSnapshotSchema.safeParse({ kind: effect.kind, params: effect.params })
-    if (!result.success) context.addIssue({ code: 'custom', message: 'Invalid persisted processor parameters.', path: ['params'] })
-  })),
-  automation: z.array(z.object({
-    id: stableIdSchema, target: z.union([trackReferenceSchema, z.object({ master: z.literal(true) }).strict()]),
-    effectInstanceId: stableIdSchema.optional(), parameterId: stableIdSchema, enabled: z.boolean(),
-    points: z.array(automationPointSchema),
-  }).strict()),
-  sidechains: z.array(z.object({
-    sourceTrackId: stableIdSchema, targetTrackId: stableIdSchema, effectInstanceId: stableIdSchema,
+    leftPadSec: secondsSchema,
+    bufferOffsetSec: secondsSchema,
+    midiOffsetBeats: secondsSchema,
+    fades: clipFadesSnapshotSchema.optional(),
+    midi: z.object({
+      wave: z.string(),
+      gain: finiteNumberSchema.optional(),
+      notes: z.array(midiNoteSchema),
+    }).strict().optional(),
   }).strict()),
 }).strict()
 
@@ -345,10 +251,7 @@ export const controlCapabilitiesV1 = {
     'project.rename', 'project.settings.set', 'track.create', 'track.rename',
     'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
     'track.delete', 'clip.midi.create', 'clip.move', 'clip.timing.set',
-    'clip.rename', 'clip.delete', 'effect.add', 'instrument.add',
-    'effect.parameter.set', 'instrument.parameter.set', 'effect.remove',
-    'instrument.remove', 'effect.reorder', 'instrument.reorder', 'automation.set',
-    'automation.delete', 'sidechain.set', 'sidechain.remove',
+    'clip.rename', 'clip.delete', 'master.volume.set',
   ],
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>

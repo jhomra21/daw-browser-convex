@@ -10,7 +10,6 @@
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {
-    "@daw-browser/shared": "workspace:*",
     "zod": "^4.3.6"
   }
 }

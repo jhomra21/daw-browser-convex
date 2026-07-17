@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 
 import {
   canonicalJson,
+  controlCapabilitiesV1,
   controlCommitRequestSchemaV1,
   controlLimitsV1,
   parseControlCommitRequestV1,
@@ -59,18 +60,12 @@ test('canonical JSON rejects unsupported values and sparse arrays', () => {
   expect(() => canonicalJson(sparse)).toThrow()
 })
 
-test('enforces aggregate MIDI and automation point limits', () => {
+test('enforces aggregate MIDI point limits', () => {
   const midiNotes = Array.from({ length: controlLimitsV1.maxMidiNotesPerCommit }, (_, index) => ({
     beat: index / 4,
     length: 0.25,
     pitch: 48 + index % 36,
     velocity: 0.8,
-  }))
-  const automationPoints = Array.from({ length: controlLimitsV1.maxAutomationPointsPerCommit }, (_, index) => ({
-    id: `point-${index}`,
-    timeSec: index / 10,
-    value: index / controlLimitsV1.maxAutomationPointsPerCommit,
-    interpolation: index % 2 === 0 ? 'linear' : 'hold',
   }))
   const midiAction = {
     kind: 'clip.midi.create',
@@ -80,33 +75,70 @@ test('enforces aggregate MIDI and automation point limits', () => {
     wave: 'sine',
     notes: midiNotes,
   }
-  const automationAction = {
-    kind: 'automation.set',
-    target: { trackId: 'track-1' },
-    parameterId: 'mixer.volume',
-    enabled: true,
-    points: automationPoints,
-  }
   const midiCommit = commit([midiAction])
-  const automationCommit = commit([automationAction])
   expect(() => parseControlCommitRequestV1(midiCommit)).not.toThrow()
-  expect(() => parseControlCommitRequestV1(automationCommit)).not.toThrow()
   expect(() => parseControlCommitRequestV1(commit([
     { ...midiAction, notes: midiNotes.slice(0, 250) },
     { ...midiAction, notes: midiNotes.slice(250) },
-    { ...automationAction, points: automationPoints.slice(0, 500) },
-    { ...automationAction, points: automationPoints.slice(500) },
   ]))).not.toThrow()
-  expect(() => parseControlCommitRequestV1(commit([
-    { ...midiAction, notes: midiNotes.slice(0, 251) },
-    { ...midiAction, notes: midiNotes.slice(250) },
-  ]))).toThrow()
-  expect(() => parseControlCommitRequestV1(commit([
-    { ...automationAction, points: automationPoints.slice(0, 501) },
-    { ...automationAction, points: automationPoints.slice(500) },
-  ]))).toThrow()
-  const fixtureBytes = new TextEncoder().encode(canonicalJson(commit([...midiCommit.actions, ...automationCommit.actions]))).byteLength
+  const fixtureBytes = new TextEncoder().encode(canonicalJson(midiCommit)).byteLength
   expect(fixtureBytes).toBeLessThan(controlLimitsV1.maxSerializedBodyBytes)
+})
+
+test('excludes deferred effects, automation, and sidechain actions', () => {
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('instrument.add')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('automation.set')
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('sidechain.set')
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'effect.add',
+    target: { master: true },
+    effectKind: 'eq',
+  }]))).toThrow()
+})
+
+test('projects core mixer and clip control state', () => {
+  const snapshot = projectSnapshotSchemaV1.parse({
+    version: 'v1',
+    project: {
+      id: 'project-1',
+      name: 'Project',
+      revision: 1,
+      tempoBpm: 120,
+      timeSignature: { numerator: 4, denominator: 4 },
+      loop: { enabled: false, startSec: 0, endSec: 8 },
+      masterVolume: 0.8,
+      updatedAt: 1,
+    },
+    tracks: [],
+    clips: [{
+      id: 'clip-1',
+      trackId: 'track-1',
+      name: 'MIDI',
+      startSec: 0,
+      duration: 1,
+      gain: 0.9,
+      leftPadSec: 0,
+      bufferOffsetSec: 0,
+      midiOffsetBeats: 0,
+      fades: {
+        fadeInStartSec: 0.05,
+        fadeInSec: 0.1,
+        fadeOutSec: 0.2,
+        fadeOutEndSec: 0.95,
+        fadeInCurve: 0.5,
+        fadeOutCurve: -0.5,
+        fadeInCurvePosition: 0.3,
+        fadeOutCurvePosition: 0.7,
+      },
+      midi: {
+        wave: 'sine',
+        notes: [{ beat: 0, length: 1, pitch: 60 }],
+      },
+    }],
+  })
+  expect(snapshot.project.masterVolume).toBe(0.8)
+  expect(snapshot.clips[0]?.midi?.notes).toHaveLength(1)
 })
 
 const routingCommitOfByteLength = (byteLength: number) => {
@@ -138,7 +170,7 @@ test('accepts the serialized request boundary and rejects one byte over', () => 
   expect(() => parseControlCommitRequestV1(overLimit)).toThrow()
 })
 
-test('rejects unknown processor fields and accepts arpeggiator snapshots', () => {
+test('rejects deferred processor actions and snapshots', () => {
   expect(() => parseControlCommitRequestV1(commit([{
     kind: 'effect.add',
     target: { trackId: 'track-1' },
@@ -159,6 +191,7 @@ test('rejects unknown processor fields and accepts arpeggiator snapshots', () =>
       id: 'project-1', name: 'Project', revision: 0, tempoBpm: 120,
       timeSignature: { numerator: 4, denominator: 4 },
       loop: { enabled: false, startSec: 0, endSec: 0 },
+      masterVolume: 0.8,
       updatedAt: 0,
     },
     tracks: [],
@@ -172,7 +205,7 @@ test('rejects unknown processor fields and accepts arpeggiator snapshots', () =>
     }],
     automation: [],
     sidechains: [],
-  })).not.toThrow()
+  })).toThrow()
 })
 
 test('rejects more actions than the atomic contract allows', () => {

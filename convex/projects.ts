@@ -3,46 +3,7 @@ import { v } from "convex/values";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueR2DeleteRows } from "./r2Deletes";
-
-async function ensureOwnedRoomRecords(
-  ctx: MutationCtx,
-  projectId: string,
-  userId: string,
-) {
-  const [project, ownershipRows] = await Promise.all([
-    ctx.db
-      .query("projects")
-      .withIndex("by_room", (q) => q.eq("projectId", projectId))
-      .unique(),
-    ctx.db
-      .query("ownerships")
-      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-      .collect(),
-  ]);
-  const markerOwnership = ownershipRows.find((ownership) => !ownership.trackId && !ownership.clipId);
-  if (!project) {
-    await ctx.db.insert("projects", {
-      projectId,
-      ownerUserId: userId,
-      name: "Untitled",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      revision: 0,
-      tempoBpm: 120,
-      timeSignatureNumerator: 4,
-      timeSignatureDenominator: 4,
-      loopEnabled: false,
-      loopStartSec: 0,
-      loopEndSec: 8,
-    });
-  }
-  if (!markerOwnership) {
-    await ctx.db.insert("ownerships", {
-      projectId,
-      ownerUserId: userId,
-    });
-  }
-}
+import { advanceProjectRevision, ensureOwnedProjectRow, getProjectRow } from "./projectRows";
 
 async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
   await Promise.all([
@@ -86,19 +47,8 @@ async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
 }
 
 async function findOwnedProject(ctx: { db: DatabaseReader }, projectId: string, userId: string) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
+  const project = await getProjectRow(ctx, projectId);
   return project?.ownerUserId === userId ? project : null;
-}
-
-async function listRoomProjectRows(ctx: { db: DatabaseReader }, projectId: string) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
-  return project ? [project] : [];
 }
 
 async function setRoomProjectDeletionPendingAt(
@@ -106,11 +56,8 @@ async function setRoomProjectDeletionPendingAt(
   projectId: string,
   deletionPendingAt: number | undefined,
 ) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (project) await ctx.db.patch(project._id, { deletionPendingAt, updatedAt: Date.now() });
+  const project = await getProjectRow(ctx, projectId);
+  if (project) await ctx.db.patch(project._id, { deletionPendingAt });
 }
 
 export const listMineDetailed = query({
@@ -127,8 +74,7 @@ export const createOwnedRoom = mutation({
   returns: v.object({ status: v.union(v.literal("created"), v.literal("exists")) }),
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    const existingProjects = await listRoomProjectRows(ctx, projectId);
-    const existingProject = existingProjects[0];
+    const existingProject = await getProjectRow(ctx, projectId);
     if (existingProject) {
       if (existingProject.deletionPendingAt !== undefined) {
         throw new Error("Project deletion is pending.");
@@ -139,9 +85,8 @@ export const createOwnedRoom = mutation({
       }
       throw new Error("Project already exists.");
     }
-    await ensureOwnedRoomRecords(ctx, projectId, userId);
-    const result: { status: "created" } = { status: "created" };
-    return result;
+    const created = await ensureOwnedProjectRow(ctx, projectId, userId);
+    return { status: created.status };
   },
 });
 
@@ -149,10 +94,7 @@ export const exists = query({
   args: { projectId: v.string() },
   returns: v.boolean(),
   handler: async (ctx, { projectId }) => {
-    const row = await ctx.db
-      .query("projects")
-      .withIndex("by_room", (q) => q.eq("projectId", projectId))
-      .first();
+    const row = await getProjectRow(ctx, projectId);
     return Boolean(row);
   },
 });
@@ -237,11 +179,10 @@ export const setName = mutation({
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const trimmed = name.trim().slice(0, 120);
     const row = await findOwnedProject(ctx, projectId, userId);
-    if (row) {
-      await ctx.db.patch(row._id, {
-        name: trimmed.length ? trimmed : "Untitled",
-        updatedAt: Date.now(),
-      });
+    const nextName = trimmed.length ? trimmed : "Untitled";
+    if (row && row.name !== nextName) {
+      await ctx.db.patch(row._id, { name: nextName });
+      await advanceProjectRevision(ctx, projectId);
     }
     return null;
   },
@@ -282,15 +223,25 @@ export const setTimelineSettings = mutation({
       ? project.loopEndSec
       : Math.max(loopStartSec + 0.05, input.loopEndSec);
 
+    const loopEnabled = input.loopEnabled ?? project.loopEnabled;
+    const changed = (
+      project.tempoBpm !== tempoBpm
+      || project.timeSignatureNumerator !== timeSignatureNumerator
+      || project.timeSignatureDenominator !== timeSignatureDenominator
+      || project.loopEnabled !== loopEnabled
+      || project.loopStartSec !== loopStartSec
+      || project.loopEndSec !== loopEndSec
+    );
+    if (!changed) return null;
     await ctx.db.patch(project._id, {
       tempoBpm,
       timeSignatureNumerator,
       timeSignatureDenominator,
-      loopEnabled: input.loopEnabled ?? project.loopEnabled,
+      loopEnabled,
       loopStartSec,
       loopEndSec,
-      updatedAt: Date.now(),
     });
+    await advanceProjectRevision(ctx, input.projectId);
     return null;
   },
 });

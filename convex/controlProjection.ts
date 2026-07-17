@@ -1,14 +1,58 @@
-import type { Doc } from "./_generated/dataModel";
 import { projectSnapshotSchemaV1 } from "@daw-browser/control";
+import {
+  effectiveControlClipName,
+  effectiveControlMixerBoolean,
+  effectiveControlTimingOffset,
+  canonicalControlMidiNotes,
+} from "./controlEffectiveValues";
 import type { MergedTrackDoc } from "./mixerChannels";
 
 type ControlProjectSnapshotInput = {
-  project: Doc<"projects">;
+  project: {
+    projectId: string;
+    name: string;
+    revision: number;
+    tempoBpm: number;
+    timeSignatureNumerator: number;
+    timeSignatureDenominator: number;
+    loopEnabled: boolean;
+    loopStartSec: number;
+    loopEndSec: number;
+    updatedAt: number;
+  };
   tracks: MergedTrackDoc[];
-  clips: Doc<"clips">[];
-  effects: Doc<"effects">[];
-  automationEnvelopes: Doc<"automationEnvelopes">[];
-  sidechainRoutes: Doc<"sidechainRoutes">[];
+  clips: Array<{
+    _id: unknown;
+    trackId: unknown;
+    name?: string;
+    startSec: number;
+    duration: number;
+    gain?: number;
+    leftPadSec?: number;
+    bufferOffsetSec?: number;
+    midiOffsetBeats?: number;
+    fades?: {
+      fadeInStartSec?: number;
+      fadeInSec: number;
+      fadeOutSec: number;
+      fadeOutEndSec?: number;
+      fadeInCurve: number;
+      fadeOutCurve: number;
+      fadeInCurvePosition?: number;
+      fadeOutCurvePosition?: number;
+    };
+    midi?: {
+      wave: string;
+      gain?: number;
+      notes: Array<{
+        beat: number;
+        length: number;
+        pitch: number;
+        velocity?: number;
+      }>;
+    };
+  }>;
+  masterVolume: number;
 };
 
 export const compareControlSnapshotText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
@@ -24,8 +68,8 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
       channelRole: track.channelRole === "group" || track.channelRole === "return" ? track.channelRole : "track",
       groupId: track.groupId ? String(track.groupId) : undefined,
       volume: track.volume,
-      muted: track.muted ?? false,
-      soloed: track.soloed ?? false,
+      muted: effectiveControlMixerBoolean(track.muted),
+      soloed: effectiveControlMixerBoolean(track.soloed),
       outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
       sends: track.sends
         .map((send) => ({
@@ -40,51 +84,20 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
     .map((clip) => ({
       id: String(clip._id),
       trackId: String(clip.trackId),
-      name: clip.name?.trim() || "Clip",
+      name: effectiveControlClipName(clip.name),
       startSec: clip.startSec,
       duration: clip.duration,
       gain: clip.gain,
-    }));
-  const effects = [...input.effects]
-    .filter((effect) => effect.targetType === "master" || effect.trackId !== undefined)
-    .sort((left, right) => (
-      compareControlSnapshotText(left.targetType, right.targetType)
-      || compareControlSnapshotText(String(left.trackId ?? ""), String(right.trackId ?? ""))
-      || left.index - right.index
-      || compareControlSnapshotText(String(left._id), String(right._id))
-    ))
-    .map((effect) => ({
-      target: effect.targetType === "master"
-        ? { master: true }
-        : { trackId: String(effect.trackId) },
-      instanceId: effect.instanceId ?? String(effect._id),
-      kind: effect.type,
-      index: effect.index,
-      params: effect.params,
-    }));
-  const automation = [...input.automationEnvelopes]
-    .filter((envelope) => envelope.targetKind === "master" || envelope.trackId !== undefined)
-    .sort((left, right) => compareControlSnapshotText(left.targetKey, right.targetKey) || compareControlSnapshotText(String(left._id), String(right._id)))
-    .map((envelope) => ({
-      id: String(envelope._id),
-      target: envelope.targetKind === "master"
-        ? { master: true }
-        : { trackId: String(envelope.trackId) },
-      effectInstanceId: envelope.effectInstanceId,
-      parameterId: envelope.parameterId,
-      enabled: envelope.enabled,
-      points: [...envelope.points].sort((left, right) => left.timeSec - right.timeSec || compareControlSnapshotText(left.id, right.id)),
-    }));
-  const sidechains = [...input.sidechainRoutes]
-    .sort((left, right) => (
-      compareControlSnapshotText(String(left.targetTrackId), String(right.targetTrackId))
-      || compareControlSnapshotText(left.effectInstanceId, right.effectInstanceId)
-      || compareControlSnapshotText(String(left.sourceTrackId), String(right.sourceTrackId))
-    ))
-    .map((route) => ({
-      sourceTrackId: String(route.sourceTrackId),
-      targetTrackId: String(route.targetTrackId),
-      effectInstanceId: route.effectInstanceId,
+      leftPadSec: effectiveControlTimingOffset(clip.leftPadSec),
+      bufferOffsetSec: effectiveControlTimingOffset(clip.bufferOffsetSec),
+      midiOffsetBeats: effectiveControlTimingOffset(clip.midiOffsetBeats),
+      fades: clip.fades,
+      midi: clip.midi
+        ? {
+          ...clip.midi,
+          notes: canonicalControlMidiNotes(clip.midi.notes),
+        }
+        : undefined,
     }));
 
   return projectSnapshotSchemaV1.parse({
@@ -103,12 +116,10 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
         startSec: input.project.loopStartSec,
         endSec: input.project.loopEndSec,
       },
+      masterVolume: input.masterVolume,
       updatedAt: input.project.updatedAt,
     },
     tracks,
     clips,
-    effects,
-    automation,
-    sidechains,
   });
 };

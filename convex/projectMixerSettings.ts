@@ -2,12 +2,17 @@ import { DEFAULT_MASTER_VOLUME, normalizeMasterVolume } from "@daw-browser/share
 import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
+import { advanceProjectRevision } from "./projectRows";
 
 type ProjectMixerSettingsReadCtx = { db: DatabaseReader };
 
 export type ProjectMixerSettings = {
   masterVolume: number;
 };
+
+export const effectiveProjectMasterVolume = (value: number | undefined) => (
+  value === undefined ? DEFAULT_MASTER_VOLUME : normalizeMasterVolume(value)
+);
 
 export async function getProjectMixerSettings(
   ctx: ProjectMixerSettingsReadCtx,
@@ -18,32 +23,37 @@ export async function getProjectMixerSettings(
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .first();
   return {
-    masterVolume: row ? normalizeMasterVolume(row.masterVolume) : DEFAULT_MASTER_VOLUME,
+    masterVolume: effectiveProjectMasterVolume(row?.masterVolume),
   };
 }
 
-async function setProjectMasterVolumeForUser(
+export async function setProjectMasterVolumeForUser(
   ctx: MutationCtx,
   projectId: string,
   userId: string,
   volume: number,
 ) {
   await requireMasterBusWriteAccess(ctx, projectId, userId);
-  const masterVolume = normalizeMasterVolume(volume);
+  const masterVolume = effectiveProjectMasterVolume(volume);
   const row = await ctx.db
     .query("projectMixerSettings")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
     .first();
   if (row) {
-    if (normalizeMasterVolume(row.masterVolume) === masterVolume) return { status: "noop" as const };
+    if (effectiveProjectMasterVolume(row.masterVolume) === masterVolume) return { status: "noop" as const };
     await ctx.db.patch(row._id, { masterVolume, updatedAt: Date.now() });
+    await advanceProjectRevision(ctx, projectId);
     return { status: "applied" as const };
+  }
+  if (masterVolume === effectiveProjectMasterVolume(undefined)) {
+    return { status: "noop" as const };
   }
   await ctx.db.insert("projectMixerSettings", {
     projectId,
     masterVolume,
     updatedAt: Date.now(),
   });
+  await advanceProjectRevision(ctx, projectId);
   return { status: "applied" as const };
 }
 

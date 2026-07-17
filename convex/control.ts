@@ -1,13 +1,18 @@
 import {
   controlCommitResultSchemaV1,
   controlErrorSchemaV1,
+  controlHistoryEntrySchemaV1,
+  controlHistoryResultSchemaV1,
   controlPreviewResultSchemaV1,
   controlRequestDigestInputV1,
   controlRequestDigestV1,
+  parseControlHistoryQueryV1,
   assertControlSerializedBodyV1,
   parseControlCommitRequestV1,
   parseControlPreviewRequestV1,
+  parseControlSnapshotQueryV1,
   planControlRequestV1,
+  projectSnapshotSchemaV1,
   type ResolvedRefV1,
 } from "@daw-browser/control";
 import { ConvexError, v } from "convex/values";
@@ -15,7 +20,7 @@ import { mutation, query } from "./_generated/server";
 import { executeControlPlanV1 } from "./controlExecution";
 import { ControlDomainError, preflightControlRequestV1 } from "./controlPreflight";
 import { readProjectControlSnapshotV1 } from "./controlSnapshot";
-import { getProjectRole, requireAuthenticatedUserId } from "./projectAccess";
+import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
 
 const maxControlCommitsPerProject = 1000;
@@ -94,6 +99,50 @@ const parseCommit = (input: unknown) => {
   }
 }
 
+const parseSnapshotQuery = (input: unknown) => {
+  try {
+    return parseControlSnapshotQueryV1(input)
+  } catch {
+    return failure("invalid-request", "Invalid control snapshot request.")
+  }
+}
+
+const parseHistoryQuery = (input: unknown) => {
+  try {
+    return parseControlHistoryQueryV1(input)
+  } catch {
+    return failure("invalid-request", "Invalid control history request.")
+  }
+}
+
+const paginateControlHistory = async (
+  ctx: any,
+  projectId: string,
+  limit: number,
+  cursor: string | undefined,
+) => {
+  const query = ctx.db
+    .query("controlCommits")
+    .withIndex("by_project_createdAt", (index: any) => index.eq("projectId", projectId))
+    .order("desc")
+  try {
+    return await query.paginate({ numItems: limit, cursor: cursor ?? null })
+  } catch {
+    return failure("invalid-request", "Invalid control history cursor.")
+  }
+}
+
+const boundedActorClaim = (value: string) => {
+  if (value.length > 0 && value.length <= 256) return value
+  return failure("authorization", "Authenticated identity claims are invalid.")
+}
+
+const controlActor = (identity: Awaited<ReturnType<typeof requireAuthenticatedIdentity>>) => ({
+  subject: boundedActorClaim(identity.subject),
+  issuer: boundedActorClaim(identity.dawControlActorIssuer ?? identity.issuer),
+  tokenIdentifier: boundedActorClaim(identity.dawControlActorTokenIdentifier ?? identity.tokenIdentifier),
+})
+
 const plan = (snapshot: Parameters<typeof planControlRequestV1>[0], request: Parameters<typeof planControlRequestV1>[1]) => {
   try {
     return planControlRequestV1(snapshot, request)
@@ -133,7 +182,7 @@ export const previewV1 = query({
     const parsed = parsePreview(request)
     let userId: string
     try {
-      userId = await requireAuthenticatedUserId(ctx)
+      userId = (await requireAuthenticatedIdentity(ctx)).subject
     } catch {
       return failure("authorization", "Authentication is required.")
     }
@@ -162,12 +211,13 @@ export const commitV1 = mutation({
   args: { request: v.any() },
   handler: async (ctx, { request }) => {
     const parsed = parseCommit(request)
-    let userId: string
+    let actor: ReturnType<typeof controlActor>
     try {
-      userId = await requireAuthenticatedUserId(ctx)
+      actor = controlActor(await requireAuthenticatedIdentity(ctx))
     } catch {
       return failure("authorization", "Authentication is required.")
     }
+    const userId = actor.subject
     const requestDigest = await controlRequestDigestV1(parsed)
     const existing = await ctx.db
       .query("controlCommits")
@@ -224,6 +274,8 @@ export const commitV1 = mutation({
       projectId: parsed.projectId,
       apiVersion: "v1",
       actorSubject: userId,
+      actorIssuer: actor.issuer,
+      actorTokenIdentifier: actor.tokenIdentifier,
       actorRole: writerRole,
       idempotencyKey: parsed.idempotencyKey,
       requestDigest,
@@ -241,5 +293,67 @@ export const commitV1 = mutation({
       failure("limit-exceeded", "Control commit retention could not be bounded safely.")
     }
     return committed
+  },
+})
+
+export const snapshotV1 = query({
+  args: { projectId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const parsed = parseSnapshotQuery(args)
+    let userId: string
+    try {
+      userId = (await requireAuthenticatedIdentity(ctx)).subject
+    } catch {
+      return failure("authorization", "Authentication is required.")
+    }
+    try {
+      await requireProjectAccess(ctx, parsed.projectId, userId)
+    } catch {
+      return failure("forbidden", "You do not have read access to this project.")
+    }
+    return projectSnapshotSchemaV1.parse(await readProjectControlSnapshotV1(ctx, parsed.projectId))
+  },
+})
+
+export const historyV1 = query({
+  args: {
+    projectId: v.string(),
+    cursor: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const parsed = parseHistoryQuery(args)
+    let userId: string
+    try {
+      userId = (await requireAuthenticatedIdentity(ctx)).subject
+    } catch {
+      return failure("authorization", "Authentication is required.")
+    }
+    try {
+      await requireProjectAccess(ctx, parsed.projectId, userId)
+    } catch {
+      return failure("forbidden", "You do not have read access to this project.")
+    }
+    const page = await paginateControlHistory(ctx, parsed.projectId, parsed.limit, parsed.cursor)
+    return controlHistoryResultSchemaV1.parse({
+      entries: page.page.map((commit: any) => controlHistoryEntrySchemaV1.parse({
+        id: String(commit._id),
+        projectId: commit.projectId,
+        actorSubject: commit.actorSubject,
+        ...(commit.actorIssuer === undefined ? {} : { actorIssuer: commit.actorIssuer }),
+        ...(commit.actorTokenIdentifier === undefined ? {} : { actorTokenIdentifier: commit.actorTokenIdentifier }),
+        actorRole: commit.actorRole,
+        idempotencyKey: commit.idempotencyKey,
+        requestDigest: commit.requestDigest,
+        priorRevision: commit.priorRevision,
+        revision: commit.finalRevision,
+        applied: commit.applied,
+        createdAt: commit.createdAt,
+      })),
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    })
   },
 })

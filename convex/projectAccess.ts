@@ -1,5 +1,6 @@
 import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
+import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
 import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
 import { getProjectRow } from "./projectRows";
@@ -13,7 +14,7 @@ type RoomOwnership = Doc<"ownerships">;
 type ProjectAccessCtx = { db: DatabaseReader };
 type AuthenticatedCtx = {
   auth: {
-    getUserIdentity: () => Promise<{ subject: string } | null>;
+    getUserIdentity: () => Promise<UserIdentity | null>;
   };
 };
 
@@ -152,9 +153,23 @@ export async function requireProjectAccess(
 }
 
 export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
+  return (await requireAuthenticatedIdentity(ctx)).subject;
+}
+
+export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Authentication required.");
-  return identity.subject;
+  return {
+    subject: identity.subject,
+    issuer: identity.issuer,
+    tokenIdentifier: identity.tokenIdentifier,
+    ...(typeof identity.dawControlActorIssuer === "string"
+      ? { dawControlActorIssuer: identity.dawControlActorIssuer }
+      : {}),
+    ...(typeof identity.dawControlActorTokenIdentifier === "string"
+      ? { dawControlActorTokenIdentifier: identity.dawControlActorTokenIdentifier }
+      : {}),
+  };
 }
 
 export async function hasProjectAdminCapability(

@@ -19,6 +19,7 @@ import type * as cloudBackups from "../cloudBackups.js";
 import type * as control from "../control.js";
 import type * as controlEffectiveValues from "../controlEffectiveValues.js";
 import type * as controlExecution from "../controlExecution.js";
+import type * as controlPreflight from "../controlPreflight.js";
 import type * as controlProjection from "../controlProjection.js";
 import type * as controlSnapshot from "../controlSnapshot.js";
 import type * as effects from "../effects.js";
@@ -61,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   control: typeof control;
   controlEffectiveValues: typeof controlEffectiveValues;
   controlExecution: typeof controlExecution;
+  controlPreflight: typeof controlPreflight;
   controlProjection: typeof controlProjection;
   controlSnapshot: typeof controlSnapshot;
   effects: typeof effects;

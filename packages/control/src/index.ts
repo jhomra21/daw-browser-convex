@@ -16,6 +16,10 @@ const secondsSchema = finiteNumberSchema.min(0)
 const trackRoleSchema = z.enum(['track', 'group', 'return'])
 const revisionSchema = z.number().int().nonnegative()
 const requestDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Request digest must be a lowercase SHA-256 hex digest.')
+const opaqueCursorSchema = z.string()
+  .min(1)
+  .max(2_048)
+  .regex(/^[\x20-\x7e]+$/, 'Cursor must contain printable ASCII characters only.')
 
 export const controlLimitsV1 = {
   maxActions: 100,
@@ -23,6 +27,8 @@ export const controlLimitsV1 = {
   maxMidiNotesPerCommit: 500,
   maxAutomationPointsPerCommit: 1000,
   maxErrorDetails: 16,
+  defaultHistoryPageSize: 50,
+  maxHistoryPageSize: 100,
 }
 
 export const stableIdSchemaV1 = stableIdSchema
@@ -58,6 +64,8 @@ export const controlCapabilitiesSchemaV1 = z.object({
     maxMidiNotesPerCommit: z.number().int().positive(),
     maxAutomationPointsPerCommit: z.number().int().positive(),
     maxErrorDetails: z.number().int().positive(),
+    defaultHistoryPageSize: z.number().int().positive(),
+    maxHistoryPageSize: z.number().int().positive(),
   }).strict(),
 }).strict()
 
@@ -420,6 +428,41 @@ export const controlCommitResultSchemaV1 = z.object({
   idempotencyReplay: z.boolean(),
 }).strict()
 
+export const controlSnapshotQuerySchemaV1 = z.object({
+  projectId: stableIdSchema,
+}).strict()
+
+export const controlHistoryQuerySchemaV1 = z.object({
+  projectId: stableIdSchema,
+  cursor: opaqueCursorSchema.optional(),
+  limit: z.number()
+    .int()
+    .positive()
+    .max(controlLimitsV1.maxHistoryPageSize)
+    .default(controlLimitsV1.defaultHistoryPageSize),
+}).strict()
+
+export const controlHistoryEntrySchemaV1 = z.object({
+  id: stableIdSchema,
+  projectId: stableIdSchema,
+  actorSubject: stableIdSchema,
+  actorIssuer: stableIdSchema.optional(),
+  actorTokenIdentifier: stableIdSchema.optional(),
+  actorRole: z.enum(['owner', 'editor', 'viewer']),
+  idempotencyKey: idempotencyKeySchemaV1,
+  requestDigest: requestDigestSchema,
+  priorRevision: revisionSchema,
+  revision: revisionSchema,
+  applied: z.boolean(),
+  createdAt: z.number().int().nonnegative(),
+}).strict()
+
+export const controlHistoryResultSchemaV1 = z.object({
+  entries: z.array(controlHistoryEntrySchemaV1).max(controlLimitsV1.maxHistoryPageSize),
+  continueCursor: opaqueCursorSchema,
+  isDone: z.boolean(),
+}).strict()
+
 const persistedProcessorTargetSchema = z.union([
   z.object({ trackId: stableIdSchema }).strict(),
   z.object({ master: z.literal(true) }).strict(),
@@ -490,6 +533,10 @@ export type ControlPreviewRequestV1 = z.infer<typeof controlPreviewRequestSchema
 export type ControlPreviewResultV1 = z.infer<typeof controlPreviewResultSchemaV1>
 export type ControlCommitResultV1 = z.infer<typeof controlCommitResultSchemaV1>
 export type ControlErrorV1 = z.infer<typeof controlErrorSchemaV1>
+export type ControlSnapshotQueryV1 = z.infer<typeof controlSnapshotQuerySchemaV1>
+export type ControlHistoryQueryV1 = z.infer<typeof controlHistoryQuerySchemaV1>
+export type ControlHistoryEntryV1 = z.infer<typeof controlHistoryEntrySchemaV1>
+export type ControlHistoryResultV1 = z.infer<typeof controlHistoryResultSchemaV1>
 export type ContextualRefV1 = z.infer<typeof contextualRefSchemaV1>
 export type TrackRefV1 = z.infer<typeof trackRefSchemaV1>
 export type ClipRefV1 = z.infer<typeof clipRefSchemaV1>
@@ -566,6 +613,14 @@ export const parseControlPreviewRequestV1 = (input: unknown) => {
   assertControlSerializedBodyV1(input)
   return assertControlSerializedBodyV1(controlPreviewRequestSchemaV1.parse(input))
 }
+
+export const parseControlSnapshotQueryV1 = (input: unknown) => (
+  controlSnapshotQuerySchemaV1.parse(input)
+)
+
+export const parseControlHistoryQueryV1 = (input: unknown) => (
+  controlHistoryQuerySchemaV1.parse(input)
+)
 
 export const controlRequestDigestInputV1 = (
   request: ControlCommitRequestV1 | ControlPreviewRequestV1,

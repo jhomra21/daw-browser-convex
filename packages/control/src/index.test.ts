@@ -7,6 +7,9 @@ import {
   controlCapabilitiesV1,
   controlCapabilitiesSchemaV1,
   controlCommitResultSchemaV1,
+  controlHistoryEntrySchemaV1,
+  controlHistoryQuerySchemaV1,
+  controlHistoryResultSchemaV1,
   controlRequestDigestV1,
   controlErrorSchemaV1,
   controlLimitsV1,
@@ -14,6 +17,7 @@ import {
   controlRequestDigestInputV1,
   findDuplicateCreationClientRefsV1,
   parseControlCommitRequestV1,
+  parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
   projectSnapshotSchemaV1,
   type ContextualRefV1,
@@ -288,6 +292,59 @@ test('validates strict preview, commit, and error result envelopes', () => {
     applied: true,
     idempotencyReplay: false,
     serverInternal: true,
+  })).toThrow()
+})
+
+test('validates bounded strict control history contracts', () => {
+  const entry = controlHistoryEntrySchemaV1.parse({
+    id: 'commit-1',
+    projectId: 'project-1',
+    actorSubject: 'user-1',
+    actorIssuer: 'issuer-1',
+    actorTokenIdentifier: 'token-1',
+    actorRole: 'editor',
+    idempotencyKey: 'history-key',
+    requestDigest: '0'.repeat(64),
+    priorRevision: 1,
+    revision: 2,
+    applied: true,
+    createdAt: 1,
+  })
+  expect(controlHistoryQuerySchemaV1.parse({ projectId: 'project-1' })).toEqual({
+    projectId: 'project-1',
+    limit: controlLimitsV1.defaultHistoryPageSize,
+  })
+  expect(parseControlHistoryQueryV1({
+    projectId: 'project-1',
+    cursor: 'cursor-1',
+    limit: controlLimitsV1.maxHistoryPageSize,
+  }).limit).toBe(100)
+  expect(() => controlHistoryQuerySchemaV1.parse({
+    projectId: 'project-1',
+    cursor: 'not valid\ncursor',
+  })).toThrow()
+  expect(() => controlHistoryQuerySchemaV1.parse({
+    projectId: 'project-1',
+    limit: controlLimitsV1.maxHistoryPageSize + 1,
+  })).toThrow()
+  expect(() => controlHistoryQuerySchemaV1.parse({
+    projectId: 'project-1',
+    extra: true,
+  })).toThrow()
+  expect(controlHistoryEntrySchemaV1.parse(entry)).toEqual(entry)
+  expect(() => controlHistoryEntrySchemaV1.parse({
+    ...entry,
+    semanticRequest: '{}',
+  })).toThrow()
+  expect(controlHistoryResultSchemaV1.parse({
+    entries: [entry],
+    continueCursor: '_end_cursor',
+    isDone: true,
+  }).entries).toHaveLength(1)
+  expect(() => controlHistoryResultSchemaV1.parse({
+    entries: Array.from({ length: controlLimitsV1.maxHistoryPageSize + 1 }, () => entry),
+    continueCursor: '_end_cursor',
+    isDone: true,
   })).toThrow()
 })
 

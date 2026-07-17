@@ -8,9 +8,8 @@ type MembershipRemovalResult = {
 async function readProjectOwnerUserId(ctx: MutationCtx, projectId: string) {
   const project = await ctx.db
     .query("projects")
-    .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
-    .order("asc")
-    .first();
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .unique();
   if (!project) throw new Error("Project not found.");
   return project.ownerUserId;
 }

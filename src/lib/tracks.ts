@@ -125,7 +125,7 @@ export function pushTrackCreateHistory(
   historyPush: HistoryPush | undefined,
   projectId: string | undefined,
   tracks: Track[],
-  track: Pick<Track, 'id' | 'kind' | 'channelRole' | 'collapsed' | 'color'> | null | undefined,
+  track: Pick<Track, 'id' | 'name' | 'kind' | 'channelRole' | 'collapsed' | 'color'> | null | undefined,
 ) {
   if (!track || !projectId || typeof historyPush !== 'function') return
   const index = tracks.findIndex((entry) => entry.id === track.id)
@@ -133,6 +133,7 @@ export function pushTrackCreateHistory(
   historyPush(buildTrackCreateHistoryEntry({
     projectId,
     trackId: track.id,
+    name: track.name,
     index,
     kind: track.kind,
     channelRole: track.channelRole,

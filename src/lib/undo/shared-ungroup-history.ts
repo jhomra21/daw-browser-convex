@@ -14,6 +14,7 @@ import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from 
 type SharedUngroupResult = {
   status: 'applied'
   group: {
+    name?: string
     historyRef?: string
     index: number
     kind?: string
@@ -44,7 +45,8 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   if (!isRecord(value) || value.status !== 'applied' || !isRecord(value.group) || !Array.isArray(value.children)) return null
   const group = value.group
   if (
-    typeof group.index !== 'number'
+    (group.name !== undefined && typeof group.name !== 'string')
+    || typeof group.index !== 'number'
     || typeof group.volume !== 'number'
     || typeof group.muted !== 'boolean'
     || typeof group.soloed !== 'boolean'
@@ -91,6 +93,7 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   return {
     status: 'applied',
     group: {
+      name: typeof group.name === 'string' ? group.name : undefined,
       historyRef: typeof group.historyRef === 'string' ? group.historyRef : undefined,
       index: group.index,
       kind: typeof group.kind === 'string' ? group.kind : undefined,
@@ -159,6 +162,7 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
   })
   const groupTrack: Track = {
     ...input.groupTrack,
+    name: input.result.group.name ?? input.groupTrack.name,
     historyRef: input.result.group.historyRef ?? input.groupTrack.historyRef,
     kind: input.result.group.kind === 'instrument' ? 'instrument' : 'audio',
     groupId: input.result.group.parentGroupId,

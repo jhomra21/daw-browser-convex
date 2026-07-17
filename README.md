@@ -82,6 +82,7 @@ Convex backend
 
 Workspace packages
   ├─ @daw-browser/shared
+  ├─ @daw-browser/control
   ├─ @daw-browser/timeline-core
   ├─ @daw-browser/waveforms
   └─ @daw-browser/audio-engine
@@ -108,6 +109,10 @@ Pure cross-runtime contracts and helpers used by the app, API, and Convex:
 - track routing core rules
 
 Public export: `@daw-browser/shared`.
+
+### `@daw-browser/control`
+
+Browser-safe, transport-neutral versioned control contracts for authoritative project snapshots, curated timeline actions, previews, atomic commit requests, limits, and deterministic request serialization. It does not expose transport routes or raw collaboration operations.
 
 ### `@daw-browser/timeline-core`
 
@@ -151,6 +156,7 @@ Only `./audio-engine`, `./export-mixdown`, and `./export-audio-support` are publ
 ├── migrations/                  # D1 Better Auth migrations
 ├── packages/
 │   ├── audio-engine/            # Web Audio runtime and export mixdown package
+│   ├── control/                 # Versioned public control contracts
 │   ├── shared/                  # Cross-runtime contracts and pure helpers
 │   ├── timeline-core/           # Timeline types and pure timeline logic
 │   └── waveforms/               # Waveform peak extraction/rendering helpers

@@ -11,7 +11,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
+    "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/control' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
     "lint:fix": "oxlint --fix .",
     "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@daw-browser/audio-engine": "workspace:*",
+    "@daw-browser/control": "workspace:*",
     "@daw-browser/shared": "workspace:*",
     "@daw-browser/timeline-core": "workspace:*",
     "@daw-browser/waveforms": "workspace:*",

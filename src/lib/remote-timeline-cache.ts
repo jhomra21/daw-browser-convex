@@ -55,7 +55,7 @@ const toTrackRow = (track: FullTimelineView['tracks'][number], index: number, up
   return {
     id: trackId,
     historyRef: track.historyRef ?? trackId,
-    name: `Track ${index + 1}`,
+    name: track.name,
     index: track.index ?? index,
     volume: track.volume,
     muted: track.muted ?? false,

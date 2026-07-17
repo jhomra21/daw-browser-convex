@@ -151,7 +151,7 @@ type SharedModulationEffectEnvelope =
   | { effect: 'lofi'; params: LoFiParamsEnvelope }
 
 export type SharedTimelineOperation =
-  | { kind: 'tracks.create'; payload: { index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
+  | { kind: 'tracks.create'; payload: { name?: string; index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
   | { kind: 'tracks.lock'; payload: { trackId: string } }
   | { kind: 'tracks.unlock'; payload: { trackId: string } }
   | { kind: 'clips.create'; payload: SharedTimelineClipCreatePayload }
@@ -174,6 +174,7 @@ export type SharedTimelineOperation =
       kind: 'tracks.restoreUngroup'
       payload: {
         group: {
+          name?: string
           index: number
           kind?: string
           historyRef?: string
@@ -630,6 +631,7 @@ const readTrackGroupTargets = (payload: unknown) => {
 const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOperation => ({
   kind: 'tracks.create',
   payload: {
+    name: readOptionalString(payload.name),
     index: readOptionalNumber(payload.index),
     kind: readOptionalString(payload.kind),
     channelRole: readOptionalString(payload.channelRole),
@@ -918,6 +920,7 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
   const group = payload.group
   if (typeof group.index !== 'number' || typeof group.volume !== 'number' || !Array.isArray(group.sends)) return null
   if (group.kind !== undefined && typeof group.kind !== 'string') return null
+  if (group.name !== undefined && typeof group.name !== 'string') return null
   if (group.historyRef !== undefined && typeof group.historyRef !== 'string') return null
   if (group.parentGroupId !== undefined && typeof group.parentGroupId !== 'string') return null
   if (group.collapsed !== undefined && typeof group.collapsed !== 'boolean') return null
@@ -960,6 +963,7 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
     kind: 'tracks.restoreUngroup',
     payload: {
       group: {
+        name: typeof group.name === 'string' ? group.name : undefined,
         index: group.index,
         kind: typeof group.kind === 'string' ? group.kind : undefined,
         historyRef: typeof group.historyRef === 'string' ? group.historyRef : undefined,

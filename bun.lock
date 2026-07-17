@@ -6,6 +6,7 @@
       "name": "vite-template-solid",
       "dependencies": {
         "@daw-browser/audio-engine": "workspace:*",
+        "@daw-browser/control": "workspace:*",
         "@daw-browser/shared": "workspace:*",
         "@daw-browser/timeline-core": "workspace:*",
         "@daw-browser/waveforms": "workspace:*",
@@ -55,6 +56,14 @@
         "@daw-browser/shared": "workspace:*",
         "@daw-browser/timeline-core": "workspace:*",
         "mediabunny": "^1.35.1",
+      },
+    },
+    "packages/control": {
+      "name": "@daw-browser/control",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/shared": "workspace:*",
+        "zod": "^4.3.6",
       },
     },
     "packages/shared": {
@@ -315,6 +324,8 @@
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
     "@daw-browser/audio-engine": ["@daw-browser/audio-engine@workspace:packages/audio-engine"],
+
+    "@daw-browser/control": ["@daw-browser/control@workspace:packages/control"],
 
     "@daw-browser/shared": ["@daw-browser/shared@workspace:packages/shared"],
 

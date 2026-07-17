@@ -168,6 +168,15 @@ const Timeline: Component<TimelineProps> = (props) => {
   } = useTimelinePreferences({
     projectId,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
+    cloudTimelineSettings: () => fullView.data?.project,
+    onCloudTimelineSettingsChange: (targetProjectId, settings) => {
+      void convexClient.mutation(convexApi.projects.setTimelineSettings, {
+        projectId: targetProjectId,
+        ...settings,
+      }).catch(() => {
+        notify("Project settings update failed", "This project setting could not be saved.")
+      })
+    },
   });
   const identity = useTimelineIdentity({
     projectId,

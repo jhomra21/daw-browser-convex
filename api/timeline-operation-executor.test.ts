@@ -46,10 +46,11 @@ test('forwards a parsed restore-chain payload without transport-only fields', ()
   })
 })
 
-test('forwards collapsed state when creating a track', () => {
+test('forwards name and collapsed state when creating a track', () => {
   const operation = parseSharedTimelineOperation({
     kind: 'tracks.create',
     payload: {
+      name: 'Named return',
       index: 2,
       kind: 'audio',
       channelRole: 'return',
@@ -64,6 +65,7 @@ test('forwards collapsed state when creating a track', () => {
 
   expect(buildTrackCreateMutationArgs('project-1', operation.payload)).toEqual({
     projectId: 'project-1',
+    name: 'Named return',
     index: 2,
     kind: 'audio',
     channelRole: 'return',

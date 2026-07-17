@@ -1,0 +1,16 @@
+{
+  "name": "@daw-browser/control",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/shared": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

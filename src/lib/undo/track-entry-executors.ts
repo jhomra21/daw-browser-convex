@@ -79,6 +79,7 @@ export async function applyTrackClipCreateEntry(
   if (!trackId) {
     const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
+      name: entry.data.track.name,
       index: entry.data.track.index,
       kind: entry.data.track.kind,
       channelRole: entry.data.track.channelRole,
@@ -94,6 +95,7 @@ export async function applyTrackClipCreateEntry(
     id: trackId,
     historyRef: entry.data.track.trackRef,
     index: trackIndex,
+    name: entry.data.track.name,
     kind: entry.data.track.kind ?? 'audio',
     channelRole: entry.data.track.channelRole ?? 'track',
   }), trackIndex)

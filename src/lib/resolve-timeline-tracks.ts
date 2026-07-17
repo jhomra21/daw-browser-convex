@@ -25,6 +25,7 @@ type TimelineTrackLike<TTrackId extends string = Track['id']> = Omit<Track, 'id'
 
 export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
   _id: TTrackId
+  name?: string
   index: number
   kind?: string
   groupId?: TTrackId
@@ -189,9 +190,9 @@ const resolveTrackName = (input: {
   fallbackIndex: number
   namesByHistoryRef: Map<string, string>
 }) => {
+  if (input.explicitName) return input.explicitName
   const rememberedName = input.namesByHistoryRef.get(input.historyRef)
   if (rememberedName) return rememberedName
-  if (input.explicitName) return input.explicitName
   return `Track ${input.fallbackIndex}`
 }
 
@@ -385,7 +386,7 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       historyRef,
       name: resolveTrackName({
         historyRef,
-        explicitName: localTrackRow?.name,
+        explicitName: trackRow.name ?? localTrackRow?.name,
         fallbackIndex: index + 1,
         namesByHistoryRef: options.client.tracks.namesByHistoryRef,
       }),

@@ -290,13 +290,13 @@ describe('shared timeline operations', () => {
     })
   })
 
-  test('preserves color and collapsed state on track create operations', () => {
+  test('preserves name, color, and collapsed state on track create operations', () => {
     expect(parseSharedTimelineOperation({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
+      payload: { name: 'Named group', index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })).toEqual({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
+      payload: { name: 'Named group', index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })
     const expanded = parseSharedTimelineOperation({
       kind: 'tracks.create',
@@ -351,7 +351,7 @@ describe('shared timeline operations', () => {
 
   test('rejects malformed effect metadata when restoring a dissolved group', () => {
     const payload: Extract<SharedTimelineOperation, { kind: 'tracks.restoreUngroup' }>['payload'] = {
-      group: { index: 1, volume: 0.8, sends: [] },
+      group: { name: 'Restored group', index: 1, volume: 0.8, sends: [] },
       children: [{ trackId: 'track-1', outputToGroup: true }],
       effects: [{
         type: 'arpeggiator',

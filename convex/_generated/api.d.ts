@@ -16,6 +16,7 @@ import type * as clipFadesValidator from "../clipFadesValidator.js";
 import type * as clipWrites from "../clipWrites.js";
 import type * as clips from "../clips.js";
 import type * as cloudBackups from "../cloudBackups.js";
+import type * as controlProjection from "../controlProjection.js";
 import type * as effects from "../effects.js";
 import type * as exports from "../exports.js";
 import type * as mixerChannels from "../mixerChannels.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   clipWrites: typeof clipWrites;
   clips: typeof clips;
   cloudBackups: typeof cloudBackups;
+  controlProjection: typeof controlProjection;
   effects: typeof effects;
   exports: typeof exports;
   mixerChannels: typeof mixerChannels;

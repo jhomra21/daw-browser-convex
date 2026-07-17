@@ -31,8 +31,32 @@ const readFullTimelineView = async (
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
   ]);
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_room", q => q.eq("projectId", projectId))
+    .unique();
+  if (!project) throw new Error("Project not found.");
 
-  return { tracks, clips, mixerSettings, automationEnvelopes, effects, sidechainRoutes };
+  return {
+    project: {
+      projectId: project.projectId,
+      name: project.name,
+      revision: project.revision,
+      tempoBpm: project.tempoBpm,
+      timeSignatureNumerator: project.timeSignatureNumerator,
+      timeSignatureDenominator: project.timeSignatureDenominator,
+      loopEnabled: project.loopEnabled,
+      loopStartSec: project.loopStartSec,
+      loopEndSec: project.loopEndSec,
+      updatedAt: project.updatedAt,
+    },
+    tracks,
+    clips,
+    mixerSettings,
+    automationEnvelopes,
+    effects,
+    sidechainRoutes,
+  };
 };
 
 export const fullView = query({

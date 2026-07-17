@@ -9,23 +9,31 @@ async function ensureOwnedRoomRecords(
   projectId: string,
   userId: string,
 ) {
-  const [projRows, ownershipRows] = await Promise.all([
+  const [project, ownershipRows] = await Promise.all([
     ctx.db
       .query("projects")
-      .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-      .collect(),
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .unique(),
     ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
       .collect(),
   ]);
   const markerOwnership = ownershipRows.find((ownership) => !ownership.trackId && !ownership.clipId);
-  if (!projRows[0]) {
+  if (!project) {
     await ctx.db.insert("projects", {
       projectId,
       ownerUserId: userId,
       name: "Untitled",
       createdAt: Date.now(),
+      updatedAt: Date.now(),
+      revision: 0,
+      tempoBpm: 120,
+      timeSignatureNumerator: 4,
+      timeSignatureDenominator: 4,
+      loopEnabled: false,
+      loopStartSec: 0,
+      loopEndSec: 8,
     });
   }
   if (!markerOwnership) {
@@ -78,17 +86,19 @@ async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
 }
 
 async function findOwnedProject(ctx: { db: DatabaseReader }, projectId: string, userId: string) {
-  return ctx.db
+  const project = await ctx.db
     .query("projects")
-    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-    .first();
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .unique();
+  return project?.ownerUserId === userId ? project : null;
 }
 
 async function listRoomProjectRows(ctx: { db: DatabaseReader }, projectId: string) {
-  return await ctx.db
+  const project = await ctx.db
     .query("projects")
     .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .collect();
+    .unique();
+  return project ? [project] : [];
 }
 
 async function setRoomProjectDeletionPendingAt(
@@ -96,8 +106,11 @@ async function setRoomProjectDeletionPendingAt(
   projectId: string,
   deletionPendingAt: number | undefined,
 ) {
-  const projects = await listRoomProjectRows(ctx, projectId);
-  await Promise.all(projects.map((project) => ctx.db.patch(project._id, { deletionPendingAt })));
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .unique();
+  if (project) await ctx.db.patch(project._id, { deletionPendingAt, updatedAt: Date.now() });
 }
 
 export const listMineDetailed = query({
@@ -117,7 +130,7 @@ export const createOwnedRoom = mutation({
     const existingProjects = await listRoomProjectRows(ctx, projectId);
     const existingProject = existingProjects[0];
     if (existingProject) {
-      if (existingProjects.some((project) => project.deletionPendingAt !== undefined)) {
+      if (existingProject.deletionPendingAt !== undefined) {
         throw new Error("Project deletion is pending.");
       }
       if (existingProject.ownerUserId === userId) {
@@ -225,8 +238,59 @@ export const setName = mutation({
     const trimmed = name.trim().slice(0, 120);
     const row = await findOwnedProject(ctx, projectId, userId);
     if (row) {
-      await ctx.db.patch(row._id, { name: trimmed.length ? trimmed : "Untitled" });
+      await ctx.db.patch(row._id, {
+        name: trimmed.length ? trimmed : "Untitled",
+        updatedAt: Date.now(),
+      });
     }
+    return null;
+  },
+});
+
+export const setTimelineSettings = mutation({
+  args: {
+    projectId: v.string(),
+    tempoBpm: v.optional(v.number()),
+    timeSignatureNumerator: v.optional(v.number()),
+    timeSignatureDenominator: v.optional(v.number()),
+    loopEnabled: v.optional(v.boolean()),
+    loopStartSec: v.optional(v.number()),
+    loopEndSec: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const userId = await requireAuthenticatedUserId(ctx);
+    const project = await findOwnedProject(ctx, input.projectId, userId);
+    if (!project) throw new Error("Only project owners can update project settings.");
+
+    const tempoBpm = input.tempoBpm === undefined
+      ? project.tempoBpm
+      : Math.min(300, Math.max(30, Math.round(input.tempoBpm)));
+    const timeSignatureNumerator = input.timeSignatureNumerator === undefined
+      ? project.timeSignatureNumerator
+      : Math.min(32, Math.max(1, Math.round(input.timeSignatureNumerator)));
+    const timeSignatureDenominator = input.timeSignatureDenominator === undefined
+      ? project.timeSignatureDenominator
+      : input.timeSignatureDenominator;
+    if (![1, 2, 4, 8, 16, 32].includes(timeSignatureDenominator)) {
+      throw new Error("Unsupported time signature denominator.");
+    }
+    const loopStartSec = input.loopStartSec === undefined
+      ? project.loopStartSec
+      : Math.max(0, input.loopStartSec);
+    const loopEndSec = input.loopEndSec === undefined
+      ? project.loopEndSec
+      : Math.max(loopStartSec + 0.05, input.loopEndSec);
+
+    await ctx.db.patch(project._id, {
+      tempoBpm,
+      timeSignatureNumerator,
+      timeSignatureDenominator,
+      loopEnabled: input.loopEnabled ?? project.loopEnabled,
+      loopStartSec,
+      loopEndSec,
+      updatedAt: Date.now(),
+    });
     return null;
   },
 });

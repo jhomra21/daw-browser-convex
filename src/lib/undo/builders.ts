@@ -18,6 +18,7 @@ import type {
 export function buildTrackCreateHistoryEntry(input: {
   projectId: string
   trackId: Track['id']
+  name?: string
   index: number
   kind?: 'audio' | 'instrument'
   channelRole?: Track['channelRole']
@@ -30,6 +31,7 @@ export function buildTrackCreateHistoryEntry(input: {
     data: {
       trackRef: input.trackId,
       currentTrackId: input.trackId,
+      name: input.name,
       index: input.index,
       kind: input.kind,
       channelRole: input.channelRole,
@@ -54,6 +56,7 @@ export function buildTrackClipCreateHistoryEntry(input: {
       track: {
         trackRef,
         currentTrackId: input.track.id,
+        name: input.track.name,
         index: input.tracks.findIndex((entry) => entry.id === input.track.id),
         kind: input.track.kind,
         channelRole: input.track.channelRole,

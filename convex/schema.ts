@@ -4,12 +4,11 @@ import { audioWarpValidator } from "./audioWarpValidator";
 import { clipFadesValidator } from "./clipFadesValidator";
 import { projectManifestValidator } from "./projectManifestValidator";
 
-// Minimal shared model for collaboration
-// - We intentionally DO NOT store track names or any audio URLs here
-// - All scoping is via a simple projectId string (avoids needing a timelines table)
+// Shared collaboration model scoped by a stable projectId.
 export default defineSchema({
   tracks: defineTable({
     projectId: v.string(),
+    name: v.string(),
     index: v.number(),
     kind: v.optional(v.string()), // 'audio' | 'instrument'
     historyRef: v.optional(v.string()),
@@ -109,6 +108,14 @@ export default defineSchema({
     ownerUserId: v.string(),
     name: v.string(),
     createdAt: v.number(),
+    updatedAt: v.number(),
+    revision: v.number(),
+    tempoBpm: v.number(),
+    timeSignatureNumerator: v.number(),
+    timeSignatureDenominator: v.number(),
+    loopEnabled: v.boolean(),
+    loopStartSec: v.number(),
+    loopEndSec: v.number(),
     deletionPendingAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerUserId"])

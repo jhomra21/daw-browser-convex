@@ -147,12 +147,14 @@ export const createHistoryTrack = async (
   const index = trackCreationIndex(deps.getTracks(), track.channelRole, track.index);
   const payload = buildTrackCreateMutationInput({
     projectId: deps.projectId,
+    name: track.name,
     index,
     kind: track.kind,
     channelRole: track.channelRole,
     collapsed: track.collapsed,
   });
   const operation = buildSharedTrackCreateOperation({
+    name: payload.name,
     index: payload.index,
     kind: payload.kind,
     channelRole: payload.channelRole,
@@ -348,6 +350,7 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       kind: "tracks.restoreUngroup",
       payload: {
         group: {
+          name: input.group.name,
           index: input.group.index,
           kind: input.group.kind,
           historyRef: input.group.trackRef,

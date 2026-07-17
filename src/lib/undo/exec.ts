@@ -634,6 +634,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       if (!newId) {
         const createdTrack = await createHistoryTrack(deps, {
           trackRef: entry.data.trackRef,
+          name: entry.data.name,
           index: entry.data.index,
           kind: entry.data.kind,
           channelRole: entry.data.channelRole,
@@ -650,6 +651,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         id: newId,
         historyRef: entry.data.trackRef,
         index,
+        name: entry.data.name,
         kind: entry.data.kind ?? 'audio',
         channelRole: entry.data.channelRole ?? 'track',
         collapsed,

@@ -294,6 +294,7 @@ const createTrackForUser = async (
     channelRole?: string
     collapsed?: boolean
     color?: string
+    name?: string
     operationId?: string
   },
 ) => {
@@ -322,6 +323,7 @@ const createTrackForUser = async (
       }
       const trackId = await ctx.db.insert("tracks", {
         projectId: input.projectId,
+        name: input.name?.trim() || `Track ${creation.creationIndex + 1}`,
         index: creation.creationIndex,
         kind: input.kind,
         collapsed: trackCreationCollapsed(channelRole, input.collapsed),
@@ -490,16 +492,17 @@ const unlockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
 }
 
 export const create = mutation({
-  args: { projectId: v.string(), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), collapsed: v.optional(v.boolean()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
-  handler: async (ctx, { projectId, index, kind, channelRole, collapsed, color, operationId }) => {
+  args: { projectId: v.string(), name: v.optional(v.string()), index: v.optional(v.number()), kind: v.optional(v.string()), channelRole: v.optional(v.string()), collapsed: v.optional(v.boolean()), color: v.optional(v.string()), operationId: v.optional(v.string()) },
+  handler: async (ctx, { projectId, name, index, kind, channelRole, collapsed, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, collapsed, color, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, name, index, kind, channelRole, collapsed, color, operationId });
   },
 });
 
 export const serverCreate = mutation({
   args: {
     projectId: v.string(),
+    name: v.optional(v.string()),
     index: v.optional(v.number()),
     kind: v.optional(v.string()),
     channelRole: v.optional(v.string()),
@@ -507,9 +510,9 @@ export const serverCreate = mutation({
     color: v.optional(v.string()),
     operationId: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, index, kind, channelRole, collapsed, color, operationId }) => {
+  handler: async (ctx, { projectId, name, index, kind, channelRole, collapsed, color, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await createTrackForUser(ctx, { projectId, userId, index, kind, channelRole, collapsed, color, operationId });
+    return await createTrackForUser(ctx, { projectId, userId, name, index, kind, channelRole, collapsed, color, operationId });
   },
 });
 
@@ -1072,6 +1075,7 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
     status: "applied" as const,
     group: {
       trackId: String(group._id),
+      name: group.name,
       historyRef: group.historyRef,
       index: group.index,
       kind: group.kind,
@@ -1152,6 +1156,7 @@ export const serverRestoreUngroup = mutation({
   args: {
     projectId: v.string(),
     group: v.object({
+      name: v.optional(v.string()),
       index: v.number(),
       kind: v.optional(v.string()),
       historyRef: v.optional(v.string()),
@@ -1302,6 +1307,7 @@ export const serverRestoreUngroup = mutation({
         });
         const groupId = await ctx.db.insert("tracks", {
           projectId: input.projectId,
+          name: input.group.name ?? `Track ${index + 1}`,
           index,
           kind: input.group.kind,
           historyRef: input.group.historyRef,

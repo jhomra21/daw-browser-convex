@@ -22,6 +22,7 @@ export const buildTrackCreateMutationArgs = (
   payload: Extract<SharedTimelineOperation, { kind: 'tracks.create' }>['payload'],
 ) => ({
   projectId,
+  name: payload.name,
   index: payload.index,
   kind: payload.kind,
   channelRole: payload.channelRole,

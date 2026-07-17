@@ -14,6 +14,8 @@ import {
   normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
+  normalizeArpeggiatorParams,
+  normalizeAudioEffectParamsForUpdate,
   AUDIO_EFFECT_CONTRACTS,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
@@ -24,8 +26,6 @@ import {
   serializeReverbParams,
   serializeSaturatorParams,
 } from "@daw-browser/shared";
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const reverbParamsValidator = v.object({
   enabled: v.boolean(),
@@ -230,18 +230,7 @@ const sanitizeArpParams = (params: {
   octaves: number
   gate: number
   hold: boolean
-}) => {
-  const octaves = clamp(Math.round(params.octaves) || 1, 1, 4)
-  const gate = clamp(Math.round(params.gate * 100) / 100 || 0.8, 0.1, 1.0)
-  return {
-    enabled: params.enabled,
-    pattern: params.pattern,
-    rate: params.rate,
-    octaves,
-    gate,
-    hold: params.hold,
-  }
-}
+}) => normalizeArpeggiatorParams(params)
 
 const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
   type !== 'instrument' && type !== 'synth' && type !== 'arpeggiator'
@@ -253,7 +242,7 @@ const normalizeEffectParamsForUpdate = (
   existing?: any,
 ) => {
   if (isAudioEffectPersistenceType(type)) {
-    return audioEffectPersistenceDescriptors[type].normalizeParamsForUpdate(params, existing)
+    return normalizeAudioEffectParamsForUpdate(type, params, existing)
   }
   return params
 }

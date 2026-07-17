@@ -1245,6 +1245,22 @@ export const AUDIO_EFFECT_CONTRACTS = {
   },
 } satisfies AudioEffectContractByKind
 
+export const normalizeArpeggiatorParams = (params: {
+  enabled: boolean
+  pattern: 'up' | 'down' | 'updown' | 'random'
+  rate: '1/4' | '1/8' | '1/16' | '1/32'
+  octaves: number
+  gate: number
+  hold: boolean
+}) => ({
+  enabled: params.enabled,
+  pattern: params.pattern,
+  rate: params.rate,
+  octaves: clamp(Math.round(params.octaves) || 1, 1, 4),
+  gate: clamp(Math.round(params.gate * 100) / 100 || 0.8, 0.1, 1),
+  hold: params.hold,
+})
+
 const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral']
 export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = AUDIO_EFFECT_CATALOG_ORDER
 

@@ -5,7 +5,9 @@ import {
   canonicalJson,
   controlActionSchemaV1,
   controlCapabilitiesV1,
+  controlCapabilitiesSchemaV1,
   controlCommitResultSchemaV1,
+  controlRequestDigestV1,
   controlErrorSchemaV1,
   controlLimitsV1,
   controlPreviewResultSchemaV1,
@@ -91,8 +93,8 @@ const planningResult = {
   priorRevision: 4,
   revision: 5,
   applied: true,
-  requestDigest: 'digest-1',
-  resolvedRefs: [{ entity: 'track', clientRef: 'new-track', id: 'track-1' }],
+  requestDigest: '0'.repeat(64),
+  resolvedRefs: [{ entity: 'track', clientRef: 'new-track', id: 'track-1', persisted: false }],
   warnings: [{ code: 'normalized', message: 'A value was normalized.', actionIndex: 0 }],
   changeSummary: {
     actionCount: 1,
@@ -246,8 +248,8 @@ test('validates optional revisions and strict idempotency keys', () => {
 })
 
 test('validates strict preview, commit, and error result envelopes', () => {
-  expect(controlPreviewResultSchemaV1.parse({ ...planningResult, snapshot }).snapshot).toBeDefined()
-  expect(controlPreviewResultSchemaV1.parse(planningResult).snapshot).toBeUndefined()
+  expect(controlPreviewResultSchemaV1.parse(planningResult).revision).toBe(5)
+  expect(() => controlPreviewResultSchemaV1.parse({ ...planningResult, snapshot })).toThrow()
   expect(controlCommitResultSchemaV1.parse({
     ...planningResult,
     revision: 5,
@@ -262,6 +264,17 @@ test('validates strict preview, commit, and error result envelopes', () => {
   ]) {
     expect(() => controlErrorSchemaV1.parse({ version: 'v1', code, message: 'Error.' })).not.toThrow()
   }
+  expect(() => controlErrorSchemaV1.parse({
+    version: 'v1',
+    code: 'validation',
+    message: 'Error.',
+    details: { field: 'Invalid value.' },
+  })).not.toThrow()
+  expect(() => controlErrorSchemaV1.parse({
+    version: 'v1',
+    code: 'validation',
+    message: 'x'.repeat(1001),
+  })).toThrow()
   expect(() => controlPreviewResultSchemaV1.parse({
     ...planningResult,
     warnings: Array.from({ length: controlLimitsV1.maxActions + 1 }, () => ({
@@ -302,6 +315,29 @@ test('semantic digest input is canonical and excludes idempotency', () => {
     projectId: 'project-1',
     version: 'v1',
   }))
+})
+
+test('computes stable SHA-256 semantic request digests', async () => {
+  const first = parseControlCommitRequestV1(commit([{
+    kind: 'track.rename',
+    track: persisted('track-1'),
+    name: 'Bass',
+  }], 'request-0001'))
+  const second = parseControlCommitRequestV1(commit([{
+    kind: 'track.rename',
+    track: persisted('track-1'),
+    name: 'Bass',
+  }], 'request-0002'))
+  const changed = parseControlCommitRequestV1(commit([{
+    kind: 'track.rename',
+    track: persisted('track-1'),
+    name: 'Lead',
+  }], 'request-0001'))
+
+  const digest = await controlRequestDigestV1(first)
+  expect(digest).toMatch(/^[0-9a-f]{64}$/)
+  expect(await controlRequestDigestV1(second)).toBe(digest)
+  expect(await controlRequestDigestV1(changed)).not.toBe(digest)
 })
 
 test('enforces MIDI and automation aggregates at exact boundaries for preview and commit', () => {
@@ -398,7 +434,9 @@ test('rejects oversized raw requests before trim normalization for preview and c
 })
 
 test('preserves the truthful v1 action list and snapshot contract', () => {
+  expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
+  expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
   expect(controlCapabilitiesV1.actionKinds).toContain('clip.midi.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')

@@ -158,7 +158,7 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
     || compareControlSnapshotText(left.processor.kind, right.processor.kind)
     || compareControlSnapshotText(left.instanceId ?? "", right.instanceId ?? "")
     || compareControlSnapshotText(String(left.id), String(right.id))
-  )).map(({ id: _id, ...processor }) => processor);
+  ));
   const automation = input.automationEnvelopes.flatMap((envelope) => {
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId);
     const target = envelope.targetKind === "master"

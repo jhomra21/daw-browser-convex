@@ -187,6 +187,26 @@ export default defineSchema({
   })
     .index("by_room_user_operation", ["projectId", "userId", "operationId"]),
 
+  controlCommits: defineTable({
+    projectId: v.string(),
+    apiVersion: v.literal("v1"),
+    actorSubject: v.string(),
+    actorIssuer: v.optional(v.string()),
+    actorTokenIdentifier: v.optional(v.string()),
+    actorRole: v.union(v.literal("owner"), v.literal("editor"), v.literal("viewer")),
+    idempotencyKey: v.string(),
+    requestDigest: v.string(),
+    semanticRequest: v.string(),
+    priorRevision: v.number(),
+    finalRevision: v.number(),
+    applied: v.boolean(),
+    result: v.any(),
+    createdAt: v.number(),
+    status: v.literal("completed"),
+  })
+    .index("by_project_actor_idempotency", ["projectId", "actorSubject", "idempotencyKey"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
   effects: defineTable({
     projectId: v.string(),
     targetType: v.string(),

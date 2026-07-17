@@ -20,7 +20,7 @@ import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } 
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
-import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -175,6 +175,13 @@ async function deleteTrackEntitiesFromPreflight(
     .collect();
   for (const envelope of automationEnvelopes) {
     await ctx.db.delete(envelope._id);
+  }
+  const effects = await ctx.db
+    .query("effects")
+    .withIndex("by_track", (q: any) => q.eq("trackId", track._id))
+    .collect();
+  for (const effect of effects) {
+    await ctx.db.delete(effect._id);
   }
   const [sourceSidechains, targetSidechains] = await Promise.all([
     ctx.db.query("sidechainRoutes").withIndex("by_source", (q: any) => q.eq("sourceTrackId", track._id)).collect(),
@@ -740,7 +747,6 @@ export const setSidechainRouteRow = async (
     effectInstanceId: string
   },
 ) => {
-  if (String(input.sourceTrackId) === String(input.targetTrackId)) throw new Error("An effect cannot sidechain from its own track.");
   const [sourceTrack, targetTrack] = await Promise.all([
     ctx.db.get(input.sourceTrackId),
     ctx.db.get(input.targetTrackId),
@@ -755,7 +761,13 @@ export const setSidechainRouteRow = async (
   }
   const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", input.targetTrackId)).collect();
   const matching = effects.filter((effect: any) => (
-    (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+    sidechainEligibilityError({
+      sourceTrackId: String(input.sourceTrackId),
+      targetTrackId: String(input.targetTrackId),
+      effectTargetTrackId: effect.targetType === "track" ? String(effect.trackId) : undefined,
+      effectKind: effect.type,
+      effectInstanceId: effect.instanceId,
+    }) === undefined
     && effect.instanceId === input.effectInstanceId
   ));
   if (matching.length !== 1) throw new Error("Sidechain target must identify exactly one compressor, gate, or spectral instance.");
@@ -829,12 +841,16 @@ export const removeSidechainRouteRow = async (
     throw new Error("Sidechain target track does not belong to this project.");
   }
   const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", input.targetTrackId)).collect();
-  const eligibleEffect = effects.find((effect: any) => (
-    effect.targetType === "track"
-    && effect.instanceId === input.effectInstanceId
-    && (effect.type === "compressor" || effect.type === "gate" || effect.type === "spectral")
+  const eligibleEffects = effects.filter((effect: any) => (
+    effect.instanceId === input.effectInstanceId
+    && sidechainTargetEligibilityError({
+      targetTrackId: String(input.targetTrackId),
+      effectTargetTrackId: effect.targetType === "track" ? String(effect.trackId) : undefined,
+      effectKind: effect.type,
+      effectInstanceId: effect.instanceId,
+    }) === undefined
   ));
-  if (!eligibleEffect) throw new Error("Sidechain target effect does not belong to this project.");
+  if (eligibleEffects.length !== 1) throw new Error("Sidechain target effect does not belong to this project.");
   const routes = await ctx.db.query("sidechainRoutes")
     .withIndex("by_room_target_effect", (q: any) => q.eq("projectId", input.projectId).eq("targetTrackId", input.targetTrackId).eq("effectInstanceId", input.effectInstanceId))
     .collect();

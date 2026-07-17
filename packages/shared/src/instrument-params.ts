@@ -35,6 +35,7 @@ export type TrackInstrumentParams =
   | { kind: 'granular'; instanceId: string; params: GranularParams }
 
 export const createInstrumentInstanceId = () => `instrument:${crypto.randomUUID()}`
+export const createAudioEffectInstanceId = () => `audio-effect:${crypto.randomUUID()}`
 
 export const duplicateTrackInstrumentParams = (
   instrument: TrackInstrumentParams,

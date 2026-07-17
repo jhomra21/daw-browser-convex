@@ -1,7 +1,9 @@
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createInstrumentInstanceId, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_ORDER, INSTRUMENT_CONTRACTS, audioEffectOrderItemId, audioEffectOrderItemKind, automationTargetMatchesEffectInstance, createAudioEffectInstanceId, createInstrumentInstanceId, normalizeTrackInstrumentParams, type AudioEffectKind, type AudioEffectOrderItem, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
+
+export { createAudioEffectInstanceId }
 
 export type LocalEffectKind = AudioEffectKind | `master-${AudioEffectKind}` | 'instrument' | 'synth' | 'arp'
 
@@ -23,7 +25,6 @@ export const localEffectRowId = (
   effect: LocalEffectKind,
   instanceId?: string,
 ) => instanceId ? `${targetId}:effect:${instanceId}` : `${targetId}:${effect}`
-export const createAudioEffectInstanceId = () => `audio-effect:${crypto.randomUUID()}`
 const now = () => Date.now()
 
 const isObject = (value: unknown): value is Record<string, unknown> => (

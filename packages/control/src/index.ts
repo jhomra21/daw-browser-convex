@@ -15,13 +15,14 @@ const finiteNumberSchema = z.number().finite()
 const secondsSchema = finiteNumberSchema.min(0)
 const trackRoleSchema = z.enum(['track', 'group', 'return'])
 const revisionSchema = z.number().int().nonnegative()
-const requestDigestSchema = z.string().min(1).max(256)
+const requestDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Request digest must be a lowercase SHA-256 hex digest.')
 
 export const controlLimitsV1 = {
   maxActions: 100,
   maxSerializedBodyBytes: 256 * 1024,
   maxMidiNotesPerCommit: 500,
   maxAutomationPointsPerCommit: 1000,
+  maxErrorDetails: 16,
 }
 
 export const stableIdSchemaV1 = stableIdSchema
@@ -56,6 +57,7 @@ export const controlCapabilitiesSchemaV1 = z.object({
     maxSerializedBodyBytes: z.number().int().positive(),
     maxMidiNotesPerCommit: z.number().int().positive(),
     maxAutomationPointsPerCommit: z.number().int().positive(),
+    maxErrorDetails: z.number().int().positive(),
   }).strict(),
 }).strict()
 
@@ -205,7 +207,7 @@ const effectRemoveActionSchema = z.object({
   kind: z.literal('effect.remove'),
   target: processorTargetSchemaV1,
   effectKind: audioEffectKindSchema,
-  effect: processorRefSchemaV1.optional(),
+  effect: z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
 }).strict()
 const effectReorderActionSchema = z.object({
   kind: z.literal('effect.reorder'),
@@ -364,8 +366,11 @@ export const controlErrorSchemaV1 = z.object({
     'approval-required',
     'internal',
   ]),
-  message: z.string().min(1),
+  message: z.string().min(1).max(1000),
   actionIndex: z.number().int().nonnegative().optional(),
+  details: z.record(z.string().min(1).max(64), z.string().max(1000))
+    .refine((details) => Object.keys(details).length <= controlLimitsV1.maxErrorDetails)
+    .optional(),
 }).strict()
 
 export const controlPreviewRequestSchemaV1 = z.object(requestBaseShape)
@@ -376,6 +381,7 @@ export const resolvedRefSchemaV1 = z.object({
   entity: z.enum(['track', 'clip', 'effect']),
   clientRef: clientRefValueSchema,
   id: stableIdSchema,
+  persisted: z.boolean(),
 }).strict()
 export const controlWarningSchemaV1 = z.object({
   code: z.string().min(1).max(64),
@@ -406,7 +412,6 @@ export const controlPreviewResultSchemaV1 = z.object({
   ...planningResultShape,
   revision: revisionSchema,
   applied: z.boolean(),
-  snapshot: z.lazy(() => projectSnapshotSchemaV1).optional(),
 }).strict()
 export const controlCommitResultSchemaV1 = z.object({
   ...planningResultShape,
@@ -459,6 +464,7 @@ export const projectSnapshotSchemaV1 = z.object({
     }).strict().optional(),
   }).strict()),
   processors: z.array(z.object({
+    id: stableIdSchema,
     target: persistedProcessorTargetSchema,
     instanceId: stableIdSchema.optional(),
     index: z.number().int().nonnegative(),
@@ -543,22 +549,22 @@ export const canonicalJson = (value: unknown): string => {
   return canonicalize(value)
 }
 
-const enforceSerializedBodyLimit = <Value>(value: Value): Value => {
+export const assertControlSerializedBodyV1 = <Value>(value: Value): Value => {
   const serialized = canonicalJson(value)
   if (new TextEncoder().encode(serialized).byteLength > controlLimitsV1.maxSerializedBodyBytes) {
-    throw new Error('Control request exceeds the serialized body limit.')
+    throw new Error('Control body exceeds the serialized body limit.')
   }
   return value
 }
 
 export const parseControlCommitRequestV1 = (input: unknown) => {
-  enforceSerializedBodyLimit(input)
-  return enforceSerializedBodyLimit(controlCommitRequestSchemaV1.parse(input))
+  assertControlSerializedBodyV1(input)
+  return assertControlSerializedBodyV1(controlCommitRequestSchemaV1.parse(input))
 }
 
 export const parseControlPreviewRequestV1 = (input: unknown) => {
-  enforceSerializedBodyLimit(input)
-  return enforceSerializedBodyLimit(controlPreviewRequestSchemaV1.parse(input))
+  assertControlSerializedBodyV1(input)
+  return assertControlSerializedBodyV1(controlPreviewRequestSchemaV1.parse(input))
 }
 
 export const controlRequestDigestInputV1 = (
@@ -569,3 +575,18 @@ export const controlRequestDigestInputV1 = (
   ...(request.expectedRevision === undefined ? {} : { expectedRevision: request.expectedRevision }),
   actions: request.actions,
 })
+
+export const controlRequestDigestV1 = async (
+  request: ControlCommitRequestV1 | ControlPreviewRequestV1,
+) => {
+  const bytes = new TextEncoder().encode(controlRequestDigestInputV1(request))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export { planControlRequestV1 } from './planner'
+export type { ControlPlanError, ControlPlanV1, PlannedControlActionV1 } from './planner'
+export {
+  collectDeletedTrackIdsV1,
+  collectTrackDeletionAffectedIdsV1,
+} from './trackDeletion'

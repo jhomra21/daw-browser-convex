@@ -43,7 +43,6 @@ The codebase is now split around runtime boundaries:
 - **Timeline editing**: Track/clip creation, drag/drop, resizing, MIDI clips, multi-selection, undo/redo, clip import, recording, and missing-media recovery.
 - **Audio playback and mixing**: Web Audio playback, BPM/transport mapping, metronome, synth/MIDI scheduling, live mixer routing, EQ/reverb, meters, spectra, and offline export.
 - **Cloud backup flow**: Local projects can be backed up to R2 with manifests, asset mappings, deleted asset tracking, and restore support.
-- **AI-assisted editing**: Worker routes validate agent command envelopes and stream chat through OpenRouter/AI SDK.
 - **Package-boundary checks**: Workspace packages have local TypeScript checks, and root `typecheck` composes package, app, and API checks.
 
 ## Tech Stack
@@ -57,7 +56,6 @@ The codebase is now split around runtime boundaries:
 | Realtime/backend data | Convex |
 | Auth | Better Auth, Google OAuth, D1, KV, custom Convex JWT bridge |
 | Storage | Cloudflare R2 for samples, assets, backups, and exports; OPFS for local assets |
-| AI | AI SDK and OpenRouter provider |
 | Tooling | Bun workspaces, TypeScript, Vite, Wrangler, Knip |
 
 ## Architecture
@@ -74,8 +72,7 @@ Cloudflare Worker / Hono API
   ├─ Convex auth token bridge
   ├─ R2 sample, asset, export, and backup routes
   ├─ shared timeline operation endpoint
-  ├─ share/member/project routes
-  └─ AI agent/chat routes
+  └─ share/member/project routes
 
 Convex backend
   ├─ project, ownership, invite, and role data

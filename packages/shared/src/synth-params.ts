@@ -153,7 +153,7 @@ export const createDefaultSynthParams = (): SynthParams => ({
   noise: { enabled: false, level: 0.25 },
   gain: 0.8,
   pan: 0,
-  polyphony: 32,
+  polyphony: 1,
   retrigger: true,
 })
 

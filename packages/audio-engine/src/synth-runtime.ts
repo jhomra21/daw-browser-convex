@@ -107,7 +107,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       ))
     const current = allocated.filter((voice) => voice.scheduledStartTime <= now)
     while (true) {
-      const victim = chooseSynthVoiceVictim(current, state.params.polyphony, now)
+      const victim = chooseSynthVoiceVictim(current, state.params.polyphony + 1, now)
       if (!victim) break
       victim.stop(now)
       current.splice(current.indexOf(victim), 1)

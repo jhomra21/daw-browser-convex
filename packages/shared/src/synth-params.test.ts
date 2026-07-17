@@ -16,6 +16,7 @@ describe('synth parameter contract', () => {
     first.filter.envelope.attackSec = 1
     expect(second.oscillators[0].level).toBe(0.7)
     expect(second.filter.envelope.attackSec).toBe(0.005)
+    expect(second.polyphony).toBe(1)
   })
 
   test('normalizes unknown values and clamps every numeric domain', () => {

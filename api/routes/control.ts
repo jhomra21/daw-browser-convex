@@ -2,6 +2,7 @@ import {
   controlCapabilitiesSchemaV1,
   controlCapabilitiesV1,
   controlCommitResultSchemaV1,
+  controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryResultSchemaV1,
   controlLimitsV1,
@@ -9,6 +10,7 @@ import {
   assetFolderResultSchemaV1,
   assetUploadResultSchemaV1,
   parseControlCommitRequestV1,
+  parseControlApprovalRequestV1,
   parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
@@ -210,8 +212,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
   })
 
   const writeRoute = (
-    path: "/api/control/v1/projects/:projectId/preview" | "/api/control/v1/projects/:projectId/commit",
-    operation: "preview" | "commit",
+    path: "/api/control/v1/projects/:projectId/preview" | "/api/control/v1/projects/:projectId/commit" | "/api/control/v1/projects/:projectId/approvals",
+    operation: "preview" | "commit" | "approval",
   ) => {
     app.post(path, async (context) => {
       const bearer = await authenticate(context, "control:write")
@@ -221,17 +223,28 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       try {
         const body = await readJsonBody(context)
         if ("error" in body) return context.json(body.error, body.status, noStore)
-        const request = operation === "preview"
-          ? parseControlPreviewRequestV1(body.value)
-          : parseControlCommitRequestV1(body.value)
+        let request
+        try {
+          request = operation === "preview"
+            ? parseControlPreviewRequestV1(body.value)
+            : operation === "approval"
+              ? parseControlApprovalRequestV1(body.value)
+              : parseControlCommitRequestV1(body.value)
+        } catch {
+          return respondError(context, controlError("invalid-request", "Invalid control request."))
+        }
         if (request.projectId !== context.req.param("projectId")) {
           return respondError(context, controlError("invalid-request", "Path projectId must match body projectId."))
         }
         const gateway = await createGateway(context, bearer.bearer)
         const result = operation === "preview"
           ? await gateway.query(convexApi.control.previewV1, { request })
-          : await gateway.mutation(convexApi.control.commitV1, { request })
-        const schema = operation === "preview" ? controlPreviewResultSchemaV1 : controlCommitResultSchemaV1
+          : operation === "approval"
+            ? await gateway.mutation(convexApi.control.requestApprovalV1, { request })
+            : await gateway.mutation(convexApi.control.commitV1, { request })
+        const schema = operation === "preview"
+          ? controlPreviewResultSchemaV1
+          : operation === "approval" ? controlApprovalResultSchemaV1 : controlCommitResultSchemaV1
         return context.json(schema.parse(result), 200, noStore)
       } catch (error) {
         return respondError(context, readControlError(error))
@@ -241,6 +254,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
 
   writeRoute("/api/control/v1/projects/:projectId/preview", "preview")
   writeRoute("/api/control/v1/projects/:projectId/commit", "commit")
+  writeRoute("/api/control/v1/projects/:projectId/approvals", "approval")
 
   app.get("/api/control/v1/projects/:projectId/history", async (context) => {
     const bearer = await authenticate(context, "control:read")
@@ -332,10 +346,25 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
   app.delete("/api/control/v1/projects/:projectId/assets/:assetId", async (context) => {
     const authorized = await authorizeAssetRoute(context, "control:write");
     if (authorized instanceof Response) return authorized;
+    const idempotencyKey = context.req.header("idempotency-key");
+    const approvalToken = context.req.header("approval-token");
+    if (!idempotencyKey) return respondError(context, controlError("invalid-request", "Idempotency-Key is required."));
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
       const gateway = await createGateway(context, authorized);
-      return context.json(await gateway.mutation(convexApi.assets.deleteAsset, { projectId, assetKey: context.req.param("assetId") }), 200, noStore);
+      const expectedRevision = context.req.header("if-match-revision");
+      let request
+      try {
+        request = parseControlCommitRequestV1({
+          version: "v1", projectId, idempotencyKey,
+          ...(approvalToken === undefined ? {} : { approvalToken }),
+          ...(expectedRevision === undefined ? {} : { expectedRevision: Number(expectedRevision) }),
+          actions: [{ kind: "asset.delete", asset: { source: "persisted", id: context.req.param("assetId") } }],
+        });
+      } catch {
+        return respondError(context, controlError("invalid-request", "Invalid asset delete request."));
+      }
+      return context.json(controlCommitResultSchemaV1.parse(await gateway.mutation(convexApi.control.commitV1, { request })), 200, noStore);
     } catch (error) { return respondError(context, readControlError(error)); }
   });
 

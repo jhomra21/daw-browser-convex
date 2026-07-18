@@ -2,10 +2,12 @@ import {
   canonicalJson,
   controlCapabilitiesSchemaV1,
   controlCommitResultSchemaV1,
+  controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryResultSchemaV1,
   controlPreviewResultSchemaV1,
   parseControlCommitRequestV1,
+  parseControlApprovalRequestV1,
   parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
@@ -13,6 +15,8 @@ import {
   type ControlCapabilitiesV1,
   type ControlCommitRequestV1,
   type ControlCommitResultV1,
+  type ControlApprovalRequestV1,
+  type ControlApprovalResultV1,
   type ControlErrorV1,
   type ControlHistoryQueryV1,
   type ControlHistoryResultV1,
@@ -144,6 +148,14 @@ export const createControlClient = (options: ControlClientOptions) => {
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/commit`,
         controlCommitResultSchemaV1,
+        { method: "POST", body: canonicalJson(requestBody) },
+      )
+    },
+    requestApproval: (input: ControlApprovalRequestV1): Promise<ControlApprovalResultV1> => {
+      const requestBody = parseControlApprovalRequestV1(input)
+      return request(
+        `/projects/${encodeURIComponent(requestBody.projectId)}/approvals`,
+        controlApprovalResultSchemaV1,
         { method: "POST", body: canonicalJson(requestBody) },
       )
     },

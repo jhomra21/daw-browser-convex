@@ -88,7 +88,7 @@ const requiresWriteScope = (value: unknown) => {
     isRecord(request)
     && request.method === "tools/call"
     && isRecord(request.params)
-    && (request.params.name === "control_preview" || request.params.name === "control_commit")
+    && (request.params.name === "control_preview" || request.params.name === "control_commit" || request.params.name === "control_request_approval")
   ))
 }
 
@@ -99,6 +99,7 @@ const controlGateway = async (context: ApiContext, bearer: ControlBearer): Promi
     snapshot: async (input) => await gateway.query(convexApi.control.snapshotV1, input),
     preview: async (input) => await gateway.query(convexApi.control.previewV1, { request: input }),
     commit: async (input) => await gateway.mutation(convexApi.control.commitV1, { request: input }),
+    requestApproval: async (input) => await gateway.mutation(convexApi.control.requestApprovalV1, { request: input }),
     history: async (input) => await gateway.query(convexApi.control.historyV1, input),
   }
 }
@@ -118,6 +119,7 @@ const lazyService = (
     snapshot: async (input) => (await resolveGateway()).snapshot(input),
     preview: async (input) => (await resolveGateway()).preview(input),
     commit: async (input) => (await resolveGateway()).commit(input),
+    requestApproval: async (input) => (await resolveGateway()).requestApproval(input),
     history: async (input) => (await resolveGateway()).history(input),
   }
 }

@@ -236,6 +236,23 @@ export default defineSchema({
     .index("by_project_actor_idempotency", ["projectId", "actorSubject", "idempotencyKey"])
     .index("by_project_createdAt", ["projectId", "createdAt"]),
 
+  controlApprovals: defineTable({
+    projectId: v.string(),
+    actorSubject: v.string(),
+    requestDigest: v.string(),
+    baseRevision: v.number(),
+    actionIndexes: v.array(v.number()),
+    tokenHash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_project_actor_createdAt", ["projectId", "actorSubject", "createdAt"])
+    .index("by_project", ["projectId"])
+    .index("by_project_createdAt", ["projectId", "createdAt"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"]),
+
   effects: defineTable({
     projectId: v.string(),
     targetType: v.string(),

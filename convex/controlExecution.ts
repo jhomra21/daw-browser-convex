@@ -51,8 +51,10 @@ import {
   setTrackColorCascadeRow,
   ungroupTrackRow,
 } from "./tracks";
-import { findSampleRow } from "./sampleRows";
+import { deleteSampleRow, findSampleRow } from "./sampleRows";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
+import { requireProjectRow } from "./projectRows";
+import { enqueueR2DeleteRows } from "./r2Deletes";
 
 const requiredId = (ctx: any, table: string, id: string) => {
   const normalized = ctx.db.normalizeId(table, id)
@@ -322,6 +324,22 @@ export async function executeControlPlanV1(
         const ownership = await ctx.db.query("ownerships").withIndex("by_clip", (query: any) => query.eq("clipId", clipId)).unique()
         if (!ownership) throw new Error("Clip ownership was not found.")
         result = await deleteClipRow(ctx, { projectId: input.projectId, clipId, ownershipId: ownership._id })
+        break
+      }
+      case "asset.delete": {
+        const deleted = await deleteSampleRow(ctx, { projectId: input.projectId, assetKey: action.asset.id })
+        if (!deleted.asset) {
+          result = { changed: false }
+          break
+        }
+        const project = await requireProjectRow(ctx, input.projectId)
+        await enqueueR2DeleteRows(ctx, {
+          projectId: input.projectId,
+          storageNamespace: project.storageNamespace,
+          keys: [deleted.asset.r2Key],
+          kind: "sample",
+        })
+        result = { changed: true }
         break
       }
       case "master.volume.set":

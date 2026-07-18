@@ -36,6 +36,7 @@ type ProjectSnapshotV1 = {
   processors: any[]
   automation: any[]
   sidechains: any[]
+  assets: any[]
 }
 type PlannerRequest = { projectId: string; actions: ControlActionV1[] }
 type Entity = 'track' | 'clip' | 'effect'
@@ -50,10 +51,12 @@ export type PlannedControlActionV1 = {
   actionIndex: number
   action: ControlActionV1
   changed: boolean
+  destructivePersisted?: boolean
   generatedInstrumentInstanceId?: string
 }
 
 export type ControlPlanV1 = {
+  baseSnapshot: ProjectSnapshotV1
   snapshot: ProjectSnapshotV1
   actions: PlannedControlActionV1[]
   applied: boolean
@@ -64,6 +67,68 @@ export type ControlPlanV1 = {
   changeSummary: {
     actionCount: number
     changes: Array<{ actionIndex: number; kind: string; description: string }>
+  }
+}
+
+export const destructiveControlActionKindsV1 = [
+  'track.delete',
+  'track.ungroup',
+  'clip.delete',
+  'effect.remove',
+  'instrument.remove',
+  'arpeggiator.remove',
+  'automation.delete',
+  'sidechain.remove',
+  'asset.delete',
+] as const
+
+const destructiveKinds = new Set<string>(destructiveControlActionKindsV1)
+
+const countRemoved = (base: { id: string }[], final: { id: string }[]) => {
+  const finalIds = new Set(final.map((entry) => entry.id))
+  return base.filter((entry) => !finalIds.has(entry.id)).length
+}
+
+const countRemovedEntries = (base: unknown[], final: unknown[]) => {
+  const finalEntries = new Set(final.map(canonical))
+  return base.filter((entry) => !finalEntries.has(canonical(entry))).length
+}
+
+const routingChanged = (
+  baseTracks: ProjectSnapshotV1['tracks'],
+  finalTracks: ProjectSnapshotV1['tracks'],
+) => {
+  const finalById = new Map(finalTracks.map((track) => [track.id, track]))
+  return baseTracks.filter((track) => {
+    const final = finalById.get(track.id)
+    return final !== undefined && !same(
+      { groupId: track.groupId, outputTargetId: track.outputTargetId, sends: track.sends },
+      { groupId: final.groupId, outputTargetId: final.outputTargetId, sends: final.sends },
+    )
+  }).length
+}
+
+export const controlApprovalRequirementV1 = (plan: ControlPlanV1, requestDigest: string) => {
+  const before = plan.baseSnapshot
+  const after = plan.snapshot
+  const impact = {
+    tracks: countRemoved(before.tracks, after.tracks),
+    clips: countRemoved(before.clips, after.clips),
+    processors: countRemoved(before.processors, after.processors),
+    automation: countRemovedEntries(before.automation, after.automation),
+    sidechains: countRemovedEntries(before.sidechains, after.sidechains),
+    assets: countRemoved(before.assets, after.assets),
+    routingChanges: routingChanged(before.tracks, after.tracks),
+  }
+  const destructive = plan.actions.filter((entry) => entry.destructivePersisted)
+  return {
+    required: destructive.length > 0,
+    actionIndexes: destructive.map((entry) => entry.actionIndex),
+    actionKinds: destructive.map((entry) => entry.action.kind),
+    impact,
+    requestDigest,
+    baseRevision: plan.priorRevision,
+    expiresInSeconds: 600 as const,
   }
 }
 
@@ -89,6 +154,55 @@ const canonical = (value: unknown): string => {
 }
 
 const same = (left: unknown, right: unknown) => canonical(left) === canonical(right)
+
+const removedBaseEntries = (base: unknown[], before: unknown[], after: unknown[]) => {
+  const baseEntries = new Set(base.map(canonical))
+  const beforeEntries = new Set(before.map(canonical))
+  const afterEntries = new Set(after.map(canonical))
+  return Array.from(baseEntries).some((entry) => beforeEntries.has(entry) && !afterEntries.has(entry))
+}
+
+const removedBaseIds = (
+  base: { id: string }[],
+  before: { id: string }[],
+  after: { id: string }[],
+) => {
+  const baseIds = new Set(base.map((entry) => entry.id))
+  const beforeIds = new Set(before.map((entry) => entry.id))
+  const afterIds = new Set(after.map((entry) => entry.id))
+  return Array.from(baseIds).some((id) => beforeIds.has(id) && !afterIds.has(id))
+}
+
+const changesBaseRouting = (
+  base: ProjectSnapshotV1['tracks'],
+  before: ProjectSnapshotV1['tracks'],
+  after: ProjectSnapshotV1['tracks'],
+) => {
+  const baseIds = new Set(base.map((track) => track.id))
+  const afterById = new Map(after.map((track) => [track.id, track]))
+  return before.some((track) => {
+    if (!baseIds.has(track.id)) return false
+    const next = afterById.get(track.id)
+    return next !== undefined && !same(
+      { groupId: track.groupId, outputTargetId: track.outputTargetId, sends: track.sends },
+      { groupId: next.groupId, outputTargetId: next.outputTargetId, sends: next.sends },
+    )
+  })
+}
+
+const hasPersistedDestructiveEffect = (
+  base: ProjectSnapshotV1,
+  before: ProjectSnapshotV1,
+  after: ProjectSnapshotV1,
+) => (
+  removedBaseIds(base.tracks, before.tracks, after.tracks)
+  || removedBaseIds(base.clips, before.clips, after.clips)
+  || removedBaseIds(base.processors, before.processors, after.processors)
+  || removedBaseIds(base.assets, before.assets, after.assets)
+  || removedBaseEntries(base.automation, before.automation, after.automation)
+  || removedBaseEntries(base.sidechains, before.sidechains, after.sidechains)
+  || changesBaseRouting(base.tracks, before.tracks, after.tracks)
+)
 
 const referenceId = (
   ref: ContextualRefV1,
@@ -237,6 +351,7 @@ export const planControlRequestV1 = (
   const tracks = new Map(snapshot.tracks.map((track) => [track.id, track]))
   const clips = new Map(snapshot.clips.map((clip) => [clip.id, clip]))
   const processors = new Map(snapshot.processors.map((processor) => [processor.id, processor]))
+  const assets = new Map(snapshot.assets.map((asset) => [asset.id, asset]))
   const trackRefs = new Map<string, string>()
   const clipRefs = new Map<string, string>()
   const effectRefs = new Map<string, string>()
@@ -253,6 +368,9 @@ export const planControlRequestV1 = (
 
   for (const [actionIndex, action] of request.actions.entries()) {
     let changed = false
+    const beforeDestructiveAction = destructiveKinds.has(action.kind)
+      ? structuredClone(snapshot)
+      : undefined
     switch (action.kind) {
       case 'project.rename': {
         const name = action.name.trim()
@@ -548,7 +666,7 @@ export const planControlRequestV1 = (
       case 'clip.audio.create': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         if (track.kind !== 'audio' || track.channelRole !== 'track') planError(actionIndex, 'validation', 'Audio clips require an audio track.')
-        const asset = (base as any).assets?.find((entry: any) => entry.id === action.asset.id)
+        const asset = assets.get(action.asset.id)
         if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
         if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) {
           planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
@@ -575,7 +693,7 @@ export const planControlRequestV1 = (
       case 'clip.source.set': {
         const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
         if (clip.midi) planError(actionIndex, 'validation', 'MIDI clips cannot have an audio source.')
-        const asset = (base as any).assets?.find((entry: any) => entry.id === action.asset.id)
+        const asset = assets.get(action.asset.id)
         if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
         if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
         const source = { assetId: asset.id, sourceKind: asset.sourceKind, durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount }
@@ -671,6 +789,20 @@ export const planControlRequestV1 = (
         const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
         clips.delete(clip.id)
         snapshot.clips = snapshot.clips.filter((entry) => entry.id !== clip.id)
+        changed = true
+        break
+      }
+      case 'asset.delete': {
+        const asset = assets.get(action.asset.id)
+        if (!asset) {
+          changed = false
+          break
+        }
+        if (Array.from(clips.values()).some((clip) => clip.source?.assetId === asset.id)) {
+          planError(actionIndex, 'validation', 'Referenced assets cannot be deleted.')
+        }
+        assets.delete(asset.id)
+        snapshot.assets = snapshot.assets.filter((entry) => entry.id !== asset.id)
         changed = true
         break
       }
@@ -904,7 +1036,10 @@ export const planControlRequestV1 = (
         break
       }
     }
-    planned.push({ actionIndex, action, changed })
+    const destructivePersisted = beforeDestructiveAction === undefined
+      ? false
+      : hasPersistedDestructiveEffect(base, beforeDestructiveAction, snapshot)
+    planned.push({ actionIndex, action, changed, ...(destructivePersisted ? { destructivePersisted } : {}) })
   }
 
   snapshot.tracks.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
@@ -912,6 +1047,7 @@ export const planControlRequestV1 = (
   snapshot.processors.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
   const applied = planned.some((entry) => entry.changed)
   return {
+    baseSnapshot: base,
     snapshot,
     actions: planned,
     applied,

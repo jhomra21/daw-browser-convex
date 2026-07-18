@@ -15,6 +15,7 @@ export const startControlMcp = async () => {
     capabilities: client.capabilities,
     snapshot: async ({ projectId }) => client.snapshot(projectId),
     preview: client.preview,
+    requestApproval: client.requestApproval,
     commit: client.commit,
     history: client.history,
   }

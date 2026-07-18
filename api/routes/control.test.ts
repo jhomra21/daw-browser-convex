@@ -160,6 +160,36 @@ describe("control REST routes", () => {
       method: "POST",
       body: "x".repeat(controlLimitsV1.maxSerializedBodyBytes + 1),
     })).status).toBe(413)
+    expect((await application.request("https://control.example/api/control/v1/projects/project-1/approvals", {
+      method: "POST",
+      body: JSON.stringify({ ...previewRequest, actor: "forbidden" }),
+    })).status).toBe(400)
+  })
+
+  test("routes asset deletes through canonical commits and leaves token optional for no-ops", async () => {
+    let received: unknown
+    const application = app(async () => bearer, async () => snapshot, async (_reference, args) => {
+      received = args
+      return commitResult
+    })
+    const missing = await application.request("https://control.example/api/control/v1/projects/project-1/assets/missing", {
+      method: "DELETE",
+      headers: { "Idempotency-Key": "asset-delete-1" },
+    })
+    expect(missing.status).toBe(200)
+    expect(received).toEqual({
+      request: {
+        version: "v1",
+        projectId: "project-1",
+        idempotencyKey: "asset-delete-1",
+        actions: [{ kind: "asset.delete", asset: { source: "persisted", id: "missing" } }],
+      },
+    })
+    const invalid = await application.request("https://control.example/api/control/v1/projects/project-1/assets/missing", {
+      method: "DELETE",
+      headers: { "Idempotency-Key": "bad key" },
+    })
+    expect(invalid.status).toBe(400)
   })
 
   test("rejects path-normalizing IDs without dispatching canonical calls", async () => {

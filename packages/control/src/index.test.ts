@@ -13,6 +13,7 @@ import {
   controlRequestDigestV1,
   controlErrorSchemaV1,
   controlLimitsV1,
+  destructiveControlActionKindsV1,
   controlPreviewResultSchemaV1,
   controlRequestDigestInputV1,
   findDuplicateCreationClientRefsV1,
@@ -554,7 +555,7 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
   expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
-  expect(controlCapabilitiesV1.actionKinds).toHaveLength(36)
+  expect(controlCapabilitiesV1.actionKinds).toHaveLength(37)
   expect(controlCapabilitiesV1.actionKinds).toEqual([
     'project.rename', 'project.settings.set', 'track.create', 'track.rename',
     'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
@@ -565,10 +566,26 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
     'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
     'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
     'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
+    'asset.delete',
   ])
   expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
   expect(projectSnapshotSchemaV1.parse(snapshot).project.masterVolume).toBe(0.8)
+})
+
+test('defines the exhaustive destructive action policy', () => {
+  expect(destructiveControlActionKindsV1).toEqual([
+    'track.delete',
+    'track.ungroup',
+    'clip.delete',
+    'effect.remove',
+    'instrument.remove',
+    'arpeggiator.remove',
+    'automation.delete',
+    'sidechain.remove',
+    'asset.delete',
+  ])
+  expect(destructiveControlActionKindsV1.every((kind) => controlCapabilitiesV1.actionKinds.includes(kind))).toBe(true)
 })
 
 test('parses every Phase 5B action strictly', () => {
@@ -589,6 +606,7 @@ test('parses every Phase 5B action strictly', () => {
     { kind: 'track.ungroup', group: track },
     { kind: 'instrument.remove', target },
     { kind: 'arpeggiator.remove', target },
+    { kind: 'asset.delete', asset },
   ]
   for (const action of actions) expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
   expect(() => parseControlCommitRequestV1(commit([{

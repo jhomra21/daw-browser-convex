@@ -28,6 +28,7 @@ const service = (overrides: Partial<ControlService> = {}): ControlService => ({
   capabilities: async () => controlCapabilitiesV1,
   snapshot: async () => snapshot,
   preview: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
+  requestApproval: async () => ({ version: "v1", approvalToken: "a".repeat(32), requestDigest: "0".repeat(64), baseRevision: 1, actionIndexes: [0], expiresAt: 2 }),
   commit: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, idempotencyReplay: false, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
   history: async () => ({ entries: [], continueCursor: "cursor-1", isDone: true }),
   ...overrides,
@@ -62,7 +63,7 @@ const request = async (
 }
 
 describe("control MCP tools", () => {
-  test("lists exactly the five canonical tools with accurate annotations", async () => {
+  test("lists exactly the six canonical tools with accurate annotations", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
@@ -70,6 +71,7 @@ describe("control MCP tools", () => {
       "control_snapshot",
       "control_preview",
       "control_commit",
+      "control_request_approval",
       "control_history",
     ])
     expect(tools.find((tool: { name: string }) => tool.name === "control_commit").annotations).toEqual({
@@ -82,6 +84,12 @@ describe("control MCP tools", () => {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
+      openWorldHint: false,
+    })
+    expect(tools.find((tool: { name: string }) => tool.name === "control_request_approval").annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
       openWorldHint: false,
     })
     expect(tools.find((tool: { name: string }) => tool.name === "control_snapshot").inputSchema.additionalProperties).toBeFalse()

@@ -38,6 +38,10 @@ const clipColorSchema = z.union([
 const trackRoleSchema = z.enum(['track', 'group', 'return'])
 const revisionSchema = z.number().int().nonnegative()
 const requestDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Request digest must be a lowercase SHA-256 hex digest.')
+export const approvalTokenSchemaV1 = z.string()
+  .min(32)
+  .max(256)
+  .regex(/^[A-Za-z0-9_-]+$/, 'Approval tokens must be URL-safe opaque values.')
 const opaqueCursorSchema = z.string()
   .min(1)
   .max(2_048)
@@ -85,6 +89,11 @@ export const controlCapabilitiesSchemaV1 = z.object({
   version: z.literal(CONTROL_API_VERSION_V1),
   executionTarget: executionTargetSchemaV1,
   actionKinds: z.array(z.string()).readonly(),
+  approvals: z.object({
+    requiredForDestructiveActions: z.literal(true),
+    expiresInSeconds: z.literal(600),
+    tool: z.literal('control_request_approval'),
+  }).strict(),
   limits: z.object({
     maxActions: z.number().int().positive(),
     maxSerializedBodyBytes: z.number().int().positive(),
@@ -369,6 +378,10 @@ const sidechainRemoveActionSchema = z.object({
   target: targetRefSchemaV1,
   effect: processorRefSchemaV1,
 }).strict()
+const assetDeleteActionSchema = z.object({
+  kind: z.literal('asset.delete'),
+  asset: assetRefSchemaV1,
+}).strict()
 
 export const controlActionSchemaV1 = z.union([
   projectRenameActionSchema, projectSettingsActionSchema, trackCreateActionSchema,
@@ -381,6 +394,7 @@ export const controlActionSchemaV1 = z.union([
   effectUpsertActionSchema, effectRemoveActionSchema, effectReorderActionSchema,
   instrumentSetActionSchema, instrumentRemoveActionSchema, arpeggiatorSetActionSchema, arpeggiatorRemoveActionSchema,
   automationSetActionSchema, automationDeleteActionSchema, sidechainSetActionSchema, sidechainRemoveActionSchema,
+  assetDeleteActionSchema,
 ])
 
 const creationClientRef = (action: z.infer<typeof controlActionSchemaV1>): string | undefined => {
@@ -456,6 +470,7 @@ export const idempotencyKeySchemaV1 = z.string()
 export const controlCommitRequestSchemaV1 = z.object({
   ...requestBaseShape,
   idempotencyKey: idempotencyKeySchemaV1,
+  approvalToken: approvalTokenSchemaV1.optional(),
 }).strict().superRefine(addAggregateIssues)
 
 export const controlErrorSchemaV1 = z.object({
@@ -483,6 +498,29 @@ export const controlErrorSchemaV1 = z.object({
 export const controlPreviewRequestSchemaV1 = z.object(requestBaseShape)
   .strict()
   .superRefine(addAggregateIssues)
+
+export const controlApprovalRequestSchemaV1 = z.object(requestBaseShape)
+  .strict()
+  .superRefine(addAggregateIssues)
+
+const controlImpactSchemaV1 = z.object({
+  tracks: z.number().int().nonnegative(),
+  clips: z.number().int().nonnegative(),
+  processors: z.number().int().nonnegative(),
+  automation: z.number().int().nonnegative(),
+  sidechains: z.number().int().nonnegative(),
+  assets: z.number().int().nonnegative(),
+  routingChanges: z.number().int().nonnegative(),
+}).strict()
+const controlApprovalRequirementSchemaV1 = z.object({
+  required: z.boolean(),
+  actionIndexes: z.array(z.number().int().nonnegative()).max(controlLimitsV1.maxActions),
+  actionKinds: z.array(z.string().min(1).max(64)).max(controlLimitsV1.maxActions),
+  impact: controlImpactSchemaV1,
+  requestDigest: requestDigestSchema,
+  baseRevision: revisionSchema,
+  expiresInSeconds: z.literal(600),
+}).strict()
 
 export const resolvedRefSchemaV1 = z.object({
   entity: z.enum(['track', 'clip', 'effect']),
@@ -519,6 +557,15 @@ export const controlPreviewResultSchemaV1 = z.object({
   ...planningResultShape,
   revision: revisionSchema,
   applied: z.boolean(),
+  approval: controlApprovalRequirementSchemaV1.optional(),
+}).strict()
+export const controlApprovalResultSchemaV1 = z.object({
+  version: z.literal(CONTROL_API_VERSION_V1),
+  approvalToken: approvalTokenSchemaV1,
+  requestDigest: requestDigestSchema,
+  baseRevision: revisionSchema,
+  actionIndexes: z.array(z.number().int().nonnegative()).min(1).max(controlLimitsV1.maxActions),
+  expiresAt: z.number().int().nonnegative(),
 }).strict()
 export const controlCommitResultSchemaV1 = z.object({
   ...planningResultShape,
@@ -681,7 +728,9 @@ export const projectSnapshotSchemaV1 = z.object({
 export type ControlActionV1 = z.infer<typeof controlActionSchemaV1>
 export type ControlCommitRequestV1 = z.infer<typeof controlCommitRequestSchemaV1>
 export type ControlPreviewRequestV1 = z.infer<typeof controlPreviewRequestSchemaV1>
+export type ControlApprovalRequestV1 = z.infer<typeof controlApprovalRequestSchemaV1>
 export type ControlPreviewResultV1 = z.infer<typeof controlPreviewResultSchemaV1>
+export type ControlApprovalResultV1 = z.infer<typeof controlApprovalResultSchemaV1>
 export type ControlCommitResultV1 = z.infer<typeof controlCommitResultSchemaV1>
 export type ControlErrorV1 = z.infer<typeof controlErrorSchemaV1>
 export type ControlSnapshotQueryV1 = z.infer<typeof controlSnapshotQuerySchemaV1>
@@ -723,7 +772,13 @@ export const controlCapabilitiesV1 = {
     'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
     'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
     'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
+    'asset.delete',
   ],
+  approvals: {
+    requiredForDestructiveActions: true,
+    expiresInSeconds: 600,
+    tool: 'control_request_approval',
+  },
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
 
@@ -771,6 +826,10 @@ export const parseControlPreviewRequestV1 = (input: unknown) => {
   assertControlSerializedBodyV1(input)
   return assertControlSerializedBodyV1(controlPreviewRequestSchemaV1.parse(input))
 }
+export const parseControlApprovalRequestV1 = (input: unknown) => {
+  assertControlSerializedBodyV1(input)
+  return assertControlSerializedBodyV1(controlApprovalRequestSchemaV1.parse(input))
+}
 
 export const parseControlSnapshotQueryV1 = (input: unknown) => (
   controlSnapshotQuerySchemaV1.parse(input)
@@ -781,7 +840,7 @@ export const parseControlHistoryQueryV1 = (input: unknown) => (
 )
 
 export const controlRequestDigestInputV1 = (
-  request: ControlCommitRequestV1 | ControlPreviewRequestV1,
+  request: ControlCommitRequestV1 | ControlPreviewRequestV1 | ControlApprovalRequestV1,
 ) => canonicalJson({
   version: request.version,
   projectId: request.projectId,
@@ -790,14 +849,14 @@ export const controlRequestDigestInputV1 = (
 })
 
 export const controlRequestDigestV1 = async (
-  request: ControlCommitRequestV1 | ControlPreviewRequestV1,
+  request: ControlCommitRequestV1 | ControlPreviewRequestV1 | ControlApprovalRequestV1,
 ) => {
   const bytes = new TextEncoder().encode(controlRequestDigestInputV1(request))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export { planControlRequestV1 } from './planner'
+export { controlApprovalRequirementV1, destructiveControlActionKindsV1, planControlRequestV1 } from './planner'
 export type { ControlPlanError, ControlPlanV1, PlannedControlActionV1 } from './planner'
 export {
   collectDeletedTrackIdsV1,

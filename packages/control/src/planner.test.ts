@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { planControlRequestV1 } from "./planner";
+import { controlApprovalRequirementV1, planControlRequestV1 } from "./planner";
 
 const snapshot = (): any => ({
   version: "v1",
@@ -56,6 +56,63 @@ const snapshot = (): any => ({
 });
 
 const persisted = (id: string) => ({ source: "persisted", id });
+
+test("derives destructive impact from the planned base-to-final diff", () => {
+  const base = snapshot();
+  base.tracks.push({
+    id: "track-2", name: "Source", index: 1, kind: "audio", channelRole: "track",
+    volume: 0.8, muted: false, soloed: false, sends: [],
+  });
+  base.automation.push({
+    target: { trackId: "track-1" }, effectInstanceId: "audio-effect:one", parameterId: "frequency",
+    enabled: true, points: [],
+  });
+  base.sidechains.push({ sourceTrackId: "track-2", targetTrackId: "track-1", effectInstanceId: "audio-effect:one" });
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "effect.remove",
+      target: { kind: "track", track: persisted("track-1") },
+      effect: persisted("effect-1"),
+      effectKind: "eq",
+    }],
+  });
+  expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
+    required: true,
+    actionIndexes: [0],
+    actionKinds: ["effect.remove"],
+    impact: { processors: 1, automation: 1, sidechains: 1 },
+  });
+});
+
+test("does not require approval for create-then-delete net no-ops", () => {
+  const plan = planControlRequestV1(snapshot(), {
+    projectId: "project-1",
+    actions: [
+      { kind: "track.create", clientRef: "temporary", trackKind: "audio" },
+      { kind: "track.delete", track: { source: "client", clientRef: "temporary" } },
+    ],
+  });
+  expect(controlApprovalRequirementV1(plan, "a".repeat(64)).required).toBe(false);
+});
+
+test("requires approval when a client-ref deletion cascades persisted descendants", () => {
+  const base = snapshot();
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "track.create", clientRef: "group", channelRole: "group" },
+      { kind: "track.group.set", track: persisted("track-1"), group: { source: "client", clientRef: "group" } },
+      { kind: "track.delete", track: { source: "client", clientRef: "group" } },
+    ],
+  });
+  expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
+    required: true,
+    actionIndexes: [2],
+    actionKinds: ["track.delete"],
+    impact: { tracks: 1, clips: 1, processors: 1 },
+  });
+});
 
 test("plans client refs as non-persisted placeholders", () => {
   const plan = planControlRequestV1(snapshot(), {

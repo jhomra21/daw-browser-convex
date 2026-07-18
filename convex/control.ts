@@ -1,5 +1,7 @@
 import {
   controlCommitResultSchemaV1,
+  controlApprovalResultSchemaV1,
+  controlApprovalRequirementV1,
   controlErrorSchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryResultSchemaV1,
@@ -9,6 +11,7 @@ import {
   parseControlHistoryQueryV1,
   assertControlSerializedBodyV1,
   parseControlCommitRequestV1,
+  parseControlApprovalRequestV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   planControlRequestV1,
@@ -28,6 +31,9 @@ const controlCommitMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
 const controlCommitPruneBatchSize = 256;
 const controlCommitPruneMaxPages = 16;
 const controlCommitRetentionSafetyCeiling = 2_048;
+const controlApprovalPruneBatchSize = 128;
+const maxActiveApprovalsPerActorProject = 16;
+const maxActiveApprovalsPerProject = 64;
 
 // Expired or pruned idempotency keys are intentionally no longer replayable.
 const pruneControlCommits = async (
@@ -69,7 +75,7 @@ const pruneControlCommits = async (
 }
 
 const failure = (
-  code: "invalid-request" | "validation" | "revision-conflict" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "internal",
+  code: "invalid-request" | "validation" | "revision-conflict" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "approval-required" | "internal",
   message: string,
   actionIndex?: number,
   details?: Record<string, string>,
@@ -96,6 +102,61 @@ const parseCommit = (input: unknown) => {
     return parseControlCommitRequestV1(input)
   } catch {
     return failure("invalid-request", "Invalid control commit request.")
+  }
+}
+
+const parseApproval = (input: unknown) => {
+  try {
+    return parseControlApprovalRequestV1(input)
+  } catch {
+    return failure("invalid-request", "Invalid control approval request.")
+  }
+}
+
+const sha256 = async (value: string) => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+const approvalToken = () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+const approvalError = (requirement: ReturnType<typeof controlApprovalRequirementV1>) => (
+  failure("approval-required", "A valid approval token is required for destructive actions.", undefined, {
+    actionIndexes: requirement.actionIndexes.join(","),
+    actionKinds: requirement.actionKinds.join(","),
+    baseRevision: String(requirement.baseRevision),
+    requestDigest: requirement.requestDigest,
+    impact: JSON.stringify(requirement.impact),
+  })
+)
+
+const pruneApprovals = async (ctx: any, projectId: string, actorSubject: string) => {
+  const now = Date.now()
+  const expired = await ctx.db.query("controlApprovals")
+    .withIndex("by_project_expiresAt", (query: any) => query.eq("projectId", projectId).lte("expiresAt", now))
+    .take(controlApprovalPruneBatchSize)
+  for (const approval of expired) await ctx.db.delete(approval._id)
+  const projectRows = await ctx.db.query("controlApprovals")
+    .withIndex("by_project_createdAt", (query: any) => query.eq("projectId", projectId))
+    .order("asc")
+    .take(controlApprovalPruneBatchSize)
+  for (const approval of projectRows) {
+    if (approval.consumedAt !== undefined) await ctx.db.delete(approval._id)
+  }
+  const actorRows = await ctx.db.query("controlApprovals")
+    .withIndex("by_project_actor_createdAt", (query: any) => query.eq("projectId", projectId).eq("actorSubject", actorSubject))
+    .order("asc")
+    .take(maxActiveApprovalsPerActorProject)
+  if (actorRows.length >= maxActiveApprovalsPerActorProject) failure("limit-exceeded", "Too many active destructive approvals.")
+  const activeRows = await ctx.db.query("controlApprovals")
+    .withIndex("by_project_createdAt", (query: any) => query.eq("projectId", projectId))
+    .order("asc")
+    .take(maxActiveApprovalsPerProject)
+  if (activeRows.length >= maxActiveApprovalsPerProject) {
+    failure("limit-exceeded", "Project destructive approval retention is full.")
   }
 }
 
@@ -200,9 +261,60 @@ export const previewV1 = query({
     }
     const requestDigest = await controlRequestDigestV1(parsed)
     const controlPlan = plan(snapshot, parsed)
+    const approval = controlApprovalRequirementV1(controlPlan, requestDigest)
     const { idempotencyReplay: _idempotencyReplay, ...preview } = result(requestDigest, parsed, controlPlan, false)
     return controlPreviewResultSchemaV1.parse({
       ...preview,
+      approval,
+    })
+  },
+})
+
+export const requestApprovalV1 = mutation({
+  args: { request: v.any() },
+  handler: async (ctx, { request }) => {
+    const parsed = parseApproval(request)
+    let actor: ReturnType<typeof controlActor>
+    try {
+      actor = controlActor(await requireAuthenticatedIdentity(ctx))
+    } catch {
+      return failure("authorization", "Authentication is required.")
+    }
+    try {
+      await preflightControlRequestV1(ctx, { projectId: parsed.projectId, actorId: actor.subject, actions: parsed.actions })
+    } catch (error) {
+      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      return failure("internal", "Control preflight failed.")
+    }
+    const snapshot = await readProjectControlSnapshotV1(ctx, parsed.projectId)
+    if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
+      return failure("revision-conflict", "Project revision does not match the expected revision.")
+    }
+    const requestDigest = await controlRequestDigestV1(parsed)
+    const controlPlan = plan(snapshot, parsed)
+    const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
+    if (!requirement.required) return failure("validation", "Approval requires a material destructive action.")
+    await pruneApprovals(ctx, parsed.projectId, actor.subject)
+    const token = approvalToken()
+    const now = Date.now()
+    const expiresAt = now + 10 * 60 * 1000
+    await ctx.db.insert("controlApprovals", {
+      projectId: parsed.projectId,
+      actorSubject: actor.subject,
+      requestDigest,
+      baseRevision: requirement.baseRevision,
+      actionIndexes: requirement.actionIndexes,
+      tokenHash: await sha256(token),
+      createdAt: now,
+      expiresAt,
+    })
+    return controlApprovalResultSchemaV1.parse({
+      version: "v1",
+      approvalToken: token,
+      requestDigest,
+      baseRevision: requirement.baseRevision,
+      actionIndexes: requirement.actionIndexes,
+      expiresAt,
     })
   },
 })
@@ -256,6 +368,25 @@ export const commitV1 = mutation({
       failure("revision-conflict", "Project revision does not match the expected revision.")
     }
     const controlPlan = plan(snapshot, parsed)
+    const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
+    if (requirement.required) {
+      if (!parsed.approvalToken) return approvalError(requirement)
+      const tokenHash = await sha256(parsed.approvalToken)
+      const approval = await ctx.db.query("controlApprovals")
+        .withIndex("by_tokenHash", (query: any) => query.eq("tokenHash", tokenHash))
+        .unique()
+      if (
+        !approval
+        || approval.actorSubject !== userId
+        || approval.projectId !== parsed.projectId
+        || approval.requestDigest !== requestDigest
+        || approval.baseRevision !== controlPlan.priorRevision
+        || approval.expiresAt <= Date.now()
+        || approval.consumedAt !== undefined
+        || approval.actionIndexes.join(",") !== requirement.actionIndexes.join(",")
+      ) return approvalError(requirement)
+      await ctx.db.patch(approval._id, { consumedAt: Date.now() })
+    }
     let execution: Awaited<ReturnType<typeof executeControlPlanV1>>
     try {
       execution = await executeControlPlanV1(ctx, { projectId: parsed.projectId, actorId: userId, plan: controlPlan })

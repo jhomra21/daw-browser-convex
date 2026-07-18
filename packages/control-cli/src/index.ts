@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises"
 import {
   canonicalJson,
   controlCommitRequestSchemaV1,
+  controlApprovalRequestSchemaV1,
   controlErrorSchemaV1,
   controlHistoryQuerySchemaV1,
   controlPreviewRequestSchemaV1,
@@ -16,7 +17,7 @@ import { credentialIdentity, createCredentialStore } from "./credentials"
 
 const commandNames = [
   "auth login --base-url <origin>", "auth status", "auth logout", "capabilities",
-  "snapshot <project-id>", "preview --request <file|->", "commit --request <file|->",
+  "snapshot <project-id>", "preview --request <file|->", "approval --request <file|->", "commit --request <file|->",
   "history <project-id> [--cursor <cursor>] [--limit <number>]",
 ]
 
@@ -168,13 +169,15 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
     } else if (command === "snapshot") {
       if (commandArguments.length !== 1) throw new Error("snapshot requires a project ID.")
       data = await client.snapshot(controlSnapshotQuerySchemaV1.parse({ projectId: commandArguments[0] }).projectId)
-    } else if (command === "preview" || command === "commit") {
+    } else if (command === "preview" || command === "approval" || command === "commit") {
       const source = option(commandArguments, "--request")
       if (!source || commandArguments.length !== 2 || commandArguments[0] !== "--request") throw new Error(`${command} requires --request <file|->.`)
       const parsed = await jsonRequest(source, io)
       data = command === "preview"
         ? await client.preview(controlPreviewRequestSchemaV1.parse(parsed))
-        : await client.commit(controlCommitRequestSchemaV1.parse(parsed))
+        : command === "approval"
+          ? await client.requestApproval(controlApprovalRequestSchemaV1.parse(parsed))
+          : await client.commit(controlCommitRequestSchemaV1.parse(parsed))
     } else if (command === "history") {
       const { projectId, cursor, limit } = historyArguments(commandArguments)
       data = await client.history(controlHistoryQuerySchemaV1.parse({

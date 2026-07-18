@@ -6,6 +6,8 @@ import {
   controlCapabilitiesSchemaV1,
   controlCommitRequestSchemaV1,
   controlCommitResultSchemaV1,
+  controlApprovalRequestSchemaV1,
+  controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryQuerySchemaV1,
   controlHistoryResultSchemaV1,
@@ -17,6 +19,8 @@ import {
   type ControlCapabilitiesV1,
   type ControlCommitRequestV1,
   type ControlCommitResultV1,
+  type ControlApprovalRequestV1,
+  type ControlApprovalResultV1,
   type ControlSnapshotQueryV1,
   type ControlHistoryResultV1,
   type ControlHistoryQueryV1,
@@ -30,6 +34,7 @@ export type ControlService = {
   snapshot: (input: ControlSnapshotQueryV1) => Promise<ProjectSnapshotV1>;
   preview: (input: ControlPreviewRequestV1) => Promise<ControlPreviewResultV1>;
   commit: (input: ControlCommitRequestV1) => Promise<ControlCommitResultV1>;
+  requestApproval: (input: ControlApprovalRequestV1) => Promise<ControlApprovalResultV1>;
   history: (input: ControlHistoryQueryV1) => Promise<ControlHistoryResultV1>;
 }
 
@@ -43,6 +48,7 @@ const annotations = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   preview: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   commit: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 }
 
 const internalError = (): ControlErrorV1 => ({
@@ -134,6 +140,9 @@ export const createControlMcpServer = (
   const commit = (input: unknown) => (
     write(input, controlCommitRequestSchemaV1.parse, service.commit, controlCommitResultSchemaV1.parse)
   )
+  const requestApproval = (input: unknown) => (
+    write(input, controlApprovalRequestSchemaV1.parse, service.requestApproval, controlApprovalResultSchemaV1.parse)
+  )
   const history = (input: unknown) => (
     execute(input, controlHistoryQuerySchemaV1.parse, service.history, controlHistoryResultSchemaV1.parse)
   )
@@ -166,6 +175,13 @@ export const createControlMcpServer = (
     annotations: annotations.commit,
   }, commit)
 
+  server.registerTool("control_request_approval", {
+    description: "Request a one-time approval token for material destructive DAW actions.",
+    inputSchema: controlApprovalRequestSchemaV1,
+    outputSchema: controlApprovalResultSchemaV1,
+    annotations: annotations.approval,
+  }, requestApproval)
+
   server.registerTool("control_history", {
     description: "Return bounded DAW control history for a project.",
     inputSchema: controlHistoryQuerySchemaV1,
@@ -180,6 +196,7 @@ export const createControlMcpServer = (
     if (request.params.name === "control_snapshot") return snapshot(input)
     if (request.params.name === "control_preview") return preview(input)
     if (request.params.name === "control_commit") return commit(input)
+    if (request.params.name === "control_request_approval") return requestApproval(input)
     if (request.params.name === "control_history") return history(input)
     return failure(invalidRequest())
   })

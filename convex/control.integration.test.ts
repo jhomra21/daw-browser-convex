@@ -23,6 +23,17 @@ const request = (actions: unknown[], idempotencyKey = "commit-key-1") => ({
   actions,
 });
 
+const approvedRequest = async (
+  t: Awaited<ReturnType<typeof setup>>,
+  actions: unknown[],
+  idempotencyKey: string,
+) => {
+  const approval = await t.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
+    request: { version: "v1", projectId, actions },
+  });
+  return { ...request(actions, idempotencyKey), approvalToken: approval.approvalToken };
+};
+
 const setup = async () => {
   const t = convexTest(schema, modules);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
@@ -108,11 +119,58 @@ test("deleting a group recursively removes nested tracks and dependent rows", as
     await ctx.db.insert("clips", { projectId, trackId: grandchild, startSec: 0, duration: 1 });
   });
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
-    request: request([{ kind: "track.delete", track: { source: "persisted", id: String(group) } }]),
+    request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(group) } }], "group-delete"),
   });
   expect(await t.run((ctx) => ctx.db.query("tracks").collect())).toHaveLength(0);
   expect(await t.run((ctx) => ctx.db.query("effects").collect())).toHaveLength(0);
   expect(await t.run((ctx) => ctx.db.query("clips").collect())).toHaveLength(0);
+});
+
+test("destructive commits require an actor-bound one-time approval", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Delete", index: 0 });
+  const actions = [{ kind: "track.delete", track: { source: "persisted" as const, id: String(track) } }];
+  await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request(actions, "approval-required"),
+  })).rejects.toThrow("approval-required");
+  const approval = await t.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
+    request: { version: "v1", projectId, actions },
+  });
+  expect((await t.run((ctx) => ctx.db.query("controlApprovals").unique()))?.tokenHash).not.toBe(approval.approvalToken);
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: { ...request(actions, "approval-once"), approvalToken: approval.approvalToken },
+  });
+  expect((await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: { ...request(actions, "approval-once"), approvalToken: approval.approvalToken },
+  })).idempotencyReplay).toBe(true);
+});
+
+test("project approval capacity rejects the sixty-fifth active approval", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Capacity", index: 0 });
+  const now = Date.now();
+  await t.run(async (ctx) => {
+    for (let index = 0; index < 64; index += 1) {
+      await ctx.db.insert("controlApprovals", {
+        projectId,
+        actorSubject: `departed-${index}`,
+        requestDigest: `${index}`.padStart(64, "0"),
+        baseRevision: 0,
+        actionIndexes: [0],
+        tokenHash: `hash-${index}`,
+        createdAt: now + index,
+        expiresAt: now + 60_000,
+      });
+    }
+  });
+  await expect(t.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
+    request: {
+      version: "v1",
+      projectId,
+      actions: [{ kind: "track.delete", track: { source: "persisted", id: String(track) } }],
+    },
+  })).rejects.toThrow("retention is full");
+  expect(await t.run((ctx) => ctx.db.query("controlApprovals").collect())).toHaveLength(64);
 });
 
 test("existing effect omitted params and unchanged instrument do not advance revision", async () => {
@@ -396,7 +454,7 @@ test("late execution failures roll back earlier actions, revisions, and idempote
     commits: await ctx.db.query("controlCommits").collect(),
   }));
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
-    request: request([
+    request: await approvedRequest(t, [
       { kind: "track.rename", track: { source: "persisted", id: String(track) }, name: "Changed" },
       { kind: "clip.delete", clip: { source: "persisted", id: String(clip) } },
     ], "late-failure"),
@@ -549,15 +607,16 @@ test("every advertised action has an authenticated preview and commit endpoint f
     { kind: "arpeggiator.remove", target: { kind: "track" as const, track: ref(instrument) } },
     { kind: "clip.delete", clip: { source: "client" as const, clientRef: "midi" } },
     { kind: "track.delete", track: temp },
+    { kind: "asset.delete", asset: { source: "persisted" as const, id: "missing-asset" } },
   ];
-  expect(actions).toHaveLength(36);
+  expect(actions).toHaveLength(37);
   expect(actions.map((action) => action.kind).sort()).toEqual([...controlCapabilitiesV1.actionKinds].sort());
   const previewRequest = { version: "v1" as const, projectId, actions };
   expect(() => parseControlPreviewRequestV1(previewRequest)).not.toThrow();
   const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, { request: previewRequest });
   expect(preview.applied).toBe(true);
   const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
-    request: request(actions, "endpoint-action-matrix"),
+    request: await approvedRequest(t, actions, "endpoint-action-matrix"),
   });
   expect(result.applied).toBe(true);
   expect(result.revision).toBe(result.priorRevision + 1);

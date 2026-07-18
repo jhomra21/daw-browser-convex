@@ -10,7 +10,7 @@ import { queryClient } from '~/lib/query-client'
 import { AppPreferencesProvider } from '~/context/app-preferences'
 import { loadInitialAppPreferences } from '~/lib/preferences/app-preferences'
 
-if (import.meta.env.PROD) {
+if (import.meta.env.PROD && !import.meta.env.VITE_DESKTOP) {
   registerSW({ immediate: true })
 }
 

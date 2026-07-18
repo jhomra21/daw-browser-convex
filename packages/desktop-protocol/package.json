@@ -1,0 +1,16 @@
+{
+  "name": "@daw-browser/desktop-protocol",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./socket": "./src/socket.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

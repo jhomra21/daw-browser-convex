@@ -32,6 +32,7 @@ import {
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
 } from "@daw-browser/control"
+import { executeHostTool, registerHostTools, type HostToolService } from "./host-tools"
 
 export type ControlService = {
   capabilities: () => Promise<ControlCapabilitiesV1>;
@@ -47,6 +48,7 @@ export type ControlMcpScope = "control:read" | "control:write"
 
 type ControlMcpOptions = {
   authorize?: (scope: ControlMcpScope) => boolean | Promise<boolean>;
+  hostTools?: HostToolService;
 }
 
 const annotations = {
@@ -203,6 +205,7 @@ export const createControlMcpServer = (
     annotations: annotations.read,
   }, recoveries)
 
+  if (options.hostTools) registerHostTools(server, options.hostTools)
   server.server.removeRequestHandler("tools/call")
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const input = request.params.arguments
@@ -213,6 +216,7 @@ export const createControlMcpServer = (
     if (request.params.name === "control_request_approval") return requestApproval(input)
     if (request.params.name === "control_history") return history(input)
     if (request.params.name === "control_recoveries") return recoveries(input)
+    if (options.hostTools) return executeHostTool(request.params.name, input, options.hostTools)
     return failure(invalidRequest())
   })
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { controlCapabilitiesV1 } from "@daw-browser/control"
 import { createControlMcpServer, type ControlService } from "./index"
+import type { HostToolService } from "./host-tools"
 
 const snapshot = {
   version: "v1",
@@ -35,12 +36,23 @@ const service = (overrides: Partial<ControlService> = {}): ControlService => ({
   ...overrides,
 })
 
+const hostTools: HostToolService = {
+  status: async () => ({ project: null, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }),
+  transportStatus: async () => ({ state: "stopped", playheadSec: 0 }),
+  play: async () => ({ state: "playing", playheadSec: 0 }),
+  pause: async () => ({ state: "paused", playheadSec: 0 }),
+  stop: async () => ({ state: "stopped", playheadSec: 0 }),
+  seek: async ({ seconds }) => ({ state: "paused", playheadSec: seconds }),
+  diagnostics: async () => ({ audio: { state: "running", sampleRate: 48_000 }, recording: { transport: null, capturedFrames: null, droppedFrames: null, deviceLost: false }, counts: { tracks: 0, clips: 0 } }),
+}
+
 const request = async (
   body: unknown,
-  options: { service?: ControlService; write?: boolean } = {},
+  options: { service?: ControlService; write?: boolean; host?: boolean } = {},
 ) => {
   const server = createControlMcpServer(options.service ?? service(), {
     authorize: (scope) => scope === "control:read" || options.write === true,
+    ...(options.host ? { hostTools } : {}),
   })
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -64,6 +76,19 @@ const request = async (
 }
 
 describe("control MCP tools", () => {
+  test("adds local host tools only when explicitly composed", async () => {
+    const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
+    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-7)).toEqual([
+      "host_status",
+      "host_transport_status",
+      "host_play",
+      "host_pause",
+      "host_stop",
+      "host_seek",
+      "host_diagnostics",
+    ])
+  })
+
   test("lists exactly the seven canonical tools with accurate annotations", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools

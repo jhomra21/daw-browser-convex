@@ -5,6 +5,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onCleanup,
   untrack,
 } from "solid-js";
 import type {
@@ -98,6 +99,7 @@ import {
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
+import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -929,13 +931,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     recordingTrackId,
   } = recordingControls;
 
-  const handleTransportPause = () => {
-    if (isRecording()) void stopRecording();
+  const handleTransportPause = async () => {
+    if (isRecording()) await stopRecording();
     handlePause();
   };
 
-  const handleTransportStop = () => {
-    if (isRecording()) void stopRecording();
+  const handleTransportStop = async () => {
+    if (isRecording()) await stopRecording();
     handleStop();
   };
 
@@ -1288,6 +1290,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
+
+  if (window.dawDesktop) {
+    const unregisterHostController = registerAttachedHostController(createAttachedHostController({
+      projectId,
+      isPlaying,
+      playheadSec,
+      tracks: renderTracks,
+      audioEngine,
+      requestPlay,
+      pause: handleTransportPause,
+      stop: handleTransportStop,
+      finishRecording: async () => {
+        if (isRecording()) await stopRecording();
+      },
+      setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
+    }));
+    onCleanup(unregisterHostController);
+  }
 
   createEffect(() => {
     const nextTracks = resolvedTracks();

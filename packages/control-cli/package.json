@@ -28,6 +28,7 @@
     "@daw-browser/control": "workspace:*",
     "@daw-browser/control-mcp": "workspace:*",
     "@daw-browser/control-sdk": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0"
   }
 }

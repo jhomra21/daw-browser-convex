@@ -96,4 +96,17 @@ describe("control CLI output", () => {
       expect(JSON.parse(stderr[0]).error.code).toBe("invalid-request")
     }
   })
+
+  test("rejects invalid host payloads before host discovery", async () => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const exitCode = await runCli(["host", "seek", "86401"], {
+      stdout: (line) => stdout.push(line),
+      stderr: (line) => stderr.push(line),
+      readStdin: async () => "",
+    })
+    expect(exitCode).toBe(1)
+    expect(stdout).toEqual([])
+    expect(JSON.parse(stderr[0]).error.message).toBe("Invalid host command.")
+  })
 })

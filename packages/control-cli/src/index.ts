@@ -15,12 +15,15 @@ import {
 import { ControlApiError, createControlClient } from "@daw-browser/control-sdk"
 import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
 import { credentialIdentity, createCredentialStore } from "./credentials"
+import { createHostClient } from "./host"
+import { desktopRequestSchemaV1, desktopProtocolVersion } from "@daw-browser/desktop-protocol"
 
 const commandNames = [
   "auth login --base-url <origin>", "auth status", "auth logout", "capabilities",
   "snapshot <project-id>", "preview --request <file|->", "approval --request <file|->", "commit --request <file|->",
   "history <project-id> [--cursor <cursor>] [--limit <number>]",
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>]",
+  "host status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
 ]
 
 type Io = {
@@ -132,6 +135,39 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
   }
   const { command, arguments_: commandArguments } = parseCommand(arguments_)
   try {
+    if (command === "host") {
+      const [action, value, ...extra] = commandArguments
+      if (!action || extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
+      const operation = action === "status" ? "host.status"
+        : action === "play" ? "transport.play"
+          : action === "pause" ? "transport.pause"
+            : action === "stop" ? "transport.stop"
+              : action === "diagnostics" ? "diagnostics.snapshot"
+                : action === "seek" ? "transport.seek" : undefined
+      if (!operation) throw new Error("Invalid host command.")
+      let input: {} | { seconds: number } = {}
+      if (action === "seek") {
+        const seconds = Number(value)
+        if (!Number.isFinite(seconds)) throw new Error("host seek requires a finite number of seconds.")
+        input = { seconds }
+      }
+      const validation = desktopRequestSchemaV1.safeParse({
+        version: desktopProtocolVersion,
+        type: "request",
+        id: "cli-validation",
+        operation,
+        input,
+      })
+      if (!validation.success) throw new Error("Invalid host command.")
+      const client = await createHostClient()
+      try {
+        const data = await client.request(operation, input)
+        io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+        return 0
+      } finally {
+        client.close()
+      }
+    }
     const store = createCredentialStore()
     if (command === "auth login") {
       const baseUrl = baseUrlFor(commandArguments)

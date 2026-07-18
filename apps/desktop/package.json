@@ -1,0 +1,25 @@
+{
+  "name": "@daw-browser/desktop",
+  "private": true,
+  "version": "0.0.0",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "check": "bun --bun tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-dmg": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-vite": "7.11.2",
+    "@electron/fuses": "2.1.3",
+    "electron": "43.1.1"
+  },
+  "dependencies": {
+    "@daw-browser/desktop-protocol": "workspace:*"
+  }
+}

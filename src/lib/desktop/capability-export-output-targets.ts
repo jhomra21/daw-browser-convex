@@ -1,0 +1,105 @@
+import type { ExportFileSink, ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
+import type { StreamTargetChunk } from "mediabunny"
+
+type CapabilityWriter = {
+  requestId: string
+  writerId: string
+  name: string
+}
+
+type DesktopCapabilityBridge = {
+  beginWrite: (requestId: string, token: string, relativePath?: string) => Promise<{ writerId: string }>
+  writeChunk: (requestId: string, writerId: string, offset: number, chunk: Uint8Array) => Promise<{ nextOffset: number }>
+  commit: (requestId: string, writerId: string) => Promise<{ basename: string; byteLength: number; mime: string }>
+  abort: (requestId: string, writerId: string) => Promise<void>
+}
+
+const maximumCapabilityChunkBytes = 1024 * 1024
+export const desktopExportResourceLimits = {
+  maximumFiles: 1_024,
+  maximumBytes: 8 * 1024 * 1024 * 1024,
+  streaming: true,
+} satisfies NonNullable<ExportOutputTargetFactory["resourceLimits"]>
+
+const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): ExportFileSink => {
+  let highWaterMark = 0
+  let settled = false
+  let operation = Promise.resolve()
+  const abort = async () => {
+    if (settled) return
+    settled = true
+    await operation
+    await bridge.abort(writer.requestId, writer.writerId)
+  }
+  const commit = async () => {
+    if (settled) return { byteLength: highWaterMark }
+    await operation
+    try {
+      const result = await bridge.commit(writer.requestId, writer.writerId)
+      settled = true
+      return { byteLength: result.byteLength }
+    } catch (error) {
+      const code = error && typeof error === "object" ? Reflect.get(error, "code") : undefined
+      const message = error instanceof Error ? error.message : ""
+      if (code === "commit-indeterminate" || message.includes("indeterminate terminal state")) settled = true
+      throw error
+    }
+  }
+  return {
+    name: writer.name,
+    target: {
+      mode: "stream",
+      writable: new WritableStream<StreamTargetChunk>({
+        async write(chunk) {
+          if (settled) throw new Error("Desktop export output is closed.")
+          const write = operation.then(async () => {
+            let position = chunk.position
+            for (let start = 0; start < chunk.data.byteLength; start += maximumCapabilityChunkBytes) {
+              const data = chunk.data.subarray(start, Math.min(start + maximumCapabilityChunkBytes, chunk.data.byteLength))
+              const result = await bridge.writeChunk(writer.requestId, writer.writerId, position, data)
+              position = result.nextOffset
+            }
+            highWaterMark = Math.max(highWaterMark, position)
+          })
+          operation = write.catch(() => undefined)
+          await write
+        },
+        close: async () => { await commit() },
+        abort,
+      }),
+      close: async () => { await commit() },
+      abort,
+    },
+    commit,
+    abort,
+  }
+}
+
+export const createDesktopCapabilityExportOutputTargetFactory = (
+  bridge: DesktopCapabilityBridge,
+  requestId: string,
+  output: { token: string; basename?: string; directory: boolean },
+): ExportOutputTargetFactory => {
+  const openFile = async (name: string) => {
+    const { writerId } = await bridge.beginWrite(
+      requestId,
+      output.token,
+      output.directory ? name : undefined,
+    )
+    return createSink(bridge, { requestId, writerId, name: output.basename ?? name })
+  }
+  return {
+    resourceLimits: desktopExportResourceLimits,
+    async createMixdownTarget() {
+      return {
+        openFile,
+        async saveBuffer() {
+          throw new Error("Desktop export requires a streamed output capability.")
+        },
+      }
+    },
+    async createStemTarget() {
+      return { openFile }
+    },
+  }
+}

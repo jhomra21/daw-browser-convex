@@ -22,6 +22,7 @@ import type * as controlEffectiveValues from "../controlEffectiveValues.js";
 import type * as controlExecution from "../controlExecution.js";
 import type * as controlPreflight from "../controlPreflight.js";
 import type * as controlProjection from "../controlProjection.js";
+import type * as controlRecovery from "../controlRecovery.js";
 import type * as controlSnapshot from "../controlSnapshot.js";
 import type * as effects from "../effects.js";
 import type * as exports from "../exports.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   controlExecution: typeof controlExecution;
   controlPreflight: typeof controlPreflight;
   controlProjection: typeof controlProjection;
+  controlRecovery: typeof controlRecovery;
   controlSnapshot: typeof controlSnapshot;
   effects: typeof effects;
   exports: typeof exports;

@@ -13,6 +13,10 @@ export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).str
 
 export const desktopOperationSchemaV1 = z.enum([
   "host.status",
+  "host.import.audio",
+  "host.export.run",
+  "host.export.status",
+  "host.export.cancel",
   "transport.status",
   "transport.play",
   "transport.pause",
@@ -24,6 +28,93 @@ export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
 
 const requestInputs = {
   "host.status": desktopEmptyInputSchemaV1,
+  "host.import.audio": z.object({
+    source: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("path"), path: z.string().min(1).max(4096) }).strict(),
+      z.object({ kind: z.literal("picker") }).strict(),
+    ]),
+  }).strict(),
+  "host.export.run": z.discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("mixdown"),
+      format: z.enum(["wav", "mp3", "ogg-opus", "flac"]),
+      destination: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("file"), path: z.string().min(1).max(4096) }).strict(),
+        z.object({ kind: z.literal("file-picker") }).strict(),
+      ]),
+      range: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("whole") }).strict(),
+        z.object({ mode: z.literal("loop"), startSec: finiteSeconds, endSec: finiteSeconds }).strict().refine((value) => value.startSec < value.endSec),
+        z.object({ mode: z.literal("custom"), startSec: finiteSeconds, endSec: finiteSeconds }).strict().refine((value) => value.startSec < value.endSec),
+      ]),
+      render: z.object({
+        sampleRate: z.union([z.literal(44100), z.literal(48000), z.literal(96000)]),
+        channels: z.union([z.literal(1), z.literal(2)]),
+        normalization: z.discriminatedUnion("mode", [
+          z.object({ mode: z.literal("none") }).strict(),
+          z.object({ mode: z.literal("sample-peak"), targetDbfs: z.number().finite().min(-120).max(0) }).strict(),
+          z.object({ mode: z.literal("loudness"), targetLufs: z.number().finite().min(-36).max(-5), ceiling: z.number().finite().min(-12).max(0), limiting: z.enum(["off", "true-peak"]) }).strict(),
+        ]),
+        tail: z.discriminatedUnion("mode", [
+          z.object({ mode: z.literal("none") }).strict(),
+          z.object({ mode: z.literal("fixed"), durationSec: z.number().finite().min(0).max(60) }).strict(),
+          z.object({ mode: z.literal("automatic"), thresholdDbfs: z.number().finite().min(-120).max(-20), holdSec: z.number().finite().min(0.1).max(10), maximumSec: z.number().finite().min(0.1).max(120) }).strict(),
+        ]),
+      }).strict(),
+      encoding: z.object({
+        mp3Bitrate: z.number().int().min(32000).max(320000).optional(),
+        oggOpusBitrate: z.number().int().min(6000).max(510000).optional(),
+        wav: z.union([
+          z.object({ codec: z.literal("pcm-s16"), dither: z.enum(["none", "tpdf"]) }).strict(),
+          z.object({ codec: z.literal("pcm-s24"), dither: z.enum(["none", "tpdf"]) }).strict(),
+          z.object({ codec: z.literal("pcm-f32"), dither: z.literal("none") }).strict(),
+        ]),
+      }).strict(),
+    }).strict(),
+    z.object({
+      mode: z.literal("stems"),
+      formats: z.array(z.enum(["wav", "mp3", "ogg-opus", "flac"])).min(1).max(4).refine((value) => new Set(value).size === value.length),
+      destination: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("directory"), path: z.string().min(1).max(4096) }).strict(),
+        z.object({ kind: z.literal("directory-picker") }).strict(),
+      ]),
+      selection: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("all-tracks") }).strict(),
+        z.object({ kind: z.literal("selected-tracks"), trackIds: z.array(z.string().min(1).max(256)).min(1).max(500).refine((value) => new Set(value).size === value.length) }).strict(),
+      ]),
+      stemMode: z.enum(["dry-source", "post-track-fx", "reachable-routing", "channel-output", "full-master-contribution"]),
+      range: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("whole") }).strict(),
+        z.object({ mode: z.literal("loop"), startSec: finiteSeconds, endSec: finiteSeconds }).strict().refine((value) => value.startSec < value.endSec),
+        z.object({ mode: z.literal("custom"), startSec: finiteSeconds, endSec: finiteSeconds }).strict().refine((value) => value.startSec < value.endSec),
+      ]),
+      render: z.object({
+        sampleRate: z.union([z.literal(44100), z.literal(48000), z.literal(96000)]),
+        channels: z.union([z.literal(1), z.literal(2)]),
+        normalization: z.discriminatedUnion("mode", [
+          z.object({ mode: z.literal("none") }).strict(),
+          z.object({ mode: z.literal("sample-peak"), targetDbfs: z.number().finite().min(-120).max(0) }).strict(),
+          z.object({ mode: z.literal("loudness"), targetLufs: z.number().finite().min(-36).max(-5), ceiling: z.number().finite().min(-12).max(0), limiting: z.enum(["off", "true-peak"]) }).strict(),
+        ]),
+        tail: z.discriminatedUnion("mode", [
+          z.object({ mode: z.literal("none") }).strict(),
+          z.object({ mode: z.literal("fixed"), durationSec: z.number().finite().min(0).max(60) }).strict(),
+          z.object({ mode: z.literal("automatic"), thresholdDbfs: z.number().finite().min(-120).max(-20), holdSec: z.number().finite().min(0.1).max(10), maximumSec: z.number().finite().min(0.1).max(120) }).strict(),
+        ]),
+      }).strict(),
+      encoding: z.object({
+        mp3Bitrate: z.number().int().min(32000).max(320000).optional(),
+        oggOpusBitrate: z.number().int().min(6000).max(510000).optional(),
+        wav: z.union([
+          z.object({ codec: z.literal("pcm-s16"), dither: z.enum(["none", "tpdf"]) }).strict(),
+          z.object({ codec: z.literal("pcm-s24"), dither: z.enum(["none", "tpdf"]) }).strict(),
+          z.object({ codec: z.literal("pcm-f32"), dither: z.literal("none") }).strict(),
+        ]),
+      }).strict(),
+    }).strict(),
+  ]),
+  "host.export.status": desktopEmptyInputSchemaV1,
+  "host.export.cancel": z.object({ jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/) }).strict(),
   "transport.status": desktopEmptyInputSchemaV1,
   "transport.play": desktopEmptyInputSchemaV1,
   "transport.pause": desktopEmptyInputSchemaV1,
@@ -31,6 +122,72 @@ const requestInputs = {
   "transport.seek": desktopSeekInputSchemaV1,
   "diagnostics.snapshot": desktopEmptyInputSchemaV1,
 } as const
+
+export const desktopHostImportInputSchemaV1 = requestInputs["host.import.audio"]
+const mixdownExtensionMatchesFormat = (format: string, filePath: string) => {
+  const extension = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+  return (format === "wav" && extension === ".wav")
+    || (format === "mp3" && extension === ".mp3")
+    || (format === "ogg-opus" && extension === ".ogg")
+    || (format === "flac" && extension === ".flac")
+}
+export const desktopHostExportRunInputSchemaV1 = requestInputs["host.export.run"].superRefine((value, context) => {
+  if (value.mode !== "mixdown" || value.destination.kind !== "file") return
+  if (!mixdownExtensionMatchesFormat(value.format, value.destination.path)) {
+    context.addIssue({ code: "custom", message: "Mixdown file extension must match the selected format.", path: ["destination", "path"] })
+  }
+})
+export const desktopHostExportCancelInputSchemaV1 = requestInputs["host.export.cancel"]
+
+const capabilityToken = z.string().regex(/^[a-f0-9]{64}$/)
+const capabilityFile = z.object({
+  token: capabilityToken,
+  basename: z.string().min(1).max(256),
+}).strict()
+export const desktopRendererImportInputSchemaV1 = z.object({
+  canceled: z.boolean(),
+  files: z.array(z.object({
+    ...capabilityFile.shape,
+    mime: z.string().min(1).max(128),
+  }).strict()).min(1).max(1).optional(),
+}).strict().superRefine((value, context) => {
+  if (!value.canceled && value.files === undefined) context.addIssue({ code: "custom", message: "A non-canceled import requires a file capability." })
+})
+const internalExportDestination = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("capability-file"), ...capabilityFile.shape }).strict(),
+  z.object({ kind: z.literal("capability-directory"), ...capabilityFile.shape }).strict(),
+])
+const internalExportRequestKeys = new Set([
+  "canceled", "preflightOnly", "destination", "mode", "format", "formats", "range",
+  "render", "encoding", "selection", "stemMode",
+])
+const activeInternalExport = z.object({
+  canceled: z.literal(false),
+  preflightOnly: z.literal(true).optional(),
+  destination: internalExportDestination,
+}).passthrough().superRefine((value, context) => {
+  for (const key of Object.keys(value)) {
+    if (!internalExportRequestKeys.has(key)) {
+      context.addIssue({ code: "unrecognized_keys", keys: [key], path: [] })
+    }
+  }
+  const { canceled: _canceled, preflightOnly: _preflightOnly, ...request } = value
+  const externalDestination = value.destination.kind === "capability-file"
+    ? { kind: "file" as const, path: `/capability/${value.destination.basename}` }
+    : { kind: "directory" as const, path: "/capability" }
+  const parsed = desktopHostExportRunInputSchemaV1.safeParse({ ...request, destination: externalDestination })
+  if (!parsed.success) context.addIssue({ code: "custom", message: "Invalid renderer export operation input." })
+})
+const canceledInternalExport = z.discriminatedUnion("mode", [
+  z.object({ canceled: z.literal(true), mode: z.literal("mixdown") }).strict(),
+  z.object({ canceled: z.literal(true), mode: z.literal("stems") }).strict(),
+])
+export const desktopRendererExportInputSchemaV1 = z.union([
+  canceledInternalExport,
+  activeInternalExport,
+])
+export type DesktopRendererImportInputV1 = z.infer<typeof desktopRendererImportInputSchemaV1>
+export type DesktopRendererExportInputV1 = z.infer<typeof desktopRendererExportInputSchemaV1>
 
 export const hostErrorSchemaV1 = z.object({
   version,
@@ -62,9 +219,31 @@ export const desktopDiagnosticsSchemaV1 = z.object({
   }).strict(),
   counts: z.object({ tracks: z.number().int().nonnegative(), clips: z.number().int().nonnegative() }).strict(),
 }).strict()
+const safeExportOutputSchema = z.object({ name: z.string().min(1).max(256), sizeBytes: z.number().int().nonnegative().max(8 * 1024 * 1024 * 1024) }).strict()
+export const desktopHostImportResultSchemaV1 = z.object({
+  status: z.enum(["created", "queued", "canceled", "failed"]),
+  count: z.number().int().min(0).max(1),
+}).strict()
+export const desktopHostExportRunResultSchemaV1 = z.object({
+  status: z.enum(["queued", "canceled"]),
+  jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/).optional(),
+}).strict().refine((value) => value.status === "canceled" || value.jobId !== undefined)
+export const desktopHostExportStatusSchemaV1 = z.object({
+  status: z.enum(["idle", "queued", "running", "completed", "canceled", "failed"]),
+  job: z.object({
+    id: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+    phase: z.string().min(1).max(32).optional(),
+    sizeBytes: z.number().int().nonnegative().max(8 * 1024 * 1024 * 1024).optional(),
+    outputs: z.array(safeExportOutputSchema).max(1024).optional(),
+  }).strict().optional(),
+}).strict()
 
 export type DesktopOperationMapV1 = {
   "host.status": { input: Record<string, never>; result: z.infer<typeof desktopHostStatusSchemaV1> }
+  "host.import.audio": { input: z.infer<typeof requestInputs["host.import.audio"]>; result: z.infer<typeof desktopHostImportResultSchemaV1> }
+  "host.export.run": { input: z.infer<typeof requestInputs["host.export.run"]>; result: z.infer<typeof desktopHostExportRunResultSchemaV1> }
+  "host.export.status": { input: Record<string, never>; result: z.infer<typeof desktopHostExportStatusSchemaV1> }
+  "host.export.cancel": { input: z.infer<typeof requestInputs["host.export.cancel"]>; result: z.infer<typeof desktopHostExportStatusSchemaV1> }
   "transport.status": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.play": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.pause": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
@@ -81,7 +260,10 @@ const request = z.object({
   input: z.unknown(),
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
-  const parsed = requestInputs[value.operation].safeParse(value.input)
+  const schema = value.operation === "host.export.run"
+    ? desktopHostExportRunInputSchemaV1
+    : requestInputs[value.operation]
+  const parsed = schema.safeParse(value.input)
   if (!parsed.success) context.addIssue({ code: "custom", message: "Invalid operation input.", path: ["input"] })
 })
 export const desktopRequestSchemaV1 = request
@@ -95,7 +277,24 @@ const lifecyclePrepareToCloseRequest = z.object({
   input: desktopEmptyInputSchemaV1,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict()
-export const desktopRendererRequestSchemaV1 = z.union([desktopRequestSchemaV1, lifecyclePrepareToCloseRequest])
+const rendererRequest = z.object({
+  version,
+  type: z.literal("request"),
+  id: correlationId,
+  operation: desktopOperationSchemaV1,
+  input: z.unknown(),
+  deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
+}).strict().superRefine((value, context) => {
+  const schema = value.operation === "host.import.audio"
+    ? desktopRendererImportInputSchemaV1
+    : value.operation === "host.export.run"
+      ? desktopRendererExportInputSchemaV1
+      : requestInputs[value.operation]
+  if (!schema.safeParse(value.input).success) {
+    context.addIssue({ code: "custom", message: "Invalid renderer operation input.", path: ["input"] })
+  }
+})
+export const desktopRendererRequestSchemaV1 = z.union([rendererRequest, lifecyclePrepareToCloseRequest])
 export type DesktopRendererRequestV1 = z.infer<typeof desktopRendererRequestSchemaV1>
 
 export const desktopReplySchemaV1 = z.object({
@@ -109,10 +308,16 @@ export const desktopReplySchemaV1 = z.object({
 })
 export const desktopCancelSchemaV1 = z.object({ version, type: z.literal("cancel"), id: correlationId }).strict()
 export const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
+export const desktopExportTerminalSchemaV1 = z.object({
+  version,
+  type: z.literal("export-terminal"),
+  jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+  status: z.enum(["success", "canceled", "error"]),
+}).strict()
 export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128) }).strict()
-export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(8) }).strict()
+export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(11) }).strict()
 export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
-export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
+export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
 
 export const desktopRegistrationSchemaV1 = z.object({
@@ -127,6 +332,9 @@ export type DesktopRegistrationV1 = z.infer<typeof desktopRegistrationSchemaV1>
 
 export const parseDesktopResult = (operation: DesktopOperationV1, value: unknown): unknown => {
   const schema = operation === "host.status" ? desktopHostStatusSchemaV1
+    : operation === "host.import.audio" ? desktopHostImportResultSchemaV1
+      : operation === "host.export.run" ? desktopHostExportRunResultSchemaV1
+        : operation === "host.export.status" || operation === "host.export.cancel" ? desktopHostExportStatusSchemaV1
     : operation === "diagnostics.snapshot" ? desktopDiagnosticsSchemaV1
       : desktopTransportStatusSchemaV1
   return schema.parse(value)

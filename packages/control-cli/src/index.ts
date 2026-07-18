@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { readFile, stat } from "node:fs/promises"
+import path from "node:path"
 import {
   canonicalJson,
   controlCommitRequestSchemaV1,
@@ -24,6 +25,7 @@ const commandNames = [
   "history <project-id> [--cursor <cursor>] [--limit <number>]",
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>]",
   "host status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
+  "host import (--path <absolute-path>|--picker)", "host export --request <file|->", "host export-status", "host export-cancel <job-id>",
 ]
 
 type Io = {
@@ -110,6 +112,17 @@ const parseCommand = (arguments_: string[]) => {
   if (first === "auth" && second) return { command: `auth ${second}`, arguments_: rest }
   return { command: first ?? "", arguments_: second === undefined ? [] : [second, ...rest] }
 }
+const audioExtension = (value: string) => [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm"].includes(path.extname(value).toLowerCase())
+const absoluteAudioPath = (value: string) => path.isAbsolute(value) && path.normalize(value) === value && audioExtension(value)
+const validateHostExportInput = (input: unknown) => {
+  if (typeof input !== "object" || input === null || !("mode" in input) || (input.mode !== "mixdown" && input.mode !== "stems") || !("destination" in input) || typeof input.destination !== "object" || input.destination === null || !("kind" in input.destination)) {
+    throw new Error("Invalid host export request.")
+  }
+  const destination = input.destination
+  if ((destination.kind === "file" || destination.kind === "directory") && (!("path" in destination) || typeof destination.path !== "string" || !path.isAbsolute(destination.path) || path.normalize(destination.path) !== destination.path || (destination.kind === "file" && !audioExtension(destination.path)))) {
+    throw new Error("Invalid host export media path.")
+  }
+}
 
 const historyArguments = (arguments_: string[]) => {
   const [projectId, ...options] = arguments_
@@ -137,7 +150,46 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
   try {
     if (command === "host") {
       const [action, value, ...extra] = commandArguments
-      if (!action || extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
+      if (!action) throw new Error("Invalid host command.")
+      if (action === "import") {
+        const pathValue = option(commandArguments.slice(1), "--path")
+        const picker = commandArguments.length === 2 && commandArguments[1] === "--picker"
+        if ((!pathValue && !picker) || (pathValue && commandArguments.length !== 3) || (picker && commandArguments.length !== 2)) throw new Error("host import requires exactly one of --path <absolute-path> or --picker.")
+        if (pathValue && !absoluteAudioPath(pathValue)) throw new Error("host import requires an absolute supported audio path.")
+        const source = picker ? { kind: "picker" } : { kind: "path", path: pathValue }
+        const client = await createHostClient()
+        try {
+          const data = await client.request("host.import.audio", { source })
+          io.stdout(canonicalJson({ version: "v1", ok: true, command: "host import", data }))
+          return 0
+        } finally { client.close() }
+      }
+      if (action === "export") {
+        const source = option(commandArguments.slice(1), "--request")
+        if (!source || commandArguments.length !== 3 || commandArguments[1] !== "--request") throw new Error("host export requires --request <file|->.")
+        const requestInput = await jsonRequest(source, io)
+        validateHostExportInput(requestInput)
+        const input = desktopRequestSchemaV1.parse({ version: desktopProtocolVersion, type: "request", id: "cli-validation", operation: "host.export.run", input: requestInput }).input
+        const client = await createHostClient()
+        try {
+          const data = await client.request("host.export.run", input)
+          io.stdout(canonicalJson({ version: "v1", ok: true, command: "host export", data }))
+          return 0
+        } finally { client.close() }
+      }
+      if (action === "export-status" || action === "export-cancel") {
+        if ((action === "export-status" && commandArguments.length !== 1) || (action === "export-cancel" && commandArguments.length !== 2)) throw new Error("Invalid host export command.")
+        const operation = action === "export-status" ? "host.export.status" : "host.export.cancel"
+        const input = action === "export-status" ? {} : { jobId: value }
+        desktopRequestSchemaV1.parse({ version: desktopProtocolVersion, type: "request", id: "cli-validation", operation, input })
+        const client = await createHostClient()
+        try {
+          const data = await client.request(operation, input)
+          io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+          return 0
+        } finally { client.close() }
+      }
+      if (extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
       const operation = action === "status" ? "host.status"
         : action === "play" ? "transport.play"
           : action === "pause" ? "transport.pause"

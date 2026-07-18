@@ -8,11 +8,10 @@ import { type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFor
   normalizeSpectralParamsEnvelope, normalizeTremoloParamsEnvelope, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
-import { convexApi, convexClient } from '~/lib/convex'
+import type { convexApi } from '~/lib/convex'
 import { isAbortError } from '~/lib/dom-errors'
 import { createUniqueStemFileName } from '~/lib/export/stem-file-names'
-import { audioEffectKindFromLocalEffect, listLocalEffects, type LocalEffectRow } from '~/lib/local-effects'
-import { loadLocalAutomationEnvelopes } from '~/lib/local-automation'
+import { audioEffectKindFromLocalEffect, type LocalEffectRow } from '~/lib/local-effects'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import { compareAudioEffectOrderEntries } from '~/lib/audio-effect-order-rows'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
@@ -23,6 +22,9 @@ import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
 import type { ExportOutputTargetFactory } from '~/lib/export/export-output-targets'
+import { preflightExportResources } from '~/lib/export/export-resource-preflight'
+import { captureLocalExportRenderRowsSnapshot } from '~/lib/export/capture-local-export-render-rows'
+import type { ExportEffectRow, ExportEffectsProjection } from '~/lib/export/export-effect-rows'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -52,7 +54,7 @@ export type ExportProgress = {
   analysis?: ExportAnalysisReport
 }
 
-export type TimelineExportRequest = {
+type TimelineExportRequest = {
   getTracks: () => RuntimeTrack[]
   bpm: number
   masterVolume: number
@@ -63,26 +65,42 @@ export type TimelineExportRequest = {
   projectId?: string
   userId?: string
   sidechainRoutes: ExternalSidechainRoute[]
-  ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+  loadCapturedClipBuffer: (clip: RuntimeClip, signal: AbortSignal) => Promise<void>
   signal: AbortSignal
   onProgress?: (progress: ExportProgress) => void
   outputTargets: ExportOutputTargetFactory
+  renderStateSnapshot: ExportRenderStateSnapshot
 }
 
-export type StemExportSelection =
+type StemExportSelection =
   | { stemSelection: 'all-tracks'; stemMode: StemMode }
   | { stemSelection: 'selected-tracks'; stemMode: StemMode; selectedTrackIds: readonly string[] }
 
 type StemExportRequest = TimelineExportRequest & StemExportSelection
 
 export type ExportOutput =
-  | { destination: 'local'; name: string; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
-  | { destination: 'cloud'; name: string; url: string; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
+  | { destination: 'local'; name: string; sizeBytes: number; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
+  | { destination: 'cloud'; name: string; url: string; sizeBytes: number; analysis?: ExportAnalysisReport; stem?: StemRecombinationMetadata }
 
 export type ExportOutcome =
   | { type: 'success'; outputs: readonly ExportOutput[] }
   | { type: 'canceled'; outputs: readonly ExportOutput[] }
   | { type: 'error'; message: string; outputs: readonly ExportOutput[] }
+
+export type ExportRenderStateSnapshot = {
+  readonly fx: ExportFx
+  readonly automationEnvelopes: readonly AutomationEnvelope[]
+}
+
+export type ExportCloudRenderRowsSnapshot = Pick<
+  FunctionReturnType<typeof convexApi.timeline.fullView>,
+  'effects' | 'automationEnvelopes'
+>
+
+export type ExportAutomationPatch = {
+  targetKey: string
+  envelope: AutomationEnvelope | undefined
+}
 
 type TrackFxMap = NonNullable<ExportFx['trackFx']>
 type TrackFxPatch = Partial<TrackFxMap[string]>
@@ -168,7 +186,29 @@ const applyExportEffectInstances = (fx: ExportFx, rows: ExportEffectInstanceRow[
   }
 }
 
-const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
+const replaceExportEffectInstancesForTarget = (
+  fx: ExportFx,
+  targetId: string,
+  rows: readonly ExportEffectRow[],
+) => {
+  const instances: ExportEffectInstanceRow[] = []
+  for (const row of rows) {
+    if (!isAudioEffectKind(row.effect) || !row.instanceId) continue
+    if (row.effect === 'eq') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: row.params })
+    else if (row.effect === 'compressor') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
+    else if (row.effect === 'saturator') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
+    else if (row.effect === 'delay') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
+    else if (row.effect === 'reverb') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
+    else instances.push(createOwnedExportEffectRow(targetId, row.instanceId, row.effect, row.params, row.index))
+  }
+  if (targetId === 'master') {
+    fx.masterFxInstances = normalizeExportEffectInstances(instances)
+    return
+  }
+  applyTrackFxPatch(ensureTrackFxMap(fx), targetId, { instances: normalizeExportEffectInstances(instances) })
+}
+
+const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
   const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
@@ -196,7 +236,7 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: LocalEffectRow[]) => {
   applyExportEffectInstances(fx, instanceRows)
 }
 
-const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
+const applyRoomEffectRowsToFx = (fx: ExportFx, rows: readonly RoomEffectRow[]) => {
   const trackFx = ensureTrackFxMap(fx)
   const instanceRows: ExportEffectInstanceRow[] = []
   for (const row of rows) {
@@ -229,6 +269,49 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: RoomEffectRow[]) => {
   applyExportEffectInstances(fx, instanceRows)
 }
 
+const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectRow[]) => {
+  const trackFx = ensureTrackFxMap(fx)
+  const instances: ExportEffectInstanceRow[] = []
+  for (const row of rows) {
+    if (isAudioEffectKind(row.effect) && row.instanceId) {
+      if (row.effect === 'eq') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: row.params })
+      else if (row.effect === 'compressor') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
+      else if (row.effect === 'saturator') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
+      else if (row.effect === 'delay') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
+      else if (row.effect === 'reverb') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
+      else instances.push(createOwnedExportEffectRow(row.targetId, row.instanceId, row.effect, row.params, row.index))
+    }
+    if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: structuredClone(row.params) })
+    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: structuredClone(row.params) })
+    if (row.effect === 'instrument') {
+      const instrument = readInstrumentParamsFromEffectRow({ type: 'instrument', params: row.params })
+      if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })
+    }
+  }
+  if (instances.length > 0) applyExportEffectInstances(fx, instances)
+}
+
+const applyEffectsProjectionToFx = (fx: ExportFx, projection: ExportEffectsProjection | undefined) => {
+  if (!projection) return
+  for (const replacement of projection.replaceAudioEffectTargets) {
+    replaceExportEffectInstancesForTarget(fx, replacement.targetId, replacement.rows)
+  }
+  applyProjectedEffectRowsToFx(fx, projection.upsertDeviceRows)
+}
+
+const applyAutomationPatches = (
+  envelopes: readonly AutomationEnvelope[],
+  patches: readonly ExportAutomationPatch[] | undefined,
+) => {
+  if (!patches || patches.length === 0) return structuredClone(envelopes)
+  const merged = new Map(envelopes.map((envelope) => [envelope.targetKey, envelope]))
+  for (const patch of patches) {
+    if (patch.envelope) merged.set(patch.targetKey, structuredClone(patch.envelope))
+    else merged.delete(patch.targetKey)
+  }
+  return Array.from(merged.values())
+}
+
 const throwIfExportAborted = (signal: AbortSignal) => {
   signal.throwIfAborted()
 }
@@ -253,7 +336,7 @@ const createEncodingProgressReporter = (
   }
 }
 
-type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'ensureClipBuffer' | 'signal'> & {
+type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'loadCapturedClipBuffer' | 'signal'> & {
   tracks: RuntimeTrack[]
   range: ExportRange
 }
@@ -269,7 +352,7 @@ async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (clip.midi || !intersects(clip) || clip.buffer) continue
-      jobs.push(() => input.ensureClipBuffer(clip.id, clip.sampleUrl))
+      jobs.push(() => input.loadCapturedClipBuffer(clip, input.signal))
     }
   }
   await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
@@ -279,32 +362,45 @@ async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
   throwIfExportAborted(input.signal)
 }
 
-async function loadExportFx(projectId: string | undefined, userId: string | undefined, masterVolume: number): Promise<ExportFx> {
-  const fx: ExportFx = { trackFx: {}, masterFxInstances: [], masterVolume }
-  const localOnly = projectId ? isLocalId('project', projectId) : false
-  if (localOnly && projectId) {
-    applyLocalEffectRowsToFx(fx, await listLocalEffects(projectId))
-  }
-  if (!localOnly && projectId && userId) {
-    const rows = await convexClient.query(convexApi.effects.listByRoom, { projectId })
-    applyRoomEffectRowsToFx(fx, rows)
-  }
-  return fx
-}
+const createExportFx = (masterVolume: number): ExportFx => ({
+  trackFx: {},
+  masterFxInstances: [],
+  masterVolume,
+})
 
-async function loadExportAutomation(projectId: string | undefined, userId: string | undefined): Promise<AutomationEnvelope[]> {
+export const createExportRenderStateSnapshot = async (input: {
+  projectId: string | undefined
+  userId: string | undefined
+  masterVolume: number
+  cloudRows: ExportCloudRenderRowsSnapshot | undefined
+  effectsProjection?: ExportEffectsProjection
+  automationPatches?: readonly ExportAutomationPatch[]
+}): Promise<ExportRenderStateSnapshot> => {
+  const { projectId, userId, masterVolume, cloudRows, effectsProjection, automationPatches } = input
+  const fx = createExportFx(masterVolume)
   const localOnly = projectId ? isLocalId('project', projectId) : false
   if (localOnly && projectId) {
-    return loadLocalAutomationEnvelopes(projectId)
+    const rows = await captureLocalExportRenderRowsSnapshot(projectId)
+    applyLocalEffectRowsToFx(fx, rows.effects)
+    applyEffectsProjectionToFx(fx, effectsProjection)
+    return {
+      fx,
+      automationEnvelopes: applyAutomationPatches(rows.automationEnvelopes, automationPatches),
+    }
   }
   if (!localOnly && projectId && userId) {
-    const rows = await convexClient.query(convexApi.automation.listByProject, { projectId })
-    return rows.flatMap((row) => {
-      const envelope = automationEnvelopeFromRow(row)
-      return envelope ? [envelope] : []
-    })
+    if (!cloudRows) throw new Error('Cloud timeline snapshot is unavailable.')
+    applyRoomEffectRowsToFx(fx, cloudRows.effects)
+    applyEffectsProjectionToFx(fx, effectsProjection)
+    return {
+      fx,
+      automationEnvelopes: applyAutomationPatches(cloudRows.automationEnvelopes.flatMap((row) => {
+        const envelope = automationEnvelopeFromRow(row)
+        return envelope ? [envelope] : []
+      }), automationPatches),
+    }
   }
-  return []
+  return { fx, automationEnvelopes: [] }
 }
 
 async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
@@ -346,7 +442,7 @@ async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, al
   try {
     await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
       throwIfExportAborted(signal)
-      const buffer = await loader.load(job.url, (data) => ctx.decodeAudioData(data))
+      const buffer = await loader.load(job.url, (data) => ctx.decodeAudioData(data), signal)
       if (!buffer) throw new Error(`Failed to preload export sample ${job.url}`)
       job.install(buffer)
     })
@@ -356,19 +452,7 @@ async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, al
   throwIfExportAborted(signal)
 }
 
-async function loadExportFxWithDrumRackBuffers(
-  projectId: string | undefined,
-  userId: string | undefined,
-  masterVolume: number,
-  signal: AbortSignal,
-  allowedTrackIds?: ReadonlySet<string>,
-): Promise<ExportFx> {
-  const fx = await loadExportFx(projectId, userId, masterVolume)
-  await loadInstrumentExportBuffers(fx, signal, allowedTrackIds)
-  return fx
-}
-
-const collectStemTracks = (input: StemExportSelection & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
+export const collectStemTracks = (input: StemExportSelection & { tracks: RuntimeTrack[] }): RuntimeTrack[] => {
   const matchesMode = (track: RuntimeTrack) => input.stemMode === 'channel-output'
     ? track.channelRole === 'group' || track.channelRole === 'return'
     : isRenderableExportTrack(track)
@@ -443,6 +527,16 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const exportDate = new Date()
     const firstFormat = formats[0]
     const firstFileName = createMixdownFileName(exportDate, firstFormat)
+    const preloadTracks = input.getTracks()
+    preflightExportResources({
+      tracks: preloadTracks,
+      range: input.range,
+      formats,
+      render: input.render,
+      encoding: input.encoding,
+      stemCount: 1,
+      resourceLimits: input.outputTargets.resourceLimits,
+    })
     const projectId = input.projectId
     localProjectId = projectId && isLocalId('project', projectId) ? projectId : undefined
     const outputTarget = await input.outputTargets.createMixdownTarget({
@@ -453,7 +547,6 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       firstFileTypes: createSaveTypes(firstFormat),
     })
     throwIfExportAborted(input.signal)
-    const preloadTracks = input.getTracks()
     input.onProgress?.({ phase: 'source-range' })
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     input.onProgress?.({ phase: 'preroll' })
@@ -465,17 +558,17 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       endSec: sourceBounds.endSec + tailMaximumSec,
     }
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
-    const [exportMixdown, , fx, automationEnvelopes] = await Promise.all([
+    const fx = structuredClone(input.renderStateSnapshot.fx)
+    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map((envelope) => structuredClone(envelope))
+    const [exportMixdown] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
-      loadExportFxWithDrumRackBuffers(input.projectId, input.userId, input.masterVolume, input.signal),
-      loadExportAutomation(input.projectId, input.userId),
+      loadInstrumentExportBuffers(fx, input.signal),
     ])
     throwIfExportAborted(input.signal)
-    const tracks = input.getTracks()
     input.onProgress?.({ phase: 'rendering' })
     const rendered = await exportMixdown.renderMixdown({
-      tracks,
+      tracks: preloadTracks,
       bpm: input.bpm,
       range: renderRange,
       sourceEndSec: sourceBounds.endSec,
@@ -506,24 +599,41 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     for (const format of formats) {
       const fileName = createMixdownFileName(exportDate, format)
       const fileSink = await outputTarget.openFile(fileName)
-      if (format === 'wav') reportFormatProgress(input, 'quantizing', format, completedFormats, formats.length)
-      reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
-      const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
-        reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
-      })
-      const enc = await exportMixdown.encodeAudioBuffer(exportBuffer, {
-        format,
-        bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
-        target: fileSink?.target ?? { mode: 'buffer' },
-        signal: input.signal,
-        onWrite: reportEncodingProgress,
-        wav: input.encoding.wav,
-        ditherSeed,
-      })
-      throwIfExportAborted(input.signal)
-      const savedName = fileSink?.name ?? fileName
-      if (localProjectId) {
-        if (!fileSink) {
+      try {
+        if (format === 'wav') reportFormatProgress(input, 'quantizing', format, completedFormats, formats.length)
+        reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
+        const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
+          reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
+        })
+        const enc = await exportMixdown.encodeAudioBuffer(exportBuffer, {
+          format,
+          bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
+          target: fileSink?.target ?? { mode: 'buffer' },
+          signal: input.signal,
+          onWrite: reportEncodingProgress,
+          wav: input.encoding.wav,
+          ditherSeed,
+        })
+        throwIfExportAborted(input.signal)
+        const committed = await fileSink?.commit()
+        const savedName = fileSink?.name ?? fileName
+        const sizeBytes = committed?.byteLength ?? enc.sizeBytes
+        if (fileSink) {
+          reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+          if (localProjectId) {
+            localMetadataRows.push({
+              name: savedName,
+              format: enc.format,
+              durationSec: enc.durationSec,
+              sampleRate: enc.sampleRate,
+              sizeBytes,
+            })
+          }
+          outputs.push({ destination: 'local', name: savedName, sizeBytes, analysis })
+          completedFormats += 1
+          continue
+        }
+        if (localProjectId) {
           if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
           reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
           const saved = await outputTarget.saveBuffer({
@@ -537,32 +647,35 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           })
           if (saved.destination !== 'local') throw new Error('Local export target selected a cloud destination.')
           throwIfExportAborted(input.signal)
+          reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+          localMetadataRows.push({
+            name: savedName,
+            format: enc.format,
+            durationSec: enc.durationSec,
+            sampleRate: enc.sampleRate,
+            sizeBytes: enc.sizeBytes,
+          })
+          throwIfExportAborted(input.signal)
+          outputs.push({ destination: 'local', name: savedName, sizeBytes, analysis })
+        } else {
+          if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
+          reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+          const saved = await outputTarget.saveBuffer({
+            blob: enc.blob,
+            fileName,
+            types: createSaveTypes(format),
+            format: enc.format,
+            durationSec: enc.durationSec,
+            sampleRate: enc.sampleRate,
+            signal: input.signal,
+          })
+          throwIfExportAborted(input.signal)
+          if (saved.destination !== 'cloud') throw new Error('Cloud export target selected a local destination.')
+          outputs.push({ destination: 'cloud', name: saved.name, url: saved.url, sizeBytes, analysis })
         }
-        reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
-        localMetadataRows.push({
-          name: savedName,
-          format: enc.format,
-          durationSec: enc.durationSec,
-          sampleRate: enc.sampleRate,
-          sizeBytes: enc.sizeBytes,
-        })
-        throwIfExportAborted(input.signal)
-        outputs.push({ destination: 'local', name: savedName, analysis })
-      } else {
-        if (!enc.blob) throw new Error('Export did not produce an uploadable file.')
-        reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
-        const saved = await outputTarget.saveBuffer({
-          blob: enc.blob,
-          fileName,
-          types: createSaveTypes(format),
-          format: enc.format,
-          durationSec: enc.durationSec,
-          sampleRate: enc.sampleRate,
-          signal: input.signal,
-        })
-        throwIfExportAborted(input.signal)
-        if (saved.destination !== 'cloud') throw new Error('Cloud export target selected a local destination.')
-        outputs.push({ destination: 'cloud', name: saved.name, url: saved.url, analysis })
+      } catch (error) {
+        await fileSink?.abort(error)
+        throw error
       }
       completedFormats += 1
     }
@@ -585,13 +698,20 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     const preloadTracks = input.getTracks()
     const preloadStemTracks = collectStemTracks({ ...input, tracks: preloadTracks })
     if (preloadStemTracks.length === 0) throw new Error('Select at least one track to export stems.')
+    preflightExportResources({
+      tracks: preloadTracks,
+      range: input.range,
+      formats,
+      render: input.render,
+      encoding: input.encoding,
+      stemCount: preloadStemTracks.length,
+      resourceLimits: input.outputTargets.resourceLimits,
+    })
     const outputTarget = await input.outputTargets.createStemTarget()
     throwIfExportAborted(input.signal)
-    const [exportMixdown, fx, automationEnvelopes] = await Promise.all([
-      import('@daw-browser/audio-engine/export-mixdown'),
-      loadExportFx(input.projectId, input.userId, input.masterVolume),
-      loadExportAutomation(input.projectId, input.userId),
-    ])
+    const fx = structuredClone(input.renderStateSnapshot.fx)
+    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map((envelope) => structuredClone(envelope))
+    const exportMixdown = await import('@daw-browser/audio-engine/export-mixdown')
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     const tailMaximumSec = getExportTailMaximumSec(input.render.tail)
     const renderRange: ExportRange = {
@@ -621,9 +741,8 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       loadInstrumentExportBuffers(fx, input.signal, preloadTrackIds),
     ])
     throwIfExportAborted(input.signal)
-    const tracks = input.getTracks()
-    const stemTracks = collectStemTracks({ ...input, tracks })
-    if (stemTracks.length === 0) throw new Error('Select at least one track to export stems.')
+    const tracks = preloadTracks
+    const stemTracks = preloadStemTracks
     let completedStems = 0
     const usedStemFileNames = new Set<string>()
     const stemRenderSession = exportMixdown.createStemRenderSession({
@@ -665,20 +784,30 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
         const metadata = getExportAudioFormatMetadata(format)
         const fileName = createUniqueStemFileName(track.name, metadata.fileExtension, usedStemFileNames)
         const fileSink = await outputTarget.openFile(fileName)
-        reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length)
-        const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
-          reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length, sizeBytes)
-        })
-        await exportMixdown.encodeAudioBuffer(stemBuffer, {
-          format,
-          bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
-          target: fileSink.target,
-          signal: input.signal,
-          onWrite: reportEncodingProgress,
-          wav: input.encoding.wav,
-          ditherSeed: createExportSeed(),
-        })
-        outputs.push({ destination: 'local', name: `stems/${fileName}`, analysis, stem: renderedStem.metadata })
+        let committed: { byteLength?: number } = {}
+        let encodedSizeBytes = 0
+        try {
+          reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length)
+          const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
+            reportStemFormatProgress(input, 'encoding', format, track, completedStems, stemTracks.length, completedFormats, formats.length, sizeBytes)
+          })
+          const encoded = await exportMixdown.encodeAudioBuffer(stemBuffer, {
+            format,
+            bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
+            target: fileSink.target,
+            signal: input.signal,
+            onWrite: reportEncodingProgress,
+            wav: input.encoding.wav,
+            ditherSeed: createExportSeed(),
+          })
+          encodedSizeBytes = encoded.sizeBytes
+          throwIfExportAborted(input.signal)
+          committed = await fileSink.commit()
+        } catch (error) {
+          await fileSink.abort(error)
+          throw error
+        }
+        outputs.push({ destination: 'local', name: `stems/${fileName}`, sizeBytes: committed.byteLength ?? encodedSizeBytes, analysis, stem: renderedStem.metadata })
         completedFormats += 1
         throwIfExportAborted(input.signal)
       }

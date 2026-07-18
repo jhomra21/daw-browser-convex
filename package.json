@@ -69,6 +69,7 @@
     "jose": "^6.2.3",
     "kysely": "0.28.11",
     "kysely-d1": "^0.4.0",
+    "mediabunny": "^1.35.1",
     "solid-js": "^1.9.11",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",

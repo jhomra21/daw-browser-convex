@@ -13,6 +13,13 @@ import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
+import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
+
+export type EffectsPanelExportSnapshot = {
+  flushPending: () => Promise<void>
+  snapshotEffectsProjection: () => ExportEffectsProjection
+  snapshotSidechainRoutes: () => ExternalSidechainRoute[]
+}
 
 type EffectsPanelControllerOptions = {
   isOpen: Accessor<boolean>;
@@ -32,6 +39,7 @@ type EffectsPanelControllerOptions = {
   onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined) => void;
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
+  onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void;
 };
 
 const deviceInsertActionsEqual = (
@@ -123,6 +131,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       projectId: options.projectId,
       userId: options.userId,
       roomEffects: () => roomEffectsQuery.data,
+      sidechainRoutes: options.sidechainRoutes,
       canWriteCurrentTargetEffects,
       onEffectParamsCommitted: options.onEffectParamsCommitted,
       onLocalSaveFailed: options.onLocalSaveFailed,
@@ -179,6 +188,21 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       audioEffects.flushPending(),
       instrument.flushPending(),
     ]);
+  };
+  const exportSnapshot: EffectsPanelExportSnapshot = {
+    flushPending,
+    snapshotEffectsProjection: () => {
+      const projection = audioEffects.snapshotExportProjection();
+      for (const track of options.tracks()) {
+        if (track.kind !== "instrument") continue;
+        const instrumentParams = instrument.readDraftInstrumentForTarget(track.id);
+        if (instrumentParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "instrument", params: structuredClone(instrumentParams) });
+        const arpParams = instrument.arp.readDraftForTarget(track.id);
+        if (arpParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "arp", params: structuredClone(arpParams) });
+      }
+      return projection;
+    },
+    snapshotSidechainRoutes: audioEffects.snapshotSidechainRoutes,
   };
 
   const close = () => {
@@ -285,8 +309,10 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
 
   onCleanup(() => {
     options.onEffectInstanceParamsReplayChange?.(undefined);
+    options.onExportSnapshotChange?.(undefined);
     void flushPending();
   });
+  options.onExportSnapshotChange?.(exportSnapshot);
 
   createEffect(() => {
     const replay = <Effect extends EffectType>(payload: {

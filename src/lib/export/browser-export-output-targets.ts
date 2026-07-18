@@ -14,9 +14,10 @@ import type { ExportFileSink, ExportOutputTargetFactory } from '~/lib/export/exp
 const createSink = (name: string, writable: Awaited<ReturnType<typeof createLocalExportWritable>>): ExportFileSink => {
   let settled = false
   const commit = async () => {
-    if (settled) return
-    settled = true
+    if (settled) return {}
     await writable.writable.close()
+    settled = true
+    return {}
   }
   const abort = async (reason?: unknown) => {
     if (settled) return
@@ -25,7 +26,7 @@ const createSink = (name: string, writable: Awaited<ReturnType<typeof createLoca
   }
   return {
     name,
-    target: { mode: 'stream', writable: writable.writable, close: commit, abort },
+    target: { mode: 'stream', writable: writable.writable, close: async () => { await commit() }, abort },
     commit,
     abort,
   }

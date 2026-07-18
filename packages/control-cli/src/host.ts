@@ -82,6 +82,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   let acceptHello: (() => void) | undefined
   let rejectHello: ((error: Error) => void) | undefined
   let closed = false
+  let capabilities = new Set<DesktopOperationV1>()
   const hello = new Promise<void>((resolve, reject) => {
     acceptHello = () => {
       clearTimeout(handshakeTimer)
@@ -96,7 +97,10 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     if (frame.type === "helloAck") {
       const parsed = desktopHelloAckSchemaV1.safeParse(frame)
       if (!parsed.success) socket.destroy(new Error("Invalid desktop host handshake."))
-      else acceptHello?.()
+      else {
+        capabilities = new Set(parsed.data.capabilities)
+        acceptHello?.()
+      }
       return
     }
     if (frame.type !== "reply") return
@@ -139,7 +143,9 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   }, options.handshakeDeadlineMs ?? 5_000)
   await hello
   return {
+    capabilities: () => new Set(capabilities),
     request: (operation: DesktopOperationV1, input: unknown, deadlineMs = 10_000): Promise<unknown> => {
+      if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
       const id = randomBytes(16).toString("hex")
       return new Promise((resolve, reject) => {
         // A client deadline prevents a wedged renderer from retaining a CLI request.

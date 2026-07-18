@@ -1,20 +1,39 @@
 import type { ForgeConfig } from "@electron-forge/shared-types"
 import { FuseV1Options, FuseVersion } from "@electron/fuses"
 import { execFile } from "node:child_process"
-import { readdir } from "node:fs/promises"
+import { chmod, mkdir, readdir } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
 const run = promisify(execFile)
+const compileNativeFileCapabilityHelper = async () => {
+  if (process.platform !== "darwin" && process.platform !== "linux") return
+  const nativeDirectory = path.join(import.meta.dirname, ".native")
+  await mkdir(nativeDirectory, { recursive: true })
+  const source = path.join(import.meta.dirname, "native", "file-capability-helper.c")
+  const output = path.join(nativeDirectory, "file-capability-helper")
+  const platformDefinition = process.platform === "darwin" ? "-D_DARWIN_C_SOURCE" : "-D_GNU_SOURCE"
+  await run("clang", ["-std=c17", "-Wall", "-Wextra", "-Werror", platformDefinition, source, "-o", output])
+  await chmod(output, 0o755)
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     prune: true,
+    extraResource: process.platform === "darwin" || process.platform === "linux"
+      ? [".native/file-capability-helper"]
+      : [],
     // Fuses are flipped during packaging before Electron Packager signs the final app.
     osxSign: { identity: "-" },
   },
   hooks: {
+    preStart: async () => {
+      await compileNativeFileCapabilityHelper()
+    },
+    prePackage: async () => {
+      await compileNativeFileCapabilityHelper()
+    },
     postPackage: async (_config, packageResult) => {
       if (packageResult.platform !== "darwin") return
       const packageApps = (await Promise.all(packageResult.outputPaths.map(async (outputPath) =>

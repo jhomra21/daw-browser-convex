@@ -1,6 +1,7 @@
 dist
 .vite
 apps/desktop/out
+apps/desktop/.native
 .wrangler
 .output
 .vercel

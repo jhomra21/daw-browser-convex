@@ -30,7 +30,7 @@ import { useClipBuffers } from "~/hooks/useClipBuffers";
 import {
   collectTrackDescendantIds,
   isLocalId,
-  automationTargetKey
+  automationTargetKey,
 } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
@@ -38,7 +38,7 @@ import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
-import type { EffectsPanelAudioEffects } from "~/components/timeline/create-effects-panel-controller";
+import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
 import { useTimelineMixerController } from "~/hooks/useTimelineMixerController";
@@ -101,6 +101,8 @@ import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
+import { createTimelineExportService } from "~/lib/export/timeline-export-service";
+import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -275,6 +277,30 @@ const Timeline: Component<TimelineProps> = (props) => {
     audioEngine,
     projectMix,
   });
+  const [effectsExportSnapshot, setEffectsExportSnapshot] =
+    createSignal<EffectsPanelExportSnapshot>();
+  let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
+  const exportService = createTimelineExportService({
+    queue: exportQueue,
+    getTracks: renderTracks,
+    getBpm: bpm,
+    getMasterVolume: () => masterVolume.volume(),
+    getProjectId: projectId,
+    getUserId: userId,
+    getCloudRenderRows: () => {
+      const data = fullView.data;
+      return data
+        ? {
+            effects: data.effects,
+            automationEnvelopes: data.automationEnvelopes,
+          }
+        : undefined;
+    },
+    getAutomationPatches: () => getAutomationPatches(),
+    getEffectsExportSnapshot: effectsExportSnapshot,
+    getSidechainRoutes: sidechainRoutes,
+    loadCapturedClipBuffer: clipBuffers.loadCapturedMedia,
+  });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
   let historyActions: TimelineHistoryActions | undefined = undefined;
@@ -363,6 +389,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selectedTrackId: selection.selectedTrackId,
     pushHistory,
   });
+  getAutomationPatches = () => automation.snapshotExportPatches();
   const {
     pendingSharedTrackVolumes,
     pendingSharedTrackRouting,
@@ -1309,6 +1336,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (isRecording()) await stopRecording();
       },
       exportQueue,
+      exportService,
       importFiles,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
@@ -1428,6 +1456,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const panelsProps = () => ({
     exportQueue,
+    exportService,
     chat: {
       bottomOffsetPx: bottomPanel.chatBottomOffsetPx(),
       sharedChatOpen: bottomPanel.sharedChatOpen(),
@@ -1474,6 +1503,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       ) => setReplayEffectInstanceParams(() => replay),
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
+      onExportSnapshotChange: setEffectsExportSnapshot,
       automationEnvelopes: automation.envelopes(),
       onSelectAutomationParameter: (
         targetKey: Track["id"] | "master",

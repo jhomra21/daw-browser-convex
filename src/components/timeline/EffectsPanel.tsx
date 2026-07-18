@@ -89,6 +89,7 @@ type EffectsPanelProps = {
   onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
+  onExportSnapshotChange?: Parameters<typeof createEffectsPanelController>[0]["onExportSnapshotChange"];
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
   automationEnvelopes?: AutomationEnvelope[];
   evaluatedValuesByTargetKey?: ReadonlyMap<string, number>;
@@ -760,6 +761,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onEffectInstanceParamsReplayChange: (replay) => props.onEffectInstanceParamsReplayChange?.(replay),
     onLocalSaveFailed: (message) => props.onLocalSaveFailed?.(message),
     onDeviceInsertActionsChange: (actions) => props.onDeviceInsertActionsChange?.(actions),
+    onExportSnapshotChange: (snapshot) => props.onExportSnapshotChange?.(snapshot),
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;

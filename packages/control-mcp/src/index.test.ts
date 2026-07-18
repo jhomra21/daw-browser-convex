@@ -44,6 +44,10 @@ const hostTools: HostToolService = {
   stop: async () => ({ state: "stopped", playheadSec: 0 }),
   seek: async ({ seconds }) => ({ state: "paused", playheadSec: seconds }),
   diagnostics: async () => ({ audio: { state: "running", sampleRate: 48_000 }, recording: { transport: null, capturedFrames: null, droppedFrames: null, deviceLost: false }, counts: { tracks: 0, clips: 0 } }),
+  importAudio: async () => ({ status: "created", count: 1 }),
+  exportRun: async () => ({ jobId: "export-1", status: "queued" }),
+  exportStatus: async () => ({ status: "idle" }),
+  exportCancel: async () => ({ status: "canceled", job: { id: "export-1" } }),
 }
 
 const request = async (
@@ -78,7 +82,7 @@ const request = async (
 describe("control MCP tools", () => {
   test("adds local host tools only when explicitly composed", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
-    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-7)).toEqual([
+    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-11)).toEqual([
       "host_status",
       "host_transport_status",
       "host_play",
@@ -86,6 +90,10 @@ describe("control MCP tools", () => {
       "host_stop",
       "host_seek",
       "host_diagnostics",
+      "host_import_audio",
+      "host_export_run",
+      "host_export_status",
+      "host_export_cancel",
     ])
   })
 

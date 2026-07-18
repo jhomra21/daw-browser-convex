@@ -17,6 +17,7 @@ import {
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import { createPersistedAutomationState } from "~/components/timeline/create-persisted-automation-state";
+import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -597,6 +598,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
   return {
     envelopes: persistedAutomation.envelopes,
+    snapshotExportPatches: (): ExportAutomationPatch[] => persistedAutomation.snapshotPatches(),
     envelopesByTargetKey: automationEnvelopesByTargetKey,
     evaluatedValuesByTargetKey,
     applyEnvelope: applyAutomationEnvelopeState,

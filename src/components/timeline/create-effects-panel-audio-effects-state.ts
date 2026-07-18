@@ -34,7 +34,7 @@ import {
   type TremoloParamsEnvelope,
   type UtilityParamsEnvelope,isLocalId
 } from "@daw-browser/shared";
-import type { Track } from "@daw-browser/timeline-core/types";
+import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import {
@@ -50,6 +50,7 @@ import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
+import type { ExportEffectRow, ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type PersistedAudioEffectDescriptor<Params> = {
@@ -72,6 +73,8 @@ type EffectsPanelAudioEffectsContext = {
   projectId: Accessor<string | undefined>;
   userId: Accessor<string | undefined>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
+  sidechainRoutes?: Accessor<ExternalSidechainRoute[]>;
+  persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
   canWriteCurrentTargetEffects: Accessor<boolean>;
   persistAudioEffectOrder?: (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
@@ -142,6 +145,9 @@ type EffectsPanelAudioDevice = {
   addByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind, index?: number) => Promise<boolean>;
   addChainToTarget: (targetId: Track["id"] | "master", effects: readonly AudioEffectChainPresetStep[], index?: number) => Promise<boolean>;
   canAddByKindToTarget: (targetId: Track["id"] | "master", effect: AudioEffectKind) => boolean;
+  snapshotExportProjection: () => ExportEffectsProjection;
+  snapshotExportRows: (targetIds: readonly string[]) => ExportEffectRow[];
+  snapshotSidechainRoutes: () => ExternalSidechainRoute[];
   flushPending: () => Promise<void>;
   paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
   orderedEffects: Accessor<AudioEffectInstance[]>;
@@ -441,6 +447,10 @@ export function createEffectsPanelAudioDevice(
   const [draftParamsByInstance, setDraftParamsByInstance] = createSignal<Record<string, AudioEffectPanelDraft | undefined>>({});
   const [optimisticOrder, setOptimisticOrder] = createSignal<{ targetId: string; order: AudioEffectInstance[] } | undefined>(undefined, { equals: false });
   const optimisticOrdersByTarget = new Map<string, AudioEffectInstance[]>();
+  type SidechainPatch = { attempt: number; targetTrackId: string; effectInstanceId: string; sourceTrackId?: string };
+  const sidechainPatches = new Map<string, SidechainPatch>();
+  const pendingSidechainWrites = new Set<Promise<void>>();
+  let sidechainAttempt = 0;
 
   const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
 
@@ -775,6 +785,58 @@ export function createEffectsPanelAudioDevice(
   }
 
   const paramsForInstance = (instance: AudioEffectInstance) => paramsForInstanceForTarget(currentTargetId(), instance);
+
+  const exportRowForRuntime = (targetId: string, instanceId: string, index: number, runtime: AudioEffectRuntimeInstance): ExportEffectRow => {
+    if (runtime.kind === "utility") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "autofilter") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "eq") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "gate") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "compressor") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "saturator") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "limiter") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "lofi") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "delay") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "reverb") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "chorus") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "flanger") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "phaser") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "tremolo") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "autopan") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "ensemble") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+  };
+  const snapshotExportProjection = (): ExportEffectsProjection => {
+    const ownedTargetIds = new Set(optimisticOrdersByTarget.keys());
+    for (const draft of Object.values(draftParamsByInstance())) {
+      if (draft) ownedTargetIds.add(draft.targetId);
+    }
+    const replaceAudioEffectTargets: ExportEffectsProjection["replaceAudioEffectTargets"] = [];
+    for (const targetId of ownedTargetIds) {
+      const rows: ExportEffectRow[] = [];
+      for (const [index, instance] of currentOrderForTarget(targetId).entries()) {
+        const params = paramsForInstanceForTarget(targetId, instance);
+        if (params === undefined) continue;
+        rows.push(exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params)));
+      }
+      replaceAudioEffectTargets.push({ targetId, rows });
+    }
+    return { replaceAudioEffectTargets, upsertDeviceRows: [] };
+  };
+
+  const sidechainKey = (targetTrackId: string, effectInstanceId: string) => `${targetTrackId}:${effectInstanceId}`;
+  const snapshotSidechainRoutes = () => {
+    const base = new Map((context.sidechainRoutes?.() ?? []).map((route) => [sidechainKey(route.targetTrackId, route.effectInstanceId), route]));
+    for (const [key, patch] of sidechainPatches) {
+      const baseRoute = base.get(key);
+      if (baseRoute?.sourceTrackId === patch.sourceTrackId || (!baseRoute && patch.sourceTrackId === undefined)) {
+        sidechainPatches.delete(key);
+        continue;
+      }
+      if (patch.sourceTrackId) base.set(key, { targetTrackId: patch.targetTrackId, effectInstanceId: patch.effectInstanceId, sourceTrackId: patch.sourceTrackId });
+      else base.delete(key);
+    }
+    return Array.from(base.values());
+  };
 
   function persistedInstanceIdForTarget(targetId: string, instance: AudioEffectInstance) {
     const row = persistedRowsForTarget(targetId).find((entry) => entry.instanceId === instance.id && entry.kind === instance.kind);
@@ -1118,13 +1180,23 @@ export function createEffectsPanelAudioDevice(
     if (!currentOrder.some((entry) => entry.id === instance.id)) return false;
     const projectId = context.projectId();
     if (!projectId) return false;
-    if (!(await deleteInstanceFromTarget(targetId, instance, projectId))) return false;
-    clearDraftParams(targetId, instance.id);
     const nextOrder = currentOrder.filter((entry) => entry.id !== instance.id);
     setOptimisticOrderForTarget(targetId, nextOrder);
     await applyInstancesToEngine(targetId, nextOrder);
-    await persistReorder(targetId, nextOrder);
-    return true;
+    try {
+      if (!(await deleteInstanceFromTarget(targetId, instance, projectId))) {
+        setOptimisticOrderForTarget(targetId, currentOrder);
+        await applyInstancesToEngine(targetId, currentOrder);
+        return false;
+      }
+      await persistReorder(targetId, nextOrder);
+      clearDraftParams(targetId, instance.id);
+      return true;
+    } catch (error) {
+      setOptimisticOrderForTarget(targetId, currentOrder);
+      await applyInstancesToEngine(targetId, currentOrder);
+      throw error;
+    }
   };
   const replayInstanceParams: EffectsPanelAudioDevice["replayInstanceParams"] = (payload) => {
     const kind = audioEffectKindForHistoryEffect(payload.effect);
@@ -1138,37 +1210,75 @@ export function createEffectsPanelAudioDevice(
   };
   const removeAllFromTarget = async (targetId: Track["id"] | "master") => {
     if (!context.canWriteCurrentTargetEffects()) return false;
-    const currentOrder = targetId === currentTargetId() ? orderedEffects() : readPersistedOrderedEffectsForTarget(targetId);
+    const currentOrder = currentOrderForTarget(targetId);
     if (currentOrder.length === 0) return false;
     const projectId = context.projectId();
     if (!projectId) return false;
-    const deleted = await Promise.all(currentOrder.map((instance) => deleteInstanceFromTarget(targetId, instance, projectId)));
-    if (!deleted.every(Boolean)) return false;
-    clearDraftParamsForTarget(targetId);
     setOptimisticOrderForTarget(targetId, []);
     await applyInstancesToEngine(targetId, []);
-    await persistReorder(targetId, []);
-    return true;
+    try {
+      const deleted = await Promise.all(currentOrder.map((instance) => deleteInstanceFromTarget(targetId, instance, projectId)));
+      if (!deleted.every(Boolean)) {
+        setOptimisticOrderForTarget(targetId, currentOrder);
+        await applyInstancesToEngine(targetId, currentOrder);
+        return false;
+      }
+      await persistReorder(targetId, []);
+      clearDraftParamsForTarget(targetId);
+      return true;
+    } catch (error) {
+      setOptimisticOrderForTarget(targetId, currentOrder);
+      await applyInstancesToEngine(targetId, currentOrder);
+      throw error;
+    }
   };
 
   const setSidechainSource = async (instanceId: string, sourceTrackId?: string) => {
     const projectId = context.projectId();
     const targetId = currentTargetId();
     if (!projectId || targetId === "master") return;
-    if (isLocalId("project", projectId)) {
-      const repository = createLocalTimelineRepository(projectId);
-      if (sourceTrackId) await repository.setSidechainRoute({ sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId });
-      else await repository.removeSidechainRoute(targetId, instanceId);
-      return;
+    const key = sidechainKey(targetId, instanceId);
+    const patch = { attempt: ++sidechainAttempt, targetTrackId: targetId, effectInstanceId: instanceId, sourceTrackId };
+    sidechainPatches.set(key, patch);
+    const persist = async () => {
+      if (context.persistSidechainRoute) {
+        await context.persistSidechainRoute(targetId, instanceId, sourceTrackId);
+        return;
+      }
+      if (isLocalId("project", projectId)) {
+        const repository = createLocalTimelineRepository(projectId);
+        if (sourceTrackId) await repository.setSidechainRoute({ sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId });
+        else await repository.removeSidechainRoute(targetId, instanceId);
+        return;
+      }
+      const userId = context.userId();
+      if (!userId) return;
+      await publishEffectOperation(projectId, userId, sourceTrackId
+        ? { kind: "sidechains.setRoute", payload: { projectId, sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId } }
+        : { kind: "sidechains.removeRoute", payload: { projectId, targetTrackId: targetId, effectInstanceId: instanceId } });
+    };
+    const pending = persist().then(() => {
+    }).catch((error) => {
+      const current = sidechainPatches.get(key);
+      if (current?.attempt === patch.attempt) sidechainPatches.delete(key);
+      throw error;
+    });
+    pendingSidechainWrites.add(pending);
+    try {
+      await pending;
+    } finally {
+      pendingSidechainWrites.delete(pending);
     }
-    const userId = context.userId();
-    if (!userId) return;
-    await publishEffectOperation(projectId, userId, sourceTrackId
-      ? { kind: "sidechains.setRoute", payload: { projectId, sourceTrackId, targetTrackId: targetId, effectInstanceId: instanceId } }
-      : { kind: "sidechains.removeRoute", payload: { projectId, targetTrackId: targetId, effectInstanceId: instanceId } });
   };
 
   return {
+    snapshotExportProjection,
+    snapshotExportRows: (targetIds) => targetIds.flatMap((targetId) => currentOrderForTarget(targetId).flatMap((instance, index) => {
+      const params = paramsForInstanceForTarget(targetId, instance);
+      if (params === undefined) return [];
+      return [exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params))];
+    })),
+    snapshotSidechainRoutes,
     addByKindToTarget,
     addChainToTarget,
     canAddByKindToTarget,
@@ -1230,7 +1340,7 @@ export function createEffectsPanelAudioDevice(
       toggleEnabled: (enabled) => updateEq((prev) => ({ ...prev, enabled })),
     },
     flushPending: async () => {
-      await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending()]);
+      await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending(), ...pendingSidechainWrites]);
     },
     orderedEffects,
     paramsForInstance,

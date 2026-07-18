@@ -13,13 +13,15 @@ import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
-import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
+import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'
+import type { TimelineExportService } from '~/lib/export/timeline-export-service'
 
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
 export type TimelinePanelsProps = {
   exportQueue: ExportQueue
+  exportService: TimelineExportService
   chat: {
     bottomOffsetPx: number
     sharedChatOpen: boolean
@@ -53,6 +55,7 @@ export type TimelinePanelsProps = {
     onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
+    onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
     automationEnvelopes?: AutomationEnvelope[]
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
@@ -102,7 +105,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
   })
 
   return (
-    <ExportProvider queue={props.exportQueue}>
+    <ExportProvider queue={props.exportQueue} service={props.exportService}>
       <Show when={canUseSharedChat()}>
         <Button
           variant="outline"
@@ -150,6 +153,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
+        onExportSnapshotChange={props.effectsPanel.onExportSnapshotChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
         evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}

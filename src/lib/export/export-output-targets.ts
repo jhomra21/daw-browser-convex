@@ -4,7 +4,7 @@ import type { ExportAudioFormat } from '@daw-browser/shared'
 export type ExportFileSink = {
   name: string
   target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>
-  commit: () => Promise<void>
+  commit: () => Promise<{ byteLength?: number }>
   abort: (reason?: unknown) => Promise<void>
 }
 
@@ -26,6 +26,11 @@ export type StemOutputTarget = {
 }
 
 export type ExportOutputTargetFactory = {
+  resourceLimits?: {
+    maximumFiles: number
+    maximumBytes: number
+    streaming: true
+  }
   createMixdownTarget: (input: {
     projectId?: string
     localProject: boolean

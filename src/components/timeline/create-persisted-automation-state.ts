@@ -144,6 +144,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     commitEnvelope,
     cancelPreview,
     envelopes,
+    snapshotPatches: () => Object.entries(draftByTargetKey()).map(([targetKey, envelope]) => ({ targetKey, envelope })),
     previewEnvelope,
     syncRemote,
   }

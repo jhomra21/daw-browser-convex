@@ -216,7 +216,11 @@ export const createControlMcpServer = (
     if (request.params.name === "control_request_approval") return requestApproval(input)
     if (request.params.name === "control_history") return history(input)
     if (request.params.name === "control_recoveries") return recoveries(input)
-    if (options.hostTools) return executeHostTool(request.params.name, input, options.hostTools)
+    if (options.hostTools) {
+      const hostWrite = new Set(["host_play", "host_pause", "host_stop", "host_seek", "host_import_audio", "host_export_run", "host_export_cancel"])
+      if (hostWrite.has(request.params.name) && !await canWrite()) return failure(forbidden())
+      return executeHostTool(request.params.name, input, options.hostTools)
+    }
     return failure(invalidRequest())
   })
 

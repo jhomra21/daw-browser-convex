@@ -31,7 +31,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
 
-const isLocalEffectRow = <TParams = any>(value: unknown): value is LocalEffectRow<TParams> => (
+export const isLocalEffectRow = <TParams = any>(value: unknown): value is LocalEffectRow<TParams> => (
   isObject(value)
   && typeof value.id === 'string'
   && typeof value.targetId === 'string'

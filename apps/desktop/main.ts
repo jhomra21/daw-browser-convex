@@ -7,15 +7,23 @@ import path from "node:path"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
+  desktopHostExportRunInputSchemaV1,
+  desktopHostExportRunResultSchemaV1,
+  desktopHostImportInputSchemaV1,
+  desktopRendererExportInputSchemaV1,
+  desktopRendererImportInputSchemaV1,
   desktopProtocolVersion,
   desktopRegistrationSchemaV1,
   desktopRendererRequestSchemaV1,
   hostError,
   type DesktopFrameV1,
+  type DesktopOperationV1,
   type DesktopRendererRequestV1,
 } from "@daw-browser/desktop-protocol"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { createCloseHandler } from "./close-flow"
+import { createFileCapabilityManager } from "./file-capabilities"
+import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
@@ -46,6 +54,14 @@ type PendingRendererRequest = {
 let window_: BrowserWindow | undefined
 let generation = 0
 const rendererPending = new Map<string, PendingRendererRequest>()
+const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
+const terminalExportsAwaitingScope = new Set<string>()
+const exportScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
+  [...exportScopes.values()].some((exportScope) => (
+    exportScope.requestId === scope.requestId
+    && exportScope.rendererGeneration === scope.rendererGeneration
+  ))
+)
 const instanceId = randomBytes(16).toString("hex")
 const secret = randomBytes(32).toString("hex")
 let registrationPath = ""
@@ -53,6 +69,30 @@ let socketPath = ""
 let socketServer: ReturnType<typeof createServer> | undefined
 const acceptedSockets = new Set<Socket>()
 let finishingQuit = false
+let nativeMediaAvailable = false
+const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
+const fileCapabilities = createFileCapabilityManager({
+  dialog: {
+    showOpenDialog: (options) => dialog.showOpenDialog(options),
+    showSaveDialog: (options) => dialog.showSaveDialog(options),
+  },
+  nativeHelper: nativeFileCapabilityHelper,
+  nativeOutputEnabled: () => nativeMediaAvailable,
+  privateTempDirectory: () => path.join(app.getPath("userData"), "output-temp"),
+})
+const settleCapabilityRevocation = (operation: Promise<void>) => {
+  void operation.catch(() => undefined)
+}
+const desktopOperations = (): DesktopOperationV1[] => {
+  const base: DesktopOperationV1[] = [
+    "host.status",
+    "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek",
+    "diagnostics.snapshot",
+  ]
+  return nativeMediaAvailable
+    ? ["host.import.audio", "host.export.run", "host.export.status", "host.export.cancel", ...base]
+    : base
+}
 
 const cancelRendererRequest = (id: string, requestGeneration: number) => {
   const target = window_?.webContents
@@ -117,6 +157,76 @@ const renderRequest = async (operation: DesktopRendererRequestV1["operation"], i
   }
 }
 
+const prepareRendererInput = async (
+  operation: DesktopRendererRequestV1["operation"],
+  input: unknown,
+  scope: { requestId: string; rendererGeneration: number },
+  signal: AbortSignal,
+) => {
+  signal.throwIfAborted()
+  if (operation === "host.import.audio") {
+    const request = desktopHostImportInputSchemaV1.parse(input)
+    const selection = request.source.kind === "picker"
+      ? await fileCapabilities.pickReadFiles(scope)
+      : { canceled: false as const, files: [await fileCapabilities.grantReadFile(scope, request.source.path)] }
+    signal.throwIfAborted()
+    return desktopRendererImportInputSchemaV1.parse(
+      selection.canceled ? { canceled: true } : { canceled: false, files: selection.files },
+    )
+  }
+  if (operation === "host.export.run") {
+    const request = desktopHostExportRunInputSchemaV1.parse(input)
+    const extension = request.mode === "mixdown"
+      ? request.format === "ogg-opus" ? "ogg" : request.format
+      : undefined
+    const placeholderDestination: {
+      kind: "capability-file"
+      token: string
+      basename: string
+    } | {
+      kind: "capability-directory"
+      token: string
+      basename: string
+    } = request.mode === "mixdown"
+      ? { kind: "capability-file", token: "0".repeat(64), basename: `preflight.${extension}` }
+      : { kind: "capability-directory", token: "0".repeat(64), basename: "preflight" }
+    const preflight = await renderRequest("host.export.run", desktopRendererExportInputSchemaV1.parse({
+      ...request,
+      canceled: false,
+      preflightOnly: true,
+      destination: placeholderDestination,
+    }), scope.requestId)
+    if (preflight.type !== "reply" || preflight.error) {
+      throw new Error(preflight.type === "reply" ? preflight.error?.message : "Export preflight failed.")
+    }
+    signal.throwIfAborted()
+    try {
+      const destination = request.destination
+      if (destination.kind === "file" || destination.kind === "file-picker") {
+        const selected = destination.kind === "file-picker"
+          ? await fileCapabilities.pickOutputFile(scope, request.mode === "mixdown" ? request.format : undefined)
+          : { canceled: false as const, file: await fileCapabilities.grantOutputFile(scope, destination.path) }
+        signal.throwIfAborted()
+        if (selected.canceled) return desktopRendererExportInputSchemaV1.parse({ canceled: true, mode: "mixdown" })
+        return desktopRendererExportInputSchemaV1.parse({ ...request, destination: { kind: "capability-file", token: selected.file.token, basename: selected.file.basename }, canceled: false })
+      }
+      const selected = destination.kind === "directory-picker"
+        ? await fileCapabilities.pickDirectory(scope)
+        : { canceled: false as const, directory: await fileCapabilities.grantDirectory(scope, destination.path) }
+      signal.throwIfAborted()
+      if (selected.canceled) return desktopRendererExportInputSchemaV1.parse({ canceled: true, mode: "stems" })
+      return desktopRendererExportInputSchemaV1.parse({ ...request, destination: { kind: "capability-directory", token: selected.directory.token, basename: selected.directory.basename }, canceled: false })
+    } catch (error) {
+      await renderRequest("host.export.run", desktopRendererExportInputSchemaV1.parse({
+        canceled: true,
+        mode: request.mode,
+      }), scope.requestId).catch(() => undefined)
+      throw error
+    }
+  }
+  return input
+}
+
 const closeSocket = async () => {
   for (const socket of acceptedSockets) socket.destroy()
   acceptedSockets.clear()
@@ -165,12 +275,26 @@ const startSocket = async () => {
 const handleSocket = (socket: Socket) => {
   let authenticated = false
   const correlation = createRequestCorrelation()
+  const preparationControllers = new Map<string, AbortController>()
+  const finalExportCandidates = new Set<string>()
   const sessionId = randomBytes(16).toString("hex")
   acceptedSockets.add(socket)
+  let closed = false
   const close = () => {
+    if (closed) return
+    closed = true
     acceptedSockets.delete(socket)
-    for (const rendererId of correlation.internalIds()) rejectRendererRequest(rendererId, "Desktop host connection closed.")
+    for (const controller of preparationControllers.values()) controller.abort()
+    preparationControllers.clear()
+    const rendererIds = [...correlation.internalIds()]
+    for (const rendererId of rendererIds) {
+      if (!finalExportCandidates.has(rendererId)) rejectRendererRequest(rendererId, "Desktop host connection closed.")
+    }
     correlation.clear()
+    for (const rendererId of rendererIds) {
+      if (finalExportCandidates.has(rendererId)) continue
+      settleCapabilityRevocation(fileCapabilities.revokeRequest({ requestId: rendererId, rendererGeneration: generation }))
+    }
   }
   const decoder = createDesktopFrameDecoder((frame) => {
     if (!authenticated) {
@@ -180,25 +304,70 @@ const handleSocket = (socket: Socket) => {
         return
       }
       authenticated = true
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: ["host.status", "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek", "diagnostics.snapshot"] }))
+      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: desktopOperations() }))
       return
     }
     if (frame.type === "cancel") {
       const rendererId = correlation.removeExternal(frame.id)
-      if (rendererId) rejectRendererRequest(rendererId, "Desktop host request cancelled.")
+      if (rendererId) {
+        finalExportCandidates.delete(rendererId)
+        preparationControllers.get(rendererId)?.abort()
+        preparationControllers.delete(rendererId)
+        const canceledScope = { requestId: rendererId, rendererGeneration: generation }
+        settleCapabilityRevocation(fileCapabilities.revokeRequest(canceledScope).finally(() => {
+          rejectRendererRequest(rendererId, "Desktop host request cancelled.")
+        }))
+      }
       return
     }
     if (frame.type !== "request" || correlation.getInternal(frame.id)) {
       socket.destroy()
       return
     }
+    if (!desktopOperations().includes(frame.operation)) {
+      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: frame.id, error: hostError("unavailable", "The requested desktop operation is unavailable on this platform.") }))
+      return
+    }
     const rendererId = correlation.create(frame.id)
-    void renderRequest(frame.operation, frame.input, rendererId, frame.deadlineMs).then((reply) => {
+    const preparation = new AbortController()
+    preparationControllers.set(rendererId, preparation)
+    const scope = { requestId: rendererId, rendererGeneration: generation }
+    void prepareRendererInput(frame.operation, frame.input, scope, preparation.signal)
+      .then((input) => {
+        if (frame.operation === "host.export.run") {
+          const parsed = desktopRendererExportInputSchemaV1.parse(input)
+          if (!parsed.canceled && !parsed.preflightOnly) finalExportCandidates.add(rendererId)
+        }
+        return renderRequest(frame.operation, input, rendererId, frame.deadlineMs)
+      }).then(async (reply) => {
+      preparationControllers.delete(rendererId)
+      finalExportCandidates.delete(rendererId)
+      if (frame.operation === "host.export.run" && reply.type === "reply" && !reply.error) {
+        const result = desktopHostExportRunResultSchemaV1.safeParse(reply.result)
+        if (result.success && result.data.status === "queued" && result.data.jobId) {
+          exportScopes.set(result.data.jobId, scope)
+          if (terminalExportsAwaitingScope.delete(result.data.jobId)) {
+            exportScopes.delete(result.data.jobId)
+            await fileCapabilities.revokeRequest(scope)
+          }
+        }
+      }
       const externalId = correlation.getExternal(rendererId)
-      if (!externalId || !correlation.removeExternal(externalId) || socket.destroyed) return
+      if (!externalId || !correlation.removeExternal(externalId) || socket.destroyed) {
+        if (frame.operation !== "host.export.run" || ![...exportScopes.values()].some((exportScope) => exportScope.requestId === scope.requestId && exportScope.rendererGeneration === scope.rendererGeneration)) {
+          await fileCapabilities.revokeRequest(scope)
+        }
+        return
+      }
       if (reply.type !== "reply") return
+      if (frame.operation === "host.import.audio" || (frame.operation === "host.export.run" && !exportScopesHasScope(scope))) {
+        await fileCapabilities.revokeRequest(scope)
+      }
       socket.write(encodeDesktopFrame({ ...reply, id: externalId }))
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
+      preparationControllers.delete(rendererId)
+      finalExportCandidates.delete(rendererId)
+      await fileCapabilities.revokeRequest(scope)
       const externalId = correlation.getExternal(rendererId)
       if (!externalId || !correlation.removeExternal(externalId)) return
       const message = error instanceof Error && error.message === "Renderer deadline exceeded." ? "The request deadline elapsed." : "The renderer is unavailable."
@@ -224,10 +393,50 @@ const registerIpc = () => {
     const messageGeneration = message.generation
     if (typeof messageGeneration !== "number" || !Number.isSafeInteger(messageGeneration) || messageGeneration !== generation) return
     const parsed = desktopFrameSchemaV1.safeParse(message.frame)
-    if (!parsed.success || parsed.data.type !== "reply") return
+    if (!parsed.success) return
+    if (parsed.data.type === "export-terminal") {
+      const scope = exportScopes.get(parsed.data.jobId)
+      if (scope) {
+        exportScopes.delete(parsed.data.jobId)
+        settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
+      } else if (terminalExportsAwaitingScope.size < 1024) terminalExportsAwaitingScope.add(parsed.data.jobId)
+      return
+    }
+    if (parsed.data.type !== "reply") return
     const pending = rendererPending.get(parsed.data.id)
     if (!pending || pending.generation !== messageGeneration) return
     pending.resolve(parsed.data)
+  })
+  const scopeFor = (event: Electron.IpcMainInvokeEvent, value: unknown) => {
+    if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return undefined
+    if (typeof value !== "object" || value === null || !("requestId" in value) || typeof value.requestId !== "string") return undefined
+    return { requestId: value.requestId, rendererGeneration: generation }
+  }
+  ipcMain.handle("daw:capability:readChunk", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (!scope || typeof value !== "object" || value === null || !("token" in value) || typeof value.token !== "string") throw new Error("Invalid capability request.")
+    return fileCapabilities.readFile(scope, value.token)
+  })
+  ipcMain.handle("daw:capability:beginWrite", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (!scope || typeof value !== "object" || value === null || !("token" in value) || typeof value.token !== "string" || ("relativePath" in value && value.relativePath !== undefined && typeof value.relativePath !== "string")) throw new Error("Invalid capability request.")
+    const relativePath = "relativePath" in value && typeof value.relativePath === "string" ? value.relativePath : undefined
+    return fileCapabilities.beginWrite(scope, value.token, relativePath)
+  })
+  ipcMain.handle("daw:capability:writeChunk", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (!scope || typeof value !== "object" || value === null || !("writerId" in value) || !("offset" in value) || !("chunk" in value) || typeof value.writerId !== "string" || typeof value.offset !== "number" || !(value.chunk instanceof Uint8Array)) throw new Error("Invalid capability request.")
+    return fileCapabilities.writeChunk(scope, value.writerId, value.offset, value.chunk)
+  })
+  ipcMain.handle("daw:capability:commit", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (!scope || typeof value !== "object" || value === null || !("writerId" in value) || typeof value.writerId !== "string") throw new Error("Invalid capability request.")
+    return fileCapabilities.commitWrite(scope, value.writerId)
+  })
+  ipcMain.handle("daw:capability:abort", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (!scope || typeof value !== "object" || value === null || !("writerId" in value) || typeof value.writerId !== "string") throw new Error("Invalid capability request.")
+    await fileCapabilities.abortWrite(scope, value.writerId)
   })
 }
 
@@ -245,10 +454,14 @@ const createWindow = () => {
     },
   })
   window_.webContents.on("did-start-navigation", () => {
+    settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
     generation += 1
     rejectRendererPending("Renderer reloaded.")
   })
-  window_.webContents.on("render-process-gone", () => rejectRendererPending("Renderer crashed."))
+  window_.webContents.on("render-process-gone", () => {
+    settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
+    rejectRendererPending("Renderer crashed.")
+  })
   window_.webContents.setWindowOpenHandler(({ url }) => {
     if (externalUrl(url)) void shell.openExternal(url)
     return { action: "deny" }
@@ -294,6 +507,7 @@ const finishQuit = async () => {
   if (finishingQuit) return
   finishingQuit = true
   rejectRendererPending("Application is closing.")
+  await fileCapabilities.revokeAll()
   await closeSocket()
   app.exit()
 }
@@ -305,6 +519,7 @@ else {
     window_?.focus()
   })
   app.whenReady().then(async () => {
+    nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     protocol.handle("daw", (request) => {
       const relative = new URL(request.url).pathname
       const safePath = path.resolve(rendererRoot, `.${relative === "/" ? "/index.html" : relative}`)

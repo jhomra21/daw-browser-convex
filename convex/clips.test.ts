@@ -45,6 +45,7 @@ test("row helpers leave revision ownership to authenticated mutation wrappers", 
   const { clipId } = await t.run(async (ctx) => {
     await ctx.db.insert("projects", {
       projectId: "project-1",
+      storageNamespace: "test-namespace",
       ownerUserId: owner,
       name: "Project",
       createdAt: 1,

@@ -216,8 +216,8 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => 
     throw new Error(detail ? `Shared audio upload failed: ${response.status} ${detail}` : `Shared audio upload failed: ${response.status}`)
   }
   const data = await response.json().catch(() => null)
-  if (!isRecord(data) || typeof data.url !== 'string') throw new Error('Shared audio upload failed.')
-  return data.url
+  if (!isRecord(data) || typeof data.url !== 'string' || typeof data.assetKey !== 'string') throw new Error('Shared audio upload failed.')
+  return { url: data.url, assetKey: data.assetKey }
 }
 
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
@@ -263,8 +263,11 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
   if (entry.kind === 'clips.createUploadedAudio') {
     const payload = readUploadedAudioClipPayload(entry.payload)
     if (!payload) throw new Error('Invalid queued shared audio clip.')
-    const sampleUrl = await uploadSharedAudioClipAsset(payload)
-    await publishSharedTimelineOperation(entry.projectId, { kind: 'clips.create', payload: { ...payload.clipPayload, sampleUrl } })
+    const upload = await uploadSharedAudioClipAsset(payload)
+    await publishSharedTimelineOperation(entry.projectId, {
+      kind: 'clips.create',
+      payload: { ...payload.clipPayload, sampleUrl: upload.url, assetKey: upload.assetKey },
+    })
     return
   }
   const operation = parseSharedTimelineOperation({ kind: entry.kind, payload: entry.payload })

@@ -52,6 +52,7 @@ export async function ensureOwnedProjectRow(
   const now = Date.now();
   const projectIdRow = await ctx.db.insert("projects", {
     projectId,
+    storageNamespace: crypto.randomUUID(),
     ownerUserId: userId,
     name: "Untitled",
     createdAt: now,

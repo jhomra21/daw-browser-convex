@@ -124,6 +124,10 @@ export const drainDueR2DeleteQueue = async (input: {
   limit?: number
 }): Promise<R2DeleteDrainSummary> => {
   const convex = await createMaintenanceWorkerConvexClient(input.c)
+  await convex.mutation(convexApi.assets.reconcileStalePending, {
+    before: Date.now() - 60 * 60 * 1000,
+    limit: 100,
+  })
   const rows = await convex.query(convexApi.r2Deletes.listDueAny, {
     now: Date.now(),
     limit: input.limit ?? 25,

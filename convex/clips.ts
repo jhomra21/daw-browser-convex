@@ -5,10 +5,10 @@ import { v } from 'convex/values'
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
 import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requireProjectAccess } from './projectAccess'
-import { upsertSampleRow } from './sampleRows'
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
-import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, sanitizePositiveNumber, type AudioSourceKind, type AudioWarpPayload } from '@daw-browser/shared'
+import { findSampleRow } from './sampleRows'
+import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioSourceKind, type AudioWarpPayload } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -250,34 +250,6 @@ const applyClipTimingPatch = async (
   return { status: 'applied' as const }
 }
 
-const upsertSampleRowForClip = async (
-  ctx: MutationCtx,
-  clip: {
-    projectId: string
-    name?: string
-    sampleUrl?: string
-    sourceAssetKey?: string
-    sourceKind?: string
-    sourceDurationSec?: number
-    sourceSampleRate?: number
-    sourceChannelCount?: number
-  },
-  ownerUserId: string,
-) => {
-  const duration = sanitizePositiveNumber(clip.sourceDurationSec)
-  await upsertSampleRow(ctx, {
-    projectId: clip.projectId,
-    url: clip.sampleUrl,
-    assetKey: clip.sourceAssetKey,
-    sourceKind: clip.sourceKind,
-    ownerUserId,
-    name: clip.name,
-    duration,
-    sampleRate: clip.sourceSampleRate,
-    channelCount: clip.sourceChannelCount,
-  })
-}
-
 const insertOwnedClipRow = async (
   ctx: MutationCtx,
   clip: ClipCreatePatch,
@@ -289,7 +261,6 @@ const insertOwnedClipRow = async (
     ownerUserId,
     clipId,
   })
-  await upsertSampleRowForClip(ctx, clip, ownerUserId)
   return clipId
 }
 
@@ -465,8 +436,7 @@ export const createOwnedClip = async (
   if (
     clipKind === 'audio'
     && (
-      item.sampleUrl === undefined
-      || sourceMetadata.assetKey === undefined
+      sourceMetadata.assetKey === undefined
       || sourceMetadata.sourceKind === undefined
       || sourceMetadata.durationSec === undefined
       || sourceMetadata.sampleRate === undefined
@@ -475,7 +445,14 @@ export const createOwnedClip = async (
   ) {
     throw new Error('Audio clips require complete source metadata')
   }
+  const asset = clipKind === 'audio' && sourceMetadata.assetKey
+    ? await findSampleRow(ctx, { projectId: item.projectId, assetKey: sourceMetadata.assetKey })
+    : null
+  if (clipKind === 'audio' && sourceMetadata.assetKey) {
+    if (!asset) throw new Error('Audio clips require an authoritative project asset')
+  }
   const clipPatch = buildClipCreatePatch(item, sourceMetadata)
+  if (asset) clipPatch.sampleUrl = `/api/samples/${encodeURIComponent(item.projectId)}/${encodeURIComponent(asset.assetKey)}`
   if (clipKind === 'midi' && clipPatch.midi) {
     return (await createMidiClipRow(ctx, {
       ...clipPatch,

@@ -1,80 +1,50 @@
-import {
-  sanitizeAudioAssetKey as sanitizeAssetKey,
-  sanitizeAudioSourceKind as sanitizeSourceKind,
-  sanitizePositiveInt,
-  sanitizePositiveNumber,
-} from '@daw-browser/shared'
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 
-export type { AudioSourceKind } from '@daw-browser/shared'
+type SampleContext = Pick<QueryCtx, "db"> | Pick<MutationCtx, "db">;
 
-export type UpsertSampleRowInput = {
-  projectId: string
-  url?: string
-  assetKey?: string
-  sourceKind?: string
-  ownerUserId: string
-  name?: string
-  duration?: number
-  sampleRate?: number
-  channelCount?: number
-  folderId?: string
-}
+export type AssetRowInput = {
+  projectId: string;
+  assetKey: string;
+  sourceKind: "upload" | "url" | "recording";
+  ownerUserId: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentSha256: string;
+  r2Key: string;
+  duration?: number;
+  sampleRate?: number;
+  channelCount?: number;
+  folderId?: string;
+};
 
-const numbersDiffer = (left: number | undefined, right: number | undefined, epsilon = 1e-6) => {
-  if (left === undefined || right === undefined) return left !== right
-  return Math.abs(left - right) > epsilon
-}
+export const findSampleRow = async (
+  ctx: SampleContext,
+  input: { projectId: string; assetKey: string },
+) => await ctx.db
+  .query("samples")
+  .withIndex("by_room_assetKey", (query) => query.eq("projectId", input.projectId).eq("assetKey", input.assetKey))
+  .unique();
 
-export async function findSampleRow(ctx: any, input: { projectId: string; assetKey?: string }) {
-  const assetKey = sanitizeAssetKey(input.assetKey)
-  if (!assetKey) return null
-  const rows = await ctx.db
-    .query('samples')
-    .withIndex('by_room_assetKey', (q: any) => q.eq('projectId', input.projectId).eq('assetKey', assetKey))
-    .collect()
-  return rows[0] ?? null
-}
+export const insertSampleRow = async (
+  ctx: Pick<MutationCtx, "db">,
+  input: AssetRowInput,
+) => {
+  const now = Date.now();
+  return await ctx.db.insert("samples", {
+    ...input,
+    createdAt: now,
+    updatedAt: now,
+  });
+};
 
-export async function upsertSampleRow(ctx: any, input: UpsertSampleRowInput) {
-  const url = typeof input.url === 'string' ? input.url : undefined
-  if (!url) return null
-
-  const assetKey = sanitizeAssetKey(input.assetKey)
-  const sourceKind = sanitizeSourceKind(input.sourceKind)
-  const duration = sanitizePositiveNumber(input.duration)
-  const sampleRate = sanitizePositiveInt(input.sampleRate)
-  const channelCount = sanitizePositiveInt(input.channelCount)
-  if (!assetKey || !sourceKind || duration === undefined || sampleRate === undefined || channelCount === undefined) return null
-
-  const existingRow = await findSampleRow(ctx, { projectId: input.projectId, assetKey })
-  if (existingRow) {
-    const patch: Record<string, unknown> = {}
-    if (existingRow.url !== url) patch.url = url
-    if (!existingRow.name && input.name) patch.name = input.name
-    const currentDuration = sanitizePositiveNumber(existingRow.duration)
-    if (currentDuration === undefined || numbersDiffer(currentDuration, duration)) {
-      patch.duration = duration
-    }
-    if (existingRow.sampleRate !== sampleRate) patch.sampleRate = sampleRate
-    if (existingRow.channelCount !== channelCount) patch.channelCount = channelCount
-    if (typeof input.folderId === 'string' && existingRow.folderId !== input.folderId) patch.folderId = input.folderId
-    if (Object.keys(patch).length > 0) {
-      await ctx.db.patch(existingRow._id, patch)
-    }
-    return existingRow._id
-  }
-
-  const row = {
-    projectId: input.projectId,
-    url,
-    assetKey,
-    sourceKind,
-    name: input.name,
-    duration,
-    sampleRate,
-    channelCount,
-    ownerUserId: input.ownerUserId,
-    createdAt: Date.now(),
-  }
-  return await ctx.db.insert('samples', typeof input.folderId === 'string' ? { ...row, folderId: input.folderId } : row)
-}
+export const moveSampleFolderRow = async (
+  ctx: Pick<MutationCtx, "db">,
+  input: { projectId: string; assetKey: string; folderId?: string },
+) => {
+  const asset = await findSampleRow(ctx, input);
+  if (!asset) return { changed: false, asset: null };
+  if (asset.folderId === input.folderId) return { changed: false, asset };
+  await ctx.db.patch(asset._id, { folderId: input.folderId, updatedAt: Date.now() });
+  return { changed: true, asset };
+};

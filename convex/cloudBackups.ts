@@ -10,6 +10,7 @@ import {
   type ProjectManifest,
 } from "@daw-browser/shared";
 import { enqueueR2DeleteRows } from "./r2Deletes";
+import { requireProjectRow } from "./projectRows";
 
 const latestBackup = async (ctx: Pick<QueryCtx, "db">, projectId: string) => (
   await ctx.db
@@ -110,7 +111,10 @@ export const upsertLatest = mutation({
     }
     const supersededCloudKeys = readSupersededCloudKeys(projectId, existing?.manifest, manifest);
     const queuedDeletedCloudKeys = [...new Set([...(pendingDeletedCloudKeys ?? []), ...supersededCloudKeys])];
-    await enqueueR2DeleteRows(ctx, { projectId, keys: queuedDeletedCloudKeys, kind: "backup-asset" });
+    const project = await requireProjectRow(ctx, projectId);
+    await enqueueR2DeleteRows(ctx, {
+      projectId, storageNamespace: project.storageNamespace, keys: queuedDeletedCloudKeys, kind: "backup-asset",
+    });
 
     const now = Date.now();
     const manifestVersion = `${now}-${crypto.randomUUID()}`;

@@ -82,14 +82,18 @@ export default defineSchema({
     projectId: v.string(),
     assetKey: v.string(),
     sourceKind: v.string(),
-    url: v.string(),
-    name: v.optional(v.string()),
-    duration: v.number(),
-    sampleRate: v.number(),
-    channelCount: v.number(),
+    name: v.string(),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    contentSha256: v.string(),
+    r2Key: v.string(),
+    duration: v.optional(v.number()),
+    sampleRate: v.optional(v.number()),
+    channelCount: v.optional(v.number()),
     ownerUserId: v.string(),
     folderId: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.number(),
   })
     .index("by_room", ["projectId"])
     .index("by_room_assetKey", ["projectId", "assetKey"])
@@ -103,8 +107,33 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"]),
 
+  assetUploadReceipts: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    idempotencyKey: v.string(),
+    contentSha256: v.string(),
+    assetKey: v.string(),
+    r2Key: v.string(),
+    semanticDigest: v.string(),
+    status: v.union(v.literal("pending"), v.literal("completed"), v.literal("failed")),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    name: v.string(),
+    folderId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    attempts: v.number(),
+  })
+    .index("by_project_actor_idempotency", ["projectId", "actorUserId", "idempotencyKey"])
+    .index("by_project_status_updatedAt", ["projectId", "status", "updatedAt"])
+    .index("by_status_updatedAt", ["status", "updatedAt"])
+    .index("by_asset", ["projectId", "assetKey"])
+    .index("by_project_folder_status", ["projectId", "folderId", "status"]),
+
   projects: defineTable({
     projectId: v.string(),
+    storageNamespace: v.string(),
     ownerUserId: v.string(),
     name: v.string(),
     createdAt: v.number(),

@@ -1,80 +1,19 @@
-import { mutation, query } from './_generated/server'
-import { v } from 'convex/values'
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
 
-import { findSampleRow } from './sampleRows'
-import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from './projectAccess'
-import { enqueueR2DeleteRows } from './r2Deletes'
-
-const readSampleObjectPathFromUrl = (url: string) => {
-  const marker = '?key='
-  const index = url.indexOf(marker)
-  if (index < 0) return null
-  try {
-    return decodeURIComponent(url.slice(index + marker.length))
-  } catch {
-    return null
-  }
-}
+export { deleteAsset as removeFromRoom, moveAssetToFolder as moveToFolder } from "./assets";
 
 export const listByRoom = query({
   args: { projectId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, { projectId, limit }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    await requireProjectAccess(ctx, projectId, userId)
-    const query = ctx.db
-      .query('samples')
-      .withIndex('by_room', q => q.eq('projectId', projectId))
-    if (limit && limit > 0) {
-      return await query.take(Math.floor(limit))
-    }
-    return await query.collect()
+    const userId = await requireAuthenticatedUserId(ctx);
+    await requireProjectAccess(ctx, projectId, userId);
+    const rows = await ctx.db.query("samples").withIndex("by_room", (query) => query.eq("projectId", projectId))
+      .take(Math.max(1, Math.min(limit ?? 1_000, 1_000)));
+    return rows.map(({ r2Key: _r2Key, ...row }) => ({
+      ...row,
+      url: `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(row.assetKey)}`,
+    }));
   },
-})
-
-export const removeFromRoom = mutation({
-  args: {
-    projectId: v.string(),
-    assetKey: v.optional(v.string()),
-  },
-  handler: async (ctx, { projectId, assetKey }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    if (!assetKey) return
-    const row = await findSampleRow(ctx, { projectId, assetKey })
-    if (!row) return
-    await requireProjectRole(ctx, projectId, userId, ['owner', 'editor'])
-
-    const clips = await ctx.db
-      .query('clips')
-      .withIndex('by_room', q => q.eq('projectId', projectId))
-      .collect()
-    const inUse = clips.some((clip) => clip.sourceAssetKey === assetKey)
-    if (inUse) return
-    const sampleObjectPath = readSampleObjectPathFromUrl(row.url)
-    if (sampleObjectPath?.startsWith(`projects/${projectId}/assets/${assetKey}/`)) {
-      await enqueueR2DeleteRows(ctx, { projectId, keys: [sampleObjectPath], kind: 'sample' })
-    }
-    await ctx.db.delete(row._id)
-  },
-})
-
-export const moveToFolder = mutation({
-  args: {
-    projectId: v.string(),
-    assetKey: v.string(),
-    folderId: v.optional(v.string()),
-  },
-  handler: async (ctx, { projectId, assetKey, folderId }) => {
-    const userId = await requireAuthenticatedUserId(ctx)
-    const row = await findSampleRow(ctx, { projectId, assetKey })
-    if (!row) return null
-    await requireProjectRole(ctx, projectId, userId, ['owner', 'editor'])
-    if (folderId) {
-      const normalizedFolderId = ctx.db.normalizeId('assetFolders', folderId)
-      if (!normalizedFolderId) return null
-      const folder = await ctx.db.get(normalizedFolderId)
-      if (folder?.projectId !== projectId) return null
-    }
-    await ctx.db.patch(row._id, { folderId })
-    return row._id
-  },
-})
+});

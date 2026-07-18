@@ -39,6 +39,9 @@ const opaqueCursorSchema = z.string()
 export const controlLimitsV1 = {
   maxActions: 100,
   maxSerializedBodyBytes: 256 * 1024,
+  maxAssetsPerSnapshot: 1_000,
+  maxAssetFoldersPerSnapshot: 500,
+  maxAssetUploadBytes: 10 * 1024 * 1024,
   maxMidiNotesPerCommit: 500,
   maxAutomationPointsPerCommit: 1000,
   maxErrorDetails: 16,
@@ -77,6 +80,9 @@ export const controlCapabilitiesSchemaV1 = z.object({
   limits: z.object({
     maxActions: z.number().int().positive(),
     maxSerializedBodyBytes: z.number().int().positive(),
+    maxAssetsPerSnapshot: z.number().int().positive(),
+    maxAssetFoldersPerSnapshot: z.number().int().positive(),
+    maxAssetUploadBytes: z.number().int().positive(),
     maxMidiNotesPerCommit: z.number().int().positive(),
     maxAutomationPointsPerCommit: z.number().int().positive(),
     maxErrorDetails: z.number().int().positive(),
@@ -498,6 +504,45 @@ const snapshotTrackSchema = z.object({
   outputTargetId: stableIdSchema.optional(),
   sends: z.array(z.object({ targetTrackId: stableIdSchema, amount: finiteNumberSchema, tap: z.enum(['pre-fx', 'pre-fader', 'post-fader']).optional() }).strict()),
 }).strict()
+const assetMimeTypeSchema = z.enum([
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/flac",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/webm",
+])
+const assetSourceKindSchema = z.enum(["upload", "url", "recording"])
+export const assetFolderSchemaV1 = z.object({
+  id: stableIdSchema,
+  name: nameSchema,
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strict()
+export const assetSnapshotSchemaV1 = z.object({
+  id: stableIdSchema,
+  name: nameSchema,
+  sourceKind: assetSourceKindSchema,
+  mimeType: assetMimeTypeSchema,
+  sizeBytes: z.number().int().positive().max(controlLimitsV1.maxAssetUploadBytes),
+  contentSha256: requestDigestSchema,
+  durationSec: secondsSchema.optional(),
+  sampleRate: z.number().int().positive().optional(),
+  channelCount: z.number().int().positive().max(64).optional(),
+  folderId: stableIdSchema.optional(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strict()
+export const assetUploadResultSchemaV1 = z.object({
+  asset: assetSnapshotSchemaV1,
+  idempotencyReplay: z.boolean(),
+}).strict()
+export const assetFolderResultSchemaV1 = z.object({
+  folder: assetFolderSchemaV1,
+  applied: z.boolean(),
+}).strict()
 export const projectSnapshotSchemaV1 = z.object({
   version: z.literal(CONTROL_API_VERSION_V1),
   project: z.object({
@@ -518,6 +563,13 @@ export const projectSnapshotSchemaV1 = z.object({
     bufferOffsetSec: secondsSchema,
     midiOffsetBeats: secondsSchema,
     fades: clipFadesSnapshotSchema.optional(),
+    source: z.object({
+      assetId: stableIdSchema,
+      sourceKind: assetSourceKindSchema,
+      durationSec: secondsSchema.optional(),
+      sampleRate: z.number().int().positive().optional(),
+      channelCount: z.number().int().positive().max(64).optional(),
+    }).strict().optional(),
     midi: z.object({
       wave: z.string(),
       gain: finiteNumberSchema.optional(),
@@ -543,6 +595,8 @@ export const projectSnapshotSchemaV1 = z.object({
     targetTrackId: stableIdSchema,
     effectInstanceId: stableIdSchema,
   }).strict()),
+  assets: z.array(assetSnapshotSchemaV1).max(controlLimitsV1.maxAssetsPerSnapshot),
+  assetFolders: z.array(assetFolderSchemaV1).max(controlLimitsV1.maxAssetFoldersPerSnapshot),
 }).strict()
 
 export type ControlActionV1 = z.infer<typeof controlActionSchemaV1>
@@ -571,6 +625,9 @@ export type ControlWarningV1 = z.infer<typeof controlWarningSchemaV1>
 export type ControlChangeSummaryV1 = z.infer<typeof controlChangeSummarySchemaV1>
 export type ProjectSnapshotV1 = z.infer<typeof projectSnapshotSchemaV1>
 export type ControlCapabilitiesV1 = z.infer<typeof controlCapabilitiesSchemaV1>
+export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>
+export type AssetFolderV1 = z.infer<typeof assetFolderSchemaV1>
+export type AssetUploadResultV1 = z.infer<typeof assetUploadResultSchemaV1>
 
 export const controlCapabilitiesV1 = {
   version: CONTROL_API_VERSION_V1,

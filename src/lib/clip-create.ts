@@ -39,7 +39,7 @@ type UploadedAudioClipInput = {
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<string | null>
+  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<{ assetKey: string; url: string } | null>
   audioBufferCache: ClipBufferWriter
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -155,7 +155,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     operationId,
   })
 
-  const sampleUrl = await uploadClipSampleUrl({
+  const upload = await uploadClipSampleUrl({
     projectId: input.projectId,
     assetKey: input.sourceAssetKey,
     file: input.file,
@@ -174,12 +174,14 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     })
     throw new SharedOutboxQueuedError('clips.createUploadedAudio')
   })
-  clip.sampleUrl = sampleUrl
+  clip.sampleUrl = upload.url
+  clip.sourceAssetKey = upload.assetKey
 
   let clipId: string
   const payload = {
     ...queuedClipPayload,
-    sampleUrl,
+    sampleUrl: upload.url,
+    assetKey: upload.assetKey,
   }
   try {
     const createdClipId = await input.createServerClip(payload)
@@ -200,8 +202,8 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
 
   if (input.canProject?.() === false) {
     void primeClipSourceAsset({
-      sourceAssetKey: input.sourceAssetKey,
-      sampleUrl,
+      sourceAssetKey: upload.assetKey,
+      sampleUrl: upload.url,
       buffer: input.decoded,
     })
     return { clipId, clip }
@@ -218,7 +220,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   input.onClipCreated?.(localClip)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
-    sampleUrl,
+    sampleUrl: upload.url,
     buffer: input.decoded,
   })
 

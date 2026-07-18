@@ -11,7 +11,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 
 type ClipMediaStatus = NonNullable<Track['clips'][number]['mediaStatus']>
 
-export type UploadToR2Result = string | null
+export type UploadToR2Result = { assetKey: string; url: string } | null
 
 export type UploadToR2 = (
   projectId: string,
@@ -69,7 +69,9 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       const res = await fetch('/api/samples', { method: 'POST', body: fd })
       if (!res.ok) return null
       const data = await res.json().catch(() => null)
-      return isRecord(data) && typeof data.url === 'string' ? data.url : null
+      return isRecord(data) && typeof data.url === 'string' && typeof data.assetKey === 'string'
+        ? { assetKey: data.assetKey, url: data.url }
+        : null
     } catch {
       return null
     }

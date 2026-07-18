@@ -43,6 +43,8 @@ async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("assetFolders").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("assetUploadReceipts").withIndex("by_project_status_updatedAt", (q) => q.eq("projectId", projectId))
+      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
@@ -234,7 +236,10 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     if (ownerProject.deletionPendingAt === undefined) {
       throw new Error("Project deletion is not pending.");
     }
-    await enqueueR2DeleteRows(ctx, { projectId, keys: [`projects/${projectId}/`], kind: "project-prefix" });
+    await enqueueR2DeleteRows(ctx, {
+      projectId, storageNamespace: ownerProject.storageNamespace,
+      keys: [`asset-namespaces/${ownerProject.storageNamespace}/`], kind: "project-prefix",
+    });
     await deleteRoomRows(ctx, projectId);
     const result: { status: "deleted" } = { status: "deleted" };
     return result;

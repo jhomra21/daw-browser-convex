@@ -21,13 +21,14 @@ export const enqueueR2DeleteRows = async (
   ctx: Pick<MutationCtx, "db">,
   input: {
     projectId: string;
+    storageNamespace: string;
     keys: string[];
     kind: R2DeleteKind;
   },
 ) => {
   const now = Date.now();
   const uniqueKeys = [...new Set(input.keys.filter(Boolean))];
-  if (uniqueKeys.some((key) => !isValidR2DeleteKey(input.projectId, input.kind, key))) {
+  if (uniqueKeys.some((key) => !isValidR2DeleteKey(input.projectId, input.storageNamespace, input.kind, key))) {
     throw new Error("Invalid R2 delete key.");
   }
   for (const r2Key of uniqueKeys) {
@@ -54,6 +55,17 @@ export const enqueueR2DeleteRows = async (
       updatedAt: now,
     });
   }
+};
+
+export const hasR2DeleteRow = async (
+  ctx: Pick<MutationCtx, "db">,
+  input: { projectId: string; r2Key: string },
+) => {
+  const row = await ctx.db
+    .query("r2DeleteQueue")
+    .withIndex("by_key", (q) => q.eq("r2Key", input.r2Key))
+    .first();
+  return row?.projectId === input.projectId;
 };
 
 export const listDue = query({
@@ -92,11 +104,11 @@ export const findDueProjectPrefix = query({
   },
   handler: async (ctx, { projectId, now }) => {
     await requireWorkerQueueAccess(ctx);
-    const row = await ctx.db
+    const rows = await ctx.db
       .query("r2DeleteQueue")
-      .withIndex("by_key", (q) => q.eq("r2Key", `projects/${projectId}/`))
-      .first();
-    return row?.projectId === projectId && row.kind === "project-prefix" && row.nextAttemptAt <= now ? row : null;
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .take(100);
+    return rows.find((row) => row.kind === "project-prefix" && row.nextAttemptAt <= now) ?? null;
   },
 });
 

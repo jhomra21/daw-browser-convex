@@ -90,6 +90,8 @@ const snapshot = {
   processors: [],
   automation: [],
   sidechains: [],
+  assets: [],
+  assetFolders: [],
 }
 
 const planningResult = {

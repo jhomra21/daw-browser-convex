@@ -20,6 +20,8 @@ const snapshot = {
   processors: [],
   automation: [],
   sidechains: [],
+  assets: [],
+  assetFolders: [],
 }
 
 const service = (overrides: Partial<ControlService> = {}): ControlService => ({

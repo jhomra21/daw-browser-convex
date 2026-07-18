@@ -22,7 +22,7 @@ type UploadToR2 = (
   assetKey: string,
   file: File,
   durationSec?: number,
-) => Promise<string | null>
+) => Promise<{ assetKey: string; url: string } | null>
 
 type ConvexClientType = typeof convexClient
 type ConvexApiType = typeof convexApi

@@ -33,6 +33,8 @@ const snapshot = {
   processors: [],
   automation: [],
   sidechains: [],
+  assets: [],
+  assetFolders: [],
 }
 
 const previewRequest = {
@@ -107,14 +109,41 @@ describe("control REST routes", () => {
     expect(response.headers.get("cache-control")).toBe("no-store")
   })
 
-  test("preserves scope boundaries", async () => {
+  test("returns an insufficient-scope challenge for preview and commit", async () => {
     const application = app(async (_request, _environment, scope) => (
       scope === "control:write" ? null : bearer
     ))
-    expect((await application.request("https://control.example/api/control/v1/projects/project-1/preview", {
+    const preview = await application.request("https://control.example/api/control/v1/projects/project-1/preview", {
       method: "POST",
       body: JSON.stringify(previewRequest),
-    })).status).toBe(403)
+    })
+    const commit = await application.request("https://control.example/api/control/v1/projects/project-1/commit", {
+      method: "POST",
+      body: JSON.stringify(commitRequest),
+    })
+    expect(preview.status).toBe(403)
+    expect(commit.status).toBe(403)
+    expect(preview.headers.get("www-authenticate")).toBe(
+      'Bearer error="insufficient_scope", scope="control:write", resource_metadata="https://control.example/.well-known/oauth-protected-resource/api"',
+    )
+  })
+
+  test("requires a bounded multipart length and sends insufficient-scope challenges for assets", async () => {
+    const application = app()
+    expect((await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+      method: "POST",
+      headers: { "Idempotency-Key": "asset-key-1" },
+    })).status).toBe(411)
+
+    const readOnly = app(async (_request, _environment, scope) => (
+      scope === "control:write" ? null : bearer
+    ))
+    const response = await readOnly.request("https://control.example/api/control/v1/projects/project-1/assets", {
+      method: "POST",
+      headers: { "Idempotency-Key": "asset-key-1", "Content-Length": "1" },
+    })
+    expect(response.status).toBe(403)
+    expect(response.headers.get("www-authenticate")).toContain('error="insufficient_scope"')
   })
 
   test("rejects mismatched, malformed, and oversized write requests", async () => {

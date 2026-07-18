@@ -51,6 +51,8 @@ const snapshot = () => ({
   }],
   automation: [],
   sidechains: [],
+  assets: [],
+  assetFolders: [],
 });
 
 const persisted = (id: string) => ({ source: "persisted", id });

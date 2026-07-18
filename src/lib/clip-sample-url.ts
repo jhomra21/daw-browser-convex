@@ -9,9 +9,9 @@ type UploadClipSampleUrlOptions = {
 }
 
 export async function uploadClipSampleUrl(options: UploadClipSampleUrlOptions) {
-  const sampleUrl = await options.uploadToR2(options.projectId, options.assetKey, options.file, options.duration)
-  if (!sampleUrl) {
+  const upload = await options.uploadToR2(options.projectId, options.assetKey, options.file, options.duration)
+  if (!upload) {
     throw new Error('sample-upload-failed')
   }
-  return sampleUrl
+  return upload
 }

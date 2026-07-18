@@ -30,6 +30,7 @@ type ControlProjectSnapshotInput = {
     _id: unknown;
     trackId: unknown;
     name?: string;
+    sourceAssetKey?: string;
     startSec: number;
     duration: number;
     gain?: number;
@@ -81,11 +82,56 @@ type ControlProjectSnapshotInput = {
     targetTrackId: unknown;
     effectInstanceId: string;
   }>;
+  assets: Array<{
+    assetKey: string;
+    name: string;
+    sourceKind: string;
+    mimeType: string;
+    sizeBytes: number;
+    contentSha256: string;
+    duration?: number;
+    sampleRate?: number;
+    channelCount?: number;
+    folderId?: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+  assetFolders: Array<{
+    _id: unknown;
+    name: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
 };
 
 export const compareControlSnapshotText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
 export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => {
+  const assets = [...input.assets]
+    .sort((left, right) => compareControlSnapshotText(left.assetKey, right.assetKey))
+    .map((asset) => ({
+      id: asset.assetKey,
+      name: asset.name,
+      sourceKind: asset.sourceKind,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes,
+      contentSha256: asset.contentSha256,
+      ...(asset.duration === undefined ? {} : { durationSec: asset.duration }),
+      ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
+      ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
+      ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+      createdAt: asset.createdAt,
+      updatedAt: asset.updatedAt,
+    }));
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assetFolders = [...input.assetFolders]
+    .sort((left, right) => compareControlSnapshotText(String(left._id), String(right._id)))
+    .map((folder) => ({
+      id: String(folder._id),
+      name: folder.name,
+      createdAt: folder.createdAt,
+      updatedAt: folder.updatedAt,
+    }));
   const tracks = [...input.tracks]
     .sort((left, right) => left.index - right.index || compareControlSnapshotText(String(left._id), String(right._id)))
     .map((track) => ({
@@ -109,7 +155,10 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
     }));
   const clips = [...input.clips]
     .sort((left, right) => left.startSec - right.startSec || compareControlSnapshotText(String(left._id), String(right._id)))
-    .map((clip) => ({
+    .map((clip) => {
+      const asset = clip.sourceAssetKey ? assetsById.get(clip.sourceAssetKey) : undefined;
+      if (clip.sourceAssetKey && !asset) throw new Error("Audio clip references an unavailable asset.");
+      return {
       id: String(clip._id),
       trackId: String(clip.trackId),
       name: effectiveControlClipName(clip.name),
@@ -126,7 +175,17 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
           notes: canonicalControlMidiNotes(clip.midi.notes),
         }
         : undefined,
-    }));
+      ...(asset === undefined ? {} : {
+        source: {
+          assetId: asset.id,
+          sourceKind: asset.sourceKind,
+          ...(asset.durationSec === undefined ? {} : { durationSec: asset.durationSec }),
+          ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
+          ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
+        },
+      }),
+    };
+    });
   const processors = input.effects.flatMap((effect) => {
     const target = effect.targetType === "master"
       ? { master: true }
@@ -220,5 +279,7 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
     processors,
     automation,
     sidechains,
+    assets,
+    assetFolders,
   });
 };

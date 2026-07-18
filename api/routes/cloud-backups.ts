@@ -1,5 +1,5 @@
 import { api as convexApi } from '../../convex/_generated/api'
-import { isValidR2DeleteKey, parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '@daw-browser/shared'
+import { isValidCloudBackupAssetKey, parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '@daw-browser/shared'
 import type { App } from '../app-types'
 import type { ApiConvexClient } from '../convex-auth'
 import { hashFile } from '../hash-file'
@@ -59,7 +59,7 @@ const readPendingDeletedCloudKeys = (value: unknown, projectId: string) => {
   }
   if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) return null
   const keys = [...new Set(parsed)]
-  return keys.every((key) => isValidR2DeleteKey(projectId, 'backup-asset', key)) ? keys : null
+  return keys.every((key) => isValidCloudBackupAssetKey(projectId, key)) ? keys : null
 }
 
 const ensureCloudProjectWritable = async (input: {

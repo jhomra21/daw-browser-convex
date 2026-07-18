@@ -52,8 +52,37 @@ test('projects complete deterministic clip timing, fades, and MIDI notes', () =>
     effects: [],
     automationEnvelopes: [],
     sidechainRoutes: [],
+    assets: [],
+    assetFolders: [],
   })
   expect(snapshot.clips[0]?.leftPadSec).toBe(0.25)
   expect(snapshot.clips[0]?.fades?.fadeInCurvePosition).toBe(0.2)
   expect(snapshot.clips[0]?.midi?.notes.map((note) => note.pitch)).toEqual([60, 72])
+})
+
+test('projects bounded asset metadata without object locators', () => {
+  const snapshot = projectControlSnapshotV1({
+    project: {
+      projectId: 'project-1', name: 'Project', revision: 2, tempoBpm: 120,
+      timeSignatureNumerator: 4, timeSignatureDenominator: 4, loopEnabled: false,
+      loopStartSec: 0, loopEndSec: 8, updatedAt: 2,
+    },
+    tracks: [],
+    clips: [{
+      _id: 'clip-1', trackId: 'track-1', name: 'Audio', startSec: 0, duration: 1,
+      sourceAssetKey: 'asset-a',
+    }],
+    masterVolume: 0.8,
+    effects: [],
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    assets: [{
+      assetKey: 'asset-a', name: 'Kick.wav', sourceKind: 'upload', mimeType: 'audio/wav',
+      sizeBytes: 12, contentSha256: 'a'.repeat(64), createdAt: 1, updatedAt: 2,
+    }],
+    assetFolders: [],
+  })
+  expect(snapshot.assets[0]).toEqual(expect.objectContaining({ id: 'asset-a', contentSha256: 'a'.repeat(64) }))
+  expect(JSON.stringify(snapshot)).not.toContain('r2Key')
+  expect(snapshot.clips[0]?.source?.assetId).toBe('asset-a')
 })

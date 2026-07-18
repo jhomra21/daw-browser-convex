@@ -5,10 +5,12 @@ import {
   controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryResultSchemaV1,
+  controlRecoveriesResultSchemaV1,
   controlPreviewResultSchemaV1,
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
   parseControlHistoryQueryV1,
+  parseControlRecoveriesQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
@@ -20,6 +22,8 @@ import {
   type ControlErrorV1,
   type ControlHistoryQueryV1,
   type ControlHistoryResultV1,
+  type ControlRecoveriesQueryV1,
+  type ControlRecoveriesResultV1,
   type ControlPreviewRequestV1,
   type ControlPreviewResultV1,
   type ProjectSnapshotV1,
@@ -166,6 +170,14 @@ export const createControlClient = (options: ControlClientOptions) => {
         limit: String(query.limit),
       }).toString()}`
       return request(url, controlHistoryResultSchemaV1)
+    },
+    recoveries: (input: ControlRecoveriesQueryV1): Promise<ControlRecoveriesResultV1> => {
+      const query = parseControlRecoveriesQueryV1(input)
+      const url = `/projects/${encodeURIComponent(query.projectId)}/recoveries?${new URLSearchParams({
+        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+        limit: String(query.limit),
+      }).toString()}`
+      return request(url, controlRecoveriesResultSchemaV1)
     },
   }
 }

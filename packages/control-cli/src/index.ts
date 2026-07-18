@@ -6,6 +6,7 @@ import {
   controlApprovalRequestSchemaV1,
   controlErrorSchemaV1,
   controlHistoryQuerySchemaV1,
+  controlRecoveriesQuerySchemaV1,
   controlPreviewRequestSchemaV1,
   controlSnapshotQuerySchemaV1,
   controlLimitsV1,
@@ -19,6 +20,7 @@ const commandNames = [
   "auth login --base-url <origin>", "auth status", "auth logout", "capabilities",
   "snapshot <project-id>", "preview --request <file|->", "approval --request <file|->", "commit --request <file|->",
   "history <project-id> [--cursor <cursor>] [--limit <number>]",
+  "recoveries <project-id> [--cursor <cursor>] [--limit <number>]",
 ]
 
 type Io = {
@@ -178,13 +180,16 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
         : command === "approval"
           ? await client.requestApproval(controlApprovalRequestSchemaV1.parse(parsed))
           : await client.commit(controlCommitRequestSchemaV1.parse(parsed))
-    } else if (command === "history") {
+    } else if (command === "history" || command === "recoveries") {
       const { projectId, cursor, limit } = historyArguments(commandArguments)
-      data = await client.history(controlHistoryQuerySchemaV1.parse({
+      const query = {
         projectId,
         ...(cursor === undefined ? {} : { cursor }),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
-      }))
+      }
+      data = command === "history"
+        ? await client.history(controlHistoryQuerySchemaV1.parse(query))
+        : await client.recoveries(controlRecoveriesQuerySchemaV1.parse(query))
     } else {
       throw new Error("Unknown command.")
     }

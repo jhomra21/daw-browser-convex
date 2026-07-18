@@ -5,6 +5,7 @@ import {
   controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryResultSchemaV1,
+  controlRecoveriesResultSchemaV1,
   controlLimitsV1,
   controlPreviewResultSchemaV1,
   assetFolderResultSchemaV1,
@@ -12,6 +13,7 @@ import {
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
   parseControlHistoryQueryV1,
+  parseControlRecoveriesQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
@@ -273,6 +275,25 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       })
       const gateway = await createGateway(context, bearer.bearer)
       return context.json(controlHistoryResultSchemaV1.parse(await gateway.query(convexApi.control.historyV1, query)), 200, noStore)
+    } catch (error) {
+      return respondError(context, readControlError(error))
+    }
+  })
+
+  app.get("/api/control/v1/projects/:projectId/recoveries", async (context) => {
+    const bearer = await authenticate(context, "control:read")
+    if (bearer.kind === "rejected") {
+      if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
+      return context.json(bearer.error, 401, { ...noStore, "WWW-Authenticate": controlChallenge(context.req.url) })
+    }
+    try {
+      const query = parseControlRecoveriesQueryV1({
+        projectId: context.req.param("projectId"),
+        ...(context.req.query("cursor") === undefined ? {} : { cursor: context.req.query("cursor") }),
+        ...(context.req.query("limit") === undefined ? {} : { limit: Number(context.req.query("limit")) }),
+      })
+      const gateway = await createGateway(context, bearer.bearer)
+      return context.json(controlRecoveriesResultSchemaV1.parse(await gateway.query(convexApi.control.recoveriesV1, query)), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }

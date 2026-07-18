@@ -198,14 +198,19 @@ export default defineSchema({
     kind: v.union(v.literal("backup-asset"), v.literal("sample"), v.literal("export"), v.literal("project-prefix")),
     attempts: v.number(),
     nextAttemptAt: v.number(),
+    status: v.union(v.literal("pending"), v.literal("claimed"), v.literal("deleted")),
+    claimedAt: v.optional(v.number()),
+    claimToken: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_key", ["r2Key"])
-    .index("by_due", ["nextAttemptAt"])
+    .index("by_status_due", ["status", "nextAttemptAt"])
+    .index("by_status_claimedAt", ["status", "claimedAt"])
     .index("by_room", ["projectId"])
-    .index("by_room_due", ["projectId", "nextAttemptAt"]),
+    .index("by_room_status_due", ["projectId", "status", "nextAttemptAt"]),
 
   sharedOperationResults: defineTable({
     projectId: v.string(),
@@ -251,6 +256,37 @@ export default defineSchema({
     .index("by_project_actor_createdAt", ["projectId", "actorSubject", "createdAt"])
     .index("by_project", ["projectId"])
     .index("by_project_createdAt", ["projectId", "createdAt"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"]),
+
+  controlRecoveries: defineTable({
+    projectId: v.string(),
+    actorSubject: v.string(),
+    sourceCommitId: v.optional(v.id("controlCommits")),
+    sourceActionIndex: v.number(),
+    kind: v.union(
+      v.literal("clip.delete"),
+      v.literal("effect.remove"),
+      v.literal("instrument.remove"),
+      v.literal("arpeggiator.remove"),
+      v.literal("automation.delete"),
+      v.literal("sidechain.remove"),
+      v.literal("asset.delete"),
+    ),
+    payload: v.string(),
+    payloadHash: v.string(),
+    impact: v.object({
+      clips: v.number(),
+      processors: v.number(),
+      automation: v.number(),
+      sidechains: v.number(),
+      assets: v.number(),
+    }),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+  })
+    .index("by_project_createdAt", ["projectId", "createdAt"])
+    .index("by_project_actor_createdAt", ["projectId", "actorSubject", "createdAt"])
     .index("by_project_expiresAt", ["projectId", "expiresAt"]),
 
   effects: defineTable({

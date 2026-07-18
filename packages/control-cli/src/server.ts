@@ -18,6 +18,7 @@ export const startControlMcp = async () => {
     requestApproval: client.requestApproval,
     commit: client.commit,
     history: client.history,
+    recoveries: client.recoveries,
   }
   const server = createControlMcpServer(service, {
     authorize: (scope) => scope === "control:read" || credentials.scopes.includes("control:write"),

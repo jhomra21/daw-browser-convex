@@ -9,6 +9,7 @@ import {
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
   normalizeMasterVolume,
+  normalizePersistedInstrumentParams,
   normalizeTrackRouting,
   normalizeTrackInstrumentParams,
   normalizeAudioWarp,
@@ -343,6 +344,7 @@ const validateAutomationTarget = (
 export const planControlRequestV1 = (
   base: ProjectSnapshotV1,
   request: PlannerRequest,
+  trustedRecoveries: ReadonlyMap<string, { payload: { kind: string; data: any } }> = new Map(),
 ): ControlPlanV1 => {
   if (base.project.id !== request.projectId) {
     planError(0, 'not-found', 'Project snapshot does not match the request project.')
@@ -1032,6 +1034,146 @@ export const planControlRequestV1 = (
         const index = snapshot.sidechains.findIndex((entry) => entry.targetTrackId === target.id && entry.effectInstanceId === effectInstanceId)
         if (index < 0) planError(actionIndex, 'not-found', 'Sidechain route was not found.')
         snapshot.sidechains.splice(index, 1)
+        changed = true
+        break
+      }
+      case 'recovery.restore': {
+        const recovery = trustedRecoveries.get(action.recovery.id)
+        if (!recovery) planError(actionIndex, 'not-found', 'Recovery is unavailable.')
+        const availableRecovery = recovery ?? planError(actionIndex, 'not-found', 'Recovery is unavailable.')
+        const data = availableRecovery.payload.data
+        if (availableRecovery.payload.kind === 'clip.delete') {
+          const track = tracks.get(String(data.clip.trackId))
+          if (!track) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+          if (clips.has(String(data.clipId))) planError(actionIndex, 'validation', 'Recovery clip collides with current state.')
+          const id = `recovery:clip:${action.recovery.id}`
+          const clip = {
+            id,
+            trackId: data.clip.trackId,
+            name: data.clip.name ?? 'Recovered clip',
+            startSec: data.clip.startSec,
+            duration: data.clip.duration,
+            ...(data.clip.gain === undefined ? {} : { gain: data.clip.gain }),
+            leftPadSec: data.clip.leftPadSec ?? 0,
+            bufferOffsetSec: data.clip.bufferOffsetSec ?? 0,
+            midiOffsetBeats: data.clip.midiOffsetBeats ?? 0,
+            ...(data.clip.fades === undefined ? {} : { fades: data.clip.fades }),
+            ...(data.clip.audioWarp === undefined ? {} : { audioWarp: data.clip.audioWarp }),
+            ...(data.clip.color === undefined ? {} : { color: data.clip.color }),
+            ...(data.clip.midi === undefined ? {} : { midi: data.clip.midi }),
+            ...(data.clip.sourceAssetKey === undefined ? {} : {
+              source: {
+                assetId: data.clip.sourceAssetKey,
+                sourceKind: data.clip.sourceKind,
+                durationSec: data.clip.sourceDurationSec,
+                sampleRate: data.clip.sourceSampleRate,
+                channelCount: data.clip.sourceChannelCount,
+              },
+            }),
+          }
+          clips.set(id, clip)
+          snapshot.clips.push(clip)
+        } else if (availableRecovery.payload.kind === 'asset.delete') {
+          const id = String(data.asset.assetKey)
+          if (assets.has(id)) planError(actionIndex, 'validation', 'Recovery asset key collides with current state.')
+          assets.set(id, {
+            id,
+            name: String(data.asset.name),
+            sourceKind: data.asset.sourceKind,
+            mimeType: data.asset.mimeType,
+            sizeBytes: Number(data.asset.sizeBytes),
+            contentSha256: data.asset.contentSha256,
+            ...(data.asset.duration === undefined ? {} : { durationSec: Number(data.asset.duration) }),
+            ...(data.asset.sampleRate === undefined ? {} : { sampleRate: Number(data.asset.sampleRate) }),
+            ...(data.asset.channelCount === undefined ? {} : { channelCount: Number(data.asset.channelCount) }),
+            ...(data.asset.folderId === undefined ? {} : { folderId: String(data.asset.folderId) }),
+            createdAt: Number(data.asset.createdAt),
+            updatedAt: Number(data.asset.updatedAt),
+          })
+          snapshot.assets = Array.from(assets.values())
+        } else if (availableRecovery.payload.kind === 'automation.delete') {
+          const row = data.automation
+          if (row.targetKind === 'track' && !tracks.has(String(row.trackId))) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+          const target = row.targetKind === 'master' ? { master: true } : { trackId: String(row.trackId) }
+          const effect = row.effectInstanceId === undefined ? undefined : Array.from(processors.values()).find((entry) => (
+            same(entry.target, target) && entry.instanceId === row.effectInstanceId
+          ))
+          validateAutomationTarget({ parameterId: row.parameterId }, target, effect, processors, actionIndex)
+          if (snapshot.automation.some((entry) => same(entry.target, target) && entry.effectInstanceId === row.effectInstanceId && entry.parameterId === row.parameterId)) {
+            planError(actionIndex, 'validation', 'Recovery automation target collides with current state.')
+          }
+          snapshot.automation.push({ target, ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: String(row.effectInstanceId) }), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
+        } else if (availableRecovery.payload.kind === 'sidechain.remove') {
+          const row = data.sidechain
+          if (!tracks.has(String(row.sourceTrackId)) || !tracks.has(String(row.targetTrackId))) planError(actionIndex, 'not-found', 'Recovery sidechain track is unavailable.')
+          if (!Array.from(processors.values()).some((entry) => 'trackId' in entry.target && entry.target.trackId === String(row.targetTrackId) && entry.instanceId === row.effectInstanceId)) {
+            planError(actionIndex, 'not-found', 'Recovery sidechain effect is unavailable.')
+          }
+          if (snapshot.sidechains.some((entry) => entry.targetTrackId === String(row.targetTrackId) && entry.effectInstanceId === row.effectInstanceId)) {
+            planError(actionIndex, 'validation', 'Recovery sidechain target collides with current state.')
+          }
+          snapshot.sidechains.push({ sourceTrackId: String(row.sourceTrackId), targetTrackId: String(row.targetTrackId), effectInstanceId: String(row.effectInstanceId) })
+        } else {
+          for (const item of data.effects) {
+            const row = item.effect
+            const target = row.target.kind === 'master' ? { master: true } : { trackId: row.target.trackId }
+            if ('trackId' in target && !tracks.has(target.trackId)) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+            const instrument = normalizePersistedInstrumentParams(
+              row.processor.kind,
+              row.instanceId,
+              row.processor.params,
+            )
+            const type = row.processor.kind === 'synth' ? 'instrument' : row.processor.kind
+            const singleton = type === 'instrument' || type === 'arpeggiator'
+            const collision = Array.from(processors.values()).some((entry) => (
+              same(entry.target, target)
+              && (
+                singleton
+                  ? entry.processor.kind === type
+                  : entry.processor.kind === type && entry.instanceId === row.instanceId
+              )
+            ))
+            if (collision) planError(actionIndex, 'validation', 'Recovery processor collides with current state.')
+            const index = row.index
+            for (const entry of processors.values()) {
+              if (same(entry.target, target) && entry.index >= index) entry.index += 1
+            }
+            const id = `recovery:effect:${action.recovery.id}:${item.id}`
+            const processor = {
+              id,
+              target,
+              ...(row.instanceId === undefined ? {} : { instanceId: row.instanceId }),
+              index,
+              processor: {
+                kind: type,
+                params: instrument ?? row.processor.params,
+              },
+            }
+            processors.set(id, processor)
+            snapshot.processors.push(processor)
+          }
+          for (const item of data.automation) {
+            const row = item.automation
+            const target = row.targetKind === 'master' ? { master: true } : { trackId: row.trackId }
+            if ('trackId' in target && !tracks.has(target.trackId)) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+            const effect = row.effectInstanceId === undefined ? undefined : Array.from(processors.values()).find((entry) => (
+              same(entry.target, target) && entry.instanceId === row.effectInstanceId
+            ))
+            validateAutomationTarget({ parameterId: row.parameterId }, target, effect, processors, actionIndex)
+            if (snapshot.automation.some((entry) => same(entry.target, target) && entry.effectInstanceId === row.effectInstanceId && entry.parameterId === row.parameterId)) {
+              planError(actionIndex, 'validation', 'Recovery automation target collides with current state.')
+            }
+            snapshot.automation.push({ target, ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: String(row.effectInstanceId) }), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
+          }
+          for (const item of data.sidechains) {
+            const row = item.sidechain
+            if (!tracks.has(row.sourceTrackId) || !tracks.has(row.targetTrackId)) planError(actionIndex, 'not-found', 'Recovery sidechain track is unavailable.')
+            if (snapshot.sidechains.some((entry) => entry.targetTrackId === row.targetTrackId && entry.effectInstanceId === row.effectInstanceId)) {
+              planError(actionIndex, 'validation', 'Recovery sidechain target collides with current state.')
+            }
+            snapshot.sidechains.push({ sourceTrackId: row.sourceTrackId, targetTrackId: row.targetTrackId, effectInstanceId: row.effectInstanceId })
+          }
+        }
         changed = true
         break
       }

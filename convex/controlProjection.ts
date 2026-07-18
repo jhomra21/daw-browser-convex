@@ -9,7 +9,7 @@ import type { MergedTrackDoc } from "./mixerChannels";
 import {
   getAutomationParameterDescriptor,
   normalizeAutomationPoints,
-  normalizeTrackInstrumentParams,
+  normalizePersistedInstrumentParams,
 } from "@daw-browser/shared";
 
 type ControlProjectSnapshotInput = {
@@ -205,15 +205,11 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
         ? { trackId: String(effect.trackId) }
         : undefined;
     if (!target) return [];
-    const instrument = effect.type === "instrument"
-      ? normalizeTrackInstrumentParams(effect.params)
-      : effect.type === "synth"
-        ? normalizeTrackInstrumentParams({
-            kind: "synth",
-            instanceId: effect.instanceId,
-            params: effect.params,
-          })
-        : undefined;
+    const instrument = normalizePersistedInstrumentParams(
+      effect.type,
+      effect.instanceId,
+      effect.params,
+    );
     const processor = instrument
       ? { kind: "instrument", params: instrument }
       : effect.type === "arpeggiator"

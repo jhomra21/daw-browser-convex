@@ -31,6 +31,7 @@ const service = (overrides: Partial<ControlService> = {}): ControlService => ({
   requestApproval: async () => ({ version: "v1", approvalToken: "a".repeat(32), requestDigest: "0".repeat(64), baseRevision: 1, actionIndexes: [0], expiresAt: 2 }),
   commit: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, idempotencyReplay: false, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
   history: async () => ({ entries: [], continueCursor: "cursor-1", isDone: true }),
+  recoveries: async () => ({ entries: [], continueCursor: "cursor-1", isDone: true }),
   ...overrides,
 })
 
@@ -63,7 +64,7 @@ const request = async (
 }
 
 describe("control MCP tools", () => {
-  test("lists exactly the six canonical tools with accurate annotations", async () => {
+  test("lists exactly the seven canonical tools with accurate annotations", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
@@ -73,6 +74,7 @@ describe("control MCP tools", () => {
       "control_commit",
       "control_request_approval",
       "control_history",
+      "control_recoveries",
     ])
     expect(tools.find((tool: { name: string }) => tool.name === "control_commit").annotations).toEqual({
       readOnlyHint: false,
@@ -93,6 +95,12 @@ describe("control MCP tools", () => {
       openWorldHint: false,
     })
     expect(tools.find((tool: { name: string }) => tool.name === "control_snapshot").inputSchema.additionalProperties).toBeFalse()
+    expect(tools.find((tool: { name: string }) => tool.name === "control_recoveries").annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    })
   })
 
   test("returns structured and text content with canonical parity", async () => {
@@ -114,6 +122,7 @@ describe("control MCP tools", () => {
       preview: async () => { calls += 1; return {} },
       commit: async () => { calls += 1; return {} },
       history: async () => { calls += 1; return {} },
+      recoveries: async () => { calls += 1; return {} },
     })
     for (const [name, arguments_] of [
       ["control_capabilities", { unexpected: true }],
@@ -121,6 +130,7 @@ describe("control MCP tools", () => {
       ["control_preview", {}],
       ["control_commit", {}],
       ["control_history", {}],
+      ["control_recoveries", {}],
     ]) {
       const response = await request({
         jsonrpc: "2.0",

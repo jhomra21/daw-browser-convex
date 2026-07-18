@@ -55,6 +55,7 @@ import { deleteSampleRow, findSampleRow } from "./sampleRows";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { requireProjectRow } from "./projectRows";
 import { enqueueR2DeleteRows } from "./r2Deletes";
+import { captureRecoveryPayload, createRecovery, isRecoverableAction, restoreRecovery } from "./controlRecovery";
 
 const requiredId = (ctx: any, table: string, id: string) => {
   const normalized = ctx.db.normalizeId(table, id)
@@ -98,16 +99,39 @@ const requireCompleteAsset = async (
 
 export async function executeControlPlanV1(
   ctx: any,
-  input: { projectId: string; actorId: string; plan: ControlPlanV1 },
+  input: { projectId: string; actorId: string; plan: ControlPlanV1; recoveries?: Map<string, any> },
 ) {
   const trackRefs = new Map<string, unknown>()
   const clipRefs = new Map<string, unknown>()
   const effectRefs = new Map<string, unknown>()
   const resolvedRefs: Array<{ entity: "track" | "clip" | "effect"; clientRef: string; id: string; persisted: true }> = []
+  const recoveries: Array<{ actionIndex: number; id: string; kind: string; expiresAt: number }> = []
+  const restored: Array<{ actionIndex: number; recoveryId: string; entities: any[] }> = []
+  const recoveryExpiryByAction = new Map<number, number>()
   let changed = false
   for (const entry of input.plan.actions) {
     const action = entry.action
     let result: { changed: boolean } = { changed: false }
+    if (entry.changed && entry.destructivePersisted && isRecoverableAction(action)) {
+      const payload = await captureRecoveryPayload(ctx, {
+        projectId: input.projectId,
+        action,
+        resolveRef: (table, ref) => resolveRef(ctx, table, table === "tracks" ? trackRefs : table === "clips" ? clipRefs : effectRefs, ref),
+      })
+      if (payload) {
+        const recovery = await createRecovery(ctx, {
+          projectId: input.projectId,
+          actorSubject: input.actorId,
+          sourceActionIndex: entry.actionIndex,
+          kind: action.kind,
+          data: payload,
+        })
+        if (recovery) {
+          recoveries.push({ actionIndex: entry.actionIndex, ...recovery })
+          recoveryExpiryByAction.set(entry.actionIndex, recovery.expiresAt)
+        }
+      }
+    }
     switch (action.kind) {
       case "project.rename":
         result = await setProjectNameRow(ctx, input.projectId, action.name)
@@ -338,7 +362,20 @@ export async function executeControlPlanV1(
           storageNamespace: project.storageNamespace,
           keys: [deleted.asset.r2Key],
           kind: "sample",
+          notBefore: recoveryExpiryByAction.get(entry.actionIndex),
         })
+        result = { changed: true }
+        break
+      }
+      case "recovery.restore": {
+        const recovery = input.recoveries?.get(action.recovery.id)
+        if (!recovery) throw new Error("Recovery is unavailable.")
+        const restoredResult = await restoreRecovery(ctx, {
+          projectId: input.projectId,
+          recovery,
+          actionIndex: entry.actionIndex,
+        })
+        restored.push(restoredResult)
         result = { changed: true }
         break
       }
@@ -471,5 +508,5 @@ export async function executeControlPlanV1(
     const row = await ctx.db.get(requiredId(ctx, table, ref.id))
     if (row) persistedRefs.push(ref)
   }
-  return { changed, resolvedRefs: persistedRefs }
+  return { changed, resolvedRefs: persistedRefs, recoveries, restored }
 }

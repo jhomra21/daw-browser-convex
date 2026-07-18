@@ -10,6 +10,7 @@ type R2DeleteQueueRow = {
   projectId: string
   r2Key: string
   kind: R2DeleteKind
+  claimToken?: string
 }
 
 type R2DeleteDrainSummary = {
@@ -42,9 +43,11 @@ export const deleteR2Keys = async (bucket: R2Bucket, keys: string[]) => {
 }
 
 const markFailed = async (convex: ApiConvexClient, row: R2DeleteQueueRow, error: unknown) => {
+  if (!row.claimToken) return
   await convex.mutation(convexApi.r2Deletes.markFailed, {
     projectId: row.projectId,
     id: row._id,
+    claimToken: row.claimToken,
     error: error instanceof Error ? error.message : 'R2 delete failed',
   })
 }
@@ -54,6 +57,16 @@ const drainR2DeleteRows = async (input: {
   bucket: R2Bucket
   rows: R2DeleteQueueRow[]
 }) => {
+  const rowsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
+  for (const row of input.rows) {
+    const ids = rowsByProject.get(row.projectId) ?? []
+    ids.push(row._id)
+    rowsByProject.set(row.projectId, ids)
+  }
+  const claimed = (await Promise.all(Array.from(rowsByProject, ([projectId, ids]) => (
+    input.convex.mutation(convexApi.r2Deletes.claimRows, { projectId, ids, now: Date.now() })
+  )))).flat()
+  if (claimed.length === 0) return { processed: 0, deleted: 0, deletedKeys: [] }
   const deletedIdsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
   const deletedKeys: string[] = []
   const recordDeleted = (row: R2DeleteQueueRow) => {
@@ -67,7 +80,7 @@ const drainR2DeleteRows = async (input: {
   }
   const objectRows: R2DeleteQueueRow[] = []
   const prefixRows: R2DeleteQueueRow[] = []
-  for (const row of input.rows) {
+  for (const row of claimed) {
     if (row.kind === 'project-prefix') prefixRows.push(row)
     else objectRows.push(row)
   }
@@ -97,9 +110,15 @@ const drainR2DeleteRows = async (input: {
     }
   }
   await Promise.all(Array.from(deletedIdsByProject).map(([projectId, ids]) => (
-    input.convex.mutation(convexApi.r2Deletes.markDeleted, { projectId, ids })
+    input.convex.mutation(convexApi.r2Deletes.markDeleted, {
+      projectId,
+      claims: ids.flatMap((id) => {
+        const row = claimed.find((candidate) => candidate._id === id)
+        return row?.claimToken ? [{ id, claimToken: row.claimToken }] : []
+      }),
+    })
   )))
-  return { processed: input.rows.length, deleted: deletedKeys.length, deletedKeys }
+  return { processed: claimed.length, deleted: deletedKeys.length, deletedKeys }
 }
 
 export const drainR2DeleteQueue = async (input: {

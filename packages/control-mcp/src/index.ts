@@ -11,6 +11,8 @@ import {
   controlErrorSchemaV1,
   controlHistoryQuerySchemaV1,
   controlHistoryResultSchemaV1,
+  controlRecoveriesQuerySchemaV1,
+  controlRecoveriesResultSchemaV1,
   controlPreviewRequestSchemaV1,
   controlPreviewResultSchemaV1,
   controlSnapshotQuerySchemaV1,
@@ -24,6 +26,8 @@ import {
   type ControlSnapshotQueryV1,
   type ControlHistoryResultV1,
   type ControlHistoryQueryV1,
+  type ControlRecoveriesQueryV1,
+  type ControlRecoveriesResultV1,
   type ControlPreviewResultV1,
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
@@ -36,6 +40,7 @@ export type ControlService = {
   commit: (input: ControlCommitRequestV1) => Promise<ControlCommitResultV1>;
   requestApproval: (input: ControlApprovalRequestV1) => Promise<ControlApprovalResultV1>;
   history: (input: ControlHistoryQueryV1) => Promise<ControlHistoryResultV1>;
+  recoveries: (input: ControlRecoveriesQueryV1) => Promise<ControlRecoveriesResultV1>;
 }
 
 export type ControlMcpScope = "control:read" | "control:write"
@@ -146,6 +151,9 @@ export const createControlMcpServer = (
   const history = (input: unknown) => (
     execute(input, controlHistoryQuerySchemaV1.parse, service.history, controlHistoryResultSchemaV1.parse)
   )
+  const recoveries = (input: unknown) => (
+    execute(input, controlRecoveriesQuerySchemaV1.parse, service.recoveries, controlRecoveriesResultSchemaV1.parse)
+  )
 
   server.registerTool("control_capabilities", {
     description: "Return the supported DAW control API capabilities.",
@@ -188,6 +196,12 @@ export const createControlMcpServer = (
     outputSchema: controlHistoryResultSchemaV1,
     annotations: annotations.read,
   }, history)
+  server.registerTool("control_recoveries", {
+    description: "Return active recovery descriptors for a DAW project.",
+    inputSchema: controlRecoveriesQuerySchemaV1,
+    outputSchema: controlRecoveriesResultSchemaV1,
+    annotations: annotations.read,
+  }, recoveries)
 
   server.server.removeRequestHandler("tools/call")
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -198,6 +212,7 @@ export const createControlMcpServer = (
     if (request.params.name === "control_commit") return commit(input)
     if (request.params.name === "control_request_approval") return requestApproval(input)
     if (request.params.name === "control_history") return history(input)
+    if (request.params.name === "control_recoveries") return recoveries(input)
     return failure(invalidRequest())
   })
 

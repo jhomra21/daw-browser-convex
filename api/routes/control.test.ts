@@ -57,7 +57,7 @@ const previewResult = {
   changeSummary: { actionCount: 1, changes: [] },
 }
 
-const commitResult = { ...previewResult, idempotencyReplay: false }
+const commitResult = { ...previewResult, idempotencyReplay: false, recoveries: [], restored: [] }
 
 const history = { entries: [], continueCursor: "next", isDone: true }
 

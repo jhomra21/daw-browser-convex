@@ -263,6 +263,8 @@ test('validates strict preview, commit, and error result envelopes', () => {
     revision: 5,
     applied: true,
     idempotencyReplay: false,
+    recoveries: [],
+    restored: [],
   }).revision).toBe(5)
 
   for (const code of [
@@ -555,7 +557,7 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
   expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
-  expect(controlCapabilitiesV1.actionKinds).toHaveLength(37)
+  expect(controlCapabilitiesV1.actionKinds).toHaveLength(38)
   expect(controlCapabilitiesV1.actionKinds).toEqual([
     'project.rename', 'project.settings.set', 'track.create', 'track.rename',
     'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
@@ -566,7 +568,7 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
     'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
     'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
     'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
-    'asset.delete',
+    'asset.delete', 'recovery.restore',
   ])
   expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')

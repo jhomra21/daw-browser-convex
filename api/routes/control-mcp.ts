@@ -101,6 +101,7 @@ const controlGateway = async (context: ApiContext, bearer: ControlBearer): Promi
     commit: async (input) => await gateway.mutation(convexApi.control.commitV1, { request: input }),
     requestApproval: async (input) => await gateway.mutation(convexApi.control.requestApprovalV1, { request: input }),
     history: async (input) => await gateway.query(convexApi.control.historyV1, input),
+    recoveries: async (input) => await gateway.query(convexApi.control.recoveriesV1, input),
   }
 }
 
@@ -121,6 +122,7 @@ const lazyService = (
     commit: async (input) => (await resolveGateway()).commit(input),
     requestApproval: async (input) => (await resolveGateway()).requestApproval(input),
     history: async (input) => (await resolveGateway()).history(input),
+    recoveries: async (input) => (await resolveGateway()).recoveries(input),
   }
 }
 

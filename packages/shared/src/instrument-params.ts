@@ -131,3 +131,15 @@ export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentP
     params: normalizeDrumRackParams(isRecord(value.params) ? value.params : {}),
   }
 }
+
+export const normalizePersistedInstrumentParams = (
+  kind: unknown,
+  instanceId: unknown,
+  params: unknown,
+): TrackInstrumentParams | undefined => {
+  if (kind === 'instrument') return normalizeTrackInstrumentParams(params)
+  if (kind === 'synth') {
+    return normalizeTrackInstrumentParams({ kind: 'synth', instanceId, params })
+  }
+  return undefined
+}

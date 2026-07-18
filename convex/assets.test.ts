@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
 import { api } from "./_generated/api";
 import schema from "./schema";
+import { enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
 
 const projectId = "project-assets";
 const owner = "asset-owner";
@@ -164,4 +165,75 @@ test("failed uploads protect their folders until retried", async () => {
     projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12,
     folderId: folder.folder.id,
   })).resolves.toMatchObject({ status: "pending" });
+});
+
+test("R2 deletion rows claim atomically, complete, and reactivate from tombstones", async () => {
+  const t = await setup();
+  const project = await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  if (!project) throw new Error("Project missing.");
+  const r2Key = `asset-namespaces/${project.storageNamespace}/samples/recovery-queue-test`;
+  await t.run(async (ctx) => {
+    await enqueueR2DeleteRows(ctx, {
+      projectId,
+      storageNamespace: project.storageNamespace,
+      keys: [r2Key],
+      kind: "sample",
+    });
+  });
+  const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+  const due = await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now: Date.now(), limit: 10 });
+  expect(due).toHaveLength(1);
+  const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: due.map((row) => row._id), now: Date.now(),
+  });
+  expect(claimed).toHaveLength(1);
+  expect((await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: due.map((row) => row._id), now: Date.now(),
+  }))).toEqual([]);
+  await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
+    projectId,
+    claims: claimed.flatMap((row) => row.claimToken ? [{ id: row._id, claimToken: row.claimToken }] : []),
+  });
+  expect(await t.run(async (ctx) => await hasR2DeleteRow(ctx, { projectId, r2Key }))).toBe(false);
+  await t.run(async (ctx) => {
+    await enqueueR2DeleteRows(ctx, {
+      projectId,
+      storageNamespace: project.storageNamespace,
+      keys: [r2Key],
+      kind: "sample",
+    });
+  });
+  expect(await t.run(async (ctx) => await hasR2DeleteRow(ctx, { projectId, r2Key }))).toBe(true);
+});
+
+test("expired R2 claims are re-leased and reject stale completion", async () => {
+  const t = await setup();
+  const project = await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  if (!project) throw new Error("Project missing.");
+  const r2Key = `asset-namespaces/${project.storageNamespace}/samples/stale-claim`;
+  await t.run(async (ctx) => await enqueueR2DeleteRows(ctx, {
+    projectId, storageNamespace: project.storageNamespace, keys: [r2Key], kind: "sample",
+  }));
+  const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+  const now = Date.now();
+  const first = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId,
+    ids: (await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now, limit: 1 })).map((row) => row._id),
+    now,
+  });
+  const original = first[0];
+  if (!original?.claimToken) throw new Error("Expected initial claim.");
+  const reclaimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: [original._id], now: now + 5 * 60 * 1000,
+  });
+  const current = reclaimed[0];
+  if (!current?.claimToken) throw new Error("Expected reclaimed claim.");
+  await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
+    projectId, claims: [{ id: original._id, claimToken: original.claimToken }],
+  });
+  const row = await t.run(async (ctx) => await ctx.db.get(original._id));
+  expect(row?.status).toBe("claimed");
+  expect(row?.claimToken).toBe(current.claimToken);
 });

@@ -61,7 +61,12 @@ describe("control SDK", () => {
         if (urls.at(-1)?.endsWith("/capabilities")) return Response.json(controlCapabilitiesV1)
         if (urls.at(-1)?.endsWith("/snapshot")) return Response.json(snapshot)
         if (urls.at(-1)?.endsWith("/preview")) return Response.json(preview)
-        if (urls.at(-1)?.endsWith("/commit")) return Response.json({ ...preview, idempotencyReplay: false })
+        if (urls.at(-1)?.endsWith("/commit")) return Response.json({
+          ...preview,
+          idempotencyReplay: false,
+          recoveries: [],
+          restored: [],
+        })
         return Response.json({ entries: [], continueCursor: "next", isDone: true })
       },
     })

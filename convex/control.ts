@@ -5,10 +5,13 @@ import {
   controlErrorSchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryResultSchemaV1,
+  controlRecoveriesResultSchemaV1,
   controlPreviewResultSchemaV1,
   controlRequestDigestInputV1,
   controlRequestDigestV1,
+  findDuplicateRecoveryActionIndexV1,
   parseControlHistoryQueryV1,
+  parseControlRecoveriesQueryV1,
   assertControlSerializedBodyV1,
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
@@ -25,6 +28,8 @@ import { ControlDomainError, preflightControlRequestV1 } from "./controlPrefligh
 import { readProjectControlSnapshotV1 } from "./controlSnapshot";
 import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
+import { loadRecovery } from "./controlRecovery";
+import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 
 const maxControlCommitsPerProject = 1000;
 const controlCommitMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
@@ -90,27 +95,39 @@ const failure = (
 }
 
 const parsePreview = (input: unknown) => {
+  let parsed: ReturnType<typeof parseControlPreviewRequestV1>
   try {
-    return parseControlPreviewRequestV1(input)
+    parsed = parseControlPreviewRequestV1(input)
   } catch {
     return failure("invalid-request", "Invalid control preview request.")
   }
+  const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
+  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  return parsed
 }
 
 const parseCommit = (input: unknown) => {
+  let parsed: ReturnType<typeof parseControlCommitRequestV1>
   try {
-    return parseControlCommitRequestV1(input)
+    parsed = parseControlCommitRequestV1(input)
   } catch {
     return failure("invalid-request", "Invalid control commit request.")
   }
+  const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
+  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  return parsed
 }
 
 const parseApproval = (input: unknown) => {
+  let parsed: ReturnType<typeof parseControlApprovalRequestV1>
   try {
-    return parseControlApprovalRequestV1(input)
+    parsed = parseControlApprovalRequestV1(input)
   } catch {
     return failure("invalid-request", "Invalid control approval request.")
   }
+  const duplicate = findDuplicateRecoveryActionIndexV1(parsed.actions)
+  if (duplicate !== undefined) failure("validation", "A recovery can only be restored once per request.", duplicate)
+  return parsed
 }
 
 const sha256 = async (value: string) => {
@@ -175,6 +192,13 @@ const parseHistoryQuery = (input: unknown) => {
     return failure("invalid-request", "Invalid control history request.")
   }
 }
+const parseRecoveriesQuery = (input: unknown) => {
+  try {
+    return parseControlRecoveriesQueryV1(input)
+  } catch {
+    return failure("invalid-request", "Invalid recovery list request.")
+  }
+}
 
 const paginateControlHistory = async (
   ctx: any,
@@ -192,6 +216,16 @@ const paginateControlHistory = async (
     return failure("invalid-request", "Invalid control history cursor.")
   }
 }
+const paginateRecoveries = async (ctx: any, projectId: string, limit: number, cursor: string | undefined) => {
+  try {
+    return await ctx.db.query("controlRecoveries")
+      .withIndex("by_project_createdAt", (index: any) => index.eq("projectId", projectId))
+      .order("desc")
+      .paginate({ numItems: limit, cursor: cursor ?? null })
+  } catch {
+    return failure("invalid-request", "Invalid recovery list cursor.")
+  }
+}
 
 const boundedActorClaim = (value: string) => {
   if (value.length > 0 && value.length <= 256) return value
@@ -204,9 +238,13 @@ const controlActor = (identity: Awaited<ReturnType<typeof requireAuthenticatedId
   tokenIdentifier: boundedActorClaim(identity.dawControlActorTokenIdentifier ?? identity.tokenIdentifier),
 })
 
-const plan = (snapshot: Parameters<typeof planControlRequestV1>[0], request: Parameters<typeof planControlRequestV1>[1]) => {
+const plan = (
+  snapshot: Parameters<typeof planControlRequestV1>[0],
+  request: Parameters<typeof planControlRequestV1>[1],
+  recoveries: ReadonlyMap<string, { payload: { kind: string; data: any } }> = new Map(),
+) => {
   try {
-    return planControlRequestV1(snapshot, request)
+    return planControlRequestV1(snapshot, request, recoveries)
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && "message" in error && "actionIndex" in error) {
       const value = error
@@ -224,6 +262,8 @@ const result = (
   controlPlan: ReturnType<typeof planControlRequestV1>,
   idempotencyReplay: boolean,
   resolvedRefs: ResolvedRefV1[] = controlPlan.resolvedRefs,
+  recoveries: Array<{ actionIndex: number; id: string; kind: string; expiresAt: number }> = [],
+  restored: Array<{ actionIndex: number; recoveryId: string; entities: any[] }> = [],
 ) => controlCommitResultSchemaV1.parse({
   version: "v1",
   projectId: request.projectId,
@@ -235,7 +275,48 @@ const result = (
   warnings: controlPlan.warnings,
   changeSummary: controlPlan.changeSummary,
   idempotencyReplay,
+  recoveries,
+  restored,
 })
+
+const requestedRecoveries = async (ctx: any, request: { projectId: string; actions: any[] }) => {
+  const entries = await Promise.all(request.actions.flatMap((action) => (
+    action.kind === "recovery.restore"
+      ? [loadRecovery(ctx, { projectId: request.projectId, id: action.recovery.id })]
+      : []
+  )))
+  return new Map(entries.map((entry) => [String(entry.row._id), entry]));
+}
+
+const recoveryTrackIds = (recovery: any): string[] => {
+  const data = recovery.payload.data
+  if (recovery.payload.kind === "clip.delete") return [String(data.clip.trackId)]
+  if (recovery.payload.kind === "automation.delete") return data.automation.trackId ? [String(data.automation.trackId)] : []
+  if (recovery.payload.kind === "sidechain.remove") return [String(data.sidechain.sourceTrackId), String(data.sidechain.targetTrackId)]
+  if (recovery.payload.kind === "asset.delete") return []
+  return [
+    ...(data.effects?.flatMap((item: any) => item.effect.target.kind === "track" ? [item.effect.target.trackId] : []) ?? []),
+    ...(data.automation?.flatMap((item: any) => item.automation.trackId === undefined ? [] : [item.automation.trackId]) ?? []),
+    ...(data.sidechains?.flatMap((item: any) => [item.sidechain.sourceTrackId, item.sidechain.targetTrackId]) ?? []),
+  ]
+}
+
+const preflightRecoveryLocks = async (
+  ctx: any,
+  input: { projectId: string; actorId: string; actions: any[]; recoveries: Map<string, any> },
+) => {
+  const tracks = await listProjectTracksWithMixerChannels(ctx, input.projectId)
+  const locks = new Map(tracks.map((track) => [String(track._id), track.lockedBy]))
+  for (const [actionIndex, action] of input.actions.entries()) {
+    if (action.kind !== "recovery.restore") continue
+    for (const trackId of new Set(recoveryTrackIds(input.recoveries.get(action.recovery.id)))) {
+      const lockedBy = locks.get(trackId)
+      if (lockedBy && lockedBy !== input.actorId) {
+        throw new ControlDomainError("forbidden", "Affected track is locked by another user.", actionIndex, { trackId, lockedBy })
+      }
+    }
+  }
+}
 
 export const previewV1 = query({
   args: { request: v.any() },
@@ -260,9 +341,22 @@ export const previewV1 = query({
       failure("revision-conflict", "Project revision does not match the expected revision.")
     }
     const requestDigest = await controlRequestDigestV1(parsed)
-    const controlPlan = plan(snapshot, parsed)
+    let recoveries: Map<string, any>
+    try {
+      recoveries = await requestedRecoveries(ctx, parsed)
+      await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: userId, actions: parsed.actions, recoveries })
+    } catch (error) {
+      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      return failure("not-found", "Recovery is unavailable.")
+    }
+    const controlPlan = plan(snapshot, parsed, recoveries)
     const approval = controlApprovalRequirementV1(controlPlan, requestDigest)
-    const { idempotencyReplay: _idempotencyReplay, ...preview } = result(requestDigest, parsed, controlPlan, false)
+    const {
+      idempotencyReplay: _idempotencyReplay,
+      recoveries: _recoveries,
+      restored: _restored,
+      ...preview
+    } = result(requestDigest, parsed, controlPlan, false)
     return controlPreviewResultSchemaV1.parse({
       ...preview,
       approval,
@@ -291,7 +385,15 @@ export const requestApprovalV1 = mutation({
       return failure("revision-conflict", "Project revision does not match the expected revision.")
     }
     const requestDigest = await controlRequestDigestV1(parsed)
-    const controlPlan = plan(snapshot, parsed)
+    let recoveries: Map<string, any>
+    try {
+      recoveries = await requestedRecoveries(ctx, parsed)
+      await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: actor.subject, actions: parsed.actions, recoveries })
+    } catch (error) {
+      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      return failure("not-found", "Recovery is unavailable.")
+    }
+    const controlPlan = plan(snapshot, parsed, recoveries)
     const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
     if (!requirement.required) return failure("validation", "Approval requires a material destructive action.")
     await pruneApprovals(ctx, parsed.projectId, actor.subject)
@@ -346,7 +448,12 @@ export const commitV1 = mutation({
           failure("forbidden", "You do not have write access to this project.")
         }
         if (existing.requestDigest !== requestDigest) failure("idempotency-conflict", "Idempotency key was already used with a different request.")
-        return controlCommitResultSchemaV1.parse({ ...existing.result, idempotencyReplay: true })
+        return controlCommitResultSchemaV1.parse({
+          ...existing.result,
+          idempotencyReplay: true,
+          recoveries: existing.result.recoveries ?? [],
+          restored: existing.result.restored ?? [],
+        })
       }
     }
     let writerRole: "owner" | "editor"
@@ -367,7 +474,15 @@ export const commitV1 = mutation({
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
       failure("revision-conflict", "Project revision does not match the expected revision.")
     }
-    const controlPlan = plan(snapshot, parsed)
+    let recoveries: Map<string, any>
+    try {
+      recoveries = await requestedRecoveries(ctx, parsed)
+      await preflightRecoveryLocks(ctx, { projectId: parsed.projectId, actorId: userId, actions: parsed.actions, recoveries })
+    } catch (error) {
+      if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
+      return failure("not-found", "Recovery is unavailable.")
+    }
+    const controlPlan = plan(snapshot, parsed, recoveries)
     const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
     if (requirement.required) {
       if (!parsed.approvalToken) return approvalError(requirement)
@@ -389,7 +504,7 @@ export const commitV1 = mutation({
     }
     let execution: Awaited<ReturnType<typeof executeControlPlanV1>>
     try {
-      execution = await executeControlPlanV1(ctx, { projectId: parsed.projectId, actorId: userId, plan: controlPlan })
+      execution = await executeControlPlanV1(ctx, { projectId: parsed.projectId, actorId: userId, plan: controlPlan, recoveries })
       if (execution.changed !== controlPlan.applied) failure("internal", "Control execution changed-state mismatch.")
     } catch (error) {
       if (error instanceof ControlDomainError) {
@@ -398,7 +513,15 @@ export const commitV1 = mutation({
       execution = failure("internal", "Control execution failed.")
     }
     if (controlPlan.applied) await advanceProjectRevision(ctx, parsed.projectId)
-    const committed = result(requestDigest, parsed, controlPlan, false, execution.resolvedRefs)
+    const committed = result(
+      requestDigest,
+      parsed,
+      controlPlan,
+      false,
+      execution.resolvedRefs,
+      execution.recoveries,
+      execution.restored,
+    )
     assertControlSerializedBodyV1(committed)
     const semanticRequest = controlRequestDigestInputV1(parsed)
     const commitId = await ctx.db.insert("controlCommits", {
@@ -418,6 +541,10 @@ export const commitV1 = mutation({
       createdAt: Date.now(),
       status: "completed",
     })
+    for (const recovery of execution.recoveries) {
+      const recoveryId = ctx.db.normalizeId("controlRecoveries", recovery.id)
+      if (recoveryId) await ctx.db.patch(recoveryId, { sourceCommitId: commitId })
+    }
     try {
       await pruneControlCommits(ctx, parsed.projectId, commitId)
     } catch {
@@ -482,6 +609,35 @@ export const historyV1 = query({
         revision: commit.finalRevision,
         applied: commit.applied,
         createdAt: commit.createdAt,
+        recoveries: commit.result?.recoveries ?? [],
+        restored: commit.result?.restored ?? [],
+      })),
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    })
+  },
+})
+
+export const recoveriesV1 = query({
+  args: { projectId: v.string(), cursor: v.optional(v.string()), limit: v.optional(v.number()) },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const parsed = parseRecoveriesQuery(args)
+    let userId: string
+    try {
+      userId = (await requireAuthenticatedIdentity(ctx)).subject
+      await requireProjectAccess(ctx, parsed.projectId, userId)
+    } catch {
+      return failure("forbidden", "You do not have read access to this project.")
+    }
+    const page = await paginateRecoveries(ctx, parsed.projectId, parsed.limit, parsed.cursor)
+    const now = Date.now()
+    return controlRecoveriesResultSchemaV1.parse({
+      entries: page.page.filter((row: any) => row.consumedAt === undefined && row.expiresAt > now).map((row: any) => ({
+        actionIndex: row.sourceActionIndex,
+        id: String(row._id),
+        kind: row.kind,
+        expiresAt: row.expiresAt,
       })),
       continueCursor: page.continueCursor,
       isDone: page.isDone,

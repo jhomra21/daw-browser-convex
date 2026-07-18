@@ -58,6 +58,8 @@ export const controlLimitsV1 = {
   maxErrorDetails: 16,
   defaultHistoryPageSize: 50,
   maxHistoryPageSize: 100,
+  defaultRecoveryPageSize: 50,
+  maxRecoveryPageSize: 100,
 }
 
 export const stableIdSchemaV1 = stableIdSchema
@@ -94,6 +96,11 @@ export const controlCapabilitiesSchemaV1 = z.object({
     expiresInSeconds: z.literal(600),
     tool: z.literal('control_request_approval'),
   }).strict(),
+  recovery: z.object({
+    supportedKinds: z.array(z.string().min(1).max(64)).readonly(),
+    unavailableKinds: z.array(z.string().min(1).max(64)).readonly(),
+    expiresInSeconds: z.literal(7 * 24 * 60 * 60),
+  }).strict(),
   limits: z.object({
     maxActions: z.number().int().positive(),
     maxSerializedBodyBytes: z.number().int().positive(),
@@ -105,6 +112,8 @@ export const controlCapabilitiesSchemaV1 = z.object({
     maxErrorDetails: z.number().int().positive(),
     defaultHistoryPageSize: z.number().int().positive(),
     maxHistoryPageSize: z.number().int().positive(),
+    defaultRecoveryPageSize: z.number().int().positive(),
+    maxRecoveryPageSize: z.number().int().positive(),
   }).strict(),
 }).strict()
 
@@ -382,6 +391,10 @@ const assetDeleteActionSchema = z.object({
   kind: z.literal('asset.delete'),
   asset: assetRefSchemaV1,
 }).strict()
+const recoveryRestoreActionSchema = z.object({
+  kind: z.literal('recovery.restore'),
+  recovery: z.object({ id: stableIdSchema }).strict(),
+}).strict()
 
 export const controlActionSchemaV1 = z.union([
   projectRenameActionSchema, projectSettingsActionSchema, trackCreateActionSchema,
@@ -394,7 +407,7 @@ export const controlActionSchemaV1 = z.union([
   effectUpsertActionSchema, effectRemoveActionSchema, effectReorderActionSchema,
   instrumentSetActionSchema, instrumentRemoveActionSchema, arpeggiatorSetActionSchema, arpeggiatorRemoveActionSchema,
   automationSetActionSchema, automationDeleteActionSchema, sidechainSetActionSchema, sidechainRemoveActionSchema,
-  assetDeleteActionSchema,
+  assetDeleteActionSchema, recoveryRestoreActionSchema,
 ])
 
 const creationClientRef = (action: z.infer<typeof controlActionSchemaV1>): string | undefined => {
@@ -453,6 +466,18 @@ const addAggregateIssues = (
       path: ['actions'],
     })
   }
+}
+
+export const findDuplicateRecoveryActionIndexV1 = (
+  actions: readonly z.infer<typeof controlActionSchemaV1>[],
+) => {
+  const recoveryIds = new Set<string>()
+  for (const [actionIndex, action] of actions.entries()) {
+    if (action.kind !== 'recovery.restore') continue
+    if (recoveryIds.has(action.recovery.id)) return actionIndex
+    recoveryIds.add(action.recovery.id)
+  }
+  return undefined
 }
 
 const requestBaseShape = {
@@ -542,6 +567,25 @@ export const controlChangeSummarySchemaV1 = z.object({
   actionCount: z.number().int().nonnegative().max(controlLimitsV1.maxActions),
   changes: z.array(controlChangeSummaryEntrySchemaV1).max(controlLimitsV1.maxActions),
 }).strict()
+const recoveryDescriptorSchemaV1 = z.object({
+  actionIndex: z.number().int().nonnegative(),
+  id: stableIdSchema,
+  kind: z.enum([
+    'clip.delete', 'effect.remove', 'instrument.remove', 'arpeggiator.remove',
+    'automation.delete', 'sidechain.remove', 'asset.delete',
+  ]),
+  expiresAt: z.number().int().nonnegative(),
+}).strict()
+const recoveryMappingEntitySchemaV1 = z.enum(['clip', 'effect', 'automation', 'sidechain', 'asset'])
+const restoredMappingSchemaV1 = z.object({
+  actionIndex: z.number().int().nonnegative(),
+  recoveryId: stableIdSchema,
+  entities: z.array(z.object({
+    entity: recoveryMappingEntitySchemaV1,
+    sourceId: stableIdSchema,
+    restoredId: stableIdSchema,
+  }).strict()).max(controlLimitsV1.maxActions),
+}).strict()
 
 const planningResultShape = {
   version: z.literal(CONTROL_API_VERSION_V1),
@@ -572,6 +616,8 @@ export const controlCommitResultSchemaV1 = z.object({
   revision: revisionSchema,
   applied: z.boolean(),
   idempotencyReplay: z.boolean(),
+  recoveries: z.array(recoveryDescriptorSchemaV1).max(controlLimitsV1.maxActions).default([]),
+  restored: z.array(restoredMappingSchemaV1).max(controlLimitsV1.maxActions).default([]),
 }).strict()
 
 export const controlSnapshotQuerySchemaV1 = z.object({
@@ -601,10 +647,24 @@ export const controlHistoryEntrySchemaV1 = z.object({
   revision: revisionSchema,
   applied: z.boolean(),
   createdAt: z.number().int().nonnegative(),
+  recoveries: z.array(recoveryDescriptorSchemaV1).max(controlLimitsV1.maxActions).default([]),
+  restored: z.array(restoredMappingSchemaV1).max(controlLimitsV1.maxActions).default([]),
 }).strict()
 
 export const controlHistoryResultSchemaV1 = z.object({
   entries: z.array(controlHistoryEntrySchemaV1).max(controlLimitsV1.maxHistoryPageSize),
+  continueCursor: opaqueCursorSchema,
+  isDone: z.boolean(),
+}).strict()
+
+export const controlRecoveriesQuerySchemaV1 = z.object({
+  projectId: projectIdSchema,
+  cursor: opaqueCursorSchema.optional(),
+  limit: z.number().int().positive().max(controlLimitsV1.maxRecoveryPageSize).default(controlLimitsV1.defaultRecoveryPageSize),
+}).strict()
+
+export const controlRecoveriesResultSchemaV1 = z.object({
+  entries: z.array(recoveryDescriptorSchemaV1).max(controlLimitsV1.maxRecoveryPageSize),
   continueCursor: opaqueCursorSchema,
   isDone: z.boolean(),
 }).strict()
@@ -737,6 +797,8 @@ export type ControlSnapshotQueryV1 = z.infer<typeof controlSnapshotQuerySchemaV1
 export type ControlHistoryQueryV1 = z.infer<typeof controlHistoryQuerySchemaV1>
 export type ControlHistoryEntryV1 = z.infer<typeof controlHistoryEntrySchemaV1>
 export type ControlHistoryResultV1 = z.infer<typeof controlHistoryResultSchemaV1>
+export type ControlRecoveriesQueryV1 = z.infer<typeof controlRecoveriesQuerySchemaV1>
+export type ControlRecoveriesResultV1 = z.infer<typeof controlRecoveriesResultSchemaV1>
 export type ContextualRefV1 = z.infer<typeof contextualRefSchemaV1>
 export type TrackRefV1 = z.infer<typeof trackRefSchemaV1>
 export type ClipRefV1 = z.infer<typeof clipRefSchemaV1>
@@ -772,12 +834,20 @@ export const controlCapabilitiesV1 = {
     'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
     'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
     'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
-    'asset.delete',
+    'asset.delete', 'recovery.restore',
   ],
   approvals: {
     requiredForDestructiveActions: true,
     expiresInSeconds: 600,
     tool: 'control_request_approval',
+  },
+  recovery: {
+    supportedKinds: [
+      'clip.delete', 'effect.remove', 'instrument.remove', 'arpeggiator.remove',
+      'automation.delete', 'sidechain.remove', 'asset.delete',
+    ],
+    unavailableKinds: ['track.delete', 'track.ungroup'],
+    expiresInSeconds: 7 * 24 * 60 * 60,
   },
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
@@ -809,6 +879,167 @@ export const canonicalJson = (value: unknown): string => {
   return canonicalize(value)
 }
 
+const recoveryPointSchemaV1 = z.object({
+  id: stableIdSchema,
+  timeSec: finiteNumberSchema,
+  value: finiteNumberSchema,
+  interpolation: z.enum(['linear', 'hold']),
+}).strict()
+const recoveryFadesSchemaV1 = z.object({
+  fadeInStartSec: secondsSchema.optional(),
+  fadeInSec: secondsSchema,
+  fadeOutSec: secondsSchema,
+  fadeOutEndSec: secondsSchema.optional(),
+  fadeInCurve: finiteNumberSchema,
+  fadeOutCurve: finiteNumberSchema,
+  fadeInCurvePosition: finiteNumberSchema.optional(),
+  fadeOutCurvePosition: finiteNumberSchema.optional(),
+}).strict()
+const recoveryAudioWarpSchemaV1 = z.object({
+  enabled: z.boolean(),
+  sourceBpm: finiteNumberSchema.min(30).max(300).optional(),
+  sourceBeatOffset: finiteNumberSchema.optional(),
+  markers: z.array(z.object({
+    id: stableIdSchema,
+    sourceBeat: finiteNumberSchema,
+    timelineBeat: finiteNumberSchema,
+  }).strict()).max(1_000).optional(),
+  mode: z.enum(['repitch', 'stretch']),
+}).strict()
+const recoveryMidiSchemaV1 = z.object({
+  wave: z.string(),
+  gain: finiteNumberSchema.optional(),
+  notes: z.array(midiNoteSchema).max(controlLimitsV1.maxMidiNotesPerCommit),
+}).strict()
+const recoveryClipSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  trackId: stableIdSchema,
+  startSec: secondsSchema,
+  duration: finiteNumberSchema.positive(),
+  sourceAssetKey: stableIdSchema.optional(),
+  sourceKind: assetSourceKindSchema.optional(),
+  sourceDurationSec: secondsSchema.optional(),
+  sourceSampleRate: z.number().int().positive().optional(),
+  sourceChannelCount: z.number().int().positive().max(64).optional(),
+  leftPadSec: secondsSchema.optional(),
+  bufferOffsetSec: secondsSchema.optional(),
+  audioWarp: recoveryAudioWarpSchemaV1.optional(),
+  gain: finiteNumberSchema.optional(),
+  fades: recoveryFadesSchemaV1.optional(),
+  color: clipColorSchema.optional(),
+  name: nameSchema.optional(),
+  sampleUrl: z.string().min(1).max(2048).optional(),
+  midi: recoveryMidiSchemaV1.optional(),
+  midiOffsetBeats: finiteNumberSchema.optional(),
+}).strict()
+const recoveryOwnershipSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  ownerUserId: stableIdSchema,
+  role: z.enum(['owner', 'editor', 'viewer']).optional(),
+}).strict()
+const recoveryAssetSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  assetKey: stableIdSchema,
+  sourceKind: assetSourceKindSchema,
+  name: nameSchema,
+  mimeType: assetMimeTypeSchema,
+  sizeBytes: z.number().int().positive().max(controlLimitsV1.maxAssetUploadBytes),
+  contentSha256: requestDigestSchema,
+  r2Key: z.string().min(1).max(2048),
+  duration: secondsSchema.optional(),
+  sampleRate: z.number().int().positive().optional(),
+  channelCount: z.number().int().positive().max(64).optional(),
+  ownerUserId: stableIdSchema,
+  folderId: stableIdSchema.optional(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strict()
+const recoveryAutomationSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  targetKind: z.enum(['track', 'master']),
+  trackId: stableIdSchema.optional(),
+  effectInstanceId: stableIdSchema.optional(),
+  targetKey: stableIdSchema,
+  parameterId: stableIdSchema,
+  enabled: z.boolean(),
+  points: z.array(recoveryPointSchemaV1).max(controlLimitsV1.maxAutomationPointsPerCommit),
+  updatedAt: z.number().int().nonnegative(),
+}).strict().superRefine((row, context) => {
+  if (row.targetKind === 'track' && row.trackId === undefined) {
+    context.addIssue({ code: 'custom', message: 'Track automation needs a track ID.', path: ['trackId'] })
+  }
+  if (row.targetKind === 'master' && row.trackId !== undefined) {
+    context.addIssue({ code: 'custom', message: 'Master automation cannot carry a track ID.', path: ['trackId'] })
+  }
+})
+const recoverySidechainSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  sourceTrackId: stableIdSchema,
+  targetTrackId: stableIdSchema,
+  effectInstanceId: stableIdSchema,
+}).strict()
+const recoveryEffectSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  target: z.union([
+    z.object({ kind: z.literal('master') }).strict(),
+    z.object({ kind: z.literal('track'), trackId: stableIdSchema }).strict(),
+  ]),
+  index: z.number().int().nonnegative(),
+  processor: persistedProcessorSnapshotSchema,
+  instanceId: stableIdSchema.optional(),
+  createdAt: z.number().int().nonnegative(),
+}).strict()
+const recoveryEffectBundleSchemaV1 = z.object({
+  effects: z.array(z.object({
+    id: stableIdSchema,
+    effect: recoveryEffectSchemaV1,
+  }).strict()).max(controlLimitsV1.maxActions),
+  automation: z.array(z.object({ id: stableIdSchema, automation: recoveryAutomationSchemaV1 }).strict())
+    .max(controlLimitsV1.maxActions),
+  sidechains: z.array(z.object({ id: stableIdSchema, sidechain: recoverySidechainSchemaV1 }).strict())
+    .max(controlLimitsV1.maxActions),
+}).strict()
+export const recoveryPayloadSchemaV1 = z.discriminatedUnion('kind', [
+  z.object({ version: z.literal(1), kind: z.literal('clip.delete'), data: z.object({
+    clip: recoveryClipSchemaV1, clipId: stableIdSchema, ownership: recoveryOwnershipSchemaV1,
+  }).strict() }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('asset.delete'), data: z.object({
+    asset: recoveryAssetSchemaV1, assetId: stableIdSchema,
+  }).strict() }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('automation.delete'), data: z.object({
+    automation: recoveryAutomationSchemaV1, automationId: stableIdSchema,
+  }).strict() }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('sidechain.remove'), data: z.object({
+    sidechain: recoverySidechainSchemaV1, sidechainId: stableIdSchema,
+  }).strict() }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('effect.remove'), data: recoveryEffectBundleSchemaV1 }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('instrument.remove'), data: recoveryEffectBundleSchemaV1 }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal('arpeggiator.remove'), data: recoveryEffectBundleSchemaV1 }).strict(),
+])
+export type RecoveryPayloadV1 = z.infer<typeof recoveryPayloadSchemaV1>
+
+export const recoveryPayloadBytesV1 = (payload: string) => new TextEncoder().encode(payload).byteLength
+export const parseRecoveryPayloadV1 = (payload: string) => {
+  if (recoveryPayloadBytesV1(payload) > controlLimitsV1.maxSerializedBodyBytes) {
+    throw new Error('Recovery payload exceeds the serialized body limit.')
+  }
+  const parsed: unknown = JSON.parse(payload)
+  const validated = recoveryPayloadSchemaV1.parse(parsed)
+  if (canonicalJson(validated) !== payload) throw new Error('Recovery payload is not canonical.')
+  return validated
+}
+export const canonicalRecoveryPayloadV1 = (payload: RecoveryPayloadV1) => {
+  const canonical = canonicalJson(recoveryPayloadSchemaV1.parse(payload))
+  if (recoveryPayloadBytesV1(canonical) > controlLimitsV1.maxSerializedBodyBytes) {
+    throw new Error('Recovery payload exceeds the serialized body limit.')
+  }
+  return canonical
+}
+export const hashRecoveryPayloadV1 = async (payload: string) => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 export const assertControlSerializedBodyV1 = <Value>(value: Value): Value => {
   const serialized = canonicalJson(value)
   if (new TextEncoder().encode(serialized).byteLength > controlLimitsV1.maxSerializedBodyBytes) {
@@ -837,6 +1068,9 @@ export const parseControlSnapshotQueryV1 = (input: unknown) => (
 
 export const parseControlHistoryQueryV1 = (input: unknown) => (
   controlHistoryQuerySchemaV1.parse(input)
+)
+export const parseControlRecoveriesQueryV1 = (input: unknown) => (
+  controlRecoveriesQuerySchemaV1.parse(input)
 )
 
 export const controlRequestDigestInputV1 = (

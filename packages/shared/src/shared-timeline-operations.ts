@@ -42,7 +42,7 @@ import {
 } from './effects-params'
 import { normalizeSpectralParamsEnvelope, type SpectralParamsEnvelope } from './spectral-params'
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
-import { normalizeClipColor } from './clip-color'
+import { normalizeClipColor, normalizeTrackColor } from './clip-color'
 import { normalizeClipTimingPatch } from './clip-timing'
 import { normalizeMasterVolume } from './master-volume'
 import {
@@ -164,6 +164,7 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'clips.setFades'; payload: { clipId: string; fades: SharedClipFades } }
   | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
+  | { kind: 'clips.setMidi'; payload: { clipId: string; midi: { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }> }; operationId: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'sidechains.setRoute'; payload: { projectId: string; sourceTrackId: string; targetTrackId: string; effectInstanceId: string } }
   | { kind: 'sidechains.removeRoute'; payload: { projectId: string; targetTrackId: string; effectInstanceId: string } }
@@ -225,7 +226,9 @@ export type SharedTimelineOperation =
   | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SynthParams; instanceId: string } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
+  | { kind: 'instruments.removeTrackInstrument'; payload: { trackId: string; operationId: string } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
+  | { kind: 'effects.removeArpeggiator'; payload: { trackId: string; operationId: string } }
   | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string } }
   | { kind: 'effects.setMasterUtilityParams'; payload: { params: UtilityParamsEnvelope; instanceId: string } }
   | { kind: 'effects.setMasterGateParams'; payload: { params: GateParamsEnvelope; instanceId: string } }
@@ -628,18 +631,22 @@ const readTrackGroupTargets = (payload: unknown) => {
   return targets
 }
 
-const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOperation => ({
-  kind: 'tracks.create',
-  payload: {
-    name: readOptionalString(payload.name),
-    index: readOptionalNumber(payload.index),
-    kind: readOptionalString(payload.kind),
-    channelRole: readOptionalString(payload.channelRole),
-    collapsed: readOptionalBoolean(payload.collapsed),
-    color: readOptionalString(payload.color),
-    operationId: readOptionalString(payload.operationId),
-  },
-})
+const parseTrackCreate = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const color = normalizeTrackColor(readOptionalString(payload.color))
+  if (payload.color !== undefined && !color) return null
+  return {
+    kind: 'tracks.create',
+    payload: {
+      name: readOptionalString(payload.name),
+      index: readOptionalNumber(payload.index),
+      kind: readOptionalString(payload.kind),
+      channelRole: readOptionalString(payload.channelRole),
+      collapsed: readOptionalBoolean(payload.collapsed),
+      color,
+      operationId: readOptionalString(payload.operationId),
+    },
+  }
+}
 
 const parseTrackLock = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string' ? { kind: 'tracks.lock', payload: { trackId: payload.trackId } } : null
@@ -734,6 +741,48 @@ const parseClipColor = (payload: Record<string, unknown>): SharedTimelineOperati
   return typeof payload.clipId === 'string' && color
     ? { kind: 'clips.setColor', payload: { clipId: payload.clipId, color } }
     : null
+}
+
+const parseClipMidi = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (
+    typeof payload.clipId !== 'string'
+    || typeof payload.operationId !== 'string'
+    || payload.operationId.length === 0
+    || !isRecord(payload.midi)
+    || Object.keys(payload).some((key) => key !== 'clipId' && key !== 'midi' && key !== 'operationId')
+  ) return null
+  const midi = payload.midi
+  if (
+    (midi.wave !== 'sine' && midi.wave !== 'square' && midi.wave !== 'sawtooth' && midi.wave !== 'triangle')
+    || (midi.gain !== undefined && (typeof midi.gain !== 'number' || !Number.isFinite(midi.gain) || midi.gain < 0 || midi.gain > 2))
+    || !Array.isArray(midi.notes)
+    || midi.notes.length > 500
+    || Object.keys(midi).some((key) => key !== 'wave' && key !== 'gain' && key !== 'notes')
+  ) return null
+  const notes = midi.notes.flatMap((note) => {
+    if (
+      !isRecord(note)
+      || Object.keys(note).some((key) => key !== 'beat' && key !== 'length' && key !== 'pitch' && key !== 'velocity')
+      || typeof note.beat !== 'number' || !Number.isFinite(note.beat)
+      || typeof note.length !== 'number' || !Number.isFinite(note.length) || note.length <= 0
+      || typeof note.pitch !== 'number' || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
+      || (note.velocity !== undefined && (typeof note.velocity !== 'number' || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1))
+    ) return []
+    return [{
+      beat: note.beat, length: note.length, pitch: note.pitch,
+      ...(typeof note.velocity === 'number' ? { velocity: note.velocity } : {}),
+    }]
+  })
+  if (notes.length !== midi.notes.length) return null
+  notes.sort((left, right) => left.beat - right.beat || left.pitch - right.pitch || left.length - right.length || (left.velocity ?? 1) - (right.velocity ?? 1))
+  return {
+    kind: 'clips.setMidi',
+    payload: {
+      clipId: payload.clipId,
+      operationId: payload.operationId,
+      midi: { wave: midi.wave, ...(typeof midi.gain === 'number' ? { gain: midi.gain } : {}), notes },
+    },
+  }
 }
 
 const parseTrackRouting = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
@@ -924,7 +973,7 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
   if (group.historyRef !== undefined && typeof group.historyRef !== 'string') return null
   if (group.parentGroupId !== undefined && typeof group.parentGroupId !== 'string') return null
   if (group.collapsed !== undefined && typeof group.collapsed !== 'boolean') return null
-  if (group.color !== undefined && typeof group.color !== 'string') return null
+  if (group.color !== undefined && (typeof group.color !== 'string' || !normalizeTrackColor(group.color))) return null
   if (group.muted !== undefined && typeof group.muted !== 'boolean') return null
   if (group.soloed !== undefined && typeof group.soloed !== 'boolean') return null
   if (group.outputTargetId !== undefined && typeof group.outputTargetId !== 'string') return null
@@ -969,7 +1018,7 @@ const parseTrackRestoreUngroup = (payload: Record<string, unknown>): SharedTimel
         historyRef: typeof group.historyRef === 'string' ? group.historyRef : undefined,
         parentGroupId: typeof group.parentGroupId === 'string' ? group.parentGroupId : undefined,
         collapsed: typeof group.collapsed === 'boolean' ? group.collapsed : undefined,
-        color: typeof group.color === 'string' ? group.color : undefined,
+        color: typeof group.color === 'string' ? normalizeTrackColor(group.color) : undefined,
         volume: group.volume,
         muted: typeof group.muted === 'boolean' ? group.muted : undefined,
         soloed: typeof group.soloed === 'boolean' ? group.soloed : undefined,
@@ -993,17 +1042,19 @@ const parseTrackCollapsed = (payload: Record<string, unknown>): SharedTimelineOp
 
 const parseTrackColor = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.trackId === 'string'
-    ? { kind: 'tracks.setColor', payload: { trackId: payload.trackId, color: readOptionalString(payload.color) } }
+    && (payload.color === undefined || normalizeTrackColor(readOptionalString(payload.color)))
+    ? { kind: 'tracks.setColor', payload: { trackId: payload.trackId, color: normalizeTrackColor(readOptionalString(payload.color)) } }
     : null
 )
 
 const parseTrackColorCascade = (payload: Record<string, unknown>): SharedTimelineOperation | null => (
   typeof payload.rootTrackId === 'string' && typeof payload.cascadeClipColors === 'boolean'
+    && (payload.color === null || payload.color === undefined || normalizeTrackColor(readOptionalString(payload.color)))
     ? {
         kind: 'tracks.setColorCascade',
         payload: {
           rootTrackId: payload.rootTrackId,
-          color: readOptionalNullableString(payload.color),
+          color: payload.color === null ? null : normalizeTrackColor(readOptionalString(payload.color)),
           cascadeClipColors: payload.cascadeClipColors,
         },
       }
@@ -1014,7 +1065,8 @@ const parseTrackColorBatch = (payload: Record<string, unknown>): SharedTimelineO
   if (!Array.isArray(payload.trackUpdates) || !Array.isArray(payload.clipUpdates)) return null
   const trackUpdates = payload.trackUpdates.flatMap((update) => (
     isRecord(update) && typeof update.trackId === 'string'
-      ? [{ trackId: update.trackId, color: readOptionalNullableString(update.color) }]
+      && (update.color === null || update.color === undefined || normalizeTrackColor(readOptionalString(update.color)))
+      ? [{ trackId: update.trackId, color: update.color === null ? null : normalizeTrackColor(readOptionalString(update.color)) }]
       : []
   ))
   const clipUpdates = payload.clipUpdates.flatMap((update) => (
@@ -1210,6 +1262,18 @@ const parseTrackInstrument = (payload: Record<string, unknown>): SharedTimelineO
     : null
 }
 
+const parseTrackDeviceRemoval = (
+  kind: 'instruments.removeTrackInstrument' | 'effects.removeArpeggiator',
+  payload: Record<string, unknown>,
+): SharedTimelineOperation | null => (
+  typeof payload.trackId === 'string'
+  && typeof payload.operationId === 'string'
+  && payload.operationId.length > 0
+  && Object.keys(payload).every((key) => key === 'trackId' || key === 'operationId')
+    ? { kind, payload: { trackId: payload.trackId, operationId: payload.operationId } }
+    : null
+)
+
 const parseTrackArpeggiator = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const params = readArpeggiatorParams(payload.params)
   return typeof payload.trackId === 'string' && params ? { kind: 'effects.setArpeggiatorParams', payload: { trackId: payload.trackId, params } } : null
@@ -1386,6 +1450,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
     durableQueue: true,
   },
   { kind: 'clips.setColor', parse: parseClipColor, targets: readClipIdTargets, durableQueue: true },
+  { kind: 'clips.setMidi', parse: parseClipMidi, targets: readClipIdTargets, durableQueue: true },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
   {
     kind: 'sidechains.setRoute',
@@ -1463,7 +1528,9 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setReverbParams', parse: parseTrackReverb, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSynthParams', parse: parseTrackSynth, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'instruments.setTrackInstrument', parse: parseTrackInstrument, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'instruments.removeTrackInstrument', parse: (payload) => parseTrackDeviceRemoval('instruments.removeTrackInstrument', payload), targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setArpeggiatorParams', parse: parseTrackArpeggiator, targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.removeArpeggiator', parse: (payload) => parseTrackDeviceRemoval('effects.removeArpeggiator', payload), targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setMasterEqParams', parse: parseMasterEq, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterUtilityParams', parse: (payload) => parseMasterProcessor('utility', 'effects.setMasterUtilityParams', payload), targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterLimiterParams', parse: (payload) => parseMasterProcessor('limiter', 'effects.setMasterLimiterParams', payload), targets: emptyTargets, durableQueue: true },

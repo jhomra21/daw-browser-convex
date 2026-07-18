@@ -20,7 +20,7 @@ import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } 
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
-import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isHexColor, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -352,6 +352,8 @@ export const createTrackRow = async (
     name?: string
   },
 ) => {
+  const color = input.color === undefined ? undefined : normalizeTrackColor(input.color)
+  if (input.color !== undefined && !color) throw new Error("Invalid track color.");
   const existing = await listProjectTracksWithMixerChannels(ctx, input.projectId);
   const channelRole = sanitizeChannelRole(input.channelRole);
   const creation = canonicalTrackCreation(existing, channelRole, input.index);
@@ -374,7 +376,7 @@ export const createTrackRow = async (
     index: creation.creationIndex,
     kind: input.kind,
     collapsed: trackCreationCollapsed(channelRole, input.collapsed),
-    color: input.color,
+    color,
   });
   await ctx.db.insert(
     "mixerChannels",
@@ -387,6 +389,23 @@ export const createTrackRow = async (
     ownerUserId: input.ownerUserId,
     trackId,
   });
+  if (input.kind === "instrument" && channelRole === "track") {
+    const instanceId = createInstrumentInstanceId();
+    await ctx.db.insert("effects", {
+      projectId: input.projectId,
+      targetType: "track",
+      trackId,
+      index: 0,
+      type: "instrument",
+      instanceId,
+      params: {
+        kind: "synth",
+        instanceId,
+        params: createDefaultSynthParams(),
+      },
+      createdAt: Date.now(),
+    });
+  }
   return { changed: true, status: "created" as const, trackId };
 };
 
@@ -542,8 +561,17 @@ const setTrackCollapsedForUser = async (
   input: { trackId: any; userId: string; collapsed: boolean },
 ) => {
   const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
-  if (track.collapsed === input.collapsed) return;
-  await ctx.db.patch(input.trackId, { collapsed: input.collapsed });
+  return await setTrackCollapsedRow(ctx, { projectId: track.projectId, trackId: input.trackId, collapsed: input.collapsed });
+}
+
+export const setTrackCollapsedRow = async (
+  ctx: any,
+  input: { projectId: string; trackId: Id<"tracks">; collapsed: boolean },
+) => {
+  const track = await ctx.db.get(input.trackId)
+  if (!track || track.projectId !== input.projectId || track.collapsed === input.collapsed) return { changed: false }
+  await ctx.db.patch(input.trackId, { collapsed: input.collapsed })
+  return { changed: true }
 }
 
 const setTrackColorForUser = async (
@@ -551,9 +579,51 @@ const setTrackColorForUser = async (
   input: { trackId: any; userId: string; color?: string | null },
 ) => {
   const { track } = await requireTrackOwnerForWrite(ctx, input.trackId, input.userId);
-  const color = input.color ?? undefined;
-  if (track.color === color) return;
-  await ctx.db.patch(input.trackId, { color });
+  return await setTrackColorRow(ctx, { projectId: track.projectId, trackId: input.trackId, color: input.color ?? undefined });
+}
+
+export const setTrackColorRow = async (
+  ctx: any,
+  input: { projectId: string; trackId: Id<"tracks">; color?: string },
+) => {
+  const color = input.color === undefined ? undefined : normalizeTrackColor(input.color)
+  if (input.color !== undefined && !color) return { changed: false, status: "rejected" as const }
+  const track = await ctx.db.get(input.trackId)
+  if (!track || track.projectId !== input.projectId || track.color === color) return { changed: false }
+  await ctx.db.patch(input.trackId, { color })
+  return { changed: true }
+}
+
+export const setTrackColorCascadeRow = async (
+  ctx: any,
+  input: { projectId: string; rootTrackId: Id<"tracks">; color?: string; cascadeClipColors: boolean },
+) => {
+  const color = input.color === undefined ? undefined : normalizeTrackColor(input.color)
+  if (input.color !== undefined && !color) return { changed: false }
+  const tracks = await listProjectTracksWithMixerChannels(ctx, input.projectId)
+  const root = tracks.find((track) => String(track._id) === String(input.rootTrackId))
+  if (!root) return { changed: false }
+  const ids = root.channelRole === "group"
+    ? new Set([String(root._id), ...collectTrackDescendantIds(tracks.map((track) => ({ id: String(track._id), groupId: track.groupId ? String(track.groupId) : undefined })), String(root._id))])
+    : new Set([String(root._id)])
+  let changed = false
+  for (const track of tracks) {
+    if (!ids.has(String(track._id)) || track.color === color) continue
+    await ctx.db.patch(track._id, { color })
+    changed = true
+  }
+  if (root.channelRole === "group" && input.cascadeClipColors && color) {
+    for (const track of tracks) {
+      if (!ids.has(String(track._id))) continue
+      const clips = await ctx.db.query("clips").withIndex("by_track", (q: any) => q.eq("trackId", track._id)).collect()
+      for (const clip of clips) {
+        if (clip.color === color) continue
+        await ctx.db.patch(clip._id, { color })
+        changed = true
+      }
+    }
+  }
+  return { changed }
 }
 
 const lockTrackForUser = async (ctx: any, trackId: any, userId: string) => {
@@ -1050,7 +1120,9 @@ export const setCollapsed = mutation({
   args: { trackId: v.id("tracks"), collapsed: v.boolean() },
   handler: async (ctx, { trackId, collapsed }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await setTrackCollapsedForUser(ctx, { trackId, userId, collapsed });
+    const track = await ctx.db.get(trackId);
+    const result = await setTrackCollapsedForUser(ctx, { trackId, userId, collapsed });
+    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
   },
 });
 
@@ -1060,7 +1132,9 @@ export const serverSetCollapsed = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
     if (!normalizedTrackId) throw new Error("Track not found.");
-    await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed });
+    const track = await ctx.db.get(normalizedTrackId);
+    const result = await setTrackCollapsedForUser(ctx, { trackId: normalizedTrackId, userId, collapsed });
+    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
   },
 });
 
@@ -1068,7 +1142,9 @@ export const setColor = mutation({
   args: { trackId: v.id("tracks"), color: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, { trackId, color }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    await setTrackColorForUser(ctx, { trackId, userId, color });
+    const track = await ctx.db.get(trackId);
+    const result = await setTrackColorForUser(ctx, { trackId, userId, color });
+    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
   },
 });
 
@@ -1078,7 +1154,9 @@ export const serverSetColor = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
     if (!normalizedTrackId) throw new Error("Track not found.");
-    await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
+    const track = await ctx.db.get(normalizedTrackId);
+    const result = await setTrackColorForUser(ctx, { trackId: normalizedTrackId, userId, color });
+    if (result?.changed && track) await advanceProjectRevision(ctx, track.projectId);
   },
 });
 
@@ -1182,7 +1260,11 @@ const normalizeColorBatch = (
   for (const update of input.trackUpdates) {
     const trackId = ctx.db.normalizeId("tracks", update.trackId);
     if (!trackId) return null;
-    trackUpdates.push({ trackId, color: update.color ?? undefined });
+    const color = update.color === null || update.color === undefined
+      ? undefined
+      : normalizeTrackColor(update.color);
+    if (update.color !== null && update.color !== undefined && !color) return null;
+    trackUpdates.push({ trackId, color });
   }
   const clipUpdates: Array<{ clipId: Id<"clips">; color: string }> = [];
   for (const update of input.clipUpdates) {
@@ -1368,6 +1450,14 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
   }
   return result;
 };
+
+export const ungroupTrackRow = async (
+  ctx: any,
+  input: { projectId: string; groupId: Id<"tracks">; userId: string },
+) => {
+  const result = await ungroupTrackForUser(ctx, input.userId, input.projectId, String(input.groupId))
+  return { changed: result.status === "applied" }
+}
 
 export const serverUngroup = mutation({
   args: { projectId: v.string(), groupId: v.string(), operationId: v.optional(v.string()) },
@@ -1637,17 +1727,22 @@ export const serverSetColorCascade = mutation({
       ? new Set([String(root._id), ...collectTrackDescendantIds(tracks.map((track) => ({ id: String(track._id), groupId: track.groupId ? String(track.groupId) : undefined })), String(root._id))])
       : new Set([String(root._id)]);
     const targetTracks = tracks.filter((track) => targetTrackIds.has(String(track._id)));
-    const clipColor = color && isHexColor(color) ? color : undefined;
+    const trackColor = color === null || color === undefined ? undefined : normalizeTrackColor(color);
+    if (color !== null && color !== undefined && !trackColor) return { status: "rejected" as const };
+    const clipColor = trackColor;
     const targetClips = root.channelRole === "group" && cascadeClipColors && clipColor
       ? (await Promise.all(targetTracks.map((track) => (
         ctx.db.query("clips").withIndex("by_track", (q: any) => q.eq("trackId", track._id)).collect()
       )))).flat()
       : [];
     const colorUpdates = {
-      trackUpdates: targetTracks.map((track) => ({ trackId: String(track._id), color })),
+      trackUpdates: targetTracks.map((track) => ({ trackId: String(track._id), color: trackColor })),
       clipUpdates: targetClips.map((clip) => ({ clipId: String(clip._id), color: clipColor ?? clip.color ?? "" })),
     };
     const updates = await applyColorBatchForUser(ctx, userId, colorUpdates);
+    if (updates && (updates.trackUpdates.some((update) => update.from !== update.to) || updates.clipUpdates.some((update) => update.from !== update.to))) {
+      await advanceProjectRevision(ctx, rootAccess.track.projectId);
+    }
     return updates
       ? { status: "applied" as const, ...updates }
       : { status: "rejected" as const };

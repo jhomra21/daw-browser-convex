@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { planControlRequestV1 } from "./planner";
 
-const snapshot = () => ({
+const snapshot = (): any => ({
   version: "v1",
   project: {
     id: "project-1",
@@ -69,6 +69,36 @@ test("plans client refs as non-persisted placeholders", () => {
     id: "control:track:new-track",
     persisted: false,
   }]);
+});
+
+test("rejects incomplete authoritative audio assets and projects complete sources", () => {
+  const incomplete = {
+    ...snapshot(),
+    tracks: [{ ...snapshot().tracks[0], kind: "audio" }],
+    assets: [{
+    id: "asset-1", name: "Audio", sourceKind: "upload", mimeType: "audio/wav",
+    sizeBytes: 1, contentSha256: "a".repeat(64), createdAt: 0, updatedAt: 0,
+    }],
+  };
+  expect(() => planControlRequestV1(incomplete, {
+    projectId: "project-1",
+    actions: [{ kind: "clip.audio.create", track: persisted("track-1"), asset: persisted("asset-1") }],
+  })).toThrow()
+
+  const complete = {
+    ...incomplete,
+    assets: [{ ...incomplete.assets[0], durationSec: 2, sampleRate: 48_000, channelCount: 2 }],
+  };
+  const plan = planControlRequestV1(complete, {
+    projectId: "project-1",
+    actions: [
+      { kind: "clip.audio.create", clientRef: "audio", track: persisted("track-1"), asset: persisted("asset-1") },
+      { kind: "clip.color.set", clip: { source: "client", clientRef: "audio" }, color: "#22c55e" },
+    ],
+  });
+  expect(plan.snapshot.clips.find((clip) => clip.id === "control:clip:audio")?.source).toEqual({
+    assetId: "asset-1", sourceKind: "upload", durationSec: 2, sampleRate: 48_000, channelCount: 2,
+  });
 });
 
 test("normalizes fades when shrinking a clip and preserves omitted offsets", () => {
@@ -190,4 +220,244 @@ test("compacts effect indices after an exact removal", () => {
     index: 0,
     processor: { kind: "reverb", params: {} },
   }]);
+});
+
+test("uses compacted indices when a removal precedes a reorder", () => {
+  const base = snapshot();
+  base.processors.push({
+    id: "effect-2",
+    target: { trackId: "track-1" },
+    instanceId: "audio-effect:two",
+    index: 1,
+    processor: { kind: "reverb", params: {} },
+  });
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      {
+        kind: "effect.remove",
+        target: { kind: "track", track: persisted("track-1") },
+        effectKind: "eq",
+        effect: persisted("effect-1"),
+      },
+      {
+        kind: "effect.reorder",
+        target: { kind: "track", track: persisted("track-1") },
+        order: [{ effect: persisted("effect-2"), kind: "reverb" }],
+      },
+    ],
+  });
+  expect(plan.actions.map((entry) => entry.changed)).toEqual([true, false]);
+  expect(plan.snapshot.processors[0]?.index).toBe(0);
+});
+
+test("consolidates duplicate instrument and arpeggiator projections on set", () => {
+  const base = snapshot();
+  base.processors = [
+    {
+      id: "instrument-canonical",
+      target: { trackId: "track-1" },
+      instanceId: "instrument-1",
+      index: 2,
+      processor: {
+        kind: "instrument",
+        params: {
+          kind: "synth",
+          instanceId: "instrument-1",
+          params: {},
+        },
+      },
+    },
+    {
+      id: "instrument-legacy",
+      target: { trackId: "track-1" },
+      instanceId: "instrument-1",
+      index: 3,
+      processor: {
+        kind: "instrument",
+        params: {
+          kind: "synth",
+          instanceId: "instrument-1",
+          params: {},
+        },
+      },
+    },
+    {
+      id: "arp-1",
+      target: { trackId: "track-1" },
+      index: 4,
+      processor: { kind: "arpeggiator", params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false } },
+    },
+    {
+      id: "arp-2",
+      target: { trackId: "track-1" },
+      index: 5,
+      processor: { kind: "arpeggiator", params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false } },
+    },
+    {
+      id: "effect-1",
+      target: { trackId: "track-1" },
+      instanceId: "audio-effect:one",
+      index: 0,
+      processor: { kind: "eq", params: {} },
+    },
+    {
+      id: "effect-2",
+      target: { trackId: "track-1" },
+      instanceId: "audio-effect:two",
+      index: 1,
+      processor: { kind: "reverb", params: {} },
+    },
+  ];
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "instrument.set", target: { kind: "track", track: persisted("track-1") }, instrumentKind: "synth" },
+      { kind: "arpeggiator.set", target: { kind: "track", track: persisted("track-1") }, params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false } },
+      {
+        kind: "effect.reorder",
+        target: { kind: "track", track: persisted("track-1") },
+        order: [
+          { effect: persisted("effect-1"), kind: "eq" },
+          { effect: persisted("effect-2"), kind: "reverb" },
+        ],
+      },
+    ],
+  });
+  expect(plan.actions.map((entry) => entry.changed)).toEqual([true, true, false]);
+  expect(plan.snapshot.processors.map((entry) => ({ id: entry.id, index: entry.index }))).toEqual([
+    { id: "effect-1", index: 0 },
+    { id: "effect-2", index: 1 },
+    { id: "instrument-canonical", index: 2 },
+    { id: "arp-1", index: 3 },
+  ]);
+});
+
+test("treats absent optional clip fields as clearable and MIDI notes as unordered", () => {
+  const base = snapshot();
+  base.clips[0] = {
+    ...base.clips[0],
+    midi: { wave: "sine", gain: 1, notes: [
+      { beat: 1, length: 1, pitch: 64 },
+      { beat: 0, length: 1, pitch: 60 },
+    ] },
+  };
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "clip.midi.set",
+      clip: persisted("clip-1"),
+      wave: "sine",
+      gain: 1,
+      notes: [
+        { beat: 0, length: 1, pitch: 60 },
+        { beat: 1, length: 1, pitch: 64 },
+      ],
+    }],
+  });
+  expect(plan.applied).toBe(false);
+});
+
+test("plans optional audio source, fades, and warp from absent values without throwing", () => {
+  const base = snapshot();
+  base.tracks[0].kind = "audio";
+  base.clips[0].midi = undefined;
+  base.clips[0].fades = undefined;
+  base.clips[0].audioWarp = undefined;
+  base.assets = [{
+    id: "asset-1", name: "Audio", sourceKind: "upload", mimeType: "audio/wav",
+    sizeBytes: 1, contentSha256: "a".repeat(64), durationSec: 2, sampleRate: 48_000, channelCount: 2,
+    createdAt: 0, updatedAt: 0,
+  }];
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "clip.source.set", clip: persisted("clip-1"), asset: persisted("asset-1") },
+      { kind: "clip.fades.set", clip: persisted("clip-1"), fades: { fadeInSec: 0.25, fadeOutSec: 0.25, fadeInCurve: 0, fadeOutCurve: 0 } },
+      { kind: "clip.audioWarp.set", clip: persisted("clip-1"), audioWarp: { enabled: false, mode: "repitch" } },
+    ],
+  });
+  expect(plan.applied).toBe(true);
+});
+
+test("treats equivalent disabled audio warp endpoints as a no-op", () => {
+  const base = snapshot();
+  base.tracks[0].kind = "audio";
+  base.clips[0].midi = undefined;
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "clip.audioWarp.set",
+      clip: persisted("clip-1"),
+      audioWarp: { enabled: false, mode: "repitch" },
+    }],
+  });
+  expect(plan.applied).toBe(false);
+  expect(plan.actions[0]?.changed).toBe(false);
+});
+
+test("normalizes track creation colors and projects an explicit instrument", () => {
+  const plan = planControlRequestV1(snapshot(), {
+    projectId: "project-1",
+    actions: [{
+      kind: "track.create",
+      clientRef: "new-instrument",
+      trackKind: "instrument",
+      color: "#AbC",
+    }],
+  });
+  const track = plan.snapshot.tracks.find((entry) => entry.id === "control:track:new-instrument");
+  expect(track?.color).toBe("#aabbcc");
+  expect(track?.collapsed).toBe(false);
+  expect(plan.snapshot.processors.some((entry) => (
+    "trackId" in entry.target
+    && entry.target.trackId === track?.id
+    && entry.processor.kind === "instrument"
+  ))).toBe(true);
+});
+
+test("rejects external routing before planning an ungroup", () => {
+  const base = snapshot();
+  base.tracks = [
+    { ...base.tracks[0], id: "group", kind: "audio", channelRole: "group", index: 0 },
+    { ...base.tracks[0], id: "child", index: 1, groupId: "group" },
+    { ...base.tracks[0], id: "external", index: 2, outputTargetId: "group" },
+  ];
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.ungroup", group: persisted("group") }],
+  })).toThrow();
+});
+
+test("compacts remaining device indices before a later reorder", () => {
+  const base = snapshot();
+  base.processors = [
+    {
+      id: "instrument-1",
+      target: { trackId: "track-1" },
+      index: 0,
+      processor: { kind: "instrument", params: { kind: "synth", instanceId: "instrument:one", params: {} } },
+    },
+    {
+      id: "arp-1",
+      target: { trackId: "track-1" },
+      index: 1,
+      processor: { kind: "arpeggiator", params: {} },
+    },
+    {
+      id: "effect-1",
+      target: { trackId: "track-1" },
+      instanceId: "audio-effect:one",
+      index: 2,
+      processor: { kind: "eq", params: {} },
+    },
+  ];
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "instrument.remove", target: { track: persisted("track-1") } },
+      { kind: "effect.reorder", target: { kind: "track", track: persisted("track-1") }, order: [{ effect: persisted("effect-1"), kind: "eq" }] },
+    ],
+  });
+  expect(plan.snapshot.processors.find((entry) => entry.id === "effect-1")?.index).toBe(0);
 });

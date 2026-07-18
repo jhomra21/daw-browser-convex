@@ -554,10 +554,46 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
   expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
-  expect(controlCapabilitiesV1.actionKinds).toContain('clip.midi.create')
+  expect(controlCapabilitiesV1.actionKinds).toHaveLength(36)
+  expect(controlCapabilitiesV1.actionKinds).toEqual([
+    'project.rename', 'project.settings.set', 'track.create', 'track.rename',
+    'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
+    'track.delete', 'clip.midi.create', 'clip.move', 'clip.timing.set',
+    'clip.rename', 'clip.delete', 'master.volume.set', 'effect.upsert',
+    'effect.remove', 'effect.reorder', 'instrument.set', 'arpeggiator.set',
+    'automation.set', 'automation.delete', 'sidechain.set', 'sidechain.remove',
+    'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
+    'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
+    'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
+  ])
   expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
   expect(projectSnapshotSchemaV1.parse(snapshot).project.masterVolume).toBe(0.8)
+})
+
+test('parses every Phase 5B action strictly', () => {
+  const track = persisted('track-1')
+  const clip = persisted('clip-1')
+  const asset = { source: 'persisted' as const, id: 'asset-1' }
+  const target = trackTarget(track)
+  const actions = [
+    { kind: 'clip.audio.create', track, asset },
+    { kind: 'clip.source.set', clip, asset },
+    { kind: 'clip.midi.set', clip, wave: 'sine', notes: [] },
+    { kind: 'clip.fades.set', clip, fades: { fadeInSec: 0, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 } },
+    { kind: 'clip.audioWarp.set', clip, audioWarp: { enabled: false, mode: 'repitch' } },
+    { kind: 'clip.color.set', clip, color: null },
+    { kind: 'track.collapsed.set', track, collapsed: true },
+    { kind: 'track.color.set', track, color: null },
+    { kind: 'track.color.cascade', root: track, color: '#22c55e', cascadeClipColors: true },
+    { kind: 'track.ungroup', group: track },
+    { kind: 'instrument.remove', target },
+    { kind: 'arpeggiator.remove', target },
+  ]
+  for (const action of actions) expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'clip.audio.create', track, asset: { source: 'persisted', id: 'asset-1', key: 'raw-key' },
+  }]))).toThrow()
 })
 
 test('accepts every canonical effect payload and rejects unknown nested fields', () => {

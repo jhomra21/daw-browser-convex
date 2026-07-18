@@ -1,23 +1,34 @@
 import { collectDeletedTrackIdsV1, type ControlPlanV1 } from "@daw-browser/control";
 import {
   createAudioEffectInstanceId,
+  createDefaultSynthParams,
+  normalizeAudioWarp,
+  normalizeClipColor,
   normalizeAudioEffectParamsForUpdate,
   normalizeTrackInstrumentParams,
 } from "@daw-browser/shared";
 import { normalizeClipFades } from "@daw-browser/timeline-core/clip-fades";
 import {
   createMidiClipRow,
+  createAudioClipRow,
   deleteClipRow,
   moveClipRow,
   setClipGainRow,
   setClipNameRow,
   setClipTimingRow,
+  setClipMidiRow,
+  setClipFadesRow,
+  setClipAudioWarpRow,
+  setClipColorRow,
+  setClipSourceRow,
 } from "./clips";
 import {
   removeAudioEffectRow,
   reorderAudioEffectRows,
   setArpeggiatorRow,
   setTrackInstrumentRow,
+  removeTrackInstrumentRow,
+  removeArpeggiatorRow,
   upsertMasterEffectRow,
   upsertTrackEffectRow,
 } from "./effects";
@@ -35,7 +46,12 @@ import {
   setTrackNameRow,
   setTrackRoutingRow,
   setTrackVolumeRow,
+  setTrackCollapsedRow,
+  setTrackColorRow,
+  setTrackColorCascadeRow,
+  ungroupTrackRow,
 } from "./tracks";
+import { findSampleRow } from "./sampleRows";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 
 const requiredId = (ctx: any, table: string, id: string) => {
@@ -51,6 +67,31 @@ const resolveRef = (ctx: any, table: string, refs: Map<string, unknown>, ref: { 
     return id
   }
   return requiredId(ctx, table, ref.id)
+}
+
+const requireCompleteAsset = async (
+  ctx: any,
+  projectId: string,
+  assetKey: string,
+): Promise<{ assetKey: string; sourceKind: "upload" | "url" | "recording"; name: string; duration: number; sampleRate: number; channelCount: number }> => {
+  const asset = await findSampleRow(ctx, { projectId, assetKey })
+  const duration = asset?.duration
+  const sampleRate = asset?.sampleRate
+  const channelCount = asset?.channelCount
+  if (
+    !asset || duration === undefined || sampleRate === undefined || channelCount === undefined
+    || (asset.sourceKind !== "upload" && asset.sourceKind !== "url" && asset.sourceKind !== "recording")
+  ) {
+    throw new Error("Audio clips require an asset with complete source metadata.")
+  }
+  return {
+    assetKey: asset.assetKey,
+    sourceKind: asset.sourceKind,
+    name: asset.name,
+    duration,
+    sampleRate,
+    channelCount,
+  }
 }
 
 export async function executeControlPlanV1(
@@ -83,6 +124,18 @@ export async function executeControlPlanV1(
           name: action.name,
         })
         result = created
+        if (entry.generatedInstrumentInstanceId && created.trackId) {
+          const instrument = await setTrackInstrumentRow(ctx, {
+            projectId: input.projectId,
+            trackId: created.trackId,
+            instrument: {
+              kind: "synth",
+              instanceId: entry.generatedInstrumentInstanceId,
+              params: createDefaultSynthParams(),
+            },
+          })
+          result = { changed: created.changed || instrument.changed }
+        }
         if (action.clientRef) {
           trackRefs.set(action.clientRef, created.trackId)
           resolvedRefs.push({ entity: "track", clientRef: action.clientRef, id: String(created.trackId), persisted: true })
@@ -156,6 +209,18 @@ export async function executeControlPlanV1(
           result = await deleteTrackRows(ctx, { projectId: input.projectId, trackIds })
         }
         break
+      case "track.collapsed.set":
+        result = await setTrackCollapsedRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.track), collapsed: action.collapsed })
+        break
+      case "track.color.set":
+        result = await setTrackColorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.track), color: action.color ?? undefined })
+        break
+      case "track.color.cascade":
+        result = await setTrackColorCascadeRow(ctx, { projectId: input.projectId, rootTrackId: resolveRef(ctx, "tracks", trackRefs, action.root), color: action.color ?? undefined, cascadeClipColors: action.cascadeClipColors })
+        break
+      case "track.ungroup":
+        result = await ungroupTrackRow(ctx, { projectId: input.projectId, groupId: resolveRef(ctx, "tracks", trackRefs, action.group), userId: input.actorId })
+        break
       case "clip.midi.create": {
         const created = await createMidiClipRow(ctx, {
           projectId: input.projectId,
@@ -174,6 +239,46 @@ export async function executeControlPlanV1(
         }
         break
       }
+      case "clip.audio.create": {
+        const asset = await requireCompleteAsset(ctx, input.projectId, action.asset.id)
+        const created = await createAudioClipRow(ctx, {
+          projectId: input.projectId, ownerUserId: input.actorId,
+          trackId: resolveRef(ctx, "tracks", trackRefs, action.track),
+          name: action.name ?? asset.name, startSec: action.startSec ?? 0, duration: action.duration ?? asset.duration,
+          gain: action.gain, color: action.color === undefined ? undefined : normalizeClipColor(action.color), leftPadSec: action.leftPadSec, bufferOffsetSec: action.bufferOffsetSec,
+          midiOffsetBeats: action.midiOffsetBeats, fades: action.fades ? normalizeClipFades(action.fades, action.duration ?? asset.duration) : undefined,
+          audioWarp: normalizeAudioWarp(action.audioWarp),
+          sourceAssetKey: asset.assetKey, sourceKind: asset.sourceKind, sourceDurationSec: asset.duration,
+          sourceSampleRate: asset.sampleRate, sourceChannelCount: asset.channelCount,
+          sampleUrl: `/api/samples/${encodeURIComponent(input.projectId)}/${encodeURIComponent(asset.assetKey)}`,
+        })
+        result = { changed: created.changed }
+        if (action.clientRef && created.value) {
+          clipRefs.set(action.clientRef, created.value)
+          resolvedRefs.push({ entity: "clip", clientRef: action.clientRef, id: String(created.value), persisted: true })
+        }
+        break
+      }
+      case "clip.source.set": {
+        const asset = await requireCompleteAsset(ctx, input.projectId, action.asset.id)
+        result = await setClipSourceRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), assetKey: asset.assetKey, sourceKind: asset.sourceKind, durationSec: asset.duration, sampleRate: asset.sampleRate, channelCount: asset.channelCount })
+        break
+      }
+      case "clip.midi.set":
+        result = await setClipMidiRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), midi: { wave: action.wave, gain: action.gain, notes: action.notes } })
+        break
+      case "clip.fades.set": {
+        const clipId = resolveRef(ctx, "clips", clipRefs, action.clip)
+        const clip = await ctx.db.get(clipId)
+        result = !clip ? { changed: false } : await setClipFadesRow(ctx, { projectId: input.projectId, clipId, fades: normalizeClipFades(action.fades, clip.duration) })
+        break
+      }
+      case "clip.audioWarp.set":
+        result = await setClipAudioWarpRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), audioWarp: normalizeAudioWarp(action.audioWarp) })
+        break
+      case "clip.color.set":
+        result = await setClipColorRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), color: action.color ?? undefined })
+        break
       case "clip.move":
         result = await moveClipRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), trackId: resolveRef(ctx, "tracks", trackRefs, action.track), startSec: action.startSec })
         break
@@ -305,6 +410,12 @@ export async function executeControlPlanV1(
       }
       case "arpeggiator.set":
         result = await setArpeggiatorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track), params: action.params })
+        break
+      case "instrument.remove":
+        result = await removeTrackInstrumentRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track) })
+        break
+      case "arpeggiator.remove":
+        result = await removeArpeggiatorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track) })
         break
       case "automation.set": {
         const effect = action.effect === undefined ? undefined : await ctx.db.get(resolveRef(ctx, "effects", effectRefs, action.effect))

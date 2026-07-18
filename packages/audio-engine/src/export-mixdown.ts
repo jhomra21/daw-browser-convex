@@ -788,7 +788,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         : instrument
           ? undefined
           : fxCfg?.synth
-      const synthTrack = synthParams || (!instrument && synthParams === undefined && track.kind === 'instrument')
+      const synthTrack = synthParams
         ? createOfflineSynthTrack({
             ctx,
             destination: trackInput,

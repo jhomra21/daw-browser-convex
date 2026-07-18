@@ -38,6 +38,16 @@ export const buildClipFadesMutationArgs = (
   fades: payload.fades,
 })
 
+export const buildClipMidiMutationArgs = (
+  projectId: string,
+  payload: Extract<SharedTimelineOperation, { kind: 'clips.setMidi' }>['payload'],
+) => ({
+  projectId,
+  clipId: payload.clipId,
+  midi: payload.midi,
+  operationId: payload.operationId,
+})
+
 export class TimelineOperationTargetError extends Error {
   constructor(message: string) {
     super(message)
@@ -138,6 +148,10 @@ export const executeTimelineOperation = async (
       )
     case 'clips.setColor':
       return await context.convex.mutation(convexApi.clips.serverSetColor, operation.payload)
+    case 'clips.setMidi':
+      return await context.convex.mutation(convexApi.clips.serverSetMidi, {
+        ...buildClipMidiMutationArgs(context.projectId, operation.payload),
+      })
     case 'tracks.setRouting':
       await context.convex.mutation(convexApi.tracks.serverSetRouting, {
         trackId: operation.payload.trackId,
@@ -290,11 +304,23 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         instrument: operation.payload.instrument,
       })
+    case 'instruments.removeTrackInstrument':
+      return await context.convex.mutation(convexApi.effects.serverRemoveTrackInstrument, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        operationId: operation.payload.operationId,
+      })
     case 'effects.setArpeggiatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetArpeggiatorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
         params: operation.payload.params,
+      })
+    case 'effects.removeArpeggiator':
+      return await context.convex.mutation(convexApi.effects.serverRemoveArpeggiator, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        operationId: operation.payload.operationId,
       })
     case 'effects.setMasterEqParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterEqParams, {

@@ -71,8 +71,28 @@ const actionTrackIds = (
       break;
     case "track.rename":
     case "track.mix.set":
+    case "track.collapsed.set":
+    case "track.color.set":
       addTrack(trackIds, action.track);
       break;
+    case "track.color.cascade":
+    case "track.ungroup": {
+      const root = action.kind === "track.color.cascade" ? persistedId(action.root) : persistedId(action.group);
+      if (root) {
+        trackIds.add(root);
+        for (const track of snapshot.tracks) {
+          let parentId = track.groupId;
+          while (parentId) {
+            if (parentId === root) {
+              trackIds.add(track.id);
+              break;
+            }
+            parentId = tracks.get(parentId)?.groupId;
+          }
+        }
+      }
+      break;
+    }
     case "track.routing.set":
       addTrack(trackIds, action.track);
       if (action.output) addTrack(trackIds, action.output);
@@ -92,6 +112,7 @@ const actionTrackIds = (
       break;
     }
     case "clip.midi.create":
+    case "clip.audio.create":
       addTrack(trackIds, action.track);
       break;
     case "clip.move":
@@ -99,6 +120,11 @@ const actionTrackIds = (
       addTrack(trackIds, action.track);
       break;
     case "clip.timing.set":
+    case "clip.source.set":
+    case "clip.midi.set":
+    case "clip.fades.set":
+    case "clip.audioWarp.set":
+    case "clip.color.set":
     case "clip.rename":
     case "clip.delete":
       addClipTrack(action.clip);
@@ -113,7 +139,9 @@ const actionTrackIds = (
       for (const item of action.order) addEffectTrack(item.effect);
       break;
     case "instrument.set":
+    case "instrument.remove":
     case "arpeggiator.set":
+    case "arpeggiator.remove":
       addTrack(trackIds, action.target.track);
       break;
     case "automation.set":

@@ -415,6 +415,22 @@ test("every advertised action has an authenticated preview and commit endpoint f
   const instrument = await addTrack(t, { name: "Instrument", index: 2, kind: "instrument" });
   const source = await addTrack(t, { name: "Source", index: 3 });
   const returnTrack = await addTrack(t, { name: "Return", index: 4, channelRole: "return" });
+  await t.run(async (ctx) => await ctx.db.insert("samples", {
+    projectId,
+    assetKey: "asset-1",
+    sourceKind: "upload",
+    name: "Fixture Audio",
+    mimeType: "audio/wav",
+    sizeBytes: 1,
+    contentSha256: "a".repeat(64),
+    r2Key: "fixture-audio",
+    duration: 2,
+    sampleRate: 48_000,
+    channelCount: 2,
+    ownerUserId: owner,
+    createdAt: 0,
+    updatedAt: 0,
+  }));
   const removable = await t.run(async (ctx) => await ctx.db.insert("effects", {
     projectId,
     targetType: "track",
@@ -461,7 +477,42 @@ test("every advertised action has an authenticated preview and commit endpoint f
       wave: "sine",
       notes: [{ beat: 0, length: 1, pitch: 60 }],
     },
+    {
+      kind: "clip.audio.create",
+      clientRef: "audio-clip",
+      track: ref(audio),
+      asset: { source: "persisted" as const, id: "asset-1" },
+      color: "#22C55E",
+      audioWarp: {
+        enabled: true,
+        sourceBpm: 120.004,
+        sourceBeatOffset: 0.0004,
+        mode: "stretch",
+      },
+    },
+    {
+      kind: "clip.source.set",
+      clip: { source: "client" as const, clientRef: "audio-clip" },
+      asset: { source: "persisted" as const, id: "asset-1" },
+    },
+    {
+      kind: "clip.fades.set",
+      clip: { source: "client" as const, clientRef: "audio-clip" },
+      fades: { fadeInSec: 0.1, fadeOutSec: 0.1, fadeInCurve: 0, fadeOutCurve: 0 },
+    },
+    {
+      kind: "clip.audioWarp.set",
+      clip: { source: "client" as const, clientRef: "audio-clip" },
+      audioWarp: {
+        enabled: true,
+        sourceBpm: 120.0041,
+        sourceBeatOffset: 0.00049,
+        mode: "stretch",
+      },
+    },
+    { kind: "clip.color.set", clip: { source: "client" as const, clientRef: "audio-clip" }, color: "#22c55e" },
     { kind: "clip.move", clip: { source: "client" as const, clientRef: "midi" }, track: ref(instrument), startSec: 1 },
+    { kind: "clip.midi.set", clip: { source: "client" as const, clientRef: "midi" }, wave: "sine", notes: [{ beat: 0, length: 1, pitch: 62 }] },
     { kind: "clip.timing.set", clip: { source: "client" as const, clientRef: "midi" }, duration: 3, gain: 0.7 },
     { kind: "clip.rename", clip: { source: "client" as const, clientRef: "midi" }, name: "Renamed MIDI" },
     { kind: "master.volume.set", volume: 0.7 },
@@ -486,13 +537,20 @@ test("every advertised action has an authenticated preview and commit endpoint f
       target: { kind: "track" as const, track: ref(instrument) },
       params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false },
     },
+    { kind: "track.collapsed.set", track: ref(source), collapsed: true },
+    { kind: "track.color.set", track: ref(source), color: "#22c55e" },
+    { kind: "track.color.cascade", root: ref(group), color: "#22c55e", cascadeClipColors: true },
+    { kind: "track.ungroup", group: ref(group) },
     { kind: "automation.set", target: { kind: "master" as const }, parameterId: "volume", enabled: true, points: [{ id: "point", timeSec: 0, value: 0.7, interpolation: "linear" }] },
     { kind: "automation.delete", target: { kind: "master" as const }, parameterId: "volume" },
     { kind: "sidechain.set", source: ref(source), target: ref(instrument), effect: { source: "client" as const, clientRef: "compressor" } },
     { kind: "sidechain.remove", target: ref(instrument), effect: { source: "client" as const, clientRef: "compressor" } },
+    { kind: "instrument.remove", target: { kind: "track" as const, track: ref(instrument) } },
+    { kind: "arpeggiator.remove", target: { kind: "track" as const, track: ref(instrument) } },
     { kind: "clip.delete", clip: { source: "client" as const, clientRef: "midi" } },
     { kind: "track.delete", track: temp },
   ];
+  expect(actions).toHaveLength(36);
   expect(actions.map((action) => action.kind).sort()).toEqual([...controlCapabilitiesV1.actionKinds].sort());
   const previewRequest = { version: "v1" as const, projectId, actions };
   expect(() => parseControlPreviewRequestV1(previewRequest)).not.toThrow();
@@ -518,11 +576,11 @@ test("every advertised action has an authenticated preview and commit endpoint f
     expect(project?.tempoBpm).toBe(128);
     expect(channel?.volume).toBe(0.6);
     expect(channel?.muted).toBe(true);
-    expect(String(channel?.outputTargetId)).toBe(String(group));
+    expect(channel?.outputTargetId).toBeUndefined();
     expect(channel?.sends).toHaveLength(1);
     expect(tracks.some((track) => track.name === "Temporary")).toBe(false);
-    expect(clips).toEqual([]);
-    expect(effects.map((effect) => effect.type).sort()).toEqual(["arpeggiator", "compressor", "instrument"]);
+    expect(clips).toHaveLength(1);
+    expect(effects.map((effect) => effect.type).sort()).toEqual(["compressor"]);
     expect(automation).toEqual([]);
     expect(sidechains).toEqual([]);
     expect(master?.masterVolume).toBe(0.7);

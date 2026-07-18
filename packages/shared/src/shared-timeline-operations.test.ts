@@ -62,6 +62,58 @@ describe('shared timeline operations', () => {
     })
   })
 
+  test('parses strict durable MIDI and device-removal operations', () => {
+    const midi = parseSharedTimelineOperation({
+      kind: 'clips.setMidi',
+      payload: {
+        clipId: 'clip-1',
+        operationId: 'midi-1',
+        midi: {
+          wave: 'sine',
+          notes: [{ beat: 2, length: 1, pitch: 72 }, { beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
+        },
+      },
+    })
+    expect(midi).toEqual({
+      kind: 'clips.setMidi',
+      payload: {
+        clipId: 'clip-1',
+        operationId: 'midi-1',
+        midi: {
+          wave: 'sine',
+          notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }, { beat: 2, length: 1, pitch: 72 }],
+        },
+      },
+    })
+    if (!midi) throw new Error('Expected MIDI operation to parse')
+    expect(readSharedTimelineOperationTargets(midi).clipIds).toEqual(new Set(['clip-1']))
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setMidi',
+      payload: { clipId: 'clip-1', operationId: 'midi-1', midi: { wave: 'sine', notes: [] }, unexpected: true },
+    })).toBeNull()
+
+    const removeInstrument = parseSharedTimelineOperation({
+      kind: 'instruments.removeTrackInstrument',
+      payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
+    })
+    const removeArpeggiator = parseSharedTimelineOperation({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: 'arp-remove-1' },
+    })
+    expect(removeInstrument).toEqual({
+      kind: 'instruments.removeTrackInstrument',
+      payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
+    })
+    expect(removeArpeggiator).toEqual({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: 'arp-remove-1' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: '', extra: true },
+    })).toBeNull()
+  })
+
   test('roundtrips synth parameters only with a durable instance identity', () => {
     const operation = {
       kind: 'effects.setSynthParams',

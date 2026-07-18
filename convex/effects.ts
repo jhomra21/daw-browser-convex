@@ -25,6 +25,9 @@ import {
   serializeEqParams,
   serializeReverbParams,
   serializeSaturatorParams,
+  parseGranularAutomationKey,
+  parseInstrumentAutomationKey,
+  parseSynthAutomationKey,
 } from "@daw-browser/shared";
 
 const reverbParamsValidator = v.object({
@@ -283,7 +286,11 @@ export const upsertTrackEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
-  const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+  const existing = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect())
+    .sort((left: EffectOrderRow, right: EffectOrderRow) => (
+      (left.index ?? 0) - (right.index ?? 0)
+      || (String(left._id) < String(right._id) ? -1 : 1)
+    ))
   if (input.instanceId) {
     const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isCanonicalAudioEffectKind(entry.type))
     validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
@@ -296,15 +303,20 @@ export const upsertTrackEffectRow = async (
       ? existing.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.targetType === 'track') ?? null
       : existing.find((entry: EffectOrderRow) => entry.type === input.type && entry.targetType === 'track' && !entry.instanceId) ?? null
   let consolidated = false
-  if (input.type === 'instrument') {
+  if (input.type === 'instrument' || input.type === 'arpeggiator') {
     await Promise.all(existing.flatMap((entry: EffectOrderRow) => (
       entry.targetType === 'track'
-        && (entry.type === 'instrument' || entry.type === 'synth')
+        && (
+          input.type === 'instrument'
+            ? entry.type === 'instrument' || entry.type === 'synth'
+            : entry.type === 'arpeggiator'
+        )
         && entry._id !== row?._id
         ? [ctx.db.delete(entry._id).then(() => { consolidated = true })]
         : []
     )))
   }
+  if (consolidated) await compactTrackProcessorIndexes(ctx, input.trackId)
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     if (row.type === input.type && stableEffectParams(row.params) === stableEffectParams(params)) {
@@ -618,6 +630,94 @@ export const removeAudioEffectRow = async (
   await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [])
   return { changed: true, status: 'deleted', effectId: row._id }
 }
+
+async function compactTrackProcessorIndexes(ctx: any, trackId: Id<'tracks'>) {
+  const rows = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', trackId)).collect())
+    .filter((row: EffectOrderRow) => row.targetType === 'track')
+    .sort((left: EffectOrderRow, right: EffectOrderRow) => (left.index ?? 0) - (right.index ?? 0))
+  for (const [index, row] of rows.entries()) {
+    if (row.index !== index) await ctx.db.patch(row._id, { index })
+  }
+}
+
+export const removeTrackInstrumentRow = async (
+  ctx: any,
+  input: { projectId: string; trackId: Id<'tracks'> },
+) => {
+  const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+  const instruments = rows.filter((entry: any) => (
+    entry.targetType === 'track' && (entry.type === 'instrument' || entry.type === 'synth')
+  ))
+  if (instruments.length === 0) return { changed: false }
+  const instanceIds = new Set(instruments.flatMap((row: any) => {
+    const instrument = row.type === 'instrument'
+      ? normalizeTrackInstrumentParams(row.params)
+      : normalizeTrackInstrumentParams({ kind: 'synth', instanceId: row.instanceId, params: row.params })
+    return instrument?.instanceId ? [instrument.instanceId] : []
+  }))
+  const automation = await ctx.db.query('automationEnvelopes').withIndex('by_project_track', (q: any) => (
+    q.eq('projectId', input.projectId).eq('trackId', input.trackId)
+  )).collect()
+  for (const envelope of automation) {
+    const key = parseInstrumentAutomationKey(envelope.parameterId)
+      ?? parseGranularAutomationKey(envelope.parameterId)
+      ?? parseSynthAutomationKey(envelope.parameterId)
+    if (key && instanceIds.has(key.instanceId)) await ctx.db.delete(envelope._id)
+  }
+  for (const row of instruments) await ctx.db.delete(row._id)
+  await compactTrackProcessorIndexes(ctx, input.trackId)
+  return { changed: true }
+}
+
+export const removeArpeggiatorRow = async (
+  ctx: any,
+  input: { projectId: string; trackId: Id<'tracks'> },
+) => {
+  const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
+  const arpeggiators = rows.filter((entry: any) => entry.targetType === 'track' && entry.type === 'arpeggiator')
+  if (arpeggiators.length === 0) return { changed: false }
+  for (const row of arpeggiators) await ctx.db.delete(row._id)
+  await compactTrackProcessorIndexes(ctx, input.trackId)
+  return { changed: true }
+}
+
+const removeTrackDeviceForUser = async (
+  ctx: any,
+  input: { projectId: string; trackId: string; operationId?: string; device: 'instrument' | 'arpeggiator' },
+) => {
+  const userId = await requireAuthenticatedUserId(ctx)
+  const trackId = ctx.db.normalizeId('tracks', input.trackId)
+  if (!trackId) return { status: 'rejected' as const }
+  return await runSharedOperationOnce(ctx, {
+    projectId: input.projectId,
+    userId,
+    operationId: input.operationId,
+    isResult: (value): value is { status: 'applied' | 'noop' | 'rejected' } => (
+      typeof value === 'object' && value !== null && 'status' in value
+      && (value.status === 'applied' || value.status === 'noop' || value.status === 'rejected')
+    ),
+    run: async () => {
+      const access = await getTrackWriteAccess(ctx, trackId, userId)
+      if (!access || access.track.projectId !== input.projectId) return { status: 'rejected' as const }
+      const result = input.device === 'instrument'
+        ? await removeTrackInstrumentRow(ctx, { projectId: input.projectId, trackId })
+        : await removeArpeggiatorRow(ctx, { projectId: input.projectId, trackId })
+      if (!result.changed) return { status: 'noop' as const }
+      await advanceProjectRevision(ctx, input.projectId)
+      return { status: 'applied' as const }
+    },
+  })
+}
+
+export const serverRemoveTrackInstrument = mutation({
+  args: { projectId: v.string(), trackId: v.string(), operationId: v.optional(v.string()) },
+  handler: async (ctx, input) => await removeTrackDeviceForUser(ctx, { ...input, device: 'instrument' }),
+})
+
+export const serverRemoveArpeggiator = mutation({
+  args: { projectId: v.string(), trackId: v.string(), operationId: v.optional(v.string()) },
+  handler: async (ctx, input) => await removeTrackDeviceForUser(ctx, { ...input, device: 'arpeggiator' }),
+})
 
 const removeAudioEffectForUser = async (
   ctx: any,

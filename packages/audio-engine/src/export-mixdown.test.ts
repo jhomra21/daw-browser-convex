@@ -199,8 +199,8 @@ describe('runtime-only cue routing', () => {
   })
 })
 
-describe('offline default synth scheduling', () => {
-  test('renders fresh instrument tracks with default synth params and skips explicit non-synth instruments', async () => {
+describe('offline instrument scheduling', () => {
+  test('does not fabricate a synth for instrument tracks without a persisted device', async () => {
     type Event = { kind: 'set' | 'ramp' | 'cancel'; value?: number; time: number }
     type Param = {
       value: number
@@ -351,11 +351,8 @@ describe('offline default synth scheduling', () => {
       },
     })
 
-    expect(contexts[0]?.oscillators).toHaveLength(3)
-    expect(contexts[0]?.oscillators.every((oscillator) => oscillator.starts.includes(0))).toBe(true)
-    expect(contexts[0]?.bufferSources).toHaveLength(1)
-    expect(contexts[0]?.bufferSources[0]?.starts).toEqual([0])
-    expect(contexts[0]?.bufferSources[0]?.loop).toBe(true)
+    expect(contexts[0]?.oscillators).toHaveLength(0)
+    expect(contexts[0]?.bufferSources).toHaveLength(0)
     expect(contexts[1]?.oscillators).toHaveLength(0)
   })
 })

@@ -49,6 +49,7 @@ type PersistedEffectState<TParams> = {
   readForTarget: (targetId: string) => TParams | undefined
   removeForTarget: (targetId: string) => boolean
   reset: () => void
+  setForTarget: (targetId: string, params: TParams) => void
   syncRemoteForTarget: (targetId: string, params: TParams | undefined) => void
   update: (updater: (prev: TParams) => TParams) => void
   updateForTarget: (targetId: string, updater: (prev: TParams) => TParams) => void
@@ -75,6 +76,7 @@ export function createPersistedEffectState<TRow, TParams>(
   const pendingCommitByTarget = new Map<string, PendingParamsCommit<TParams>>()
   const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
+  const appliedEngineStateByTarget = new Map<string, string | undefined>()
 
   function keyForTarget(targetId: string) {
     const scopeId = options.scopeId?.()
@@ -251,13 +253,12 @@ export function createPersistedEffectState<TRow, TParams>(
     saveTimers.set(key, setTimeout(() => flushTarget(targetId, key), debounceMs))
   }
 
-  function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
+  function applyParams(
+    targetId: string,
+    previous: TParams | undefined,
+    next: TParams,
+  ) {
     const key = keyForTarget(targetId)
-    const previous = readCurrent(targetId)
-    const initial = previous ?? options.createInitialParams(targetId)
-    if (!initial) return
-
-    const next = updater(initial)
     const serializedNext = options.serializeParams(next)
     if (previous !== undefined && options.serializeParams(previous) === serializedNext) return
     const pendingCommit = pendingCommitByTarget.get(key)
@@ -278,6 +279,13 @@ export function createPersistedEffectState<TRow, TParams>(
       serialized: serializedNext,
     })
     persistOrSchedule(targetId, key, next)
+  }
+
+  function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
+    const previous = readCurrent(targetId)
+    const initial = previous ?? options.createInitialParams(targetId)
+    if (!initial) return
+    applyParams(targetId, previous, updater(initial))
   }
 
   const params = createMemo(() => {
@@ -344,10 +352,15 @@ export function createPersistedEffectState<TRow, TParams>(
     if (!targetId) return
     const next = params()
     if (!next) {
+      if (appliedEngineStateByTarget.get(targetId) === undefined && appliedEngineStateByTarget.has(targetId)) return
       options.clearFromEngine?.(targetId)
+      appliedEngineStateByTarget.set(targetId, undefined)
       return
     }
+    const serialized = options.serializeParams(next)
+    if (appliedEngineStateByTarget.get(targetId) === serialized) return
     options.applyToEngine(targetId, next)
+    appliedEngineStateByTarget.set(targetId, serialized)
   })
 
   const flushPending = async (projectId?: string) => {
@@ -434,6 +447,9 @@ export function createPersistedEffectState<TRow, TParams>(
       const initial = options.createInitialParams(targetId)
       if (!initial) return
       applyUpdate(targetId, () => initial)
+    },
+    setForTarget: (targetId, params) => {
+      applyParams(targetId, readCurrent(targetId), params)
     },
     syncRemoteForTarget: syncRemote,
     update: (updater) => {

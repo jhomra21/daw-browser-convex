@@ -154,7 +154,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   createEffect(() => {
     const effects = roomEffectsQuery.data;
     if (effects === undefined) return;
-    const activeTarget = currentTargetId();
     const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     for (const row of effects) {
@@ -168,7 +167,6 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       }
     }
     for (const track of options.tracks()) {
-      if (track.id === activeTarget) continue;
       const instrumentParams = track.kind === "instrument" ? instrumentByTrackId.get(track.id) : undefined;
       const arpParams = track.kind === "instrument" ? arpByTrackId.get(track.id) : undefined;
       instrument.syncRemoteInstrumentForTarget(track.id, instrumentParams);

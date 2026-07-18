@@ -1,5 +1,8 @@
 import {
   canonicalTrackCreation,
+  canonicalControlMidiNotes,
+  audioWarpEqual,
+  createDefaultSynthParams,
   getAutomationParameterDescriptor,
   hasValidReturnTrackPartition,
   normalizeAutomationPoints,
@@ -8,6 +11,10 @@ import {
   normalizeMasterVolume,
   normalizeTrackRouting,
   normalizeTrackInstrumentParams,
+  normalizeAudioWarp,
+  normalizeClipColor,
+  normalizeTrackColor,
+  trackCreationCollapsed,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
@@ -69,6 +76,7 @@ const placeholderId = (entity: Entity, clientRef: string | undefined, actionInde
 )
 
 const canonical = (value: unknown): string => {
+  if (value === undefined) return 'undefined'
   if (value === null) return 'null'
   if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -163,6 +171,16 @@ const isAudioEffectKind = (kind: string) => (
   || kind === 'autopan' || kind === 'ensemble' || kind === 'delay' || kind === 'reverb'
   || kind === 'spectral'
 )
+
+const compactTrackProcessorIndexes = (
+  processors: ProjectSnapshotV1['processors'],
+  trackId: string,
+) => {
+  processors
+    .filter((entry) => 'trackId' in entry.target && entry.target.trackId === trackId)
+    .sort((left, right) => left.index - right.index)
+    .forEach((entry, index) => { entry.index = index })
+}
 
 const validateAutomationTarget = (
   action: ControlActionV1,
@@ -291,15 +309,42 @@ export const planControlRequestV1 = (
           muted: false,
           soloed: false,
           sends: [],
+          collapsed: trackCreationCollapsed(action.channelRole, undefined),
+          ...(action.color === undefined ? {} : {
+            color: normalizeTrackColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid track color.'),
+          }),
         }
         tracks.set(id, track)
         snapshot.tracks.push(track)
+        const generatedInstrumentInstanceId = (
+          (action.trackKind ?? 'audio') === 'instrument'
+          && (action.channelRole ?? 'track') === 'track'
+        ) ? `control:instrument:${actionIndex}` : undefined
+        if (generatedInstrumentInstanceId) {
+          const processor = {
+            id: placeholderId('effect', undefined, actionIndex),
+            target: { trackId: id },
+            instanceId: generatedInstrumentInstanceId,
+            index: 0,
+            processor: {
+              kind: 'instrument',
+              params: {
+                kind: 'synth',
+                instanceId: generatedInstrumentInstanceId,
+                params: createDefaultSynthParams(),
+              },
+            },
+          }
+          processors.set(processor.id, processor)
+          snapshot.processors.push(processor)
+        }
         if (action.clientRef) {
           trackRefs.set(action.clientRef, id)
           resolvedRefs.push({ entity: 'track', clientRef: action.clientRef, id, persisted: false })
         }
         changed = true
-        break
+        planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
+        continue
       }
       case 'track.rename': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
@@ -403,6 +448,78 @@ export const planControlRequestV1 = (
         changed = true
         break
       }
+      case 'track.collapsed.set': {
+        const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
+        changed = track.collapsed !== action.collapsed
+        track.collapsed = action.collapsed
+        break
+      }
+      case 'track.color.set': {
+        const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
+        const color = action.color === null ? undefined : normalizeTrackColor(action.color)
+        if (action.color !== null && !color) planError(actionIndex, 'validation', 'Invalid track color.')
+        changed = track.color !== color
+        track.color = color
+        break
+      }
+      case 'track.color.cascade': {
+        const root = requireTrack(action.root, tracks, trackRefs, actionIndex)
+        const color = action.color === null ? undefined : normalizeTrackColor(action.color)
+        if (action.color !== null && !color) planError(actionIndex, 'validation', 'Invalid track color.')
+        const targetIds = new Set([root.id])
+        if (root.channelRole === 'group') {
+          let added = true
+          while (added) {
+            added = false
+            for (const track of tracks.values()) {
+              if (track.groupId && targetIds.has(track.groupId) && !targetIds.has(track.id)) {
+                targetIds.add(track.id)
+                added = true
+              }
+            }
+          }
+        }
+        changed = false
+        for (const track of tracks.values()) {
+          if (!targetIds.has(track.id)) continue
+          changed = changed || track.color !== color
+          track.color = color
+        }
+        if (root.channelRole === 'group' && action.cascadeClipColors && color) {
+          for (const clip of clips.values()) {
+            if (!targetIds.has(clip.trackId)) continue
+            changed = changed || clip.color !== color
+            clip.color = color
+          }
+        }
+        break
+      }
+      case 'track.ungroup': {
+        const group = requireTrack(action.group, tracks, trackRefs, actionIndex)
+        if (group.channelRole !== 'group') planError(actionIndex, 'validation', 'Only group tracks can be ungrouped.')
+        const children = Array.from(tracks.values()).filter((track) => track.groupId === group.id)
+        if (Array.from(clips.values()).some((clip) => clip.trackId === group.id)) planError(actionIndex, 'validation', 'Cannot ungroup a group with clips.')
+        const childIds = new Set(children.map((child) => child.id))
+        if (Array.from(tracks.values()).some((track) => (
+          track.id !== group.id
+          && !childIds.has(track.id)
+          && (track.outputTargetId === group.id || track.sends.some((send: any) => send.targetTrackId === group.id))
+        ))) {
+          planError(actionIndex, 'validation', 'Cannot ungroup a group with external routing references.')
+        }
+        for (const child of children) {
+          child.groupId = group.groupId
+          if (child.outputTargetId === group.id) child.outputTargetId = group.groupId
+        }
+        tracks.delete(group.id)
+        snapshot.tracks = snapshot.tracks.filter((track) => track.id !== group.id)
+        snapshot.processors = snapshot.processors.filter((processor) => !('trackId' in processor.target && processor.target.trackId === group.id))
+        snapshot.automation = snapshot.automation.filter((entry) => !('trackId' in entry.target && entry.target.trackId === group.id))
+        snapshot.sidechains = snapshot.sidechains.filter((entry) => entry.sourceTrackId !== group.id && entry.targetTrackId !== group.id)
+        snapshot.tracks.sort((left, right) => left.index - right.index).forEach((track, index) => { track.index = index })
+        changed = true
+        break
+      }
       case 'clip.midi.create': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         if (track.kind !== 'instrument' || track.channelRole !== 'track') planError(actionIndex, 'validation', 'MIDI clips require an instrument track.')
@@ -426,6 +543,77 @@ export const planControlRequestV1 = (
           resolvedRefs.push({ entity: 'clip', clientRef: action.clientRef, id, persisted: false })
         }
         changed = true
+        break
+      }
+      case 'clip.audio.create': {
+        const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
+        if (track.kind !== 'audio' || track.channelRole !== 'track') planError(actionIndex, 'validation', 'Audio clips require an audio track.')
+        const asset = (base as any).assets?.find((entry: any) => entry.id === action.asset.id)
+        if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
+        if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) {
+          planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
+        }
+        const id = placeholderId('clip', action.clientRef, actionIndex)
+        const duration = action.duration ?? asset.durationSec
+        const clip = {
+          id, trackId: track.id, name: action.name ?? asset.name, startSec: action.startSec ?? 0, duration,
+          gain: action.gain, leftPadSec: action.leftPadSec ?? 0, bufferOffsetSec: action.bufferOffsetSec ?? 0,
+          midiOffsetBeats: action.midiOffsetBeats ?? 0, fades: action.fades ? normalizeClipFades(action.fades, duration) : undefined,
+          ...(action.color === undefined ? {} : { color: normalizeClipColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid clip color.') }),
+          audioWarp: action.audioWarp ? normalizeAudioWarp(action.audioWarp) : undefined,
+          source: { assetId: asset.id, sourceKind: asset.sourceKind, durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount },
+        }
+        clips.set(id, clip)
+        snapshot.clips.push(clip)
+        if (action.clientRef) {
+          clipRefs.set(action.clientRef, id)
+          resolvedRefs.push({ entity: 'clip', clientRef: action.clientRef, id, persisted: false })
+        }
+        changed = true
+        break
+      }
+      case 'clip.source.set': {
+        const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
+        if (clip.midi) planError(actionIndex, 'validation', 'MIDI clips cannot have an audio source.')
+        const asset = (base as any).assets?.find((entry: any) => entry.id === action.asset.id)
+        if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
+        if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
+        const source = { assetId: asset.id, sourceKind: asset.sourceKind, durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount }
+        changed = !same(clip.source, source)
+        clip.source = source
+        break
+      }
+      case 'clip.midi.set': {
+        const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
+        if (!clip.midi) planError(actionIndex, 'validation', 'Audio clips cannot contain MIDI.')
+        const midi = { wave: action.wave, gain: action.gain, notes: action.notes }
+        midi.notes = canonicalControlMidiNotes(midi.notes)
+        changed = !same({ ...clip.midi, notes: canonicalControlMidiNotes(clip.midi.notes) }, midi)
+        clip.midi = midi
+        break
+      }
+      case 'clip.fades.set': {
+        const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
+        if (clip.midi) planError(actionIndex, 'validation', 'MIDI clips do not support fades.')
+        const fades = normalizeClipFades(action.fades, clip.duration)
+        changed = !same(clip.fades, fades)
+        clip.fades = fades
+        break
+      }
+      case 'clip.audioWarp.set': {
+        const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
+        if (clip.midi) planError(actionIndex, 'validation', 'MIDI clips do not support audio warp.')
+        const audioWarp = normalizeAudioWarp(action.audioWarp)
+        changed = !audioWarpEqual(clip.audioWarp, audioWarp)
+        if (changed) clip.audioWarp = audioWarp
+        break
+      }
+      case 'clip.color.set': {
+        const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
+        const color = action.color === null ? undefined : normalizeClipColor(action.color)
+        if (action.color !== null && !color) planError(actionIndex, 'validation', 'Invalid clip color.')
+        changed = clip.color !== color
+        clip.color = color
         break
       }
       case 'clip.move': {
@@ -570,7 +758,13 @@ export const planControlRequestV1 = (
       case 'arpeggiator.set': {
         const track = requireTrack(action.target.track, tracks, trackRefs, actionIndex)
         if (track.kind !== 'instrument') planError(actionIndex, 'validation', 'Instruments and arpeggiators require an instrument track.')
-        const existing = Array.from(processors.values()).find((entry) => 'trackId' in entry.target && entry.target.trackId === track.id && entry.processor.kind === (action.kind === 'instrument.set' ? 'instrument' : 'arpeggiator'))
+        const processorKind = action.kind === 'instrument.set' ? 'instrument' : 'arpeggiator'
+        const existingRows = Array.from(processors.values()).filter((entry) => (
+          'trackId' in entry.target
+          && entry.target.trackId === track.id
+          && entry.processor.kind === processorKind
+        ))
+        const existing = existingRows[0]
         const existingInstrument = action.kind === 'instrument.set'
           ? normalizeTrackInstrumentParams(existing?.processor.params)
           : undefined
@@ -594,14 +788,57 @@ export const planControlRequestV1 = (
           index: existing?.index ?? snapshot.processors.filter((processor) => 'trackId' in processor.target && processor.target.trackId === track.id).length,
           processor,
         }
-        changed = !existing || !same(existing.processor, next.processor)
+        changed = existingRows.length !== 1 || !existing || !same(existing.processor, next.processor)
         if (existing) Object.assign(existing, next)
         else {
           processors.set(next.id, next)
           snapshot.processors.push(next)
         }
+        if (existingRows.length > 1) {
+          const duplicateIds = new Set(existingRows.slice(1).map((entry) => entry.id))
+          for (const id of duplicateIds) processors.delete(id)
+          snapshot.processors = snapshot.processors.filter((entry) => !duplicateIds.has(entry.id))
+          compactTrackProcessorIndexes(snapshot.processors, track.id)
+        }
         planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
         continue
+      }
+      case 'instrument.remove':
+      case 'arpeggiator.remove': {
+        const track = requireTrack(action.target.track, tracks, trackRefs, actionIndex)
+        const kind = action.kind === 'instrument.remove' ? 'instrument' : 'arpeggiator'
+        const existing = Array.from(processors.values()).filter((entry) => (
+          'trackId' in entry.target
+          && entry.target.trackId === track.id
+          && (entry.processor.kind === kind || kind === 'instrument' && entry.processor.kind === 'synth')
+        ))
+        if (existing.length === 0) {
+          changed = false
+          break
+        }
+        const existingIds = new Set(existing.map((entry) => entry.id))
+        for (const entry of existing) processors.delete(entry.id)
+        snapshot.processors = snapshot.processors.filter((entry) => !existingIds.has(entry.id))
+        const instrumentIds = new Set(existing.flatMap((entry) => (
+          kind === 'instrument'
+            ? [normalizeTrackInstrumentParams(entry.processor.params)?.instanceId]
+            : []
+        )).filter((instanceId): instanceId is string => instanceId !== undefined))
+        snapshot.automation = snapshot.automation.filter((entry) => (
+          !('trackId' in entry.target && entry.target.trackId === track.id)
+          || instrumentIds.size === 0
+          || !(
+            instrumentIds.has(parseInstrumentAutomationKey(entry.parameterId)?.instanceId ?? '')
+            || instrumentIds.has(parseGranularAutomationKey(entry.parameterId)?.instanceId ?? '')
+            || instrumentIds.has(parseSynthAutomationKey(entry.parameterId)?.instanceId ?? '')
+          )
+        ))
+        snapshot.processors
+          .filter((entry) => 'trackId' in entry.target && entry.target.trackId === track.id)
+          .sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
+          .forEach((entry, index) => { entry.index = index })
+        changed = true
+        break
       }
       case 'automation.set': {
         const target = resolveTarget(action.target, actionIndex)

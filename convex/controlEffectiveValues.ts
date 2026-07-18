@@ -1,3 +1,7 @@
+import { canonicalControlMidiNotes } from "@daw-browser/shared";
+
+export { canonicalControlMidiNotes } from "@daw-browser/shared";
+
 export const effectiveControlClipName = (name: string | undefined) => (
   name?.trim() || "Clip"
 );
@@ -10,31 +14,16 @@ export const effectiveControlMixerBoolean = (value: boolean | undefined) => (
   value ?? false
 );
 
-type ControlMidiNote = {
-  beat: number;
-  length: number;
-  pitch: number;
-  velocity?: number;
-};
-
 type ControlMidi = {
   wave: string;
   gain?: number;
-  notes: ControlMidiNote[];
+  notes: Array<{
+    beat: number;
+    length: number;
+    pitch: number;
+    velocity?: number;
+  }>;
 };
-
-export const canonicalControlMidiNotes = (
-  notes: ReadonlyArray<ControlMidiNote>,
-) => notes
-  .map((note, index) => ({ note, index }))
-  .sort((left, right) => (
-    left.note.beat - right.note.beat
-    || left.note.pitch - right.note.pitch
-    || left.note.length - right.note.length
-    || (left.note.velocity ?? 0) - (right.note.velocity ?? 0)
-    || left.index - right.index
-  ))
-  .map(({ note }) => note);
 
 export const controlMidiEqual = (
   left: ControlMidi | undefined,

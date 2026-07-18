@@ -1,6 +1,6 @@
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
-import { buildClipFadesMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
+import { buildClipFadesMutationArgs, buildClipMidiMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
 
 declare function test(name: string, run: () => void): void
 declare function expect(value: unknown): {
@@ -107,4 +107,22 @@ test('forwards a parsed fade operation to the clips.setFades mutation', () => {
   }
 
   expect(buildClipFadesMutationArgs(operation.payload)).toEqual(expected)
+})
+
+test('forwards a parsed durable MIDI operation to the server mutation', () => {
+  const operation = parseSharedTimelineOperation({
+    kind: 'clips.setMidi',
+    payload: {
+      clipId: 'clip-1',
+      operationId: 'midi-1',
+      midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+    },
+  })
+  if (!operation || operation.kind !== 'clips.setMidi') throw new Error('Expected MIDI operation to parse')
+  expect(buildClipMidiMutationArgs('project-1', operation.payload)).toEqual({
+    projectId: 'project-1',
+    clipId: 'clip-1',
+    operationId: 'midi-1',
+    midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+  })
 })

@@ -37,6 +37,14 @@ type ControlProjectSnapshotInput = {
     leftPadSec?: number;
     bufferOffsetSec?: number;
     midiOffsetBeats?: number;
+    color?: string;
+    audioWarp?: {
+      enabled: boolean;
+      sourceBpm?: number;
+      sourceBeatOffset?: number;
+      markers?: Array<{ id: string; sourceBeat: number; timelineBeat: number }>;
+      mode: "repitch" | "stretch";
+    };
     fades?: {
       fadeInStartSec?: number;
       fadeInSec: number;
@@ -152,6 +160,8 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
           tap: send.tap,
         }))
         .sort((left, right) => compareControlSnapshotText(left.targetTrackId, right.targetTrackId)),
+      collapsed: track.collapsed === true,
+      ...(track.color === undefined ? {} : { color: track.color }),
     }));
   const clips = [...input.clips]
     .sort((left, right) => left.startSec - right.startSec || compareControlSnapshotText(String(left._id), String(right._id)))
@@ -169,6 +179,8 @@ export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => 
       bufferOffsetSec: effectiveControlTimingOffset(clip.bufferOffsetSec),
       midiOffsetBeats: effectiveControlTimingOffset(clip.midiOffsetBeats),
       fades: clip.fades,
+      ...(clip.color === undefined ? {} : { color: clip.color }),
+      ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
       midi: clip.midi
         ? {
           ...clip.midi,

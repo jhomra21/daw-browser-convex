@@ -209,7 +209,6 @@ export function useEffectsPanelAudioSync(
 
     if (!projectId) return;
 
-    const activeTargetId = options.currentTargetId();
     const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
     const arpByTrackId = new Map<string, ArpeggiatorParams>();
     const effectInstances = collectSyncedAudioEffectInstances(effects);
@@ -247,7 +246,6 @@ export function useEffectsPanelAudioSync(
     clearSyncedTrackState(audioEngine, staleTrackIds);
 
     for (const track of tracks) {
-      if (track.id === activeTargetId) continue;
       const trackEffectInstances = effectInstances.tracks.get(track.id) ?? [];
       void audioEngine.setTrackFxInstances(track.id, trackEffectInstances).catch(() => undefined);
       if (track.kind === "instrument") {

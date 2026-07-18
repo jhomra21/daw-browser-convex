@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { AUDIO_EFFECT_CONTRACTS } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, createDefaultSynthParams } from "@daw-browser/shared";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
@@ -206,6 +206,44 @@ test("treats reordered MIDI notes as a no-op but versions material note changes"
     },
   });
   expect(await projectRevision(t, "project-1")).toBe(2);
+});
+
+test("replays durable MIDI and device removals without re-advancing revision", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0, kind: "instrument" });
+  const clipId = await seedMidiClip(t, { projectId: "project-1", trackId });
+  const user = t.withIdentity({ subject: owner });
+
+  const midi = {
+    projectId: "project-1",
+    clipId: String(clipId),
+    operationId: "midi-1",
+    midi: { wave: "sine", notes: [{ beat: 0, length: 1, pitch: 60 }] },
+  };
+  expect(await user.mutation(api.clips.serverSetMidi, midi)).toEqual({ status: "applied" });
+  expect(await user.mutation(api.clips.serverSetMidi, midi)).toEqual({ status: "applied" });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+
+  await user.mutation(api.effects.serverSetTrackInstrument, {
+    projectId: "project-1",
+    trackId,
+    instrument: { kind: "synth", instanceId: "instrument-1", params: createDefaultSynthParams() },
+  });
+  await user.mutation(api.effects.serverSetArpeggiatorParams, {
+    projectId: "project-1",
+    trackId,
+    params: { enabled: true, pattern: "up", rate: "1/4", octaves: 1, gate: 0.8, hold: false },
+  });
+  expect(await projectRevision(t, "project-1")).toBe(3);
+
+  const instrument = { projectId: "project-1", trackId: String(trackId), operationId: "instrument-remove-1" };
+  expect(await user.mutation(api.effects.serverRemoveTrackInstrument, instrument)).toEqual({ status: "applied" });
+  expect(await user.mutation(api.effects.serverRemoveTrackInstrument, instrument)).toEqual({ status: "applied" });
+  const arpeggiator = { projectId: "project-1", trackId: String(trackId), operationId: "arp-remove-1" };
+  expect(await user.mutation(api.effects.serverRemoveArpeggiator, arpeggiator)).toEqual({ status: "applied" });
+  expect(await user.mutation(api.effects.serverRemoveArpeggiator, arpeggiator)).toEqual({ status: "applied" });
+  expect(await projectRevision(t, "project-1")).toBe(5);
 });
 
 test("versions projected effect, automation, and sidechain state only for material writes", async () => {

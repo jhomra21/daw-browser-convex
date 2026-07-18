@@ -28,6 +28,13 @@ const clientRefValueSchema = z.string().min(1).max(256)
 const nameSchema = z.string().trim().min(1).max(120)
 const finiteNumberSchema = z.number().finite()
 const secondsSchema = finiteNumberSchema.min(0)
+const trackColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+const clipColorSchema = z.union([
+  trackColorSchema,
+  z.literal('clip-audio'),
+  z.literal('clip-midi'),
+  z.literal('clip-recording'),
+])
 const trackRoleSchema = z.enum(['track', 'group', 'return'])
 const revisionSchema = z.number().int().nonnegative()
 const requestDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Request digest must be a lowercase SHA-256 hex digest.')
@@ -59,6 +66,7 @@ export const contextualRefSchemaV1 = z.discriminatedUnion('source', [
 export const trackRefSchemaV1 = contextualRefSchemaV1.describe('Track reference')
 export const clipRefSchemaV1 = contextualRefSchemaV1.describe('Clip reference')
 export const processorRefSchemaV1 = contextualRefSchemaV1.describe('Effect reference')
+export const assetRefSchemaV1 = z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict()
 export const groupRefSchemaV1 = contextualRefSchemaV1.describe('Group track reference')
 export const outputRefSchemaV1 = contextualRefSchemaV1.describe('Output track reference')
 export const sendRefSchemaV1 = contextualRefSchemaV1.describe('Send target track reference')
@@ -115,7 +123,7 @@ const trackCreateActionSchema = z.object({
   index: z.number().int().nonnegative().optional(),
   trackKind: z.enum(['audio', 'instrument']).optional(),
   channelRole: trackRoleSchema.optional(),
-  color: z.string().max(64).optional(),
+  color: trackColorSchema.optional(),
 }).strict()
 const trackRenameActionSchema = z.object({
   kind: z.literal('track.rename'),
@@ -156,6 +164,18 @@ const trackDeleteActionSchema = z.object({
   kind: z.literal('track.delete'),
   track: trackRefSchemaV1,
 }).strict()
+const trackCollapsedSetActionSchema = z.object({
+  kind: z.literal('track.collapsed.set'), track: trackRefSchemaV1, collapsed: z.boolean(),
+}).strict()
+const trackColorSetActionSchema = z.object({
+  kind: z.literal('track.color.set'), track: trackRefSchemaV1, color: trackColorSchema.nullable(),
+}).strict()
+const trackColorCascadeActionSchema = z.object({
+  kind: z.literal('track.color.cascade'), root: trackRefSchemaV1, color: trackColorSchema.nullable(), cascadeClipColors: z.boolean(),
+}).strict()
+const trackUngroupActionSchema = z.object({
+  kind: z.literal('track.ungroup'), group: trackRefSchemaV1,
+}).strict()
 const midiNoteSchema = z.object({
   beat: finiteNumberSchema,
   length: finiteNumberSchema.positive(),
@@ -172,6 +192,17 @@ const clipFadesSnapshotSchema = z.object({
   fadeInCurvePosition: finiteNumberSchema.optional(),
   fadeOutCurvePosition: finiteNumberSchema.optional(),
 }).strict()
+const audioWarpSchema = z.object({
+  enabled: z.boolean(),
+  sourceBpm: finiteNumberSchema.min(30).max(300).optional(),
+  sourceBeatOffset: finiteNumberSchema.optional(),
+  markers: z.array(z.object({
+    id: stableIdSchema,
+    sourceBeat: finiteNumberSchema,
+    timelineBeat: finiteNumberSchema,
+  }).strict()).max(1_000).optional(),
+  mode: z.enum(['repitch', 'stretch']),
+}).strict()
 const clipCreateMidiActionSchema = z.object({
   kind: z.literal('clip.midi.create'),
   clientRef: clientRefValueSchema.optional(),
@@ -182,6 +213,41 @@ const clipCreateMidiActionSchema = z.object({
   wave: z.enum(['sine', 'square', 'sawtooth', 'triangle']),
   notes: z.array(midiNoteSchema).max(controlLimitsV1.maxMidiNotesPerCommit),
   gain: finiteNumberSchema.min(0).max(2).optional(),
+}).strict()
+const clipCreateAudioActionSchema = z.object({
+  kind: z.literal('clip.audio.create'),
+  clientRef: clientRefValueSchema.optional(),
+  track: trackRefSchemaV1,
+  asset: assetRefSchemaV1,
+  name: nameSchema.optional(),
+  startSec: secondsSchema.optional(),
+  duration: finiteNumberSchema.positive().optional(),
+  gain: finiteNumberSchema.min(0).max(2).optional(),
+  color: trackColorSchema.optional(),
+  leftPadSec: secondsSchema.optional(),
+  bufferOffsetSec: secondsSchema.optional(),
+  midiOffsetBeats: secondsSchema.optional(),
+  fades: clipFadesSnapshotSchema.optional(),
+  audioWarp: audioWarpSchema.optional(),
+}).strict()
+const clipSourceSetActionSchema = z.object({
+  kind: z.literal('clip.source.set'), clip: clipRefSchemaV1, asset: assetRefSchemaV1,
+}).strict()
+const clipMidiSetActionSchema = z.object({
+  kind: z.literal('clip.midi.set'),
+  clip: clipRefSchemaV1,
+  wave: z.enum(['sine', 'square', 'sawtooth', 'triangle']),
+  notes: z.array(midiNoteSchema).max(controlLimitsV1.maxMidiNotesPerCommit),
+  gain: finiteNumberSchema.min(0).max(2).optional(),
+}).strict()
+const clipFadesSetActionSchema = z.object({
+  kind: z.literal('clip.fades.set'), clip: clipRefSchemaV1, fades: clipFadesSnapshotSchema,
+}).strict()
+const clipAudioWarpSetActionSchema = z.object({
+  kind: z.literal('clip.audioWarp.set'), clip: clipRefSchemaV1, audioWarp: audioWarpSchema,
+}).strict()
+const clipColorSetActionSchema = z.object({
+  kind: z.literal('clip.color.set'), clip: clipRefSchemaV1, color: clipColorSchema.nullable(),
 }).strict()
 const clipMoveActionSchema = z.object({
   kind: z.literal('clip.move'),
@@ -266,6 +332,12 @@ const arpeggiatorSetActionSchema = z.object({
   target: trackProcessorTargetSchemaV1,
   params: arpeggiatorParamsSchema,
 }).strict()
+const instrumentRemoveActionSchema = z.object({
+  kind: z.literal('instrument.remove'), target: trackProcessorTargetSchemaV1,
+}).strict()
+const arpeggiatorRemoveActionSchema = z.object({
+  kind: z.literal('arpeggiator.remove'), target: trackProcessorTargetSchemaV1,
+}).strict()
 const automationPointSchema = z.object({
   id: stableIdSchema,
   timeSec: secondsSchema,
@@ -302,10 +374,12 @@ export const controlActionSchemaV1 = z.union([
   projectRenameActionSchema, projectSettingsActionSchema, trackCreateActionSchema,
   trackRenameActionSchema, trackMixActionSchema, trackRoutingActionSchema,
   trackReorderActionSchema, trackGroupActionSchema, trackDeleteActionSchema,
-  clipCreateMidiActionSchema, clipMoveActionSchema, clipTimingActionSchema,
+  trackCollapsedSetActionSchema, trackColorSetActionSchema, trackColorCascadeActionSchema, trackUngroupActionSchema,
+  clipCreateMidiActionSchema, clipCreateAudioActionSchema, clipSourceSetActionSchema, clipMidiSetActionSchema,
+  clipFadesSetActionSchema, clipAudioWarpSetActionSchema, clipColorSetActionSchema, clipMoveActionSchema, clipTimingActionSchema,
   clipNameActionSchema, clipDeleteActionSchema, masterVolumeActionSchema,
   effectUpsertActionSchema, effectRemoveActionSchema, effectReorderActionSchema,
-  instrumentSetActionSchema, arpeggiatorSetActionSchema,
+  instrumentSetActionSchema, instrumentRemoveActionSchema, arpeggiatorSetActionSchema, arpeggiatorRemoveActionSchema,
   automationSetActionSchema, automationDeleteActionSchema, sidechainSetActionSchema, sidechainRemoveActionSchema,
 ])
 
@@ -313,6 +387,7 @@ const creationClientRef = (action: z.infer<typeof controlActionSchemaV1>): strin
   if (
     action.kind === 'track.create'
     || action.kind === 'clip.midi.create'
+    || action.kind === 'clip.audio.create'
     || action.kind === 'effect.upsert'
   ) return action.clientRef
   return undefined
@@ -339,7 +414,7 @@ const addAggregateIssues = (
   let midiNotes = 0
   let automationPoints = 0
   for (const action of request.actions) {
-    if (action.kind === 'clip.midi.create') midiNotes += action.notes.length
+    if (action.kind === 'clip.midi.create' || action.kind === 'clip.midi.set') midiNotes += action.notes.length
     if (action.kind === 'automation.set') automationPoints += action.points.length
   }
   if (midiNotes > controlLimitsV1.maxMidiNotesPerCommit) {
@@ -503,6 +578,8 @@ const snapshotTrackSchema = z.object({
   soloed: z.boolean(),
   outputTargetId: stableIdSchema.optional(),
   sends: z.array(z.object({ targetTrackId: stableIdSchema, amount: finiteNumberSchema, tap: z.enum(['pre-fx', 'pre-fader', 'post-fader']).optional() }).strict()),
+  collapsed: z.boolean(),
+  color: clipColorSchema.optional(),
 }).strict()
 const assetMimeTypeSchema = z.enum([
   "audio/mpeg",
@@ -563,6 +640,8 @@ export const projectSnapshotSchemaV1 = z.object({
     bufferOffsetSec: secondsSchema,
     midiOffsetBeats: secondsSchema,
     fades: clipFadesSnapshotSchema.optional(),
+    color: clipColorSchema.optional(),
+    audioWarp: audioWarpSchema.optional(),
     source: z.object({
       assetId: stableIdSchema,
       sourceKind: assetSourceKindSchema,
@@ -613,6 +692,7 @@ export type ContextualRefV1 = z.infer<typeof contextualRefSchemaV1>
 export type TrackRefV1 = z.infer<typeof trackRefSchemaV1>
 export type ClipRefV1 = z.infer<typeof clipRefSchemaV1>
 export type ProcessorRefV1 = z.infer<typeof processorRefSchemaV1>
+export type AssetRefV1 = z.infer<typeof assetRefSchemaV1>
 export type GroupRefV1 = z.infer<typeof groupRefSchemaV1>
 export type OutputRefV1 = z.infer<typeof outputRefSchemaV1>
 export type SendRefV1 = z.infer<typeof sendRefSchemaV1>
@@ -640,6 +720,9 @@ export const controlCapabilitiesV1 = {
     'effect.upsert', 'effect.remove', 'effect.reorder',
     'instrument.set', 'arpeggiator.set',
     'automation.set', 'automation.delete', 'sidechain.set', 'sidechain.remove',
+    'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
+    'clip.audioWarp.set', 'clip.color.set', 'track.collapsed.set', 'track.color.set',
+    'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
   ],
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>

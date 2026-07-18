@@ -175,6 +175,66 @@ test("phase 3B-1 device row helpers preserve rows without advancing revision", a
   expect(await projectRevision(t, projectId)).toBe(1);
 });
 
+test("device setters consolidate canonical, legacy, and duplicate device rows", async () => {
+  const t = newTest();
+  const projectId = "phase-3b1-device-duplicates";
+  await createProject(t, projectId);
+  const trackId = await seedTrack(t, projectId);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("effects", {
+      projectId,
+      targetType: "track",
+      trackId,
+      index: 0,
+      type: "instrument",
+      instanceId: "canonical-instrument",
+      params: { kind: "synth", instanceId: "canonical-instrument", params: {} },
+      createdAt: 1,
+    });
+    await ctx.db.insert("effects", {
+      projectId,
+      targetType: "track",
+      trackId,
+      index: 1,
+      type: "synth",
+      instanceId: "legacy-instrument",
+      params: {},
+      createdAt: 1,
+    });
+    for (const index of [2, 3]) {
+      await ctx.db.insert("effects", {
+        projectId,
+        targetType: "track",
+        trackId,
+        index,
+        type: "arpeggiator",
+        params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false },
+        createdAt: 1,
+      });
+    }
+  });
+
+  const instrument = await t.run(async (ctx) => await setTrackInstrumentRow(ctx, {
+    projectId,
+    trackId,
+    instrument: { kind: "synth", instanceId: "canonical-instrument", params: {} },
+  }));
+  const arpeggiator = await t.run(async (ctx) => await setArpeggiatorRow(ctx, {
+    projectId,
+    trackId,
+    params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false },
+  }));
+  expect(instrument).toMatchObject({ changed: true, effectId: expect.anything() });
+  expect(arpeggiator).toMatchObject({ changed: true, effectId: expect.anything() });
+  expect(await t.run(async (ctx) => (await ctx.db.query("effects")
+    .withIndex("by_track", (q) => q.eq("trackId", trackId))
+    .collect()).map((row) => ({ type: row.type, index: row.index }))))
+    .toEqual([
+      { type: "instrument", index: 0 },
+      { type: "arpeggiator", index: 1 },
+    ]);
+});
+
 test("phase 3B-1 automation row helpers stay revision-free while wrappers version writes", async () => {
   const t = newTest();
   const projectId = "phase-3b1-automation-project";

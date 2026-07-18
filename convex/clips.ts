@@ -8,7 +8,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
-import { buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioSourceKind, type AudioWarpPayload } from '@daw-browser/shared'
+import { audioWarpEqual, buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioSourceKind, type AudioWarpPayload } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -187,7 +187,7 @@ const buildClipCreatePatch = (
     leftPadSec: item.leftPadSec,
     midi: item.midi,
     bufferOffsetSec: item.bufferOffsetSec,
-    audioWarp: item.audioWarp,
+    audioWarp: normalizeAudioWarp(item.audioWarp),
     gain: item.gain,
     fades: item.fades ? normalizeClipFades(item.fades, item.duration) : undefined,
     midiOffsetBeats: item.midiOffsetBeats,
@@ -239,7 +239,7 @@ const applyClipTimingPatch = async (
   const patch = buildClipTimingPatch(input)
   if (input.fades && !access.clip.midi) patch.fades = normalizeClipFades(input.fades, input.duration)
   else if (access.clip.fades) patch.fades = normalizeClipFades(access.clip.fades, input.duration)
-  if (input.audioWarp !== undefined) patch.audioWarp = input.audioWarp
+  if (input.audioWarp !== undefined) patch.audioWarp = normalizeAudioWarp(input.audioWarp)
   const result = await setClipTimingRow(ctx, {
     projectId: access.clip.projectId,
     clipId,
@@ -287,6 +287,16 @@ export const createMidiClipRow = async (
     changed: true,
     value: await insertOwnedClipRow(ctx, clip, ownerUserId),
   }
+}
+
+export const createAudioClipRow = async (
+  ctx: MutationCtx,
+  input: ClipCreatePatch & { ownerUserId: string },
+) => {
+  const track = await getCompatibleMergedTrack(ctx, input.trackId, input.projectId, 'audio')
+  if (!track) return { changed: false, value: null }
+  const { ownerUserId, ...clip } = input
+  return { changed: true, value: await insertOwnedClipRow(ctx, clip, ownerUserId) }
 }
 
 export const setClipMidiRow = async (
@@ -351,7 +361,7 @@ export const setClipTimingRow = async (
     || ('fades' in input.patch && JSON.stringify(clip.fades) !== JSON.stringify(input.patch.fades))
   )
   const changed = snapshotChanged
-    || ('audioWarp' in input.patch && JSON.stringify(clip.audioWarp) !== JSON.stringify(input.patch.audioWarp))
+    || ('audioWarp' in input.patch && !audioWarpEqual(clip.audioWarp, input.patch.audioWarp))
   if (!changed) return { changed: false, snapshotChanged: false }
   await ctx.db.patch(input.clipId, input.patch)
   return { changed: true, snapshotChanged }
@@ -403,6 +413,52 @@ export const setClipFadesRow = async (
   return { changed: true }
 }
 
+export const setClipAudioWarpRow = async (
+  ctx: MutationCtx,
+  input: { projectId: string; clipId: Id<'clips'>; audioWarp: AudioWarpPayload | undefined },
+) => {
+  const clip = await getProjectClip(ctx, input.projectId, input.clipId)
+  const audioWarp = normalizeAudioWarp(input.audioWarp)
+  if (!clip || clip.midi || audioWarpEqual(clip.audioWarp, audioWarp)) return { changed: false }
+  await ctx.db.patch(input.clipId, { audioWarp })
+  return { changed: true }
+}
+
+export const setClipColorRow = async (
+  ctx: MutationCtx,
+  input: { projectId: string; clipId: Id<'clips'>; color?: string },
+) => {
+  const color = input.color === undefined ? undefined : normalizeClipColor(input.color)
+  if (input.color !== undefined && !color) return { changed: false }
+  const clip = await getProjectClip(ctx, input.projectId, input.clipId)
+  if (!clip || clip.color === color) return { changed: false }
+  await ctx.db.patch(input.clipId, { color })
+  return { changed: true }
+}
+
+export const setClipSourceRow = async (
+  ctx: MutationCtx,
+  input: {
+    projectId: string; clipId: Id<'clips'>; assetKey: string; sourceKind: AudioSourceKind;
+    durationSec: number; sampleRate: number; channelCount: number;
+  },
+) => {
+  const clip = await getProjectClip(ctx, input.projectId, input.clipId)
+  if (!clip || clip.midi) return { changed: false }
+  const source = buildClipAudioSourceFields({
+    assetKey: input.assetKey, sourceKind: input.sourceKind, durationSec: input.durationSec,
+    sampleRate: input.sampleRate, channelCount: input.channelCount,
+  })
+  const sampleUrl = `/api/samples/${encodeURIComponent(input.projectId)}/${encodeURIComponent(input.assetKey)}`
+  if (
+    clip.sourceAssetKey === source.sourceAssetKey && clip.sourceKind === source.sourceKind
+    && clip.sourceDurationSec === source.sourceDurationSec && clip.sourceSampleRate === source.sourceSampleRate
+    && clip.sourceChannelCount === source.sourceChannelCount && clip.sampleUrl === sampleUrl
+  ) return { changed: false }
+  await ctx.db.patch(input.clipId, { ...source, sampleUrl })
+  return { changed: true }
+}
+
 export const deleteClipRow = async (
   ctx: MutationCtx,
   input: {
@@ -428,6 +484,9 @@ export const createOwnedClip = async (
   ctx: MutationCtx,
   item: ClipCreateInput,
 ): Promise<Id<'clips'> | null> => {
+  if (item.color !== undefined && !normalizeClipColor(item.color)) {
+    throw new Error('Invalid clip color')
+  }
   const clipKind = sanitizeClipKind(item.clipKind ?? (item.midi ? 'midi' : 'audio'))
   const track = await getWritableCompatibleMergedTrack(ctx, item.trackId, item.userId, item.projectId, clipKind)
   if (!track) return null
@@ -784,8 +843,13 @@ export const setAudioWarp = mutation({
     const access = await getClipWriteAccess(ctx, clipId, userId)
     if (!access) return { status: 'rejected' as const }
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-    if (JSON.stringify(access.clip.audioWarp) === JSON.stringify(audioWarp)) return { status: 'noop' as const }
-    await ctx.db.patch(clipId, { audioWarp })
+    const result = await setClipAudioWarpRow(ctx, {
+      projectId: access.clip.projectId,
+      clipId,
+      audioWarp,
+    })
+    if (!result.changed) return { status: 'noop' as const }
+    await advanceProjectRevision(ctx, access.clip.projectId)
     return { status: 'applied' as const }
   },
 })
@@ -845,8 +909,13 @@ export const serverSetAudioWarp = mutation({
     const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
     if (!access) return { status: 'rejected' as const }
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
-    if (JSON.stringify(access.clip.audioWarp) === JSON.stringify(audioWarp)) return { status: 'noop' as const }
-    await ctx.db.patch(normalizedClipId, { audioWarp })
+    const result = await setClipAudioWarpRow(ctx, {
+      projectId: access.clip.projectId,
+      clipId: normalizedClipId,
+      audioWarp,
+    })
+    if (!result.changed) return { status: 'noop' as const }
+    await advanceProjectRevision(ctx, access.clip.projectId)
     return { status: 'applied' as const }
   },
 })
@@ -910,7 +979,9 @@ export const serverSetColor = mutation({
     if (await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
     const normalizedColor = normalizeClipColor(color)
     if (!normalizedColor) return { status: 'rejected' as const }
+    if (access.clip.color === normalizedColor) return { status: 'noop' as const }
     await ctx.db.patch(normalizedClipId, { color: normalizedColor })
+    await advanceProjectRevision(ctx, access.clip.projectId)
     return { status: 'applied' as const }
   },
 })
@@ -994,6 +1065,41 @@ export const setMidi = mutation({
     })
     if (!result.changed) return
     await advanceProjectRevision(ctx, access.clip.projectId)
+  },
+})
+
+export const serverSetMidi = mutation({
+  args: {
+    projectId: v.string(),
+    clipId: v.string(),
+    midi: v.object({
+      wave: v.string(),
+      gain: v.optional(v.number()),
+      notes: v.array(v.object({
+        beat: v.number(), length: v.number(), pitch: v.number(), velocity: v.optional(v.number()),
+      })),
+    }),
+    operationId: v.optional(v.string()),
+  },
+  handler: async (ctx, { projectId, clipId, midi, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId("clips", clipId)
+    if (!normalizedClipId) return { status: "rejected" as const }
+    return await runSharedOperationOnce(ctx, {
+      projectId, userId, operationId,
+      isResult: (value): value is { status: "applied" | "noop" | "rejected" } => (
+        typeof value === "object" && value !== null && "status" in value
+        && ((value.status === "applied") || (value.status === "noop") || (value.status === "rejected"))
+      ),
+      run: async () => {
+        const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+        if (!access || access.clip.projectId !== projectId || !access.clip.midi || await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: "rejected" as const }
+        const result = await setClipMidiRow(ctx, { projectId, clipId: normalizedClipId, midi })
+        if (!result.changed) return { status: "noop" as const }
+        await advanceProjectRevision(ctx, projectId)
+        return { status: "applied" as const }
+      },
+    })
   },
 })
 

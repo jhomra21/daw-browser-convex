@@ -172,7 +172,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       clipPayload: queuedClipPayload,
       error,
     })
-    throw new SharedOutboxQueuedError('clips.createUploadedAudio')
+    throw new SharedOutboxQueuedError('clips.createUploadedAudio', operationId)
   })
   clip.sampleUrl = upload.url
   clip.sourceAssetKey = upload.assetKey
@@ -195,7 +195,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       operation: { kind: 'clips.create', payload },
       error,
     })
-    throw new SharedOutboxQueuedError('clips.create')
+    throw new SharedOutboxQueuedError('clips.create', operationId)
   }
   input.grantClipWrite?.(clipId, input.grantScope)
   removePendingClip()

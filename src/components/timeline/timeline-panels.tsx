@@ -14,10 +14,12 @@ import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
+import type { ExportQueue } from '~/lib/export/export-queue'
 
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
 export type TimelinePanelsProps = {
+  exportQueue: ExportQueue
   chat: {
     bottomOffsetPx: number
     sharedChatOpen: boolean
@@ -100,7 +102,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
   })
 
   return (
-    <ExportProvider>
+    <ExportProvider queue={props.exportQueue}>
       <Show when={canUseSharedChat()}>
         <Button
           variant="outline"

@@ -5,6 +5,8 @@ import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writ
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 import type { DesktopOperationMapV1, DesktopOperationV1 } from "@daw-browser/desktop-protocol"
+import type { ExportQueue } from "~/lib/export/export-queue"
+import type { ImportSummary } from "~/hooks/useTimelineClipImport"
 
 type HostRequest = {
   id: string
@@ -71,6 +73,8 @@ export const createAttachedHostController = (input: {
   pause: () => Promise<void>
   stop: () => Promise<void>
   finishRecording: () => Promise<void>
+  exportQueue: ExportQueue
+  importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
 }): TimelineHostController => {
   const transport = () => ({

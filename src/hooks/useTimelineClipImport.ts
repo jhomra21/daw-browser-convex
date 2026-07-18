@@ -56,8 +56,22 @@ type TimelineClipImportOptions = {
 type TimelineClipImportHandlers = {
   handleDrop: (event: DragEvent) => Promise<void>
   handleFiles: (files: FileList | null) => Promise<void>
+  importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
   handleAddAudio: () => Promise<void>
   handleInsertSample: (input: InsertSampleInput) => Promise<void>
+}
+
+export type ImportFileOutcome = {
+  fileName: string
+  status: 'created' | 'queued' | 'skipped' | 'local-save-failed' | 'failed' | 'canceled'
+  message?: string
+  assetId?: string
+  clipId?: string
+  operationId?: string
+}
+
+export type ImportSummary = {
+  outcomes: readonly ImportFileOutcome[]
 }
 
 type TargetAudioTrack = {
@@ -209,10 +223,13 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     trackId?: Track['id'],
     desiredStart?: number,
     autoCreatedTrack?: Track,
-  ) => {
+    signal?: AbortSignal,
+  ): Promise<ImportFileOutcome> => {
+    signal?.throwIfAborted()
     const decoded = await audioEngine.decodeAudioData(await file.arrayBuffer())
+    signal?.throwIfAborted()
     const target = await ensureTargetAudioTrack(trackId)
-    if (!target) return
+    if (!target) return { fileName: file.name, status: 'skipped' }
     const startSec = resolveClipStartSec(
       target.track,
       typeof desiredStart === 'number' ? desiredStart : playheadSec(),
@@ -224,10 +241,43 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
       track: target.track,
       startSec,
       autoCreatedTrack: autoCreatedTrack ?? (target.autoCreated ? target.track : undefined),
+      signal,
     })
     if (result.status === 'local-save-failed' || result.status === 'failed') {
       notify('Audio import failed', result.message)
     }
+    return {
+      fileName: file.name,
+      status: result.status,
+      ...('message' in result ? { message: result.message } : {}),
+      ...('assetId' in result ? {
+        assetId: result.assetId,
+        ...('clipId' in result ? { clipId: result.clipId } : {}),
+        ...('operationId' in result ? { operationId: result.operationId } : {}),
+      } : {}),
+    }
+  }
+
+  const importFiles = async (files: readonly File[], signal?: AbortSignal): Promise<ImportSummary> => {
+    const outcomes: ImportFileOutcome[] = []
+    for (const file of files) {
+      if (signal?.aborted) {
+        outcomes.push({ fileName: file.name, status: 'canceled' })
+        continue
+      }
+      if (!file.type.startsWith('audio')) {
+        outcomes.push({ fileName: file.name, status: 'skipped' })
+        continue
+      }
+      try {
+        const outcome = await handleFilesInternal(file, undefined, undefined, undefined, signal)
+        outcomes.push(outcome)
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) outcomes.push({ fileName: file.name, status: 'canceled' })
+        else outcomes.push({ fileName: file.name, status: 'failed', message: 'Audio could not be imported. Please retry the import.' })
+      }
+    }
+    return { outcomes }
   }
 
   const handleDrop = async (event: DragEvent) => {
@@ -276,7 +326,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     if (!files || files.length === 0) return
     const file = Array.from(files).find(f => f.type.startsWith('audio'))
     if (!file) return
-    await handleFilesInternal(file)
+    await importFiles([file])
   }
 
   const handleAddAudio = async () => {
@@ -322,6 +372,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   return {
     handleDrop,
     handleFiles,
+    importFiles,
     handleAddAudio,
     handleInsertSample,
   }

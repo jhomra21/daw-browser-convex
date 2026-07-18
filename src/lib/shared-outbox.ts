@@ -90,9 +90,12 @@ const OUTBOX_STATUS_KEY = 'shared-outbox-status'
 const now = () => Date.now()
 const retryDelayMs = (attempts: number) => Math.min(60 * 1000, 2 ** Math.min(attempts, 6) * 1000)
 export class SharedOutboxQueuedError extends Error {
-  constructor(kind: SharedOutboxKind) {
+  readonly operationId?: string
+
+  constructor(kind: SharedOutboxKind, operationId?: string) {
     super(`${kind} queued for retry`)
     this.name = 'SharedOutboxQueuedError'
+    this.operationId = operationId
   }
 }
 

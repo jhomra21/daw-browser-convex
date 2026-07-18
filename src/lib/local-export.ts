@@ -1,4 +1,3 @@
-import type { EncodeAudioBufferTarget } from '@daw-browser/audio-engine/export-mixdown'
 import { queryFileSystemHandlePermission, requestFileSystemHandlePermission } from '~/lib/local-project-db'
 
 type BlobDownloadInput = {
@@ -18,8 +17,6 @@ type LocalExportWritableInput = {
 export type LocalExportWritable = {
   writable: FileSystemWritableFileStream
 }
-
-type LocalExportTarget = Extract<EncodeAudioBufferTarget, { mode: 'stream' }>
 
 export const chooseLocalExportFile = async (input: LocalExportWritableInput): Promise<FileSystemFileHandle | undefined> => {
   if (typeof window === 'undefined' || !window.showSaveFilePicker) return
@@ -58,13 +55,6 @@ export const createLocalExportDirectoryWritable = async (
   const fileHandle = await directory.getFileHandle(fileName, { create: true })
   return createLocalExportWritable(fileHandle)
 }
-
-export const createLocalExportTarget = (localExport: LocalExportWritable): LocalExportTarget => ({
-  mode: 'stream',
-  writable: localExport.writable,
-  close: () => localExport.writable.close(),
-  abort: (reason) => localExport.writable.abort(reason),
-})
 
 export const downloadBlob = (input: BlobDownloadInput): void => {
   const url = URL.createObjectURL(input.blob)

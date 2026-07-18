@@ -1,5 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/desktop": {
+      "entry": [
+        "main.ts",
+        "preload.ts"
+      ]
+    }
+  },
   "ignoreFiles": [
     "public/audio-worklets/*.js",
     "src/components/nav-user.tsx",
@@ -11,7 +19,6 @@
     "src/components/ui/skeleton.tsx",
     "apps/desktop/forge.config.ts",
     "apps/desktop/no-pwa.ts",
-    "apps/desktop/preload.ts",
     "apps/desktop/vite.main.config.ts",
     "apps/desktop/vite.preload.config.ts",
     "apps/desktop/vite.renderer.config.ts"

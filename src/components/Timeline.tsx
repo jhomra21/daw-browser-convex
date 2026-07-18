@@ -100,6 +100,7 @@ import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
+import { createExportQueue } from "~/lib/export/export-queue";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -109,6 +110,8 @@ type TimelineProps = {
 };
 
 const Timeline: Component<TimelineProps> = (props) => {
+  const exportQueue = createExportQueue();
+  onCleanup(exportQueue.dispose);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [appMessage, setAppMessage] =
     createSignal<AppMessageDialogState | null>(null);
@@ -662,6 +665,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     handleFiles,
     handleAddAudio,
     handleInsertSample,
+    importFiles,
   } = useTimelineClipImport({
     audioEngine,
     tracks: renderTracks,
@@ -1304,6 +1308,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       finishRecording: async () => {
         if (isRecording()) await stopRecording();
       },
+      exportQueue,
+      importFiles,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
     onCleanup(unregisterHostController);
@@ -1421,6 +1427,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   );
 
   const panelsProps = () => ({
+    exportQueue,
     chat: {
       bottomOffsetPx: bottomPanel.chatBottomOffsetPx(),
       sharedChatOpen: bottomPanel.sharedChatOpen(),

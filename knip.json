@@ -42,6 +42,9 @@
     "packages/audio-engine/src/audio-stretch-cache.ts": [
       "exports"
     ],
+    "packages/control-cli/src/mcp.ts": [
+      "files"
+    ],
     "packages/audio-engine/src/clip-scheduler.ts": [
       "exports"
     ],

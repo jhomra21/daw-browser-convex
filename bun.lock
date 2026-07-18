@@ -69,6 +69,20 @@
         "zod": "^4.3.6",
       },
     },
+    "packages/control-cli": {
+      "name": "@daw-browser/control-cli",
+      "version": "0.0.0",
+      "bin": {
+        "daw-control": "./dist/daw-control.js",
+        "daw-control-mcp": "./dist/daw-control-mcp.js",
+      },
+      "dependencies": {
+        "@daw-browser/control": "workspace:*",
+        "@daw-browser/control-mcp": "workspace:*",
+        "@daw-browser/control-sdk": "workspace:*",
+        "@modelcontextprotocol/sdk": "1.29.0",
+      },
+    },
     "packages/control-mcp": {
       "name": "@daw-browser/control-mcp",
       "version": "0.0.0",
@@ -338,6 +352,8 @@
     "@daw-browser/audio-engine": ["@daw-browser/audio-engine@workspace:packages/audio-engine"],
 
     "@daw-browser/control": ["@daw-browser/control@workspace:packages/control"],
+
+    "@daw-browser/control-cli": ["@daw-browser/control-cli@workspace:packages/control-cli"],
 
     "@daw-browser/control-mcp": ["@daw-browser/control-mcp@workspace:packages/control-mcp"],
 

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { controlApprovalRequirementV1, planControlRequestV1 } from "./planner";
+import { controlLimitsV1 } from "./index";
 
 const snapshot = (): any => ({
   version: "v1",
@@ -94,6 +95,28 @@ test("does not require approval for create-then-delete net no-ops", () => {
     ],
   });
   expect(controlApprovalRequirementV1(plan, "a".repeat(64)).required).toBe(false);
+});
+
+test("rejects track deletion exceeding dedicated recovery limits before approval", () => {
+  const base = snapshot();
+  base.tracks = Array.from({ length: controlLimitsV1.maxRecoveryEntities + 1 }, (_, index) => ({
+    id: `track-${index}`,
+    name: `Track ${index}`,
+    index,
+    kind: "audio",
+    channelRole: index === 0 ? "group" : "track",
+    volume: 0.8,
+    muted: false,
+    soloed: false,
+    sends: [],
+    ...(index === 0 ? {} : { groupId: "track-0" }),
+  }));
+  base.clips = [];
+  base.processors = [];
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.delete", track: persisted("track-0") }],
+  })).toThrow();
 });
 
 test("requires approval when a client-ref deletion cascades persisted descendants", () => {

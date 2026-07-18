@@ -271,10 +271,13 @@ export default defineSchema({
       v.literal("automation.delete"),
       v.literal("sidechain.remove"),
       v.literal("asset.delete"),
+      v.literal("track.delete"),
+      v.literal("track.ungroup"),
     ),
     payload: v.string(),
     payloadHash: v.string(),
     impact: v.object({
+      tracks: v.optional(v.number()),
       clips: v.number(),
       processors: v.number(),
       automation: v.number(),

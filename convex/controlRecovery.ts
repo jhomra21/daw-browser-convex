@@ -6,13 +6,20 @@ import {
   type ControlActionV1,
   type ContextualRefV1,
   type RecoveryPayloadV1,
+  collectDeletedTrackIdsV1,
 } from "@daw-browser/control";
+import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
 import {
+  automationTargetKey,
+  granularAutomationKey,
+  instrumentAutomationKey,
   normalizePersistedInstrumentParams,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
   persistedProcessorSnapshotSchema,
+  sidechainEligibilityError,
+  synthAutomationKey,
 } from "@daw-browser/shared";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -23,10 +30,10 @@ const maxRecoveriesPerProject = 1000;
 const maxRecoveriesPerActorProject = 128;
 const recoveryKinds = new Set([
   "clip.delete", "effect.remove", "instrument.remove", "arpeggiator.remove",
-  "automation.delete", "sidechain.remove", "asset.delete",
+  "automation.delete", "sidechain.remove", "asset.delete", "track.delete", "track.ungroup",
 ]);
 
-type Mapping = { entity: "clip" | "effect" | "automation" | "sidechain" | "asset"; sourceId: string; restoredId: string };
+type Mapping = { entity: "track" | "clip" | "effect" | "automation" | "sidechain" | "asset"; sourceId: string; restoredId: string };
 type RecoveryCtx = Pick<MutationCtx, "db">;
 type RecoveryResolver = <TableName extends "tracks" | "clips" | "effects">(
   table: TableName,
@@ -34,12 +41,92 @@ type RecoveryResolver = <TableName extends "tracks" | "clips" | "effects">(
 ) => Id<TableName>;
 type RecoverableAction = Extract<ControlActionV1, { kind:
   | "clip.delete" | "effect.remove" | "instrument.remove" | "arpeggiator.remove"
-  | "automation.delete" | "sidechain.remove" | "asset.delete"
+  | "automation.delete" | "sidechain.remove" | "asset.delete" | "track.delete" | "track.ungroup"
 }>;
 type EffectBundle = Extract<RecoveryPayloadV1, {
   kind: "effect.remove" | "instrument.remove" | "arpeggiator.remove"
 }>["data"];
 type RecoveryEffect = EffectBundle["effects"][number]["effect"];
+
+const trackStatePayload = (row: any) => ({
+  projectId: row.projectId,
+  name: row.name,
+  index: row.index,
+  ...(row.kind === undefined ? {} : { kind: row.kind }),
+  ...(row.historyRef === undefined ? {} : { historyRef: row.historyRef }),
+  ...(row.groupId === undefined ? {} : { groupId: String(row.groupId) }),
+  ...(row.collapsed === undefined ? {} : { collapsed: row.collapsed }),
+  ...(row.color === undefined ? {} : { color: row.color }),
+  mixer: {
+    volume: row.volume,
+    ...(row.muted === undefined ? {} : { muted: row.muted }),
+    ...(row.soloed === undefined ? {} : { soloed: row.soloed }),
+    channelRole: row.channelRole,
+    ...(row.outputTargetId === undefined ? {} : { outputTargetId: String(row.outputTargetId) }),
+    sends: row.sends.map((send: any) => ({
+      targetId: String(send.targetId),
+      amount: send.amount,
+      ...(send.tap === undefined ? {} : { tap: send.tap }),
+    })),
+  },
+});
+
+const recoverySurvivorState = (row: any) => ({
+  index: row.index,
+  ...(row.groupId === undefined ? {} : { groupId: String(row.groupId) }),
+  ...(row.mixer?.outputTargetId === undefined && row.outputTargetId === undefined ? {} : {
+    outputTargetId: String(row.mixer?.outputTargetId ?? row.outputTargetId),
+  }),
+  sends: (row.mixer?.sends ?? row.sends).map((send: any) => ({
+    targetId: String(send.targetId),
+    amount: send.amount,
+    ...(send.tap === undefined ? {} : { tap: send.tap }),
+  })),
+});
+
+const sameRecoverySurvivorState = (left: any, right: any) => (
+  JSON.stringify(recoverySurvivorState(left)) === JSON.stringify(recoverySurvivorState(right))
+);
+
+const rebasedAutomationParameterId = (parameterId: string, trackId: string | undefined) => {
+  if (trackId === undefined) return parameterId;
+  const instrument = parseInstrumentAutomationKey(parameterId);
+  if (instrument) return instrumentAutomationKey(trackId, instrument.instanceId, instrument.parameterId);
+  const granular = parseGranularAutomationKey(parameterId);
+  if (granular) return granularAutomationKey(trackId, granular.instanceId, granular.parameterId);
+  const synth = parseSynthAutomationKey(parameterId);
+  return synth ? synthAutomationKey(trackId, synth.instanceId, synth.parameterId) : parameterId;
+};
+
+const requireRecoveryTrackTarget = async (
+  ctx: RecoveryCtx,
+  projectId: string,
+  id: Id<"tracks"> | undefined,
+  actionIndex: number,
+  message: string,
+) => {
+  if (!id) throw new ControlDomainError("not-found", message, actionIndex);
+  const track = await ctx.db.get(id);
+  if (!track || track.projectId !== projectId) throw new ControlDomainError("not-found", message, actionIndex);
+  return track;
+};
+
+const postDeleteTrackState = (row: any, deletedIds: Set<string>, index: number) => ({
+  ...trackStatePayload(row),
+  index,
+  ...(deletedIds.has(String(row.groupId)) ? { groupId: undefined } : {}),
+  mixer: {
+    ...trackStatePayload(row).mixer,
+    ...(deletedIds.has(String(row.outputTargetId)) ? { outputTargetId: undefined } : {}),
+    sends: row.sends
+      .filter((send: any) => !deletedIds.has(String(send.targetId)))
+      .map((send: any) => ({
+        targetId: String(send.targetId),
+        amount: send.amount,
+        ...(send.tap === undefined ? {} : { tap: send.tap }),
+      })),
+  },
+});
 
 const clipPayload = (row: Doc<"clips">) => ({
   projectId: row.projectId,
@@ -133,6 +220,98 @@ export const captureRecoveryPayload = async (
 ) => {
   const { action } = input;
   if (!isRecoverableAction(action)) return null;
+  if (action.kind === "track.delete" || action.kind === "track.ungroup") {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+    const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+    const channelByTrackId = new Map(channels.map((channel) => [String(channel.trackId), channel]));
+    const merged = tracks.map((track) => {
+      const channel = channelByTrackId.get(String(track._id));
+      if (!channel) throw new Error("Track mixer channel is unavailable.");
+      return {
+        ...track,
+        volume: channel.volume,
+        muted: channel.muted,
+        soloed: channel.soloed,
+        channelRole: channel.channelRole,
+        outputTargetId: channel.outputTargetId,
+        sends: channel.sends,
+      };
+    });
+    const ownerships = await ctx.db.query("ownerships").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+    const ownershipByTrackId = new Map(ownerships.flatMap((ownership) => ownership.trackId ? [[String(ownership.trackId), ownership] as const] : []));
+    const rootId = input.resolveRef("tracks", action.kind === "track.delete" ? action.track : action.group);
+    const root = merged.find((track) => String(track._id) === String(rootId));
+    const rootOwnership = ownershipByTrackId.get(String(rootId));
+    if (!root || !rootOwnership) return null;
+    const selectedIds = action.kind === "track.delete"
+      ? collectDeletedTrackIdsV1(merged.map((track) => ({
+          id: String(track._id), index: track.index, ...(track.groupId ? { groupId: String(track.groupId) } : {}),
+          ...(track.outputTargetId ? { outputTargetId: String(track.outputTargetId) } : {}),
+          sends: track.sends.map((send: any) => ({ targetTrackId: String(send.targetId) })),
+        })), String(rootId))
+      : new Set([String(rootId)]);
+    const selected = merged.filter((track) => selectedIds.has(String(track._id)));
+    const clips = (await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
+      .filter((clip) => selectedIds.has(String(clip.trackId)));
+    const clipOwnerships = await Promise.all(clips.map((clip) => ctx.db.query("ownerships").withIndex("by_clip", (q) => q.eq("clipId", clip._id)).unique()));
+    if (clipOwnerships.some((ownership) => !ownership)) return null;
+    const effects = (await ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
+      .filter((effect) => effect.targetType === "track" && effect.trackId && selectedIds.has(String(effect.trackId)));
+    const automation = (await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect())
+      .filter((row) => row.trackId && selectedIds.has(String(row.trackId)));
+    const sidechains = (await ctx.db.query("sidechainRoutes").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
+      .filter((row) => selectedIds.has(String(row.sourceTrackId)) || selectedIds.has(String(row.targetTrackId)));
+    const entityBundle = {
+      tracks: selected.map((track) => {
+        const ownership = ownershipByTrackId.get(String(track._id));
+        if (!ownership) throw new Error("Track ownership is unavailable.");
+        return { id: String(track._id), track: trackStatePayload(track), ownership: ownershipPayload(ownership) };
+      }),
+      clips: clips.map((clip, index) => ({
+        id: String(clip._id), clip: clipPayload(clip), ownership: ownershipPayload(clipOwnerships[index]!),
+      })),
+      effects: effects.map((effect) => ({ id: String(effect._id), effect: effectPayload(effect) })),
+      automation: automation.map((row) => ({ id: String(row._id), automation: automationPayload(row) })),
+      sidechains: sidechains.map((row) => ({ id: String(row._id), sidechain: sidechainPayload(row) })),
+    };
+    if (action.kind === "track.delete") {
+      const survivors = merged
+        .filter((track) => !selectedIds.has(String(track._id)))
+        .sort((left, right) => left.index - right.index || String(left._id).localeCompare(String(right._id)));
+      return {
+        rootTrackId: String(rootId),
+        ...entityBundle,
+        survivors: survivors.flatMap((track, index) => {
+          const before = trackStatePayload(track);
+          const after = postDeleteTrackState(track, selectedIds, index);
+          return sameRecoverySurvivorState(before, after)
+            ? []
+            : [{ id: String(track._id), before, after }];
+        }),
+      };
+    }
+    if (root.channelRole !== "group" || clips.length > 0) return null;
+    const children = merged.filter((track) => String(track.groupId) === String(rootId));
+    return {
+      groupId: String(rootId),
+      ...entityBundle,
+      children: children.map((child) => ({
+        id: String(child._id),
+        before: trackStatePayload(child),
+        after: {
+          ...trackStatePayload(child),
+          index: child.index > root.index ? child.index - 1 : child.index,
+          ...(root.groupId ? { groupId: String(root.groupId) } : { groupId: undefined }),
+          mixer: {
+            ...trackStatePayload(child).mixer,
+            ...(String(child.outputTargetId) === String(rootId)
+              ? root.groupId ? { outputTargetId: String(root.groupId) } : { outputTargetId: undefined }
+              : {}),
+          },
+        },
+      })),
+    };
+  }
   if (action.kind === "clip.delete") {
     const clipId = input.resolveRef("clips", action.clip);
     const clip = await ctx.db.get(clipId);
@@ -206,8 +385,12 @@ export const captureRecoveryPayload = async (
 const impact = (payload: RecoveryPayloadV1) => {
   const data = payload.data;
   const bundle = "effects" in data ? data : undefined;
+  const trackBundle = payload.kind === "track.delete" || payload.kind === "track.ungroup"
+    ? payload.data
+    : undefined;
   return {
-    clips: payload.kind === "clip.delete" ? 1 : 0,
+    tracks: trackBundle?.tracks.length ?? 0,
+    clips: payload.kind === "clip.delete" ? 1 : (trackBundle?.clips.length ?? 0),
     processors: bundle?.effects.length ?? 0,
     automation: bundle?.automation.length ?? 0,
     sidechains: bundle?.sidechains.length ?? 0,
@@ -243,7 +426,8 @@ export const createRecovery = async (
   input: { projectId: string; actorSubject: string; sourceActionIndex: number; kind: RecoveryPayloadV1["kind"]; data: unknown },
 ) => {
   if (!recoveryKinds.has(input.kind)) return null;
-  const validated = recoveryPayloadSchemaV1.parse({ version: 1, kind: input.kind, data: input.data });
+  const data = JSON.parse(JSON.stringify(input.data));
+  const validated = recoveryPayloadSchemaV1.parse({ version: 1, kind: input.kind, data });
   const payload = canonicalRecoveryPayloadV1(validated);
   await pruneRecoveries(ctx, input.projectId, input.actorSubject);
   const createdAt = Date.now();
@@ -364,6 +548,16 @@ const restoreEffectBundle = async (
     const sidechain = item.sidechain;
     const sourceTrack = await requireTrack(ctx, projectId, sidechain.sourceTrackId, actionIndex);
     const targetTrack = await requireTrack(ctx, projectId, sidechain.targetTrackId, actionIndex);
+    const targetEffect = (await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", targetTrack._id)).collect())
+      .find((effect) => effect.projectId === projectId && effect.instanceId === sidechain.effectInstanceId);
+    const eligibility = sidechainEligibilityError({
+      sourceTrackId: String(sourceTrack._id),
+      targetTrackId: String(targetTrack._id),
+      effectTargetTrackId: targetEffect?.trackId === undefined ? undefined : String(targetEffect.trackId),
+      effectKind: targetEffect?.type ?? "",
+      effectInstanceId: targetEffect?.instanceId,
+    });
+    if (eligibility) throw new ControlDomainError("validation", eligibility, actionIndex);
     const existing = await ctx.db.query("sidechainRoutes").withIndex("by_room_target_effect", (q) => (
       q.eq("projectId", projectId).eq("targetTrackId", targetTrack._id).eq("effectInstanceId", sidechain.effectInstanceId)
     )).unique();
@@ -378,13 +572,231 @@ const restoreEffectBundle = async (
   }
 };
 
+const restoredTrackId = (ctx: RecoveryCtx, map: Map<string, Id<"tracks">>, id: string | undefined) => {
+  if (id === undefined) return undefined;
+  return map.get(id) ?? ctx.db.normalizeId("tracks", id) ?? undefined;
+};
+
+const restoreTrackBundle = async (
+  ctx: RecoveryCtx,
+  input: {
+    projectId: string;
+    data: any;
+    survivors: Array<{ id: string; before: any; after: any }>;
+    actionIndex: number;
+  },
+  mappings: Mapping[],
+) => {
+  const existingTracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+  const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+  const channelByTrackId = new Map(channels.map((channel) => [String(channel.trackId), channel]));
+  for (const entry of input.data.tracks) {
+    const originalId = ctx.db.normalizeId("tracks", entry.id);
+    if (originalId && await ctx.db.get(originalId)) {
+      throw new ControlDomainError("validation", "Recovery track collides with current state.", input.actionIndex);
+    }
+  }
+  for (const survivor of input.survivors) {
+    const track = existingTracks.find((entry) => String(entry._id) === survivor.id);
+    const channel = track ? channelByTrackId.get(survivor.id) : undefined;
+    if (!track || !channel || !sameRecoverySurvivorState({ ...track, ...channel, sends: channel.sends }, survivor.after)) {
+      throw new ControlDomainError("validation", "Recovery state has drifted.", input.actionIndex);
+    }
+  }
+  const restoredSourceIds = new Set(input.data.tracks.map((entry: any) => entry.id));
+  const validateRoutingTargets = async (state: any) => {
+    const validate = async (targetId: string | undefined, message: string, groupOnly = false) => {
+      if (!targetId || restoredSourceIds.has(targetId)) return;
+      const target = await requireRecoveryTrackTarget(
+        ctx,
+        input.projectId,
+        ctx.db.normalizeId("tracks", targetId) ?? undefined,
+        input.actionIndex,
+        message,
+      );
+      const channel = channelByTrackId.get(String(target._id));
+      if (groupOnly && channel?.channelRole !== "group") {
+        throw new ControlDomainError("validation", "Recovery group target must be a group track.", input.actionIndex);
+      }
+    };
+    await validate(state.groupId, "Recovery group target is unavailable.", true);
+    await validate(state.mixer.outputTargetId, "Recovery output target is unavailable.");
+    for (const send of state.mixer.sends) await validate(send.targetId, "Recovery routing target is unavailable.");
+  };
+  for (const entry of input.data.tracks) await validateRoutingTargets(entry.track);
+  for (const survivor of input.survivors) await validateRoutingTargets(survivor.before);
+  const trackIds = new Map<string, Id<"tracks">>();
+  const mergedOrder = mergeRecoveryTrackOrderV1(
+    existingTracks.map((track) => ({ id: String(track._id), index: track.index })),
+    input.data.tracks.map((entry: any) => ({ id: entry.id, index: entry.track.index })),
+  );
+  const finalIndexById = new Map(mergedOrder.map((entry) => [entry.id, entry.index]));
+  for (const track of existingTracks) {
+    const index = finalIndexById.get(String(track._id));
+    if (index !== undefined && track.index !== index) await ctx.db.patch(track._id, { index });
+  }
+  for (const entry of [...input.data.tracks].sort((left: any, right: any) => left.track.index - right.track.index || left.id.localeCompare(right.id))) {
+    const index = finalIndexById.get(entry.id);
+    if (index === undefined) throw new Error("Recovery track order is unavailable.");
+    const id = await ctx.db.insert("tracks", {
+      projectId: entry.track.projectId,
+      name: entry.track.name,
+      index,
+      ...(entry.track.kind === undefined ? {} : { kind: entry.track.kind }),
+      ...(entry.track.historyRef === undefined ? {} : { historyRef: entry.track.historyRef }),
+      ...(entry.track.collapsed === undefined ? {} : { collapsed: entry.track.collapsed }),
+      ...(entry.track.color === undefined ? {} : { color: entry.track.color }),
+    });
+    trackIds.set(entry.id, id);
+    mappings.push({ entity: "track", sourceId: entry.id, restoredId: String(id) });
+  }
+  const resolve = (id: string | undefined) => restoredTrackId(ctx, trackIds, id);
+  for (const entry of input.data.tracks) {
+    const id = trackIds.get(entry.id);
+    if (!id) throw new Error("Recovery track mapping is unavailable.");
+    const groupId = resolve(entry.track.groupId);
+    const outputTargetId = resolve(entry.track.mixer.outputTargetId);
+    const sends = entry.track.mixer.sends.map((send: any) => {
+      const targetId = resolve(send.targetId);
+      if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
+      return { targetId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }) };
+    });
+    if (entry.track.groupId && !groupId) throw new ControlDomainError("not-found", "Recovery group target is unavailable.", input.actionIndex);
+    if (entry.track.mixer.outputTargetId && !outputTargetId) throw new ControlDomainError("not-found", "Recovery output target is unavailable.", input.actionIndex);
+    await ctx.db.patch(id, groupId === undefined ? {} : { groupId });
+    await ctx.db.insert("mixerChannels", {
+      projectId: entry.track.projectId, trackId: id, volume: entry.track.mixer.volume,
+      ...(entry.track.mixer.muted === undefined ? {} : { muted: entry.track.mixer.muted }),
+      ...(entry.track.mixer.soloed === undefined ? {} : { soloed: entry.track.mixer.soloed }),
+      channelRole: entry.track.mixer.channelRole,
+      ...(outputTargetId === undefined ? {} : { outputTargetId }),
+      sends,
+    });
+    await ctx.db.insert("ownerships", {
+      projectId: entry.ownership.projectId, ownerUserId: entry.ownership.ownerUserId,
+      ...(entry.ownership.role === undefined ? {} : { role: entry.ownership.role }), trackId: id,
+    });
+  }
+  for (const survivor of input.survivors) {
+    const id = ctx.db.normalizeId("tracks", survivor.id);
+    const channel = id ? channelByTrackId.get(survivor.id) : undefined;
+    if (!id || !channel) throw new Error("Recovery survivor mapping is unavailable.");
+    const groupId = resolve(survivor.before.groupId);
+    const outputTargetId = resolve(survivor.before.mixer.outputTargetId);
+    const sends = survivor.before.mixer.sends.map((send: any) => {
+      const targetId = resolve(send.targetId);
+      if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
+      return { targetId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }) };
+    });
+    await ctx.db.patch(id, groupId === undefined ? { groupId: undefined } : { groupId });
+    await ctx.db.patch(channel._id, {
+      ...(outputTargetId === undefined ? { outputTargetId: undefined } : { outputTargetId }),
+      sends,
+    });
+  }
+  for (const item of input.data.effects) {
+    const effect = item.effect;
+    const trackId = effect.target.kind === "track" ? resolve(effect.target.trackId) : undefined;
+    if (effect.target.kind === "track" && !trackId) throw new ControlDomainError("not-found", "Recovery processor target is unavailable.", input.actionIndex);
+    const targetRows = effect.target.kind === "master"
+      ? await ctx.db.query("effects").withIndex("by_room_target", (q) => q.eq("projectId", input.projectId).eq("targetType", "master")).collect()
+      : await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect();
+    const singleton = effect.processor.kind === "instrument" || effect.processor.kind === "synth" || effect.processor.kind === "arpeggiator";
+    if (targetRows.some((row) => (
+      singleton
+        ? row.type === effect.processor.kind || effect.processor.kind === "instrument" && row.type === "synth"
+        : effect.instanceId !== undefined && row.instanceId === effect.instanceId
+    ))) throw new ControlDomainError("validation", "Recovery processor collides with current state.", input.actionIndex);
+    const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId, effect.processor.params);
+    const id = await ctx.db.insert("effects", {
+      projectId: effect.projectId, targetType: effect.target.kind, ...(trackId === undefined ? {} : { trackId }),
+      index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
+      ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }),
+      params: instrument ?? effect.processor.params, createdAt: effect.createdAt,
+    });
+    mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
+  }
+  for (const item of input.data.clips) {
+    const clip = item.clip;
+    const trackId = resolve(clip.trackId);
+    if (!trackId) throw new ControlDomainError("not-found", "Recovery clip target is unavailable.", input.actionIndex);
+    const id = await ctx.db.insert("clips", { ...clip, trackId });
+    await ctx.db.insert("ownerships", {
+      projectId: item.ownership.projectId, ownerUserId: item.ownership.ownerUserId,
+      ...(item.ownership.role === undefined ? {} : { role: item.ownership.role }), clipId: id,
+    });
+    mappings.push({ entity: "clip", sourceId: item.id, restoredId: String(id) });
+  }
+  for (const item of input.data.automation) {
+    const automation = item.automation;
+    const trackId = resolve(automation.trackId);
+    if (automation.trackId && !trackId) throw new ControlDomainError("not-found", "Recovery automation target is unavailable.", input.actionIndex);
+    const parameterId = rebasedAutomationParameterId(
+      automation.parameterId,
+      trackId === undefined ? undefined : String(trackId),
+    );
+    const targetKey = automationTargetKey(
+      automation.targetKind === "master"
+        ? { kind: "master", effectInstanceId: automation.effectInstanceId }
+        : { kind: "track", trackId: String(trackId), effectInstanceId: automation.effectInstanceId },
+      parameterId,
+    );
+    const existing = await ctx.db.query("automationEnvelopes").withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", targetKey)).unique();
+    if (existing) throw new ControlDomainError("validation", "Recovery automation target collides with current state.", input.actionIndex);
+    const id = await ctx.db.insert("automationEnvelopes", {
+      projectId: automation.projectId, targetKind: automation.targetKind, ...(trackId === undefined ? {} : { trackId }),
+      ...(automation.effectInstanceId === undefined ? {} : { effectInstanceId: automation.effectInstanceId }),
+      targetKey, parameterId, enabled: automation.enabled, points: automation.points, updatedAt: automation.updatedAt,
+    });
+    mappings.push({ entity: "automation", sourceId: item.id, restoredId: String(id) });
+  }
+  for (const item of input.data.sidechains) {
+    const sidechain = item.sidechain;
+    const sourceTrackId = resolve(sidechain.sourceTrackId);
+    const targetTrackId = resolve(sidechain.targetTrackId);
+    if (!sourceTrackId || !targetTrackId) throw new ControlDomainError("not-found", "Recovery sidechain target is unavailable.", input.actionIndex);
+    const targetEffect = (await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", targetTrackId)).collect())
+      .find((effect) => effect.projectId === input.projectId && effect.instanceId === sidechain.effectInstanceId);
+    const eligibility = sidechainEligibilityError({
+      sourceTrackId: String(sourceTrackId),
+      targetTrackId: String(targetTrackId),
+      effectTargetTrackId: targetEffect?.trackId === undefined ? undefined : String(targetEffect.trackId),
+      effectKind: targetEffect?.type ?? "",
+      effectInstanceId: targetEffect?.instanceId,
+    });
+    if (eligibility) throw new ControlDomainError("validation", eligibility, input.actionIndex);
+    const existing = await ctx.db.query("sidechainRoutes").withIndex("by_room_target_effect", (q) => (
+      q.eq("projectId", input.projectId).eq("targetTrackId", targetTrackId).eq("effectInstanceId", sidechain.effectInstanceId)
+    )).unique();
+    if (existing) throw new ControlDomainError("validation", "Recovery sidechain target collides with current state.", input.actionIndex);
+    const id = await ctx.db.insert("sidechainRoutes", { projectId: sidechain.projectId, sourceTrackId, targetTrackId, effectInstanceId: sidechain.effectInstanceId });
+    mappings.push({ entity: "sidechain", sourceId: item.id, restoredId: String(id) });
+  }
+};
+
 export const restoreRecovery = async (
   ctx: RecoveryCtx,
   input: { projectId: string; recovery: Awaited<ReturnType<typeof loadRecovery>>; actionIndex: number },
 ) => {
   const { row, payload } = input.recovery;
   const mappings: Mapping[] = [];
-  if (payload.kind === "clip.delete") {
+  if (payload.kind === "track.delete") {
+    await restoreTrackBundle(ctx, {
+      projectId: input.projectId,
+      data: payload.data,
+      survivors: payload.data.survivors,
+      actionIndex: input.actionIndex,
+    }, mappings);
+  } else if (payload.kind === "track.ungroup") {
+    await restoreTrackBundle(ctx, {
+      projectId: input.projectId,
+      data: payload.data,
+      survivors: payload.data.children.map((child) => ({
+        id: child.id, before: child.before, after: child.after,
+      })),
+      actionIndex: input.actionIndex,
+    }, mappings);
+  } else if (payload.kind === "clip.delete") {
     const data = payload.data;
     const track = await requireTrack(ctx, input.projectId, data.clip.trackId, input.actionIndex);
     const id = await ctx.db.insert("clips", {

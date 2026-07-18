@@ -19,11 +19,16 @@ import {
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
+  granularAutomationKey,
+  instrumentAutomationKey,
+  synthAutomationKey,
   sidechainEligibilityError,
   sidechainTargetEligibilityError,
 } from '@daw-browser/shared'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { collectDeletedTrackIdsV1 } from './trackDeletion'
+import { recoveryLimitsV1 } from './recovery-limits'
+import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 
 type ContextualRefV1 = { source: 'persisted'; id: string } | { source: 'client'; clientRef: string }
 type TrackRefV1 = ContextualRefV1
@@ -43,7 +48,7 @@ type PlannerRequest = { projectId: string; actions: ControlActionV1[] }
 type Entity = 'track' | 'clip' | 'effect'
 
 export type ControlPlanError = {
-  code: 'validation' | 'not-found'
+  code: 'validation' | 'not-found' | 'limit-exceeded'
   message: string
   actionIndex: number
 }
@@ -155,6 +160,56 @@ const canonical = (value: unknown): string => {
 }
 
 const same = (left: unknown, right: unknown) => canonical(left) === canonical(right)
+
+const recoverySurvivorState = (entry: any) => ({
+  index: entry.index,
+  groupId: entry.groupId,
+  outputTargetId: entry.mixer?.outputTargetId ?? entry.outputTargetId,
+  sends: (entry.mixer?.sends ?? entry.sends).map((send: any) => ({
+    targetTrackId: send.targetId ?? send.targetTrackId,
+    amount: send.amount,
+    ...(send.tap === undefined ? {} : { tap: send.tap }),
+  })),
+})
+
+const rebaseRecoveryAutomationParameterId = (parameterId: string, trackId: string | undefined) => {
+  if (trackId === undefined) return parameterId
+  const instrument = parseInstrumentAutomationKey(parameterId)
+  if (instrument) return instrumentAutomationKey(trackId, instrument.instanceId, instrument.parameterId)
+  const granular = parseGranularAutomationKey(parameterId)
+  if (granular) return granularAutomationKey(trackId, granular.instanceId, granular.parameterId)
+  const synth = parseSynthAutomationKey(parameterId)
+  return synth ? synthAutomationKey(trackId, synth.instanceId, synth.parameterId) : parameterId
+}
+
+const validateRecoveryLimits = (
+  actionIndex: number,
+  snapshot: ProjectSnapshotV1,
+  trackIds: Set<string>,
+  transitions: readonly ProjectSnapshotV1['tracks'][number][] = [],
+) => {
+  const clips = snapshot.clips.filter((clip) => trackIds.has(clip.trackId))
+  const processors = snapshot.processors.filter((processor) => 'trackId' in processor.target && trackIds.has(processor.target.trackId))
+  const automation = snapshot.automation.filter((entry) => 'trackId' in entry.target && trackIds.has(entry.target.trackId))
+  const sidechains = snapshot.sidechains.filter((entry) => trackIds.has(entry.sourceTrackId) || trackIds.has(entry.targetTrackId))
+  const entities = trackIds.size + clips.length + processors.length + automation.length + sidechains.length
+  const notes = clips.reduce((total, clip) => total + (clip.midi?.notes.length ?? 0), 0)
+  const points = automation.reduce((total, entry) => total + entry.points.length, 0)
+  const markers = clips.reduce((total, clip) => total + (clip.audioWarp?.markers?.length ?? 0), 0)
+  const sends = Array.from(trackIds, (id) => tracksById(snapshot.tracks).get(id)?.sends.length ?? 0)
+    .reduce((total, count) => total + count, 0)
+    + transitions.reduce((total, track) => total + track.sends.length * 2, 0)
+  if (
+    entities > recoveryLimitsV1.maxEntities
+    || transitions.length > recoveryLimitsV1.maxEntities
+    || notes > recoveryLimitsV1.maxMidiNotes
+    || points > recoveryLimitsV1.maxAutomationPoints
+    || markers > recoveryLimitsV1.maxWarpMarkers
+    || sends > recoveryLimitsV1.maxSends
+  ) planError(actionIndex, 'limit-exceeded', 'Recovery payload exceeds recovery limits.')
+}
+
+const tracksById = (tracks: ProjectSnapshotV1['tracks']) => new Map(tracks.map((track) => [track.id, track]))
 
 const removedBaseEntries = (base: unknown[], before: unknown[], after: unknown[]) => {
   const baseEntries = new Set(base.map(canonical))
@@ -551,6 +606,16 @@ export const planControlRequestV1 = (
       case 'track.delete': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         const removeTrackIds = collectDeletedTrackIdsV1(Array.from(tracks.values()), track.id)
+        const survivors = Array.from(tracks.values())
+          .filter((entry) => !removeTrackIds.has(entry.id))
+          .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
+          .filter((entry, index) => (
+            entry.index !== index
+            || entry.groupId !== undefined && removeTrackIds.has(entry.groupId)
+            || entry.outputTargetId !== undefined && removeTrackIds.has(entry.outputTargetId)
+            || entry.sends.some((send: any) => removeTrackIds.has(send.targetTrackId))
+          ))
+        validateRecoveryLimits(actionIndex, snapshot, removeTrackIds, survivors)
         for (const id of removeTrackIds) tracks.delete(id)
         snapshot.tracks = snapshot.tracks.filter((entry) => !removeTrackIds.has(entry.id))
         snapshot.clips = snapshot.clips.filter((entry) => !removeTrackIds.has(entry.trackId))
@@ -618,6 +683,7 @@ export const planControlRequestV1 = (
         const group = requireTrack(action.group, tracks, trackRefs, actionIndex)
         if (group.channelRole !== 'group') planError(actionIndex, 'validation', 'Only group tracks can be ungrouped.')
         const children = Array.from(tracks.values()).filter((track) => track.groupId === group.id)
+        validateRecoveryLimits(actionIndex, snapshot, new Set([group.id]), children)
         if (Array.from(clips.values()).some((clip) => clip.trackId === group.id)) planError(actionIndex, 'validation', 'Cannot ungroup a group with clips.')
         const childIds = new Set(children.map((child) => child.id))
         if (Array.from(tracks.values()).some((track) => (
@@ -1042,7 +1108,148 @@ export const planControlRequestV1 = (
         if (!recovery) planError(actionIndex, 'not-found', 'Recovery is unavailable.')
         const availableRecovery = recovery ?? planError(actionIndex, 'not-found', 'Recovery is unavailable.')
         const data = availableRecovery.payload.data
-        if (availableRecovery.payload.kind === 'clip.delete') {
+        if (availableRecovery.payload.kind === 'track.delete' || availableRecovery.payload.kind === 'track.ungroup') {
+          const restoreTracks = data.tracks
+          const restoredIds = new Map(restoreTracks.map((entry: any) => [entry.id, `recovery:track:${action.recovery.id}:${entry.id}`]))
+          const survivorStates = availableRecovery.payload.kind === 'track.delete' ? data.survivors : data.children
+          for (const entry of restoreTracks) {
+            if (tracks.has(entry.id)) planError(actionIndex, 'validation', 'Recovery track collides with current state.')
+          }
+          for (const survivor of survivorStates) {
+            const current = tracks.get(survivor.id)
+            if (!current || !same(recoverySurvivorState(current), recoverySurvivorState(survivor.after))) {
+              planError(actionIndex, 'validation', 'Recovery state has drifted.')
+            }
+          }
+          const restoredSourceIds = new Set(restoreTracks.map((entry: any) => entry.id))
+          const validateRoutingTargets = (state: any) => {
+            const requireTarget = (targetId: string | undefined, message: string, groupOnly = false) => {
+              if (!targetId || restoredSourceIds.has(targetId)) return
+              const target = tracks.get(targetId) ?? planError(actionIndex, 'not-found', message)
+              if (groupOnly && target.channelRole !== 'group') planError(actionIndex, 'validation', 'Recovery group target must be a group track.')
+            }
+            requireTarget(state.groupId, 'Recovery group target is unavailable.', true)
+            requireTarget(state.mixer.outputTargetId, 'Recovery output target is unavailable.')
+            for (const send of state.mixer.sends) requireTarget(send.targetId, 'Recovery routing target is unavailable.')
+          }
+          for (const entry of restoreTracks) validateRoutingTargets(entry.track)
+          for (const survivor of survivorStates) validateRoutingTargets(survivor.before)
+          for (const survivor of survivorStates) {
+            const current = tracks.get(survivor.id)
+            if (!current) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+            const { index: _index, ...before } = recoverySurvivorState(survivor.before)
+            Object.assign(current, {
+              ...before,
+              groupId: restoredIds.get(survivor.before.groupId) ?? survivor.before.groupId,
+              outputTargetId: restoredIds.get(survivor.before.mixer.outputTargetId) ?? survivor.before.mixer.outputTargetId,
+              sends: survivor.before.mixer.sends.map((send: any) => ({
+                targetTrackId: restoredIds.get(send.targetId) ?? send.targetId,
+                amount: send.amount,
+                ...(send.tap === undefined ? {} : { tap: send.tap }),
+              })),
+            })
+          }
+          for (const entry of restoreTracks) {
+            const track = entry.track
+            const id = restoredIds.get(entry.id)
+            if (!id) throw new Error('Recovery track mapping is unavailable.')
+            const restored = {
+              id, name: track.name, index: track.index, kind: track.kind,
+              channelRole: track.mixer.channelRole,
+              groupId: restoredIds.get(track.groupId) ?? track.groupId,
+              volume: track.mixer.volume, muted: Boolean(track.mixer.muted), soloed: Boolean(track.mixer.soloed),
+              outputTargetId: restoredIds.get(track.mixer.outputTargetId) ?? track.mixer.outputTargetId,
+              sends: track.mixer.sends.map((send: any) => ({
+                targetTrackId: restoredIds.get(send.targetId) ?? send.targetId,
+                amount: send.amount,
+                ...(send.tap === undefined ? {} : { tap: send.tap }),
+              })),
+            }
+            tracks.set(id, restored)
+            snapshot.tracks.push(restored)
+          }
+          const restoredPlannerIds = new Set(restoredIds.values())
+          const mergedOrder = mergeRecoveryTrackOrderV1(
+            Array.from(tracks.values())
+              .filter((track) => !restoredPlannerIds.has(track.id))
+              .map((track) => ({ id: track.id, index: track.index })),
+            restoreTracks.map((entry: any) => ({
+              id: restoredIds.get(entry.id) ?? planError(actionIndex, 'validation', 'Recovery track mapping is unavailable.'),
+              index: entry.track.index,
+            })),
+          )
+          for (const entry of mergedOrder) {
+            const track = tracks.get(entry.id)
+            if (track) track.index = entry.index
+          }
+          for (const item of data.clips) {
+            const trackId = restoredIds.get(item.clip.trackId)
+            if (!trackId) planError(actionIndex, 'validation', 'Recovery clip target is unavailable.')
+            const id = `recovery:clip:${action.recovery.id}:${item.id}`
+            const clip = { id, ...item.clip, trackId }
+            clips.set(id, clip)
+            snapshot.clips.push(clip)
+          }
+          for (const item of data.effects) {
+            const effect = item.effect
+            const trackId = effect.target.kind === 'track' ? restoredIds.get(effect.target.trackId) : undefined
+            if (effect.target.kind === 'track' && !trackId) planError(actionIndex, 'validation', 'Recovery processor target is unavailable.')
+            const target = effect.target.kind === 'master' ? { master: true } : { trackId }
+            const singleton = effect.processor.kind === 'instrument' || effect.processor.kind === 'synth' || effect.processor.kind === 'arpeggiator'
+            if (Array.from(processors.values()).some((processor) => (
+              same(processor.target, target)
+              && (
+                singleton
+                  ? processor.processor.kind === effect.processor.kind || effect.processor.kind === 'instrument' && processor.processor.kind === 'synth'
+                  : effect.instanceId !== undefined && processor.instanceId === effect.instanceId
+              )
+            ))) {
+              planError(actionIndex, 'validation', 'Recovery processor collides with current state.')
+            }
+            const id = `recovery:effect:${action.recovery.id}:${item.id}`
+            const processor = { id, target, index: effect.index, ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }), processor: effect.processor }
+            processors.set(id, processor)
+            snapshot.processors.push(processor)
+          }
+          for (const item of data.automation) {
+            const row = item.automation
+            const restoredTrackId = row.trackId === undefined ? undefined : restoredIds.get(row.trackId)
+            const trackId = restoredTrackId === undefined ? undefined : String(restoredTrackId)
+            if (row.trackId !== undefined && !trackId) planError(actionIndex, 'validation', 'Recovery automation target is unavailable.')
+            const target = row.targetKind === 'master' ? { master: true } : { trackId }
+            snapshot.automation.push({
+              target,
+              ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: row.effectInstanceId }),
+              parameterId: rebaseRecoveryAutomationParameterId(row.parameterId, trackId),
+              enabled: row.enabled,
+              points: row.points,
+            })
+          }
+          for (const item of data.sidechains) {
+            const route = item.sidechain
+            const sourceTrackId = restoredIds.get(route.sourceTrackId) ?? route.sourceTrackId
+            const targetTrackId = restoredIds.get(route.targetTrackId) ?? route.targetTrackId
+            if (!tracks.has(sourceTrackId) || !tracks.has(targetTrackId)) planError(actionIndex, 'not-found', 'Recovery sidechain target is unavailable.')
+            const targetEffect = Array.from(processors.values()).find((processor) => (
+              'trackId' in processor.target
+              && processor.target.trackId === targetTrackId
+              && processor.instanceId === route.effectInstanceId
+            ))
+            const eligibility = sidechainEligibilityError({
+              sourceTrackId,
+              targetTrackId,
+              effectTargetTrackId: targetEffect && 'trackId' in targetEffect.target ? targetEffect.target.trackId : undefined,
+              effectKind: targetEffect?.processor.kind ?? '',
+              effectInstanceId: targetEffect?.instanceId,
+            })
+            if (eligibility) planError(actionIndex, 'validation', eligibility)
+            if (snapshot.sidechains.some((entry) => entry.targetTrackId === targetTrackId && entry.effectInstanceId === route.effectInstanceId)) {
+              planError(actionIndex, 'validation', 'Recovery sidechain target collides with current state.')
+            }
+            snapshot.sidechains.push({ sourceTrackId, targetTrackId, effectInstanceId: route.effectInstanceId })
+          }
+          if (!hasValidReturnTrackPartition(Array.from(tracks.values()))) planError(actionIndex, 'validation', 'Return tracks must remain an ungrouped suffix.')
+        } else if (availableRecovery.payload.kind === 'clip.delete') {
           const track = tracks.get(String(data.clip.trackId))
           if (!track) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
           if (clips.has(String(data.clipId))) planError(actionIndex, 'validation', 'Recovery clip collides with current state.')

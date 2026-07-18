@@ -13,14 +13,17 @@ import {
   parseControlHistoryQueryV1,
   parseControlRecoveriesQueryV1,
   assertControlSerializedBodyV1,
+  canonicalRecoveryPayloadV1,
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   planControlRequestV1,
   projectSnapshotSchemaV1,
+  recoveryPayloadSchemaV1,
   type ResolvedRefV1,
 } from "@daw-browser/control";
+import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { executeControlPlanV1 } from "./controlExecution";
@@ -28,7 +31,7 @@ import { ControlDomainError, preflightControlRequestV1 } from "./controlPrefligh
 import { readProjectControlSnapshotV1 } from "./controlSnapshot";
 import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
-import { loadRecovery } from "./controlRecovery";
+import { captureRecoveryPayload, isRecoverableAction, loadRecovery } from "./controlRecovery";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 
 const maxControlCommitsPerProject = 1000;
@@ -248,7 +251,7 @@ const plan = (
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && "message" in error && "actionIndex" in error) {
       const value = error
-      if (value.code === "validation" || value.code === "not-found") {
+      if (value.code === "validation" || value.code === "not-found" || value.code === "limit-exceeded") {
         return failure(value.code, String(value.message), typeof value.actionIndex === "number" ? value.actionIndex : undefined)
       }
     }
@@ -288,18 +291,93 @@ const requestedRecoveries = async (ctx: any, request: { projectId: string; actio
   return new Map(entries.map((entry) => [String(entry.row._id), entry]));
 }
 
+const hasClientReference = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(hasClientReference)
+  if (typeof value !== "object" || value === null) return false
+  if ("source" in value && value.source === "client") return true
+  return Object.values(value).some(hasClientReference)
+}
+
+const validateRecoveryDrafts = async (
+  ctx: any,
+  input: { projectId: string; actions: any[] },
+) => {
+  for (const action of input.actions) {
+    if (!isRecoverableAction(action) || hasClientReference(action)) continue
+    const data = await captureRecoveryPayload(ctx, {
+      projectId: input.projectId,
+      action,
+      resolveRef: (table, ref) => {
+        if (ref.source !== "persisted") throw new Error("Recovery draft has an unresolved reference.");
+        const id = ctx.db.normalizeId(table, ref.id);
+        if (!id) throw new Error("Recovery draft has an invalid reference.");
+        return id;
+      },
+    })
+    if (data) {
+      canonicalRecoveryPayloadV1(recoveryPayloadSchemaV1.parse({
+        version: 1,
+        kind: action.kind,
+        data: JSON.parse(JSON.stringify(data)),
+      }))
+    }
+  }
+}
+
 const recoveryTrackIds = (recovery: any): string[] => {
   const data = recovery.payload.data
+  const routingTargets = (state: any) => [
+    ...(state.groupId === undefined ? [] : [state.groupId]),
+    ...(state.mixer?.outputTargetId === undefined ? [] : [state.mixer.outputTargetId]),
+    ...(state.mixer?.sends ?? []).map((send: any) => send.targetId),
+  ]
   if (recovery.payload.kind === "clip.delete") return [String(data.clip.trackId)]
   if (recovery.payload.kind === "automation.delete") return data.automation.trackId ? [String(data.automation.trackId)] : []
   if (recovery.payload.kind === "sidechain.remove") return [String(data.sidechain.sourceTrackId), String(data.sidechain.targetTrackId)]
   if (recovery.payload.kind === "asset.delete") return []
+  if (recovery.payload.kind === "track.delete") {
+    return [
+      ...data.survivors.map((entry: any) => entry.id),
+      ...data.tracks.flatMap((entry: any) => routingTargets(entry.track)),
+      ...data.survivors.flatMap((entry: any) => routingTargets(entry.before)),
+      ...data.sidechains.flatMap((entry: any) => [entry.sidechain.sourceTrackId, entry.sidechain.targetTrackId]),
+    ]
+  }
+  if (recovery.payload.kind === "track.ungroup") {
+    return [
+      ...data.children.map((entry: any) => entry.id),
+      ...data.tracks.flatMap((entry: any) => routingTargets(entry.track)),
+      ...data.children.flatMap((entry: any) => routingTargets(entry.before)),
+      ...data.sidechains.flatMap((entry: any) => [entry.sidechain.sourceTrackId, entry.sidechain.targetTrackId]),
+    ]
+  }
   return [
     ...(data.effects?.flatMap((item: any) => item.effect.target.kind === "track" ? [item.effect.target.trackId] : []) ?? []),
     ...(data.automation?.flatMap((item: any) => item.automation.trackId === undefined ? [] : [item.automation.trackId]) ?? []),
     ...(data.sidechains?.flatMap((item: any) => [item.sidechain.sourceTrackId, item.sidechain.targetTrackId]) ?? []),
   ]
 }
+
+const recoveryIndexShiftedTrackIds = (
+  recovery: any,
+  tracks: Array<{ _id: unknown; index: number }>,
+) => {
+  if (recovery.payload.kind !== "track.delete" && recovery.payload.kind !== "track.ungroup") return [];
+  const recovered = recovery.payload.data.tracks.map((entry: any) => ({
+    id: entry.id,
+    index: entry.track.index,
+  }));
+  const recoveredIds = new Set(recovered.map((track: { id: string }) => track.id));
+  const currentIndexById = new Map(tracks.map((track) => [String(track._id), track.index]));
+  const finalOrder = mergeRecoveryTrackOrderV1(
+    tracks.map((track) => ({ id: String(track._id), index: track.index })),
+    recovered,
+  );
+  return finalOrder.flatMap((track) => {
+    if (recoveredIds.has(track.id)) return [];
+    return currentIndexById.get(track.id) === track.index ? [] : [track.id];
+  });
+};
 
 const preflightRecoveryLocks = async (
   ctx: any,
@@ -309,7 +387,13 @@ const preflightRecoveryLocks = async (
   const locks = new Map(tracks.map((track) => [String(track._id), track.lockedBy]))
   for (const [actionIndex, action] of input.actions.entries()) {
     if (action.kind !== "recovery.restore") continue
-    for (const trackId of new Set(recoveryTrackIds(input.recoveries.get(action.recovery.id)))) {
+    const recovery = input.recoveries.get(action.recovery.id)
+    if (!recovery) continue
+    const affectedTrackIds = new Set([
+      ...recoveryTrackIds(recovery),
+      ...recoveryIndexShiftedTrackIds(recovery, tracks),
+    ])
+    for (const trackId of affectedTrackIds) {
       const lockedBy = locks.get(trackId)
       if (lockedBy && lockedBy !== input.actorId) {
         throw new ControlDomainError("forbidden", "Affected track is locked by another user.", actionIndex, { trackId, lockedBy })
@@ -385,6 +469,11 @@ export const requestApprovalV1 = mutation({
       return failure("revision-conflict", "Project revision does not match the expected revision.")
     }
     const requestDigest = await controlRequestDigestV1(parsed)
+    try {
+      await validateRecoveryDrafts(ctx, { projectId: parsed.projectId, actions: parsed.actions })
+    } catch {
+      return failure("limit-exceeded", "Recovery payload exceeds recovery limits.")
+    }
     let recoveries: Map<string, any>
     try {
       recoveries = await requestedRecoveries(ctx, parsed)

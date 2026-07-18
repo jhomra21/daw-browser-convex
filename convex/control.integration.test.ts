@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { controlCapabilitiesV1, parseControlPreviewRequestV1, parseRecoveryPayloadV1 } from "@daw-browser/control";
+import { controlCapabilitiesV1, parseControlPreviewRequestV1, parseRecoveryPayloadV1, planControlRequestV1 } from "@daw-browser/control";
 import {
   automationTargetKey,
   createDefaultSynthParams,
@@ -12,6 +12,7 @@ import {
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { enqueueR2DeleteRows } from "./r2Deletes";
+import { readProjectControlSnapshotV1 } from "./controlSnapshot";
 import schema from "./schema";
 
 const modules = {
@@ -118,6 +119,75 @@ test("restores a deleted clip through an opaque single-use recovery descriptor",
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor!.id } }], "recovery-reuse"),
   })).rejects.toThrow("Recovery is unavailable.");
+});
+
+test("restores a deleted nested track subtree and survivor routing through recovery", async () => {
+  const t = await setup();
+  const group = await addTrack(t, { name: "Group", index: 0, channelRole: "group" });
+  const child = await addTrack(t, { name: "Child", index: 1 });
+  const survivor = await addTrack(t, { name: "Survivor", index: 2 });
+  await t.run(async (ctx) => {
+    const childRow = await ctx.db.get(child);
+    const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", child)).unique();
+    const survivorChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+    if (!childRow || !childChannel || !survivorChannel) throw new Error("Track fixtures are unavailable.");
+    await ctx.db.patch(childRow._id, { groupId: group });
+    await ctx.db.patch(childChannel._id, { outputTargetId: group });
+    await ctx.db.patch(survivorChannel._id, { outputTargetId: group, sends: [{ targetId: child, amount: 0.4 }] });
+  });
+  const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(group) } }], "track-recovery-delete"),
+  });
+  expect(deleted.recoveries[0]?.kind).toBe("track.delete");
+  const descriptor = deleted.recoveries[0];
+  if (!descriptor) throw new Error("Expected track recovery.");
+  const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "track-recovery-restore"),
+  });
+  expect(restored.restored[0]?.entities.filter((entity) => entity.entity === "track")).toHaveLength(2);
+  await t.run(async (ctx) => {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const restoredGroup = tracks.find((track) => track.name === "Group");
+    const restoredChild = tracks.find((track) => track.name === "Child");
+    const restoredSurvivor = tracks.find((track) => track.name === "Survivor");
+    if (!restoredGroup || !restoredChild || !restoredSurvivor) throw new Error("Restored tracks are unavailable.");
+    const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredChild._id)).unique();
+    const survivorChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredSurvivor._id)).unique();
+    expect(String(restoredChild.groupId)).toBe(String(restoredGroup._id));
+    expect(String(childChannel?.outputTargetId)).toBe(String(restoredGroup._id));
+    expect(String(survivorChannel?.outputTargetId)).toBe(String(restoredGroup._id));
+    expect(String(survivorChannel?.sends[0]?.targetId)).toBe(String(restoredChild._id));
+  });
+});
+
+test("restores an ungrouped group and its direct child transitions through recovery", async () => {
+  const t = await setup();
+  const group = await addTrack(t, { name: "Group", index: 0, channelRole: "group" });
+  const child = await addTrack(t, { name: "Child", index: 1, groupId: group });
+  await t.run(async (ctx) => {
+    const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", child)).unique();
+    if (!channel) throw new Error("Child mixer channel is unavailable.");
+    await ctx.db.patch(channel._id, { outputTargetId: group });
+  });
+  const ungrouped = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{ kind: "track.ungroup", group: { source: "persisted", id: String(group) } }], "ungroup-recovery-delete"),
+  });
+  expect(ungrouped.recoveries[0]?.kind).toBe("track.ungroup");
+  const descriptor = ungrouped.recoveries[0];
+  if (!descriptor) throw new Error("Expected ungroup recovery.");
+  const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "ungroup-recovery-restore"),
+  });
+  expect(restored.restored[0]?.entities.some((entity) => entity.entity === "track")).toBe(true);
+  await t.run(async (ctx) => {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const restoredGroup = tracks.find((track) => track.name === "Group");
+    const restoredChild = tracks.find((track) => track.name === "Child");
+    if (!restoredGroup || !restoredChild) throw new Error("Restored group fixtures are unavailable.");
+    const childChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", restoredChild._id)).unique();
+    expect(String(restoredChild.groupId)).toBe(String(restoredGroup._id));
+    expect(String(childChannel?.outputTargetId)).toBe(String(restoredGroup._id));
+  });
 });
 
 test("lists only active recovery descriptors without private payload data", async () => {
@@ -731,6 +801,117 @@ test("deletion rejects a locked surviving sidechain dependent without writes", a
     revision: (await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique())?.revision,
     commits: await ctx.db.query("controlCommits").collect(),
   }))).toEqual(before);
+});
+
+test("track recovery transition limits accept sixty-four survivors and reject sixty-five before approval creation", async () => {
+  const allowed = await setup();
+  const root = await addTrack(allowed, { name: "Deleted", index: 0 });
+  for (let index = 0; index < 64; index += 1) {
+    await addTrack(allowed, { name: `Survivor ${index}`, index: index + 1 });
+  }
+  const allowedAction = { kind: "track.delete", track: { source: "persisted" as const, id: String(root) } };
+  expect((await allowed.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions: [allowedAction] },
+  })).approval?.required).toBe(true);
+  expect((await allowed.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
+    request: { version: "v1", projectId, actions: [allowedAction] },
+  }).then((approval) => approval.approvalToken)).length).toBeGreaterThan(0);
+
+  const rejected = await setup();
+  const rejectedRoot = await addTrack(rejected, { name: "Deleted", index: 0 });
+  for (let index = 0; index < 65; index += 1) {
+    await addTrack(rejected, { name: `Survivor ${index}`, index: index + 1 });
+  }
+  const rejectedAction = { kind: "track.delete", track: { source: "persisted" as const, id: String(rejectedRoot) } };
+  await expect(rejected.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions: [rejectedAction] },
+  })).rejects.toThrow('"code":"limit-exceeded"');
+  await expect(rejected.withIdentity({ subject: owner }).mutation(api.control.requestApprovalV1, {
+    request: { version: "v1", projectId, actions: [rejectedAction] },
+  })).rejects.toThrow('"code":"limit-exceeded"');
+  expect(await rejected.run((ctx) => ctx.db.query("controlApprovals").collect())).toEqual([]);
+});
+
+test("recovery locks appended tracks whose indices would shift before writes", async () => {
+  const t = await setup();
+  const deleted = await addTrack(t, { name: "Deleted", index: 0 });
+  const survivor = await addTrack(t, { name: "Survivor", index: 1 });
+  const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{ kind: "track.delete", track: { source: "persisted", id: String(deleted) } }], "recovery-lock-delete"),
+  });
+  const descriptor = deletion.recoveries[0];
+  if (!descriptor) throw new Error("Expected recovery descriptor.");
+  const appended = await addTrack(t, { name: "Appended", index: 1, lockedBy: "other-user" });
+  const action = { kind: "recovery.restore", recovery: { id: descriptor.id } };
+  const before = await t.run(async (ctx) => ({
+    tracks: await ctx.db.query("tracks").collect(),
+    approvals: await ctx.db.query("controlApprovals").collect(),
+    commits: await ctx.db.query("controlCommits").collect(),
+  }));
+  for (const invoke of [
+    () => t.withIdentity({ subject: owner }).query(api.control.previewV1, {
+      request: { version: "v1", projectId, actions: [action] },
+    }),
+    () => t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+      request: request([action], "recovery-lock-restore"),
+    }),
+  ]) {
+    await expect(invoke()).rejects.toThrow("Affected track is locked");
+  }
+  expect(await t.run(async (ctx) => ({
+    tracks: await ctx.db.query("tracks").collect(),
+    approvals: await ctx.db.query("controlApprovals").collect(),
+    commits: await ctx.db.query("controlCommits").collect(),
+  }))).toEqual(before);
+  expect(String(survivor)).toBeTruthy();
+  expect(String(appended)).toBeTruthy();
+});
+
+test("track recovery restores canonical contiguous order matching its preview", async () => {
+  const t = await setup();
+  const leading = await addTrack(t, { name: "Leading", index: 0 });
+  const group = await addTrack(t, { name: "Group", index: 1, channelRole: "group" });
+  const child = await addTrack(t, { name: "Child", index: 2, groupId: group });
+  const grandchild = await addTrack(t, { name: "Grandchild", index: 3, groupId: child });
+  const trailing = await addTrack(t, { name: "Trailing", index: 4 });
+  const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{
+      kind: "track.delete",
+      track: { source: "persisted", id: String(group) },
+    }], "canonical-order-delete"),
+  });
+  const descriptor = deletion.recoveries[0];
+  if (!descriptor) throw new Error("Expected recovery descriptor.");
+  await addTrack(t, { name: "Appended one", index: 2 });
+  await addTrack(t, { name: "Appended two", index: 3 });
+  const action = { kind: "recovery.restore", recovery: { id: descriptor.id } };
+  await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions: [action] },
+  });
+  const expected = await t.run(async (ctx) => {
+    const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+    const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+    if (!recovery) throw new Error("Recovery record is unavailable.");
+    return planControlRequestV1(
+      await readProjectControlSnapshotV1(ctx, projectId),
+      { projectId, actions: [action] },
+      new Map([[descriptor.id, { payload: parseRecoveryPayloadV1(recovery.payload) }]]),
+    ).snapshot.tracks.map((track) => ({ name: track.name, index: track.index }));
+  });
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([action], "canonical-order-restore"),
+  });
+  const actual = await t.run(async (ctx) => (await ctx.db.query("tracks")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .collect())
+    .sort((left, right) => left.index - right.index || String(left._id).localeCompare(String(right._id)))
+    .map((track) => ({ name: track.name, index: track.index })));
+  expect(actual.map((track) => track.index)).toEqual(Array.from({ length: actual.length }, (_, index) => index));
+  expect(actual).toEqual(expected);
+  expect(String(leading)).toBeTruthy();
+  expect(String(child)).toBeTruthy();
+  expect(String(grandchild)).toBeTruthy();
+  expect(String(trailing)).toBeTruthy();
 });
 
 test("replay requires current write access without rerunning control preflight", async () => {

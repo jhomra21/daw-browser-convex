@@ -112,7 +112,7 @@ export async function executeControlPlanV1(
   for (const entry of input.plan.actions) {
     const action = entry.action
     let result: { changed: boolean } = { changed: false }
-    if (entry.changed && entry.destructivePersisted && isRecoverableAction(action)) {
+    if (isRecoverableAction(action)) {
       const payload = await captureRecoveryPayload(ctx, {
         projectId: input.projectId,
         action,

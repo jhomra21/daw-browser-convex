@@ -4,6 +4,7 @@ import { createAuth } from './auth'
 import type { ApiBindings } from './app-types'
 import { registerControlOAuthRoutes } from './control-oauth'
 import { registerControlRoutes } from './routes/control'
+import { registerControlMcpRoutes } from './routes/control-mcp'
 import { registerConvexAuthRoutes } from './convex-auth'
 import { registerCloudBackupRoutes } from './routes/cloud-backups'
 import { registerExportRoutes } from './routes/exports'
@@ -84,6 +85,7 @@ app.use('/api/auth/*', cors({
 registerPublicSampleRoutes(app)
 registerControlOAuthRoutes(app, createAuth)
 registerControlRoutes(app)
+registerControlMcpRoutes(app)
 
 // Session middleware - adds user and session to context
 app.use('*', async (c, next) => {

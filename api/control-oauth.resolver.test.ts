@@ -345,7 +345,11 @@ describe("resolveControlBearer", () => {
     const validBindingId = await bind(valid);
     expect((await resolveControlBearer(request(valid), environment, "control:read"))?.userId).toBe(userId);
 
-    const forged = `${valid.slice(0, -1)}${valid.endsWith("a") ? "b" : "a"}`;
+    const [header, payload, signature] = valid.split(".");
+    if (!header || !payload || !signature) throw new Error("Expected a signed JWT.");
+    const signatureBytes = Buffer.from(signature, "base64url");
+    signatureBytes[0] ^= 1;
+    const forged = `${header}.${payload}.${signatureBytes.toString("base64url")}`;
     await bind(forged);
     expect(await resolveControlBearer(request(forged), environment, "control:read")).toBeNull();
 

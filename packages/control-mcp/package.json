@@ -1,0 +1,16 @@
+{
+  "name": "@daw-browser/control-mcp",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/control": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
+}

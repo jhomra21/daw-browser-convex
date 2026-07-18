@@ -85,6 +85,8 @@ export const controlCapabilitiesSchemaV1 = z.object({
   }).strict(),
 }).strict()
 
+export const controlCapabilitiesQuerySchemaV1 = z.object({}).strict()
+
 const projectRenameActionSchema = z.object({
   kind: z.literal('project.rename'),
   name: nameSchema,

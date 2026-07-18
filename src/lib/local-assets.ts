@@ -9,11 +9,14 @@ import {
 } from '~/lib/local-project-db'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 type LocalAssetMetadata = {
+  sourceKind?: 'upload' | 'url' | 'recording'
   durationSec?: number
   sampleRate?: number
+  channelCount?: number
   contentHash?: string
   originalFileName?: string
   originalLastModified?: number
@@ -44,7 +47,6 @@ type LocalAssetBytesResult =
 
 const ASSETS_DIRECTORY_NAME = 'assets'
 const MAX_ASSET_EXTENSION_LENGTH = 16
-
 const isPermissionError = (error: unknown) => (
   error instanceof DOMException
   && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
@@ -103,6 +105,12 @@ const writeFile = async (
   }
 }
 
+const sha256File = async (file: File): Promise<string> => {
+  const hash = sha256.create()
+  for await (const chunk of file.stream()) hash.update(chunk)
+  return hash.digest().reduce((hex, byte) => `${hex}${byte.toString(16).padStart(2, '0')}`, '')
+}
+
 const removeFileIfPresent = async (
   root: FileSystemDirectoryHandle,
   path: string,
@@ -137,7 +145,7 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
   const timestamp = now()
   const id = createLocalAssetId()
   const storagePath = getAssetFileName(id, input.file.name)
-  await writeFile(root, storagePath, input.file)
+  const contentHash = await sha256File(input.file)
 
   const row: LocalProjectAssetRow = {
     id,
@@ -147,15 +155,18 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
     storagePath,
     originalFileName: input.metadata?.originalFileName ?? input.file.name,
     originalLastModified: input.metadata?.originalLastModified ?? input.file.lastModified,
-    contentHash: input.metadata?.contentHash,
+    contentHash,
+    sourceKind: input.metadata?.sourceKind ?? 'upload',
     durationSec: input.metadata?.durationSec,
     sampleRate: input.metadata?.sampleRate,
+    channelCount: input.metadata?.channelCount,
     createdAt: timestamp,
     updatedAt: timestamp,
   }
 
-  const db = await openLocalProjectDb(input.projectId)
   try {
+    await writeFile(root, storagePath, input.file)
+    const db = await openLocalProjectDb(input.projectId)
     await db.put('assets', row)
   } catch (error) {
     await removeFileIfPresent(root, storagePath).catch(() => null)

@@ -1,6 +1,8 @@
 import {
   canonicalRecoveryPayloadV1,
   hashRecoveryPayloadV1,
+  isCloudRecoveryAssetV1,
+  isCloudRecoveryOwnershipV1,
   parseRecoveryPayloadV1,
   recoveryPayloadSchemaV1,
   type ControlActionV1,
@@ -781,6 +783,12 @@ export const restoreRecovery = async (
   const { row, payload } = input.recovery;
   const mappings: Mapping[] = [];
   if (payload.kind === "track.delete") {
+    if (
+      payload.data.tracks.some((entry) => !isCloudRecoveryOwnershipV1(entry.ownership))
+      || payload.data.clips.some((entry) => !isCloudRecoveryOwnershipV1(entry.ownership))
+    ) {
+      throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
+    }
     await restoreTrackBundle(ctx, {
       projectId: input.projectId,
       data: payload.data,
@@ -788,6 +796,12 @@ export const restoreRecovery = async (
       actionIndex: input.actionIndex,
     }, mappings);
   } else if (payload.kind === "track.ungroup") {
+    if (
+      payload.data.tracks.some((entry) => !isCloudRecoveryOwnershipV1(entry.ownership))
+      || payload.data.clips.some((entry) => !isCloudRecoveryOwnershipV1(entry.ownership))
+    ) {
+      throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
+    }
     await restoreTrackBundle(ctx, {
       projectId: input.projectId,
       data: payload.data,
@@ -798,6 +812,9 @@ export const restoreRecovery = async (
     }, mappings);
   } else if (payload.kind === "clip.delete") {
     const data = payload.data;
+    if (!isCloudRecoveryOwnershipV1(data.ownership)) {
+      throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
+    }
     const track = await requireTrack(ctx, input.projectId, data.clip.trackId, input.actionIndex);
     const id = await ctx.db.insert("clips", {
       projectId: data.clip.projectId,
@@ -829,30 +846,34 @@ export const restoreRecovery = async (
     mappings.push({ entity: "clip", sourceId: data.clipId, restoredId: String(id) });
   } else if (payload.kind === "asset.delete") {
     const data = payload.data;
+    const asset = data.asset;
+    if (!isCloudRecoveryAssetV1(asset)) {
+      throw new ControlDomainError("validation", "Local recovery assets cannot be restored to cloud.", input.actionIndex);
+    }
     const existing = await ctx.db.query("samples").withIndex("by_room_assetKey", (q) => (
-      q.eq("projectId", input.projectId).eq("assetKey", data.asset.assetKey)
+      q.eq("projectId", input.projectId).eq("assetKey", asset.assetKey)
     )).unique();
     if (existing) throw new ControlDomainError("validation", "Recovery asset key collides with current state.", input.actionIndex);
-    const queue = await ctx.db.query("r2DeleteQueue").withIndex("by_key", (q) => q.eq("r2Key", data.asset.r2Key)).unique();
+    const queue = await ctx.db.query("r2DeleteQueue").withIndex("by_key", (q) => q.eq("r2Key", asset.r2Key)).unique();
     if (queue?.status === "deleted") throw new ControlDomainError("not-found", "Recovery asset bytes were already deleted.", input.actionIndex);
     if (queue?.status === "claimed") throw new ControlDomainError("validation", "Recovery asset bytes are being deleted.", input.actionIndex);
     if (queue?.status === "pending") await ctx.db.delete(queue._id);
     const id = await ctx.db.insert("samples", {
-      projectId: data.asset.projectId,
-      assetKey: data.asset.assetKey,
-      sourceKind: data.asset.sourceKind,
-      name: data.asset.name,
-      mimeType: data.asset.mimeType,
-      sizeBytes: data.asset.sizeBytes,
-      contentSha256: data.asset.contentSha256,
-      r2Key: data.asset.r2Key,
-      ...(data.asset.duration === undefined ? {} : { duration: data.asset.duration }),
-      ...(data.asset.sampleRate === undefined ? {} : { sampleRate: data.asset.sampleRate }),
-      ...(data.asset.channelCount === undefined ? {} : { channelCount: data.asset.channelCount }),
-      ownerUserId: data.asset.ownerUserId,
-      ...(data.asset.folderId === undefined ? {} : { folderId: data.asset.folderId }),
-      createdAt: data.asset.createdAt,
-      updatedAt: data.asset.updatedAt,
+      projectId: asset.projectId,
+      assetKey: asset.assetKey,
+      sourceKind: asset.sourceKind,
+      name: asset.name,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes,
+      contentSha256: asset.contentSha256,
+      r2Key: asset.r2Key,
+      ...(asset.duration === undefined ? {} : { duration: asset.duration }),
+      ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
+      ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
+      ownerUserId: asset.ownerUserId,
+      ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+      createdAt: asset.createdAt,
+      updatedAt: asset.updatedAt,
     });
     mappings.push({ entity: "asset", sourceId: data.assetId, restoredId: String(id) });
   } else if (payload.kind === "automation.delete") {

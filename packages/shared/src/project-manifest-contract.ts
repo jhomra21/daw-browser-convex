@@ -21,8 +21,10 @@ export type ProjectManifestAsset = {
   originalFileName?: string;
   originalLastModified?: number;
   contentHash?: string;
+  sourceKind?: "upload" | "url" | "recording";
   durationSec?: number;
   sampleRate?: number;
+  channelCount?: number;
   folderId?: string;
   createdAt: number;
   updatedAt: number;
@@ -72,6 +74,9 @@ const readArray = (value: unknown, field: string) => {
 
 const readOptionalString = (value: unknown) => typeof value === "string" && value ? value : undefined;
 const readOptionalNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+const readOptionalSourceKind = (value: unknown): ProjectManifestAsset["sourceKind"] => (
+  value === "upload" || value === "url" || value === "recording" ? value : undefined
+);
 
 const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
   if (!isRecord(value)) throw new Error("Project manifest has invalid entity.");
@@ -165,8 +170,10 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
       originalFileName: readOptionalString(asset.originalFileName),
       originalLastModified: readOptionalNumber(asset.originalLastModified),
       contentHash: readOptionalString(asset.contentHash),
+      sourceKind: readOptionalSourceKind(asset.sourceKind),
       durationSec: readOptionalNumber(asset.durationSec),
       sampleRate: readOptionalNumber(asset.sampleRate),
+      channelCount: readOptionalNumber(asset.channelCount),
       folderId: readOptionalString(asset.folderId),
       createdAt: readNumber(asset.createdAt, "asset.createdAt"),
       updatedAt: readNumber(asset.updatedAt, "asset.updatedAt"),

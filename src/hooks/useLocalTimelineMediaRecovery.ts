@@ -112,7 +112,7 @@ export const useMissingMediaRecovery = (input: Input) => {
     const asset = await createLocalAsset({
       projectId: rid,
       file,
-      metadata: source,
+      metadata: { ...source, sourceKind: 'upload' },
     });
     const sourceKind: Clip["sourceKind"] = "upload";
     const updated = {

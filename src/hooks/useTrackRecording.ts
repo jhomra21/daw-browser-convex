@@ -371,7 +371,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         const asset = await createLocalAsset({
           projectId: rid,
           file,
-          metadata: sourceMetadata,
+          metadata: { ...sourceMetadata, sourceKind: 'recording' },
         })
         assetId = asset.id
         const created = await createLocalAudioClip({

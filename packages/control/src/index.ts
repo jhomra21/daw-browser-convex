@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import { sha256 } from '@noble/hashes/sha2.js'
+import {
+  projectControlSnapshotCoreV1,
+  type ControlProjectSnapshotInput,
+} from './projection'
 import { recoveryLimitsV1 } from './recovery-limits'
 import {
   audioEffectAddPayloadSchema,
@@ -864,6 +869,10 @@ export const controlCapabilitiesV1 = {
   },
   limits: controlLimitsV1,
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
+export const localControlCapabilitiesV1 = {
+  ...controlCapabilitiesV1,
+  executionTarget: 'local-project',
+} satisfies z.input<typeof controlCapabilitiesSchemaV1>
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -945,12 +954,20 @@ const recoveryClipSchemaV1 = z.object({
   midi: recoveryMidiSchemaV1.optional(),
   midiOffsetBeats: finiteNumberSchema.optional(),
 }).strict()
-const recoveryOwnershipSchemaV1 = z.object({
+const cloudRecoveryOwnershipSchemaV1 = z.object({
   projectId: projectIdSchema,
   ownerUserId: stableIdSchema,
   role: z.enum(['owner', 'editor', 'viewer']).optional(),
 }).strict()
-const recoveryAssetSchemaV1 = z.object({
+const localRecoveryOwnershipSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  localActorSubject: stableIdSchema,
+}).strict()
+const recoveryOwnershipSchemaV1 = z.union([
+  cloudRecoveryOwnershipSchemaV1,
+  localRecoveryOwnershipSchemaV1,
+])
+const cloudRecoveryAssetSchemaV1 = z.object({
   projectId: projectIdSchema,
   assetKey: stableIdSchema,
   sourceKind: assetSourceKindSchema,
@@ -967,6 +984,36 @@ const recoveryAssetSchemaV1 = z.object({
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+const localRecoveryAssetSchemaV1 = z.object({
+  projectId: projectIdSchema,
+  assetKey: stableIdSchema,
+  sourceKind: assetSourceKindSchema,
+  name: nameSchema,
+  mimeType: assetMimeTypeSchema,
+  sizeBytes: z.number().int().positive().max(controlLimitsV1.maxAssetUploadBytes),
+  contentSha256: requestDigestSchema,
+  storagePath: z.string().min(1).max(2048),
+  duration: secondsSchema.optional(),
+  sampleRate: z.number().int().positive().optional(),
+  channelCount: z.number().int().positive().max(64).optional(),
+  folderId: stableIdSchema.optional(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strict()
+const recoveryAssetSchemaV1 = z.union([
+  cloudRecoveryAssetSchemaV1,
+  localRecoveryAssetSchemaV1,
+])
+export type CloudRecoveryOwnershipV1 = z.infer<typeof cloudRecoveryOwnershipSchemaV1>
+export type RecoveryOwnershipV1 = z.infer<typeof recoveryOwnershipSchemaV1>
+export type CloudRecoveryAssetV1 = z.infer<typeof cloudRecoveryAssetSchemaV1>
+export type RecoveryAssetV1 = z.infer<typeof recoveryAssetSchemaV1>
+export const isCloudRecoveryOwnershipV1 = (
+  ownership: RecoveryOwnershipV1,
+): ownership is CloudRecoveryOwnershipV1 => 'ownerUserId' in ownership
+export const isCloudRecoveryAssetV1 = (
+  asset: RecoveryAssetV1,
+): asset is CloudRecoveryAssetV1 => 'r2Key' in asset
 const recoveryAutomationSchemaV1 = z.object({
   projectId: projectIdSchema,
   targetKind: z.enum(['track', 'master']),
@@ -1153,10 +1200,12 @@ export const canonicalRecoveryPayloadV1 = (payload: RecoveryPayloadV1) => {
   }
   return canonical
 }
-export const hashRecoveryPayloadV1 = async (payload: string) => {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
+const sha256Hex = (value: string) => (
+  Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+)
+export const hashCanonicalJsonSyncV1 = (value: unknown) => sha256Hex(canonicalJson(value))
+export const hashRecoveryPayloadSyncV1 = (payload: string) => sha256Hex(payload)
+export const hashRecoveryPayloadV1 = async (payload: string) => hashRecoveryPayloadSyncV1(payload)
 
 export const assertControlSerializedBodyV1 = <Value>(value: Value): Value => {
   const serialized = canonicalJson(value)
@@ -1200,13 +1249,12 @@ export const controlRequestDigestInputV1 = (
   actions: request.actions,
 })
 
+export const controlRequestDigestSyncV1 = (
+  request: ControlCommitRequestV1 | ControlPreviewRequestV1 | ControlApprovalRequestV1,
+) => sha256Hex(controlRequestDigestInputV1(request))
 export const controlRequestDigestV1 = async (
   request: ControlCommitRequestV1 | ControlPreviewRequestV1 | ControlApprovalRequestV1,
-) => {
-  const bytes = new TextEncoder().encode(controlRequestDigestInputV1(request))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
+) => controlRequestDigestSyncV1(request)
 
 export { controlApprovalRequirementV1, destructiveControlActionKindsV1, planControlRequestV1 } from './planner'
 export type { ControlPlanError, ControlPlanV1, PlannedControlActionV1 } from './planner'
@@ -1214,3 +1262,10 @@ export {
   collectDeletedTrackIdsV1,
   collectTrackDeletionAffectedIdsV1,
 } from './trackDeletion'
+export {
+  compareControlSnapshotText,
+} from './projection'
+export type { ControlProjectSnapshotInput }
+export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => (
+  projectControlSnapshotCoreV1(input, projectSnapshotSchemaV1.parse)
+)

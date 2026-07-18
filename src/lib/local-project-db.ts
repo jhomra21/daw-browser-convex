@@ -4,10 +4,11 @@ import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 1
+export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
 const GLOBAL_DB_VERSION = 1
-const PROJECT_DB_VERSION = 1
+const PROJECT_DB_VERSION = 2
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
 export type LocalProjectMode = 'local-only' | 'backup'
@@ -54,8 +55,10 @@ export type LocalProjectAssetRow = {
   originalFileName?: string
   originalLastModified?: number
   contentHash?: string
+  sourceKind?: 'upload' | 'url' | 'recording'
   durationSec?: number
   sampleRate?: number
+  channelCount?: number
   folderId?: string
   createdAt: number
   updatedAt: number
@@ -77,6 +80,17 @@ export type LocalProjectSyncStateRow = {
   key: string
   value: unknown
   updatedAt: number
+}
+export type LocalControlStateRow = LocalProjectStateRow
+export type LocalControlCommitRow = { id: string; createdAt: number; actorSubject: string; idempotencyKey: string; value: unknown }
+export type LocalControlApprovalRow = { id: string; expiresAt: number; createdAt: number; actorSubject: string; value: unknown }
+export type LocalControlRecoveryRow = { id: string; expiresAt: number; createdAt: number; actorSubject: string; value: unknown }
+export type LocalControlAssetGcRow = { id: string; eligibleAt: number; storagePath: string; value: unknown }
+export type LocalControlProjectMetadata = {
+  version: 1
+  name: string
+  updatedAt: number
+  timeSignature: { numerator: number; denominator: number }
 }
 
 type GlobalProjectsDB = DBSchema & {
@@ -122,6 +136,23 @@ type ProjectDB = DBSchema & {
     key: string
     value: LocalProjectSyncStateRow
   }
+  controlState: { key: string; value: LocalControlStateRow }
+  controlCommits: {
+    key: string; value: LocalControlCommitRow
+    indexes: { 'by-created-at': number; 'by-actor-idempotency': [string, string] }
+  }
+  controlApprovals: {
+    key: string; value: LocalControlApprovalRow
+    indexes: { 'by-expires-at': number; 'by-created-at': number; 'by-actor': string }
+  }
+  controlRecoveries: {
+    key: string; value: LocalControlRecoveryRow
+    indexes: { 'by-created-at': number; 'by-expires-at': number; 'by-actor': string }
+  }
+  controlAssetGc: {
+    key: string; value: LocalControlAssetGcRow
+    indexes: { 'by-eligible-at': number; 'by-storage-path': string }
+  }
 }
 
 export const createProjectId = createLocalProjectId
@@ -130,6 +161,97 @@ export const getProjectDbName = (projectId: string) => `${PROJECT_DB_PREFIX}${pr
 const now = () => Date.now()
 let globalDbPromise: Promise<IDBPDatabase<GlobalProjectsDB>> | undefined
 const projectDbPromises = new Map<string, Promise<IDBPDatabase<ProjectDB>>>()
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+const isPositiveInteger = (value: unknown): value is number => (
+  typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0
+)
+export const isCanonicalLocalControlTimeSignature = (
+  value: unknown,
+): value is LocalControlProjectMetadata['timeSignature'] => (
+  isRecord(value)
+  && isPositiveInteger(value.numerator)
+  && value.numerator <= 32
+  && (
+    value.denominator === 1
+    || value.denominator === 2
+    || value.denominator === 4
+    || value.denominator === 8
+    || value.denominator === 16
+    || value.denominator === 32
+  )
+)
+
+const readControlProjectMetadata = (value: unknown): LocalControlProjectMetadata | undefined => {
+  if (!isRecord(value)) return undefined
+  const record = value
+  const timeSignature = record.timeSignature
+  if (
+    record.version !== 1
+    || typeof record.name !== 'string'
+    || typeof record.updatedAt !== 'number'
+    || !isCanonicalLocalControlTimeSignature(timeSignature)
+  ) return undefined
+  return {
+    version: 1,
+    name: record.name,
+    updatedAt: record.updatedAt,
+    timeSignature: { numerator: timeSignature.numerator, denominator: timeSignature.denominator },
+  }
+}
+
+const metadataRowFor = (project: LocalProjectEntry): LocalProjectStateRow => ({
+  key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
+  value: {
+    version: 1,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    timeSignature: { numerator: 4, denominator: 4 },
+  } satisfies LocalControlProjectMetadata,
+  updatedAt: project.updatedAt,
+})
+
+const normalizedProjectState = (
+  project: LocalProjectEntry,
+  projectState: LocalProjectStateRow[],
+): LocalProjectStateRow[] => {
+  const incoming = projectState.find((row) => row.key === LOCAL_CONTROL_PROJECT_METADATA_KEY)
+  const timeSignature = readControlProjectMetadata(incoming?.value)?.timeSignature
+    ?? { numerator: 4, denominator: 4 }
+  return [
+    ...projectState.filter((row) => row.key !== LOCAL_CONTROL_PROJECT_METADATA_KEY),
+    {
+      key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
+      value: {
+        version: 1,
+        name: project.name,
+        updatedAt: project.updatedAt,
+        timeSignature,
+      } satisfies LocalControlProjectMetadata,
+      updatedAt: project.updatedAt,
+    },
+  ]
+}
+
+const ensureControlProjectMetadata = async (project: LocalProjectEntry) => {
+  const projectDb = await openLocalProjectDb(project.id)
+  const existing = await projectDb.get('projectState', LOCAL_CONTROL_PROJECT_METADATA_KEY)
+  const metadata = readControlProjectMetadata(existing?.value)
+  if (metadata) return metadata
+  const seeded = metadataRowFor(project)
+  await projectDb.put('projectState', seeded)
+  return readControlProjectMetadata(seeded.value)
+}
+
+const reconcileProjectCache = async (project: LocalProjectEntry) => {
+  const metadata = await ensureControlProjectMetadata(project)
+  if (!metadata || (project.name === metadata.name && project.updatedAt === metadata.updatedAt)) return project
+  const db = await openGlobalProjectsDb()
+  const next = { ...project, name: metadata.name, updatedAt: metadata.updatedAt }
+  await db.put('projects', next)
+  return next
+}
 
 const openGlobalProjectsDb = () => {
   if (globalDbPromise) return globalDbPromise
@@ -176,6 +298,29 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
       if (!db.objectStoreNames.contains('syncState')) {
         db.createObjectStore('syncState', { keyPath: 'key' })
       }
+      if (!db.objectStoreNames.contains('controlState')) db.createObjectStore('controlState', { keyPath: 'key' })
+      if (!db.objectStoreNames.contains('controlCommits')) {
+        const store = db.createObjectStore('controlCommits', { keyPath: 'id' })
+        store.createIndex('by-created-at', 'createdAt')
+        store.createIndex('by-actor-idempotency', ['actorSubject', 'idempotencyKey'])
+      }
+      if (!db.objectStoreNames.contains('controlApprovals')) {
+        const store = db.createObjectStore('controlApprovals', { keyPath: 'id' })
+        store.createIndex('by-expires-at', 'expiresAt')
+        store.createIndex('by-created-at', 'createdAt')
+        store.createIndex('by-actor', 'actorSubject')
+      }
+      if (!db.objectStoreNames.contains('controlRecoveries')) {
+        const store = db.createObjectStore('controlRecoveries', { keyPath: 'id' })
+        store.createIndex('by-created-at', 'createdAt')
+        store.createIndex('by-expires-at', 'expiresAt')
+        store.createIndex('by-actor', 'actorSubject')
+      }
+      if (!db.objectStoreNames.contains('controlAssetGc')) {
+        const store = db.createObjectStore('controlAssetGc', { keyPath: 'id' })
+        store.createIndex('by-eligible-at', 'eligibleAt')
+        store.createIndex('by-storage-path', 'storagePath')
+      }
     },
     blocking(_currentVersion, _blockedVersion, event) {
       projectDbPromises.delete(dbName)
@@ -193,12 +338,13 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
 export const listLocalProjects = async (): Promise<LocalProjectEntry[]> => {
   const db = await openGlobalProjectsDb()
   const projects = await db.getAllFromIndex('projects', 'by-last-opened')
-  return projects.reverse()
+  return (await Promise.all(projects.map(reconcileProjectCache))).reverse()
 }
 
 export const getLocalProject = async (projectId: string): Promise<LocalProjectEntry | undefined> => {
   const db = await openGlobalProjectsDb()
-  return db.get('projects', projectId)
+  const project = await db.get('projects', projectId)
+  return project ? reconcileProjectCache(project) : undefined
 }
 
 export const createLocalProject = async (name: string): Promise<LocalProjectEntry> => {
@@ -217,12 +363,24 @@ export const createLocalProject = async (name: string): Promise<LocalProjectEntr
   }
   await db.put('projects', project)
   const projectDb = await openLocalProjectDb(project.id)
-  await projectDb.put('entities', createLocalProjectEntityRow(
-    'track',
-    trackId,
-    buildTimelineTrackRow({ id: trackId, index: 0, timestamp }),
-    timestamp,
-  ))
+  const tx = projectDb.transaction(['entities', 'projectState'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('entities').put(createLocalProjectEntityRow(
+      'track',
+      trackId,
+      buildTimelineTrackRow({ id: trackId, index: 0, timestamp }),
+      timestamp,
+    )),
+    tx.objectStore('projectState').put({
+      key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
+      value: {
+        version: 1, name: project.name, updatedAt: timestamp,
+        timeSignature: { numerator: 4, denominator: 4 },
+      } satisfies LocalControlProjectMetadata,
+      updatedAt: timestamp,
+    }),
+    tx.done,
+  ])
   return project
 }
 
@@ -249,6 +407,20 @@ export const renameLocalProject = async (
     updatedAt: timestamp,
     lastOpenedAt: timestamp,
   }
+  const projectDb = await openLocalProjectDb(projectId)
+  const metadata = readControlProjectMetadata(
+    (await projectDb.get('projectState', LOCAL_CONTROL_PROJECT_METADATA_KEY))?.value,
+  )
+  await projectDb.put('projectState', {
+    key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
+    value: {
+      version: 1,
+      name: next.name,
+      updatedAt: timestamp,
+      timeSignature: metadata?.timeSignature ?? { numerator: 4, denominator: 4 },
+    } satisfies LocalControlProjectMetadata,
+    updatedAt: timestamp,
+  })
   await db.put('projects', next)
   notifyLocalProjectChanged(projectId)
   return next
@@ -283,11 +455,12 @@ export const importLocalProject = async (
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
+  const projectState = normalizedProjectState(project, rows.projectState)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
   await Promise.all([
     ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
-    ...rows.projectState.map((row) => tx.objectStore('projectState').put(row)),
+    ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
     tx.done,
   ])
@@ -310,16 +483,22 @@ export const replaceLocalProject = async (
   const previousAssetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
   const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
-  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState'], 'readwrite')
+  const projectState = normalizedProjectState(project, rows.projectState)
+  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   await Promise.all([
     tx.objectStore('entities').clear(),
     tx.objectStore('assets').clear(),
     tx.objectStore('projectState').clear(),
     tx.objectStore('history').clear(),
     tx.objectStore('syncState').clear(),
+    tx.objectStore('controlState').clear(),
+    tx.objectStore('controlCommits').clear(),
+    tx.objectStore('controlApprovals').clear(),
+    tx.objectStore('controlRecoveries').clear(),
+    tx.objectStore('controlAssetGc').clear(),
     ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
-    ...rows.projectState.map((row) => tx.objectStore('projectState').put(row)),
+    ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
     tx.done,
   ])

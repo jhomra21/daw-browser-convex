@@ -3,6 +3,7 @@ import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 
 import {
   canonicalJson,
+  controlRequestDigestSyncV1,
   controlActionSchemaV1,
   controlCapabilitiesV1,
   controlCapabilitiesSchemaV1,
@@ -22,6 +23,10 @@ import {
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
+  hashRecoveryPayloadSyncV1,
+  hashRecoveryPayloadV1,
+  canonicalRecoveryPayloadV1,
+  recoveryPayloadSchemaV1,
   type ContextualRefV1,
   type ProcessorTargetV1,
 } from './index'
@@ -458,6 +463,51 @@ test('computes stable SHA-256 semantic request digests', async () => {
   expect(digest).toMatch(/^[0-9a-f]{64}$/)
   expect(await controlRequestDigestV1(second)).toBe(digest)
   expect(await controlRequestDigestV1(changed)).not.toBe(digest)
+})
+
+test('hashes canonical Unicode and empty payloads synchronously with WebCrypto-equivalent wrappers', async () => {
+  const request = parseControlCommitRequestV1(commit([{
+    kind: 'project.rename',
+    name: 'Åudio 🎛️',
+  }]))
+  const asyncDigest = await controlRequestDigestV1(request)
+  expect(controlRequestDigestSyncV1(request)).toBe(asyncDigest)
+  const emptyDigest = hashRecoveryPayloadSyncV1('')
+  const webCrypto = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(''))
+  expect(emptyDigest).toBe(Array.from(new Uint8Array(webCrypto), (byte) => byte.toString(16).padStart(2, '0')).join(''))
+  expect(canonicalJson({ z: 1, a: 'Åudio 🎛️' })).toBe('{"a":"Åudio 🎛️","z":1}')
+})
+
+test('keeps cloud recovery payload bytes canonical while accepting strict local storage variants', async () => {
+  const cloud = recoveryPayloadSchemaV1.parse({
+    version: 1,
+    kind: 'asset.delete',
+    data: {
+      assetId: 'asset-1',
+      asset: {
+        projectId: 'project-1', assetKey: 'asset-1', sourceKind: 'upload',
+        name: 'Kick.wav', mimeType: 'audio/wav', sizeBytes: 1, contentSha256: 'a'.repeat(64),
+        r2Key: 'projects/project-1/assets/asset-1/kick.wav', ownerUserId: 'user-1',
+        createdAt: 1, updatedAt: 1,
+      },
+    },
+  })
+  const local = recoveryPayloadSchemaV1.parse({
+    version: 1,
+    kind: 'asset.delete',
+    data: {
+      assetId: 'asset-1',
+      asset: {
+        projectId: 'project-1', assetKey: 'asset-1', sourceKind: 'upload',
+        name: 'Kick.wav', mimeType: 'audio/wav', sizeBytes: 1, contentSha256: 'a'.repeat(64),
+        storagePath: 'asset-1.wav', createdAt: 1, updatedAt: 1,
+      },
+    },
+  })
+  const bytes = canonicalRecoveryPayloadV1(cloud)
+  expect(bytes).toBe(canonicalJson(cloud))
+  expect(await hashRecoveryPayloadV1(bytes)).toBe(hashRecoveryPayloadSyncV1(bytes))
+  expect(JSON.stringify(local)).not.toContain('r2Key')
 })
 
 test('enforces MIDI and automation aggregates at exact boundaries for preview and commit', () => {

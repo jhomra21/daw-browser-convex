@@ -13,5 +13,8 @@
     "@daw-browser/control": "workspace:*",
     "@daw-browser/desktop-protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "devDependencies": {
+    "@daw-browser/control-sdk": "workspace:*"
   }
 }

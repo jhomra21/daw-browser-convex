@@ -20,7 +20,7 @@ import {
   type HostErrorV1,
   type DesktopControlOperationV1,
 } from "@daw-browser/desktop-protocol"
-import { ControlApiError, createControlClient } from "@daw-browser/control-sdk"
+import { ControlApiError, ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
 import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
 import { credentialIdentity, createCredentialStore } from "./credentials"
 import { createHostClient, DesktopControlError, DesktopHostError } from "./host"
@@ -64,15 +64,8 @@ const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 =>
 })
 
 const toCommandError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
-  if (cause instanceof ControlApiError) {
-    return {
-      version: "v1",
-      code: cause.code,
-      message: cause.message,
-      ...(cause.details === undefined ? {} : { details: cause.details }),
-      ...(cause.actionIndex === undefined ? {} : { actionIndex: cause.actionIndex }),
-    }
-  }
+  if (cause instanceof ControlApiError) return cause.data
+  if (cause instanceof ControlTransportError) return hostError("unavailable", "Cloud control service is unavailable.")
   if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) return cause.data
   const parsed = controlErrorSchemaV1.safeParse(cause)
   if (parsed.success) return parsed.data

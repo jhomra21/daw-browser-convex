@@ -312,4 +312,12 @@ describe("desktop protocol v1", () => {
     new DataView(oversized.buffer).setUint32(0, maxDesktopFrameBytes + 1)
     expect(() => decode(oversized)).toThrow("size limit")
   })
+
+  test("rejects invalid UTF-8 frame payloads before JSON parsing", () => {
+    const decode = createDecoder(() => undefined)
+    const frame = new Uint8Array(5)
+    new DataView(frame.buffer).setUint32(0, 1)
+    frame[4] = 0xff
+    expect(() => decode(frame)).toThrow("not JSON")
+  })
 })

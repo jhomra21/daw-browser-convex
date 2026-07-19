@@ -1,7 +1,7 @@
 import { desktopFrameSchemaV1, maxDesktopFrameBytes, type DesktopFrameV1 } from "./index"
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+const decoder = new TextDecoder("utf-8", { fatal: true })
 export const desktopFrameHeaderBytes = 4
 
 export const encodeDesktopFrame = (frame: DesktopFrameV1): Uint8Array => {

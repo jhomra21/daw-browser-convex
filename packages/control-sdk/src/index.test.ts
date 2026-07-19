@@ -207,6 +207,14 @@ describe("control SDK", () => {
       expect(error).toBeInstanceOf(ControlApiError)
       if (!(error instanceof ControlApiError)) throw error
       expect(error.status).toBe(422)
+      expect(error.data).toEqual({
+        version: "v1",
+        code: "validation",
+        message: "Action is invalid.",
+        details: { field: "actions.2.name" },
+        actionIndex: 2,
+      })
+      expect(Object.isFrozen(error.data)).toBeTrue()
       expect(error.code).toBe("validation")
       expect(error.message).toBe("Action is invalid.")
       expect(error.details).toEqual({ field: "actions.2.name" })

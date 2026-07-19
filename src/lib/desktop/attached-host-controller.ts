@@ -4,9 +4,11 @@ import {
   desktopHostExportRunInputSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
+  hostError,
   isDesktopControlOperation,
   parseDesktopResult,
   type ControlErrorV1,
+  type HostErrorV1,
   type DesktopOperationMapV1,
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
@@ -37,7 +39,7 @@ type HostRequest = {
 type HostResponse = {
   id: string
   result?: unknown
-  error?: { version: "v1"; code: "invalid-request" | "unavailable" | "cancelled" | "deadline-exceeded" | "internal"; message: string } | ControlErrorV1
+  error?: HostErrorV1 | ControlErrorV1
 }
 
 type TimelineHostController = {
@@ -73,16 +75,26 @@ const cancelled = (id: string): HostResponse => ({
   error: { version: "v1", code: "cancelled", message: "The request was cancelled." },
 })
 
-const mountedProjectRequired = (): ControlErrorV1 => ({
-  version: "v1",
-  code: "not-found",
-  message: "A mounted local project is required.",
-})
-const controlUnavailable = (): ControlErrorV1 => ({
-  version: "v1",
-  code: "internal",
-  message: "The local control request was cancelled.",
-})
+const mountedProjectRequired = () => hostError("unavailable", "A mounted local project is required.")
+const controlUnavailable = () => hostError("cancelled", "The local control request was cancelled.")
+const controlFailure = () => hostError("internal", "The local control request could not be completed.")
+
+const mountedProjectMismatch = () => hostError("invalid-request", "The requested project is not mounted.")
+const projectMatchesMount = (request: HostRequest, mountedProjectId: string) => (
+  request.operation === "control.capabilities"
+  || (
+    typeof request.input === "object"
+    && request.input !== null
+    && "projectId" in request.input
+    && request.input.projectId === mountedProjectId
+  )
+)
+
+const mountedProjectError = (request: HostRequest, mountedProjectId: string) => (
+  projectMatchesMount(request, mountedProjectId)
+    ? mountedProjectRequired()
+    : mountedProjectMismatch()
+)
 
 class ControlRequestUnavailableError extends Error {}
 
@@ -230,18 +242,13 @@ export const createAttachedHostController = (input: {
     }
     const mountedProjectId = input.projectId()
     const mountedGeneration = input.mountedProjectGeneration()
-    if (!mountedProjectId || !await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+    if (!mountedProjectId) {
       return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
     }
-    if (
-      request_.operation !== "control.capabilities"
-      && (
-        typeof request_.input !== "object"
-        || request_.input === null
-        || !("projectId" in request_.input)
-        || request_.input.projectId !== mountedProjectId
-      )
-    ) return { id: request_.id, error: mountedProjectRequired() }
+    if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+      return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
+    }
+    if (!projectMatchesMount(request_, mountedProjectId)) return { id: request_.id, error: mountedProjectMismatch() }
     try {
       const service = createLocalControlService({
         actor: { subject: request_.actorSubject, issuer: "daw-browser-desktop-host" },
@@ -269,7 +276,7 @@ export const createAttachedHostController = (input: {
                   ? await service.history(request_.input)
                   : await service.recoveries(request_.input)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
-        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
       return { id: request_.id, result: parseDesktopResult(request_.operation, result) }
     } catch (error) {
@@ -277,10 +284,10 @@ export const createAttachedHostController = (input: {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
       }
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
-        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
       if (error instanceof LocalControlServiceError) return { id: request_.id, error: error.data }
-      return { id: request_.id, error: { version: "v1", code: "internal", message: "The local control request could not be completed." } }
+      return { id: request_.id, error: controlFailure() }
     }
   }
   const request = async (request_: HostRequest): Promise<HostResponse> => {

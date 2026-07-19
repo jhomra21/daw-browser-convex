@@ -1,4 +1,4 @@
-import { hostError, isDesktopControlOperation, type DesktopOperationV1, type DesktopTrustedRendererRequestV1, type HostErrorV1, type ControlErrorV1 } from "@daw-browser/desktop-protocol"
+import { hostError, type DesktopOperationV1, type DesktopTrustedRendererRequestV1, type HostErrorV1, type ControlErrorV1 } from "@daw-browser/desktop-protocol"
 
 export type PreloadHostRequest = {
   id: string
@@ -28,14 +28,7 @@ type RequestQueueOptions = {
 
 type RequestHandler = (request: PreloadHostRequest) => Promise<PreloadHostResponse>
 
-const errorFor = (operation: DesktopOperationV1, code: HostErrorV1["code"], message: string): HostErrorV1 | ControlErrorV1 => {
-  if (!isDesktopControlOperation(operation)) return hostError(code, message)
-  return {
-    version: "v1",
-    code: code === "invalid-request" ? "invalid-request" : code === "unavailable" ? "not-found" : "internal",
-    message,
-  }
-}
+const errorFor = (_operation: DesktopOperationV1, code: HostErrorV1["code"], message: string): HostErrorV1 | ControlErrorV1 => hostError(code, message)
 const deadlineExceeded = (id: string, operation: DesktopOperationV1): PreloadHostResponse => ({
   id,
   error: errorFor(operation, "deadline-exceeded", "The request deadline elapsed."),

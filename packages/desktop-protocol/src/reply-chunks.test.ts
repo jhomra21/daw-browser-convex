@@ -62,6 +62,15 @@ const largeControlReply = (actionCount = 60_000) => ({
     actionKinds: Array.from({ length: actionCount }, (_, index) => `軌道-${index}`),
   },
 })
+const controlReplyWithPayload = (size: number) => ({
+  version: "v1",
+  type: "reply",
+  id: "control-1",
+  result: {
+    ...localControlCapabilitiesV1,
+    actionKinds: ["x".repeat(size)],
+  },
+})
 
 describe("desktop reply chunks", () => {
   test("returns a regular validated reply within one frame", () => {
@@ -91,6 +100,24 @@ describe("desktop reply chunks", () => {
     const chunks = serializeDesktopReply("control.capabilities", reply)
     expect(chunks.length).toBeGreaterThan(1)
     expect(chunks.every((chunk) => encodeDesktopFrame(chunk).byteLength <= maxDesktopReplyFrameBytes)).toBeTrue()
+  })
+
+  test("chunks valid 4 MiB and near-64 MiB replies within the 512 KiB frame limit", () => {
+    for (const payloadBytes of [
+      4 * 1024 * 1024,
+      maxDesktopReplyBytes - (2 * maxDesktopReplyFrameBytes),
+    ]) {
+      const chunks = serializeDesktopReply("control.capabilities", controlReplyWithPayload(payloadBytes))
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks.every((chunk) => encodeDesktopFrame(chunk).byteLength <= maxDesktopReplyFrameBytes)).toBeTrue()
+    }
+  })
+
+  test("rejects replies larger than 64 MiB", () => {
+    expect(() => serializeDesktopReply(
+      "control.capabilities",
+      controlReplyWithPayload(maxDesktopReplyBytes + 1),
+    )).toThrow("aggregate size limit")
   })
 
   test("uses the encoded-frame boundary for unchunked replies and chunks", () => {

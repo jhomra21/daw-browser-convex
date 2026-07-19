@@ -39,6 +39,7 @@ type ControlClientOptions = {
 }
 
 export class ControlApiError extends Error {
+  readonly data: ControlErrorV1
   readonly status: number
   readonly code: ControlErrorV1["code"]
   readonly details: ControlErrorV1["details"]
@@ -47,10 +48,14 @@ export class ControlApiError extends Error {
   constructor(status: number, error: ControlErrorV1) {
     super(error.message)
     this.name = "ControlApiError"
+    this.data = Object.freeze({
+      ...error,
+      ...(error.details === undefined ? {} : { details: Object.freeze({ ...error.details }) }),
+    })
     this.status = status
-    this.code = error.code
-    this.details = error.details
-    this.actionIndex = error.actionIndex
+    this.code = this.data.code
+    this.details = this.data.details
+    this.actionIndex = this.data.actionIndex
   }
 }
 

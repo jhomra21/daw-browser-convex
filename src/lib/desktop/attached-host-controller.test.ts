@@ -306,7 +306,7 @@ test("attaches control only to an existing mounted local project", async () => {
     const response = await requestControl(controller, "control.capabilities", {}, undefined, controlActor)
     expect(response.error).toEqual({
       version: "v1",
-      code: "not-found",
+      code: "unavailable",
       message: "A mounted local project is required.",
     })
   }
@@ -314,7 +314,13 @@ test("attaches control only to an existing mounted local project", async () => {
   await deleteLocalProject(project.id)
   expect((await requestControl(controller, "control.capabilities", {}, undefined, controlActor)).error).toEqual({
     version: "v1",
-    code: "not-found",
+    code: "unavailable",
+    message: "A mounted local project is required.",
+  })
+  mountedProjectId = ""
+  expect((await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)).error).toEqual({
+    version: "v1",
+    code: "unavailable",
     message: "A mounted local project is required.",
   })
 
@@ -331,8 +337,8 @@ test("rejects an unmounted local project without dispatching to it", async () =>
 
   expect((await requestControl(controller, "control.snapshot", { projectId: other.id }, undefined, controlActor)).error).toEqual({
     version: "v1",
-    code: "not-found",
-    message: "A mounted local project is required.",
+    code: "invalid-request",
+    message: "The requested project is not mounted.",
   })
   const otherHistory = await createLocalControlService({ actor: { subject: controlActor } })
     .history({ projectId: other.id, limit: 10 })
@@ -429,7 +435,7 @@ test("cancels or rejects control requests that change mount during lookup", asyn
   releaseLookup?.(localProject)
   expect((await pending).error).toEqual({
     version: "v1",
-    code: "not-found",
+    code: "unavailable",
     message: "A mounted local project is required.",
   })
 
@@ -444,7 +450,7 @@ test("cancels or rejects control requests that change mount during lookup", asyn
   )
   abortDuringLookup.abort()
   releaseLookup?.(localProject)
-  expect((await abortedPending).error?.code).toBe("internal")
+  expect((await abortedPending).error?.code).toBe("cancelled")
 
   const abort = new AbortController()
   abort.abort()
@@ -483,7 +489,7 @@ test("does not commit after cancellation while waiting for the asset lock", asyn
   abort.abort()
   releaseLock?.()
   await lock
-  expect((await pending).error?.code).toBe("internal")
+  expect((await pending).error?.code).toBe("cancelled")
 
   const inspected = createLocalControlService({ actor: { subject: controlActor } })
   expect((await inspected.snapshot({ projectId: project.id })).project).toEqual(initial.project)
@@ -533,7 +539,7 @@ test("does not commit after a mount switch while waiting for the asset lock", as
   await lock
   expect((await pending).error).toEqual({
     version: "v1",
-    code: "not-found",
+    code: "unavailable",
     message: "A mounted local project is required.",
   })
 
@@ -614,6 +620,67 @@ test("pre-accept cancellation does not retain prepared export state", async () =
   expect(final.error?.code).toBe("invalid-request")
   expect(submissions).toBe(0)
 
+  unregister()
+  queue.dispose()
+})
+
+test("renderer cancellation immediately deletes prepared export state before final submission", async () => {
+  installBridge([])
+  let submissions = 0
+  const service: TimelineExportService = {
+    enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+    enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+    submitTimelineExport: async () => { throw new Error("unused") },
+    submitStemExport: async () => { throw new Error("unused") },
+    prepareTimelineExport: async () => prepared,
+    prepareStemExport: async () => { throw new Error("unused") },
+    submitPreparedTimelineExport: () => {
+      submissions += 1
+      return { id: "unexpected", completion: Promise.resolve({ type: "success", outputs: [] }) }
+    },
+    submitPreparedStemExport: () => { throw new Error("unused") },
+    cancel: () => undefined,
+    status: () => undefined,
+  }
+  const queue = createExportQueue()
+  const controller = createAttachedHostController({
+    projectId: () => "project-1",
+    mountedProjectGeneration: () => 0,
+    isPlaying: () => false,
+    playheadSec: () => 0,
+    tracks: () => prepared.snapshot.tracks,
+    audioEngine: new AudioEngine(),
+    requestPlay: async () => undefined,
+    pause: async () => undefined,
+    stop: async () => undefined,
+    finishRecording: async () => undefined,
+    exportService: service,
+    exportQueue: queue,
+    importFiles: async () => ({ outcomes: [] }),
+    setPlayhead: () => undefined,
+  })
+  const unregister = registerAttachedHostController(controller)
+  const requestId = "picker-unresolved"
+  await controller.request({
+    id: requestId,
+    operation: "host.export.run",
+    input: { ...exportInput, preflightOnly: true },
+    signal: new AbortController().signal,
+  })
+  await controller.request({
+    id: requestId,
+    operation: "host.export.run",
+    input: { canceled: true, mode: "mixdown" },
+    signal: new AbortController().signal,
+  })
+  const final = await controller.request({
+    id: requestId,
+    operation: "host.export.run",
+    input: exportInput,
+    signal: new AbortController().signal,
+  })
+  expect(final.error?.code).toBe("invalid-request")
+  expect(submissions).toBe(0)
   unregister()
   queue.dispose()
 })

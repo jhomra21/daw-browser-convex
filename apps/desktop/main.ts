@@ -62,6 +62,7 @@ let generation = 0
 const rendererPending = new Map<string, PendingRendererRequest>()
 const preparationRegistry = createPreparationRegistry()
 const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
+const preparedExportModes = new Map<string, "mixdown" | "stems">()
 const terminalExportsAwaitingScope = new Set<string>()
 const exportScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
   [...exportScopes.values()].some((exportScope) => (
@@ -99,6 +100,24 @@ const cancelRendererRequest = (id: string, requestGeneration: number) => {
   target.send(incomingChannel, {
     generation: requestGeneration,
     frame: { version: desktopProtocolVersion, type: "cancel", id },
+  })
+}
+
+const cancelPreparedRendererExport = (id: string) => {
+  const mode = preparedExportModes.get(id)
+  if (!mode) return
+  preparedExportModes.delete(id)
+  const target = window_?.webContents
+  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
+  target.send(incomingChannel, {
+    generation,
+    frame: {
+      version: desktopProtocolVersion,
+      type: "request",
+      id,
+      operation: "host.export.run",
+      input: desktopRendererExportInputSchemaV1.parse({ canceled: true, mode }),
+    },
   })
 }
 
@@ -198,6 +217,7 @@ const prepareRendererInput = async (
       destination: placeholderDestination,
     }), scope.requestId)
     if (preflight.error) throw new Error(preflight.error.message)
+    preparedExportModes.set(scope.requestId, request.mode)
     try {
       signal.throwIfAborted()
       const destination = request.destination
@@ -216,11 +236,10 @@ const prepareRendererInput = async (
       if (selected.canceled) return desktopRendererExportInputSchemaV1.parse({ canceled: true, mode: "stems" })
       return desktopRendererExportInputSchemaV1.parse({ ...request, destination: { kind: "capability-directory", token: selected.directory.token, basename: selected.directory.basename }, canceled: false })
     } catch (error) {
-      await renderRequest("host.export.run", desktopRendererExportInputSchemaV1.parse({
-        canceled: true,
-        mode: request.mode,
-      }), scope.requestId).catch(() => undefined)
+      cancelPreparedRendererExport(scope.requestId)
       throw error
+    } finally {
+      preparedExportModes.delete(scope.requestId)
     }
   }
   return input
@@ -291,6 +310,7 @@ const handleSocket = (socket: Socket) => {
     preparationControllers.clear()
     const rendererIds = [...correlation.internalIds()]
     for (const rendererId of rendererIds) {
+      cancelPreparedRendererExport(rendererId)
       if (!finalExportCandidates.has(rendererId)) rejectRendererRequest(rendererId, "Desktop host connection closed.")
     }
     correlation.clear()
@@ -315,6 +335,7 @@ const handleSocket = (socket: Socket) => {
       const rendererId = correlation.removeExternal(frame.id)
       if (rendererId) {
         finalExportCandidates.delete(rendererId)
+        cancelPreparedRendererExport(rendererId)
         const controller = preparationControllers.get(rendererId)
         controller?.abort()
         if (controller) preparationRegistry.delete(controller)

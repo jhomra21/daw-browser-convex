@@ -295,7 +295,7 @@ describe("desktop preload request queue", () => {
     ])
   })
 
-  test("emits schema-valid transport errors for control queue failures", async () => {
+  test("emits host transport errors for control queue failures", async () => {
     const replies: PreloadHostResponse[] = []
     let now = 0
     const deadlineQueue = createRequestQueue({
@@ -363,7 +363,7 @@ describe("desktop preload request queue", () => {
     for (const reply of replies) {
       expect(() => parseDesktopReplyError("control.capabilities", reply.error)).not.toThrow()
       if (!reply.error) throw new Error("Expected a queue failure reply.")
-      expect(["invalid-request", "not-found", "internal"]).toContain(reply.error.code)
+      expect(["deadline-exceeded", "cancelled", "unavailable", "internal"]).toContain(reply.error.code)
     }
     expect(replies.map((reply) => reply.error?.message)).toEqual([
       "The request deadline elapsed.",

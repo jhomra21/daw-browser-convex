@@ -10,7 +10,8 @@ import {
 } from "@daw-browser/control"
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { createControlMcpServer } from "@daw-browser/control-mcp"
-import { createControlClient } from "@daw-browser/control-sdk"
+import { ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
+import { hostError } from "@daw-browser/desktop-protocol"
 import { createAccessTokenProvider } from "./auth"
 import { credentialIdentity, createCredentialStore, sameCredentialIdentity, type ControlCredentialIdentity, type ControlCredentials } from "./credentials"
 import { createHostClient } from "./host"
@@ -20,6 +21,15 @@ class CloudControlError extends Error {
     version: "v1" as const,
     code: "authorization" as const,
     message: "Cloud control credentials are unavailable.",
+  }
+}
+
+class CloudControlTransportError extends Error {
+  readonly data = hostError("unavailable", "Cloud control service is unavailable.")
+
+  constructor() {
+    super("Cloud control service is unavailable.")
+    this.name = "CloudControlTransportError"
   }
 }
 
@@ -63,14 +73,22 @@ export const startControlMcp = async () => {
       baseUrl: credentials.baseUrl,
       accessToken: createAccessTokenProvider(identity, store),
     })
+    const withTransportBoundary = async <Value>(request: () => Promise<Value>) => {
+      try {
+        return await request()
+      } catch (error) {
+        if (error instanceof ControlTransportError) throw new CloudControlTransportError()
+        throw error
+      }
+    }
     return {
-      capabilities: client.capabilities,
-      snapshot: async ({ projectId }) => client.snapshot(projectId),
-      preview: client.preview,
-      requestApproval: client.requestApproval,
-      commit: client.commit,
-      history: client.history,
-      recoveries: client.recoveries,
+      capabilities: async () => withTransportBoundary(client.capabilities),
+      snapshot: async ({ projectId }) => withTransportBoundary(() => client.snapshot(projectId)),
+      preview: async (input) => withTransportBoundary(() => client.preview(input)),
+      requestApproval: async (input) => withTransportBoundary(() => client.requestApproval(input)),
+      commit: async (input) => withTransportBoundary(() => client.commit(input)),
+      history: async (input) => withTransportBoundary(() => client.history(input)),
+      recoveries: async (input) => withTransportBoundary(() => client.recoveries(input)),
     }
   }
   const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {

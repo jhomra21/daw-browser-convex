@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { controlCapabilitiesV1 } from "@daw-browser/control"
+import { ControlApiError } from "@daw-browser/control-sdk"
 import { createControlMcpServer, type ControlService } from "./index"
 import type { HostToolService } from "./host-tools"
 
@@ -271,7 +272,7 @@ describe("control MCP tools", () => {
     expect(hostCalls).toBe(0)
   })
 
-  test("preserves canonical control errors and action indexes", async () => {
+  test("preserves actual SDK canonical errors and action indexes", async () => {
     const response = await request({
       jsonrpc: "2.0",
       id: 4,
@@ -284,7 +285,13 @@ describe("control MCP tools", () => {
       write: true,
       service: service({
         preview: async () => {
-          throw { version: "v1", code: "validation", message: "Invalid action.", actionIndex: 0 }
+          throw new ControlApiError(422, {
+            version: "v1",
+            code: "validation",
+            message: "Invalid action.",
+            actionIndex: 0,
+            details: { field: "actions.0.name" },
+          })
         },
       }),
     })
@@ -294,6 +301,7 @@ describe("control MCP tools", () => {
       code: "validation",
       message: "Invalid action.",
       actionIndex: 0,
+      details: { field: "actions.0.name" },
     })
   })
 
@@ -456,5 +464,25 @@ describe("control MCP tools", () => {
       message: "A local desktop host is unavailable.",
     })
     expect(closeCount).toBe(2)
+  })
+
+  test("preserves host lifecycle errors for canonical host targets", async () => {
+    const lifecycleFailure = {
+      version: "v1",
+      code: "cancelled",
+      message: "The request was cancelled.",
+    }
+    const response = await request(call("control_preview", {
+      target: "host",
+      version: "v1",
+      projectId: "project-1",
+      actions: [{ kind: "project.rename", name: "Next" }],
+    }), {
+      hostFactory: async () => ({
+        service: service({ preview: async () => { throw { data: lifecycleFailure } } }),
+        close: () => undefined,
+      }),
+    })
+    expect(JSON.parse(response.result.content[0].text)).toEqual(lifecycleFailure)
   })
 })

@@ -33,6 +33,10 @@ import {
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
 } from "@daw-browser/control"
+import {
+  hostErrorSchemaV1,
+  type HostErrorV1,
+} from "@daw-browser/desktop-protocol"
 import { executeHostTool, registerHostTools, type HostToolService } from "./host-tools"
 
 export type ControlService = {
@@ -85,7 +89,7 @@ const hostUnavailable = (): ControlErrorV1 => ({
   code: "not-found",
   message: "A local desktop host is unavailable.",
 })
-const hostTransportError = (error: unknown): ControlErrorV1 => {
+const hostTransportError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
     error,
     isRecord(error) ? error.data : undefined,
@@ -93,6 +97,8 @@ const hostTransportError = (error: unknown): ControlErrorV1 => {
   ]) {
     const control = controlErrorSchemaV1.safeParse(candidate)
     if (control.success) return control.data
+    const host = hostErrorSchemaV1.safeParse(candidate)
+    if (host.success) return host.data
   }
   return hostUnavailable()
 }
@@ -101,7 +107,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 )
 
-const controlError = (error: unknown): ControlErrorV1 => {
+const serviceError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
     error,
     isRecord(error) ? error.data : undefined,
@@ -109,6 +115,8 @@ const controlError = (error: unknown): ControlErrorV1 => {
   ]) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
     if (parsed.success) return parsed.data
+    const host = hostErrorSchemaV1.safeParse(candidate)
+    if (host.success) return host.data
   }
   return internalError()
 }
@@ -118,7 +126,7 @@ const success = <Value>(value: Value) => ({
   content: [{ type: "text" as const, text: canonicalJson(value) }],
 })
 
-const failure = (error: ControlErrorV1) => ({
+const failure = (error: ControlErrorV1 | HostErrorV1) => ({
   isError: true,
   content: [{ type: "text" as const, text: canonicalJson(error) }],
 })
@@ -128,7 +136,7 @@ const execute = async <Input, Output>(
   parseInput: (value: unknown) => Input,
   invoke: (value: Input) => Promise<unknown>,
   parseOutput: (value: unknown) => Output,
-  errorFor: (error: unknown) => ControlErrorV1 = controlError,
+  errorFor: (error: unknown) => ControlErrorV1 | HostErrorV1 = serviceError,
 ) => {
   let parsedInput: Input
   try {
@@ -180,14 +188,14 @@ export const createControlMcpServer = (
           ? await options.cloudService(requiresWriteScope ? "control:write" : "control:read")
           : service
       } catch (error) {
-        return failure(controlError(error))
+        return failure(serviceError(error))
       }
       if (!cloud) return failure(internalError())
       if (requiresWriteScope) {
         try {
           if (!await canWrite()) return failure(forbidden())
         } catch (error) {
-          return failure(controlError(error))
+          return failure(serviceError(error))
         }
       }
       return execute(parsedInput, parseInput, (value) => invoke(cloud, value), parseOutput)

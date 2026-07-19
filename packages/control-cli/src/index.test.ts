@@ -506,6 +506,25 @@ describe("canonical CLI target routing", () => {
     expect(unavailable.stderr[0]).not.toContain("/not/a/credential/path")
   })
 
+  test("maps SDK cloud transport failures to a sanitized host envelope", async () => {
+    const directory = await mkdtemp("/tmp/daw-control-cli-")
+    directories.push(directory)
+    process.env.DAW_CONTROL_AUTH_PATH = join(directory, "credentials.json")
+    await createCredentialStore().write(credentials)
+    globalThis.fetch = Object.assign(
+      async () => { throw new Error("https://secret.example/private") },
+      { preconnect: previousFetch.preconnect },
+    )
+    const output = io()
+    expect(await runCli(["capabilities"], output.value)).toBe(1)
+    expect(JSON.parse(output.stderr[0]).error).toEqual({
+      version: "v1",
+      code: "unavailable",
+      message: "Cloud control service is unavailable.",
+    })
+    expect(output.stderr[0]).not.toContain("secret.example")
+  })
+
   test("requires an advertised host capability before dispatch", async () => {
     let requests = 0
     await createHost(() => { requests += 1 }, [])

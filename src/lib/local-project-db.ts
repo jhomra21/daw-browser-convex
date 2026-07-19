@@ -82,10 +82,53 @@ export type LocalProjectSyncStateRow = {
   updatedAt: number
 }
 export type LocalControlStateRow = LocalProjectStateRow
-export type LocalControlCommitRow = { id: string; createdAt: number; actorSubject: string; idempotencyKey: string; value: unknown }
-export type LocalControlApprovalRow = { id: string; expiresAt: number; createdAt: number; actorSubject: string; value: unknown }
-export type LocalControlRecoveryRow = { id: string; expiresAt: number; createdAt: number; actorSubject: string; value: unknown }
-export type LocalControlAssetGcRow = { id: string; eligibleAt: number; storagePath: string; value: unknown }
+export type LocalControlCommitRow = {
+  id: string
+  version: 1
+  projectId: string
+  createdAt: number
+  actorSubject: string
+  idempotencyKey: string
+  request: unknown
+  result: unknown
+  baseRevision: number
+  revision: number
+  status: 'completed'
+}
+export type LocalControlApprovalRow = {
+  id: string
+  version: 1
+  projectId: string
+  expiresAt: number
+  createdAt: number
+  actorSubject: string
+  requestDigest: string
+  baseRevision: number
+}
+export type LocalControlRecoveryRow = {
+  id: string
+  version: 1
+  projectId: string
+  expiresAt: number
+  createdAt: number
+  actorSubject: string
+  sourceActionIndex: number
+  sourceCommitId?: string
+  kind: string
+  payload: string
+  payloadHash: string
+  consumedAt?: number
+}
+export type LocalControlAssetGcRow = {
+  id: string
+  version: 1
+  projectId: string
+  assetId: string
+  eligibleAt: number
+  storagePath: string
+  recoveryId: string
+  cloudAssetKey?: string
+}
 export type LocalControlProjectMetadata = {
   version: 1
   name: string

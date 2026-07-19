@@ -1,0 +1,357 @@
+import {
+  canonicalRecoveryPayloadV1,
+  hashRecoveryPayloadSyncV1,
+  recoveryPayloadSchemaV1,
+  type ControlActionV1,
+  type ProjectSnapshotV1,
+  type RecoveryPayloadV1,
+} from '@daw-browser/control'
+import {
+  automationTargetKey,
+  parseGranularAutomationKey,
+  parseInstrumentAutomationKey,
+  parseSynthAutomationKey,
+} from '@daw-browser/shared'
+import type { LocalProjectAssetRow } from '~/lib/local-project-db'
+import { localSidechainRouteRowId } from '~/lib/local-effects'
+
+export const localRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
+
+const ownership = (projectId: string, localActorSubject: string) => ({ projectId, localActorSubject })
+const clipPayload = (projectId: string, clip: ProjectSnapshotV1['clips'][number]) => ({
+  projectId,
+  trackId: clip.trackId,
+  startSec: clip.startSec,
+  duration: clip.duration,
+  ...(clip.source ? {
+    sourceAssetKey: clip.source.assetId,
+    sourceKind: clip.source.sourceKind,
+    sourceDurationSec: clip.source.durationSec,
+    sourceSampleRate: clip.source.sampleRate,
+    sourceChannelCount: clip.source.channelCount,
+  } : {}),
+  ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
+  ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
+  ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
+  ...(clip.gain === undefined ? {} : { gain: clip.gain }),
+  ...(clip.fades === undefined ? {} : { fades: clip.fades }),
+  ...(clip.color === undefined ? {} : { color: clip.color }),
+  ...(clip.name === undefined ? {} : { name: clip.name }),
+  ...(clip.midi === undefined ? {} : { midi: clip.midi }),
+  ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+})
+const trackPayload = (projectId: string, track: ProjectSnapshotV1['tracks'][number], actorSubject: string) => ({
+  id: track.id,
+  track: {
+    projectId,
+    name: track.name,
+    index: track.index,
+    kind: track.kind,
+    ...(track.groupId === undefined ? {} : { groupId: track.groupId }),
+    ...(track.collapsed === undefined ? {} : { collapsed: track.collapsed }),
+    ...(track.color === undefined ? {} : { color: track.color }),
+    mixer: {
+      volume: track.volume,
+      ...(track.muted === undefined ? {} : { muted: track.muted }),
+      ...(track.soloed === undefined ? {} : { soloed: track.soloed }),
+      channelRole: track.channelRole,
+      ...(track.outputTargetId === undefined ? {} : { outputTargetId: track.outputTargetId }),
+      sends: track.sends.map((send) => ({
+        targetId: send.targetTrackId,
+        amount: send.amount,
+        ...(send.tap === undefined ? {} : { tap: send.tap }),
+      })),
+    },
+  },
+  ownership: ownership(projectId, actorSubject),
+})
+const effectPayload = (projectId: string, effect: ProjectSnapshotV1['processors'][number]) => ({
+  id: effect.id,
+  effect: {
+    projectId,
+    target: 'master' in effect.target ? { kind: 'master' as const } : { kind: 'track' as const, trackId: effect.target.trackId },
+    index: effect.index,
+    processor: effect.processor,
+    ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }),
+    createdAt: 0,
+  },
+})
+const automationPayload = (projectId: string, entry: ProjectSnapshotV1['automation'][number], id: string) => ({
+  id,
+  automation: {
+    projectId,
+    targetKind: 'master' in entry.target ? 'master' as const : 'track' as const,
+    ...('master' in entry.target ? {} : { trackId: entry.target.trackId }),
+    ...(entry.effectInstanceId === undefined ? {} : { effectInstanceId: entry.effectInstanceId }),
+    targetKey: id,
+    parameterId: entry.parameterId,
+    enabled: entry.enabled,
+    points: entry.points,
+    updatedAt: 0,
+  },
+})
+const sidechainPayload = (projectId: string, entry: ProjectSnapshotV1['sidechains'][number], id: string) => ({
+  id,
+  sidechain: {
+    projectId,
+    sourceTrackId: entry.sourceTrackId,
+    targetTrackId: entry.targetTrackId,
+    effectInstanceId: entry.effectInstanceId,
+  },
+})
+const effectBundle = (
+  projectId: string,
+  snapshot: ProjectSnapshotV1,
+  effects: readonly ProjectSnapshotV1['processors'][number][],
+) => {
+  const effectInstanceIds = new Set(effects.flatMap((effect) => effect.instanceId === undefined ? [] : [effect.instanceId]))
+  const targets = new Set(effects.map((effect) => (
+    'master' in effect.target ? 'master' : effect.target.trackId
+  )))
+  return {
+    effects: effects.map((effect) => effectPayload(projectId, effect)),
+    automation: snapshot.automation.flatMap((entry) => (
+      effectInstanceIds.has(entry.effectInstanceId ?? '')
+      && targets.has('master' in entry.target ? 'master' : entry.target.trackId)
+        ? [automationPayload(projectId, entry, automationTargetKey(
+          'master' in entry.target
+            ? { kind: 'master', effectInstanceId: entry.effectInstanceId }
+            : { kind: 'track', trackId: entry.target.trackId, effectInstanceId: entry.effectInstanceId },
+          entry.parameterId,
+        ))]
+        : []
+    )),
+    sidechains: snapshot.sidechains.flatMap((entry) => (
+      effectInstanceIds.has(entry.effectInstanceId)
+        ? [sidechainPayload(projectId, entry, localSidechainRouteRowId(entry.targetTrackId, entry.effectInstanceId))]
+        : []
+    )),
+  }
+}
+
+const instrumentAutomation = (
+  projectId: string,
+  snapshot: ProjectSnapshotV1,
+  effects: readonly ProjectSnapshotV1['processors'][number][],
+) => {
+  const instanceIds = new Set(effects.flatMap((effect) => {
+    const params = effect.processor.params
+    return typeof params === 'object' && params !== null && 'instanceId' in params && typeof params.instanceId === 'string'
+      ? [params.instanceId]
+      : []
+  }))
+  return snapshot.automation.flatMap((entry) => {
+    const identity = parseInstrumentAutomationKey(entry.parameterId)
+      ?? parseGranularAutomationKey(entry.parameterId)
+      ?? parseSynthAutomationKey(entry.parameterId)
+    return identity && instanceIds.has(identity.instanceId)
+      ? [automationPayload(projectId, entry, automationTargetKey(
+        'master' in entry.target
+          ? { kind: 'master', effectInstanceId: entry.effectInstanceId }
+          : { kind: 'track', trackId: entry.target.trackId, effectInstanceId: entry.effectInstanceId },
+        entry.parameterId,
+      ))]
+      : []
+  })
+}
+export const captureLocalRecoveryPayload = (input: {
+  projectId: string
+  actorSubject: string
+  action: ControlActionV1
+  snapshot: ProjectSnapshotV1
+  assets: readonly LocalProjectAssetRow[]
+}): RecoveryPayloadV1 | undefined => {
+  const { action, snapshot } = input
+  let raw: unknown
+  if (action.kind === 'clip.delete') {
+    const clipRef = action.clip
+    if (clipRef.source !== 'persisted') return undefined
+    const clip = snapshot.clips.find((entry) => entry.id === clipRef.id)
+    raw = clip ? { version: 1, kind: action.kind, data: { clip: clipPayload(input.projectId, clip), clipId: clip.id, ownership: ownership(input.projectId, input.actorSubject) } } : undefined
+  } else if (action.kind === 'asset.delete') {
+    const asset = input.assets.find((entry) => entry.id === action.asset.id)
+    raw = asset ? {
+      version: 1,
+      kind: action.kind,
+      data: {
+        asset: {
+          projectId: input.projectId, assetKey: asset.id, sourceKind: asset.sourceKind,
+          name: asset.name, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes,
+          contentSha256: asset.contentHash, storagePath: asset.storagePath, duration: asset.durationSec,
+          sampleRate: asset.sampleRate, channelCount: asset.channelCount, folderId: asset.folderId,
+          missing: asset.missing, originalFileName: asset.originalFileName,
+          originalLastModified: asset.originalLastModified, createdAt: asset.createdAt, updatedAt: asset.updatedAt,
+        },
+        assetId: asset.id,
+      },
+    } : undefined
+  } else if (action.kind === 'automation.delete') {
+    const target = action.target.kind === 'master'
+      ? { master: true }
+      : action.target.track.source === 'persisted' ? { trackId: action.target.track.id } : undefined
+    const effectId = action.effect?.source === 'persisted' ? action.effect.id : undefined
+    const effect = effectId === undefined ? undefined : snapshot.processors.find((entry) => entry.id === effectId)
+    const entry = snapshot.automation.find((candidate) => (
+      target !== undefined && JSON.stringify(candidate.target) === JSON.stringify(target)
+      && candidate.effectInstanceId === effect?.instanceId
+      && candidate.parameterId === action.parameterId
+    ))
+    raw = entry ? {
+      version: 1,
+      kind: action.kind,
+      data: {
+        automation: automationPayload(input.projectId, entry, automationTargetKey(
+          'master' in entry.target
+            ? { kind: 'master', effectInstanceId: entry.effectInstanceId }
+            : { kind: 'track', trackId: entry.target.trackId, effectInstanceId: entry.effectInstanceId },
+          entry.parameterId,
+        )).automation,
+        automationId: automationTargetKey(
+          'master' in entry.target
+            ? { kind: 'master', effectInstanceId: entry.effectInstanceId }
+            : { kind: 'track', trackId: entry.target.trackId, effectInstanceId: entry.effectInstanceId },
+          entry.parameterId,
+        ),
+      },
+    } : undefined
+  } else if (action.kind === 'sidechain.remove') {
+    const effectId = action.effect.source === 'persisted' ? action.effect.id : undefined
+    const effect = effectId === undefined
+      ? undefined
+      : snapshot.processors.find((entry) => entry.id === effectId)
+    const targetId = action.target.source === 'persisted' ? action.target.id : undefined
+    const entry = targetId === undefined || effect?.instanceId === undefined ? undefined : snapshot.sidechains.find((candidate) => (
+      candidate.targetTrackId === targetId && candidate.effectInstanceId === effect.instanceId
+    ))
+    raw = entry ? {
+      version: 1,
+      kind: action.kind,
+      data: {
+        sidechain: sidechainPayload(
+          input.projectId,
+          entry,
+          localSidechainRouteRowId(entry.targetTrackId, entry.effectInstanceId),
+        ).sidechain,
+        sidechainId: localSidechainRouteRowId(entry.targetTrackId, entry.effectInstanceId),
+      },
+    } : undefined
+  } else if (action.kind === 'effect.remove' || action.kind === 'instrument.remove' || action.kind === 'arpeggiator.remove') {
+    const effectId = action.kind === 'effect.remove' && action.effect.source === 'persisted'
+      ? action.effect.id
+      : undefined
+    const trackId = action.kind !== 'effect.remove' && action.target.track.source === 'persisted'
+      ? action.target.track.id
+      : undefined
+    const effects = action.kind === 'effect.remove'
+      ? effectId === undefined ? [] : snapshot.processors.filter((entry) => entry.id === effectId)
+      : trackId === undefined ? [] : snapshot.processors.filter((entry) => (
+        'trackId' in entry.target && entry.target.trackId === trackId
+        && (action.kind === 'instrument.remove' ? entry.processor.kind === 'instrument' : entry.processor.kind === 'arpeggiator')
+      ))
+    if (effects.length > 0) {
+      const bundle = effectBundle(input.projectId, snapshot, effects)
+      raw = {
+        version: 1,
+        kind: action.kind,
+        data: action.kind === 'instrument.remove'
+          ? { ...bundle, automation: instrumentAutomation(input.projectId, snapshot, effects) }
+          : bundle,
+      }
+    }
+  } else if (action.kind === 'track.delete' || action.kind === 'track.ungroup') {
+    const rootId = action.kind === 'track.delete' ? action.track : action.group
+    if (rootId.source !== 'persisted') return undefined
+    const root = snapshot.tracks.find((track) => track.id === rootId.id)
+    if (!root) return undefined
+    const selected = action.kind === 'track.delete'
+      ? new Set(snapshot.tracks.filter((track) => {
+        let current = track
+        while (current.groupId !== undefined) {
+          if (current.groupId === root.id) return true
+          const parent = snapshot.tracks.find((candidate) => candidate.id === current.groupId)
+          if (!parent) break
+          current = parent
+        }
+        return track.id === root.id
+      }).map((track) => track.id))
+      : new Set([root.id])
+    const tracks = snapshot.tracks.filter((track) => selected.has(track.id))
+    const bundle = {
+      tracks: tracks.map((track) => trackPayload(input.projectId, track, input.actorSubject)),
+      clips: snapshot.clips.filter((clip) => selected.has(clip.trackId)).map((clip) => ({
+        id: clip.id,
+        clip: clipPayload(input.projectId, clip),
+        ownership: ownership(input.projectId, input.actorSubject),
+      })),
+      effects: snapshot.processors
+        .filter((effect) => 'trackId' in effect.target && selected.has(effect.target.trackId))
+        .map((effect) => effectPayload(input.projectId, effect)),
+      automation: snapshot.automation
+        .flatMap((entry) => 'trackId' in entry.target && selected.has(entry.target.trackId)
+          ? [automationPayload(input.projectId, entry, automationTargetKey(
+          { kind: 'track', trackId: entry.target.trackId, effectInstanceId: entry.effectInstanceId },
+          entry.parameterId,
+        ))]
+          : []),
+      sidechains: snapshot.sidechains
+        .filter((entry) => selected.has(entry.sourceTrackId) || selected.has(entry.targetTrackId))
+        .map((entry) => sidechainPayload(
+          input.projectId,
+          entry,
+          localSidechainRouteRowId(entry.targetTrackId, entry.effectInstanceId),
+        )),
+    }
+    if (action.kind === 'track.delete') {
+      const survivors = snapshot.tracks
+        .filter((track) => !selected.has(track.id))
+        .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
+        .flatMap((track, index) => {
+          const after = {
+            ...trackPayload(input.projectId, track, input.actorSubject).track,
+            index,
+            ...(selected.has(track.groupId ?? '') ? { groupId: undefined } : {}),
+            mixer: {
+              ...trackPayload(input.projectId, track, input.actorSubject).track.mixer,
+              ...(selected.has(track.outputTargetId ?? '') ? { outputTargetId: undefined } : {}),
+              sends: track.sends.filter((send) => !selected.has(send.targetTrackId)).map((send) => ({
+                targetId: send.targetTrackId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }),
+              })),
+            },
+          }
+          const before = trackPayload(input.projectId, track, input.actorSubject).track
+          return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ id: track.id, before, after }]
+        })
+      raw = { version: 1, kind: action.kind, data: { rootTrackId: root.id, ...bundle, survivors } }
+    } else {
+      if (root.channelRole !== 'group' || snapshot.clips.some((clip) => clip.trackId === root.id)) return undefined
+      raw = {
+        version: 1,
+        kind: action.kind,
+        data: {
+          groupId: root.id,
+          ...bundle,
+          children: snapshot.tracks.filter((track) => track.groupId === root.id).map((child) => ({
+            id: child.id,
+            before: trackPayload(input.projectId, child, input.actorSubject).track,
+            after: {
+              ...trackPayload(input.projectId, child, input.actorSubject).track,
+              index: child.index > root.index ? child.index - 1 : child.index,
+              groupId: root.groupId,
+              mixer: {
+                ...trackPayload(input.projectId, child, input.actorSubject).track.mixer,
+                ...(child.outputTargetId === root.id ? { outputTargetId: root.groupId } : {}),
+              },
+            },
+          })),
+        },
+      }
+    }
+  }
+  const parsed = recoveryPayloadSchemaV1.safeParse(raw)
+  return parsed.success ? parsed.data : undefined
+}
+
+export const serializeLocalRecoveryPayload = (payload: RecoveryPayloadV1) => {
+  const text = canonicalRecoveryPayloadV1(JSON.parse(JSON.stringify(payload)))
+  return { payload: text, payloadHash: hashRecoveryPayloadSyncV1(text) }
+}

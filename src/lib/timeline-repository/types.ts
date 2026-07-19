@@ -36,6 +36,7 @@ export type TimelineClipRow = {
   startSec: number
   duration: number
   color: string
+  controlColorExplicit?: boolean
   sourceAssetId?: TimelineAssetId
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind

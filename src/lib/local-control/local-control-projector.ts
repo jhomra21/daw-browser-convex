@@ -16,6 +16,11 @@ import {
 } from '~/lib/local-project-db'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
+import {
+  LOCAL_ASSET_FOLDER_KEY_PREFIX,
+  parseLocalAssetFolderRow,
+} from '~/lib/local-asset-folders'
+import { normalizeLocalAutomationEnvelopes } from '~/lib/local-automation'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -188,6 +193,7 @@ export const projectLocalControlSnapshotV1 = (input: {
     })),
     clips: valueOfKind(input.entities, 'clip', isClip).map((clip) => ({
       ...clip,
+      ...(clip.controlColorExplicit === false ? { color: undefined } : {}),
       _id: clip.id,
       sourceAssetKey: clip.sourceAssetKey ?? clip.sourceAssetId,
     })),
@@ -205,7 +211,9 @@ export const projectLocalControlSnapshotV1 = (input: {
         params: effect.params,
       }
     }),
-    automationEnvelopes: valueOfKind(input.entities, 'automation-envelope', isAutomation).map((envelope) => ({
+    automationEnvelopes: normalizeLocalAutomationEnvelopes(
+      valueOfKind(input.entities, 'automation-envelope', isAutomation),
+    ).map((envelope) => ({
       _id: envelope.id,
       targetKind: envelope.target.kind,
       trackId: envelope.target.kind === 'track' ? envelope.target.trackId : undefined,
@@ -216,6 +224,15 @@ export const projectLocalControlSnapshotV1 = (input: {
     })),
     sidechainRoutes: valueOfKind(input.entities, 'sidechain-route', isSidechain),
     assets: completeAssets(input.assets),
-    assetFolders: [],
+    assetFolders: input.projectState.flatMap((row) => {
+      if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) return []
+      const folder = parseLocalAssetFolderRow(row.value)
+      return folder ? [{
+        _id: folder.id,
+        name: folder.name,
+        createdAt: folder.createdAt,
+        updatedAt: folder.updatedAt,
+      }] : []
+    }),
   })
 }

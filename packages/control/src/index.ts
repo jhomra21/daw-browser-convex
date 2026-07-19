@@ -997,6 +997,9 @@ const localRecoveryAssetSchemaV1 = z.object({
   sampleRate: z.number().int().positive().optional(),
   channelCount: z.number().int().positive().max(64).optional(),
   folderId: stableIdSchema.optional(),
+  missing: z.boolean().optional(),
+  originalFileName: z.string().min(1).max(1_024).optional(),
+  originalLastModified: z.number().int().nonnegative().optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
@@ -1256,8 +1259,17 @@ export const controlRequestDigestV1 = async (
   request: ControlCommitRequestV1 | ControlPreviewRequestV1 | ControlApprovalRequestV1,
 ) => controlRequestDigestSyncV1(request)
 
-export { controlApprovalRequirementV1, destructiveControlActionKindsV1, planControlRequestV1 } from './planner'
-export type { ControlPlanError, ControlPlanV1, PlannedControlActionV1 } from './planner'
+export {
+  controlApprovalRequirementV1,
+  destructiveControlActionKindsV1,
+  planControlRequestV1,
+  rebaseRecoveryAutomationParameterIdV1,
+} from './planner'
+export type {
+  ControlPlanError,
+  ControlPlanV1,
+  PlannedControlActionV1,
+} from './planner'
 export {
   collectDeletedTrackIdsV1,
   collectTrackDeletionAffectedIdsV1,

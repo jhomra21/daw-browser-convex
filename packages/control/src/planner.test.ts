@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { controlApprovalRequirementV1, planControlRequestV1 } from "./planner";
+import {
+  canonicalizePlannerSnapshotV1,
+  controlApprovalRequirementV1,
+  planControlRequestV1,
+} from "./planner";
 import { controlLimitsV1 } from "./index";
 
 const snapshot = (): any => ({
@@ -57,6 +61,45 @@ const snapshot = (): any => ({
 });
 
 const persisted = (id: string) => ({ source: "persisted", id });
+
+test("traces canonically ordered snapshots for every action and the final plan", () => {
+  const base = snapshot()
+  base.tracks.push({
+    id: "track-2", name: "Audio", index: 1, kind: "audio", channelRole: "track",
+    volume: 0.8, muted: false, soloed: false, sends: [],
+  })
+  base.processors.push({
+    id: "effect-2", target: { trackId: "track-1" }, instanceId: "audio-effect:two", index: 1,
+    processor: { kind: "reverb", params: {} },
+  })
+  const traces: any[] = []
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      {
+        kind: "track.reorder",
+        tracks: [
+          { track: persisted("track-2"), index: 0, group: null },
+          { track: persisted("track-1"), index: 1, group: null },
+        ],
+      },
+      {
+        kind: "effect.reorder",
+        target: { kind: "track", track: persisted("track-1") },
+        order: [
+          { effect: persisted("effect-2"), kind: "reverb" },
+          { effect: persisted("effect-1"), kind: "eq" },
+        ],
+      },
+    ],
+  }, new Map(), { onActionPlanned: (entry) => traces.push(entry) })
+
+  expect(traces).toHaveLength(plan.actions.length)
+  for (const entry of traces) {
+    expect(entry.afterSnapshot).toEqual(canonicalizePlannerSnapshotV1(entry.afterSnapshot))
+  }
+  expect(traces.at(-1)?.afterSnapshot).toEqual(plan.snapshot)
+})
 
 test("derives destructive impact from the planned base-to-final diff", () => {
   const base = snapshot();

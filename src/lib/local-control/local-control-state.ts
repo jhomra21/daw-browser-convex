@@ -4,9 +4,17 @@ import {
 } from '@daw-browser/control'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import {
+  type LocalControlApprovalRow,
+  type LocalControlAssetGcRow,
+  type LocalControlCommitRow,
+  type LocalControlRecoveryRow,
   getLocalProject,
   openLocalProjectDb,
   type LocalControlProjectMetadata,
+  type LocalProjectAssetRow,
+  type LocalProjectEntityRow,
+  type LocalProjectStateRow,
+  type LocalProjectSyncStateRow,
 } from '~/lib/local-project-db'
 import { projectLocalControlSnapshotV1 } from './local-control-projector'
 
@@ -17,6 +25,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 )
 
 type LocalControlSnapshotState = {
+  version: 1
   revision: number
   digest: string
   updatedAt: number
@@ -25,6 +34,35 @@ type LocalControlSnapshotState = {
 type LocalControlTransactionResult = {
   snapshot: ProjectSnapshotV1
   state: LocalControlSnapshotState
+  rows: {
+    entities: readonly LocalProjectEntityRow[]
+    assets: readonly LocalProjectAssetRow[]
+    projectState: readonly LocalProjectStateRow[]
+    syncState: readonly LocalProjectSyncStateRow[]
+    commits: readonly LocalControlCommitRow[]
+    approvals: readonly LocalControlApprovalRow[]
+    recoveries: readonly LocalControlRecoveryRow[]
+    assetGc: readonly LocalControlAssetGcRow[]
+  }
+  write: {
+    controlState: (state: LocalControlSnapshotState) => void
+    entity: (row: LocalProjectEntityRow) => void
+    asset: (row: LocalProjectAssetRow) => void
+    projectState: (row: LocalProjectStateRow) => void
+    commit: (row: LocalControlCommitRow) => void
+    approval: (row: LocalControlApprovalRow) => void
+    recovery: (row: LocalControlRecoveryRow) => void
+    assetGc: (row: LocalControlAssetGcRow) => void
+  }
+  remove: {
+    entity: (kind: string, id: string) => void
+    asset: (id: string) => void
+    projectState: (key: string) => void
+    commit: (id: string) => void
+    approval: (id: string) => void
+    recovery: (id: string) => void
+    assetGc: (id: string) => void
+  }
 }
 
 const controlState = (value: unknown): LocalControlSnapshotState | undefined => {
@@ -34,7 +72,7 @@ const controlState = (value: unknown): LocalControlSnapshotState | undefined => 
     || typeof value.digest !== 'string'
     || typeof value.updatedAt !== 'number'
   ) return undefined
-  return { revision: value.revision, digest: value.digest, updatedAt: value.updatedAt }
+  return { version: 1, revision: value.revision, digest: value.digest, updatedAt: value.updatedAt }
 }
 
 const semanticSnapshotDigest = (snapshot: ProjectSnapshotV1) => {
@@ -87,13 +125,22 @@ const runLocalControlTransaction = async <Value>(
   const project = await getLocalProject(projectId)
   if (!project) throw new Error('Local project not found.')
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction(['entities', 'assets', 'projectState', 'controlState'], 'readwrite')
-  const [entities, assets, projectState, currentRow] = await Promise.all([
+  const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
+  const [entities, assets, projectState, syncState, currentRow, commits, approvals, recoveries, assetGc] = await Promise.all([
     tx.objectStore('entities').getAll(),
     tx.objectStore('assets').getAll(),
     tx.objectStore('projectState').getAll(),
+    tx.objectStore('syncState').getAll(),
     tx.objectStore('controlState').get(CONTROL_SNAPSHOT_STATE_KEY),
+    tx.objectStore('controlCommits').getAll(),
+    tx.objectStore('controlApprovals').getAll(),
+    tx.objectStore('controlRecoveries').getAll(),
+    tx.objectStore('controlAssetGc').getAll(),
   ])
+  if (commits.length > 2049 || recoveries.length > 2049 || approvals.length > 129 || assetGc.length > 1001) {
+    abortLocalControlTransaction(tx)
+    throw new Error('Local control transaction limit exceeded.')
+  }
   const current = controlState(currentRow?.value)
   const initialRevision = current?.revision ?? 0
   let snapshot = projectLocalControlSnapshotV1({
@@ -108,6 +155,7 @@ const runLocalControlTransaction = async <Value>(
   const drifted = current !== undefined && current.digest !== digest
   const updatedAt = drifted ? Date.now() : current?.updatedAt ?? snapshot.project.updatedAt
   const state: LocalControlSnapshotState = {
+    version: 1,
     revision: current === undefined ? 0 : drifted ? current.revision + 1 : current.revision,
     digest,
     updatedAt,
@@ -156,14 +204,46 @@ const runLocalControlTransaction = async <Value>(
       updatedAt: state.updatedAt,
     })
   }
+  const writes: Array<() => void> = []
+  const removals: Array<() => void> = []
+  const context: LocalControlTransactionResult = {
+    snapshot,
+    state,
+    rows: { entities, assets, projectState: projectedProjectState, syncState, commits, approvals, recoveries, assetGc },
+    write: {
+      controlState: (nextState) => { writes.push(() => { tx.objectStore('controlState').put({
+        key: CONTROL_SNAPSHOT_STATE_KEY,
+        value: nextState,
+        updatedAt: nextState.updatedAt,
+      }) }) },
+      entity: (row) => { writes.push(() => { tx.objectStore('entities').put(row) }) },
+      asset: (row) => { writes.push(() => { tx.objectStore('assets').put(row) }) },
+      projectState: (row) => { writes.push(() => { tx.objectStore('projectState').put(row) }) },
+      commit: (row) => { writes.push(() => { tx.objectStore('controlCommits').put(row) }) },
+      approval: (row) => { writes.push(() => { tx.objectStore('controlApprovals').put(row) }) },
+      recovery: (row) => { writes.push(() => { tx.objectStore('controlRecoveries').put(row) }) },
+      assetGc: (row) => { writes.push(() => { tx.objectStore('controlAssetGc').put(row) }) },
+    },
+    remove: {
+      entity: (kind, id) => { removals.push(() => { tx.objectStore('entities').delete([kind, id]) }) },
+      asset: (id) => { removals.push(() => { tx.objectStore('assets').delete(id) }) },
+      projectState: (key) => { removals.push(() => { tx.objectStore('projectState').delete(key) }) },
+      commit: (id) => { removals.push(() => { tx.objectStore('controlCommits').delete(id) }) },
+      approval: (id) => { removals.push(() => { tx.objectStore('controlApprovals').delete(id) }) },
+      recovery: (id) => { removals.push(() => { tx.objectStore('controlRecoveries').delete(id) }) },
+      assetGc: (id) => { removals.push(() => { tx.objectStore('controlAssetGc').delete(id) }) },
+    },
+  }
   let result: Value
   try {
-    result = callback({ snapshot, state })
+    result = callback(context)
     if (isThenable(result)) throw new Error('Local control transactions require synchronous callbacks.')
   } catch (error) {
     abortLocalControlTransaction(tx)
     throw error
   }
+  for (const remove of removals) remove()
+  for (const write of writes) write()
   await tx.done
   return result
 }

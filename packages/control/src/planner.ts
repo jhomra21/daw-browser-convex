@@ -43,6 +43,7 @@ type ProjectSnapshotV1 = {
   automation: any[]
   sidechains: any[]
   assets: any[]
+  assetFolders: any[]
 }
 type PlannerRequest = { projectId: string; actions: ControlActionV1[] }
 type Entity = 'track' | 'clip' | 'effect'
@@ -74,6 +75,16 @@ export type ControlPlanV1 = {
     actionCount: number
     changes: Array<{ actionIndex: number; kind: string; description: string }>
   }
+}
+
+type ControlPlannerTraceV1 = {
+  onActionPlanned: (entry: {
+    actionIndex: number
+    action: ControlActionV1
+    changed: boolean
+    beforeSnapshot: ProjectSnapshotV1
+    afterSnapshot: ProjectSnapshotV1
+  }) => void
 }
 
 export const destructiveControlActionKindsV1 = [
@@ -161,6 +172,16 @@ const canonical = (value: unknown): string => {
 
 const same = (left: unknown, right: unknown) => canonical(left) === canonical(right)
 
+export const canonicalizePlannerSnapshotV1 = (
+  snapshot: ProjectSnapshotV1,
+): ProjectSnapshotV1 => {
+  const canonicalSnapshot = structuredClone(snapshot)
+  canonicalSnapshot.tracks.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
+  canonicalSnapshot.clips.sort((left, right) => left.startSec - right.startSec || (left.id < right.id ? -1 : 1))
+  canonicalSnapshot.processors.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
+  return canonicalSnapshot
+}
+
 const recoverySurvivorState = (entry: any) => ({
   index: entry.index,
   groupId: entry.groupId,
@@ -172,7 +193,7 @@ const recoverySurvivorState = (entry: any) => ({
   })),
 })
 
-const rebaseRecoveryAutomationParameterId = (parameterId: string, trackId: string | undefined) => {
+export const rebaseRecoveryAutomationParameterIdV1 = (parameterId: string, trackId: string | undefined) => {
   if (trackId === undefined) return parameterId
   const instrument = parseInstrumentAutomationKey(parameterId)
   if (instrument) return instrumentAutomationKey(trackId, instrument.instanceId, instrument.parameterId)
@@ -400,6 +421,8 @@ export const planControlRequestV1 = (
   base: ProjectSnapshotV1,
   request: PlannerRequest,
   trustedRecoveries: ReadonlyMap<string, { payload: { kind: string; data: any } }> = new Map(),
+  trace?: ControlPlannerTraceV1,
+  actionIndexOffset = 0,
 ): ControlPlanV1 => {
   if (base.project.id !== request.projectId) {
     planError(0, 'not-found', 'Project snapshot does not match the request project.')
@@ -414,6 +437,21 @@ export const planControlRequestV1 = (
   const effectRefs = new Map<string, string>()
   const resolvedRefs: ControlPlanV1['resolvedRefs'] = []
   const planned: PlannedControlActionV1[] = []
+  const traceAction = (
+    actionIndex: number,
+    action: ControlActionV1,
+    changed: boolean,
+    beforeSnapshot: ProjectSnapshotV1 | undefined,
+  ) => {
+    if (!trace) return
+    trace.onActionPlanned({
+      actionIndex,
+      action,
+      changed,
+      beforeSnapshot: canonicalizePlannerSnapshotV1(beforeSnapshot ?? snapshot),
+      afterSnapshot: canonicalizePlannerSnapshotV1(snapshot),
+    })
+  }
 
   const resolveTarget = (
     target: { kind: 'track'; track: ContextualRefV1 } | { kind: 'master' },
@@ -423,9 +461,10 @@ export const planControlRequestV1 = (
     return { trackId: requireTrack(target.track, tracks, trackRefs, actionIndex).id }
   }
 
-  for (const [actionIndex, action] of request.actions.entries()) {
+  for (const [requestActionIndex, action] of request.actions.entries()) {
+    const actionIndex = requestActionIndex + actionIndexOffset
     let changed = false
-    const beforeDestructiveAction = destructiveKinds.has(action.kind)
+    const beforeAction = trace || destructiveKinds.has(action.kind)
       ? structuredClone(snapshot)
       : undefined
     switch (action.kind) {
@@ -519,6 +558,7 @@ export const planControlRequestV1 = (
         }
         changed = true
         planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
+        traceAction(actionIndex, action, changed, beforeAction)
         continue
       }
       case 'track.rename': {
@@ -1001,6 +1041,7 @@ export const planControlRequestV1 = (
           compactTrackProcessorIndexes(snapshot.processors, track.id)
         }
         planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
+        traceAction(actionIndex, action, changed, beforeAction)
         continue
       }
       case 'instrument.remove':
@@ -1157,6 +1198,8 @@ export const planControlRequestV1 = (
               id, name: track.name, index: track.index, kind: track.kind,
               channelRole: track.mixer.channelRole,
               groupId: restoredIds.get(track.groupId) ?? track.groupId,
+              collapsed: track.collapsed,
+              ...(track.color === undefined ? {} : { color: track.color }),
               volume: track.mixer.volume, muted: Boolean(track.mixer.muted), soloed: Boolean(track.mixer.soloed),
               outputTargetId: restoredIds.get(track.mixer.outputTargetId) ?? track.mixer.outputTargetId,
               sends: track.mixer.sends.map((send: any) => ({
@@ -1220,7 +1263,7 @@ export const planControlRequestV1 = (
             snapshot.automation.push({
               target,
               ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: row.effectInstanceId }),
-              parameterId: rebaseRecoveryAutomationParameterId(row.parameterId, trackId),
+              parameterId: rebaseRecoveryAutomationParameterIdV1(row.parameterId, trackId),
               enabled: row.enabled,
               points: row.points,
             })
@@ -1385,10 +1428,11 @@ export const planControlRequestV1 = (
         break
       }
     }
-    const destructivePersisted = beforeDestructiveAction === undefined
+    const destructivePersisted = beforeAction === undefined
       ? false
-      : hasPersistedDestructiveEffect(base, beforeDestructiveAction, snapshot)
+      : destructiveKinds.has(action.kind) && hasPersistedDestructiveEffect(base, beforeAction, snapshot)
     planned.push({ actionIndex, action, changed, ...(destructivePersisted ? { destructivePersisted } : {}) })
+    traceAction(actionIndex, action, changed, beforeAction)
   }
 
   snapshot.tracks.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))

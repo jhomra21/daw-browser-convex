@@ -8,10 +8,10 @@ type LocalAssetFolderRow = {
   updatedAt: number
 }
 
-const FOLDER_KEY_PREFIX = 'asset-folder:'
+export const LOCAL_ASSET_FOLDER_KEY_PREFIX = 'asset-folder:'
 
 const now = () => Date.now()
-const folderKey = (folderId: string) => `${FOLDER_KEY_PREFIX}${folderId}`
+export const localAssetFolderKey = (folderId: string) => `${LOCAL_ASSET_FOLDER_KEY_PREFIX}${folderId}`
 const createFolderId = () => `asset-folder:${crypto.randomUUID()}`
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -20,7 +20,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 
 const normalizeFolderName = (name: string) => name.trim() || 'Folder'
 
-const readFolderRow = (value: unknown): LocalAssetFolderRow | undefined => {
+export const parseLocalAssetFolderRow = (value: unknown): LocalAssetFolderRow | undefined => {
   if (!isRecord(value)) return undefined
   if (typeof value.id !== 'string' || typeof value.name !== 'string') return undefined
   if (typeof value.createdAt !== 'number' || typeof value.updatedAt !== 'number') return undefined
@@ -41,8 +41,8 @@ export const listLocalAssetFolders = async (projectId: string): Promise<LocalAss
   const rows = await db.getAll('projectState')
   const folders: LocalAssetFolderRow[] = []
   for (const row of rows) {
-    if (!row.key.startsWith(FOLDER_KEY_PREFIX)) continue
-    const folder = readFolderRow(row.value)
+    if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) continue
+    const folder = parseLocalAssetFolderRow(row.value)
     if (folder) folders.push(folder)
   }
   return sortFoldersByName(folders)
@@ -61,7 +61,7 @@ export const createLocalAssetFolder = async (
   }
   const db = await openLocalProjectDb(projectId)
   await db.put('projectState', {
-    key: folderKey(row.id),
+    key: localAssetFolderKey(row.id),
     value: row,
     updatedAt: timestamp,
   })
@@ -75,8 +75,8 @@ export const renameLocalAssetFolder = async (
   name: string,
 ): Promise<LocalAssetFolderRow | undefined> => {
   const db = await openLocalProjectDb(projectId)
-  const stateRow = await db.get('projectState', folderKey(folderId))
-  const folder = readFolderRow(stateRow?.value)
+  const stateRow = await db.get('projectState', localAssetFolderKey(folderId))
+  const folder = parseLocalAssetFolderRow(stateRow?.value)
   if (!folder) return undefined
   const timestamp = now()
   const next = {
@@ -85,7 +85,7 @@ export const renameLocalAssetFolder = async (
     updatedAt: timestamp,
   }
   await db.put('projectState', {
-    key: folderKey(folderId),
+    key: localAssetFolderKey(folderId),
     value: next,
     updatedAt: timestamp,
   })
@@ -100,7 +100,7 @@ export const deleteEmptyLocalAssetFolder = async (
   const db = await openLocalProjectDb(projectId)
   const assets = await db.getAll('assets')
   if (assets.some((asset) => asset.folderId === folderId)) return false
-  await db.delete('projectState', folderKey(folderId))
+  await db.delete('projectState', localAssetFolderKey(folderId))
   notifyLocalProjectChanged(projectId)
   return true
 }
@@ -114,7 +114,7 @@ export const moveLocalAssetToFolder = async (
   const asset = await db.get('assets', assetId)
   if (!asset) return undefined
   if (folderId) {
-    const folder = readFolderRow((await db.get('projectState', folderKey(folderId)))?.value)
+    const folder = parseLocalAssetFolderRow((await db.get('projectState', localAssetFolderKey(folderId)))?.value)
     if (!folder) return undefined
   }
   const timestamp = now()

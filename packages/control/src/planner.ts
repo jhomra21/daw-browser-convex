@@ -325,6 +325,50 @@ const requireEffect = (
   return processor ?? planError(actionIndex, 'not-found', `Effect "${id}" was not found.`)
 }
 
+const requireAudioAssetSource = (
+  assetId: string,
+  assets: Map<string, ProjectSnapshotV1['assets'][number]>,
+  actionIndex: number,
+) => {
+  const asset = assets.get(assetId)
+  if (!asset) planError(actionIndex, 'not-found', `Asset "${assetId}" was not found.`)
+  if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) {
+    planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
+  }
+  return {
+    assetId: asset.id,
+    sourceKind: asset.sourceKind,
+    durationSec: asset.durationSec,
+    sampleRate: asset.sampleRate,
+    channelCount: asset.channelCount,
+  }
+}
+
+const recoveredClip = (
+  id: string,
+  clip: any,
+  trackId: string,
+  assets: Map<string, ProjectSnapshotV1['assets'][number]>,
+  actionIndex: number,
+) => ({
+  id,
+  trackId,
+  name: clip.name ?? 'Recovered clip',
+  startSec: clip.startSec,
+  duration: clip.duration,
+  ...(clip.gain === undefined ? {} : { gain: clip.gain }),
+  leftPadSec: clip.leftPadSec ?? 0,
+  bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+  midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+  ...(clip.fades === undefined ? {} : { fades: clip.fades }),
+  ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
+  ...(clip.color === undefined ? {} : { color: clip.color }),
+  ...(clip.midi === undefined ? {} : { midi: clip.midi }),
+  ...(clip.sourceAssetKey === undefined ? {} : {
+    source: requireAudioAssetSource(clip.sourceAssetKey, assets, actionIndex),
+  }),
+})
+
 const targetMatches = (
   processor: ProjectSnapshotV1['processors'][number],
   target: { kind: 'track'; track: ContextualRefV1 } | { kind: 'master' },
@@ -774,20 +818,18 @@ export const planControlRequestV1 = (
       case 'clip.audio.create': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         if (track.kind !== 'audio' || track.channelRole !== 'track') planError(actionIndex, 'validation', 'Audio clips require an audio track.')
+        const source = requireAudioAssetSource(action.asset.id, assets, actionIndex)
         const asset = assets.get(action.asset.id)
-        if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
-        if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) {
-          planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
-        }
+        if (!asset) throw new Error('Audio asset disappeared during planning.')
         const id = placeholderId('clip', action.clientRef, actionIndex)
-        const duration = action.duration ?? asset.durationSec
+        const duration = action.duration ?? source.durationSec
         const clip = {
           id, trackId: track.id, name: action.name ?? asset.name, startSec: action.startSec ?? 0, duration,
           gain: action.gain, leftPadSec: action.leftPadSec ?? 0, bufferOffsetSec: action.bufferOffsetSec ?? 0,
           midiOffsetBeats: action.midiOffsetBeats ?? 0, fades: action.fades ? normalizeClipFades(action.fades, duration) : undefined,
           ...(action.color === undefined ? {} : { color: normalizeClipColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid clip color.') }),
           audioWarp: action.audioWarp ? normalizeAudioWarp(action.audioWarp) : undefined,
-          source: { assetId: asset.id, sourceKind: asset.sourceKind, durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount },
+          source,
         }
         clips.set(id, clip)
         snapshot.clips.push(clip)
@@ -801,10 +843,7 @@ export const planControlRequestV1 = (
       case 'clip.source.set': {
         const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
         if (clip.midi) planError(actionIndex, 'validation', 'MIDI clips cannot have an audio source.')
-        const asset = assets.get(action.asset.id)
-        if (!asset) planError(actionIndex, 'not-found', `Asset "${action.asset.id}" was not found.`)
-        if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
-        const source = { assetId: asset.id, sourceKind: asset.sourceKind, durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount }
+        const source = requireAudioAssetSource(action.asset.id, assets, actionIndex)
         changed = !same(clip.source, source)
         clip.source = source
         break
@@ -1229,7 +1268,7 @@ export const planControlRequestV1 = (
             const trackId = restoredIds.get(item.clip.trackId)
             if (!trackId) planError(actionIndex, 'validation', 'Recovery clip target is unavailable.')
             const id = `recovery:clip:${action.recovery.id}:${item.id}`
-            const clip = { id, ...item.clip, trackId }
+            const clip = recoveredClip(id, item.clip, String(trackId), assets, actionIndex)
             clips.set(id, clip)
             snapshot.clips.push(clip)
           }
@@ -1297,30 +1336,7 @@ export const planControlRequestV1 = (
           if (!track) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
           if (clips.has(String(data.clipId))) planError(actionIndex, 'validation', 'Recovery clip collides with current state.')
           const id = `recovery:clip:${action.recovery.id}`
-          const clip = {
-            id,
-            trackId: data.clip.trackId,
-            name: data.clip.name ?? 'Recovered clip',
-            startSec: data.clip.startSec,
-            duration: data.clip.duration,
-            ...(data.clip.gain === undefined ? {} : { gain: data.clip.gain }),
-            leftPadSec: data.clip.leftPadSec ?? 0,
-            bufferOffsetSec: data.clip.bufferOffsetSec ?? 0,
-            midiOffsetBeats: data.clip.midiOffsetBeats ?? 0,
-            ...(data.clip.fades === undefined ? {} : { fades: data.clip.fades }),
-            ...(data.clip.audioWarp === undefined ? {} : { audioWarp: data.clip.audioWarp }),
-            ...(data.clip.color === undefined ? {} : { color: data.clip.color }),
-            ...(data.clip.midi === undefined ? {} : { midi: data.clip.midi }),
-            ...(data.clip.sourceAssetKey === undefined ? {} : {
-              source: {
-                assetId: data.clip.sourceAssetKey,
-                sourceKind: data.clip.sourceKind,
-                durationSec: data.clip.sourceDurationSec,
-                sampleRate: data.clip.sourceSampleRate,
-                channelCount: data.clip.sourceChannelCount,
-              },
-            }),
-          }
+          const clip = recoveredClip(id, data.clip, data.clip.trackId, assets, actionIndex)
           clips.set(id, clip)
           snapshot.clips.push(clip)
         } else if (availableRecovery.payload.kind === 'asset.delete') {

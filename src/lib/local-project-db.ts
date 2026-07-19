@@ -1,6 +1,7 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { createLocalProjectId, createLocalTrackId } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 1
@@ -88,11 +89,15 @@ export type LocalControlCommitRow = {
   projectId: string
   createdAt: number
   actorSubject: string
+  actorIssuer?: string
+  actorTokenIdentifier?: string
+  actorRole: 'owner'
   idempotencyKey: string
-  request: unknown
+  requestDigest: string
   result: unknown
-  baseRevision: number
+  priorRevision: number
   revision: number
+  applied: boolean
   status: 'completed'
 }
 export type LocalControlApprovalRow = {
@@ -104,6 +109,9 @@ export type LocalControlApprovalRow = {
   actorSubject: string
   requestDigest: string
   baseRevision: number
+  actionIndexes: number[]
+  tokenHash: string
+  consumedAt?: number
 }
 export type LocalControlRecoveryRow = {
   id: string
@@ -128,6 +136,8 @@ export type LocalControlAssetGcRow = {
   storagePath: string
   recoveryId: string
   cloudAssetKey?: string
+  claimToken?: string
+  claimedAt?: number
 }
 export type LocalControlProjectMetadata = {
   version: 1
@@ -488,7 +498,7 @@ export const setLocalProjectMode = async (
   return next
 }
 
-export const importLocalProject = async (
+export const importLocalProjectUnlocked = async (
   project: LocalProjectEntry,
   rows: {
     entities: LocalProjectEntityRow[]
@@ -511,7 +521,17 @@ export const importLocalProject = async (
   await globalDb.put('projects', project)
 }
 
-export const replaceLocalProject = async (
+export const importLocalProject = (
+  project: LocalProjectEntry,
+  rows: {
+    entities: LocalProjectEntityRow[]
+    assets: LocalProjectAssetRow[]
+    projectState: LocalProjectStateRow[]
+    syncState: LocalProjectSyncStateRow[]
+  },
+): Promise<void> => withLocalProjectAssetLock(project.id, () => importLocalProjectUnlocked(project, rows))
+
+const replaceLocalProjectUnlocked = async (
   project: LocalProjectEntry,
   rows: {
     entities: LocalProjectEntityRow[]
@@ -549,6 +569,16 @@ export const replaceLocalProject = async (
   notifyLocalProjectChanged(project.id)
   await deleteLocalProjectAssetFiles(project.id, directoryEntry?.handle, staleAssetPaths)
 }
+
+export const replaceLocalProject = (
+  project: LocalProjectEntry,
+  rows: {
+    entities: LocalProjectEntityRow[]
+    assets: LocalProjectAssetRow[]
+    projectState: LocalProjectStateRow[]
+    syncState: LocalProjectSyncStateRow[]
+  },
+): Promise<void> => withLocalProjectAssetLock(project.id, () => replaceLocalProjectUnlocked(project, rows))
 
 export const exportLocalProjectRows = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
@@ -590,7 +620,7 @@ const deleteLocalProjectAssetFiles = async (
   ])
 }
 
-export const deleteLocalProject = async (projectId: string): Promise<void> => {
+export const deleteLocalProjectUnlocked = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
   const directoryEntry = await db.get('directoryHandles', projectId)
   const dbName = getProjectDbName(projectId)
@@ -610,6 +640,10 @@ export const deleteLocalProject = async (projectId: string): Promise<void> => {
   }
   await deleteDB(dbName)
 }
+
+export const deleteLocalProject = (projectId: string): Promise<void> => (
+  withLocalProjectAssetLock(projectId, () => deleteLocalProjectUnlocked(projectId))
+)
 
 export const purgeLocalProjectCache = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()

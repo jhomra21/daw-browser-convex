@@ -4,6 +4,7 @@ import type { convexApi } from '~/lib/convex'
 import { normalizeAudioWarp, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { getDefaultClipColor } from '~/lib/clip-color'
@@ -131,7 +132,7 @@ const timelineCacheSignature = (input: {
   sidechainRoutes?: Array<{ sourceTrackId: string; targetTrackId: string; effectInstanceId: string }>
 }) => JSON.stringify(input)
 
-export const cacheRemoteTimelineSnapshot = async (
+const cacheRemoteTimelineSnapshotUnlocked = async (
   projectId: string,
   data: FullTimelineView,
 ): Promise<void> => {
@@ -219,3 +220,11 @@ export const cacheRemoteTimelineSnapshot = async (
   ])
   notifyLocalProjectChanged(projectId)
 }
+
+export const cacheRemoteTimelineSnapshot = (
+  projectId: string,
+  data: FullTimelineView,
+): Promise<void> => withLocalProjectAssetLock(
+  projectId,
+  () => cacheRemoteTimelineSnapshotUnlocked(projectId, data),
+)

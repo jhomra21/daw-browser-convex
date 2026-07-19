@@ -72,3 +72,30 @@ test('aborts callback failures and thenables without advancing the control revis
   const state = await withLocalControlTransaction(project.id, 'readonly', (result) => result.state)
   expect(state.revision).toBe(0)
 })
+
+test('fails closed when an existing control state row is malformed', async () => {
+  const project = await createLocalProject(`Control corruption ${crypto.randomUUID()}`)
+  const db = await openLocalProjectDb(project.id)
+  const valid = {
+    key: 'snapshot',
+    value: {
+      version: 1,
+      revision: 1,
+      digest: 'a'.repeat(64),
+      updatedAt: 1,
+    },
+    updatedAt: 1,
+  }
+
+  for (const value of [
+    { ...valid.value, version: 2 },
+    { ...valid.value, revision: -1 },
+    { ...valid.value, digest: 'not-a-digest' },
+    { ...valid.value, updatedAt: -1 },
+  ]) {
+    await db.put('controlState', { ...valid, value })
+    await expect(withLocalControlTransaction(project.id, 'readonly', () => undefined))
+      .rejects.toMatchObject({ kind: 'corruption' })
+    expect(await db.get('controlState', 'snapshot')).toEqual({ ...valid, value })
+  }
+})

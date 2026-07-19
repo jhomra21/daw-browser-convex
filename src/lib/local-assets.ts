@@ -11,6 +11,7 @@ import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 
 type LocalAssetMetadata = {
   sourceKind?: 'upload' | 'url' | 'recording'
@@ -124,7 +125,43 @@ const removeFileIfPresent = async (
   }
 }
 
-export const writeLocalAssetFile = async (
+type LocalAssetRemovalResult =
+  | { status: 'deleted' | 'already-missing' }
+  | { status: 'permission-unavailable' | 'retryable-failure' }
+
+/** Removes a retained asset without prompting or publishing a project change. */
+export const removeLocalAssetFileUnlocked = async (
+  projectId: string,
+  storagePath: string,
+): Promise<LocalAssetRemovalResult> => {
+  const directoryHandle = await getProjectDirectoryHandle(projectId)
+  if (directoryHandle) {
+    const permission = await queryFileSystemHandlePermission(directoryHandle, 'readwrite')
+    if (permission !== 'granted') return { status: 'permission-unavailable' }
+  }
+  try {
+    const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
+    const assets = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+    await assets.removeEntry(storagePath)
+    return { status: 'deleted' }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') {
+      return { status: 'already-missing' }
+    }
+    if (isPermissionError(error)) return { status: 'permission-unavailable' }
+    return { status: 'retryable-failure' }
+  }
+}
+
+export const removeLocalAssetFile = (
+  projectId: string,
+  storagePath: string,
+): Promise<LocalAssetRemovalResult> => (
+  withLocalProjectAssetLock(projectId, () => removeLocalAssetFileUnlocked(projectId, storagePath))
+)
+
+/** Caller must hold the project asset lock. */
+export const writeLocalAssetFileUnlocked = async (
   projectId: string,
   path: string,
   file: File,
@@ -136,7 +173,15 @@ export const writeLocalAssetFile = async (
   await writeFile(root, path, file)
 }
 
-export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
+export const writeLocalAssetFile = async (
+  projectId: string,
+  path: string,
+  file: File,
+): Promise<void> => {
+  await withLocalProjectAssetLock(projectId, () => writeLocalAssetFileUnlocked(projectId, path, file))
+}
+
+const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
   const root = await getWritableProjectRoot(input.projectId)
   if (!root) {
     throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
@@ -176,6 +221,10 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
   return row
 }
 
+export const createLocalAsset = (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => (
+  withLocalProjectAssetLock(input.projectId, () => createLocalAssetUnlocked(input))
+)
+
 export const getLocalAsset = async (
   projectId: string,
   assetId: string,
@@ -194,28 +243,30 @@ export const setLocalProjectAssetDirectory = async (
   projectId: string,
   nextRoot: FileSystemDirectoryHandle,
 ): Promise<void> => {
-  const rows = await listLocalAssets(projectId)
-  await requireWritableDirectory(nextRoot)
-  const previousRoot = await getWritableProjectRoot(projectId)
-  if (rows.length === 0) {
-    await saveProjectDirectoryHandle(projectId, nextRoot)
-    return
-  }
-  if (!previousRoot) {
-    throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
-  }
+  await withLocalProjectAssetLock(projectId, async () => {
+    const rows = await listLocalAssets(projectId)
+    await requireWritableDirectory(nextRoot)
+    const previousRoot = await getWritableProjectRoot(projectId)
+    if (rows.length === 0) {
+      await saveProjectDirectoryHandle(projectId, nextRoot)
+      return
+    }
+    if (!previousRoot) {
+      throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
+    }
 
-  try {
-    const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
-    await Promise.all(rows.map(async (row) => {
-      const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
-      await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
-    }))
-  } catch (error) {
-    if (error instanceof LocalAssetWriteError) throw error
-    throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
-  }
-  await saveProjectDirectoryHandle(projectId, nextRoot)
+    try {
+      const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+      await Promise.all(rows.map(async (row) => {
+        const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
+        await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
+      }))
+    } catch (error) {
+      if (error instanceof LocalAssetWriteError) throw error
+      throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
+    }
+    await saveProjectDirectoryHandle(projectId, nextRoot)
+  })
 }
 
 export const readLocalAssetBytes = async (
@@ -244,7 +295,7 @@ export const readLocalAssetBytes = async (
   }
 }
 
-export const deleteLocalAsset = async (
+const deleteLocalAssetUnlocked = async (
   projectId: string,
   assetId: string,
 ): Promise<void> => {
@@ -270,3 +321,8 @@ export const deleteLocalAsset = async (
   }
   notifyLocalProjectChanged(projectId)
 }
+
+export const deleteLocalAsset = (
+  projectId: string,
+  assetId: string,
+): Promise<void> => withLocalProjectAssetLock(projectId, () => deleteLocalAssetUnlocked(projectId, assetId))

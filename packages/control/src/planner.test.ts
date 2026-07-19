@@ -224,6 +224,65 @@ test("rejects incomplete authoritative audio assets and projects complete source
   });
 });
 
+test("validates recovered audio clip sources against the projected asset set", () => {
+  const audioAsset = {
+    id: "asset-1", name: "Audio", sourceKind: "upload", mimeType: "audio/wav",
+    sizeBytes: 1, contentSha256: "a".repeat(64), durationSec: 2, sampleRate: 48_000, channelCount: 2,
+    createdAt: 0, updatedAt: 0,
+  };
+  const audioClip = {
+    projectId: "project-1", trackId: "track-1", name: "Audio", startSec: 0, duration: 1,
+    sourceAssetKey: "asset-1", sourceKind: "upload", sourceDurationSec: 2,
+    sourceSampleRate: 48_000, sourceChannelCount: 2,
+  };
+  const clipRecovery = { payload: { kind: "clip.delete", data: { clipId: "clip-1", clip: audioClip } } };
+  const base = snapshot();
+  base.tracks[0].kind = "audio";
+  base.clips = [];
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "recovery.restore", recovery: { id: "clip" } }],
+  }, new Map([["clip", clipRecovery]]))).toThrow('Asset "asset-1" was not found.')
+
+  const assetRecovery = { payload: { kind: "asset.delete", data: { asset: {
+    assetKey: "asset-1", name: audioAsset.name, sourceKind: audioAsset.sourceKind,
+    mimeType: audioAsset.mimeType, sizeBytes: audioAsset.sizeBytes, contentSha256: audioAsset.contentSha256,
+    duration: audioAsset.durationSec, sampleRate: audioAsset.sampleRate, channelCount: audioAsset.channelCount,
+    createdAt: audioAsset.createdAt, updatedAt: audioAsset.updatedAt,
+  } } } };
+  const recoveries = new Map<string, { payload: { kind: string; data: any } }>()
+  recoveries.set("asset", assetRecovery)
+  recoveries.set("clip", clipRecovery)
+  const restored = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "recovery.restore", recovery: { id: "asset" } },
+      { kind: "recovery.restore", recovery: { id: "clip" } },
+    ],
+  }, recoveries);
+  expect(restored.snapshot.clips[0]?.source).toEqual({
+    assetId: "asset-1", sourceKind: "upload", durationSec: 2, sampleRate: 48_000, channelCount: 2,
+  });
+
+  const trackRecovery = { payload: {
+    kind: "track.delete",
+    data: {
+      rootTrackId: "track-1",
+      tracks: [{ id: "track-1", track: {
+        projectId: "project-1", name: "Audio", index: 0, kind: "audio",
+        mixer: { volume: 1, channelRole: "track", sends: [] },
+      } }],
+      clips: [{ id: "clip-1", clip: audioClip }],
+      effects: [], automation: [], sidechains: [], survivors: [],
+    },
+  } };
+  const trackBase = { ...base, tracks: [] };
+  expect(() => planControlRequestV1(trackBase, {
+    projectId: "project-1",
+    actions: [{ kind: "recovery.restore", recovery: { id: "track" } }],
+  }, new Map([["track", trackRecovery]]))).toThrow('Asset "asset-1" was not found.')
+});
+
 test("normalizes fades when shrinking a clip and preserves omitted offsets", () => {
   const plan = planControlRequestV1(snapshot(), {
     projectId: "project-1",

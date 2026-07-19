@@ -31,7 +31,17 @@ type LocalControlSnapshotState = {
   updatedAt: number
 }
 
-type LocalControlTransactionResult = {
+export class LocalControlTransactionError extends Error {
+  readonly kind: 'not-found' | 'limit-exceeded' | 'corruption'
+
+  constructor(kind: 'not-found' | 'limit-exceeded' | 'corruption') {
+    super(kind)
+    this.name = 'LocalControlTransactionError'
+    this.kind = kind
+  }
+}
+
+export type LocalControlTransactionResult = {
   snapshot: ProjectSnapshotV1
   state: LocalControlSnapshotState
   rows: {
@@ -49,6 +59,7 @@ type LocalControlTransactionResult = {
     entity: (row: LocalProjectEntityRow) => void
     asset: (row: LocalProjectAssetRow) => void
     projectState: (row: LocalProjectStateRow) => void
+    syncState: (row: LocalProjectSyncStateRow) => void
     commit: (row: LocalControlCommitRow) => void
     approval: (row: LocalControlApprovalRow) => void
     recovery: (row: LocalControlRecoveryRow) => void
@@ -58,6 +69,7 @@ type LocalControlTransactionResult = {
     entity: (kind: string, id: string) => void
     asset: (id: string) => void
     projectState: (key: string) => void
+    syncState: (key: string) => void
     commit: (id: string) => void
     approval: (id: string) => void
     recovery: (id: string) => void
@@ -68,9 +80,15 @@ type LocalControlTransactionResult = {
 const controlState = (value: unknown): LocalControlSnapshotState | undefined => {
   if (
     !isRecord(value)
+    || value.version !== 1
     || typeof value.revision !== 'number'
+    || !Number.isInteger(value.revision)
+    || value.revision < 0
     || typeof value.digest !== 'string'
+    || !/^[0-9a-f]{64}$/u.test(value.digest)
     || typeof value.updatedAt !== 'number'
+    || !Number.isInteger(value.updatedAt)
+    || value.updatedAt < 0
   ) return undefined
   return { version: 1, revision: value.revision, digest: value.digest, updatedAt: value.updatedAt }
 }
@@ -123,7 +141,7 @@ const runLocalControlTransaction = async <Value>(
 ): Promise<Value> => {
   await flushLocalProjectPendingWrites(projectId)
   const project = await getLocalProject(projectId)
-  if (!project) throw new Error('Local project not found.')
+  if (!project) throw new LocalControlTransactionError('not-found')
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   const [entities, assets, projectState, syncState, currentRow, commits, approvals, recoveries, assetGc] = await Promise.all([
@@ -139,9 +157,13 @@ const runLocalControlTransaction = async <Value>(
   ])
   if (commits.length > 2049 || recoveries.length > 2049 || approvals.length > 129 || assetGc.length > 1001) {
     abortLocalControlTransaction(tx)
-    throw new Error('Local control transaction limit exceeded.')
+    throw new LocalControlTransactionError('limit-exceeded')
   }
-  const current = controlState(currentRow?.value)
+  const current = currentRow === undefined ? undefined : controlState(currentRow.value)
+  if (currentRow !== undefined && current === undefined) {
+    abortLocalControlTransaction(tx)
+    throw new LocalControlTransactionError('corruption')
+  }
   const initialRevision = current?.revision ?? 0
   let snapshot = projectLocalControlSnapshotV1({
     projectId,
@@ -219,6 +241,7 @@ const runLocalControlTransaction = async <Value>(
       entity: (row) => { writes.push(() => { tx.objectStore('entities').put(row) }) },
       asset: (row) => { writes.push(() => { tx.objectStore('assets').put(row) }) },
       projectState: (row) => { writes.push(() => { tx.objectStore('projectState').put(row) }) },
+      syncState: (row) => { writes.push(() => { tx.objectStore('syncState').put(row) }) },
       commit: (row) => { writes.push(() => { tx.objectStore('controlCommits').put(row) }) },
       approval: (row) => { writes.push(() => { tx.objectStore('controlApprovals').put(row) }) },
       recovery: (row) => { writes.push(() => { tx.objectStore('controlRecoveries').put(row) }) },
@@ -228,6 +251,7 @@ const runLocalControlTransaction = async <Value>(
       entity: (kind, id) => { removals.push(() => { tx.objectStore('entities').delete([kind, id]) }) },
       asset: (id) => { removals.push(() => { tx.objectStore('assets').delete(id) }) },
       projectState: (key) => { removals.push(() => { tx.objectStore('projectState').delete(key) }) },
+      syncState: (key) => { removals.push(() => { tx.objectStore('syncState').delete(key) }) },
       commit: (id) => { removals.push(() => { tx.objectStore('controlCommits').delete(id) }) },
       approval: (id) => { removals.push(() => { tx.objectStore('controlApprovals').delete(id) }) },
       recovery: (id) => { removals.push(() => { tx.objectStore('controlRecoveries').delete(id) }) },

@@ -16,8 +16,9 @@ import {
   createLocalTrackId,
 } from '@daw-browser/shared'
 import { localEffectRowId, localSidechainRouteRowId, type LocalEffectRow } from '~/lib/local-effects'
+import type { LocalControlRecoveryRow } from '~/lib/local-project-db'
 import { materializeLocalControlSnapshot } from './local-control-model'
-import { withLocalControlTransaction } from './local-control-state'
+import { withLocalControlTransaction, type LocalControlTransactionResult } from './local-control-state'
 import {
   captureLocalRecoveryPayload,
   localRecoveryLifetimeMs,
@@ -25,6 +26,7 @@ import {
 } from './local-control-recovery'
 import { projectLocalControlSnapshotV1 } from './local-control-projector'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
+import { localControlAssetGcLeaseMs } from './local-control-asset-gc'
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -297,7 +299,8 @@ const removedCanonicalEntityKeys = (
   return new Set(Array.from(canonicalEntityKeys(before)).filter((key) => !afterKeys.has(key)))
 }
 
-export const executeLocalControlRequestV1 = (
+export const executeLocalControlRequestInTransactionV1 = (
+  context: LocalControlTransactionResult,
   input: { projectId: string; actions: ControlActionV1[]; actorSubject?: string },
 ) => {
   const request = parseControlPreviewRequestV1({
@@ -309,12 +312,12 @@ export const executeLocalControlRequestV1 = (
   if (duplicateRecoveryActionIndex !== undefined) {
     throw { code: 'validation', message: 'Recovery IDs must be restored at most once per request.', actionIndex: duplicateRecoveryActionIndex }
   }
-  return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
   const actorSubject = input.actorSubject ?? 'local'
   const ids = new Map<string, string>()
   const instanceIds = new Map<string, string>()
   const clientRefs = new Map<string, string>()
   const recoveries: Array<{ actionIndex: number; id: string; kind: string; expiresAt: number }> = []
+  const recoveryRows: LocalControlRecoveryRow[] = []
   const restored: Array<{ actionIndex: number; recoveryId: string; entities: Array<{ entity: string; sourceId: string; restoredId: string }> }> = []
   const assetFallbacks = new Map<string, typeof context.rows.assets[number]>()
   let current = context.snapshot
@@ -381,7 +384,7 @@ export const executeLocalControlRequestV1 = (
         const createdAt = Date.now()
         const serialized = serializeLocalRecoveryPayload(payload)
         const expiresAt = createdAt + localRecoveryLifetimeMs
-        context.write.recovery({
+        const recoveryRow: LocalControlRecoveryRow = {
           id,
           version: 1,
           projectId: request.projectId,
@@ -392,7 +395,9 @@ export const executeLocalControlRequestV1 = (
           payloadHash: serialized.payloadHash,
           createdAt,
           expiresAt,
-        })
+        }
+        context.write.recovery(recoveryRow)
+        recoveryRows.push(recoveryRow)
         if (payload.kind === 'asset.delete') {
           if (!('storagePath' in payload.data.asset)) throw new Error('Cloud recovery assets cannot be restored locally.')
           context.write.assetGc({
@@ -509,6 +514,14 @@ export const executeLocalControlRequestV1 = (
     if (originalAction.kind === 'recovery.restore' && entry.changed) {
       const recovery = recoveryById.get(originalAction.recovery.id)
       if (!recovery) throw new Error('Recovery is unavailable.')
+      const gc = context.rows.assetGc.find((row) => row.recoveryId === originalAction.recovery.id)
+      if (gc?.claimedAt !== undefined && gc.claimedAt > Date.now() - localControlAssetGcLeaseMs) {
+        throw {
+          code: 'validation',
+          message: 'Recovery asset bytes are being deleted.',
+          actionIndex,
+        }
+      }
       context.write.recovery({
         ...context.rows.recoveries.find((row) => row.id === originalAction.recovery.id)!,
         consumedAt: Date.now(),
@@ -592,8 +605,16 @@ export const executeLocalControlRequestV1 = (
       return id && survives ? [{ ...ref, id, persisted: true }] : []
     }),
     recoveries,
+    recoveryRows,
     restored,
     plan: fullPlan,
   }
-})
 }
+
+export const executeLocalControlRequestV1 = (
+  input: { projectId: string; actions: ControlActionV1[]; actorSubject?: string },
+) => withLocalControlTransaction(
+  input.projectId,
+  'readwrite',
+  (context) => executeLocalControlRequestInTransactionV1(context, input),
+)

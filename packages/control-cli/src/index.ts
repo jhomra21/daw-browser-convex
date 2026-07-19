@@ -13,17 +13,24 @@ import {
   controlLimitsV1,
   type ControlErrorV1,
 } from "@daw-browser/control"
+import {
+  desktopRequestSchemaV1,
+  desktopProtocolVersion,
+  hostError,
+  type HostErrorV1,
+  type DesktopControlOperationV1,
+} from "@daw-browser/desktop-protocol"
 import { ControlApiError, createControlClient } from "@daw-browser/control-sdk"
 import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
 import { credentialIdentity, createCredentialStore } from "./credentials"
-import { createHostClient } from "./host"
-import { desktopRequestSchemaV1, desktopProtocolVersion } from "@daw-browser/desktop-protocol"
+import { createHostClient, DesktopControlError, DesktopHostError } from "./host"
+export { DesktopControlError, DesktopHostError } from "./host"
 
 const commandNames = [
-  "auth login --base-url <origin>", "auth status", "auth logout", "capabilities",
-  "snapshot <project-id>", "preview --request <file|->", "approval --request <file|->", "commit --request <file|->",
-  "history <project-id> [--cursor <cursor>] [--limit <number>]",
-  "recoveries <project-id> [--cursor <cursor>] [--limit <number>]",
+  "auth login --base-url <origin>", "auth status", "auth logout", "capabilities [--target <cloud|host>]",
+  "snapshot <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
+  "history <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
+  "recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "host status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
   "host import (--path <absolute-path>|--picker)", "host export --request <file|->", "host export-status", "host export-cancel <job-id>",
 ]
@@ -56,7 +63,7 @@ const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 =>
   message,
 })
 
-const toControlError = (cause: unknown): ControlErrorV1 => {
+const toCommandError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
   if (cause instanceof ControlApiError) {
     return {
       version: "v1",
@@ -66,6 +73,7 @@ const toControlError = (cause: unknown): ControlErrorV1 => {
       ...(cause.actionIndex === undefined ? {} : { actionIndex: cause.actionIndex }),
     }
   }
+  if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) return cause.data
   const parsed = controlErrorSchemaV1.safeParse(cause)
   if (parsed.success) return parsed.data
   return error("invalid-request", cause instanceof Error ? cause.message.slice(0, 1000) : "Invalid command.")
@@ -139,6 +147,65 @@ const historyArguments = (arguments_: string[]) => {
     else limit = value
   }
   return { projectId, cursor, limit }
+}
+
+type ControlTarget = "cloud" | "host"
+
+const canonicalControlOperations = {
+  capabilities: "control.capabilities",
+  snapshot: "control.snapshot",
+  preview: "control.preview",
+  approval: "control.requestApproval",
+  commit: "control.commit",
+  history: "control.history",
+  recoveries: "control.recoveries",
+} satisfies Record<string, DesktopControlOperationV1>
+
+type CanonicalCommand = keyof typeof canonicalControlOperations
+
+const isCanonicalCommand = (command: string): command is CanonicalCommand => Object.hasOwn(canonicalControlOperations, command)
+
+const stripTarget = (arguments_: string[]): { target: ControlTarget; arguments_: string[] } => {
+  let target: ControlTarget = "cloud"
+  let targetSeen = false
+  const rest: string[] = []
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const value = arguments_[index]
+    if (value !== "--target") {
+      rest.push(value)
+      continue
+    }
+    if (targetSeen || index + 1 >= arguments_.length) throw new Error("Invalid control target.")
+    const targetValue = arguments_[index + 1]
+    if (targetValue !== "cloud" && targetValue !== "host") throw new Error("Invalid control target.")
+    target = targetValue
+    targetSeen = true
+    index += 1
+  }
+  return { target, arguments_: rest }
+}
+
+class HostTargetUnavailableError extends Error {
+  readonly data = hostError("unavailable", "Desktop control host is unavailable.")
+
+  constructor() {
+    super("Desktop control host is unavailable.")
+    this.name = "HostTargetUnavailableError"
+  }
+}
+
+const requestHostControl = async (operation: DesktopControlOperationV1, input: unknown) => {
+  try {
+    const client = await createHostClient()
+    try {
+      return await client.request(operation, input)
+    } finally {
+      client.close()
+    }
+  } catch (cause) {
+    if (cause instanceof DesktopControlError || cause instanceof DesktopHostError) throw cause
+    throw new HostTargetUnavailableError()
+  }
 }
 
 export const runCli = async (arguments_: string[], io: Io = processIo): Promise<number> => {
@@ -220,8 +287,8 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
         client.close()
       }
     }
-    const store = createCredentialStore()
     if (command === "auth login") {
+      const store = createCredentialStore()
       const baseUrl = baseUrlFor(commandArguments)
       await login(baseUrl, { store, writeStderr: io.stderr })
       io.stdout(canonicalJson({ version: "v1", ok: true, command, data: { baseUrl } }))
@@ -229,6 +296,7 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
     }
     if (command === "auth status") {
       if (commandArguments.length !== 0) throw new Error("auth status accepts no arguments.")
+      const store = createCredentialStore()
       const credentials = await store.read()
       io.stdout(canonicalJson({
         version: "v1",
@@ -242,49 +310,81 @@ export const runCli = async (arguments_: string[], io: Io = processIo): Promise<
     }
     if (command === "auth logout") {
       if (commandArguments.length !== 0) throw new Error("auth logout accepts no arguments.")
+      const store = createCredentialStore()
       const result = await logout(store)
       io.stdout(canonicalJson({ version: "v1", ok: true, command, data: result }))
       return 0
     }
-    const credentials = await store.read()
-    if (!credentials) throw new Error("Run daw-control auth login first.")
-    const client = createControlClient({
-      baseUrl: credentials.baseUrl,
-      accessToken: createAccessTokenProvider(credentialIdentity(credentials), store),
-    })
+    if (!isCanonicalCommand(command)) throw new Error("Unknown command.")
+    const routing = stripTarget(commandArguments)
+    const canonicalArguments = routing.arguments_
+    const cloudClient = async () => {
+      const store = createCredentialStore()
+      const credentials = await store.read()
+      if (!credentials) throw new Error("Run daw-control auth login first.")
+      return createControlClient({
+        baseUrl: credentials.baseUrl,
+        accessToken: createAccessTokenProvider(credentialIdentity(credentials), store),
+      })
+    }
     let data: unknown
     if (command === "capabilities") {
-      if (commandArguments.length !== 0) throw new Error("capabilities accepts no arguments.")
-      data = await client.capabilities()
+      if (canonicalArguments.length !== 0) throw new Error("capabilities accepts no arguments.")
+      if (routing.target === "host") {
+        data = await requestHostControl(canonicalControlOperations[command], {})
+      } else {
+        const client = await cloudClient()
+        data = await client.capabilities()
+      }
     } else if (command === "snapshot") {
-      if (commandArguments.length !== 1) throw new Error("snapshot requires a project ID.")
-      data = await client.snapshot(controlSnapshotQuerySchemaV1.parse({ projectId: commandArguments[0] }).projectId)
+      if (canonicalArguments.length !== 1) throw new Error("snapshot requires a project ID.")
+      const input = controlSnapshotQuerySchemaV1.parse({ projectId: canonicalArguments[0] })
+      if (routing.target === "host") {
+        data = await requestHostControl(canonicalControlOperations[command], input)
+      } else {
+        const client = await cloudClient()
+        data = await client.snapshot(input.projectId)
+      }
     } else if (command === "preview" || command === "approval" || command === "commit") {
-      const source = option(commandArguments, "--request")
-      if (!source || commandArguments.length !== 2 || commandArguments[0] !== "--request") throw new Error(`${command} requires --request <file|->.`)
+      const source = option(canonicalArguments, "--request")
+      if (!source || canonicalArguments.length !== 2 || canonicalArguments[0] !== "--request") throw new Error(`${command} requires --request <file|->.`)
       const parsed = await jsonRequest(source, io)
-      data = command === "preview"
-        ? await client.preview(controlPreviewRequestSchemaV1.parse(parsed))
+      const input = command === "preview"
+        ? controlPreviewRequestSchemaV1.parse(parsed)
         : command === "approval"
-          ? await client.requestApproval(controlApprovalRequestSchemaV1.parse(parsed))
-          : await client.commit(controlCommitRequestSchemaV1.parse(parsed))
+          ? controlApprovalRequestSchemaV1.parse(parsed)
+          : controlCommitRequestSchemaV1.parse(parsed)
+      if (routing.target === "host") {
+        data = await requestHostControl(canonicalControlOperations[command], input)
+      } else {
+        const client = await cloudClient()
+        if (command === "preview") data = await client.preview(input)
+        else if (command === "approval") data = await client.requestApproval(input)
+        else data = await client.commit(controlCommitRequestSchemaV1.parse(parsed))
+      }
     } else if (command === "history" || command === "recoveries") {
-      const { projectId, cursor, limit } = historyArguments(commandArguments)
+      const { projectId, cursor, limit } = historyArguments(canonicalArguments)
       const query = {
         projectId,
         ...(cursor === undefined ? {} : { cursor }),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
       }
-      data = command === "history"
-        ? await client.history(controlHistoryQuerySchemaV1.parse(query))
-        : await client.recoveries(controlRecoveriesQuerySchemaV1.parse(query))
-    } else {
-      throw new Error("Unknown command.")
+      const input = command === "history"
+        ? controlHistoryQuerySchemaV1.parse(query)
+        : controlRecoveriesQuerySchemaV1.parse(query)
+      if (routing.target === "host") {
+        data = await requestHostControl(canonicalControlOperations[command], input)
+      } else {
+        const client = await cloudClient()
+        data = command === "history"
+          ? await client.history(input)
+          : await client.recoveries(input)
+      }
     }
     io.stdout(canonicalJson({ version: "v1", ok: true, command, data }))
     return 0
   } catch (cause) {
-    const commandError = toControlError(cause)
+    const commandError = toCommandError(cause)
     io.stderr(canonicalJson({ version: "v1", ok: false, command, error: commandError }))
     return 1
   }

@@ -1,10 +1,24 @@
 import type { Accessor } from "solid-js"
 import { isLocalId } from "@daw-browser/shared"
+import {
+  desktopHostExportRunInputSchemaV1,
+  desktopRendererExportInputSchemaV1,
+  desktopRendererImportInputSchemaV1,
+  isDesktopControlOperation,
+  parseDesktopResult,
+  type ControlErrorV1,
+  type DesktopOperationMapV1,
+  type DesktopOperationV1,
+} from "@daw-browser/desktop-protocol"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
+import { getLocalProject } from "~/lib/local-project-db"
+import {
+  createLocalControlService,
+  LocalControlServiceError,
+} from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
-import { desktopHostExportRunInputSchemaV1, desktopRendererExportInputSchemaV1, desktopRendererImportInputSchemaV1, type DesktopOperationMapV1, type DesktopOperationV1 } from "@daw-browser/desktop-protocol"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { ImportSummary } from "~/hooks/useTimelineClipImport"
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
@@ -17,12 +31,13 @@ type HostRequest = {
   operation: DesktopOperationV1
   input: unknown
   signal: AbortSignal
+  actorSubject?: string
 }
 
 type HostResponse = {
   id: string
   result?: unknown
-  error?: { version: "v1"; code: "invalid-request" | "unavailable" | "cancelled" | "deadline-exceeded" | "internal"; message: string }
+  error?: { version: "v1"; code: "invalid-request" | "unavailable" | "cancelled" | "deadline-exceeded" | "internal"; message: string } | ControlErrorV1
 }
 
 type TimelineHostController = {
@@ -57,6 +72,19 @@ const cancelled = (id: string): HostResponse => ({
   id,
   error: { version: "v1", code: "cancelled", message: "The request was cancelled." },
 })
+
+const mountedProjectRequired = (): ControlErrorV1 => ({
+  version: "v1",
+  code: "not-found",
+  message: "A mounted local project is required.",
+})
+const controlUnavailable = (): ControlErrorV1 => ({
+  version: "v1",
+  code: "internal",
+  message: "The local control request was cancelled.",
+})
+
+class ControlRequestUnavailableError extends Error {}
 
 let activeController: TimelineHostController | undefined
 
@@ -148,6 +176,7 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
 
 export const createAttachedHostController = (input: {
   projectId: Accessor<string>
+  mountedProjectGeneration: Accessor<number>
   isPlaying: Accessor<boolean>
   playheadSec: Accessor<number>
   tracks: Accessor<{ clips: unknown[] }[]>
@@ -160,8 +189,10 @@ export const createAttachedHostController = (input: {
   exportQueue: ExportQueue
   importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
+  getMountedLocalProject?: typeof getLocalProject
 }): TimelineHostController => {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
+  const findMountedLocalProject = input.getMountedLocalProject ?? getLocalProject
   const transport = () => ({
     state: input.isPlaying() ? "playing" as const : input.playheadSec() === 0 ? "stopped" as const : "paused" as const,
     playheadSec: Math.max(0, input.playheadSec()),
@@ -175,11 +206,89 @@ export const createAttachedHostController = (input: {
       capabilities: { playback: true, diagnostics: true },
     }
   }
+  const ensureMountedLocalProject = async (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => {
+    if (
+      signal.aborted
+      || activeController !== controller
+      || input.projectId() !== mountedProjectId
+      || input.mountedProjectGeneration() !== mountedGeneration
+      || !isLocalId("project", mountedProjectId)
+    ) return false
+    const project = await findMountedLocalProject(mountedProjectId)
+    return !signal.aborted
+      && activeController === controller
+      && input.projectId() === mountedProjectId
+      && input.mountedProjectGeneration() === mountedGeneration
+      && project !== undefined
+  }
+  const control = async (request_: HostRequest): Promise<HostResponse> => {
+    if (!request_.actorSubject) {
+      return {
+        id: request_.id,
+        error: { version: "v1", code: "authorization", message: "A trusted local control actor is required." },
+      }
+    }
+    const mountedProjectId = input.projectId()
+    const mountedGeneration = input.mountedProjectGeneration()
+    if (!mountedProjectId || !await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+      return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+    }
+    if (
+      request_.operation !== "control.capabilities"
+      && (
+        typeof request_.input !== "object"
+        || request_.input === null
+        || !("projectId" in request_.input)
+        || request_.input.projectId !== mountedProjectId
+      )
+    ) return { id: request_.id, error: mountedProjectRequired() }
+    try {
+      const service = createLocalControlService({
+        actor: { subject: request_.actorSubject, issuer: "daw-browser-desktop-host" },
+        assertAvailable: () => {
+          if (
+            request_.signal.aborted
+            || activeController !== controller
+            || input.projectId() !== mountedProjectId
+            || input.mountedProjectGeneration() !== mountedGeneration
+            || !isLocalId("project", mountedProjectId)
+          ) throw new ControlRequestUnavailableError()
+        },
+      })
+      const result = request_.operation === "control.capabilities"
+        ? service.capabilities()
+        : request_.operation === "control.snapshot"
+          ? await service.snapshot(request_.input)
+          : request_.operation === "control.preview"
+            ? await service.preview(request_.input)
+            : request_.operation === "control.commit"
+              ? await service.commit(request_.input)
+              : request_.operation === "control.requestApproval"
+                ? await service.requestApproval(request_.input)
+                : request_.operation === "control.history"
+                  ? await service.history(request_.input)
+                  : await service.recoveries(request_.input)
+      if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+      }
+      return { id: request_.id, result: parseDesktopResult(request_.operation, result) }
+    } catch (error) {
+      if (error instanceof ControlRequestUnavailableError) {
+        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+      }
+      if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+        return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
+      }
+      if (error instanceof LocalControlServiceError) return { id: request_.id, error: error.data }
+      return { id: request_.id, error: { version: "v1", code: "internal", message: "The local control request could not be completed." } }
+    }
+  }
   const request = async (request_: HostRequest): Promise<HostResponse> => {
-    if (activeController === undefined) return unavailable(request_.id)
+    if (activeController !== controller) return unavailable(request_.id)
     if (request_.signal.aborted) return cancelled(request_.id)
     try {
       let result: DesktopOperationMapV1[DesktopOperationV1]["result"]
+      if (isDesktopControlOperation(request_.operation)) return control(request_)
       if (request_.operation === "host.status") result = status()
       else if (request_.operation === "host.import.audio") {
         const input_ = request_.input
@@ -297,5 +406,6 @@ export const createAttachedHostController = (input: {
       return false
     }
   }
-  return { request, prepareToClose }
+  const controller: TimelineHostController = { request, prepareToClose }
+  return controller
 }

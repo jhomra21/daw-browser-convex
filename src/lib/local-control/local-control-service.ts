@@ -230,10 +230,14 @@ const parseApprovalRow = (value: unknown): LocalControlApprovalRow | undefined =
   }
 }
 
-const serviceOperation = async <Value>(callback: () => Promise<Value>): Promise<Value> => {
+const serviceOperation = async <Value>(
+  callback: () => Promise<Value>,
+  isAvailabilityFailure?: (error: unknown) => boolean,
+): Promise<Value> => {
   try {
     return await callback()
   } catch (error) {
+    if (isAvailabilityFailure?.(error)) throw error
     if (error instanceof LocalControlServiceError) throw error
     if (error instanceof LocalControlTransactionError) {
       if (error.kind === 'not-found') return fail('not-found', 'Local project was not found.')
@@ -367,6 +371,7 @@ const prune = (
 export const createLocalControlService = (input: {
   actor: { subject: string; issuer?: string; tokenIdentifier?: string }
   projectId?: string
+  assertAvailable?: () => void
 }) => {
   if (
     !isBoundedText(input.actor.subject)
@@ -376,12 +381,26 @@ export const createLocalControlService = (input: {
     fail('authorization', 'Local control actor subject is invalid.')
   }
   const actor = input.actor
+  const availabilityFailures = new WeakSet<object>()
+  const assertAvailable = () => {
+    try {
+      input.assertAvailable?.()
+    } catch (error) {
+      if (typeof error === 'object' && error !== null) availabilityFailures.add(error)
+      throw error
+    }
+  }
+  const isAvailabilityFailure = (error: unknown) => (
+    typeof error === 'object' && error !== null && availabilityFailures.has(error)
+  )
   if (input.projectId !== undefined) void runAssetGcMaintenance(input.projectId)
 
   const preview = async (inputValue: unknown) => {
     const request = parseRequest(inputValue, parseControlPreviewRequestV1, 'control preview')
     const requestDigest = controlRequestDigestSyncV1(request)
+    assertAvailable()
     return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+      assertAvailable()
       if (request.expectedRevision !== undefined && request.expectedRevision !== context.snapshot.project.revision) {
         fail('revision-conflict', 'Project revision does not match the expected revision.')
       }
@@ -400,7 +419,9 @@ export const createLocalControlService = (input: {
     const approvalToken = token()
     const tokenHash = hashApprovalToken(approvalToken)
     const requestDigest = controlRequestDigestSyncV1(request)
+    assertAvailable()
     return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+      assertAvailable()
       if (request.expectedRevision !== undefined && request.expectedRevision !== context.snapshot.project.revision) {
         fail('revision-conflict', 'Project revision does not match the expected revision.')
       }
@@ -443,7 +464,11 @@ export const createLocalControlService = (input: {
     const approvalTokenHash = request.approvalToken === undefined
       ? undefined
       : hashApprovalToken(request.approvalToken)
-    const outcome = await withLocalProjectAssetLock(request.projectId, () => withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+    assertAvailable()
+    const outcome = await withLocalProjectAssetLock(request.projectId, () => {
+      assertAvailable()
+      return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+        assertAvailable()
       const matching = context.rows.commits.filter((row) => (
         row.projectId === request.projectId && row.actorSubject === actor.subject
         && row.idempotencyKey === request.idempotencyKey
@@ -526,7 +551,8 @@ export const createLocalControlService = (input: {
         new Set(execution.restored.map((restored) => restored.recoveryId)),
       )
       return { result, notify: result.applied }
-    }))
+      })
+    })
     let gcFinalized = false
     try {
       gcFinalized = (await runLocalControlAssetGc(request.projectId, { notify: false })).finalized
@@ -537,8 +563,13 @@ export const createLocalControlService = (input: {
 
   const snapshot = async (inputValue: unknown) => {
     const request = parse(() => parseControlSnapshotQueryV1(inputValue), 'Invalid control snapshot request.')
+    assertAvailable()
     await runAssetGcMaintenance(request.projectId)
-    return withLocalControlTransaction(request.projectId, 'readwrite', (context) => projectSnapshotSchemaV1.parse(context.snapshot))
+    assertAvailable()
+    return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+      assertAvailable()
+      return projectSnapshotSchemaV1.parse(context.snapshot)
+    })
   }
 
   const page = async (inputValue: unknown, kind: 'history' | 'recoveries') => {
@@ -546,8 +577,11 @@ export const createLocalControlService = (input: {
       kind === 'history' ? parseControlHistoryQueryV1(inputValue) : parseControlRecoveriesQueryV1(inputValue)
     ), `Invalid ${kind} request.`)
     const cursor = parse(() => parseLocalControlCursor(request.cursor, kind), `Invalid ${kind} cursor.`)
+    assertAvailable()
     await runAssetGcMaintenance(request.projectId)
+    assertAvailable()
     return withLocalControlTransaction(request.projectId, 'readwrite', (context) => {
+      assertAvailable()
       if (kind === 'history') {
         const rows = context.rows.commits.filter((row) => row.projectId === request.projectId).sort(compareNewest)
         const filtered = cursor === undefined ? rows : rows.filter((row) => (
@@ -606,11 +640,11 @@ export const createLocalControlService = (input: {
 
   return {
     capabilities: () => localControlCapabilitiesV1,
-    snapshot: (inputValue: unknown) => serviceOperation(() => snapshot(inputValue)),
-    preview: (inputValue: unknown) => serviceOperation(() => preview(inputValue)),
-    commit: (inputValue: unknown) => serviceOperation(() => commit(inputValue)),
-    requestApproval: (inputValue: unknown) => serviceOperation(() => requestApproval(inputValue)),
-    history: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'history')),
-    recoveries: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'recoveries')),
+    snapshot: (inputValue: unknown) => serviceOperation(() => snapshot(inputValue), isAvailabilityFailure),
+    preview: (inputValue: unknown) => serviceOperation(() => preview(inputValue), isAvailabilityFailure),
+    commit: (inputValue: unknown) => serviceOperation(() => commit(inputValue), isAvailabilityFailure),
+    requestApproval: (inputValue: unknown) => serviceOperation(() => requestApproval(inputValue), isAvailabilityFailure),
+    history: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'history'), isAvailabilityFailure),
+    recoveries: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'recoveries'), isAvailabilityFailure),
   }
 }

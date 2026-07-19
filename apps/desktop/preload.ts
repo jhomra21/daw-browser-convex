@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron"
-import { desktopCancelSchemaV1, desktopExportTerminalSchemaV1, desktopRendererRequestSchemaV1, desktopReplySchemaV1, hostError, type DesktopRendererRequestV1 } from "@daw-browser/desktop-protocol"
+import { desktopCancelSchemaV1, desktopExportTerminalSchemaV1, desktopReplySchemaV1, desktopTrustedRendererRequestSchemaV1, hostError, type DesktopRendererRequestV1 } from "@daw-browser/desktop-protocol"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 
 const incomingChannel = "daw:host-request"
@@ -20,25 +20,30 @@ const reply = (generation: number, response: PreloadHostResponse) => {
 
 const requestQueue = createRequestQueue({ reply, queueLimit })
 
-const dispatchLifecycle = (generation: number, request: DesktopRendererRequestV1) => {
-  if (request.operation === "lifecycle.prepareToClose") {
-    void (closeHandler ? closeHandler() : Promise.resolve({ flushed: false }))
-      .then((response) => reply(generation, { id: request.id, result: response }))
-      .catch(() => reply(generation, { id: request.id, error: hostError("internal", "The timeline could not prepare to close.") }))
-  }
+const dispatchLifecycle = (
+  generation: number,
+  request: Extract<DesktopRendererRequestV1, { operation: "lifecycle.prepareToClose" }>,
+) => {
+  void (closeHandler ? closeHandler() : Promise.resolve({ flushed: false }))
+    .then((response) => reply(generation, { id: request.id, result: response }))
+    .catch(() => reply(generation, { id: request.id, error: hostError("internal", "The timeline could not prepare to close.") }))
 }
 
 ipcRenderer.on(incomingChannel, (_event, message: unknown) => {
   if (typeof message !== "object" || message === null || !("generation" in message) || !("frame" in message)) return
   const generation = message.generation
   if (typeof generation !== "number" || !Number.isSafeInteger(generation)) return
-  activeGeneration = generation
+  if (generation < activeGeneration) return
+  if (generation > activeGeneration) {
+    requestQueue.reset(generation)
+    activeGeneration = generation
+  }
   const cancel = desktopCancelSchemaV1.safeParse(message.frame)
   if (cancel.success) {
     requestQueue.cancel(cancel.data.id)
     return
   }
-  const parsed = desktopRendererRequestSchemaV1.safeParse(message.frame)
+  const parsed = desktopTrustedRendererRequestSchemaV1.safeParse(message.frame)
   if (!parsed.success) return
   if (parsed.data.operation === "lifecycle.prepareToClose") {
     dispatchLifecycle(generation, parsed.data)

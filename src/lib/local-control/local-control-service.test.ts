@@ -5,6 +5,8 @@ import { createLocalControlService, LocalControlServiceError } from './local-con
 
 const actor = { subject: 'local:00000000-0000-4000-8000-000000000000' }
 
+class AvailabilityError extends Error {}
+
 test('provides canonical local snapshot, preview, commit, and history with idempotency replay', async () => {
   const project = await createLocalProject(`Service ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor })
@@ -40,6 +42,49 @@ test('maps malformed inputs and duplicate recovery restores to parsed local erro
       { kind: 'recovery.restore', recovery: { id: 'local-recovery:duplicate' } },
     ],
   })).rejects.toMatchObject({ data: { code: 'validation', actionIndex: 1 } })
+})
+
+test('execution guards prevent transaction reads and writes after availability is revoked', async () => {
+  const project = await createLocalProject(`Guarded service ${crypto.randomUUID()}`)
+  let available = true
+  const service = createLocalControlService({
+    actor,
+    assertAvailable: () => {
+      if (!available) throw new AvailabilityError()
+    },
+  })
+  const initial = await service.snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error('Expected local project track.')
+  available = false
+  const destructive = {
+    version: 'v1' as const,
+    projectId: project.id,
+    actions: [{ kind: 'track.delete' as const, track: { source: 'persisted' as const, id: track.id } }],
+  }
+  await expect(service.preview({
+    version: 'v1',
+    projectId: project.id,
+    actions: [{ kind: 'project.rename', name: 'Blocked preview' }],
+  })).rejects.toBeInstanceOf(AvailabilityError)
+  await expect(service.requestApproval(destructive)).rejects.toBeInstanceOf(AvailabilityError)
+  await expect(service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'blocked-commit',
+    actions: [{ kind: 'project.rename', name: 'Blocked commit' }],
+  })).rejects.toBeInstanceOf(AvailabilityError)
+  await expect(service.snapshot({ projectId: project.id })).rejects.toBeInstanceOf(AvailabilityError)
+  await expect(service.history({ projectId: project.id, limit: 10 })).rejects.toBeInstanceOf(AvailabilityError)
+  await expect(service.recoveries({ projectId: project.id, limit: 10 })).rejects.toBeInstanceOf(AvailabilityError)
+
+  const inspected = createLocalControlService({ actor })
+  const after = await inspected.snapshot({ projectId: project.id })
+  expect(after.project).toEqual(initial.project)
+  expect((await inspected.history({ projectId: project.id, limit: 10 })).entries).toEqual([])
+  const db = await openLocalProjectDb(project.id)
+  expect(await db.count('controlApprovals')).toBe(0)
+  expect(await db.count('controlCommits')).toBe(0)
 })
 
 test('replays only the original semantic request for an idempotency key', async () => {

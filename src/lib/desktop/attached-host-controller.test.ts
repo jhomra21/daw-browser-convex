@@ -1,7 +1,11 @@
+import "fake-indexeddb/auto"
 import { expect, test } from "bun:test"
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 
 import { createExportQueue } from "~/lib/export/export-queue"
+import { withLocalProjectAssetLock } from "~/lib/local-project-asset-lock"
+import { createLocalProject, deleteLocalProject, getLocalProject } from "~/lib/local-project-db"
+import { createLocalControlService } from "~/lib/local-control/local-control-service"
 import {
   createAttachedHostController,
   registerAttachedHostController,
@@ -95,6 +99,73 @@ const installBridge = (terminalJobs: string[]) => {
   })
 }
 
+const controlActor = "local:00000000-0000-4000-8000-000000000000"
+
+const createController = (
+  projectId: () => string,
+  getMountedLocalProject?: typeof getLocalProject,
+  mountedProjectGeneration: () => number = () => 0,
+) => {
+  const queue = createExportQueue()
+  return {
+    controller: createAttachedHostController({
+      projectId,
+      mountedProjectGeneration,
+      isPlaying: () => false,
+      playheadSec: () => 0,
+      tracks: () => [],
+      audioEngine: new AudioEngine(),
+      requestPlay: async () => undefined,
+      pause: async () => undefined,
+      stop: async () => undefined,
+      finishRecording: async () => undefined,
+      exportQueue: queue,
+      exportService: {
+        enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+        enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+        submitTimelineExport: async () => {
+          throw new Error("unused")
+        },
+        submitStemExport: async () => {
+          throw new Error("unused")
+        },
+        prepareTimelineExport: async () => {
+          throw new Error("unused")
+        },
+        prepareStemExport: async () => {
+          throw new Error("unused")
+        },
+        submitPreparedTimelineExport: () => {
+          throw new Error("unused")
+        },
+        submitPreparedStemExport: () => {
+          throw new Error("unused")
+        },
+        cancel: () => undefined,
+        status: () => undefined,
+      },
+      importFiles: async () => ({ outcomes: [] }),
+      setPlayhead: () => undefined,
+      ...(getMountedLocalProject === undefined ? {} : { getMountedLocalProject }),
+    }),
+    dispose: () => queue.dispose(),
+  }
+}
+
+const requestControl = (
+  controller: ReturnType<typeof createController>["controller"],
+  operation: "control.capabilities" | "control.snapshot" | "control.preview" | "control.commit" | "control.requestApproval" | "control.history" | "control.recoveries",
+  input: unknown,
+  signal = new AbortController().signal,
+  actorSubject?: string,
+) => controller.request({
+  id: crypto.randomUUID(),
+  operation,
+  input,
+  signal,
+  ...(actorSubject === undefined ? {} : { actorSubject }),
+})
+
 test("accepted exports outlive the initiating request and remain queryable and cancelable", async () => {
   const terminalJobs: string[] = []
   installBridge(terminalJobs)
@@ -131,6 +202,7 @@ test("accepted exports outlive the initiating request and remain queryable and c
   const queue = createExportQueue()
   const controller = createAttachedHostController({
     projectId: () => "project-1",
+    mountedProjectGeneration: () => 0,
     isPlaying: () => false,
     playheadSec: () => 0,
     tracks: () => prepared.snapshot.tracks,
@@ -217,6 +289,262 @@ test("accepted exports outlive the initiating request and remain queryable and c
   queue.dispose()
 })
 
+test("attaches control only to an existing mounted local project", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Attached control ${crypto.randomUUID()}`)
+  let mountedProjectId = project.id
+  const { controller, dispose } = createController(() => mountedProjectId)
+  const unregister = registerAttachedHostController(controller)
+
+  const capabilities = await requestControl(controller, "control.capabilities", {}, undefined, controlActor)
+  expect(capabilities.result).toMatchObject({ executionTarget: "local-project" })
+  const snapshot = await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)
+  expect(snapshot.result).toMatchObject({ project: { id: project.id } })
+
+  for (const invalidMount of ["cloud-project", `project:${crypto.randomUUID()}`, ""]) {
+    mountedProjectId = invalidMount
+    const response = await requestControl(controller, "control.capabilities", {}, undefined, controlActor)
+    expect(response.error).toEqual({
+      version: "v1",
+      code: "not-found",
+      message: "A mounted local project is required.",
+    })
+  }
+  mountedProjectId = project.id
+  await deleteLocalProject(project.id)
+  expect((await requestControl(controller, "control.capabilities", {}, undefined, controlActor)).error).toEqual({
+    version: "v1",
+    code: "not-found",
+    message: "A mounted local project is required.",
+  })
+
+  unregister()
+  dispose()
+})
+
+test("rejects an unmounted local project without dispatching to it", async () => {
+  installBridge([])
+  const mounted = await createLocalProject(`Mounted ${crypto.randomUUID()}`)
+  const other = await createLocalProject(`Other ${crypto.randomUUID()}`)
+  const { controller, dispose } = createController(() => mounted.id)
+  const unregister = registerAttachedHostController(controller)
+
+  expect((await requestControl(controller, "control.snapshot", { projectId: other.id }, undefined, controlActor)).error).toEqual({
+    version: "v1",
+    code: "not-found",
+    message: "A mounted local project is required.",
+  })
+  const otherHistory = await createLocalControlService({ actor: { subject: controlActor } })
+    .history({ projectId: other.id, limit: 10 })
+  expect(otherHistory.entries).toEqual([])
+
+  unregister()
+  dispose()
+})
+
+test("runs the complete local control flow with the trusted actor", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Control flow ${crypto.randomUUID()}`)
+  const { controller, dispose } = createController(() => project.id)
+  const unregister = registerAttachedHostController(controller)
+
+  const initial = await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)
+  const snapshot = initial.result
+  if (typeof snapshot !== "object" || snapshot === null || !("tracks" in snapshot) || !Array.isArray(snapshot.tracks)) {
+    throw new Error("Expected control snapshot tracks.")
+  }
+  const track = snapshot.tracks[0]
+  if (typeof track !== "object" || track === null || !("id" in track) || typeof track.id !== "string") {
+    throw new Error("Expected control snapshot track.")
+  }
+  const destructive = {
+    version: "v1" as const,
+    projectId: project.id,
+    actions: [{ kind: "track.delete" as const, track: { source: "persisted" as const, id: track.id } }],
+  }
+  expect((await requestControl(controller, "control.preview", {
+    version: "v1",
+    projectId: project.id,
+    actions: [{ kind: "project.rename", name: "Preview only" }],
+  }, undefined, controlActor)).result).toMatchObject({ applied: true })
+  const approval = await requestControl(controller, "control.requestApproval", destructive, undefined, controlActor)
+  const approvalResult = approval.result
+  if (typeof approvalResult !== "object" || approvalResult === null || !("approvalToken" in approvalResult) || typeof approvalResult.approvalToken !== "string") {
+    throw new Error("Expected local control approval.")
+  }
+  expect((await requestControl(controller, "control.commit", {
+    ...destructive,
+    idempotencyKey: "attached-destructive-commit",
+    approvalToken: approvalResult.approvalToken,
+  }, undefined, controlActor)).result).toMatchObject({ applied: true })
+  const history = await requestControl(controller, "control.history", { projectId: project.id, limit: 10 }, undefined, controlActor)
+  expect(history.result).toMatchObject({ entries: [expect.objectContaining({ actorSubject: controlActor })] })
+  const recoveries = await requestControl(controller, "control.recoveries", { projectId: project.id, limit: 10 }, undefined, controlActor)
+  expect(recoveries.result).toMatchObject({ entries: [expect.objectContaining({ kind: "track.delete" })] })
+
+  unregister()
+  dispose()
+})
+
+test("preserves local control errors and fails closed without a trusted actor", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Control errors ${crypto.randomUUID()}`)
+  const { controller, dispose } = createController(() => project.id)
+  const unregister = registerAttachedHostController(controller)
+
+  expect((await requestControl(controller, "control.preview", {
+    version: "v1",
+    projectId: project.id,
+    actions: [
+      { kind: "recovery.restore", recovery: { id: "local-recovery:duplicate" } },
+      { kind: "recovery.restore", recovery: { id: "local-recovery:duplicate" } },
+    ],
+  }, undefined, controlActor)).error).toMatchObject({ code: "validation", actionIndex: 1 })
+  expect((await requestControl(controller, "control.snapshot", { projectId: project.id })).error).toEqual({
+    version: "v1",
+    code: "authorization",
+    message: "A trusted local control actor is required.",
+  })
+
+  unregister()
+  dispose()
+})
+
+test("cancels or rejects control requests that change mount during lookup", async () => {
+  installBridge([])
+  const first = await createLocalProject(`First mount ${crypto.randomUUID()}`)
+  const second = await createLocalProject(`Second mount ${crypto.randomUUID()}`)
+  const localProject = await getLocalProject(first.id)
+  if (!localProject) throw new Error("Expected local project.")
+  let mountedProjectId = first.id
+  let releaseLookup: ((project: typeof localProject | undefined) => void) | undefined
+  const lookup = async () => new Promise<Awaited<ReturnType<typeof getLocalProject>>>((resolve) => {
+    releaseLookup = resolve
+  })
+  const { controller, dispose } = createController(() => mountedProjectId, lookup)
+  const unregister = registerAttachedHostController(controller)
+
+  const pending = requestControl(controller, "control.snapshot", { projectId: first.id }, undefined, controlActor)
+  mountedProjectId = second.id
+  releaseLookup?.(localProject)
+  expect((await pending).error).toEqual({
+    version: "v1",
+    code: "not-found",
+    message: "A mounted local project is required.",
+  })
+
+  mountedProjectId = first.id
+  const abortDuringLookup = new AbortController()
+  const abortedPending = requestControl(
+    controller,
+    "control.snapshot",
+    { projectId: first.id },
+    abortDuringLookup.signal,
+    controlActor,
+  )
+  abortDuringLookup.abort()
+  releaseLookup?.(localProject)
+  expect((await abortedPending).error?.code).toBe("internal")
+
+  const abort = new AbortController()
+  abort.abort()
+  expect((await requestControl(controller, "control.snapshot", { projectId: second.id }, abort.signal, controlActor)).error?.code).toBe("cancelled")
+
+  unregister()
+  dispose()
+})
+
+test("does not commit after cancellation while waiting for the asset lock", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Locked cancellation ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } })
+    .snapshot({ projectId: project.id })
+  let releaseLock: (() => void) | undefined
+  let lockHeld: (() => void) | undefined
+  const lock = withLocalProjectAssetLock(project.id, async () => {
+    lockHeld?.()
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve
+    })
+  })
+  await new Promise<void>((resolve) => {
+    lockHeld = resolve
+  })
+  const { controller, dispose } = createController(() => project.id)
+  const unregister = registerAttachedHostController(controller)
+  const abort = new AbortController()
+  const pending = requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: "locked-cancel",
+    actions: [{ kind: "project.rename", name: "Should not commit" }],
+  }, abort.signal, controlActor)
+  for (let index = 0; index < 10; index += 1) await Promise.resolve()
+  abort.abort()
+  releaseLock?.()
+  await lock
+  expect((await pending).error?.code).toBe("internal")
+
+  const inspected = createLocalControlService({ actor: { subject: controlActor } })
+  expect((await inspected.snapshot({ projectId: project.id })).project).toEqual(initial.project)
+  expect((await inspected.history({ projectId: project.id, limit: 10 })).entries).toEqual([])
+
+  unregister()
+  dispose()
+})
+
+test("does not commit after a mount switch while waiting for the asset lock", async () => {
+  installBridge([])
+  const first = await createLocalProject(`Locked first ${crypto.randomUUID()}`)
+  const second = await createLocalProject(`Locked second ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } })
+    .snapshot({ projectId: first.id })
+  let mountedProjectId = first.id
+  let mountedProjectGeneration = 0
+  let releaseLock: (() => void) | undefined
+  let lockHeld: (() => void) | undefined
+  const lock = withLocalProjectAssetLock(first.id, async () => {
+    lockHeld?.()
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve
+    })
+  })
+  await new Promise<void>((resolve) => {
+    lockHeld = resolve
+  })
+  const { controller, dispose } = createController(
+    () => mountedProjectId,
+    undefined,
+    () => mountedProjectGeneration,
+  )
+  const unregister = registerAttachedHostController(controller)
+  const pending = requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: first.id,
+    idempotencyKey: "locked-switch",
+    actions: [{ kind: "project.rename", name: "Should not commit" }],
+  }, undefined, controlActor)
+  for (let index = 0; index < 10; index += 1) await Promise.resolve()
+  mountedProjectId = second.id
+  mountedProjectGeneration += 1
+  mountedProjectId = first.id
+  mountedProjectGeneration += 1
+  releaseLock?.()
+  await lock
+  expect((await pending).error).toEqual({
+    version: "v1",
+    code: "not-found",
+    message: "A mounted local project is required.",
+  })
+
+  const inspected = createLocalControlService({ actor: { subject: controlActor } })
+  expect((await inspected.snapshot({ projectId: first.id })).project).toEqual(initial.project)
+  expect((await inspected.history({ projectId: first.id, limit: 10 })).entries).toEqual([])
+
+  unregister()
+  dispose()
+})
+
 test("pre-accept cancellation does not retain prepared export state", async () => {
   installBridge([])
   let releasePreparation: (() => void) | undefined
@@ -252,6 +580,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
   const queue = createExportQueue()
   const controller = createAttachedHostController({
     projectId: () => "project-1",
+    mountedProjectGeneration: () => 0,
     isPlaying: () => false,
     playheadSec: () => 0,
     tracks: () => prepared.snapshot.tracks,

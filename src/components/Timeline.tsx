@@ -133,6 +133,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const {
     projectId,
+    mountedProjectGeneration,
     setProjectId,
     userId,
     projects,
@@ -1325,6 +1326,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   if (window.dawDesktop) {
     const unregisterHostController = registerAttachedHostController(createAttachedHostController({
       projectId,
+      mountedProjectGeneration,
       isPlaying,
       playheadSec,
       tracks: renderTracks,

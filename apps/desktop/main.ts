@@ -15,16 +15,22 @@ import {
   desktopProtocolVersion,
   desktopRegistrationSchemaV1,
   desktopRendererRequestSchemaV1,
+  desktopTrustedRendererRequestSchemaV1,
   hostError,
+  isDesktopControlOperation,
   type DesktopFrameV1,
   type DesktopOperationV1,
   type DesktopRendererRequestV1,
+  type DesktopTrustedRendererRequestV1,
 } from "@daw-browser/desktop-protocol"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
+import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
+import { createPreparationRegistry } from "./preparation-registry"
+import { desktopOperations } from "./desktop-operations"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -47,13 +53,14 @@ const isAudioCaptureRequest = (details: Electron.PermissionRequest | Electron.Fi
 
 type PendingRendererRequest = {
   generation: number
-  resolve: (frame: DesktopFrameV1) => void
+  resolve: (frame: Extract<DesktopFrameV1, { type: "reply" }>) => void
   reject: (error: Error) => void
 }
 
 let window_: BrowserWindow | undefined
 let generation = 0
 const rendererPending = new Map<string, PendingRendererRequest>()
+const preparationRegistry = createPreparationRegistry()
 const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
 const terminalExportsAwaitingScope = new Set<string>()
 const exportScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
@@ -83,16 +90,8 @@ const fileCapabilities = createFileCapabilityManager({
 const settleCapabilityRevocation = (operation: Promise<void>) => {
   void operation.catch(() => undefined)
 }
-const desktopOperations = (): DesktopOperationV1[] => {
-  const base: DesktopOperationV1[] = [
-    "host.status",
-    "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek",
-    "diagnostics.snapshot",
-  ]
-  return nativeMediaAvailable
-    ? ["host.import.audio", "host.export.run", "host.export.status", "host.export.cancel", ...base]
-    : base
-}
+const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
+const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
 
 const cancelRendererRequest = (id: string, requestGeneration: number) => {
   const target = window_?.webContents
@@ -118,7 +117,7 @@ const rejectRendererRequest = (id: string, message: string) => {
   pending.reject(new Error(message))
 }
 
-const sendToRenderer = (request: DesktopRendererRequestV1) => new Promise<DesktopFrameV1>((resolve, reject) => {
+const sendToRenderer = (request: DesktopRendererRequestV1 | DesktopTrustedRendererRequestV1) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
   const target = window_?.webContents
   if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) {
     reject(new Error("Renderer unavailable."))
@@ -133,16 +132,18 @@ const sendToRenderer = (request: DesktopRendererRequestV1) => new Promise<Deskto
   target.send(incomingChannel, { generation: expectedGeneration, frame: request })
 })
 
-const renderRequest = async (operation: DesktopRendererRequestV1["operation"], input: unknown, id: string, deadlineMs = 10_000) => {
-  const parsed = desktopRendererRequestSchemaV1.parse({ version: desktopProtocolVersion, type: "request", id, operation, input, deadlineMs })
-  if (parsed.type !== "request") throw new Error("Invalid desktop request.")
+const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareToClose", input: unknown, id: string, deadlineMs = 10_000, actorSubject?: string) => {
+  const request = { version: desktopProtocolVersion, type: "request" as const, id, operation, input, deadlineMs }
+  const parsed = operation !== "lifecycle.prepareToClose" && isDesktopControlOperation(operation)
+    ? desktopTrustedRendererRequestSchemaV1.parse({ ...request, actorSubject })
+    : desktopRendererRequestSchemaV1.parse(request)
   // This is a bounded deadline guard for a renderer IPC round trip; it is always cleared on completion.
   let timeout: ReturnType<typeof setTimeout> | undefined
   let deadlineElapsed = false
   try {
     return await Promise.race([
       sendToRenderer(parsed),
-      new Promise<DesktopFrameV1>((_resolve, reject) => {
+      new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((_resolve, reject) => {
         timeout = setTimeout(() => {
           deadlineElapsed = true
           reject(new Error("Renderer deadline exceeded."))
@@ -158,7 +159,7 @@ const renderRequest = async (operation: DesktopRendererRequestV1["operation"], i
 }
 
 const prepareRendererInput = async (
-  operation: DesktopRendererRequestV1["operation"],
+  operation: DesktopOperationV1,
   input: unknown,
   scope: { requestId: string; rendererGeneration: number },
   signal: AbortSignal,
@@ -196,11 +197,9 @@ const prepareRendererInput = async (
       preflightOnly: true,
       destination: placeholderDestination,
     }), scope.requestId)
-    if (preflight.type !== "reply" || preflight.error) {
-      throw new Error(preflight.type === "reply" ? preflight.error?.message : "Export preflight failed.")
-    }
-    signal.throwIfAborted()
+    if (preflight.error) throw new Error(preflight.error.message)
     try {
+      signal.throwIfAborted()
       const destination = request.destination
       if (destination.kind === "file" || destination.kind === "file-picker") {
         const selected = destination.kind === "file-picker"
@@ -274,6 +273,7 @@ const startSocket = async () => {
 
 const handleSocket = (socket: Socket) => {
   let authenticated = false
+  let actorSubject: string | undefined
   const correlation = createRequestCorrelation()
   const preparationControllers = new Map<string, AbortController>()
   const finalExportCandidates = new Set<string>()
@@ -284,7 +284,10 @@ const handleSocket = (socket: Socket) => {
     if (closed) return
     closed = true
     acceptedSockets.delete(socket)
-    for (const controller of preparationControllers.values()) controller.abort()
+    for (const controller of preparationControllers.values()) {
+      controller.abort()
+      preparationRegistry.delete(controller)
+    }
     preparationControllers.clear()
     const rendererIds = [...correlation.internalIds()]
     for (const rendererId of rendererIds) {
@@ -304,14 +307,17 @@ const handleSocket = (socket: Socket) => {
         return
       }
       authenticated = true
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: desktopOperations() }))
+      actorSubject = `local:${hello.data.actorId}`
+      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: availableDesktopOperations() }))
       return
     }
     if (frame.type === "cancel") {
       const rendererId = correlation.removeExternal(frame.id)
       if (rendererId) {
         finalExportCandidates.delete(rendererId)
-        preparationControllers.get(rendererId)?.abort()
+        const controller = preparationControllers.get(rendererId)
+        controller?.abort()
+        if (controller) preparationRegistry.delete(controller)
         preparationControllers.delete(rendererId)
         const canceledScope = { requestId: rendererId, rendererGeneration: generation }
         settleCapabilityRevocation(fileCapabilities.revokeRequest(canceledScope).finally(() => {
@@ -324,25 +330,28 @@ const handleSocket = (socket: Socket) => {
       socket.destroy()
       return
     }
-    if (!desktopOperations().includes(frame.operation)) {
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: frame.id, error: hostError("unavailable", "The requested desktop operation is unavailable on this platform.") }))
+    if (!availableDesktopOperations().includes(frame.operation)) {
+      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: frame.id, error: operationFailure(frame.operation, "unavailable", "The requested desktop operation is unavailable on this platform.") }))
       return
     }
     const rendererId = correlation.create(frame.id)
     const preparation = new AbortController()
+    preparationRegistry.add(preparation)
     preparationControllers.set(rendererId, preparation)
     const scope = { requestId: rendererId, rendererGeneration: generation }
     void prepareRendererInput(frame.operation, frame.input, scope, preparation.signal)
       .then((input) => {
+        preparation.signal.throwIfAborted()
         if (frame.operation === "host.export.run") {
           const parsed = desktopRendererExportInputSchemaV1.parse(input)
           if (!parsed.canceled && !parsed.preflightOnly) finalExportCandidates.add(rendererId)
         }
-        return renderRequest(frame.operation, input, rendererId, frame.deadlineMs)
+        return renderRequest(frame.operation, input, rendererId, frame.deadlineMs, actorSubject)
       }).then(async (reply) => {
       preparationControllers.delete(rendererId)
+      preparationRegistry.delete(preparation)
       finalExportCandidates.delete(rendererId)
-      if (frame.operation === "host.export.run" && reply.type === "reply" && !reply.error) {
+      if (frame.operation === "host.export.run" && !reply.error) {
         const result = desktopHostExportRunResultSchemaV1.safeParse(reply.result)
         if (result.success && result.data.status === "queued" && result.data.jobId) {
           exportScopes.set(result.data.jobId, scope)
@@ -353,26 +362,40 @@ const handleSocket = (socket: Socket) => {
         }
       }
       const externalId = correlation.getExternal(rendererId)
-      if (!externalId || !correlation.removeExternal(externalId) || socket.destroyed) {
+      if (!externalId) {
         if (frame.operation !== "host.export.run" || ![...exportScopes.values()].some((exportScope) => exportScope.requestId === scope.requestId && exportScope.rendererGeneration === scope.rendererGeneration)) {
           await fileCapabilities.revokeRequest(scope)
         }
         return
       }
-      if (reply.type !== "reply") return
+      correlation.removeExternal(externalId)
+      if (socket.destroyed) {
+        if (frame.operation !== "host.export.run" || ![...exportScopes.values()].some((exportScope) => exportScope.requestId === scope.requestId && exportScope.rendererGeneration === scope.rendererGeneration)) {
+          await fileCapabilities.revokeRequest(scope)
+        }
+        return
+      }
       if (frame.operation === "host.import.audio" || (frame.operation === "host.export.run" && !exportScopesHasScope(scope))) {
         await fileCapabilities.revokeRequest(scope)
       }
-      socket.write(encodeDesktopFrame({ ...reply, id: externalId }))
+      try {
+        for (const outbound of serializeDesktopReply(frame.operation, { ...reply, id: externalId })) {
+          socket.write(encodeDesktopFrame(outbound))
+        }
+      } catch {
+        socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: externalId, error: operationFailure(frame.operation, "internal", "The desktop response could not be serialized.") }))
+      }
     }).catch(async (error: unknown) => {
       preparationControllers.delete(rendererId)
+      preparationRegistry.delete(preparation)
       finalExportCandidates.delete(rendererId)
       await fileCapabilities.revokeRequest(scope)
       const externalId = correlation.getExternal(rendererId)
-      if (!externalId || !correlation.removeExternal(externalId)) return
+      if (!externalId) return
+      correlation.removeExternal(externalId)
       const message = error instanceof Error && error.message === "Renderer deadline exceeded." ? "The request deadline elapsed." : "The renderer is unavailable."
       const code = error instanceof Error && error.message === "Renderer deadline exceeded." ? "deadline-exceeded" : "unavailable"
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: externalId, error: hostError(code, message) }))
+      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: externalId, error: operationFailure(frame.operation, code, message) }))
     })
   })
   socket.on("data", (chunk: Buffer) => {
@@ -454,11 +477,13 @@ const createWindow = () => {
     },
   })
   window_.webContents.on("did-start-navigation", () => {
+    preparationRegistry.abortAll()
     settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
     generation += 1
     rejectRendererPending("Renderer reloaded.")
   })
   window_.webContents.on("render-process-gone", () => {
+    preparationRegistry.abortAll()
     settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
     rejectRendererPending("Renderer crashed.")
   })
@@ -473,7 +498,7 @@ const createWindow = () => {
     prepare: async () => {
       try {
         const reply = await renderRequest("lifecycle.prepareToClose", {}, randomUUID(), 10_000)
-        const result = reply.type === "reply" ? reply.result : undefined
+        const result = reply.result
         return typeof result === "object" && result !== null && "flushed" in result && result.flushed === true
       } catch {
         return false
@@ -506,6 +531,7 @@ app.setName(appName)
 const finishQuit = async () => {
   if (finishingQuit) return
   finishingQuit = true
+  preparationRegistry.abortAll()
   rejectRendererPending("Application is closing.")
   await fileCapabilities.revokeAll()
   await closeSocket()

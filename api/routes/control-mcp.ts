@@ -89,6 +89,7 @@ const requiresWriteScope = (value: unknown) => {
     && request.method === "tools/call"
     && isRecord(request.params)
     && (request.params.name === "control_preview" || request.params.name === "control_commit" || request.params.name === "control_request_approval")
+    && (!isRecord(request.params.arguments) || request.params.arguments.target !== "host")
   ))
 }
 

@@ -1,4 +1,13 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import {
+  controlApprovalResultSchemaV1,
+  controlCapabilitiesSchemaV1,
+  controlCommitResultSchemaV1,
+  controlHistoryResultSchemaV1,
+  controlPreviewResultSchemaV1,
+  controlRecoveriesResultSchemaV1,
+  projectSnapshotSchemaV1,
+} from "@daw-browser/control"
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { createControlMcpServer } from "@daw-browser/control-mcp"
 import { createControlClient } from "@daw-browser/control-sdk"
@@ -6,56 +15,134 @@ import { createAccessTokenProvider } from "./auth"
 import { credentialIdentity, createCredentialStore, sameCredentialIdentity, type ControlCredentialIdentity, type ControlCredentials } from "./credentials"
 import { createHostClient } from "./host"
 
+class CloudControlError extends Error {
+  readonly data = {
+    version: "v1" as const,
+    code: "authorization" as const,
+    message: "Cloud control credentials are unavailable.",
+  }
+}
+
 type ControlCredentialReader = {
   read: () => Promise<ControlCredentials | undefined>
 }
 
 export const authorizeControlMcpScope = async (
   scope: ControlMcpScope,
-  startupCredentialIdentity: ControlCredentialIdentity,
+  expectedIdentity: ControlCredentialIdentity,
   store: ControlCredentialReader,
 ) => {
   if (scope === "control:read") return true
-  const current = await store.read()
-  return current !== undefined
-    && sameCredentialIdentity(startupCredentialIdentity, current)
-    && current.scopes.includes("control:write")
+  const credentials = await store.read()
+  return credentials !== undefined
+    && sameCredentialIdentity(expectedIdentity, credentials)
+    && credentials.scopes.includes("control:write")
 }
 
 export const startControlMcp = async () => {
   const store = createCredentialStore()
-  const credentials = await store.read()
-  if (!credentials) throw new Error("Run daw-control auth login first.")
-  const startupCredentialIdentity = credentialIdentity(credentials)
-  const accessToken = createAccessTokenProvider(startupCredentialIdentity, store)
-  const client = createControlClient({ baseUrl: credentials.baseUrl, accessToken })
-  const service: ControlService = {
-    capabilities: client.capabilities,
-    snapshot: async ({ projectId }) => client.snapshot(projectId),
-    preview: client.preview,
-    requestApproval: client.requestApproval,
-    commit: client.commit,
-    history: client.history,
-    recoveries: client.recoveries,
+  let cloudCredentialIdentity: ControlCredentialIdentity | undefined
+  const readCloudCredentials = async () => {
+    let credentials: ControlCredentials | undefined
+    try {
+      credentials = await store.read()
+    } catch {
+      throw new CloudControlError()
+    }
+    if (!credentials) throw new CloudControlError()
+    if (cloudCredentialIdentity !== undefined && !sameCredentialIdentity(cloudCredentialIdentity, credentials)) {
+      throw new CloudControlError()
+    }
+    const identity = credentialIdentity(credentials)
+    cloudCredentialIdentity ??= identity
+    return { credentials, identity }
   }
-  const hostClient = await createHostClient().catch(() => undefined)
-  const hostTools = hostClient === undefined ? undefined : {
-    operations: hostClient.capabilities(),
-    status: () => hostClient.request("host.status", {}),
-    transportStatus: () => hostClient.request("transport.status", {}),
-    play: () => hostClient.request("transport.play", {}),
-    pause: () => hostClient.request("transport.pause", {}),
-    stop: () => hostClient.request("transport.stop", {}),
-    seek: (input: { seconds: number }) => hostClient.request("transport.seek", input),
-    diagnostics: () => hostClient.request("diagnostics.snapshot", {}),
-    importAudio: (input: unknown) => hostClient.request("host.import.audio", input),
-    exportRun: (input: unknown) => hostClient.request("host.export.run", input),
-    exportStatus: () => hostClient.request("host.export.status", {}),
-    exportCancel: (input: { jobId: string }) => hostClient.request("host.export.cancel", input),
+  const cloudService = async (_scope: ControlMcpScope): Promise<ControlService> => {
+    const { credentials, identity } = await readCloudCredentials()
+    const client = createControlClient({
+      baseUrl: credentials.baseUrl,
+      accessToken: createAccessTokenProvider(identity, store),
+    })
+    return {
+      capabilities: client.capabilities,
+      snapshot: async ({ projectId }) => client.snapshot(projectId),
+      preview: client.preview,
+      requestApproval: client.requestApproval,
+      commit: client.commit,
+      history: client.history,
+      recoveries: client.recoveries,
+    }
   }
-  const server = createControlMcpServer(service, {
-    authorize: (scope) => authorizeControlMcpScope(scope, startupCredentialIdentity, store),
+  const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {
+    const client = await createHostClient()
+    const service: ControlService = {
+      capabilities: async () => controlCapabilitiesSchemaV1.parse(await client.request("control.capabilities", {})),
+      snapshot: async (input) => projectSnapshotSchemaV1.parse(await client.request("control.snapshot", input)),
+      preview: async (input) => controlPreviewResultSchemaV1.parse(await client.request("control.preview", input)),
+      requestApproval: async (input) => controlApprovalResultSchemaV1.parse(await client.request("control.requestApproval", input)),
+      commit: async (input) => controlCommitResultSchemaV1.parse(await client.request("control.commit", input)),
+      history: async (input) => controlHistoryResultSchemaV1.parse(await client.request("control.history", input)),
+      recoveries: async (input) => controlRecoveriesResultSchemaV1.parse(await client.request("control.recoveries", input)),
+    }
+    return {
+      service,
+      close: client.close,
+    }
+  }
+  const hostTools = {
+    status: async () => {
+      const client = await createHostClient()
+      try { return await client.request("host.status", {}) } finally { client.close() }
+    },
+    transportStatus: async () => {
+      const client = await createHostClient()
+      try { return await client.request("transport.status", {}) } finally { client.close() }
+    },
+    play: async () => {
+      const client = await createHostClient()
+      try { return await client.request("transport.play", {}) } finally { client.close() }
+    },
+    pause: async () => {
+      const client = await createHostClient()
+      try { return await client.request("transport.pause", {}) } finally { client.close() }
+    },
+    stop: async () => {
+      const client = await createHostClient()
+      try { return await client.request("transport.stop", {}) } finally { client.close() }
+    },
+    seek: async (input: { seconds: number }) => {
+      const client = await createHostClient()
+      try { return await client.request("transport.seek", input) } finally { client.close() }
+    },
+    diagnostics: async () => {
+      const client = await createHostClient()
+      try { return await client.request("diagnostics.snapshot", {}) } finally { client.close() }
+    },
+    importAudio: async (input: unknown) => {
+      const client = await createHostClient()
+      try { return await client.request("host.import.audio", input) } finally { client.close() }
+    },
+    exportRun: async (input: unknown) => {
+      const client = await createHostClient()
+      try { return await client.request("host.export.run", input) } finally { client.close() }
+    },
+    exportStatus: async () => {
+      const client = await createHostClient()
+      try { return await client.request("host.export.status", {}) } finally { client.close() }
+    },
+    exportCancel: async (input: { jobId: string }) => {
+      const client = await createHostClient()
+      try { return await client.request("host.export.cancel", input) } finally { client.close() }
+    },
+  }
+  const server = createControlMcpServer(undefined, {
+    authorize: async (scope) => {
+      const { credentials } = await readCloudCredentials()
+      return credentials.scopes.includes(scope)
+    },
     hostTools,
+    hostService,
+    cloudService,
   })
   const transport = new StdioServerTransport()
   let closed = false
@@ -64,7 +151,6 @@ export const startControlMcp = async () => {
     closed = true
     await transport.close()
     await server.close()
-    hostClient?.close()
   }
   process.once("SIGINT", () => { void close().finally(() => process.exit(0)) })
   process.once("SIGTERM", () => { void close().finally(() => process.exit(0)) })

@@ -36,6 +36,13 @@ const service = (overrides: Partial<ControlService> = {}): ControlService => ({
   ...overrides,
 })
 
+const call = (name: string, arguments_: Record<string, unknown>) => ({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "tools/call",
+  params: { name, arguments: arguments_ },
+})
+
 const hostTools: HostToolService = {
   status: async () => ({ project: null, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }),
   transportStatus: async () => ({ state: "stopped", playheadSec: 0 }),
@@ -52,11 +59,23 @@ const hostTools: HostToolService = {
 
 const request = async (
   body: unknown,
-  options: { service?: ControlService; write?: boolean; host?: boolean } = {},
+  options: {
+    service?: ControlService
+    write?: boolean
+    host?: boolean
+    hostService?: ControlService
+    hostFactory?: () => Promise<{ service: ControlService; close: () => void }>
+    cloudService?: () => Promise<ControlService>
+    authorize?: (scope: "control:read" | "control:write") => boolean | Promise<boolean>
+  } = {},
 ) => {
+  const selectedHostService = options.hostService
   const server = createControlMcpServer(options.service ?? service(), {
-    authorize: (scope) => scope === "control:read" || options.write === true,
+    authorize: options.authorize ?? ((scope) => scope === "control:read" || options.write === true),
     ...(options.host ? { hostTools } : {}),
+    ...(options.hostFactory ? { hostService: options.hostFactory } : {}),
+    ...(selectedHostService ? { hostService: async () => ({ service: selectedHostService, close: () => undefined }) } : {}),
+    ...(options.cloudService ? { cloudService: options.cloudService } : {}),
   })
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -97,6 +116,45 @@ describe("control MCP tools", () => {
     ])
   })
 
+  test("dispatches legacy local writes without cloud authorization", async () => {
+    let plays = 0
+    const response = await request(call("host_play", {}), {
+      host: true,
+      authorize: () => { throw new Error("Local host tools must not authorize against cloud credentials.") },
+    })
+    expect(response.result.isError).not.toBeTrue()
+    expect(response.result.structuredContent).toEqual({ state: "playing", playheadSec: 0 })
+
+    const countedTools: HostToolService = {
+      ...hostTools,
+      play: async () => {
+        plays += 1
+        return { state: "playing", playheadSec: 0 }
+      },
+    }
+    const server = createControlMcpServer(service(), {
+      authorize: () => false,
+      hostTools: countedTools,
+    })
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    })
+    try {
+      await server.connect(transport)
+      const result = await transport.handleRequest(new Request("https://control.example/api/mcp", {
+        method: "POST",
+        headers: { Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+        body: JSON.stringify(call("host_play", {})),
+      }))
+      expect((await result.json()).result.isError).not.toBeTrue()
+    } finally {
+      await transport.close()
+      await server.close()
+    }
+    expect(plays).toBe(1)
+  })
+
   test("lists exactly the seven canonical tools with accurate annotations", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools
@@ -128,6 +186,13 @@ describe("control MCP tools", () => {
       openWorldHint: false,
     })
     expect(tools.find((tool: { name: string }) => tool.name === "control_snapshot").inputSchema.additionalProperties).toBeFalse()
+    for (const tool of tools) {
+      expect(tool.inputSchema.properties.target).toEqual({
+        type: "string",
+        enum: ["cloud", "host"],
+        default: "cloud",
+      })
+    }
     expect(tools.find((tool: { name: string }) => tool.name === "control_recoveries").annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,
@@ -181,6 +246,31 @@ describe("control MCP tools", () => {
     expect(calls).toBe(0)
   })
 
+  test("rejects invalid targets and canonical extras before either route dispatches", async () => {
+    let cloudCalls = 0
+    let hostCalls = 0
+    const cloud = service({ snapshot: async () => { cloudCalls += 1; return snapshot } })
+    const hostFactory = async () => ({
+      service: service({ snapshot: async () => { hostCalls += 1; return snapshot } }),
+      close: () => undefined,
+    })
+    for (const arguments_ of [
+      { projectId: "project-1", target: "other" },
+      { projectId: "project-1", target: true },
+      { projectId: "project-1", target: "cloud", unexpected: true },
+      { projectId: "project-1", target: "host", unexpected: true },
+    ]) {
+      const response = await request(call("control_snapshot", arguments_), { service: cloud, hostFactory })
+      expect(JSON.parse(response.result.content[0].text)).toEqual({
+        version: "v1",
+        code: "invalid-request",
+        message: "Invalid control tool input.",
+      })
+    }
+    expect(cloudCalls).toBe(0)
+    expect(hostCalls).toBe(0)
+  })
+
   test("preserves canonical control errors and action indexes", async () => {
     const response = await request({
       jsonrpc: "2.0",
@@ -207,8 +297,8 @@ describe("control MCP tools", () => {
     })
   })
 
-  test("gates write tools without calling the control service", async () => {
-    let calls = 0
+  test("resolves cloud identity before authorizing writes", async () => {
+    const calls: string[] = []
     const response = await request({
       jsonrpc: "2.0",
       id: 5,
@@ -217,9 +307,154 @@ describe("control MCP tools", () => {
         name: "control_commit",
         arguments: { version: "v1", projectId: "project-1", idempotencyKey: "request-1", actions: [{ kind: "project.rename", name: "Next" }] },
       },
-    }, { service: service({ commit: async () => { calls += 1; return {} } }) })
-    expect(response.result.isError).toBeTrue()
-    expect(JSON.parse(response.result.content[0].text).code).toBe("forbidden")
-    expect(calls).toBe(0)
+    }, {
+      cloudService: async () => {
+        calls.push("resolve")
+        return service({ commit: async (input) => { calls.push("commit"); return service().commit(input) } })
+      },
+      authorize: () => {
+        calls.push("authorize")
+        return true
+      },
+    })
+    expect(response.result.isError).not.toBeTrue()
+    expect(calls).toEqual(["resolve", "authorize", "commit"])
+  })
+
+  test("returns canonical authorization when cloud identity cannot resolve", async () => {
+    const response = await request(call("control_commit", {
+      version: "v1",
+      projectId: "project-1",
+      idempotencyKey: "request-1",
+      actions: [{ kind: "project.rename", name: "Next" }],
+    }), {
+      cloudService: async () => { throw { version: "v1", code: "authorization", message: "Cloud control credentials are unavailable." } },
+      authorize: () => { throw new Error("Write authorization must not run without cloud identity.") },
+    })
+    expect(JSON.parse(response.result.content[0].text)).toEqual({
+      version: "v1",
+      code: "authorization",
+      message: "Cloud control credentials are unavailable.",
+    })
+  })
+
+  test("keeps omitted and explicit cloud targets on the canonical cloud route", async () => {
+    let cloudCalls = 0
+    let hostCalls = 0
+    const cloud = service({
+      capabilities: async () => { cloudCalls += 1; return controlCapabilitiesV1 },
+      snapshot: async () => { cloudCalls += 1; return snapshot },
+      preview: async (input) => { cloudCalls += 1; return service().preview(input) },
+      requestApproval: async (input) => { cloudCalls += 1; return service().requestApproval(input) },
+      commit: async (input) => { cloudCalls += 1; return service().commit(input) },
+      history: async (input) => { cloudCalls += 1; return service().history(input) },
+      recoveries: async (input) => { cloudCalls += 1; return service().recoveries(input) },
+    })
+    const hostFactory = async () => {
+      hostCalls += 1
+      return { service: cloud, close: () => undefined }
+    }
+    const tools = [
+      ["control_capabilities", {}],
+      ["control_snapshot", { projectId: "project-1" }],
+      ["control_preview", { version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_commit", { version: "v1", projectId: "project-1", idempotencyKey: "request-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_request_approval", { version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_history", { projectId: "project-1" }],
+      ["control_recoveries", { projectId: "project-1" }],
+    ]
+    for (const [name, canonicalInput] of tools) {
+      for (const arguments_ of [canonicalInput, { ...canonicalInput, target: "cloud" }]) {
+        const response = await request(call(name, arguments_), { service: cloud, hostFactory, write: true })
+        expect(response.result.isError).not.toBeTrue()
+      }
+    }
+    expect(cloudCalls).toBe(14)
+    expect(hostCalls).toBe(0)
+  })
+
+  test("routes all canonical tools to an explicit host target without cloud fallback", async () => {
+    let cloudCalls = 0
+    let hostCalls = 0
+    const cloud = service({
+      capabilities: async () => { cloudCalls += 1; return controlCapabilitiesV1 },
+      snapshot: async () => { cloudCalls += 1; return snapshot },
+      preview: async () => { cloudCalls += 1; return service().preview({ version: "v1", projectId: "project-1", actions: [] }) },
+      requestApproval: async () => { cloudCalls += 1; return service().requestApproval({ version: "v1", projectId: "project-1", actions: [] }) },
+      commit: async () => { cloudCalls += 1; return service().commit({ version: "v1", projectId: "project-1", idempotencyKey: "request-1", actions: [] }) },
+      history: async () => { cloudCalls += 1; return service().history({ projectId: "project-1" }) },
+      recoveries: async () => { cloudCalls += 1; return service().recoveries({ projectId: "project-1" }) },
+    })
+    let created = 0
+    let closed = 0
+    let authorized = 0
+    const inputs: unknown[] = []
+    const hostFactory = async () => ({
+      service: service({
+        capabilities: async () => { hostCalls += 1; inputs.push({}); return controlCapabilitiesV1 },
+        snapshot: async (input) => { hostCalls += 1; inputs.push(input); return snapshot },
+        preview: async (input) => { hostCalls += 1; inputs.push(input); return service().preview(input) },
+        requestApproval: async (input) => { hostCalls += 1; inputs.push(input); return service().requestApproval(input) },
+        commit: async (input) => { hostCalls += 1; inputs.push(input); return service().commit(input) },
+        history: async (input) => { hostCalls += 1; inputs.push(input); return service().history(input) },
+        recoveries: async (input) => { hostCalls += 1; inputs.push(input); return service().recoveries(input) },
+      }),
+      close: () => { closed += 1 },
+    })
+    for (const [name, arguments_] of [
+      ["control_capabilities", { target: "host" }],
+      ["control_snapshot", { target: "host", projectId: "project-1" }],
+      ["control_preview", { target: "host", version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_request_approval", { target: "host", version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_commit", { target: "host", version: "v1", projectId: "project-1", idempotencyKey: "request-1", actions: [{ kind: "project.rename", name: "Next" }] }],
+      ["control_history", { target: "host", projectId: "project-1" }],
+      ["control_recoveries", { target: "host", projectId: "project-1" }],
+    ]) {
+      const response = await request({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: arguments_ } }, {
+        service: cloud,
+        hostFactory: async () => {
+          created += 1
+          return await hostFactory()
+        },
+        authorize: () => {
+          authorized += 1
+          return false
+        },
+      })
+      expect(response.result.isError).not.toBeTrue()
+    }
+    expect(hostCalls).toBe(7)
+    expect(cloudCalls).toBe(0)
+    expect(created).toBe(7)
+    expect(closed).toBe(7)
+    expect(authorized).toBe(0)
+    expect(inputs).toEqual([
+      {},
+      { projectId: "project-1" },
+      { version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] },
+      { version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] },
+      { version: "v1", projectId: "project-1", idempotencyKey: "request-1", actions: [{ kind: "project.rename", name: "Next" }] },
+      { projectId: "project-1", limit: 50 },
+      { projectId: "project-1", limit: 50 },
+    ])
+  })
+
+  test("preserves host control errors and safely hides host transport failures", async () => {
+    const controlFailure = { version: "v1", code: "validation", message: "Invalid action.", actionIndex: 0 }
+    let closeCount = 0
+    const factory = (failure: unknown) => async () => ({
+      service: service({ preview: async () => { throw failure } }),
+      close: () => { closeCount += 1 },
+    })
+    const arguments_ = { target: "host", version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }
+    const preserved = await request(call("control_preview", arguments_), { hostFactory: factory({ data: controlFailure }) })
+    expect(JSON.parse(preserved.result.content[0].text)).toEqual(controlFailure)
+    const hidden = await request(call("control_preview", arguments_), { hostFactory: factory(new Error("/private/desktop.sock secret")) })
+    expect(JSON.parse(hidden.result.content[0].text)).toEqual({
+      version: "v1",
+      code: "not-found",
+      message: "A local desktop host is unavailable.",
+    })
+    expect(closeCount).toBe(2)
   })
 })

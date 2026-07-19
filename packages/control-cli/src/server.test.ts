@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
-import { authorizeControlMcpScope } from "./server"
 import { credentialIdentity, type ControlCredentials } from "./credentials"
+import { authorizeControlMcpScope } from "./server"
 
 const credentials = (overrides: Partial<ControlCredentials> = {}): ControlCredentials => ({
   version: "v1",
@@ -16,15 +16,14 @@ const credentials = (overrides: Partial<ControlCredentials> = {}): ControlCreden
   ...overrides,
 })
 
-test("control MCP write authorization follows current credential identity and scope", async () => {
-  const startup = credentialIdentity(credentials())
+test("cloud write authorization rejects deleted, replaced, and scope-revoked credentials", async () => {
+  const expected = credentialIdentity(credentials())
   const authorize = (current: ControlCredentials | undefined) => (
-    authorizeControlMcpScope("control:write", startup, { read: async () => current })
+    authorizeControlMcpScope("control:write", expected, { read: async () => current })
   )
-
-  expect(await authorize(credentials())).toBe(true)
-  expect(await authorize(undefined)).toBe(false)
-  expect(await authorize(credentials({ clientId: "client-2" }))).toBe(false)
-  expect(await authorize(credentials({ scopes: ["control:read"] }))).toBe(false)
-  expect(await authorizeControlMcpScope("control:read", startup, { read: async () => undefined })).toBe(true)
+  expect(await authorize(credentials())).toBeTrue()
+  expect(await authorize(undefined)).toBeFalse()
+  expect(await authorize(credentials({ clientId: "client-2" }))).toBeFalse()
+  expect(await authorize(credentials({ scopes: ["control:read"] }))).toBeFalse()
+  expect(await authorizeControlMcpScope("control:read", expected, { read: async () => undefined })).toBeTrue()
 })

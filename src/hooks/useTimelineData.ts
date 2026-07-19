@@ -52,6 +52,7 @@ type UseTimelineDataInput = {
 
 type UseTimelineDataReturn = {
   projectId: Accessor<string>
+  mountedProjectGeneration: Accessor<number>
   setProjectId: (projectId: string) => void
   userId: () => string
   projects: Accessor<TimelineProject[]>
@@ -95,6 +96,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     bootstrapIfEmpty: input.bootstrapIfEmpty,
   })
   const projectId = route.projectId
+  const mountedProjectGeneration = route.mountedProjectGeneration
   const bootstrapProjectId = route.bootstrapProjectId
   const acceptingShareToken = route.acceptingShareToken
   const setAcceptingShareToken = route.setAcceptingShareToken
@@ -426,6 +428,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
 
   return {
     projectId,
+    mountedProjectGeneration,
     setProjectId,
     userId,
     projects,

@@ -258,6 +258,115 @@ describe("hosted control MCP route", () => {
     })
   })
 
+  test("rejects host-target canonical calls without constructing a cloud gateway", async () => {
+    let gatewayCalls = 0
+    const application = new Hono<ApiBindings>()
+    registerControlMcpRoutes(application, {
+      resolveBearer: async () => writeBearer,
+      createGateway: async () => {
+        gatewayCalls += 1
+        return controlService()
+      },
+    })
+    const response = await application.request(mcpRequest(call("control_snapshot", {
+      projectId: "project-1",
+      target: "host",
+    })))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.result.isError).toBeTrue()
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      version: "v1",
+      code: "not-found",
+      message: "A local desktop host is unavailable.",
+    })
+    expect(gatewayCalls).toBe(0)
+  })
+
+  test("requires base bearer authentication for hosted host targets", async () => {
+    let gatewayCalls = 0
+    const application = new Hono<ApiBindings>()
+    registerControlMcpRoutes(application, {
+      resolveBearer: async () => null,
+      createGateway: async () => {
+        gatewayCalls += 1
+        return controlService()
+      },
+    })
+    const response = await application.request(mcpRequest(call("control_preview", {
+      target: "host",
+      version: "v1",
+      projectId: "project-1",
+      actions: [{ kind: "project.rename", name: "Next" }],
+    })))
+    expect(response.status).toBe(401)
+    expect(gatewayCalls).toBe(0)
+  })
+
+  test("keeps host targets out of hosted write scope and gateway routing", async () => {
+    const scopes: string[] = []
+    let gatewayCalls = 0
+    const application = new Hono<ApiBindings>()
+    registerControlMcpRoutes(application, {
+      resolveBearer: async (_request, _environment, scope) => {
+        scopes.push(scope)
+        return scope === "control:read" ? readBearer : null
+      },
+      createGateway: async () => {
+        gatewayCalls += 1
+        return controlService()
+      },
+    })
+    const hostPreview = call("control_preview", {
+      target: "host",
+      version: "v1",
+      projectId: "project-1",
+      actions: [{ kind: "project.rename", name: "Next" }],
+    })
+    const hostResponse = await application.request(mcpRequest(hostPreview))
+    expect(hostResponse.status).toBe(200)
+    expect(JSON.parse((await hostResponse.json()).result.content[0].text)).toEqual({
+      version: "v1",
+      code: "not-found",
+      message: "A local desktop host is unavailable.",
+    })
+    expect(scopes).toEqual(["control:read"])
+    expect(gatewayCalls).toBe(0)
+
+    scopes.splice(0)
+    const mixedHostAndRead = await application.request(mcpRequest([
+      hostPreview,
+      call("control_history", { projectId: "project-1" }),
+    ]))
+    expect(mixedHostAndRead.status).toBe(200)
+    expect(scopes).toEqual(["control:read"])
+    expect(gatewayCalls).toBe(1)
+
+    scopes.splice(0)
+    const mixedHostAndCloudWrite = await application.request(mcpRequest([
+      hostPreview,
+      call("control_preview", {
+        version: "v1",
+        projectId: "project-1",
+        actions: [{ kind: "project.rename", name: "Next" }],
+      }),
+    ]))
+    expect(mixedHostAndCloudWrite.status).toBe(403)
+    expect(scopes).toEqual(["control:write", "control:read"])
+    expect(gatewayCalls).toBe(1)
+
+    scopes.splice(0)
+    const invalidTarget = await application.request(mcpRequest(call("control_preview", {
+      target: "invalid",
+      version: "v1",
+      projectId: "project-1",
+      actions: [{ kind: "project.rename", name: "Next" }],
+    })))
+    expect(invalidTarget.status).toBe(403)
+    expect(scopes).toEqual(["control:write", "control:read"])
+    expect(gatewayCalls).toBe(1)
+  })
+
   test("rejects unsupported methods, malformed JSON, and non-JSON content", async () => {
     expect((await app().request("https://control.example/api/mcp")).status).toBe(405)
     const malformed = await app().request(new Request("https://control.example/api/mcp", {

@@ -1,7 +1,21 @@
 import { z } from "zod"
+import {
+  controlApprovalRequestSchemaV1, controlApprovalResultSchemaV1, controlCapabilitiesQuerySchemaV1,
+  controlCapabilitiesSchemaV1, controlCommitRequestSchemaV1, controlCommitResultSchemaV1,
+  controlErrorSchemaV1, controlHistoryQuerySchemaV1, controlHistoryResultSchemaV1,
+  controlPreviewRequestSchemaV1, controlPreviewResultSchemaV1, controlRecoveriesQuerySchemaV1,
+  controlRecoveriesResultSchemaV1, controlSnapshotQuerySchemaV1, projectSnapshotSchemaV1,
+  type ControlErrorV1,
+} from "@daw-browser/control"
+export type { ControlErrorV1 } from "@daw-browser/control"
 
 export const desktopProtocolVersion = "v1" as const
 export const maxDesktopFrameBytes = 1_048_576
+export const maxDesktopReplyFrameBytes = 512 * 1024
+export const maxDesktopReplyBytes = 64 * 1024 * 1024
+export const maxDesktopReplyPayloadBytes = 380 * 1024
+export const maxDesktopReplyPayloadBase64Characters = 4 * Math.ceil(maxDesktopReplyPayloadBytes / 3)
+export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktopReplyPayloadBytes)
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 
@@ -23,6 +37,13 @@ export const desktopOperationSchemaV1 = z.enum([
   "transport.stop",
   "transport.seek",
   "diagnostics.snapshot",
+  "control.capabilities",
+  "control.snapshot",
+  "control.preview",
+  "control.commit",
+  "control.requestApproval",
+  "control.history",
+  "control.recoveries",
 ])
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
 
@@ -121,6 +142,13 @@ const requestInputs = {
   "transport.stop": desktopEmptyInputSchemaV1,
   "transport.seek": desktopSeekInputSchemaV1,
   "diagnostics.snapshot": desktopEmptyInputSchemaV1,
+  "control.capabilities": controlCapabilitiesQuerySchemaV1,
+  "control.snapshot": controlSnapshotQuerySchemaV1,
+  "control.preview": controlPreviewRequestSchemaV1,
+  "control.commit": controlCommitRequestSchemaV1,
+  "control.requestApproval": controlApprovalRequestSchemaV1,
+  "control.history": controlHistoryQuerySchemaV1,
+  "control.recoveries": controlRecoveriesQuerySchemaV1,
 } as const
 
 export const desktopHostImportInputSchemaV1 = requestInputs["host.import.audio"]
@@ -250,6 +278,13 @@ export type DesktopOperationMapV1 = {
   "transport.stop": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.seek": { input: { seconds: number }; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "diagnostics.snapshot": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV1> }
+  "control.capabilities": { input: z.infer<typeof controlCapabilitiesQuerySchemaV1>; result: z.infer<typeof controlCapabilitiesSchemaV1> }
+  "control.snapshot": { input: z.infer<typeof controlSnapshotQuerySchemaV1>; result: z.infer<typeof projectSnapshotSchemaV1> }
+  "control.preview": { input: z.infer<typeof controlPreviewRequestSchemaV1>; result: z.infer<typeof controlPreviewResultSchemaV1> }
+  "control.commit": { input: z.infer<typeof controlCommitRequestSchemaV1>; result: z.infer<typeof controlCommitResultSchemaV1> }
+  "control.requestApproval": { input: z.infer<typeof controlApprovalRequestSchemaV1>; result: z.infer<typeof controlApprovalResultSchemaV1> }
+  "control.history": { input: z.infer<typeof controlHistoryQuerySchemaV1>; result: z.infer<typeof controlHistoryResultSchemaV1> }
+  "control.recoveries": { input: z.infer<typeof controlRecoveriesQuerySchemaV1>; result: z.infer<typeof controlRecoveriesResultSchemaV1> }
 }
 
 const request = z.object({
@@ -281,7 +316,7 @@ const rendererRequest = z.object({
   version,
   type: z.literal("request"),
   id: correlationId,
-  operation: desktopOperationSchemaV1,
+  operation: desktopOperationSchemaV1.exclude(["control.capabilities", "control.snapshot", "control.preview", "control.commit", "control.requestApproval", "control.history", "control.recoveries"]),
   input: z.unknown(),
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
@@ -297,16 +332,43 @@ const rendererRequest = z.object({
 export const desktopRendererRequestSchemaV1 = z.union([rendererRequest, lifecyclePrepareToCloseRequest])
 export type DesktopRendererRequestV1 = z.infer<typeof desktopRendererRequestSchemaV1>
 
+export const desktopControlOperationSchemaV1 = z.enum([
+  "control.capabilities", "control.snapshot", "control.preview", "control.commit",
+  "control.requestApproval", "control.history", "control.recoveries",
+])
+export type DesktopControlOperationV1 = z.infer<typeof desktopControlOperationSchemaV1>
+export const isDesktopControlOperation = (operation: DesktopOperationV1): operation is DesktopControlOperationV1 => (
+  desktopControlOperationSchemaV1.safeParse(operation).success
+)
+const trustedRendererControlRequest = z.object({
+  version, type: z.literal("request"), id: correlationId, operation: desktopControlOperationSchemaV1,
+  input: z.unknown(), deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
+  actorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+}).strict().superRefine((value, context) => {
+  if (!requestInputs[value.operation].safeParse(value.input).success) {
+    context.addIssue({ code: "custom", message: "Invalid renderer control operation input.", path: ["input"] })
+  }
+})
+export const desktopTrustedRendererRequestSchemaV1 = z.union([desktopRendererRequestSchemaV1, trustedRendererControlRequest])
+export type DesktopTrustedRendererRequestV1 = z.infer<typeof desktopTrustedRendererRequestSchemaV1>
+
 export const desktopReplySchemaV1 = z.object({
   version,
   type: z.literal("reply"),
   id: correlationId,
   result: z.unknown().optional(),
-  error: hostErrorSchemaV1.optional(),
+  error: z.union([hostErrorSchemaV1, controlErrorSchemaV1]).optional(),
 }).strict().superRefine((value, context) => {
   if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
 })
 export const desktopCancelSchemaV1 = z.object({ version, type: z.literal("cancel"), id: correlationId }).strict()
+export const desktopReplyChunkSchemaV1 = z.object({
+  version, type: z.literal("replyChunk"), id: correlationId, operation: desktopOperationSchemaV1,
+  index: z.number().int().nonnegative(), total: z.number().int().positive().max(maxDesktopReplyChunks),
+  byteLength: z.number().int().positive().max(maxDesktopReplyBytes),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  payload: z.string().max(maxDesktopReplyPayloadBase64Characters).regex(/^[A-Za-z0-9+/]*={0,2}$/),
+}).strict().refine((value) => value.index < value.total)
 export const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
 export const desktopExportTerminalSchemaV1 = z.object({
   version,
@@ -314,10 +376,10 @@ export const desktopExportTerminalSchemaV1 = z.object({
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
   status: z.enum(["success", "canceled", "error"]),
 }).strict()
-export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128) }).strict()
-export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(11) }).strict()
+export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128), actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) }).strict()
+export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length) }).strict()
 export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
-export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
+export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
 
 export const desktopRegistrationSchemaV1 = z.object({
@@ -330,14 +392,37 @@ export const desktopRegistrationSchemaV1 = z.object({
 }).strict()
 export type DesktopRegistrationV1 = z.infer<typeof desktopRegistrationSchemaV1>
 
-export const parseDesktopResult = (operation: DesktopOperationV1, value: unknown): unknown => {
-  const schema = operation === "host.status" ? desktopHostStatusSchemaV1
-    : operation === "host.import.audio" ? desktopHostImportResultSchemaV1
-      : operation === "host.export.run" ? desktopHostExportRunResultSchemaV1
-        : operation === "host.export.status" || operation === "host.export.cancel" ? desktopHostExportStatusSchemaV1
-    : operation === "diagnostics.snapshot" ? desktopDiagnosticsSchemaV1
-      : desktopTransportStatusSchemaV1
-  return schema.parse(value)
-}
+const resultSchemas = {
+  "host.status": desktopHostStatusSchemaV1,
+  "host.import.audio": desktopHostImportResultSchemaV1,
+  "host.export.run": desktopHostExportRunResultSchemaV1,
+  "host.export.status": desktopHostExportStatusSchemaV1,
+  "host.export.cancel": desktopHostExportStatusSchemaV1,
+  "transport.status": desktopTransportStatusSchemaV1,
+  "transport.play": desktopTransportStatusSchemaV1,
+  "transport.pause": desktopTransportStatusSchemaV1,
+  "transport.stop": desktopTransportStatusSchemaV1,
+  "transport.seek": desktopTransportStatusSchemaV1,
+  "diagnostics.snapshot": desktopDiagnosticsSchemaV1,
+  "control.capabilities": controlCapabilitiesSchemaV1,
+  "control.snapshot": projectSnapshotSchemaV1,
+  "control.preview": controlPreviewResultSchemaV1,
+  "control.commit": controlCommitResultSchemaV1,
+  "control.requestApproval": controlApprovalResultSchemaV1,
+  "control.history": controlHistoryResultSchemaV1,
+  "control.recoveries": controlRecoveriesResultSchemaV1,
+} satisfies Record<DesktopOperationV1, z.ZodType>
+
+export const parseDesktopResult = (operation: DesktopOperationV1, value: unknown): unknown => (
+  resultSchemas[operation].parse(value)
+)
+
+export const parseDesktopReplyError = (operation: DesktopOperationV1, value: unknown): HostErrorV1 | ControlErrorV1 => (
+  isDesktopControlOperation(operation)
+    ? controlErrorSchemaV1.safeParse(value).success
+      ? controlErrorSchemaV1.parse(value)
+      : hostErrorSchemaV1.parse(value)
+    : hostErrorSchemaV1.parse(value)
+)
 
 export const hostError = (code: HostErrorV1["code"], message: string): HostErrorV1 => ({ version: desktopProtocolVersion, code, message })

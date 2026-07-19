@@ -1,11 +1,63 @@
 import { describe, expect, test } from "bun:test"
+import { localControlCapabilitiesV1 } from "@daw-browser/control"
 import {
+  desktopControlOperationSchemaV1,
   desktopHelloSchemaV1,
+  desktopHelloAckSchemaV1,
+  desktopOperationSchemaV1,
+  desktopRendererRequestSchemaV1,
   desktopRendererExportInputSchemaV1,
+  desktopTrustedRendererRequestSchemaV1,
   desktopRequestSchemaV1,
   maxDesktopFrameBytes,
+  parseDesktopReplyError,
+  parseDesktopResult,
 } from "./index"
 import { createDesktopFrameDecoder as createDecoder, encodeDesktopFrame as encodeFrame } from "./socket"
+
+const actorSubject = "local:123e4567-e89b-42d3-a456-426614174000"
+const controlAction = { kind: "project.rename", name: "Project" }
+const controlRequestInputs = [
+  ["control.capabilities", {}],
+  ["control.snapshot", { projectId: "project-1" }],
+  ["control.preview", { version: "v1", projectId: "project-1", actions: [controlAction] }],
+  ["control.commit", { version: "v1", projectId: "project-1", actions: [controlAction], idempotencyKey: "request1" }],
+  ["control.requestApproval", { version: "v1", projectId: "project-1", actions: [controlAction] }],
+  ["control.history", { projectId: "project-1" }],
+  ["control.recoveries", { projectId: "project-1" }],
+]
+
+const snapshot = {
+  version: "v1",
+  project: {
+    id: "project-1",
+    name: "Project",
+    revision: 0,
+    tempoBpm: 120,
+    timeSignature: { numerator: 4, denominator: 4 },
+    loop: { enabled: false, startSec: 0, endSec: 0 },
+    masterVolume: 1,
+    updatedAt: 0,
+  },
+  tracks: [],
+  clips: [],
+  processors: [],
+  automation: [],
+  sidechains: [],
+  assets: [],
+  assetFolders: [],
+}
+const planningResult = {
+  version: "v1",
+  projectId: "project-1",
+  priorRevision: 0,
+  revision: 0,
+  applied: false,
+  requestDigest: "0".repeat(64),
+  resolvedRefs: [],
+  warnings: [],
+  changeSummary: { actionCount: 0, changes: [] },
+}
 
 describe("desktop protocol v1", () => {
   test("accepts only declared operations and bounded correlation IDs", () => {
@@ -114,8 +166,139 @@ describe("desktop protocol v1", () => {
   })
 
   test("requires protocol version and validates hello secrets", () => {
-    expect(desktopHelloSchemaV1.safeParse({ version: "v1", type: "hello", secret: "a".repeat(64), client: "test" }).success).toBe(true)
-    expect(desktopHelloSchemaV1.safeParse({ version: "v2", type: "hello", secret: "a".repeat(64), client: "test" }).success).toBe(false)
+    expect(desktopHelloSchemaV1.safeParse({ version: "v1", type: "hello", secret: "a".repeat(64), client: "test", actorId: "123e4567-e89b-42d3-a456-426614174000" }).success).toBe(true)
+    expect(desktopHelloSchemaV1.safeParse({ version: "v2", type: "hello", secret: "a".repeat(64), client: "test", actorId: "123e4567-e89b-42d3-a456-426614174000" }).success).toBe(false)
+    expect(desktopHelloSchemaV1.safeParse({ version: "v1", type: "hello", secret: "a".repeat(64), client: "test", actorId: "123E4567-E89B-42D3-A456-426614174000" }).success).toBe(false)
+    expect(desktopHelloSchemaV1.safeParse({ version: "v1", type: "hello", secret: "a".repeat(64), client: "test", actorId: "not-a-uuid" }).success).toBe(false)
+  })
+
+  test("derives the hello capability maximum from all 18 operations", () => {
+    expect(desktopOperationSchemaV1.options).toHaveLength(18)
+    expect(desktopHelloAckSchemaV1.safeParse({
+      version: "v1",
+      type: "helloAck",
+      sessionId: "session-12345678",
+      capabilities: desktopOperationSchemaV1.options,
+    }).success).toBe(true)
+    expect(desktopHelloAckSchemaV1.safeParse({
+      version: "v1",
+      type: "helloAck",
+      sessionId: "session-12345678",
+      capabilities: [...desktopOperationSchemaV1.options, "host.status"],
+    }).success).toBe(false)
+  })
+
+  test("directly validates all seven shared control request inputs", () => {
+    expect(controlRequestInputs).toHaveLength(7)
+    for (const [operation, input] of controlRequestInputs) {
+      const request = { version: "v1", type: "request", id: "control-1", operation, input }
+      expect(desktopRequestSchemaV1.safeParse(request).success).toBe(true)
+      expect(desktopRequestSchemaV1.safeParse({ ...request, input: { malformed: true } }).success).toBe(false)
+    }
+  })
+
+  test("keeps external and renderer actor boundaries strict", () => {
+    for (const [operation, input] of controlRequestInputs) {
+      const request = { version: "v1", type: "request", id: "control-1", operation, input }
+      expect(desktopTrustedRendererRequestSchemaV1.safeParse(request).success).toBe(false)
+      expect(desktopTrustedRendererRequestSchemaV1.safeParse({ ...request, actorSubject }).success).toBe(true)
+      expect(desktopRequestSchemaV1.safeParse({ ...request, actorSubject }).success).toBe(false)
+    }
+
+    const controlRequest = {
+      version: "v1",
+      type: "request",
+      id: "control-1",
+      operation: "control.capabilities",
+      input: {},
+    }
+    for (const invalidActorSubject of [
+      "123e4567-e89b-42d3-a456-426614174000",
+      "local:123E4567-E89B-42D3-A456-426614174000",
+      "local:123e4567-e89b-42d3-7456-426614174000",
+    ]) {
+      expect(desktopTrustedRendererRequestSchemaV1.safeParse({
+        ...controlRequest,
+        actorSubject: invalidActorSubject,
+      }).success).toBe(false)
+    }
+
+    const rendererRequest = {
+      version: "v1",
+      type: "request",
+      id: "renderer-1",
+      operation: "transport.play",
+      input: {},
+    }
+    expect(desktopRendererRequestSchemaV1.safeParse(rendererRequest).success).toBe(true)
+    expect(desktopTrustedRendererRequestSchemaV1.safeParse(rendererRequest).success).toBe(true)
+    expect(desktopRendererRequestSchemaV1.safeParse({ ...rendererRequest, actorSubject }).success).toBe(false)
+    expect(desktopTrustedRendererRequestSchemaV1.safeParse({ ...rendererRequest, actorSubject }).success).toBe(false)
+
+    const lifecycleRequest = {
+      version: "v1",
+      type: "request",
+      id: "lifecycle-1",
+      operation: "lifecycle.prepareToClose",
+      input: {},
+    }
+    expect(desktopRendererRequestSchemaV1.safeParse(lifecycleRequest).success).toBe(true)
+    expect(desktopRendererRequestSchemaV1.safeParse({ ...lifecycleRequest, actorSubject }).success).toBe(false)
+  })
+
+  test("parses minimum valid results for all seven control operations", () => {
+    const results = [
+      ["control.capabilities", localControlCapabilitiesV1],
+      ["control.snapshot", snapshot],
+      ["control.preview", planningResult],
+      ["control.commit", { ...planningResult, idempotencyReplay: false, recoveries: [], restored: [] }],
+      ["control.requestApproval", {
+        version: "v1",
+        approvalToken: "a".repeat(32),
+        requestDigest: "0".repeat(64),
+        baseRevision: 0,
+        actionIndexes: [0],
+        expiresAt: 0,
+      }],
+      ["control.history", { entries: [], continueCursor: "end", isDone: true }],
+      ["control.recoveries", { entries: [], continueCursor: "end", isDone: true }],
+    ]
+    expect(results).toHaveLength(7)
+    for (const [operation, result] of results) {
+      const parsedOperation = desktopControlOperationSchemaV1.parse(operation)
+      expect(parseDesktopResult(parsedOperation, result)).toEqual(result)
+      expect(() => parseDesktopResult(parsedOperation, {})).toThrow()
+    }
+  })
+
+  test("parses only the operation error family and preserves control metadata", () => {
+    const controlError = {
+      version: "v1",
+      code: "validation",
+      message: "Invalid action.",
+      actionIndex: 2,
+      details: { field: "name" },
+    }
+    expect(parseDesktopReplyError("control.commit", controlError)).toEqual({
+      version: "v1",
+      code: "validation",
+      message: "Invalid action.",
+      actionIndex: 2,
+      details: { field: "name" },
+    })
+    expect(() => parseDesktopReplyError("host.status", controlError)).toThrow()
+
+    const hostError = { version: "v1", code: "unavailable", message: "Host unavailable." }
+    expect(parseDesktopReplyError("host.status", hostError)).toEqual({
+      version: "v1",
+      code: "unavailable",
+      message: "Host unavailable.",
+    })
+    expect(parseDesktopReplyError("control.commit", hostError)).toEqual({
+      version: "v1",
+      code: "unavailable",
+      message: "Host unavailable.",
+    })
   })
 
   test("bounds framed payloads before parsing", () => {

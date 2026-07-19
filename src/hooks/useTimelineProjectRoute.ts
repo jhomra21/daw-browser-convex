@@ -30,6 +30,12 @@ export const clearShareTokenFromUrl = () => {
 
 export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions) => {
   const [projectId, setProjectIdState] = createSignal<string>('')
+  const [mountedProjectGeneration, setMountedProjectGeneration] = createSignal(0)
+  const setMountedProjectId = (nextProjectId: string) => {
+    if (projectId() !== nextProjectId) setMountedProjectGeneration((generation) => generation + 1)
+    setProjectIdState(nextProjectId)
+  }
+
   const [bootstrapProjectId, setBootstrapProjectId] = createSignal<string | null>(null)
   const [acceptingShareToken, setAcceptingShareToken] = createSignal<string | null>(null)
 
@@ -45,7 +51,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     }
     batch(() => {
       setBootstrapProjectId(routeOptions?.bootstrap ?? null)
-      setProjectIdState(nextProjectId)
+      setMountedProjectId(nextProjectId)
     })
   }
 
@@ -60,7 +66,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
 
   const setProjectId = (nextProjectId: string) => {
     setBootstrapProjectId(null)
-    setProjectIdState(nextProjectId)
+    setMountedProjectId(nextProjectId)
   }
 
   onMount(() => {
@@ -74,7 +80,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
       }
       batch(() => {
         setBootstrapProjectId(null)
-        setProjectIdState('')
+        setMountedProjectId('')
       })
       if (nextShareToken || !options.bootstrapIfEmpty) return
       const generatedProjectId = crypto.randomUUID()
@@ -94,6 +100,7 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
 
   return {
     projectId,
+    mountedProjectGeneration,
     bootstrapProjectId,
     acceptingShareToken,
     setAcceptingShareToken,

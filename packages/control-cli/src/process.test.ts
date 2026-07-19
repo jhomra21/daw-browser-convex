@@ -27,20 +27,20 @@ describe("control CLI processes", () => {
     expect(await failed.exited).toBe(1)
   })
 
-  test("stdio MCP emits no protocol stdout before credentials exist", async () => {
+  test("stdio MCP starts without cloud credentials for local host routing", async () => {
     const directory = await mkdtemp("/tmp/daw-control-cli-")
     directories.push(directory)
+    const credentialsPath = join(directory, "credentials.json")
+    await Bun.write(credentialsPath, "{")
     const child = Bun.spawn(["bun", mcpEntrypoint], {
-      env: { ...process.env, DAW_CONTROL_AUTH_PATH: join(directory, "credentials.json") },
+      env: { ...process.env, DAW_CONTROL_AUTH_PATH: credentialsPath },
       stdout: "pipe",
       stderr: "pipe",
     })
+    await Bun.sleep(50)
+    expect(child.exitCode).toBeNull()
+    child.kill()
     expect(await new Response(child.stdout).text()).toBe("")
-    expect(JSON.parse(await new Response(child.stderr).text())).toMatchObject({
-      version: "v1",
-      ok: false,
-      command: "mcp",
-    })
-    expect(await child.exited).toBe(1)
+    expect(await new Response(child.stderr).text()).toBe("")
   })
 })

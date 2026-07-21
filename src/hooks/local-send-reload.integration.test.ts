@@ -117,6 +117,32 @@ describe('local send reload path', () => {
     }
   })
 
+  test('resolves local pending volume overlays', async () => {
+    const overlayProjectId = 'project:local-volume-overlay'
+    const repository = createLocalTimelineRepository(overlayProjectId)
+    await repository.createTrack({ id: sourceTrackId, index: 0 })
+    await repository.createTrack({ id: returnTrackId, index: 1, channelRole: 'return' })
+    const snapshot = await repository.loadSnapshot()
+    const pendingVolumes = new Map<Track['id'], number>([
+      [sourceTrackId, 0.35],
+      [returnTrackId, 0.55],
+    ])
+
+    const client = emptyClientState({})
+    client.mix.pendingSharedTrackVolumes = pendingVolumes
+    const resolvedTracks = resolveTimelineTracks({
+      projectId: overlayProjectId,
+      server: { localSnapshot: snapshot },
+      client,
+      buffers: {
+        getBuffer: () => undefined,
+        getMediaStatus: () => undefined,
+      },
+    })
+    expect(resolvedTracks.find((track) => track.id === sourceTrackId)?.volume).toBe(0.35)
+    expect(resolvedTracks.find((track) => track.id === returnTrackId)?.volume).toBe(0.55)
+  })
+
   test('persists a send to a return created after controller setup, reloads it, and clears it', async () => {
     const previousWindow = globalThis.window
     Reflect.set(globalThis, 'window', {

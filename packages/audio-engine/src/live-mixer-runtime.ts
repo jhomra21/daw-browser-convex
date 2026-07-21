@@ -143,6 +143,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   let currentBpm = 120
   let currentTracks: RuntimeTrack[] = []
   const retiredTrackResources = new Map<string, Array<{ resources: TrackInstanceResources; ids: Set<string> }>>()
+  const appliedStaticGains = new Map<string, { gain: number; outputGain: number }>()
 
   const currentTrackResources = (trackId: string): TrackInstanceResources => ({
     eq: instanceEqChains.get(trackId) ?? new Map(),
@@ -680,6 +681,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     removeLiveMixerEdgesForNodes(cueEdges, removedNodes)
     disconnectAudioNodes([gain])
     gains.delete(trackId)
+    appliedStaticGains.delete(trackId)
     disconnectAudioNodes([input])
     inputs.delete(trackId)
     disconnectAudioNodes([postFx])
@@ -741,6 +743,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     compressorMeterListeners.clear()
     options.onGraphLatencyChange?.(null)
     currentTracks = []
+    appliedStaticGains.clear()
   }
 
   const refreshMixerRouting = () => {
@@ -750,7 +753,16 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
     publishGraphLatency()
     const trackNodes = new Map<string, TrackNodeGroup>()
-    for (const resolvedTrack of graph.channels) trackNodes.set(resolvedTrack.channel.id, ensureTrackNodes(resolvedTrack.channel.id))
+    const staticGainSync = new Map<string, { gain: boolean; outputGain: boolean }>()
+    for (const resolvedTrack of graph.channels) {
+      const trackId = resolvedTrack.channel.id
+      const created = !gains.has(trackId) || !outputs.has(trackId)
+      const prior = appliedStaticGains.get(trackId)
+      const gain = created || prior?.gain !== resolvedTrack.gain
+      const outputGain = created || prior?.outputGain !== resolvedTrack.outputGain
+      if (gain || outputGain) staticGainSync.set(trackId, { gain, outputGain })
+      trackNodes.set(trackId, ensureTrackNodes(trackId))
+    }
     const activeMeterTrackIds = new Set<string>(
       graph.channels.filter((entry) => entry.outputGain > 0 || entry.sends.length > 0).map((entry) => entry.channel.id),
     )
@@ -759,6 +771,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       masterInput,
       trackNodes,
       edgeRuntimes,
+      staticGainSync,
       createGain: () => ctx.createGain(),
       createDelay: () => ctx.createDelay(),
       currentTime: ctx.currentTime,
@@ -772,6 +785,12 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
         options.reconnectTrackMeters(trackId, gain, () => outputs.get(trackId) === gain)
       },
     })
+    for (const resolvedTrack of graph.channels) {
+      appliedStaticGains.set(resolvedTrack.channel.id, {
+        gain: resolvedTrack.gain,
+        outputGain: resolvedTrack.outputGain,
+      })
+    }
     const activeTrackIds = new Set<string>(graph.channels.map((entry) => entry.channel.id))
     for (const id of Array.from(gains.keys())) if (!activeTrackIds.has(id)) disposeTrack(id)
     applyAuxiliaryRoutes()

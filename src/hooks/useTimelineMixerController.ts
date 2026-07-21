@@ -89,8 +89,11 @@ export function useTimelineMixerController(
   const pendingLocalVolumeHistoryVersion = new Map<Track['id'], number>()
   const pendingLocalMixHistory = new Map<Track['id'], PendingLocalTrackMixHistory>()
   const trackIndex = createMemo(() => createTimelineTrackIndex(options.tracks()))
-  const relevantTrackIds = createMemo(() => {
-    const next = new Set(options.optimisticTrackIds())
+  const retainedTrackIds = createMemo(() => {
+    const next = new Set(options.tracks().map((track) => track.id))
+    for (const trackId of options.optimisticTrackIds()) {
+      next.add(trackId)
+    }
     const serverState = options.serverTrackState()
     if (serverState) {
       for (const trackId of serverState.serverVolumes.keys()) {
@@ -682,7 +685,7 @@ export function useTimelineMixerController(
   })
 
   createEffect(() => {
-    const trackIds = relevantTrackIds()
+    const trackIds = retainedTrackIds()
     setRawPendingSharedTrackVolumes((current) => pruneMapToKeys(current, trackIds))
     setRawPendingSharedTrackRouting((current) => pruneMapToKeys(current, trackIds))
     setRawPendingSharedTrackMix((current) => pruneMapToKeys(current, trackIds))

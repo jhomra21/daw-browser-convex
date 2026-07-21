@@ -22,6 +22,7 @@ type ApplyLiveMixerGraphOptions = {
   masterInput: GainNode
   trackNodes: Map<string, LiveTrackNodes>
   edgeRuntimes: Map<string, LiveMixerEdgeRuntime>
+  staticGainSync?: ReadonlyMap<string, { gain: boolean; outputGain: boolean }>
   createGain: () => GainNode
   createDelay: () => DelayNode
   currentTime: number
@@ -55,8 +56,9 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     const nodes = options.trackNodes.get(channelId)
     assert(nodes, `Missing live mixer nodes for track ${channelId}`)
 
-    nodes.gain.gain.value = channel.gain
-    nodes.output.gain.value = channel.outputGain
+    const staticGainSync = options.staticGainSync?.get(channelId)
+    if (!options.staticGainSync || staticGainSync?.gain) nodes.gain.gain.value = channel.gain
+    if (!options.staticGainSync || staticGainSync?.outputGain) nodes.output.gain.value = channel.outputGain
     nodes.postFx.connect(nodes.gain)
     nodes.gain.connect(nodes.output)
     const targetNodes = channel.outputTargetId

@@ -12,6 +12,7 @@
 #include "pluginterfaces/gui/iplugview.h"
 
 #include <CommonCrypto/CommonDigest.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <libkern/OSByteOrder.h>
 #include <mach-o/fat.h>
@@ -199,6 +200,33 @@ std::optional<std::string> HashBinary(const std::filesystem::path& path) {
   return result;
 }
 
+bool BundleEntryNameLess(
+  const std::filesystem::directory_entry& left,
+  const std::filesystem::directory_entry& right
+) {
+  // Keep this ordering aligned with fingerprintVst3Bundle's localeCompare sort.
+  // A bytewise order changes the trusted bundle fingerprint for names such as
+  // "_CodeSignature" and makes an otherwise valid catalog fail closed.
+  const auto leftName = left.path().filename().string();
+  const auto rightName = right.path().filename().string();
+  const auto leftString = CFStringCreateWithCString(
+    kCFAllocatorDefault, leftName.c_str(), kCFStringEncodingUTF8
+  );
+  const auto rightString = CFStringCreateWithCString(
+    kCFAllocatorDefault, rightName.c_str(), kCFStringEncodingUTF8
+  );
+  if (!leftString || !rightString) {
+    if (leftString) CFRelease(leftString);
+    if (rightString) CFRelease(rightString);
+    return leftName < rightName;
+  }
+  const auto comparison = CFStringCompare(leftString, rightString, kCFCompareLocalized);
+  CFRelease(leftString);
+  CFRelease(rightString);
+  return comparison == kCFCompareLessThan
+    || (comparison == kCFCompareEqualTo && leftName < rightName);
+}
+
 std::optional<std::string> HashBundle(const std::filesystem::path& bundle) {
   CC_SHA256_CTX hash{};
   CC_SHA256_Init(&hash);
@@ -210,9 +238,7 @@ std::optional<std::string> HashBundle(const std::filesystem::path& bundle) {
       entries.push_back(*iterator);
     }
     if (error) return false;
-    std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
-      return left.path().filename().string() < right.path().filename().string();
-    });
+    std::sort(entries.begin(), entries.end(), BundleEntryNameLess);
     for (const auto& entry : entries) {
       const auto name = entry.path().filename().string();
       const auto entryRelative = relative.empty() ? name : relative + "/" + name;

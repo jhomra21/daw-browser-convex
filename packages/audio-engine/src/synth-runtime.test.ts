@@ -251,6 +251,19 @@ describe('synth runtime characterization', () => {
     expect(gains[1]?.gain.events).toContainEqual({ kind: 'set', value: 0.8, time: 0 })
   })
 
+  test('keeps timeline notes separate from a held live note when retrigger is disabled', () => {
+    const { oscillators, runtime } = createRuntime()
+    const params = createDefaultSynthParams()
+    runtime.setTrackSynth('track-1', { ...params, retrigger: false })
+    const live = runtime.startPreviewNote('track-1', 60)
+    if (live === undefined) throw new Error('Expected live synth note.')
+
+    runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('timeline-clip'), 0, 0)
+    runtime.releasePreviewNote('track-1', live, 0)
+
+    expect(oscillators).toHaveLength(6)
+  })
+
   test('removes ended oscillators and their gain node from active state', () => {
     const { runtime, sources, oscillators, bufferSources } = createRuntime()
     runtime.scheduleMidiClip(createTrack('track-1'), createMidiClip('clip-1'), 0, 0)
@@ -261,6 +274,35 @@ describe('synth runtime characterization', () => {
 
     expect(sources.snapshot()).toHaveLength(0)
     runtime.stopAll()
+  })
+
+  test('schedules legacy MIDI through configured synth waves without repairing the source clip', () => {
+    const { oscillators, runtime } = createRuntime()
+    const clip = createMidiClip('legacy-wave')
+    if (!clip.midi) throw new Error('Expected MIDI clip.')
+    clip.midi = { ...clip.midi, wave: 'custom-legacy', gain: 7 }
+
+    expect(runtime.scheduleMidiClip(createTrack('track-1'), clip, 0, 0)).toBe(true)
+
+    expect(clip.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
+    expect(oscillators.map((oscillator) => oscillator.type)).toEqual(['sawtooth', 'sawtooth', 'sine'])
+  })
+
+  test('skips invalid persisted MIDI notes without modifying their source clip', () => {
+    const { oscillators, runtime } = createRuntime()
+    const clip = createMidiClip('invalid-legacy')
+    if (!clip.midi) throw new Error('Expected MIDI clip.')
+    clip.midi = {
+      wave: 'custom-legacy',
+      gain: 7,
+      notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
+    }
+    const source = structuredClone(clip.midi)
+
+    expect(runtime.scheduleMidiClip(createTrack('track-1'), clip, 0, 0)).toBe(true)
+
+    expect(oscillators).toHaveLength(0)
+    expect(clip.midi).toEqual(source)
   })
 
   test('keeps per-voice pan neutral while applying pan on the persistent track output', () => {
@@ -1029,6 +1071,42 @@ describe('synth runtime characterization', () => {
     runtime.releasePreviewNote('track-1', 2)
 
     expect(oscillators.slice(3).every((oscillator) => oscillator.stops.filter((time) => time === 0.32).length === 1)).toBe(true)
+  })
+
+  test('does not release a recreated synth voice through a stale live generation', () => {
+    const { ctx, oscillators, runtime } = createRuntime()
+    const staleGeneration = runtime.getLiveVoiceGeneration('track-1')
+    if (staleGeneration === undefined) throw new Error('Expected a synth generation.')
+    runtime.startPreviewNote('track-1', 60)
+    runtime.clearTrackSynth('track-1')
+    runtime.setTrackSynth('track-1', createDefaultSynthParams())
+    const currentGeneration = runtime.getLiveVoiceGeneration('track-1')
+    expect(currentGeneration).not.toBe(staleGeneration)
+    runtime.startPreviewNote('track-1', 62)
+    ctx.currentTime = 0.01
+    const newVoiceStops = oscillators.slice(3).map((oscillator) => [...oscillator.stops])
+    runtime.releasePreviewNote('track-1', 1, undefined, false, staleGeneration)
+    expect(oscillators.slice(3).map((oscillator) => oscillator.stops)).toEqual(newVoiceStops)
+  })
+
+  test('does not clear a recreated live voice when a disposed voice ends late', () => {
+    const { bufferSources, ctx, oscillators, runtime } = createRuntime()
+    runtime.startPreviewNote('track-1', 60)
+    const staleOscillatorCount = oscillators.length
+    const staleBufferSourceCount = bufferSources.length
+    const staleEnded = [...oscillators, ...bufferSources].map((source) => source.onended)
+    runtime.clearTrackSynth('track-1')
+    runtime.setTrackSynth('track-1', createDefaultSynthParams())
+    runtime.startPreviewNote('track-1', 62)
+    for (const ended of staleEnded) ended?.()
+
+    ctx.currentTime = 0.01
+    runtime.releasePreviewNote('track-1', 1)
+
+    expect([
+      ...oscillators.slice(staleOscillatorCount),
+      ...bufferSources.slice(staleBufferSourceCount),
+    ].every((source) => source.stops.includes(0.13))).toBe(true)
   })
 
   test('releases a held preview filter envelope at note-off instead of its original long duration', () => {

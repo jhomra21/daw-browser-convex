@@ -2,6 +2,8 @@ import type { Accessor } from "solid-js"
 import { isLocalId } from "@daw-browser/shared"
 import {
   desktopHostExportRunInputSchemaV1,
+  desktopRendererControlCapabilitiesInputSchemaV1,
+  desktopRendererControlSnapshotInputSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
   hostError,
@@ -21,6 +23,20 @@ import {
   LocalControlServiceError,
 } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
+import type {
+  NativeHostDeviceConfiguration,
+  NativeHostPcmAsset,
+  NativeHostRecordingBlock,
+  NativeHostRecordingConfiguration,
+  NativeHostRecordingStatus,
+  NativeHostTransport,
+  NativeInputDevice,
+  NativeOutputDevice,
+} from "@daw-browser/audio-engine/native-host-wire"
+import type {
+  NativeVst3InsertionPreflightRequest,
+  NativeVst3InsertionPreflightResult,
+} from "@daw-browser/plugin-host-protocol"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { ImportSummary } from "~/hooks/useTimelineClipImport"
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
@@ -42,6 +58,41 @@ type HostResponse = {
   error?: HostErrorV1 | ControlErrorV1
 }
 
+export type DesktopPluginCatalogEntry = {
+  displayName: string
+  discoveredAtMs: number
+  architecture: "unknown"
+  hostingStatus: "unavailable"
+  unavailableReason: string
+  classes: Array<{
+    classId: string
+    vendor: string
+    name: string
+    version: string
+    role: "effect" | "instrument"
+    source: "moduleinfo" | "factory"
+    sdkVersion?: string
+  }>
+  scanHealth: "filesystem-only" | "scanned" | "scan-failed"
+  scannerVersion?: string
+  sdkVersion?: string
+  binaryFingerprint?: string
+  catalogReference?: Omit<NativeVst3InsertionPreflightRequest["reference"], "classId" | "vendorId">
+}
+
+export type DesktopPluginCatalog = {
+  version: 3
+  directories: string[]
+  entries: DesktopPluginCatalogEntry[]
+  diagnostics: { directory: string; message: string }[]
+  scannedAtMs: number | null
+}
+
+export type DesktopPluginCatalogReply =
+  | { ok: true; catalog: DesktopPluginCatalog }
+  | { ok: true; canceled: true }
+  | { ok: false; error: string }
+
 type TimelineHostController = {
   request: (request: HostRequest) => Promise<HostResponse>
   prepareToClose: () => Promise<boolean>
@@ -56,6 +107,41 @@ type DesktopBridge = {
   commit: (requestId: string, writerId: string) => Promise<{ basename: string; byteLength: number; mime: string }>
   abort: (requestId: string, writerId: string) => Promise<void>
   exportTerminal: (jobId: string, status: "success" | "canceled" | "error") => void
+  audioHost?: {
+    diagnostics: () => Promise<{ ok: true } | { ok: false; error: string }>
+    resolveOutputDevice: (preferredDeviceId?: string) => Promise<{ ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }>
+    resolveInputDevice: (preferredDeviceId?: string) => Promise<{ ok: true; device: NativeInputDevice | null } | { ok: false; error: string }>
+    session: {
+      configure: (input: NativeHostDeviceConfiguration) => Promise<{ ok: true } | { ok: false; error: string }>
+      beginTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
+      commitTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
+      rollbackTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
+      installAsset: (input: NativeHostPcmAsset) => Promise<{ ok: true } | { ok: false; error: string }>
+      releaseAsset: (sessionAssetId: number) => Promise<{ ok: true } | { ok: false; error: string }>
+      publishGraph: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
+      queueParameterEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
+      queueInstrumentEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
+      queueSourceEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
+      setTransport: (input: NativeHostTransport) => Promise<{ ok: true } | { ok: false; error: string }>
+      configureRecording: (input: NativeHostRecordingConfiguration) => Promise<{ ok: true } | { ok: false; error: string }>
+      startRecording: () => Promise<{ ok: true } | { ok: false; error: string }>
+      stopRecording: (stopFrame?: number) => Promise<{ ok: true } | { ok: false; error: string }>
+      cancelRecording: () => Promise<{ ok: true } | { ok: false; error: string }>
+      start: () => Promise<{ ok: true } | { ok: false; error: string }>
+      stop: () => Promise<{ ok: true } | { ok: false; error: string }>
+      teardown: () => Promise<{ ok: true } | { ok: false; error: string }>
+      onLoss: (listener: () => void) => () => void
+      onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => () => void
+      onRecordingStatus: (listener: (status: NativeHostRecordingStatus) => void) => () => void
+    }
+  }
+  pluginCatalog?: {
+    read: () => Promise<DesktopPluginCatalogReply>
+    chooseDirectory: () => Promise<DesktopPluginCatalogReply>
+    removeDirectory: (directory: string) => Promise<DesktopPluginCatalogReply>
+    scan: () => Promise<DesktopPluginCatalogReply>
+    preflightInsertion: (input: NativeVst3InsertionPreflightRequest) => Promise<NativeVst3InsertionPreflightResult>
+  }
 }
 
 declare global {
@@ -263,10 +349,14 @@ export const createAttachedHostController = (input: {
         },
       })
       const result = request_.operation === "control.capabilities"
-        ? service.capabilities()
+        ? desktopRendererControlCapabilitiesInputSchemaV1.parse(request_.input).readVersion === "v2"
+          ? service.capabilitiesV2()
+          : service.capabilities()
         : request_.operation === "control.snapshot"
-          ? await service.snapshot(request_.input)
-          : request_.operation === "control.preview"
+          ? desktopRendererControlSnapshotInputSchemaV1.parse(request_.input).readVersion === "v2"
+            ? await service.snapshotV2({ projectId: mountedProjectId })
+            : await service.snapshot(desktopRendererControlSnapshotInputSchemaV1.parse(request_.input))
+        : request_.operation === "control.preview"
             ? await service.preview(request_.input)
             : request_.operation === "control.commit"
               ? await service.commit(request_.input)
@@ -278,7 +368,14 @@ export const createAttachedHostController = (input: {
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
-      return { id: request_.id, result: parseDesktopResult(request_.operation, result) }
+      const rendererProtocolVersion = (
+        request_.operation === "control.capabilities"
+        && desktopRendererControlCapabilitiesInputSchemaV1.parse(request_.input).readVersion === "v2"
+      ) || (
+        request_.operation === "control.snapshot"
+        && desktopRendererControlSnapshotInputSchemaV1.parse(request_.input).readVersion === "v2"
+      ) ? "v2" : "v1"
+      return { id: request_.id, result: parseDesktopResult(request_.operation, result, request_.input, rendererProtocolVersion) }
     } catch (error) {
       if (error instanceof ControlRequestUnavailableError) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }

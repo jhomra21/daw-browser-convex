@@ -1,7 +1,8 @@
-import { For } from "solid-js";
+import { For, Match, Show, Switch } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
 import { Button } from "~/components/ui/button";
 import { useAppPreferences } from "~/context/app-preferences";
+import { useMidiAccess } from "~/context/midi-access";
 import type { AppTheme } from "~/lib/preferences/app-preferences";
 import { DEFAULT_DAW_THEME_ID, type DawThemeId } from "~/lib/theme/theme-registry";
 
@@ -60,6 +61,7 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
 
 export function DashboardGeneralView() {
   const appPreferences = useAppPreferences();
+  const midiAccess = useMidiAccess();
 
   const themeOptions = (): readonly PreviewOption[] => [
     { id: "system", label: "System" },
@@ -134,6 +136,92 @@ export function DashboardGeneralView() {
             </div>
           }
         />
+      </DashboardSection>
+      <DashboardSection title="MIDI input" description="MIDI devices stay on this device and are never shared with projects.">
+        <Switch>
+          <Match when={midiAccess.status() === "unsupported"}>
+            <DashboardRow
+              label="MIDI is unavailable"
+              value="This browser does not support Web MIDI input."
+            />
+          </Match>
+          <Match when={midiAccess.status() === "idle" || midiAccess.status() === "denied" || midiAccess.status() === "error"}>
+            <DashboardRow
+              label="MIDI access"
+              value={
+                midiAccess.status() === "denied"
+                  ? "Access was denied. Enable it in your browser or desktop app, then try again."
+                  : midiAccess.status() === "error"
+                    ? "MIDI access could not be initialized. Try again."
+                    : "Enable MIDI to choose local input devices."
+              }
+              action={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-8 rounded-none px-2 text-xs"
+                  onClick={() => void midiAccess.requestAccess()}
+                >
+                  {midiAccess.status() === "idle" ? "Enable MIDI" : "Try again"}
+                </Button>
+              }
+            />
+          </Match>
+          <Match when={midiAccess.status() === "requesting"}>
+            <DashboardRow
+              label="MIDI access"
+              value="Waiting for the browser or desktop app to respond."
+              action={<Button type="button" variant="outline" size="sm" class="h-8 rounded-none px-2 text-xs" disabled>Enabling MIDI</Button>}
+            />
+          </Match>
+          <Match when={midiAccess.status() === "ready"}>
+            <>
+              <For each={midiAccess.inputs()}>
+                {(input) => (
+                  <DashboardRow
+                    label={input.connected ? input.name ?? "MIDI input" : "Previously selected MIDI input"}
+                    value={
+                      input.connected
+                        ? `${input.manufacturer ? `${input.manufacturer} · ` : ""}${input.selected ? "Selected" : "Not selected"}`
+                        : "Unavailable until this local device reconnects."
+                    }
+                    action={
+                      <label class="flex items-center gap-2 text-xs text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={input.selected}
+                          disabled={!input.connected && !input.selected}
+                          aria-label={`Use ${input.name ?? "MIDI input"} for MIDI input`}
+                          onChange={(event) => midiAccess.setInputSelected(input.id, event.currentTarget.checked)}
+                        />
+                        Use input
+                      </label>
+                    }
+                  />
+                )}
+              </For>
+              <Show when={midiAccess.inputs().length === 0}>
+                <DashboardRow label="No MIDI inputs found" value="Connect an input, then reopen this dashboard if needed." />
+              </Show>
+              <DashboardRow
+                label="MIDI safety"
+                value="Sends a local reset to all selected, connected MIDI input consumers."
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="h-8 rounded-none px-2 text-xs"
+                    onClick={midiAccess.panic}
+                  >
+                    Panic
+                  </Button>
+                }
+              />
+            </>
+          </Match>
+        </Switch>
       </DashboardSection>
     </DashboardScrollView>
   );

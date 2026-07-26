@@ -8,7 +8,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
-import { audioWarpEqual, buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, type AudioSourceKind, type AudioWarpPayload } from '@daw-browser/shared'
+import { audioWarpEqual, buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -19,8 +19,11 @@ import {
 import { audioWarpValidator } from './audioWarpValidator'
 import { clipFadesValidator } from './clipFadesValidator'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { midiValidator } from './midiValidator'
+import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
 
 type ClipKind = 'audio' | 'midi'
+type ClipMidiInput = LegacyMidiClip
 
 type AudioSourceMetadataInput = {
   assetKey?: string
@@ -37,12 +40,47 @@ const clipDeleteSkipReason = v.union(
 
 const clipDeleteResult = v.object({
   removedClipIds: v.array(v.id('clips')),
+  recoveries: v.array(v.object({
+    sourceClipId: v.id('clips'),
+    recoveryId: v.id('clipDeletionRecoveries'),
+  })),
   skippedClipIds: v.array(v.id('clips')),
   skipped: v.array(v.object({
     clipId: v.id('clips'),
     reason: clipDeleteSkipReason,
   })),
 })
+
+type ClipDeleteResult = {
+  removedClipIds: Id<'clips'>[]
+  recoveries: Array<{ sourceClipId: Id<'clips'>; recoveryId: Id<'clipDeletionRecoveries'> }>
+  skippedClipIds: Id<'clips'>[]
+  skipped: Array<{ clipId: Id<'clips'>; reason: 'access-denied' | 'not-found' }>
+}
+
+type ClipOwnership = { clip: Doc<'clips'>; owner: Doc<'ownerships'> }
+
+const isClipDeleteResult = (value: unknown): value is ClipDeleteResult => (
+  typeof value === 'object'
+  && value !== null
+  && 'removedClipIds' in value
+  && 'recoveries' in value
+  && Array.isArray(value.removedClipIds)
+  && Array.isArray(value.recoveries)
+)
+
+const clipRestoreResult = v.union(
+  v.object({ status: v.literal('applied'), clipId: v.string() }),
+  v.object({ status: v.literal('noop'), clipId: v.string() }),
+  v.object({ status: v.literal('rejected'), reason: v.optional(v.string()) }),
+)
+
+const clipDeletionRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
+const maxClipDeletionRecoveriesPerProject = 1000
+const maxClipDeletionRecoveriesPerActorProject = 128
+const clipDeletionRecoveryReceiptLifetimeMs = 24 * 60 * 60 * 1000
+const maxClipDeletionRecoveryReceiptsPerProject = 1000
+const maxClipDeletionRecoveryReceiptsPerActorProject = 128
 
 type ClipCreateInput = {
   projectId: string
@@ -70,16 +108,7 @@ type ClipCreateInput = {
   fades?: Partial<ClipFades>
   midiOffsetBeats?: number
   color?: string
-  midi?: {
-    wave: string
-    gain?: number
-    notes: Array<{
-      beat: number
-      length: number
-      pitch: number
-      velocity?: number
-    }>
-  }
+  midi?: ClipMidiInput
   clipKind?: string
   operationId?: string
 }
@@ -176,6 +205,7 @@ const isTrackLockedByOther = async (
 const buildClipCreatePatch = (
   item: ClipCreateInput,
   metadata: AudioSourceMetadataInput,
+  normalizeMidi: (midi: ClipMidiInput) => ClipMidiInput = normalizeMidiClip,
 ) => {
   const patch: ClipCreatePatch = {
     projectId: item.projectId,
@@ -185,7 +215,7 @@ const buildClipCreatePatch = (
     name: item.name,
     sampleUrl: item.sampleUrl,
     leftPadSec: item.leftPadSec,
-    midi: item.midi,
+    midi: item.midi === undefined ? undefined : normalizeMidi(item.midi),
     bufferOffsetSec: item.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(item.audioWarp),
     gain: item.gain,
@@ -310,8 +340,26 @@ export const setClipMidiRow = async (
   const clip = await getProjectClip(ctx, input.projectId, input.clipId)
   if (!clip) return { changed: false }
   const track = await getCompatibleMergedTrack(ctx, clip.trackId, input.projectId, 'midi')
-  if (!track || controlMidiEqual(clip.midi, input.midi)) return { changed: false }
-  await ctx.db.patch(input.clipId, { midi: input.midi })
+  const midi = normalizeMidiClip(input.midi)
+  if (!track || controlMidiEqual(clip.midi, midi)) return { changed: false }
+  await ctx.db.patch(input.clipId, { midi })
+  return { changed: true }
+}
+
+export const setClipLegacyMidiRow = async (
+  ctx: MutationCtx,
+  input: {
+    projectId: string
+    clipId: Id<'clips'>
+    midi: NonNullable<ClipCreateInput['midi']>
+  },
+) => {
+  const clip = await getProjectClip(ctx, input.projectId, input.clipId)
+  if (!clip) return { changed: false }
+  const track = await getCompatibleMergedTrack(ctx, clip.trackId, input.projectId, 'midi')
+  const midi = normalizeLegacyMidiClip(input.midi)
+  if (!track || controlMidiEqual(clip.midi, midi)) return { changed: false }
+  await ctx.db.patch(input.clipId, { midi })
   return { changed: true }
 }
 
@@ -449,14 +497,94 @@ export const setClipSourceRow = async (
     assetKey: input.assetKey, sourceKind: input.sourceKind, durationSec: input.durationSec,
     sampleRate: input.sampleRate, channelCount: input.channelCount,
   })
-  const sampleUrl = `/api/samples/${encodeURIComponent(input.projectId)}/${encodeURIComponent(input.assetKey)}`
-  if (
+  const sourceChanged = !(
     clip.sourceAssetKey === source.sourceAssetKey && clip.sourceKind === source.sourceKind
     && clip.sourceDurationSec === source.sourceDurationSec && clip.sourceSampleRate === source.sourceSampleRate
-    && clip.sourceChannelCount === source.sourceChannelCount && clip.sampleUrl === sampleUrl
-  ) return { changed: false }
-  await ctx.db.patch(input.clipId, { ...source, sampleUrl })
+    && clip.sourceChannelCount === source.sourceChannelCount
+  )
+  if (!sourceChanged) return { changed: false }
+  await ctx.db.patch(input.clipId, { ...source, sampleUrl: undefined })
   return { changed: true }
+}
+
+const clipDeletionRecoveryPayload = (
+  clip: Doc<'clips'>,
+  ownership: Doc<'ownerships'>,
+  trackHistoryRef: string | undefined,
+) => ({
+  clip: {
+    projectId: clip.projectId,
+    trackId: String(clip.trackId),
+    ...(trackHistoryRef === undefined ? {} : { trackHistoryRef }),
+    startSec: clip.startSec,
+    duration: clip.duration,
+    ...(clip.sourceAssetKey === undefined ? {} : { sourceAssetKey: clip.sourceAssetKey }),
+    ...(clip.sourceKind === undefined ? {} : { sourceKind: clip.sourceKind }),
+    ...(clip.sourceDurationSec === undefined ? {} : { sourceDurationSec: clip.sourceDurationSec }),
+    ...(clip.sourceSampleRate === undefined ? {} : { sourceSampleRate: clip.sourceSampleRate }),
+    ...(clip.sourceChannelCount === undefined ? {} : { sourceChannelCount: clip.sourceChannelCount }),
+    ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
+    ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
+    ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
+    ...(clip.gain === undefined ? {} : { gain: clip.gain }),
+    ...(clip.fades === undefined ? {} : { fades: clip.fades }),
+    ...(clip.color === undefined ? {} : { color: clip.color }),
+    ...(clip.name === undefined ? {} : { name: clip.name }),
+    ...(clip.sampleUrl === undefined ? {} : { sampleUrl: clip.sampleUrl }),
+    ...(clip.midi === undefined ? {} : { midi: clip.midi }),
+    ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+  },
+  ownership: {
+    projectId: ownership.projectId,
+    ownerUserId: ownership.ownerUserId,
+    ...(ownership.role === undefined ? {} : { role: ownership.role }),
+  },
+})
+
+const pruneClipDeletionRecoveries = async (
+  ctx: MutationCtx,
+  input: { projectId: string; actorUserId: string; reserve: number },
+) => {
+  const now = Date.now()
+  const projectRows = await ctx.db.query('clipDeletionRecoveries')
+    .withIndex('by_project_createdAt', (q) => q.eq('projectId', input.projectId))
+    .order('asc')
+    .collect()
+  const actorRows = projectRows.filter((row) => row.actorUserId === input.actorUserId)
+  const expired = projectRows.filter((row) => row.expiresAt <= now || row.consumedAt !== undefined)
+  for (const row of expired) await ctx.db.delete(row._id)
+  const activeProject = projectRows.filter((row) => !expired.includes(row))
+  const activeActor = actorRows.filter((row) => !expired.includes(row))
+  if (
+    activeProject.length + input.reserve > maxClipDeletionRecoveriesPerProject
+    || activeActor.length + input.reserve > maxClipDeletionRecoveriesPerActorProject
+  ) {
+    throw new Error('Clip deletion recovery limit exceeded.')
+  }
+}
+
+const pruneClipDeletionRecoveryReceipts = async (
+  ctx: MutationCtx,
+  input: { projectId: string; actorUserId: string },
+) => {
+  const now = Date.now()
+  const rows = await ctx.db.query('clipDeletionRecoveryReceipts')
+    .withIndex('by_project_createdAt', (q) => q.eq('projectId', input.projectId))
+    .order('asc')
+    .collect()
+  const actorRows = rows.filter((row) => row.actorUserId === input.actorUserId)
+  const expired = rows.filter((row) => row.expiresAt <= now)
+  for (const row of expired) await ctx.db.delete(row._id)
+  const activeProject = rows.filter((row) => !expired.includes(row))
+  const activeActor = actorRows.filter((row) => !expired.includes(row))
+  const projectOverflow = Math.max(0, activeProject.length + 1 - maxClipDeletionRecoveryReceiptsPerProject)
+  const actorOverflow = Math.max(0, activeActor.length + 1 - maxClipDeletionRecoveryReceiptsPerActorProject)
+  const removed = new Set<string>()
+  for (const row of [...activeProject.slice(0, projectOverflow), ...activeActor.slice(0, actorOverflow)]) {
+    if (removed.has(String(row._id))) continue
+    removed.add(String(row._id))
+    await ctx.db.delete(row._id)
+  }
 }
 
 export const deleteClipRow = async (
@@ -465,6 +593,7 @@ export const deleteClipRow = async (
     projectId: string
     clipId: Id<'clips'>
     ownershipId: Id<'ownerships'>
+    recovery?: { actorUserId: string; deleteOperationId: string }
   },
 ) => {
   const clip = await getProjectClip(ctx, input.projectId, input.clipId)
@@ -475,9 +604,27 @@ export const deleteClipRow = async (
     || ownership.projectId !== input.projectId
     || ownership.clipId !== input.clipId
   ) return { changed: false }
+  const track = await ctx.db.get(clip.trackId)
+  const recoveryPayload = clipDeletionRecoveryPayload(
+    clip,
+    ownership,
+    track?.projectId === input.projectId ? track.historyRef : undefined,
+  )
+  const recoveryId = input.recovery
+    ? await ctx.db.insert('clipDeletionRecoveries', {
+      projectId: clip.projectId,
+      actorUserId: input.recovery.actorUserId,
+      sourceClipId: String(input.clipId),
+      deleteOperationId: input.recovery.deleteOperationId,
+      payload: recoveryPayload,
+      payloadDigest: hashCanonicalJsonSyncV1(recoveryPayload),
+      createdAt: Date.now(),
+      expiresAt: Date.now() + clipDeletionRecoveryLifetimeMs,
+    })
+    : undefined
   await ctx.db.delete(input.ownershipId)
   await ctx.db.delete(input.clipId)
-  return { changed: true }
+  return { changed: true, recoveryId }
 }
 
 export const createOwnedClip = async (
@@ -522,6 +669,51 @@ export const createOwnedClip = async (
   return await insertOwnedClipRow(ctx, clipPatch, item.userId)
 }
 
+export const restoreLegacyHistory = mutation({
+  args: {
+    projectId: v.string(),
+    trackId: v.string(),
+    startSec: v.number(),
+    duration: v.number(),
+    name: v.optional(v.string()),
+    sampleUrl: v.optional(v.string()),
+    leftPadSec: v.optional(v.number()),
+    bufferOffsetSec: v.optional(v.number()),
+    audioWarp: v.optional(audioWarpValidator),
+    gain: v.optional(v.number()),
+    fades: v.optional(clipFadesValidator),
+    midiOffsetBeats: v.optional(v.number()),
+    color: v.optional(v.string()),
+    midi: v.optional(midiValidator),
+    clipKind: v.optional(v.string()),
+    operationId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    return await runSharedOperationOnce(ctx, {
+      projectId: args.projectId,
+      userId,
+      operationId: args.operationId,
+      isResult: (value): value is string | null => typeof value === 'string' || value === null,
+      run: async () => {
+        const trackId = ctx.db.normalizeId('tracks', args.trackId)
+        if (!trackId || (args.color !== undefined && !normalizeClipColor(args.color))) return null
+        const clipKind = sanitizeClipKind(args.clipKind ?? (args.midi ? 'midi' : 'audio'))
+        const track = await getWritableCompatibleMergedTrack(ctx, trackId, userId, args.projectId, clipKind)
+        if (!track) return null
+        const patch = buildClipCreatePatch(
+          { ...args, trackId, userId },
+          normalizeAudioSourceMetadataPatch({}),
+          normalizeLegacyMidiClip,
+        )
+        const clipId = await insertOwnedClipRow(ctx, patch, userId)
+        await advanceProjectRevision(ctx, args.projectId)
+        return String(clipId)
+      },
+    })
+  },
+})
+
 export const listByRoom = query({
   args: { projectId: v.string() },
   handler: async (ctx, { projectId }) => {
@@ -554,16 +746,7 @@ export const create = mutation({
     fades: v.optional(clipFadesValidator),
     midiOffsetBeats: v.optional(v.number()),
     color: v.optional(v.string()),
-    midi: v.optional(v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(),
-        length: v.number(),
-        pitch: v.number(),
-        velocity: v.optional(v.number()),
-      })),
-    })),
+    midi: v.optional(midiValidator),
     clipKind: v.optional(v.string()),
     operationId: v.optional(v.string()),
   },
@@ -603,16 +786,7 @@ export const serverCreate = mutation({
     fades: v.optional(clipFadesValidator),
     midiOffsetBeats: v.optional(v.number()),
     color: v.optional(v.string()),
-    midi: v.optional(v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(),
-        length: v.number(),
-        pitch: v.number(),
-        velocity: v.optional(v.number()),
-      })),
-    })),
+    midi: v.optional(midiValidator),
     clipKind: v.optional(v.string()),
     operationId: v.optional(v.string()),
   },
@@ -767,12 +941,19 @@ export const remove = mutation({
     const access = await getClipWriteAccess(ctx, clipId, userId)
     if (!access) return
 
-    await deleteClipRow(ctx, {
+    await pruneClipDeletionRecoveries(ctx, {
+      projectId: access.clip.projectId,
+      actorUserId: userId,
+      reserve: 1,
+    })
+    const result = await deleteClipRow(ctx, {
       projectId: access.clip.projectId,
       clipId,
       ownershipId: access.owner._id,
+      recovery: { actorUserId: userId, deleteOperationId: `clip:${String(clipId)}` },
     })
     await advanceProjectRevision(ctx, access.clip.projectId)
+    return result.recoveryId ?? null
   },
 })
 
@@ -1039,16 +1220,7 @@ export const serverSetTimingAndAudioWarp = mutation({
 export const setMidi = mutation({
   args: {
     clipId: v.id('clips'),
-    midi: v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(),
-        length: v.number(),
-        pitch: v.number(),
-        velocity: v.optional(v.number()),
-      })),
-    }),
+    midi: midiValidator,
   },
   handler: async (ctx, { clipId, midi }) => {
     const userId = await requireAuthenticatedUserId(ctx)
@@ -1072,13 +1244,7 @@ export const serverSetMidi = mutation({
   args: {
     projectId: v.string(),
     clipId: v.string(),
-    midi: v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(), length: v.number(), pitch: v.number(), velocity: v.optional(v.number()),
-      })),
-    }),
+    midi: midiValidator,
     operationId: v.optional(v.string()),
   },
   handler: async (ctx, { projectId, clipId, midi, operationId }) => {
@@ -1103,6 +1269,46 @@ export const serverSetMidi = mutation({
   },
 })
 
+export const serverSetMidiAndTiming = mutation({
+  args: {
+    projectId: v.string(),
+    clipId: v.string(),
+    startSec: v.number(),
+    duration: v.number(),
+    midi: midiValidator,
+    operationId: v.string(),
+  },
+  handler: async (ctx, { projectId, clipId, startSec, duration, midi, operationId }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const normalizedClipId = ctx.db.normalizeId('clips', clipId)
+    if (!normalizedClipId) return { status: 'rejected' as const }
+    return await runSharedOperationOnce(ctx, {
+      projectId, userId, operationId,
+      isResult: (value): value is { status: 'applied' | 'noop' | 'rejected' } => (
+        typeof value === 'object' && value !== null && 'status' in value
+        && (value.status === 'applied' || value.status === 'noop' || value.status === 'rejected')
+      ),
+      run: async () => {
+        const access = await getClipWriteAccess(ctx, normalizedClipId, userId)
+        if (!access || access.clip.projectId !== projectId || !access.clip.midi || await isTrackLockedByOther(ctx, access.clip.trackId, userId)) return { status: 'rejected' as const }
+        const timing = buildClipTimingPatch({ startSec, duration })
+        if (access.clip.fades) timing.fades = normalizeClipFades(access.clip.fades, duration)
+        const normalizedMidi = normalizeMidiClip(midi)
+        const timingChanged = access.clip.startSec !== timing.startSec
+          || access.clip.duration !== timing.duration
+          || access.clip.leftPadSec !== timing.leftPadSec
+          || access.clip.bufferOffsetSec !== timing.bufferOffsetSec
+          || access.clip.midiOffsetBeats !== timing.midiOffsetBeats
+        const midiChanged = !controlMidiEqual(access.clip.midi, normalizedMidi)
+        if (!timingChanged && !midiChanged) return { status: 'noop' as const }
+        await ctx.db.patch(normalizedClipId, { ...timing, midi: normalizedMidi })
+        await advanceProjectRevision(ctx, projectId)
+        return { status: 'applied' as const }
+      },
+    })
+  },
+})
+
 export const createMany = mutation({
   args: {
     items: v.array(v.object({
@@ -1118,16 +1324,7 @@ export const createMany = mutation({
       sampleRate: v.optional(v.number()),
       channelCount: v.optional(v.number()),
       leftPadSec: v.optional(v.number()),
-      midi: v.optional(v.object({
-        wave: v.string(),
-        gain: v.optional(v.number()),
-        notes: v.array(v.object({
-          beat: v.number(),
-          length: v.number(),
-          pitch: v.number(),
-          velocity: v.optional(v.number()),
-        })),
-      })),
+      midi: v.optional(midiValidator),
       bufferOffsetSec: v.optional(v.number()),
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
@@ -1174,16 +1371,7 @@ export const serverCreateMany = mutation({
       sampleRate: v.optional(v.number()),
       channelCount: v.optional(v.number()),
       leftPadSec: v.optional(v.number()),
-      midi: v.optional(v.object({
-        wave: v.string(),
-        gain: v.optional(v.number()),
-        notes: v.array(v.object({
-          beat: v.number(),
-          length: v.number(),
-          pitch: v.number(),
-          velocity: v.optional(v.number()),
-        })),
-      })),
+      midi: v.optional(midiValidator),
       bufferOffsetSec: v.optional(v.number()),
       audioWarp: v.optional(audioWarpValidator),
       gain: v.optional(v.number()),
@@ -1224,65 +1412,234 @@ const removeManyForUser = async (
   ctx: MutationCtx,
   clipIds: Id<'clips'>[],
   userId: string,
+  projectId: string,
+  deleteOperationId: string,
 ) => {
-    const removedClipIds: Id<'clips'>[] = []
-    const skipped: Array<{ clipId: Id<'clips'>; reason: 'access-denied' | 'not-found' }> = []
-    const changedProjectIds = new Set<string>()
-    const ownerships = await Promise.all(clipIds.map(async (clipId) => ({
+  if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+  const clipIdTexts = new Set<string>()
+  for (const clipId of clipIds) {
+    const clipIdText = String(clipId)
+    if (clipIdTexts.has(clipIdText)) throw new Error('Clip deletion cannot contain duplicate clip IDs.')
+    clipIdTexts.add(clipIdText)
+  }
+  const ownerships = await Promise.all(clipIds.map(async (clipId) => ({
+    clipId,
+    ownership: await getClipOwnership(ctx, clipId),
+  })))
+  const projectCanWrite = new Map<string, boolean>()
+  const deletable: Array<{ clipId: Id<'clips'>; ownership: ClipOwnership }> = []
+  for (const { clipId, ownership } of ownerships) {
+    if (!ownership) {
+      throw new Error(`Clip deletion target was not found: ${String(clipId)}.`)
+    }
+    if (ownership.clip.projectId !== projectId) {
+      throw new Error('Clip deletion targets must belong to the requested project.')
+    }
+    if (ownership.owner.ownerUserId !== userId) {
+      let canWrite = projectCanWrite.get(ownership.clip.projectId)
+      if (canWrite === undefined) {
+        canWrite = canWriteProject(await getProjectRole(ctx, ownership.clip.projectId, userId))
+        projectCanWrite.set(ownership.clip.projectId, canWrite)
+      }
+      if (!canWrite) {
+        throw new Error('Actor cannot delete one or more clips.')
+      }
+    }
+    deletable.push({ clipId, ownership })
+  }
+  for (const { ownership } of deletable) {
+    if (await isTrackLockedByOther(ctx, ownership.clip.trackId, userId)) {
+      throw new Error('Actor cannot delete clips on a locked track.')
+    }
+  }
+  const recoveryCountByProject = new Map<string, number>()
+  for (const { ownership } of deletable) {
+    recoveryCountByProject.set(
+      ownership.clip.projectId,
+      (recoveryCountByProject.get(ownership.clip.projectId) ?? 0) + 1,
+    )
+  }
+  for (const [projectId, reserve] of recoveryCountByProject) {
+    await pruneClipDeletionRecoveries(ctx, { projectId, actorUserId: userId, reserve })
+  }
+  const removedClipIds: Id<'clips'>[] = []
+  const recoveries: Array<{ sourceClipId: Id<'clips'>; recoveryId: Id<'clipDeletionRecoveries'> }> = []
+  for (const { clipId, ownership } of deletable) {
+    const deleted = await deleteClipRow(ctx, {
+      projectId: ownership.clip.projectId,
       clipId,
-      ownership: await getClipOwnership(ctx, clipId),
-    })))
-    const projectCanWrite = new Map<string, boolean>()
-    for (const { clipId, ownership } of ownerships) {
-      if (!ownership) {
-        skipped.push({ clipId, reason: 'not-found' })
-        continue
-      }
-      if (ownership.owner.ownerUserId !== userId) {
-        let canWrite = projectCanWrite.get(ownership.clip.projectId)
-        if (canWrite === undefined) {
-          canWrite = canWriteProject(await getProjectRole(ctx, ownership.clip.projectId, userId))
-          projectCanWrite.set(ownership.clip.projectId, canWrite)
-        }
-        if (!canWrite) {
-          skipped.push({ clipId, reason: 'access-denied' })
-          continue
-        }
-      }
-      await deleteClipRow(ctx, {
-        projectId: ownership.clip.projectId,
-        clipId,
-        ownershipId: ownership.owner._id,
-      })
-      removedClipIds.push(clipId)
-      changedProjectIds.add(ownership.clip.projectId)
-    }
-    for (const projectId of changedProjectIds) await advanceProjectRevision(ctx, projectId)
-    return {
-      removedClipIds,
-      skippedClipIds: skipped.map((entry) => entry.clipId),
-      skipped,
-    }
+      ownershipId: ownership.owner._id,
+      recovery: { actorUserId: userId, deleteOperationId },
+    })
+    if (!deleted.changed || !deleted.recoveryId) throw new Error('Clip deletion target changed during deletion.')
+    recoveries.push({ sourceClipId: clipId, recoveryId: deleted.recoveryId })
+    removedClipIds.push(clipId)
+  }
+  await advanceProjectRevision(ctx, projectId)
+  return {
+    removedClipIds,
+    recoveries,
+    skippedClipIds: [],
+    skipped: [],
+  }
 }
 
 export const removeMany = mutation({
-  args: { clipIds: v.array(v.id('clips')) },
+  args: { projectId: v.string(), clipIds: v.array(v.id('clips')), operationId: v.string() },
   returns: clipDeleteResult,
-  handler: async (ctx, { clipIds }) => {
+  handler: async (ctx, { projectId, clipIds, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await removeManyForUser(ctx, clipIds, userId)
+    return await runSharedOperationOnce(ctx, {
+      projectId,
+      userId,
+      operationId,
+      isResult: isClipDeleteResult,
+      run: () => removeManyForUser(ctx, clipIds, userId, projectId, operationId),
+    })
   },
 })
 
 export const serverRemoveMany = mutation({
-  args: { clipIds: v.array(v.string()) },
+  args: { projectId: v.string(), clipIds: v.array(v.string()), operationId: v.string() },
   returns: clipDeleteResult,
-  handler: async (ctx, { clipIds }) => {
+  handler: async (ctx, { projectId, clipIds, operationId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    const normalizedClipIds = clipIds.flatMap((clipId) => {
-      const normalized = ctx.db.normalizeId('clips', clipId)
-      return normalized ? [normalized] : []
+    return await runSharedOperationOnce(ctx, {
+      projectId,
+      userId,
+      operationId,
+      isResult: isClipDeleteResult,
+      run: async () => {
+        if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
+        const normalizedClipIds: Id<'clips'>[] = []
+        for (const clipId of clipIds) {
+          const normalized = ctx.db.normalizeId('clips', clipId)
+          if (!normalized) throw new Error(`Invalid clip deletion ID: ${clipId}.`)
+          normalizedClipIds.push(normalized)
+        }
+        return await removeManyForUser(ctx, normalizedClipIds, userId, projectId, operationId)
+      },
     })
-    return await removeManyForUser(ctx, normalizedClipIds, userId)
+  },
+})
+
+export const restoreDeleted = mutation({
+  args: { recoveryId: v.string() },
+  returns: clipRestoreResult,
+  handler: async (ctx, { recoveryId: recoveryIdText }) => {
+    const userId = await requireAuthenticatedUserId(ctx)
+    const recoveryId = ctx.db.normalizeId('clipDeletionRecoveries', recoveryIdText)
+    if (!recoveryId) {
+      const receipt = await ctx.db.query('clipDeletionRecoveryReceipts')
+        .withIndex('by_recovery', (q) => q.eq('recoveryId', recoveryIdText))
+        .first()
+      if (
+        receipt
+        && receipt.actorUserId === userId
+        && receipt.expiresAt > Date.now()
+        && canWriteProject(await getProjectRole(ctx, receipt.projectId, userId))
+      ) return { status: 'noop' as const, clipId: receipt.restoredClipId }
+      return { status: 'rejected' as const }
+    }
+    const recovery = await ctx.db.get(recoveryId)
+    if (!recovery || recovery.actorUserId !== userId || recovery.expiresAt <= Date.now()) {
+      const receipt = await ctx.db.query('clipDeletionRecoveryReceipts')
+        .withIndex('by_recovery', (q) => q.eq('recoveryId', recoveryIdText))
+        .first()
+      if (
+        receipt
+        && receipt.actorUserId === userId
+        && receipt.expiresAt > Date.now()
+        && canWriteProject(await getProjectRole(ctx, receipt.projectId, userId))
+      ) return { status: 'noop' as const, clipId: receipt.restoredClipId }
+      return { status: 'rejected' as const }
+    }
+    if (!canWriteProject(await getProjectRole(ctx, recovery.projectId, userId))) {
+      return { status: 'rejected' as const }
+    }
+    if (hashCanonicalJsonSyncV1(recovery.payload) !== recovery.payloadDigest) {
+      return { status: 'rejected' as const }
+    }
+    const payload = recovery.payload
+    const clip = payload?.clip
+    const ownership = payload?.ownership
+    if (
+      !clip || !ownership || clip.projectId !== recovery.projectId
+      || ownership.projectId !== recovery.projectId || typeof clip.trackId !== 'string'
+      || typeof ownership.ownerUserId !== 'string'
+    ) return { status: 'rejected' as const }
+    const originalTrackId = ctx.db.normalizeId('tracks', clip.trackId)
+    const originalTrack = originalTrackId
+      ? await getCompatibleMergedTrack(ctx, originalTrackId, recovery.projectId, clip.midi ? 'midi' : 'audio')
+      : null
+    const replacementTracks = !originalTrack && typeof clip.trackHistoryRef === 'string'
+      ? (await ctx.db.query('tracks').withIndex('by_room', (q) => q.eq('projectId', recovery.projectId)).collect())
+        .filter((candidate) => candidate.historyRef === clip.trackHistoryRef)
+      : []
+    if (replacementTracks.length > 1) return { status: 'rejected' as const }
+    const track = originalTrack ?? (replacementTracks[0]
+      ? await getCompatibleMergedTrack(ctx, replacementTracks[0]._id, recovery.projectId, clip.midi ? 'midi' : 'audio')
+      : null)
+    if (!track) return { status: 'rejected' as const }
+    if (isMergedTrackLockedByOther(track, userId)) return { status: 'rejected' as const }
+    const trackId = track._id
+    const audioSource = clip.midi ? undefined : normalizeAudioSourceMetadataPatch({
+      assetKey: clip.sourceAssetKey,
+      sourceKind: clip.sourceKind,
+      durationSec: clip.sourceDurationSec,
+      sampleRate: clip.sourceSampleRate,
+      channelCount: clip.sourceChannelCount,
+    })
+    if (
+      !clip.midi && clip.sourceAssetKey !== undefined
+      && (
+        audioSource?.assetKey === undefined
+        || audioSource.sourceKind === undefined
+        || audioSource.durationSec === undefined
+        || audioSource.sampleRate === undefined
+        || audioSource.channelCount === undefined
+      )
+    ) return { status: 'rejected' as const, reason: 'invalid-audio-source' }
+    const asset = clip.sourceAssetKey === undefined
+      ? undefined
+      : audioSource?.assetKey
+      ? await findSampleRow(ctx, { projectId: recovery.projectId, assetKey: audioSource.assetKey })
+      : undefined
+    if (!clip.midi && clip.sourceAssetKey !== undefined && !asset) return { status: 'rejected' as const, reason: 'missing-audio-asset' }
+    const restoredId = await insertOwnedClipRow(ctx, {
+      projectId: clip.projectId,
+      trackId,
+      startSec: clip.startSec,
+      duration: clip.duration,
+      ...(audioSource ? buildClipAudioSourceFields(audioSource) : {}),
+      ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
+      ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
+      ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
+      ...(clip.gain === undefined ? {} : { gain: clip.gain }),
+      ...(clip.fades === undefined ? {} : { fades: clip.fades }),
+      ...(clip.color === undefined ? {} : { color: clip.color }),
+      ...(clip.name === undefined ? {} : { name: clip.name }),
+      ...(asset
+        ? { sampleUrl: `/api/samples/${encodeURIComponent(recovery.projectId)}/${encodeURIComponent(asset.assetKey)}` }
+        : typeof clip.sampleUrl === 'string' ? { sampleUrl: clip.sampleUrl } : {}),
+      ...(clip.midi === undefined ? {} : { midi: normalizeLegacyMidiClip(clip.midi) }),
+      ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+    }, ownership.ownerUserId)
+    await pruneClipDeletionRecoveryReceipts(ctx, {
+      projectId: recovery.projectId,
+      actorUserId: userId,
+    })
+    const createdAt = Date.now()
+    await ctx.db.insert('clipDeletionRecoveryReceipts', {
+      projectId: recovery.projectId,
+      actorUserId: userId,
+      recoveryId: recoveryIdText,
+      restoredClipId: String(restoredId),
+      createdAt,
+      expiresAt: createdAt + clipDeletionRecoveryReceiptLifetimeMs,
+    })
+    await ctx.db.delete(recoveryId)
+    await advanceProjectRevision(ctx, recovery.projectId)
+    return { status: 'applied' as const, clipId: String(restoredId) }
   },
 })

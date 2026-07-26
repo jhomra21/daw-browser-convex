@@ -73,6 +73,12 @@ async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("controlRecoveries").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("sharedOperationResults").withIndex("by_room_user_operation", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("clipDeletionRecoveries").withIndex("by_project_expiresAt", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("clipDeletionRecoveryReceipts").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
+      .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
   ]);
 }
 

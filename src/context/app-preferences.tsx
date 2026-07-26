@@ -63,12 +63,19 @@ type AppPreferencesContextValue = {
     setEchoCancellation: (enabled: boolean) => void
     setNoiseSuppression: (enabled: boolean) => void
     setAutoGainControl: (enabled: boolean) => void
+    setNativePlaybackEnabled: (enabled: boolean) => void
+    setPortableBrowserPlaybackEnabled: (enabled: boolean) => void
   }
   recording: {
     preferences: () => AppPreferences["recording"]
+    setPortableEnabled: (enabled: boolean) => void
     setInputConfiguration: (configuration: RecordingInputPreferences) => void
     setManualOffsetFrames: (frames: number) => void
     setCalibrations: (calibrations: RecordingCalibration[]) => void
+  }
+  midi: {
+    selectedInputIds: () => readonly string[]
+    setSelectedInputIds: (ids: string[]) => void
   }
 }
 
@@ -234,16 +241,24 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
           setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),
           setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
-          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled)
+          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled),
+          setNativePlaybackEnabled: (enabled) => setPreferences("audio", "nativePlaybackEnabled", enabled),
+          setPortableBrowserPlaybackEnabled: (enabled) => setPreferences("audio", "portableBrowserPlaybackEnabled", enabled)
         },
         recording: {
           preferences: () => preferences.recording,
+          setPortableEnabled: (enabled) => setPreferences("recording", "portableEnabled", enabled),
           setInputConfiguration: (configuration) =>
             setPreferences("recording", (recording) => updateRecordingInputPreferences(recording, configuration)),
           setManualOffsetFrames: (frames) =>
             setPreferences("recording", "manualOffsetFrames", normalizeRecordingManualOffsetFrames(frames)),
           setCalibrations: (calibrations) =>
             setPreferences("recording", (recording) => updateRecordingCalibrations(recording, calibrations))
+        },
+        midi: {
+          selectedInputIds: () => preferences.midi.selectedInputIds,
+          setSelectedInputIds: (ids) =>
+            setPreferences("midi", "selectedInputIds", () => ids)
         }
       }}
     >

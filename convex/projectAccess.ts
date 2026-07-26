@@ -169,6 +169,7 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
     ...(typeof identity.dawControlActorTokenIdentifier === "string"
       ? { dawControlActorTokenIdentifier: identity.dawControlActorTokenIdentifier }
       : {}),
+    ...(identity.dawWorker === true ? { dawWorker: true } : {}),
   };
 }
 

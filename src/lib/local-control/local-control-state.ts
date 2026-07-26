@@ -1,8 +1,10 @@
 import {
   hashCanonicalJsonSyncV1,
   type ProjectSnapshotV1,
+  type ProjectSnapshotV2,
 } from '@daw-browser/control'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
+import type { PendingWriteKind } from '~/lib/local-project-write-flushers'
 import {
   type LocalControlApprovalRow,
   type LocalControlAssetGcRow,
@@ -16,7 +18,7 @@ import {
   type LocalProjectStateRow,
   type LocalProjectSyncStateRow,
 } from '~/lib/local-project-db'
-import { projectLocalControlSnapshotV1 } from './local-control-projector'
+import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
 
 const CONTROL_SNAPSHOT_STATE_KEY = 'snapshot'
 const chains = new Map<string, Promise<void>>()
@@ -25,7 +27,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 )
 
 type LocalControlSnapshotState = {
-  version: 1
+  version: 1 | 2
   revision: number
   digest: string
   updatedAt: number
@@ -42,7 +44,7 @@ export class LocalControlTransactionError extends Error {
 }
 
 export type LocalControlTransactionResult = {
-  snapshot: ProjectSnapshotV1
+  snapshot: ProjectSnapshotV2
   state: LocalControlSnapshotState
   rows: {
     entities: readonly LocalProjectEntityRow[]
@@ -80,7 +82,7 @@ export type LocalControlTransactionResult = {
 const controlState = (value: unknown): LocalControlSnapshotState | undefined => {
   if (
     !isRecord(value)
-    || value.version !== 1
+    || (value.version !== 1 && value.version !== 2)
     || typeof value.revision !== 'number'
     || !Number.isInteger(value.revision)
     || value.revision < 0
@@ -90,10 +92,10 @@ const controlState = (value: unknown): LocalControlSnapshotState | undefined => 
     || !Number.isInteger(value.updatedAt)
     || value.updatedAt < 0
   ) return undefined
-  return { version: 1, revision: value.revision, digest: value.digest, updatedAt: value.updatedAt }
+  return { version: value.version, revision: value.revision, digest: value.digest, updatedAt: value.updatedAt }
 }
 
-const semanticSnapshotDigest = (snapshot: ProjectSnapshotV1) => {
+const semanticSnapshotDigest = (snapshot: ProjectSnapshotV2) => {
   const {
     revision: _revision,
     updatedAt: _updatedAt,
@@ -112,6 +114,24 @@ const semanticSnapshotDigest = (snapshot: ProjectSnapshotV1) => {
   return hashCanonicalJsonSyncV1(JSON.parse(JSON.stringify(content)))
 }
 
+const legacySemanticSnapshotDigest = (snapshot: ProjectSnapshotV1) => {
+  const {
+    revision: _revision,
+    updatedAt: _updatedAt,
+    ...project
+  } = snapshot.project
+  return hashCanonicalJsonSyncV1(JSON.parse(JSON.stringify({
+    project,
+    tracks: snapshot.tracks,
+    clips: snapshot.clips,
+    processors: snapshot.processors,
+    automation: snapshot.automation,
+    sidechains: snapshot.sidechains,
+    assets: snapshot.assets,
+    assetFolders: snapshot.assetFolders,
+  })))
+}
+
 const metadataFor = (project: { name: string; updatedAt: number }): LocalControlProjectMetadata => ({
   version: 1,
   name: project.name,
@@ -123,6 +143,12 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> => (
   (typeof value === 'object' && value !== null || typeof value === 'function')
   && typeof Reflect.get(value, 'then') === 'function'
 )
+
+type LocalControlTransactionOptions = {
+  excludePendingWriteKinds?: readonly PendingWriteKind[]
+  flushPendingWrites?: boolean
+  pendingWritesFlushedUnderAssetLock?: boolean
+}
 
 const abortLocalControlTransaction = (tx: { abort: () => void; done: Promise<unknown> }) => {
   tx.abort()
@@ -139,7 +165,6 @@ const runLocalControlTransaction = async <Value>(
   projectId: string,
   callback: (result: LocalControlTransactionResult) => Value,
 ): Promise<Value> => {
-  await flushLocalProjectPendingWrites(projectId)
   const project = await getLocalProject(projectId)
   if (!project) throw new LocalControlTransactionError('not-found')
   const db = await openLocalProjectDb(projectId)
@@ -165,7 +190,15 @@ const runLocalControlTransaction = async <Value>(
     throw new LocalControlTransactionError('corruption')
   }
   const initialRevision = current?.revision ?? 0
-  let snapshot = projectLocalControlSnapshotV1({
+  let snapshot = projectLocalControlSnapshotV2({
+    projectId,
+    fallbackMetadata: metadataFor(project),
+    entities,
+    assets,
+    projectState,
+    revision: initialRevision,
+  })
+  const legacySnapshot = projectLocalControlSnapshotV1({
     projectId,
     fallbackMetadata: metadataFor(project),
     entities,
@@ -174,10 +207,11 @@ const runLocalControlTransaction = async <Value>(
     revision: initialRevision,
   })
   const digest = semanticSnapshotDigest(snapshot)
-  const drifted = current !== undefined && current.digest !== digest
+  const migrated = current?.version === 1 && current.digest === legacySemanticSnapshotDigest(legacySnapshot)
+  const drifted = current !== undefined && !migrated && current.digest !== digest
   const updatedAt = drifted ? Date.now() : current?.updatedAt ?? snapshot.project.updatedAt
   const state: LocalControlSnapshotState = {
-    version: 1,
+    version: 2,
     revision: current === undefined ? 0 : drifted ? current.revision + 1 : current.revision,
     digest,
     updatedAt,
@@ -210,7 +244,7 @@ const runLocalControlTransaction = async <Value>(
     })
   }
   if (snapshot.project.revision !== state.revision) {
-    snapshot = projectLocalControlSnapshotV1({
+    snapshot = projectLocalControlSnapshotV2({
       projectId,
       fallbackMetadata: metadataFor(project),
       entities,
@@ -219,7 +253,7 @@ const runLocalControlTransaction = async <Value>(
       revision: state.revision,
     })
   }
-  if (current === undefined || drifted) {
+  if (current === undefined || drifted || migrated) {
     await tx.objectStore('controlState').put({
       key: CONTROL_SNAPSHOT_STATE_KEY,
       value: state,
@@ -278,9 +312,26 @@ export const withLocalControlTransaction = <Value>(
   callback: (result: LocalControlTransactionResult) => Value,
   ..._thenableIsInvalid: ThenableCallbackArgument<Value>
 ): Promise<Value> => {
+  return queueLocalControlTransaction(projectId, callback)
+}
+
+const queueLocalControlTransaction = <Value>(
+  projectId: string,
+  callback: (result: LocalControlTransactionResult) => Value,
+  options?: LocalControlTransactionOptions,
+): Promise<Value> => (async () => {
+  if (options?.pendingWritesFlushedUnderAssetLock !== true && options?.flushPendingWrites !== false) {
+    await flushLocalProjectPendingWrites(projectId, { excludeKinds: options?.excludePendingWriteKinds })
+  }
   const previous = chains.get(projectId) ?? Promise.resolve()
   const run = () => runLocalControlTransaction(projectId, callback)
   const next = previous.then(run, run)
   chains.set(projectId, next.then(() => undefined, () => undefined))
   return next
-}
+})()
+
+export const withLocalControlTransactionOptions = <Value>(
+  projectId: string,
+  callback: (result: LocalControlTransactionResult) => Value,
+  options?: LocalControlTransactionOptions,
+): Promise<Value> => queueLocalControlTransaction(projectId, callback, options)

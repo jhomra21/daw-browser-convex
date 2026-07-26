@@ -2,14 +2,19 @@ import { z } from "zod"
 import {
   controlApprovalRequestSchemaV1, controlApprovalResultSchemaV1, controlCapabilitiesQuerySchemaV1,
   controlCapabilitiesSchemaV1, controlCommitRequestSchemaV1, controlCommitResultSchemaV1,
+  controlCapabilitiesQuerySchemaV2, controlCapabilitiesSchemaV2,
   controlErrorSchemaV1, controlHistoryQuerySchemaV1, controlHistoryResultSchemaV1,
   controlPreviewRequestSchemaV1, controlPreviewResultSchemaV1, controlRecoveriesQuerySchemaV1,
-  controlRecoveriesResultSchemaV1, controlSnapshotQuerySchemaV1, projectSnapshotSchemaV1,
+  controlRecoveriesResultSchemaV1, controlSnapshotQuerySchemaV1,
+  projectSnapshotSchemaV1, projectSnapshotSchemaV2,
   type ControlErrorV1,
 } from "@daw-browser/control"
 export type { ControlErrorV1 } from "@daw-browser/control"
 
 export const desktopProtocolVersion = "v1" as const
+export const desktopProtocolVersionV2 = "v2" as const
+export const desktopProtocolVersions = [desktopProtocolVersion, desktopProtocolVersionV2] as const
+export type DesktopProtocolVersion = typeof desktopProtocolVersions[number]
 export const maxDesktopFrameBytes = 1_048_576
 export const maxDesktopReplyFrameBytes = 512 * 1024
 export const maxDesktopReplyBytes = 64 * 1024 * 1024
@@ -21,6 +26,7 @@ export const maxDeadlineMs = 60_000
 
 const correlationId = z.string().min(1).max(maxCorrelationIdLength).regex(/^[A-Za-z0-9._-]+$/)
 const version = z.literal(desktopProtocolVersion)
+const versionV2 = z.literal(desktopProtocolVersionV2)
 export const desktopEmptyInputSchemaV1 = z.object({}).strict()
 const finiteSeconds = z.number().finite().min(0).max(86_400)
 export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).strict()
@@ -46,6 +52,21 @@ export const desktopOperationSchemaV1 = z.enum([
   "control.recoveries",
 ])
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
+
+export const desktopControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1
+export const desktopControlSnapshotInputSchemaV1 = controlSnapshotQuerySchemaV1
+export const desktopRendererControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1.extend({
+  readVersion: z.literal("v2").optional(),
+}).strict()
+export const desktopRendererControlSnapshotInputSchemaV1 = controlSnapshotQuerySchemaV1.extend({
+  readVersion: z.literal("v2").optional(),
+}).strict()
+export const desktopControlCapabilitiesInputSchemaV2 = controlCapabilitiesQuerySchemaV2.extend({
+  readVersion: z.literal("v2"),
+}).strict()
+export const desktopControlSnapshotInputSchemaV2 = controlSnapshotQuerySchemaV1.extend({
+  readVersion: z.literal("v2"),
+}).strict()
 
 const requestInputs = {
   "host.status": desktopEmptyInputSchemaV1,
@@ -142,8 +163,8 @@ const requestInputs = {
   "transport.stop": desktopEmptyInputSchemaV1,
   "transport.seek": desktopSeekInputSchemaV1,
   "diagnostics.snapshot": desktopEmptyInputSchemaV1,
-  "control.capabilities": controlCapabilitiesQuerySchemaV1,
-  "control.snapshot": controlSnapshotQuerySchemaV1,
+  "control.capabilities": desktopControlCapabilitiesInputSchemaV1,
+  "control.snapshot": desktopControlSnapshotInputSchemaV1,
   "control.preview": controlPreviewRequestSchemaV1,
   "control.commit": controlCommitRequestSchemaV1,
   "control.requestApproval": controlApprovalRequestSchemaV1,
@@ -223,6 +244,8 @@ export const hostErrorSchemaV1 = z.object({
   message: z.string().min(1).max(512),
 }).strict()
 export type HostErrorV1 = z.infer<typeof hostErrorSchemaV1>
+export const hostErrorSchemaV2 = hostErrorSchemaV1.extend({ version: versionV2 })
+export type HostErrorV2 = z.infer<typeof hostErrorSchemaV2>
 
 export const desktopHostStatusSchemaV1 = z.object({
   project: z.object({ id: z.string().min(1).max(256), kind: z.enum(["local", "cloud"]) }).nullable(),
@@ -278,8 +301,8 @@ export type DesktopOperationMapV1 = {
   "transport.stop": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.seek": { input: { seconds: number }; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "diagnostics.snapshot": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV1> }
-  "control.capabilities": { input: z.infer<typeof controlCapabilitiesQuerySchemaV1>; result: z.infer<typeof controlCapabilitiesSchemaV1> }
-  "control.snapshot": { input: z.infer<typeof controlSnapshotQuerySchemaV1>; result: z.infer<typeof projectSnapshotSchemaV1> }
+  "control.capabilities": { input: z.infer<typeof desktopControlCapabilitiesInputSchemaV1>; result: z.infer<typeof controlCapabilitiesSchemaV1> }
+  "control.snapshot": { input: z.infer<typeof desktopControlSnapshotInputSchemaV1>; result: z.infer<typeof projectSnapshotSchemaV1> }
   "control.preview": { input: z.infer<typeof controlPreviewRequestSchemaV1>; result: z.infer<typeof controlPreviewResultSchemaV1> }
   "control.commit": { input: z.infer<typeof controlCommitRequestSchemaV1>; result: z.infer<typeof controlCommitResultSchemaV1> }
   "control.requestApproval": { input: z.infer<typeof controlApprovalRequestSchemaV1>; result: z.infer<typeof controlApprovalResultSchemaV1> }
@@ -297,7 +320,7 @@ const request = z.object({
 }).strict().superRefine((value, context) => {
   const schema = value.operation === "host.export.run"
     ? desktopHostExportRunInputSchemaV1
-    : requestInputs[value.operation]
+    : inputSchemaFor(value.operation)
   const parsed = schema.safeParse(value.input)
   if (!parsed.success) context.addIssue({ code: "custom", message: "Invalid operation input.", path: ["input"] })
 })
@@ -324,7 +347,7 @@ const rendererRequest = z.object({
     ? desktopRendererImportInputSchemaV1
     : value.operation === "host.export.run"
       ? desktopRendererExportInputSchemaV1
-      : requestInputs[value.operation]
+      : inputSchemaFor(value.operation)
   if (!schema.safeParse(value.input).success) {
     context.addIssue({ code: "custom", message: "Invalid renderer operation input.", path: ["input"] })
   }
@@ -337,15 +360,17 @@ export const desktopControlOperationSchemaV1 = z.enum([
   "control.requestApproval", "control.history", "control.recoveries",
 ])
 export type DesktopControlOperationV1 = z.infer<typeof desktopControlOperationSchemaV1>
-export const isDesktopControlOperation = (operation: DesktopOperationV1): operation is DesktopControlOperationV1 => (
-  desktopControlOperationSchemaV1.safeParse(operation).success
-)
 const trustedRendererControlRequest = z.object({
   version, type: z.literal("request"), id: correlationId, operation: desktopControlOperationSchemaV1,
   input: z.unknown(), deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
   actorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
 }).strict().superRefine((value, context) => {
-  if (!requestInputs[value.operation].safeParse(value.input).success) {
+  const schema = value.operation === "control.capabilities"
+    ? desktopRendererControlCapabilitiesInputSchemaV1
+    : value.operation === "control.snapshot"
+      ? desktopRendererControlSnapshotInputSchemaV1
+      : inputSchemaFor(value.operation)
+  if (!schema.safeParse(value.input).success) {
     context.addIssue({ code: "custom", message: "Invalid renderer control operation input.", path: ["input"] })
   }
 })
@@ -382,6 +407,79 @@ export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lif
 export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
 
+const requestInputsV2 = {
+  ...requestInputs,
+  "control.capabilities": z.union([controlCapabilitiesQuerySchemaV2, desktopControlCapabilitiesInputSchemaV2]),
+  "control.snapshot": z.union([controlSnapshotQuerySchemaV1, desktopControlSnapshotInputSchemaV2]),
+} as const
+const requestV2 = z.object({
+  version: versionV2,
+  type: z.literal("request"),
+  id: correlationId,
+  operation: desktopOperationSchemaV1,
+  input: z.unknown(),
+  deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
+}).strict().superRefine((value, context) => {
+  const schema = value.operation === "host.export.run"
+    ? desktopHostExportRunInputSchemaV1
+    : isDesktopControlOperation(value.operation)
+      ? value.operation === "control.capabilities"
+        ? requestInputsV2["control.capabilities"]
+        : value.operation === "control.snapshot"
+          ? requestInputsV2["control.snapshot"]
+          : desktopControlOperationDescriptorsV1[value.operation].input
+      : requestInputsV2[value.operation]
+  if (!schema.safeParse(value.input).success) {
+    context.addIssue({ code: "custom", message: "Invalid operation input.", path: ["input"] })
+  }
+})
+export const desktopRequestSchemaV2 = requestV2
+export type DesktopRequestV2 = z.infer<typeof requestV2>
+
+export const desktopReplySchemaV2 = z.object({
+  version: versionV2,
+  type: z.literal("reply"),
+  id: correlationId,
+  result: z.unknown().optional(),
+  error: z.union([
+    hostErrorSchemaV2,
+    controlErrorSchemaV1,
+  ]).optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
+})
+export const desktopCancelSchemaV2 = z.object({ version: versionV2, type: z.literal("cancel"), id: correlationId }).strict()
+export const desktopReplyChunkSchemaV2 = z.object({
+  ...desktopReplyChunkSchemaV1.shape,
+  version: versionV2,
+}).strict().refine((value) => value.index < value.total)
+export const desktopProgressSchemaV2 = desktopProgressSchemaV1.extend({ version: versionV2 })
+export const desktopExportTerminalSchemaV2 = desktopExportTerminalSchemaV1.extend({ version: versionV2 })
+export const desktopHelloSchemaV2 = z.object({
+  version: versionV2,
+  type: z.literal("hello"),
+  secret: z.string().regex(/^[a-f0-9]{64}$/),
+  client: z.string().min(1).max(128),
+  actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+  supportedVersions: z.array(z.enum(desktopProtocolVersions)).min(1).max(desktopProtocolVersions.length).refine((versions) => new Set(versions).size === versions.length && versions.includes("v2")),
+}).strict()
+export const desktopHelloAckSchemaV2 = z.object({
+  version: versionV2,
+  type: z.literal("helloAck"),
+  selectedVersion: z.literal(desktopProtocolVersionV2),
+  sessionId: z.string().min(16).max(128),
+  capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length),
+}).strict()
+export const desktopLifecycleSchemaV2 = desktopLifecycleSchemaV1.extend({ version: versionV2 })
+export const desktopFrameSchemaV2 = z.discriminatedUnion("type", [
+  desktopRequestSchemaV2, desktopReplySchemaV2, desktopReplyChunkSchemaV2,
+  desktopCancelSchemaV2, desktopProgressSchemaV2, desktopExportTerminalSchemaV2,
+  desktopHelloSchemaV2, desktopHelloAckSchemaV2, desktopLifecycleSchemaV2,
+])
+export type DesktopFrameV2 = z.infer<typeof desktopFrameSchemaV2>
+export const desktopFrameSchema = z.union([desktopFrameSchemaV1, desktopFrameSchemaV2])
+export type DesktopFrame = z.infer<typeof desktopFrameSchema>
+
 export const desktopRegistrationSchemaV1 = z.object({
   version,
   instanceId: z.string().regex(/^[a-f0-9]{32}$/),
@@ -392,7 +490,7 @@ export const desktopRegistrationSchemaV1 = z.object({
 }).strict()
 export type DesktopRegistrationV1 = z.infer<typeof desktopRegistrationSchemaV1>
 
-const resultSchemas = {
+const nonControlResultSchemas = {
   "host.status": desktopHostStatusSchemaV1,
   "host.import.audio": desktopHostImportResultSchemaV1,
   "host.export.run": desktopHostExportRunResultSchemaV1,
@@ -404,25 +502,83 @@ const resultSchemas = {
   "transport.stop": desktopTransportStatusSchemaV1,
   "transport.seek": desktopTransportStatusSchemaV1,
   "diagnostics.snapshot": desktopDiagnosticsSchemaV1,
-  "control.capabilities": controlCapabilitiesSchemaV1,
-  "control.snapshot": projectSnapshotSchemaV1,
-  "control.preview": controlPreviewResultSchemaV1,
-  "control.commit": controlCommitResultSchemaV1,
-  "control.requestApproval": controlApprovalResultSchemaV1,
-  "control.history": controlHistoryResultSchemaV1,
-  "control.recoveries": controlRecoveriesResultSchemaV1,
-} satisfies Record<DesktopOperationV1, z.ZodType>
+} satisfies Partial<Record<DesktopOperationV1, z.ZodType>>
 
-export const parseDesktopResult = (operation: DesktopOperationV1, value: unknown): unknown => (
-  resultSchemas[operation].parse(value)
+export const desktopControlOperationDescriptorsV1 = {
+  "control.capabilities": {
+    input: desktopControlCapabilitiesInputSchemaV1,
+    output: controlCapabilitiesSchemaV1,
+  },
+  "control.snapshot": {
+    input: desktopControlSnapshotInputSchemaV1,
+    output: projectSnapshotSchemaV1,
+  },
+  "control.preview": {
+    input: controlPreviewRequestSchemaV1,
+    output: controlPreviewResultSchemaV1,
+  },
+  "control.commit": {
+    input: controlCommitRequestSchemaV1,
+    output: controlCommitResultSchemaV1,
+  },
+  "control.requestApproval": {
+    input: controlApprovalRequestSchemaV1,
+    output: controlApprovalResultSchemaV1,
+  },
+  "control.history": {
+    input: controlHistoryQuerySchemaV1,
+    output: controlHistoryResultSchemaV1,
+  },
+  "control.recoveries": {
+    input: controlRecoveriesQuerySchemaV1,
+    output: controlRecoveriesResultSchemaV1,
+  },
+} satisfies Record<DesktopControlOperationV1, { input: z.ZodType; output: z.ZodType }>
+
+export const isDesktopControlOperation = (operation: DesktopOperationV1): operation is DesktopControlOperationV1 => (
+  Object.hasOwn(desktopControlOperationDescriptorsV1, operation)
 )
 
-export const parseDesktopReplyError = (operation: DesktopOperationV1, value: unknown): HostErrorV1 | ControlErrorV1 => (
+export const desktopControlOperationsV1 = Object.keys(desktopControlOperationDescriptorsV1).map(
+  (operation) => desktopControlOperationSchemaV1.parse(operation),
+)
+
+const inputSchemaFor = (operation: DesktopOperationV1) => (
+  isDesktopControlOperation(operation)
+    ? desktopControlOperationDescriptorsV1[operation].input
+    : requestInputs[operation]
+)
+
+export const parseDesktopResult = (
+  operation: DesktopOperationV1,
+  value: unknown,
+  input?: unknown,
+  protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
+): unknown => {
+  if (protocolVersion === desktopProtocolVersionV2 && operation === "control.capabilities" && desktopControlCapabilitiesInputSchemaV2.safeParse(input).success) {
+    return controlCapabilitiesSchemaV2.parse(value)
+  }
+  if (protocolVersion === desktopProtocolVersionV2 && operation === "control.snapshot" && desktopControlSnapshotInputSchemaV2.safeParse(input).success) {
+    return projectSnapshotSchemaV2.parse(value)
+  }
+  const schema = isDesktopControlOperation(operation)
+    ? desktopControlOperationDescriptorsV1[operation].output
+    : nonControlResultSchemas[operation]
+  if (!schema) throw new Error("Unknown desktop operation.")
+  return schema.parse(value)
+}
+
+export const parseDesktopReplyError = (
+  operation: DesktopOperationV1,
+  value: unknown,
+  protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
+): HostErrorV1 | HostErrorV2 | ControlErrorV1 => (
   isDesktopControlOperation(operation)
     ? controlErrorSchemaV1.safeParse(value).success
       ? controlErrorSchemaV1.parse(value)
-      : hostErrorSchemaV1.parse(value)
-    : hostErrorSchemaV1.parse(value)
+      : protocolVersion === desktopProtocolVersionV2 ? hostErrorSchemaV2.parse(value) : hostErrorSchemaV1.parse(value)
+    : protocolVersion === desktopProtocolVersionV2 ? hostErrorSchemaV2.parse(value) : hostErrorSchemaV1.parse(value)
 )
 
 export const hostError = (code: HostErrorV1["code"], message: string): HostErrorV1 => ({ version: desktopProtocolVersion, code, message })
+export const hostErrorV2 = (code: HostErrorV1["code"], message: string) => ({ version: desktopProtocolVersionV2, code, message })

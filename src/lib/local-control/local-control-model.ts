@@ -3,6 +3,7 @@ import {
   createAudioEffectInstanceId,
   createInstrumentInstanceId,
   AUDIO_EFFECT_ORDER,
+  normalizeLegacyMidiClip,
   type AutomationTarget,
   type AudioEffectKind,
 } from '@daw-browser/shared'
@@ -46,11 +47,7 @@ type ControlSnapshot = ControlPlanV1['snapshot']
 
 const localMidi = (value: ControlSnapshot['clips'][number]['midi']): TimelineClipRow['midi'] => {
   if (!value) return undefined
-  if (
-    value.wave !== 'sine' && value.wave !== 'square'
-    && value.wave !== 'sawtooth' && value.wave !== 'triangle'
-  ) return undefined
-  return { wave: value.wave, gain: value.gain, notes: value.notes }
+  return normalizeLegacyMidiClip(value)
 }
 
 type LocalControlModel = {
@@ -79,6 +76,8 @@ export const materializeLocalControlSnapshot = (
   removedAssetIds: ReadonlySet<string> = new Set(),
   removedEntities: ReadonlySet<string> = new Set(),
   migratedLegacySynthIds: ReadonlySet<string> = new Set(),
+  sampleUrlFallbacks: ReadonlyMap<string, string> = new Map(),
+  historyRefFallbacks: ReadonlyMap<string, string> = new Map(),
 ): MaterializedLocalControlModel => {
   const tracks = rowsByKind(model.entities, 'track')
   const clips = rowsByKind(model.entities, 'clip')
@@ -145,11 +144,13 @@ export const materializeLocalControlSnapshot = (
     const existingValue = clips.get(item.id)?.value
     const existing = isRecord(existingValue) ? existingValue : undefined
     const source = item.source
+    const sourceChanged = source !== undefined
+      && stringField(existing, 'sourceAssetKey') !== source.assetId
     const row: TimelineClipRow = {
       ...(isRecord(existing) ? existing : {}),
       id: item.id,
       trackId: item.trackId,
-      historyRef: stringField(existing, 'historyRef') ?? item.id,
+      historyRef: historyRefFallbacks.get(item.id) ?? stringField(existing, 'historyRef') ?? item.id,
       name: item.name,
       startSec: item.startSec,
       duration: item.duration,
@@ -161,6 +162,7 @@ export const materializeLocalControlSnapshot = (
       sourceDurationSec: source?.durationSec,
       sourceSampleRate: source?.sampleRate,
       sourceChannelCount: source?.channelCount,
+      sampleUrl: sourceChanged ? undefined : stringField(existing, 'sampleUrl') ?? sampleUrlFallbacks.get(item.id),
       leftPadSec: item.leftPadSec,
       bufferOffsetSec: item.bufferOffsetSec,
       audioWarp: item.audioWarp,

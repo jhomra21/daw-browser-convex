@@ -7,6 +7,116 @@ import {
 } from '~/lib/local-project-db'
 import { buildTimelineTrackRow } from './track-row-builder'
 import { createLocalTimelineRepository } from './local-timeline-repository'
+import { externalPluginEntityKind } from '@daw-browser/external-plugins'
+
+test('deletes external processor rows with their target track', async () => {
+  const projectId = `project:external-delete-${crypto.randomUUID()}`
+  const repository = createLocalTimelineRepository(projectId)
+  const track = await repository.createTrack({ id: 'audio-track', kind: 'audio' })
+  const db = await openLocalProjectDb(projectId)
+  await db.put('entities', createLocalProjectEntityRow(
+    externalPluginEntityKind,
+    'external-plugin:test',
+    { targetId: track.id },
+    1,
+  ))
+
+  await repository.deleteTrack(track.id)
+
+  expect(await db.getAllFromIndex('entities', 'by-kind', externalPluginEntityKind)).toEqual([])
+})
+
+test('normalizes and preserves expanded local MIDI without reference equality', async () => {
+  const projectId = 'project:local-expanded-midi'
+  const repository = createLocalTimelineRepository(projectId)
+  const track = await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+  const clip = await repository.createClip({
+    id: 'midi-clip',
+    trackId: track.id,
+    startSec: 0,
+    duration: 1,
+    midi: {
+      wave: 'sine',
+      notes: [{ beat: 0, length: 1, pitch: 60 }],
+      cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+      mappings: [{
+        id: 'mapping-1',
+        source: { kind: 'cc', controller: 1 },
+        target: { parameterId: 'opaque-parameter' },
+        outputMin: 0,
+        outputMax: 1,
+      }],
+    },
+  })
+  const snapshot = await repository.loadSnapshot()
+  const stored = snapshot.clips[0]
+  expect(stored?.midi).toEqual(expect.objectContaining({
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+    mappings: clip.midi?.mappings,
+  }))
+  if (!stored?.midi) throw new Error('Expected normalized MIDI clip.')
+  const updated = await repository.updateClip({
+    clipId: clip.id,
+    midi: stored.midi,
+  })
+  expect(updated?.updatedAt).toBe(clip.updatedAt)
+})
+
+test('hydrates persisted legacy MIDI wave and gain without dropping the clip', async () => {
+  const projectId = 'project:local-legacy-midi'
+  const repository = createLocalTimelineRepository(projectId)
+  const track = await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+  const db = await openLocalProjectDb(projectId)
+  await db.put('entities', createLocalProjectEntityRow('clip', 'legacy-midi-clip', {
+    id: 'legacy-midi-clip',
+    trackId: track.id,
+    historyRef: 'legacy-midi-clip',
+    name: 'Legacy MIDI',
+    startSec: 0,
+    duration: 1,
+    color: 'clip-midi',
+    midi: { wave: 'custom-legacy', gain: 7, notes: [] },
+    createdAt: 1,
+    updatedAt: 1,
+  }, 1))
+
+  expect((await repository.loadSnapshot()).clips).toEqual([
+    expect.objectContaining({
+      id: 'legacy-midi-clip',
+      midi: expect.objectContaining({ wave: 'custom-legacy', gain: 7 }),
+    }),
+  ])
+})
+
+test('restores historical local MIDI through the dedicated legacy path', async () => {
+  const projectId = 'project:local-history-midi'
+  const repository = createLocalTimelineRepository(projectId)
+  const track = await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+  const restored = await repository.restoreHistoryClip({
+    id: 'restored-midi',
+    historyRef: 'historical-midi',
+    trackId: track.id,
+    startSec: 0,
+    duration: 1,
+    midi: {
+      wave: '',
+      gain: 7,
+      notes: [
+        { beat: 0, length: 1, pitch: 60 },
+        { beat: 1, length: -1, pitch: 200 },
+        ...Array.from({ length: 501 }, (_, beat) => ({ beat: beat + 2, length: 1, pitch: 60 })),
+      ],
+    },
+  })
+  expect(restored.midi).toMatchObject({ wave: '', gain: 7 })
+  expect(restored.midi?.notes).toHaveLength(503)
+  await expect(repository.createClip({
+    trackId: track.id,
+    startSec: 2,
+    duration: 1,
+    midi: { wave: '', gain: 7, notes: [] },
+  })).rejects.toThrow()
+})
 
 test('creation repairs interleaved legacy Return indexes atomically', async () => {
   const projectId = 'project:local-return-creation-repair'

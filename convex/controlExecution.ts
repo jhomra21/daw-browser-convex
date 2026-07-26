@@ -1,4 +1,4 @@
-import { collectDeletedTrackIdsV1, type ControlPlanV1 } from "@daw-browser/control";
+import { collectDeletedTrackIdsV1, resolveControlMidiActionV1, type ControlPlanV1 } from "@daw-browser/control";
 import {
   createAudioEffectInstanceId,
   createDefaultSynthParams,
@@ -16,7 +16,7 @@ import {
   setClipGainRow,
   setClipNameRow,
   setClipTimingRow,
-  setClipMidiRow,
+  setClipLegacyMidiRow,
   setClipFadesRow,
   setClipAudioWarpRow,
   setClipColorRow,
@@ -72,6 +72,28 @@ const resolveRef = (ctx: any, table: string, refs: Map<string, unknown>, ref: { 
   return requiredId(ctx, table, ref.id)
 }
 
+const resolveRangeDeletePatch = (
+  ctx: any,
+  patch: any,
+  clipRefs: Map<string, unknown>,
+) => {
+  const resolveClipId = (id: string) => String(clipRefs.get(id) ?? requiredId(ctx, "clips", id))
+  return {
+    ...patch,
+    clipDeletes: patch.clipDeletes.map((entry: any) => ({ ...entry, clipId: resolveClipId(entry.clipId) })),
+    clipUpdates: patch.clipUpdates.map((entry: any) => ({
+      ...entry,
+      clipId: resolveClipId(entry.clipId),
+      before: { ...entry.before, id: resolveClipId(entry.before.id) },
+      after: { ...entry.after, id: resolveClipId(entry.after.id) },
+    })),
+    clipCreates: patch.clipCreates.map((entry: any) => ({
+      ...entry,
+      sourceClipId: resolveClipId(entry.sourceClipId),
+    })),
+  }
+}
+
 const requireCompleteAsset = async (
   ctx: any,
   projectId: string,
@@ -111,24 +133,36 @@ export async function executeControlPlanV1(
   let changed = false
   for (const entry of input.plan.actions) {
     const action = entry.action
+    const timelineRangeDelete = action.kind === "timeline.range.delete" && entry.timelineRangeDelete
+      ? resolveRangeDeletePatch(ctx, entry.timelineRangeDelete, clipRefs)
+      : undefined
     let result: { changed: boolean } = { changed: false }
+    let deferredRangeRecovery: any
     if (isRecoverableAction(action)) {
       const payload = await captureRecoveryPayload(ctx, {
         projectId: input.projectId,
         action,
+        actionIndex: entry.actionIndex,
+        ...(timelineRangeDelete
+          ? { timelineRangeDelete }
+          : {}),
         resolveRef: (table, ref) => resolveRef(ctx, table, table === "tracks" ? trackRefs : table === "clips" ? clipRefs : effectRefs, ref),
       })
       if (payload) {
-        const recovery = await createRecovery(ctx, {
-          projectId: input.projectId,
-          actorSubject: input.actorId,
-          sourceActionIndex: entry.actionIndex,
-          kind: action.kind,
-          data: payload,
-        })
-        if (recovery) {
-          recoveries.push({ actionIndex: entry.actionIndex, ...recovery })
-          recoveryExpiryByAction.set(entry.actionIndex, recovery.expiresAt)
+        if (action.kind === "timeline.range.delete") {
+          deferredRangeRecovery = payload
+        } else {
+          const recovery = await createRecovery(ctx, {
+            projectId: input.projectId,
+            actorSubject: input.actorId,
+            sourceActionIndex: entry.actionIndex,
+            kind: action.kind,
+            data: payload,
+          })
+          if (recovery) {
+            recoveries.push({ actionIndex: entry.actionIndex, ...recovery })
+            recoveryExpiryByAction.set(entry.actionIndex, recovery.expiresAt)
+          }
         }
       }
     }
@@ -256,13 +290,14 @@ export async function executeControlPlanV1(
           startSec: action.startSec,
           duration: action.duration,
           gain: action.gain,
-          midi: { wave: action.wave, gain: action.gain, notes: action.notes },
+          midi: resolveControlMidiActionV1(action),
         })
         result = { changed: created.changed }
         if (action.clientRef && created.value) {
           clipRefs.set(action.clientRef, created.value)
           resolvedRefs.push({ entity: "clip", clientRef: action.clientRef, id: String(created.value), persisted: true })
         }
+        if (created.value) clipRefs.set(`control:clip:${action.clientRef ?? entry.actionIndex}`, created.value)
         break
       }
       case "clip.audio.create": {
@@ -283,6 +318,7 @@ export async function executeControlPlanV1(
           clipRefs.set(action.clientRef, created.value)
           resolvedRefs.push({ entity: "clip", clientRef: action.clientRef, id: String(created.value), persisted: true })
         }
+        if (created.value) clipRefs.set(`control:clip:${action.clientRef ?? entry.actionIndex}`, created.value)
         break
       }
       case "clip.source.set": {
@@ -290,9 +326,17 @@ export async function executeControlPlanV1(
         result = await setClipSourceRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), assetKey: asset.assetKey, sourceKind: asset.sourceKind, durationSec: asset.duration, sampleRate: asset.sampleRate, channelCount: asset.channelCount })
         break
       }
-      case "clip.midi.set":
-        result = await setClipMidiRow(ctx, { projectId: input.projectId, clipId: resolveRef(ctx, "clips", clipRefs, action.clip), midi: { wave: action.wave, gain: action.gain, notes: action.notes } })
+      case "clip.midi.set": {
+        const clipId = resolveRef(ctx, "clips", clipRefs, action.clip)
+        const clip = await ctx.db.get(clipId)
+        if (!clip?.midi || clip.projectId !== input.projectId) throw new Error("MIDI clip was not found.")
+        result = await setClipLegacyMidiRow(ctx, {
+          projectId: input.projectId,
+          clipId,
+          midi: resolveControlMidiActionV1(action, clip.midi),
+        })
         break
+      }
       case "clip.fades.set": {
         const clipId = resolveRef(ctx, "clips", clipRefs, action.clip)
         const clip = await ctx.db.get(clipId)
@@ -350,6 +394,75 @@ export async function executeControlPlanV1(
         result = await deleteClipRow(ctx, { projectId: input.projectId, clipId, ownershipId: ownership._id })
         break
       }
+      case "timeline.range.delete": {
+        const patch = timelineRangeDelete
+        if (!patch) throw new Error("Timeline range delete patch is unavailable.")
+        for (const deletion of patch.clipDeletes) {
+          const clipId = requiredId(ctx, "clips", deletion.clipId)
+          const ownership = await ctx.db.query("ownerships").withIndex("by_clip", (query: any) => query.eq("clipId", clipId)).unique()
+          if (!ownership) throw new Error("Clip ownership was not found.")
+          await ctx.db.delete(ownership._id)
+          await ctx.db.delete(clipId)
+        }
+        for (const update of patch.clipUpdates) {
+          const clipId = requiredId(ctx, "clips", update.clipId)
+          await ctx.db.patch(clipId, {
+            startSec: update.after.startSec,
+            duration: update.after.duration,
+            leftPadSec: update.after.leftPadSec,
+            bufferOffsetSec: update.after.bufferOffsetSec,
+            midiOffsetBeats: update.after.midiOffsetBeats,
+            ...(update.after.fades === undefined ? { fades: undefined } : { fades: update.after.fades }),
+            audioWarp: update.after.audioWarp,
+          })
+        }
+        for (const creation of patch.clipCreates) {
+          const sourceId = requiredId(ctx, "clips", creation.sourceClipId)
+          const source = await ctx.db.get(sourceId)
+          const ownership = await ctx.db.query("ownerships").withIndex("by_clip", (query: any) => query.eq("clipId", sourceId)).unique()
+          if (!source || !ownership) throw new Error("Range fragment source is unavailable.")
+          const { _id, _creationTime, ...sourceFields } = source
+          const created = await ctx.db.insert("clips", {
+            ...sourceFields,
+            startSec: creation.after.startSec,
+            duration: creation.after.duration,
+            leftPadSec: creation.after.leftPadSec,
+            bufferOffsetSec: creation.after.bufferOffsetSec,
+            midiOffsetBeats: creation.after.midiOffsetBeats,
+            ...(creation.after.fades === undefined ? { fades: undefined } : { fades: creation.after.fades }),
+            audioWarp: creation.after.audioWarp,
+          })
+          await ctx.db.insert("ownerships", {
+            projectId: ownership.projectId,
+            ownerUserId: ownership.ownerUserId,
+            ...(ownership.role === undefined ? {} : { role: ownership.role }),
+            clipId: created,
+          })
+          clipRefs.set(creation.placeholderId, created)
+          resolvedRefs.push({ entity: "clip", clientRef: creation.placeholderId, id: String(created), persisted: true })
+        }
+        for (const update of patch.automationUpdates) {
+          const trackId = "trackId" in update.identity.target
+            ? requiredId(ctx, "tracks", update.identity.target.trackId)
+            : undefined
+          const rows = await ctx.db.query("automationEnvelopes").withIndex("by_project", (query: any) => query.eq("projectId", input.projectId)).collect()
+          const current = rows.find((row: any) => (
+            row.targetKind === ("master" in update.identity.target ? "master" : "track")
+            && String(row.trackId ?? "") === String(trackId ?? "")
+            && row.effectInstanceId === update.identity.effectInstanceId
+            && row.parameterId === update.identity.parameterId
+          ))
+          if (!current) throw new Error("Automation envelope was not found.")
+          await ctx.db.patch(current._id, { enabled: update.after.enabled, points: update.after.points, updatedAt: Date.now() })
+        }
+        result = {
+          changed: patch.clipDeletes.length > 0
+            || patch.clipUpdates.length > 0
+            || patch.clipCreates.length > 0
+            || patch.automationUpdates.length > 0,
+        }
+        break
+      }
       case "asset.delete": {
         const deleted = await deleteSampleRow(ctx, { projectId: input.projectId, assetKey: action.asset.id })
         if (!deleted.asset) {
@@ -376,6 +489,18 @@ export async function executeControlPlanV1(
           actionIndex: entry.actionIndex,
         })
         restored.push(restoredResult)
+        for (const mapping of restoredResult.entities) {
+          const refs = mapping.entity === "track" ? trackRefs : mapping.entity === "clip" ? clipRefs : mapping.entity === "effect" ? effectRefs : undefined
+          if (!refs) continue
+          refs.set(`recovery:${mapping.entity}:${action.recovery.id}:${mapping.sourceId}`, requiredId(
+            ctx,
+            mapping.entity === "track" ? "tracks" : mapping.entity === "clip" ? "clips" : "effects",
+            mapping.restoredId,
+          ))
+          if (mapping.entity === "clip") {
+            refs.set(`recovery:clip:${action.recovery.id}`, requiredId(ctx, "clips", mapping.restoredId))
+          }
+        }
         result = { changed: true }
         break
       }
@@ -497,6 +622,26 @@ export async function executeControlPlanV1(
         if (!effect?.instanceId) throw new Error("Sidechain effect was not found.")
         result = await removeSidechainRouteRow(ctx, { projectId: input.projectId, targetTrackId: resolveRef(ctx, "tracks", trackRefs, action.target), effectInstanceId: effect.instanceId })
         break
+      }
+    }
+    if (action.kind === "timeline.range.delete" && deferredRangeRecovery) {
+      const recovery = await createRecovery(ctx, {
+        projectId: input.projectId,
+        actorSubject: input.actorId,
+        sourceActionIndex: entry.actionIndex,
+        kind: action.kind,
+        data: {
+          ...deferredRangeRecovery,
+          createdClips: deferredRangeRecovery.createdClips.map((creation: any) => {
+            const id = clipRefs.get(creation.id)
+            if (!id) throw new Error("Range fragment ID is unavailable.")
+            return { ...creation, id: String(id) }
+          }),
+        },
+      })
+      if (recovery) {
+        recoveries.push({ actionIndex: entry.actionIndex, ...recovery })
+        recoveryExpiryByAction.set(entry.actionIndex, recovery.expiresAt)
       }
     }
     if (result.changed !== entry.changed) throw new Error(`Planner and executor disagree for action ${entry.actionIndex}.`)

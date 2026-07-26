@@ -5,7 +5,7 @@ export type TransportClock = {
   timelineToCtxTime: (timelineSec: number) => number
   ctxTimeToTimeline: (ctxTime: number) => number
   start: (ctxTime: number, playheadSec: number) => void
-  pause: () => void
+  pause: (ctxTime: number) => void
   stop: (ctxTime: number) => void
   seek: (ctxTime: number, playheadSec: number, offsetSec?: number) => void
   isRunning: () => boolean
@@ -31,6 +31,7 @@ export function createTransportClock(): TransportClock {
       return epochCtxTime + Math.max(0, delta)
     },
     ctxTimeToTimeline: (ctxTime) => {
+      if (!running) return epochTimelineSec
       const delta = ctxTime - epochCtxTime
       return epochTimelineSec + Math.max(0, delta)
     },
@@ -39,7 +40,9 @@ export function createTransportClock(): TransportClock {
       epochTimelineSec = Math.max(0, playheadSec)
       running = true
     },
-    pause: () => {
+    pause: (ctxTime) => {
+      if (running) epochTimelineSec = epochTimelineSec + Math.max(0, ctxTime - epochCtxTime)
+      epochCtxTime = ctxTime
       running = false
     },
     stop: (ctxTime) => {

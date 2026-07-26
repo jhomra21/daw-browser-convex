@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Hono } from "hono";
 import type { ApiBindings } from "../app-types";
-import { registerSampleRoutes } from "./samples";
+import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
 
 const file = (contents = "audio") => new File([contents], "Kick.wav", { type: "audio/wav" });
 
@@ -95,4 +95,51 @@ test("an outbox retry with changed bytes conflicts before writing another object
   const response = await application.request(request("client-stable-asset-key", "changed-audio"));
   expect(response.status).toBe(409);
   expect(puts).toBe(0);
+});
+
+test("default sample catalog CORS only permits trusted Electron origins", async () => {
+  const application = new Hono<ApiBindings>();
+  registerPublicSampleRoutes(application, {
+    listDefaultSamples: async () => ({ samples: [] }),
+  });
+
+  const allowed = await application.request(new Request("https://control.example/api/default-samples", {
+    headers: { Origin: "daw://app" },
+  }));
+  expect(allowed.status).toBe(200);
+  expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("daw://app");
+  expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+
+  const head = await application.request(new Request("https://control.example/api/default-samples", {
+    method: "HEAD",
+    headers: { Origin: "daw://app" },
+  }));
+  expect(head.status).toBe(200);
+  expect(head.headers.get("Access-Control-Allow-Origin")).toBe("daw://app");
+
+  const rejected = await application.request(new Request("https://control.example/api/default-samples", {
+    headers: { Origin: "https://untrusted.example" },
+  }));
+  expect(rejected.status).toBe(200);
+  expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull();
+});
+
+test("default sample media CORS preflight only permits trusted Electron origins", async () => {
+  const application = new Hono<ApiBindings>();
+  registerPublicSampleRoutes(application);
+
+  const allowed = await application.request(new Request("https://control.example/api/default-sample", {
+    method: "OPTIONS",
+    headers: { Origin: "http://localhost:5173" },
+  }));
+  expect(allowed.status).toBe(204);
+  expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
+  expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+
+  const rejected = await application.request(new Request("https://control.example/api/default-sample", {
+    method: "OPTIONS",
+    headers: { Origin: "https://untrusted.example" },
+  }));
+  expect(rejected.status).toBe(403);
+  expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull();
 });

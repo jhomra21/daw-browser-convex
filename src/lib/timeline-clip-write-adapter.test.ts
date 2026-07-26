@@ -28,3 +28,21 @@ test('setFades normalizes against the local repository duration, not a caller pr
     fadeOutSec: 2,
   })
 })
+
+test('deleteClips exposes permanent shared rejection without reporting optimistic removals', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = Object.assign(
+    async () => new Response('clip no longer exists', { status: 400 }),
+    { preconnect: originalFetch.preconnect },
+  )
+  try {
+    await expect(createTimelineClipWriteAdapter({
+      projectId: `shared-delete-rejection-${crypto.randomUUID()}`,
+      userId: 'user-1',
+    }).deleteClips(['clip-1'])).rejects.toThrow(
+      'Permanent failure: Shared timeline operation failed: 400 clip no longer exists',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

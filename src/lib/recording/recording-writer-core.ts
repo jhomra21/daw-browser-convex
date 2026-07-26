@@ -1,4 +1,5 @@
 import {
+  RECORDER_BLOCK_FRAMES,
   RECORDER_MAX_QUEUED_BLOCKS,
   readWriterInboundMessage,
   type RecorderBlockMessage,
@@ -11,6 +12,7 @@ import {
 
 type WriterSession = {
   append: (channels: readonly Float32Array[]) => Promise<void>
+  appendPlanar?: (buffer: ArrayBuffer, frameCount: number) => Promise<void>
   finalize: () => Promise<{ capturedFrames: number }>
   abort: () => Promise<void>
 }
@@ -66,12 +68,16 @@ export const createRecordingWriterHandler = (
     if (message.sequence !== expectedSequence) throw new Error('recording-block-out-of-order')
     if (message.channelCount !== canonicalChannelCount) throw new Error('recording-channel-layout-mismatch')
     expectedSequence += 1
-    const planar = new Float32Array(message.buffer)
-    const channels: Float32Array[] = []
-    for (let channel = 0; channel < message.channelCount; channel += 1) {
-      channels.push(planar.subarray(channel * 2048, channel * 2048 + message.frameCount))
+    if (session.appendPlanar) {
+      await session.appendPlanar(message.buffer, message.frameCount)
+    } else {
+      const planar = new Float32Array(message.buffer)
+      const channels: Float32Array[] = []
+      for (let channel = 0; channel < message.channelCount; channel += 1) {
+        channels.push(planar.subarray(channel * RECORDER_BLOCK_FRAMES, channel * RECORDER_BLOCK_FRAMES + message.frameCount))
+      }
+      await session.append(channels)
     }
-    await session.append(channels)
     if (hasFailed()) return
     output({
       type: 'return',

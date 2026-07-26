@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { controlCapabilitiesV1, parseControlPreviewRequestV1, parseRecoveryPayloadV1, planControlRequestV1 } from "@daw-browser/control";
+import { canonicalRecoveryPayloadV1, controlCapabilitiesV1, hashRecoveryPayloadSyncV1, parseCapturedRecoveryPayload, parseControlPreviewRequestV1, parseRecoveryPayload, planControlRequestV1, projectSnapshotSchemaV1 } from "@daw-browser/control";
 import {
   automationTargetKey,
   createDefaultSynthParams,
@@ -97,6 +97,117 @@ test("preview is write-free and commit replays persisted client refs", async () 
   expect(replay).toEqual({ ...first, idempotencyReplay: true });
 });
 
+test("plans and executes a legacy MIDI no-op against the expanded cloud snapshot", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+  const clip = await t.run(async (ctx) => {
+    const clipId = await ctx.db.insert("clips", {
+      projectId,
+      trackId: track,
+      startSec: 0,
+      duration: 1,
+      name: "Expanded MIDI",
+      midi: {
+        wave: "sine",
+        gain: 0.5,
+        inputChannel: 2,
+        notes: [{ id: "note-1", beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+        cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 2 }],
+        pitchBends: [],
+        channelPressure: [],
+        polyPressure: [],
+        mappings: [{ id: "mapping-1", source: { kind: "cc", controller: 1, channel: 2 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
+      },
+    });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+    return clipId;
+  });
+  const action = {
+    kind: "clip.midi.set",
+    clip: { source: "persisted" as const, id: String(clip) },
+    wave: "sine",
+    gain: 0.5,
+    notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
+  };
+  const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions: [action] },
+  });
+  expect(preview.applied).toBe(false);
+  const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([action], "expanded-midi-noop"),
+  });
+  expect(committed.applied).toBe(false);
+  const v2 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV2, { projectId });
+  expect(v2.clips[0]?.midi).toMatchObject({
+    inputChannel: 2,
+    notes: [{ id: "note-1", channel: 2 }],
+    cc: [{ id: "cc-1", channel: 2 }],
+  });
+  const v1 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV1, { projectId });
+  expect(v1.clips[0]?.midi).not.toHaveProperty("cc");
+});
+
+test("edits one legacy cloud MIDI note without dropping historical fields", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Legacy instrument", index: 0, kind: "instrument" });
+  const notes = Array.from({ length: 501 }, (_, index) => ({
+    id: `note-${index}`, beat: index, length: 1, pitch: 60, velocity: 0.5, channel: 1,
+  }));
+  notes[0] = { id: "invalid-note", beat: -2, length: -1, pitch: 200, velocity: 2, channel: 1 };
+  const legacy = {
+    wave: "custom-legacy",
+    gain: 7,
+    notes,
+    cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 1 }],
+    mappings: [{ id: "mapping-1", source: { kind: "cc" as const, controller: 1, channel: 1 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
+  };
+  const clip = await t.run(async (ctx) => {
+    const clipId = await ctx.db.insert("clips", {
+      projectId, trackId: track, startSec: 0, duration: 1, name: "Legacy MIDI", midi: legacy,
+    });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+    return clipId;
+  });
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{
+      kind: "clip.midi.set",
+      clip: { source: "persisted" as const, id: String(clip) },
+      wave: "custom-legacy",
+      gain: 7,
+      notes: notes.map((note) => note.id === "invalid-note"
+        ? { ...note, beat: 0, length: 1, pitch: 60, velocity: 0.5 }
+        : note),
+    }], "legacy-midi-edit"),
+  });
+  const midi = (await t.withIdentity({ subject: owner }).query(api.control.snapshotV2, { projectId }))
+    .clips.find((entry) => entry.id === String(clip))?.midi;
+  expect(midi).toMatchObject({ wave: "custom-legacy", gain: 7, cc: legacy.cc, mappings: legacy.mappings });
+  expect(midi?.notes).toHaveLength(501);
+  expect(midi?.notes.find((note) => note.id === "invalid-note")).toMatchObject({
+    id: "invalid-note", beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 1,
+  });
+});
+
+test("projects historical finite MIDI values through both cloud snapshot versions", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Legacy instrument", index: 0, kind: "instrument" });
+  await t.run(async (ctx) => {
+    const clipId = await ctx.db.insert("clips", {
+      projectId, trackId: track, startSec: 0, duration: 1, name: "Legacy MIDI",
+      midi: {
+        wave: "custom-legacy", gain: 7,
+        notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
+      },
+    });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+  });
+  const v1 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV1, { projectId });
+  const v2 = await t.withIdentity({ subject: owner }).query(api.control.snapshotV2, { projectId });
+  const expected = { wave: "custom-legacy", gain: 7, notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }] };
+  expect(projectSnapshotSchemaV1.parse(v1).clips[0]?.midi).toEqual(expected);
+  expect(v2.clips[0]?.midi).toMatchObject(expected);
+});
+
 test("restores a deleted clip through an opaque single-use recovery descriptor", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Audio", index: 0 });
@@ -119,6 +230,267 @@ test("restores a deleted clip through an opaque single-use recovery descriptor",
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor!.id } }], "recovery-reuse"),
   })).rejects.toThrow("Recovery is unavailable.");
+});
+
+test("restores range-deleted clips and automation after verifying semantic drift digests", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Range recovery", index: 0, kind: "audio" });
+  const originalPoints = [
+    { id: "range-a", timeSec: 0, value: 0, interpolation: "linear" as const },
+    { id: "range-b", timeSec: 2, value: 1, interpolation: "linear" as const },
+    { id: "range-c", timeSec: 4, value: 0, interpolation: "linear" as const },
+  ];
+  const clips = await t.run(async (ctx) => {
+    const split = await ctx.db.insert("clips", {
+      projectId, trackId: track, historyRef: "split-history", startSec: 0, duration: 4, name: "Split", bufferOffsetSec: 0, midiOffsetBeats: 0,
+    });
+    const deleted = await ctx.db.insert("clips", {
+      projectId, trackId: track, historyRef: "deleted-history", startSec: 1.25, duration: 0.5, name: "Deleted", bufferOffsetSec: 0, midiOffsetBeats: 0,
+    });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId: split });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId: deleted });
+    await ctx.db.insert("automationEnvelopes", {
+      projectId,
+      targetKind: "track",
+      trackId: track,
+      targetKey: automationTargetKey({ kind: "track", trackId: String(track) }, "volume"),
+      parameterId: "volume",
+      enabled: true,
+      points: originalPoints,
+      updatedAt: 1,
+    });
+    return { split: String(split), deleted: String(deleted) };
+  });
+  const action = {
+    kind: "timeline.range.delete" as const,
+    tracks: [{ source: "persisted" as const, id: String(track) }],
+    startSec: 1,
+    endSec: 3,
+  };
+  const deletion = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [action], "range-recovery-delete"),
+  });
+  const descriptor = deletion.recoveries[0];
+  if (!descriptor) throw new Error("Expected range recovery.");
+  expect(descriptor.kind).toBe("timeline.range.delete");
+  await t.run(async (ctx) => {
+    const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+    const row = recoveryId ? await ctx.db.get(recoveryId) : null;
+    if (!row) throw new Error("Expected stored range recovery.");
+    const payload = parseCapturedRecoveryPayload(row.payload);
+    if (payload.kind !== "timeline.range.delete") throw new Error("Expected range recovery payload.");
+    expect(Object.keys(payload.data).sort()).toEqual([
+      "automation", "createdClips", "deletedClips", "range", "updatedClips",
+    ]);
+    expect(payload.data.range).toEqual({ trackIds: [String(track)], startSec: 1, endSec: 3 });
+    expect(payload.data.deletedClips[0]).toMatchObject({ id: clips.deleted, before: { name: "Deleted", historyRef: "deleted-history" } });
+    expect(payload.data.updatedClips[0]).toMatchObject({ id: clips.split, before: { name: "Split", historyRef: "split-history" } });
+    expect(payload.data.createdClips).toHaveLength(1);
+    const created = payload.data.createdClips[0]!;
+    expect(created.id).not.toContain("control:");
+    expect(await ctx.db.get(ctx.db.normalizeId("clips", created.id)!)).not.toBeNull();
+    expect(payload.data.automation[0]?.id).toMatch(/.+/);
+  });
+  expect(await t.run((ctx) => ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect())).toHaveLength(2);
+  const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "range-recovery-restore"),
+  });
+  expect(restored.restored[0]?.entities).toEqual([
+    expect.objectContaining({ entity: "clip", sourceId: clips.deleted }),
+  ]);
+  await t.run(async (ctx) => {
+    const currentClips = await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    expect(currentClips).toHaveLength(2);
+    expect(currentClips.find((clip) => String(clip._id) === clips.split)).toMatchObject({
+      startSec: 0,
+      duration: 4,
+      name: "Split",
+    });
+    expect(currentClips.some((clip) => clip.name === "Deleted" && clip.startSec === 1.25 && clip.duration === 0.5)).toBe(true);
+    expect(currentClips.find((clip) => clip.name === "Deleted")?.historyRef).toBe("deleted-history");
+    const automation = await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", projectId)).unique();
+    expect(automation?.points).toEqual(originalPoints);
+  });
+});
+
+test("resolves created clip placeholders for a later range split and recovery", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+  const actions = [
+    {
+      kind: "clip.midi.create",
+      clientRef: "created-clip",
+      track: { source: "persisted", id: String(track) },
+      startSec: 0,
+      duration: 4,
+      wave: "sine",
+      notes: [{ beat: 0, length: 1, pitch: 60 }],
+    },
+    {
+      kind: "timeline.range.delete",
+      tracks: [{ source: "persisted", id: String(track) }],
+      startSec: 1,
+      endSec: 3,
+    },
+  ];
+  const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request(actions, "create-then-range-delete"),
+  });
+  const recovery = committed.recoveries[0];
+  if (!recovery) throw new Error("Expected range recovery.");
+  expect(await t.run(async (ctx) => (
+    await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+  ))).toMatchObject([
+    { startSec: 0, duration: 1 },
+    { startSec: 3, duration: 1 },
+  ]);
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: recovery.id } }], "restore-created-range-split"),
+  });
+  expect(await t.run(async (ctx) => (
+    await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
+  ))).toMatchObject([{ startSec: 0, duration: 4 }]);
+});
+
+test("keeps recovery restore and range deletion planner and executor references aligned", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "Restore then delete", index: 0 });
+  await t.run(async (ctx) => {
+    const clipId = await ctx.db.insert("clips", {
+      projectId, trackId: track, startSec: 1, duration: 1, name: "Recovered then deleted",
+    });
+    await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+    return clipId;
+  });
+  const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [
+      {
+        kind: "timeline.range.delete",
+        tracks: [{ source: "persisted", id: String(track) }],
+        startSec: 0.5,
+        endSec: 2.5,
+      },
+    ], "restore-range-initial-delete"),
+  });
+  const recovery = deleted.recoveries[0];
+  if (!recovery) throw new Error("Expected clip recovery.");
+  const actions = [
+    { kind: "recovery.restore" as const, recovery: { id: recovery.id } },
+    {
+      kind: "timeline.range.delete" as const,
+      tracks: [{ source: "persisted" as const, id: String(track) }],
+      startSec: 0.5,
+      endSec: 2.5,
+    },
+  ];
+  const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions },
+  });
+  expect(preview.applied).toBe(true);
+  const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request(actions, "restore-range-commit"),
+  });
+  const recaptured = committed.recoveries.find((entry) => entry.kind === "timeline.range.delete");
+  if (!recaptured) throw new Error("Expected range recovery.");
+  expect(await t.run((ctx) => ctx.db.query("clips")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).collect())).toEqual([]);
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: recaptured.id } }], "restore-range-rollback"),
+  });
+  expect(await t.run((ctx) => ctx.db.query("clips")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).collect())).toMatchObject([
+    { name: "Recovered then deleted", startSec: 1, duration: 1 },
+  ]);
+});
+
+test("lists and restores an unexpired stored V1 clip recovery", async () => {
+  const t = await setup();
+  const track = await addTrack(t, { name: "V1 recovery track", index: 0 });
+  const recoveryId = await t.run(async (ctx) => {
+    const payload = canonicalRecoveryPayloadV1({
+      version: 1,
+      kind: "clip.delete",
+      data: {
+        clipId: "legacy-clip",
+        ownership: { projectId, ownerUserId: owner },
+        clip: {
+          projectId,
+          trackId: String(track),
+          startSec: 2,
+          duration: 3,
+          name: "Stored V1 clip",
+        },
+      },
+    });
+    return await ctx.db.insert("controlRecoveries", {
+      projectId,
+      actorSubject: owner,
+      sourceActionIndex: 0,
+      kind: "clip.delete",
+      payload,
+      payloadHash: hashRecoveryPayloadSyncV1(payload),
+      impact: { clips: 1, processors: 0, automation: 0, sidechains: 0, assets: 0 },
+      createdAt: Date.now() - 1_000,
+      expiresAt: Date.now() + 60_000,
+    });
+  });
+  const recoveryIdText = String(recoveryId);
+  expect((await t.withIdentity({ subject: owner }).query(api.control.recoveriesV1, { projectId })).entries)
+    .toEqual([expect.objectContaining({ id: recoveryIdText, kind: "clip.delete" })]);
+  const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: recoveryIdText } }], "stored-v1-recovery-restore"),
+  });
+  expect(restored.restored[0]?.entities).toEqual([
+    expect.objectContaining({ entity: "clip", sourceId: "legacy-clip" }),
+  ]);
+  const clips = await t.run((ctx) => ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect());
+  expect(clips).toEqual([
+    expect.objectContaining({ trackId: track, startSec: 2, duration: 3, name: "Stored V1 clip" }),
+  ]);
+});
+
+test("captures and restores oversized legacy MIDI for clip and track deletion", async () => {
+  const oversizedMidi = {
+    wave: "custom-legacy",
+    gain: 7,
+    notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+    cc: [{ beat: 0, controller: 1, value: 0 }],
+  };
+  for (const deletionKind of ["clip", "track"] as const) {
+    const t = await setup();
+    const track = await addTrack(t, { name: `Instrument ${deletionKind}`, index: 0, kind: "instrument" });
+    const clip = await t.run(async (ctx) => {
+      const clipId = await ctx.db.insert("clips", {
+        projectId, trackId: track, startSec: 0, duration: 1, midi: oversizedMidi,
+      });
+      await ctx.db.insert("ownerships", { projectId, ownerUserId: owner, clipId });
+      return clipId;
+    });
+    const action = deletionKind === "clip"
+      ? { kind: "clip.delete" as const, clip: { source: "persisted" as const, id: String(clip) } }
+      : { kind: "track.delete" as const, track: { source: "persisted" as const, id: String(track) } };
+    const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+      request: await approvedRequest(t, [action], `oversized-${deletionKind}-delete`),
+    });
+    const descriptor = deleted.recoveries[0];
+    if (!descriptor) throw new Error("Expected recovery descriptor.");
+    const recovery = await t.run(async (ctx) => {
+      const id = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+      return id ? await ctx.db.get(id) : null;
+    });
+    if (!recovery) throw new Error("Recovery row is unavailable.");
+    expect(parseCapturedRecoveryPayload(recovery.payload).kind).toBe(`${deletionKind}.delete`);
+    const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+      request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], `oversized-${deletionKind}-restore`),
+    });
+    expect(restored.restored).toHaveLength(1);
+    const restoredClip = await t.run(async (ctx) => (await ctx.db.query("clips")
+      .withIndex("by_room", (q) => q.eq("projectId", projectId))
+      .collect())[0]);
+    expect(restoredClip?.midi?.notes).toHaveLength(500);
+    expect(restoredClip?.midi?.cc).toHaveLength(1);
+    expect(restoredClip?.midi).toMatchObject({ wave: "custom-legacy", gain: 7 });
+  }
 });
 
 test("restores a deleted nested track subtree and survivor routing through recovery", async () => {
@@ -225,9 +597,20 @@ test("project deletion removes recoveries before a project ID is recreated", asy
   });
   const descriptor = deleted.recoveries[0];
   if (!descriptor) throw new Error("Expected recovery.");
+  await t.run(async (ctx) => {
+    await ctx.db.insert("sharedOperationResults", {
+      projectId, userId: owner, operationId: "stale-operation-receipt", result: { stale: true }, createdAt: Date.now(),
+    });
+    await ctx.db.insert("clipDeletionRecoveryReceipts", {
+      projectId, actorUserId: owner, recoveryId: "stale-clip-recovery", restoredClipId: "stale-clip",
+      createdAt: Date.now(), expiresAt: Date.now() + 60_000,
+    });
+  });
   await t.withIdentity({ subject: owner }).mutation(api.projects.prepareCloudRoomDeleteAsOwner, { projectId });
   await t.withIdentity({ subject: owner }).mutation(api.projects.finalizeCloudRoomDeleteAsOwner, { projectId });
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
+  expect(await t.run(async (ctx) => await ctx.db.query("sharedOperationResults").collect())).toEqual([]);
+  expect(await t.run(async (ctx) => await ctx.db.query("clipDeletionRecoveryReceipts").collect())).toEqual([]);
   await expect(t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "recreated-project-recovery"),
   })).rejects.toThrow("Recovery is unavailable.");
@@ -386,7 +769,8 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
       return recoveryId === null ? null : await ctx.db.get(recoveryId);
     });
     if (!recovery) throw new Error("Recovery record missing.");
-    parseRecoveryPayloadV1(recovery.payload);
+    expect(JSON.parse(recovery.payload).version).toBe(2);
+    parseRecoveryPayload(recovery.payload);
     let preview;
     try {
       preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
@@ -509,6 +893,73 @@ test("restores an asset before its pending deletion claim and replays the restor
   });
   expect(restored.restored[0]?.entities[0]?.entity).toBe("asset");
   expect(replay.idempotencyReplay).toBe(true);
+});
+
+test("previews, approves, and commits restore-then-delete asset recovery with a canonical recapture", async () => {
+  const t = await setup();
+  const project = await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  if (!project) throw new Error("Project missing.");
+  await t.run(async (ctx) => {
+    await ctx.db.insert("samples", {
+      projectId,
+      assetKey: "restore-then-delete",
+      sourceKind: "upload",
+      name: "Recovered.wav",
+      mimeType: "audio/wav",
+      sizeBytes: 1,
+      contentSha256: "a".repeat(64),
+      r2Key: `asset-namespaces/${project.storageNamespace}/restore-then-delete`,
+      duration: 1,
+      sampleRate: 48_000,
+      channelCount: 2,
+      ownerUserId: owner,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+  });
+  const initial = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [
+      { kind: "asset.delete", asset: { source: "persisted", id: "restore-then-delete" } },
+    ], "restore-then-delete-initial"),
+  });
+  const recovery = initial.recoveries[0];
+  if (!recovery) throw new Error("Expected asset recovery.");
+
+  const actions = [
+    { kind: "recovery.restore" as const, recovery: { id: recovery.id } },
+    { kind: "asset.delete" as const, asset: { source: "persisted" as const, id: "restore-then-delete" } },
+  ];
+  const preview = await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
+    request: { version: "v1", projectId, actions },
+  });
+  expect(preview.applied).toBe(true);
+  const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, actions, "restore-then-delete-commit"),
+  });
+  const recaptured = committed.recoveries[0];
+  if (!recaptured) throw new Error("Expected recaptured asset recovery.");
+  const row = await t.run(async (ctx) => {
+    const id = ctx.db.normalizeId("controlRecoveries", recaptured.id);
+    return id ? await ctx.db.get(id) : null;
+  });
+  if (!row) throw new Error("Expected recaptured recovery row.");
+  expect(hashRecoveryPayloadSyncV1(row.payload)).toBe(row.payloadHash);
+  expect(parseCapturedRecoveryPayload(row.payload)).toMatchObject({
+    kind: "asset.delete",
+    data: {
+      assetId: "restore-then-delete",
+      asset: {
+        r2Key: `asset-namespaces/${project.storageNamespace}/restore-then-delete`,
+        duration: 1,
+        sampleRate: 48_000,
+        channelCount: 2,
+      },
+    },
+  });
+  expect(await t.run((ctx) => ctx.db.query("samples")
+    .withIndex("by_room_assetKey", (query) => query.eq("projectId", projectId).eq("assetKey", "restore-then-delete"))
+    .unique())).toBeNull();
 });
 
 test("locked affected tracks reject preview and commit with an action index", async () => {
@@ -895,7 +1346,7 @@ test("track recovery restores canonical contiguous order matching its preview", 
     return planControlRequestV1(
       await readProjectControlSnapshotV1(ctx, projectId),
       { projectId, actions: [action] },
-      new Map([[descriptor.id, { payload: parseRecoveryPayloadV1(recovery.payload) }]]),
+      new Map([[descriptor.id, { payload: parseRecoveryPayload(recovery.payload) }]]),
     ).snapshot.tracks.map((track) => ({ name: track.name, index: track.index }));
   });
   await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
@@ -1139,11 +1590,12 @@ test("every advertised action has an authenticated preview and commit endpoint f
     { kind: "sidechain.remove", target: ref(instrument), effect: { source: "client" as const, clientRef: "compressor" } },
     { kind: "instrument.remove", target: { kind: "track" as const, track: ref(instrument) } },
     { kind: "arpeggiator.remove", target: { kind: "track" as const, track: ref(instrument) } },
+    { kind: "timeline.range.delete", tracks: [ref(instrument)], startSec: 100, endSec: 101 },
     { kind: "clip.delete", clip: { source: "client" as const, clientRef: "midi" } },
     { kind: "track.delete", track: temp },
     { kind: "asset.delete", asset: { source: "persisted" as const, id: "missing-asset" } },
   ];
-  expect(actions).toHaveLength(37);
+  expect(actions).toHaveLength(38);
   expect(actions.map((action) => action.kind).sort()).toEqual(
     controlCapabilitiesV1.actionKinds.filter((kind) => kind !== "recovery.restore").sort(),
   );

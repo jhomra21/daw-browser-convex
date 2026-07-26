@@ -23,6 +23,7 @@ import type {
   UtilityParamsEnvelope,
 } from './effects-params'
 import { parseStrictSynthParams, type SynthParams } from './synth-params'
+import { normalizeLegacyMidiClip, normalizeMidiClip, type LegacyMidiClip, type MidiClip } from './midi'
 import {
   isAudioEffectKind,
   isAudioEffectInstance,
@@ -99,16 +100,7 @@ export type SharedTimelineClipCreatePayload = {
   fades?: SharedClipFadesInput
   midiOffsetBeats?: number
   color?: string
-  midi?: {
-    wave: string
-    gain?: number
-    notes: Array<{
-      beat: number
-      length: number
-      pitch: number
-      velocity?: number
-    }>
-  }
+  midi?: LegacyMidiClip
   clipKind?: string
   operationId?: string
 }
@@ -156,7 +148,7 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.unlock'; payload: { trackId: string } }
   | { kind: 'clips.create'; payload: SharedTimelineClipCreatePayload }
   | { kind: 'clips.createMany'; payload: { items: SharedTimelineClipCreatePayload[]; operationId?: string } }
-  | { kind: 'clips.removeMany'; payload: { clipIds: string[] } }
+  | { kind: 'clips.removeMany'; payload: { clipIds: string[]; operationId: string } }
   | { kind: 'clips.moveMany'; payload: { moves: MoveClipInput[] } }
   | { kind: 'clips.setTiming'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; fades?: SharedClipFades } }
   | { kind: 'clips.setTimingAndAudioWarp'; payload: { clipId: string; startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: AudioWarpPayload; fades?: SharedClipFades } }
@@ -164,7 +156,8 @@ export type SharedTimelineOperation =
   | { kind: 'clips.setGain'; payload: { clipId: string; gain: number } }
   | { kind: 'clips.setFades'; payload: { clipId: string; fades: SharedClipFades } }
   | { kind: 'clips.setColor'; payload: { clipId: string; color: string } }
-  | { kind: 'clips.setMidi'; payload: { clipId: string; midi: { wave: 'sine' | 'square' | 'sawtooth' | 'triangle'; gain?: number; notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }> }; operationId: string } }
+  | { kind: 'clips.setMidi'; payload: { clipId: string; midi: MidiClip; operationId: string } }
+  | { kind: 'clips.setMidiAndTiming'; payload: { clipId: string; startSec: number; duration: number; midi: MidiClip; operationId: string } }
   | { kind: 'tracks.setRouting'; payload: { trackId: string; routing: TrackRouting } }
   | { kind: 'sidechains.setRoute'; payload: { projectId: string; sourceTrackId: string; targetTrackId: string; effectInstanceId: string } }
   | { kind: 'sidechains.removeRoute'; payload: { projectId: string; targetTrackId: string; effectInstanceId: string } }
@@ -390,28 +383,18 @@ const readSends = (value: unknown): TrackRouting['sends'] => Array.isArray(value
 
 export const readSharedTimelineClipCreatePayload = (
   value: unknown,
-  options?: { requireAudioSampleUrl?: boolean },
+  options?: { requireAudioSampleUrl?: boolean; durable?: boolean },
 ): SharedTimelineClipCreatePayload | null => {
   if (!isRecord(value) || typeof value.trackId !== 'string' || typeof value.startSec !== 'number' || typeof value.duration !== 'number') return null
-  const midi = isRecord(value.midi) && Array.isArray(value.midi.notes) && typeof value.midi.wave === 'string'
-    ? {
-        wave: value.midi.wave,
-        gain: readOptionalNumber(value.midi.gain),
-        notes: value.midi.notes.flatMap((note) => (
-          isRecord(note)
-          && typeof note.beat === 'number'
-          && typeof note.length === 'number'
-          && typeof note.pitch === 'number'
-            ? [{
-                beat: note.beat,
-                length: note.length,
-                pitch: note.pitch,
-                velocity: readOptionalNumber(note.velocity),
-              }]
-            : []
-        )),
-      }
-    : undefined
+  if (value.midi !== undefined && !isRecord(value.midi)) return null
+  let midi: MidiClip | LegacyMidiClip | undefined
+  try {
+    midi = value.midi === undefined
+      ? undefined
+      : options?.durable ? normalizeLegacyMidiClip(value.midi) : normalizeMidiClip(value.midi)
+  } catch {
+    return null
+  }
   const isMidiClip = Boolean(midi) || value.clipKind === 'midi'
   if (!isMidiClip && (
     (options?.requireAudioSampleUrl !== false && typeof value.sampleUrl !== 'string')
@@ -661,6 +644,11 @@ const parseClipCreate = (payload: Record<string, unknown>): SharedTimelineOperat
   return clipPayload ? { kind: 'clips.create', payload: clipPayload } : null
 }
 
+const parseDurableClipCreate = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  const clipPayload = readSharedTimelineClipCreatePayload(payload, { durable: true })
+  return clipPayload ? { kind: 'clips.create', payload: clipPayload } : null
+}
+
 const parseClipCreateMany = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   if (!Array.isArray(payload.items)) return null
   const items = payload.items.flatMap((item) => {
@@ -671,10 +659,23 @@ const parseClipCreateMany = (payload: Record<string, unknown>): SharedTimelineOp
     ? { kind: 'clips.createMany', payload: { items, operationId: readOptionalString(payload.operationId) } }
     : null
 }
+const parseDurableClipCreateMany = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (!Array.isArray(payload.items)) return null
+  const items = payload.items.flatMap((item) => {
+    const clipPayload = readSharedTimelineClipCreatePayload(item, { durable: true })
+    return clipPayload ? [clipPayload] : []
+  })
+  return items.length === payload.items.length
+    ? { kind: 'clips.createMany', payload: { items, operationId: readOptionalString(payload.operationId) } }
+    : null
+}
 
 const parseClipRemoveMany = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
   const clipIds = readStringArray(payload.clipIds)
-  return clipIds.length > 0 ? { kind: 'clips.removeMany', payload: { clipIds } } : null
+  const operationId = readOptionalString(payload.operationId)
+  return clipIds.length > 0 && operationId
+    ? { kind: 'clips.removeMany', payload: { clipIds, operationId } }
+    : null
 }
 
 const parseClipMoveMany = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
@@ -751,37 +752,45 @@ const parseClipMidi = (payload: Record<string, unknown>): SharedTimelineOperatio
     || !isRecord(payload.midi)
     || Object.keys(payload).some((key) => key !== 'clipId' && key !== 'midi' && key !== 'operationId')
   ) return null
-  const midi = payload.midi
-  if (
-    (midi.wave !== 'sine' && midi.wave !== 'square' && midi.wave !== 'sawtooth' && midi.wave !== 'triangle')
-    || (midi.gain !== undefined && (typeof midi.gain !== 'number' || !Number.isFinite(midi.gain) || midi.gain < 0 || midi.gain > 2))
-    || !Array.isArray(midi.notes)
-    || midi.notes.length > 500
-    || Object.keys(midi).some((key) => key !== 'wave' && key !== 'gain' && key !== 'notes')
-  ) return null
-  const notes = midi.notes.flatMap((note) => {
-    if (
-      !isRecord(note)
-      || Object.keys(note).some((key) => key !== 'beat' && key !== 'length' && key !== 'pitch' && key !== 'velocity')
-      || typeof note.beat !== 'number' || !Number.isFinite(note.beat)
-      || typeof note.length !== 'number' || !Number.isFinite(note.length) || note.length <= 0
-      || typeof note.pitch !== 'number' || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
-      || (note.velocity !== undefined && (typeof note.velocity !== 'number' || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1))
-    ) return []
-    return [{
-      beat: note.beat, length: note.length, pitch: note.pitch,
-      ...(typeof note.velocity === 'number' ? { velocity: note.velocity } : {}),
-    }]
-  })
-  if (notes.length !== midi.notes.length) return null
-  notes.sort((left, right) => left.beat - right.beat || left.pitch - right.pitch || left.length - right.length || (left.velocity ?? 1) - (right.velocity ?? 1))
+  let midi: MidiClip
+  try {
+    midi = normalizeMidiClip(payload.midi)
+  } catch {
+    return null
+  }
   return {
     kind: 'clips.setMidi',
     payload: {
       clipId: payload.clipId,
       operationId: payload.operationId,
-      midi: { wave: midi.wave, ...(typeof midi.gain === 'number' ? { gain: midi.gain } : {}), notes },
+      midi,
     },
+  }
+}
+
+const parseClipMidiAndTiming = (payload: Record<string, unknown>): SharedTimelineOperation | null => {
+  if (
+    typeof payload.clipId !== 'string'
+    || typeof payload.startSec !== 'number'
+    || typeof payload.duration !== 'number'
+    || typeof payload.operationId !== 'string'
+    || payload.operationId.length === 0
+    || !isRecord(payload.midi)
+    || Object.keys(payload).some((key) => !['clipId', 'startSec', 'duration', 'midi', 'operationId'].includes(key))
+  ) return null
+  try {
+    return {
+      kind: 'clips.setMidiAndTiming',
+      payload: {
+        clipId: payload.clipId,
+        startSec: payload.startSec,
+        duration: payload.duration,
+        midi: normalizeMidiClip(payload.midi),
+        operationId: payload.operationId,
+      },
+    }
+  } catch {
+    return null
   }
 }
 
@@ -1451,6 +1460,7 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   },
   { kind: 'clips.setColor', parse: parseClipColor, targets: readClipIdTargets, durableQueue: true },
   { kind: 'clips.setMidi', parse: parseClipMidi, targets: readClipIdTargets, durableQueue: true },
+  { kind: 'clips.setMidiAndTiming', parse: parseClipMidiAndTiming, targets: readClipIdTargets, durableQueue: true },
   { kind: 'tracks.setRouting', parse: parseTrackRouting, targets: readRoutingTargets, durableQueue: true },
   {
     kind: 'sidechains.setRoute',
@@ -1568,5 +1578,13 @@ export const readSharedTimelineOperationTargets = (operation: SharedTimelineOper
 
 export const parseSharedTimelineOperation = (value: unknown): SharedTimelineOperation | null => {
   if (!isRecord(value) || !isRecord(value.payload)) return null
+  return findSharedTimelineOperationDescriptor(value.kind)?.parse(value.payload) ?? null
+}
+
+/** Parses only operations loaded from the durable local outbox. */
+export const parseDurableSharedTimelineOperation = (value: unknown): SharedTimelineOperation | null => {
+  if (!isRecord(value) || !isRecord(value.payload)) return null
+  if (value.kind === 'clips.create') return parseDurableClipCreate(value.payload)
+  if (value.kind === 'clips.createMany') return parseDurableClipCreateMany(value.payload)
   return findSharedTimelineOperationDescriptor(value.kind)?.parse(value.payload) ?? null
 }

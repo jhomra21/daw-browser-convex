@@ -137,6 +137,46 @@ describe('granular runtime transfer contract', () => {
     expect(released).toBe(1)
   })
 
+  test('force-stops only the matching live gate while preserving other live and clip intervals', async () => {
+    const scheduled: Array<[number, number]> = []
+    const gate: AudioParam = {
+      automationRate: 'a-rate',
+      defaultValue: 0,
+      maxValue: 1,
+      minValue: 0,
+      value: 0,
+      cancelAndHoldAtTime: () => gate,
+      cancelScheduledValues: () => gate,
+      exponentialRampToValueAtTime: () => gate,
+      linearRampToValueAtTime: () => gate,
+      setTargetAtTime: () => gate,
+      setValueAtTime: (value, time) => {
+        scheduled.push([value, time])
+        return gate
+      },
+      setValueCurveAtTime: () => gate,
+    }
+    const runtime = await createGranularRuntime({
+      context: { currentTime: 2 },
+      params: createDefaultGranularParams(),
+      createNode: () => ({
+        parameters: new Map([['gate', gate]]),
+        connect: () => {},
+        disconnect: () => {},
+        onprocessorerror: null,
+        port: { onmessage: null, postMessage: () => {}, close: () => {} },
+      }),
+    })
+
+    runtime.scheduleNote({ clipId: 'live:one', when: 4, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.scheduleNote({ clipId: 'live:two', when: 5.5, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.scheduleNote({ clipId: 'transport', when: 7, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.stopClip('live:one')
+
+    expect(scheduled.slice(-5)).toEqual([[0, 2], [1, 5.5], [0, 6.5], [1, 7], [0, 8]])
+    runtime.close()
+  })
+
   test('rejects oversize, install errors, stale acknowledgements, and pending work on close', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
     let onmessage: ((event: MessageEvent) => void) | null = null

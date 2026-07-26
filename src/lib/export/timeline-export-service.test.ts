@@ -19,8 +19,11 @@ import { createTimelineExportService, type TimelineExportInput } from "~/lib/exp
 import { createCapturedClipMediaLoader } from "~/hooks/useClipBuffers"
 import { setLocalAutomationEnvelope } from "~/lib/local-automation"
 import { setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
+import { setLocalExternalProcessor } from "~/lib/external-plugins"
+import { importLocalProject, LOCAL_PROJECT_SCHEMA_VERSION } from "~/lib/local-project-db"
 import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
+import { externalProcessorSchema } from "@daw-browser/external-plugins"
 
 const settings: TimelineExportInput = {
   range: { mode: "whole" },
@@ -36,6 +39,40 @@ const settings: TimelineExportInput = {
     wav: { codec: "pcm-s16", dither: "none" },
   },
 }
+
+const createExternalProcessor = () => externalProcessorSchema.parse({
+  instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
+  targetId: 'track-1',
+  chainIndex: 0,
+  manifest: {
+    identity: {
+      format: 'vst3',
+      classId: 'class-1',
+      vendor: 'Vendor',
+      name: 'Plugin',
+      version: '1',
+      architecture: 'arm64',
+      discoveredPath: '/Plugins/Plugin.vst3',
+      binaryFingerprint: 'a'.repeat(64),
+    },
+    role: 'effect',
+    audioInputs: [],
+    audioOutputs: [{ name: 'main', channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: true,
+    supportsEditor: false,
+    supportsState: false,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  health: { state: 'ready', updatedAt: 1 },
+  updatedAt: 1,
+})
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 0.001
@@ -102,6 +139,33 @@ test("local export snapshot flushes pending writes and remains submission-consis
       points: [expect.objectContaining({ value: 0.25 })],
     }),
   ])
+})
+
+test('blocks export for a restored cloud project with a persisted live external plugin', async () => {
+  const projectId = `cloud-project-${crypto.randomUUID()}`
+  await importLocalProject({
+    id: projectId,
+    name: 'Restored cloud project',
+    schemaVersion: LOCAL_PROJECT_SCHEMA_VERSION,
+    mode: 'backup',
+    storageKind: 'opfs',
+    createdAt: 1,
+    updatedAt: 1,
+    lastOpenedAt: 1,
+  }, {
+    entities: [],
+    assets: [],
+    projectState: [],
+    syncState: [],
+  })
+  await setLocalExternalProcessor(projectId, createExternalProcessor())
+
+  await expect(createExportRenderStateSnapshot({
+    projectId,
+    userId: 'user-1',
+    masterVolume: 1,
+    cloudRows: undefined,
+  })).rejects.toThrow('must be frozen or bypassed')
 })
 
 test("persisted devices and automation survive absent and intentionally empty audio projections", async () => {
@@ -208,6 +272,36 @@ test("snapshot failure rejects before queue insertion or output target creation"
   expect(queue.activeJob()).toBeUndefined()
   expect(service.status()).toBeUndefined()
   expect(targetCreated).toBeFalse()
+  queue.dispose()
+})
+
+test("restarts export capture through successive project switches during MIDI flushing", async () => {
+  let projectId = "project-a"
+  let projectReads = 0
+  const queue = createExportQueue(() => "job-project-switch")
+  const service = createTimelineExportService({
+    queue,
+    getTracks: () => [{ id: `track-${projectId}`, name: projectId, volume: 1, clips: [] }],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => {
+      projectReads += 1
+      if (projectReads === 2) projectId = "project-b"
+      if (projectReads === 4) projectId = "project-c"
+      return projectId
+    },
+    getUserId: () => "user-1",
+    getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => undefined,
+    getSidechainRoutes: () => [],
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+  const prepared = await service.prepareTimelineExport(settings)
+  expect(prepared.snapshot.projectId).toBe("project-c")
+  expect(prepared.snapshot.tracks).toEqual([
+    expect.objectContaining({ id: "track-project-c" }),
+  ])
   queue.dispose()
 })
 

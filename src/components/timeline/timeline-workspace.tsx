@@ -171,6 +171,7 @@ type Props = {
     card: TimelineMidiBounds;
     userId: string;
     projectId: string;
+    canWrite: boolean;
     close: () => void;
     changeBounds: (bounds: TimelineMidiBounds) => void;
     auditionNote: (note: number, velocity?: number) => void;
@@ -476,6 +477,7 @@ export default function TimelineWorkspace(props: Props) {
                   }}
                   recording={props.recording}
                   midi={props.midi}
+                  effectInstancesByOwnerKey={props.automation.lanes.effectInstancesByOwnerKey}
                 />
               </div>
               <div

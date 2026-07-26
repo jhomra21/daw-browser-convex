@@ -1,11 +1,249 @@
 import type { ForgeConfig } from "@electron-forge/shared-types"
 import { FuseV1Options, FuseVersion } from "@electron/fuses"
+import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
 import { execFile } from "node:child_process"
-import { chmod, mkdir, readdir } from "node:fs/promises"
+import { chmod, mkdir, open, readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
+import {
+  nativeAudioHostArtifactName,
+  nativeReleaseArtifactManifestName,
+  nativeVst3ScannerArtifactName,
+  getPackagedNativeReleaseArtifacts,
+  sha256ReleaseArtifact,
+  validateNativeReleaseArtifacts,
+  verifyPackagedNativeReleaseArtifacts,
+  writePackagedNativeReleaseArtifactManifest,
+  type NativeReleaseArtifact,
+} from "./native-release-artifacts"
 
 const run = promisify(execFile)
+type PluginHostReleaseArtifact = NativeReleaseArtifact
+
+const portableWasmReleaseAssetNames = [
+  "daw-audio-core.wasm",
+  "daw-audio-core.manifest.json",
+] as const
+
+export const validatePortableWasmReleaseAssets = async (
+  publicDirectory = path.resolve(import.meta.dirname, "../../public"),
+): Promise<void> => {
+  const [wasmName, manifestName] = portableWasmReleaseAssetNames
+  const wasmPath = path.join(publicDirectory, "audio-core", wasmName)
+  const manifestPath = path.join(publicDirectory, "audio-core", manifestName)
+  if (!await isFile(wasmPath)) throw new Error(`Required portable Wasm release asset is missing: ${wasmPath}`)
+  let manifest: unknown
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+  } catch {
+    throw new Error(`Required portable Wasm release asset is missing or invalid: ${manifestPath}`)
+  }
+  if (typeof manifest !== "object" || manifest === null
+    || !("artifactKind" in manifest) || manifest.artifactKind !== "production"
+    || !("buildType" in manifest) || manifest.buildType !== "Release"
+    || !("lto" in manifest) || manifest.lto !== true
+    || !("sizeBytes" in manifest) || typeof manifest.sizeBytes !== "number"
+    || !("maximumBytes" in manifest) || typeof manifest.maximumBytes !== "number"
+    || !("sha256" in manifest) || typeof manifest.sha256 !== "string"
+    || !/^[a-f0-9]{64}$/.test(manifest.sha256)) {
+    throw new Error(`Required portable Wasm release asset is invalid: ${manifestPath}`)
+  }
+  const size = (await stat(wasmPath)).size
+  if (size !== manifest.sizeBytes || size > manifest.maximumBytes) {
+    throw new Error(`Portable Wasm release asset exceeds or does not match its manifest size budget: ${wasmPath}`)
+  }
+  const hash = await sha256ReleaseArtifact(wasmPath)
+  if (hash !== manifest.sha256) throw new Error(`Portable Wasm release asset hash does not match its manifest: ${wasmPath}`)
+}
+
+export const getPluginHostReleaseArtifactPlan = (
+  environment: NodeJS.ProcessEnv = process.env,
+): PluginHostReleaseArtifact[] => {
+  if (environment.DAW_ENABLE_VST3_HOSTING !== "1") return []
+  const scannerPath = environment.DAW_VST3_SCANNER_PATH
+  const workerPath = environment.DAW_VST3_WORKER_PATH
+  const audioHostPath = environment.DAW_AUDIO_HOST_PATH
+  if (!scannerPath || !workerPath || !audioHostPath) {
+    throw new Error("DAW_ENABLE_VST3_HOSTING=1 requires DAW_VST3_SCANNER_PATH, DAW_VST3_WORKER_PATH, and DAW_AUDIO_HOST_PATH.")
+  }
+  return [
+    { sourcePath: path.resolve(scannerPath), name: nativeVst3ScannerArtifactName },
+    { sourcePath: path.resolve(workerPath), name: nativeVst3WorkerArtifactId },
+    { sourcePath: path.resolve(audioHostPath), name: nativeAudioHostArtifactName },
+  ]
+}
+
+export const validatePluginHostReleaseArtifactPlan = async (
+  plan: readonly PluginHostReleaseArtifact[],
+  manifestPath = process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH,
+): Promise<void> => {
+  if (plan.length === 0) return
+  if (!manifestPath) throw new Error("DAW_ENABLE_VST3_HOSTING=1 requires DAW_NATIVE_ARTIFACT_MANIFEST_PATH.")
+  if (path.basename(manifestPath) !== nativeReleaseArtifactManifestName) {
+    throw new Error(`Native release artifact manifest must be named ${nativeReleaseArtifactManifestName}.`)
+  }
+  await validateNativeReleaseArtifacts(plan, path.resolve(manifestPath))
+}
+
+const pluginHostReleaseArtifacts = getPluginHostReleaseArtifactPlan()
+const isFile = async (filePath: string) => stat(filePath).then((entry) => entry.isFile()).catch(() => false)
+
+type NotaryCredentials =
+  | { keychainProfile: string; keychain?: string }
+  | { appleId: string; appleIdPassword: string; teamId: string }
+  | { appleApiKey: string; appleApiKeyId: string; appleApiIssuer: string }
+
+const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | undefined => {
+  if (environment.APPLE_NOTARY_KEYCHAIN_PROFILE) {
+    return {
+      keychainProfile: environment.APPLE_NOTARY_KEYCHAIN_PROFILE,
+      ...(environment.APPLE_NOTARY_KEYCHAIN ? { keychain: environment.APPLE_NOTARY_KEYCHAIN } : {}),
+    }
+  }
+  if (environment.APPLE_ID && environment.APPLE_APP_SPECIFIC_PASSWORD && environment.APPLE_TEAM_ID) {
+    return {
+      appleId: environment.APPLE_ID,
+      appleIdPassword: environment.APPLE_APP_SPECIFIC_PASSWORD,
+      teamId: environment.APPLE_TEAM_ID,
+    }
+  }
+  if (environment.APPLE_API_KEY && environment.APPLE_API_KEY_ID && environment.APPLE_API_ISSUER) {
+    return {
+      appleApiKey: environment.APPLE_API_KEY,
+      appleApiKeyId: environment.APPLE_API_KEY_ID,
+      appleApiIssuer: environment.APPLE_API_ISSUER,
+    }
+  }
+  return undefined
+}
+
+const entitlementsDirectory = path.join(import.meta.dirname, "entitlements")
+const appEntitlements = path.join(entitlementsDirectory, "app.plist")
+const helperEntitlements = path.join(entitlementsDirectory, "helper.plist")
+const nativeEntitlements = path.join(entitlementsDirectory, "native.plist")
+const vstWorkerEntitlements = path.join(entitlementsDirectory, "vst3-worker.plist")
+
+export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = process.env) => {
+  const identity = environment.APPLE_SIGNING_IDENTITY
+  const notarize = notaryCredentials(environment)
+  if (!identity || !notarize) return undefined
+  return {
+    sign: {
+      identity,
+      identityValidation: true,
+      hardenedRuntime: true,
+      signatureFlags: ["runtime"],
+      strictVerify: true,
+      preAutoEntitlements: false,
+      ignore: pluginHostReleaseArtifacts.length > 0
+        ? (filePath: string) => pluginHostReleaseArtifacts.some((artifact) => path.basename(filePath) === artifact.name)
+        : undefined,
+      optionsForFile: (filePath: string) => {
+        const basename = path.basename(filePath)
+        if (basename === nativeVst3WorkerArtifactId) {
+          return { entitlements: vstWorkerEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
+        }
+        if (basename === nativeVst3ScannerArtifactName || basename === nativeAudioHostArtifactName) {
+          return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
+        }
+        if (filePath.endsWith(".app")) {
+          return {
+            entitlements: filePath.includes(".app/") ? helperEntitlements : appEntitlements,
+            hardenedRuntime: true,
+            signatureFlags: ["runtime"],
+          }
+        }
+        return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
+      },
+    },
+    notarize,
+  }
+}
+
+export const requireMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = process.env) => {
+  const configuration = getMacReleaseConfiguration(environment)
+  if (!environment.APPLE_SIGNING_IDENTITY) {
+    throw new Error("macOS packaging requires APPLE_SIGNING_IDENTITY; ad-hoc release signing is not allowed.")
+  }
+  if (!configuration) {
+    throw new Error("macOS packaging requires complete notarytool credentials or an APPLE_NOTARY_KEYCHAIN_PROFILE.")
+  }
+  return configuration
+}
+
+const macReleaseConfiguration = getMacReleaseConfiguration()
+
+const machOMagic = new Set([
+  "cefaedfe",
+  "cffaedfe",
+  "feedface",
+  "feedfacf",
+  "cafebabe",
+  "bebafeca",
+  "cafebabf",
+  "bfbafeca",
+])
+
+const isMachOFile = async (filePath: string) => {
+  const handle = await open(filePath, "r")
+  try {
+    const header = Buffer.alloc(4)
+    const { bytesRead } = await handle.read(header, 0, header.length, 0)
+    return bytesRead === header.length && machOMagic.has(header.toString("hex"))
+  } finally {
+    await handle.close()
+  }
+}
+
+const signedCodeCandidates = async (root: string): Promise<string[]> => {
+  const candidates: string[] = []
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue
+    const entryPath = path.join(root, entry.name)
+    if (entry.isDirectory()) {
+      candidates.push(...await signedCodeCandidates(entryPath))
+      if ([".app", ".framework", ".xpc", ".bundle"].includes(path.extname(entryPath))) candidates.push(entryPath)
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (await isMachOFile(entryPath)) candidates.push(entryPath)
+  }
+  return candidates
+}
+
+const signPackagedNativeReleaseArtifacts = async (
+  buildPath: string,
+  configuration: NonNullable<ReturnType<typeof getMacReleaseConfiguration>>,
+): Promise<void> => {
+  const artifacts = getPackagedNativeReleaseArtifacts(path.join(buildPath, "Contents", "Resources"))
+  for (const artifact of artifacts) {
+    const options = configuration.sign.optionsForFile(artifact.sourcePath)
+    const arguments_ = [
+      "--sign",
+      configuration.sign.identity,
+      "--force",
+      "--timestamp",
+      "--options",
+      Array.isArray(options.signatureFlags) ? options.signatureFlags.join(",") : options.signatureFlags,
+      "--entitlements",
+      options.entitlements,
+      artifact.sourcePath,
+    ]
+    await run("codesign", arguments_)
+    await run("codesign", ["--verify", "--strict", "--verbose=2", artifact.sourcePath])
+  }
+  await writePackagedNativeReleaseArtifactManifest(path.join(buildPath, "Contents", "Resources"))
+}
+
+const verifySignedPackage = async (appPath: string) => {
+  if (pluginHostReleaseArtifacts.length > 0) {
+    await verifyPackagedNativeReleaseArtifacts(path.join(appPath, "Contents", "Resources"))
+  }
+  const candidates = [...await signedCodeCandidates(appPath), appPath]
+  for (const candidate of candidates) {
+    await run("codesign", ["--verify", "--strict", "--verbose=2", candidate])
+  }
+}
 const compileNativeFileCapabilityHelper = async () => {
   if (process.platform !== "darwin" && process.platform !== "linux") return
   const nativeDirectory = path.join(import.meta.dirname, ".native")
@@ -22,24 +260,37 @@ const config: ForgeConfig = {
     asar: true,
     prune: true,
     extraResource: process.platform === "darwin" || process.platform === "linux"
-      ? [".native/file-capability-helper"]
+      ? [
+          ".native/file-capability-helper",
+          ...pluginHostReleaseArtifacts.map((artifact) => artifact.sourcePath),
+          ...(pluginHostReleaseArtifacts.length > 0 && process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH
+            ? [path.resolve(process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH)]
+            : []),
+        ]
       : [],
-    // Fuses are flipped during packaging before Electron Packager signs the final app.
-    osxSign: { identity: "-" },
+    osxSign: macReleaseConfiguration?.sign,
+    osxNotarize: macReleaseConfiguration?.notarize,
   },
   hooks: {
     preStart: async () => {
       await compileNativeFileCapabilityHelper()
     },
-    prePackage: async () => {
+    prePackage: async (_config, platform) => {
+      if (platform === "darwin") requireMacReleaseConfiguration()
+      await validatePluginHostReleaseArtifactPlan(pluginHostReleaseArtifacts)
+      await validatePortableWasmReleaseAssets()
       await compileNativeFileCapabilityHelper()
+    },
+    packageAfterCopy: async (_config, buildPath, _electronVersion, platform) => {
+      if (platform !== "darwin" || pluginHostReleaseArtifacts.length === 0) return
+      await signPackagedNativeReleaseArtifacts(buildPath, requireMacReleaseConfiguration())
     },
     postPackage: async (_config, packageResult) => {
       if (packageResult.platform !== "darwin") return
       const packageApps = (await Promise.all(packageResult.outputPaths.map(async (outputPath) =>
         (await readdir(outputPath)).filter((entry) => entry.endsWith(".app")).map((entry) => path.join(outputPath, entry)),
       ))).flat()
-      await Promise.all(packageApps.map((appPath) => run("codesign", ["--deep", "--force", "--sign", "-", appPath])))
+      await Promise.all(packageApps.map(verifySignedPackage))
     },
   },
   makers: [

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
 import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
@@ -25,6 +25,12 @@ import {
   moveLocalAssetToFolder,
   renameLocalAssetFolder,
 } from "~/lib/local-asset-folders";
+import type { DesktopPluginCatalogEntry } from "~/lib/desktop/attached-host-controller";
+import {
+  insertNativeVst3Effect,
+  nativeVst3InsertionAvailability,
+  type NativeVst3CatalogSelection,
+} from "~/lib/desktop/native-vst3-insertion";
 
 type Options = {
   projectId: Accessor<string>;
@@ -44,10 +50,14 @@ type Options = {
   currentEffectsTargetId: Accessor<Track["id"] | "master">;
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
   onDeviceDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
+  onExternalPluginInsertionResult?: (title: string, message: string) => void;
 };
 
 const effectChainItemId = (preset: AudioEffectChainPreset) => `builtin:audio-effect-chain:${preset.id}`;
 const instrumentPresetItemId = (preset: InstrumentPreset) => `builtin:instrument-preset:${preset.id}`;
+const externalPluginItemId = (selection: NativeVst3CatalogSelection) => (
+  `vst3:${selection.entry.binaryFingerprint ?? "unscanned"}:${selection.pluginClass.classId}`
+);
 
 const visibleBrowserSections = (sections: BrowserSection[]): BrowserSection[] => {
   const visibleSections: BrowserSection[] = [];
@@ -117,6 +127,26 @@ type RenameFolderDraft = {
 export function useTimelineBrowserController(options: Options): Accessor<TimelineLeftBrowserModel> {
   const [renameFolderDraft, setRenameFolderDraft] = createSignal<RenameFolderDraft | null>(null);
   const [renameFolderBusy, setRenameFolderBusy] = createSignal(false);
+  const [desktopPluginEntries, setDesktopPluginEntries] = createSignal<DesktopPluginCatalogEntry[]>([]);
+  const [insertingExternalPluginId, setInsertingExternalPluginId] = createSignal<string>();
+  const [externalPluginStatusById, setExternalPluginStatusById] = createSignal<Record<string, string>>({});
+  const refreshDesktopPluginCatalog = async () => {
+    const bridge = window.dawDesktop?.pluginCatalog
+    if (!bridge) return
+    try {
+      const result = await bridge.read()
+      if ("catalog" in result) setDesktopPluginEntries(result.catalog.entries)
+    } catch {
+      setDesktopPluginEntries([])
+    }
+  }
+  onMount(() => {
+    if (!window.dawDesktop?.pluginCatalog) return
+    void refreshDesktopPluginCatalog()
+    const listener = () => void refreshDesktopPluginCatalog()
+    window.addEventListener("daw-plugin-catalog-changed", listener)
+    onCleanup(() => window.removeEventListener("daw-plugin-catalog-changed", listener))
+  })
   const browserSamplesEnabled = () => options.leftBrowser.open() && options.leftBrowser.activeTab() === "assets";
   const browserSamples = useProjectSamples({
     projectId: options.projectId,
@@ -232,6 +262,36 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     name: folder.name,
   })));
   const browserDeviceQuery = (tab: "effects" | "midi-instruments") => options.leftBrowser.searchQueryByTab()[tab].trim().toLowerCase();
+  const desktopPluginSelections = createMemo<NativeVst3CatalogSelection[]>(() => (
+    desktopPluginEntries().flatMap((entry) => entry.classes.map((pluginClass) => ({ entry, pluginClass })))
+  ));
+  const desktopPluginSelectionById = createMemo(() => {
+    const selections = new Map<string, NativeVst3CatalogSelection>();
+    for (const selection of desktopPluginSelections()) selections.set(externalPluginItemId(selection), selection);
+    return selections;
+  });
+  const externalPluginItem = (selection: NativeVst3CatalogSelection): BrowserItem => {
+    const id = externalPluginItemId(selection);
+    const availability = nativeVst3InsertionAvailability({
+      selection,
+      projectId: options.projectId(),
+      targetId: options.currentEffectsTargetId(),
+      canWrite: options.deviceInsertActions()?.canWrite === true,
+      bridgeAvailable: window.dawDesktop?.pluginCatalog !== undefined,
+      busy: insertingExternalPluginId() !== undefined,
+    });
+    return {
+      id,
+      source: "external-catalog",
+      category: "external-plugin",
+      label: selection.pluginClass.name,
+      subtitle: availability.enabled
+        ? externalPluginStatusById()[id] ?? availability.message
+        : availability.message,
+      searchText: `${selection.pluginClass.name} ${selection.pluginClass.vendor} vst3 ${selection.pluginClass.role} ${availability.enabled ? "eligible" : availability.code}`.toLowerCase(),
+      disabled: !availability.enabled,
+    };
+  };
   const browserEffectItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
     return [...BROWSER_AUDIO_EFFECT_CATALOG, ...BROWSER_MIDI_EFFECT_CATALOG].map((entry) => ({
@@ -328,9 +388,16 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         children: midiEffectItems.map(createBrowserLeafRow),
       },
     ], browserDeviceQuery("effects"));
-    return visibleBrowserSections([
+    const sections = [
       createBrowserSection("builtin-effects", "Builtin", rows),
-    ]);
+    ];
+    const pluginRows = filterBrowserTreeRows(desktopPluginSelections()
+      .filter((selection) => selection.pluginClass.role === "effect")
+      .map((selection) => createBrowserLeafRow(externalPluginItem(selection))), browserDeviceQuery("effects"));
+    if (pluginRows.length > 0) {
+      sections.push(createBrowserSection("vst3-discovery", "VST3 Plug-ins", pluginRows));
+    }
+    return visibleBrowserSections(sections);
   });
   const browserInstrumentItems = createMemo<BrowserItem[]>(() => {
     const actions = options.deviceInsertActions();
@@ -422,9 +489,16 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         children: presetRows,
       },
     ], browserDeviceQuery("midi-instruments"));
-    return visibleBrowserSections([
+    const sections = [
       createBrowserSection("builtin-midi-instruments", "Builtin", rows),
-    ]);
+    ];
+    const pluginRows = filterBrowserTreeRows(desktopPluginSelections()
+      .filter((selection) => selection.pluginClass.role === "instrument")
+      .map((selection) => createBrowserLeafRow(externalPluginItem(selection))), browserDeviceQuery("midi-instruments"));
+    if (pluginRows.length > 0) {
+      sections.push(createBrowserSection("vst3-instruments", "VST3 Plug-ins", pluginRows));
+    }
+    return visibleBrowserSections(sections);
   });
 
   const insertBrowserSample = (itemId: string) => {
@@ -574,7 +648,55 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     return undefined;
   };
 
+  const addExternalPlugin = async (itemId: string, selection: NativeVst3CatalogSelection) => {
+    const projectId = options.projectId();
+    const targetId = options.currentEffectsTargetId();
+    const actions = options.deviceInsertActions();
+    const availability = nativeVst3InsertionAvailability({
+      selection,
+      projectId,
+      targetId,
+      canWrite: actions?.canWrite === true,
+      bridgeAvailable: window.dawDesktop?.pluginCatalog !== undefined,
+      busy: insertingExternalPluginId() !== undefined,
+    });
+    if (!availability.enabled || targetId === "master" || !window.dawDesktop?.pluginCatalog) {
+      options.onExternalPluginInsertionResult?.("VST3 insertion unavailable", availability.message);
+      return;
+    }
+    setInsertingExternalPluginId(itemId);
+    try {
+      const result = await insertNativeVst3Effect({
+        projectId,
+        targetId,
+        selection,
+        bridge: window.dawDesktop.pluginCatalog,
+        validateBeforePersist: () => (
+          options.projectId() === projectId
+          && options.currentEffectsTargetId() === targetId
+          && options.tracks().some((track) => track.id === targetId)
+        ),
+      });
+      const message = result.ok
+        ? "Inserted as bypassed metadata. Native graph activation remains gated."
+        : result.message;
+      setExternalPluginStatusById((statuses) => ({ ...statuses, [itemId]: message }));
+      options.onExternalPluginInsertionResult?.(result.ok ? "VST3 effect inserted" : "VST3 insertion failed", message);
+    } catch {
+      const message = "The native VST3 host preflight failed.";
+      setExternalPluginStatusById((statuses) => ({ ...statuses, [itemId]: message }));
+      options.onExternalPluginInsertionResult?.("VST3 insertion failed", message);
+    } finally {
+      setInsertingExternalPluginId(undefined);
+    }
+  };
+
   const addBrowserEffect = (itemId: string) => {
+    const externalPlugin = desktopPluginSelectionById().get(itemId);
+    if (externalPlugin) {
+      void addExternalPlugin(itemId, externalPlugin);
+      return;
+    }
     const payload = resolveBrowserDevicePayload(itemId);
     const actions = options.deviceInsertActions();
     if (!payload || !actions?.canWrite) return;

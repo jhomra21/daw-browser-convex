@@ -6,14 +6,18 @@ import {
   controlRequestDigestSyncV1,
   controlActionSchemaV1,
   controlCapabilitiesV1,
+  controlCapabilitiesV2,
   controlCapabilitiesSchemaV1,
+  controlCapabilitiesSchemaV2,
   controlCommitResultSchemaV1,
+  controlCommitRequestSchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryQuerySchemaV1,
   controlHistoryResultSchemaV1,
   controlRequestDigestV1,
   controlErrorSchemaV1,
   controlLimitsV1,
+  controlLimitsV2,
   destructiveControlActionKindsV1,
   controlPreviewResultSchemaV1,
   controlRequestDigestInputV1,
@@ -26,9 +30,17 @@ import {
   hashRecoveryPayloadSyncV1,
   hashRecoveryPayloadV1,
   canonicalRecoveryPayloadV1,
+  canonicalRecoveryPayloadV2,
+  canonicalCapturedRecoveryPayloadV2,
+  parseCapturedRecoveryPayload,
+  parseRecoveryPayload,
   recoveryPayloadSchemaV1,
+  recoveryPayloadSchemaV2,
+  recoveryCapturedPayloadSchemaV2,
+  resolveControlMidiActionV1,
   type ContextualRefV1,
   type ProcessorTargetV1,
+  type RecoveryPayloadV2,
 } from './index'
 
 const persisted = (id: string): ContextualRefV1 => ({ source: 'persisted', id })
@@ -510,6 +522,333 @@ test('keeps cloud recovery payload bytes canonical while accepting strict local 
   expect(JSON.stringify(local)).not.toContain('r2Key')
 })
 
+test('verifies legacy recovery bytes before normalizing note-only MIDI', () => {
+  const legacy = {
+    version: 1 as const,
+    kind: 'clip.delete' as const,
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: {
+        projectId: 'project-1',
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+      },
+    },
+  }
+  const stored = canonicalJson(legacy)
+  const restored = parseRecoveryPayload(stored)
+  if (restored.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
+  expect(restored.data.clip.midi).toMatchObject({
+    notes: [{ channel: 1 }],
+    cc: [],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [],
+  })
+})
+
+test('keeps exact V1 recovery bytes and rejects expanded MIDI fields', () => {
+  const legacy = {
+    version: 1 as const,
+    kind: 'clip.delete' as const,
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: {
+        projectId: 'project-1',
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        midi: { wave: 'sine', gain: 1, notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }] },
+      },
+    },
+  }
+  const bytes = canonicalRecoveryPayloadV1(recoveryPayloadSchemaV1.parse(legacy))
+  expect(bytes).toBe(canonicalJson(legacy))
+  const emptyWave = recoveryPayloadSchemaV1.parse({
+    ...legacy,
+    data: { ...legacy.data, clip: { ...legacy.data.clip, midi: { ...legacy.data.clip.midi, wave: '' } } },
+  })
+  expect(canonicalRecoveryPayloadV1(emptyWave)).toBe(canonicalJson(emptyWave))
+  expect(parseRecoveryPayload(canonicalRecoveryPayloadV1(emptyWave))).toMatchObject({
+    version: 2,
+    data: { clip: { midi: { wave: '' } } },
+  })
+  expect(() => recoveryPayloadSchemaV1.parse({
+    ...legacy,
+    data: { ...legacy.data, clip: { ...legacy.data.clip, midi: { ...legacy.data.clip.midi, inputChannel: 1 } } },
+  })).toThrow()
+})
+
+test('parses and hashes a 501-note canonical V1 recovery without applying V2 write limits', async () => {
+  const legacy = recoveryPayloadSchemaV1.parse({
+    version: 1,
+    kind: 'clip.delete',
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: {
+        projectId: 'project-1',
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 501,
+        midi: { wave: 'sine', notes: midiNotes(501) },
+      },
+    },
+  })
+  const bytes = canonicalRecoveryPayloadV1(legacy)
+  expect(await hashRecoveryPayloadV1(bytes)).toBe(hashRecoveryPayloadSyncV1(bytes))
+  const restored = parseRecoveryPayload(bytes)
+  if (restored.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
+  expect(restored.data.clip.midi?.notes).toHaveLength(501)
+})
+
+test('preserves expanded MIDI for legacy actions and replaces it when supplied', () => {
+  const current = {
+    wave: 'sine',
+    gain: 0.5,
+    inputChannel: 2,
+    notes: [{ id: 'old-note', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [{ id: 'mapping-1', source: { kind: 'cc' as const, controller: 1, channel: 2 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
+  }
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    gain: 0.5,
+    notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
+  }, current)).toMatchObject(current)
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    notes: [],
+    cc: [],
+  }, current)).toEqual({
+    wave: 'sine',
+    notes: [],
+    cc: [],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [],
+  })
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    notes: [{ id: 'replacement-note', beat: 0, length: 1, pitch: 61 }],
+  }, current)).toMatchObject({
+    wave: 'sine',
+    inputChannel: current.inputChannel,
+    cc: current.cc,
+    pitchBends: current.pitchBends,
+    channelPressure: current.channelPressure,
+    polyPressure: current.polyPressure,
+    mappings: current.mappings,
+    notes: [{ id: 'replacement-note', beat: 0, length: 1, pitch: 61, channel: 1 }],
+  })
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    notes: [{ beat: 0, length: 1, pitch: 61, channel: 3 }],
+  }, current).notes).toMatchObject([{ beat: 0, length: 1, pitch: 61, channel: 3 }])
+})
+
+test('reconciles identical idless notes one-to-one and preserves omitted channels', () => {
+  const current = {
+    wave: 'sine',
+    notes: [
+      { id: 'first', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 },
+      { id: 'second', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 3 },
+    ],
+  }
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    notes: [
+      { beat: 0, length: 1, pitch: 60, velocity: 0.5 },
+      { beat: 0, length: 1, pitch: 60, velocity: 0.5 },
+    ],
+  }, current).notes).toMatchObject(current.notes)
+  expect(resolveControlMidiActionV1({
+    wave: 'sine',
+    notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 4 }],
+  }, current).notes).toMatchObject([{
+    beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 4,
+  }])
+})
+
+test('edits one legacy MIDI note without rewriting unrelated historical state', () => {
+  const notes = Array.from({ length: 501 }, (_, index) => ({
+    id: `note-${index}`,
+    beat: index,
+    length: 1,
+    pitch: 60,
+    velocity: 0.5,
+    channel: 1,
+  }))
+  notes[0] = { id: 'invalid-note', beat: -2, length: -1, pitch: 200, velocity: 2, channel: 1 }
+  const current = {
+    wave: 'custom-legacy',
+    gain: 7,
+    notes,
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 1 }],
+    mappings: [{ id: 'mapping-1', source: { kind: 'cc' as const, controller: 1, channel: 1 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
+  }
+  const action = {
+    kind: 'clip.midi.set' as const,
+    clip: persisted('clip-1'),
+    wave: 'custom-legacy',
+    gain: 7,
+    notes: notes.map((note) => note.id === 'invalid-note'
+      ? { ...note, beat: 0, length: 1, pitch: 60, velocity: 0.5 }
+      : note),
+  }
+  const parsedAction = controlActionSchemaV1.parse(action)
+  if (parsedAction.kind !== 'clip.midi.set') throw new Error('Expected MIDI set action.')
+  expect(parsedAction.notes).toHaveLength(501)
+  const resolved = resolveControlMidiActionV1(action, current)
+  expect(resolved).toMatchObject({
+    wave: 'custom-legacy',
+    gain: 7,
+    cc: current.cc,
+    mappings: current.mappings,
+  })
+  expect(resolved.notes).toHaveLength(501)
+  expect(resolved.notes.find((note) => note.id === 'invalid-note')).toMatchObject({
+    id: 'invalid-note', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 1,
+  })
+  expect(() => resolveControlMidiActionV1({
+    ...action,
+    notes: [...action.notes, { id: 'new-invalid', beat: 0, length: -1, pitch: 200, velocity: 2 }],
+  }, current)).toThrow()
+  expect(() => resolveControlMidiActionV1({
+    ...action,
+    notes: action.notes.map((note) => note.id === 'invalid-note' ? { ...note, length: -2 } : note),
+  }, current)).toThrow()
+  expect(() => resolveControlMidiActionV1({ ...action, wave: 'unsupported-new-wave' }, current)).toThrow()
+  expect(() => resolveControlMidiActionV1({ ...action, gain: 8 }, current)).toThrow()
+  expect(() => resolveControlMidiActionV1({
+    ...action,
+    notes: [...action.notes, { id: 'new-valid', beat: 600, length: 1, pitch: 60, velocity: 0.5 }],
+  }, current)).toThrow()
+})
+
+test('round-trips canonical V2 recovery MIDI without changing fields', () => {
+  const payload = recoveryPayloadSchemaV2.parse({
+    version: 2,
+    kind: 'clip.delete',
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: {
+        projectId: 'project-1',
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        midi: {
+          wave: 'sine',
+          inputChannel: 2,
+          notes: [{ id: 'note-1', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+          cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+          pitchBends: [],
+          channelPressure: [],
+          polyPressure: [],
+          mappings: [{ id: 'mapping-1', source: { kind: 'cc', controller: 1, channel: 2 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
+        },
+      },
+    },
+  })
+  const bytes = canonicalRecoveryPayloadV2(payload)
+  expect(parseRecoveryPayload(bytes)).toEqual(payload)
+  expect(() => parseRecoveryPayload(bytes.replace('"version":2', '"version":1'))).toThrow()
+})
+
+test('rejects expanded V2 recovery MIDI limits and duplicate supplied IDs', () => {
+  const recovery = (
+    midi: NonNullable<Extract<RecoveryPayloadV2, { kind: 'clip.delete' }>['data']['clip']['midi']>,
+  ) => ({
+    version: 2 as const,
+    kind: 'clip.delete' as const,
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: { projectId: 'project-1', trackId: 'track-1', startSec: 0, duration: 1, midi },
+    },
+  }) satisfies Extract<RecoveryPayloadV2, { kind: 'clip.delete' }>
+  expect(() => canonicalRecoveryPayloadV2(recovery({
+    wave: 'sine',
+    notes: midiNotes(501).map((note, index) => ({ ...note, id: `note-${index}`, channel: 1 })),
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0, channel: 1 }],
+  }))).toThrow('performance events')
+  expect(() => canonicalRecoveryPayloadV2(recovery({
+    wave: 'sine',
+    notes: [
+      { id: 'duplicate', beat: 0, length: 1, pitch: 60, channel: 1 },
+      { id: 'duplicate', beat: 1, length: 1, pitch: 61, channel: 1 },
+    ],
+  }))).toThrow('IDs must be unique')
+})
+
+test('captures oversized durable V2 MIDI without relaxing new recovery payload limits', () => {
+  const oversizedMidi = {
+    wave: 'custom-legacy',
+    gain: 7,
+    notes: midiNotes(500).map((note, index) => ({ ...note, id: `note-${index}`, channel: 1 })),
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0, channel: 1 }],
+  }
+  const clipPayload = {
+    version: 2 as const,
+    kind: 'clip.delete' as const,
+    data: {
+      clipId: 'clip-1',
+      ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      clip: { projectId: 'project-1', trackId: 'track-1', startSec: 0, duration: 1, midi: oversizedMidi },
+    },
+  }
+  expect(() => recoveryPayloadSchemaV2.parse(clipPayload)).toThrow()
+  const bytes = canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(clipPayload))
+  const parsed = parseCapturedRecoveryPayload(bytes)
+  if (parsed.kind !== 'clip.delete') throw new Error('Expected clip recovery payload.')
+  expect(parsed.data.clip.midi?.notes).toHaveLength(500)
+  expect(parsed.data.clip.midi?.cc).toHaveLength(1)
+  expect(parsed.data.clip.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
+  expect(hashRecoveryPayloadSyncV1(bytes)).toHaveLength(64)
+  expect(bytes).toBe(canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(JSON.parse(bytes))))
+})
+
+test('projects historical finite MIDI values through the narrow V1 snapshot schema', () => {
+  const legacyMidi = {
+    wave: 'custom-legacy',
+    gain: 7,
+    notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
+  }
+  const parsed = projectSnapshotSchemaV1.parse({
+    ...snapshot,
+    clips: [{
+      id: 'clip-1',
+      trackId: 'track-1',
+      name: 'Legacy MIDI',
+      startSec: 0,
+      duration: 1,
+      leftPadSec: 0,
+      bufferOffsetSec: 0,
+      midiOffsetBeats: 0,
+      midi: legacyMidi,
+    }],
+  })
+  expect(parsed.clips[0]?.midi).toEqual(legacyMidi)
+  expect(() => parseControlCommitRequestV1(commit([{
+    kind: 'clip.midi.create',
+    track: persisted('track-1'),
+    startSec: 0,
+    duration: 1,
+    wave: 'sine',
+    notes: legacyMidi.notes,
+  }]))).toThrow()
+})
+
 test('enforces MIDI and automation aggregates at exact boundaries for preview and commit', () => {
   const boundaryActions = [
     {
@@ -543,6 +882,51 @@ test('enforces MIDI and automation aggregates at exact boundaries for preview an
   expect(() => parseControlPreviewRequestV1(preview(midiOver))).toThrow()
   expect(() => parseControlCommitRequestV1(commit(automationOver))).toThrow()
   expect(() => parseControlPreviewRequestV1(preview(automationOver))).toThrow()
+})
+
+test('reports expanded MIDI aggregate overflow through safeParse', () => {
+  const result = controlCommitRequestSchemaV1.safeParse(commit([{
+    kind: 'clip.midi.create',
+    track: persisted('track-1'),
+    startSec: 0,
+    duration: 1,
+    wave: 'sine',
+    notes: midiNotes(500),
+    cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0, channel: 1 }],
+  }]))
+  expect(result.success).toBe(false)
+})
+
+test('aggregates strict MIDI set payloads while preserving oversized legacy set envelopes', () => {
+  const set = (notes: number, mappings = 0) => ({
+    kind: 'clip.midi.set' as const,
+    clip: persisted('clip-1'),
+    wave: 'sine',
+    notes: midiNotes(notes),
+    ...(mappings === 0 ? {} : {
+      mappings: Array.from({ length: mappings }, (_, index) => ({
+        id: `mapping-${index}`,
+        source: { kind: 'cc' as const, controller: index, channel: 1 },
+        target: { parameterId: 'gain' },
+        outputMin: 0,
+        outputMax: 1,
+      })),
+    }),
+  })
+  expect(() => parseControlPreviewRequestV1(preview([set(250), set(251)]))).toThrow('MIDI performance events')
+  expect(() => parseControlCommitRequestV1(commit([
+    {
+      kind: 'clip.midi.create',
+      track: persisted('track-1'),
+      startSec: 0,
+      duration: 1,
+      wave: 'sine',
+      notes: midiNotes(250),
+    },
+    set(251),
+  ]))).toThrow('MIDI performance events')
+  expect(() => parseControlPreviewRequestV1(preview([set(1, 40), set(1, 40)]))).not.toThrow()
+  expect(() => parseControlPreviewRequestV1(preview([set(501)]))).not.toThrow()
 })
 
 test('enforces action count for preview and commit', () => {
@@ -607,12 +991,15 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
   expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
-  expect(controlCapabilitiesV1.actionKinds).toHaveLength(38)
+  expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiPerformanceEventsPerClip')
+  expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiEventsPerArray')
+  expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiMappingsPerClip')
+  expect(controlCapabilitiesV1.actionKinds).toHaveLength(39)
   expect(controlCapabilitiesV1.actionKinds).toEqual([
     'project.rename', 'project.settings.set', 'track.create', 'track.rename',
     'track.mix.set', 'track.routing.set', 'track.reorder', 'track.group.set',
     'track.delete', 'clip.midi.create', 'clip.move', 'clip.timing.set',
-    'clip.rename', 'clip.delete', 'master.volume.set', 'effect.upsert',
+    'clip.rename', 'clip.delete', 'master.volume.set', 'timeline.range.delete', 'effect.upsert',
     'effect.remove', 'effect.reorder', 'instrument.set', 'arpeggiator.set',
     'automation.set', 'automation.delete', 'sidechain.set', 'sidechain.remove',
     'clip.audio.create', 'clip.source.set', 'clip.midi.set', 'clip.fades.set',
@@ -636,6 +1023,7 @@ test('defines the exhaustive destructive action policy', () => {
     'automation.delete',
     'sidechain.remove',
     'asset.delete',
+    'timeline.range.delete',
   ])
   expect(destructiveControlActionKindsV1.every((kind) => controlCapabilitiesV1.actionKinds.includes(kind))).toBe(true)
 })
@@ -659,6 +1047,7 @@ test('parses every Phase 5B action strictly', () => {
     { kind: 'instrument.remove', target },
     { kind: 'arpeggiator.remove', target },
     { kind: 'asset.delete', asset },
+    { kind: 'timeline.range.delete', tracks: [track], startSec: 0, endSec: 1 },
   ]
   for (const action of actions) expect(() => parseControlCommitRequestV1(commit([action]))).not.toThrow()
   expect(() => parseControlCommitRequestV1(commit([{
@@ -681,4 +1070,49 @@ test('accepts every canonical effect payload and rejects unknown nested fields',
       params: { ...action.params, unexpected: true },
     }]))).toThrow()
   }
+})
+
+test('keeps V1 capabilities strict and exposes additive MIDI limits in V2', () => {
+  expect(() => controlCapabilitiesSchemaV1.parse({
+    ...controlCapabilitiesV1,
+    limits: { ...controlCapabilitiesV1.limits, maxMidiEventsPerArray: 500 },
+  })).toThrow()
+  const parsed = controlCapabilitiesSchemaV2.parse(controlCapabilitiesV2)
+  expect(parsed.limits.maxMidiPerformanceEventsPerClip).toBe(controlLimitsV2.maxMidiPerformanceEventsPerClip)
+  expect(parsed.limits.maxMidiEventsPerArray).toBe(controlLimitsV2.maxMidiEventsPerArray)
+  expect(parsed.limits.maxMidiMappingsPerClip).toBe(controlLimitsV2.maxMidiMappingsPerClip)
+})
+
+test('rejects duplicate MIDI event and mapping IDs while permitting legacy mapping envelopes', () => {
+  const action = {
+    kind: 'clip.midi.set' as const,
+    clip: persisted('clip-1'),
+    wave: 'sine' as const,
+    notes: [{ id: 'duplicate', beat: 0, length: 1, pitch: 60 }],
+  }
+  expect(controlActionSchemaV1.safeParse({
+    ...action,
+    notes: [...action.notes, { id: 'duplicate', beat: 1, length: 1, pitch: 61 }],
+  }).success).toBe(false)
+  expect(controlActionSchemaV1.safeParse({
+    ...action,
+    cc: [{ id: 'duplicate', beat: 0, controller: 1, value: 0 }],
+  }).success).toBe(false)
+  expect(controlActionSchemaV1.safeParse({
+    ...action,
+    mappings: [
+      { id: 'mapping', source: { kind: 'cc', controller: 1 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 },
+      { id: 'mapping', source: { kind: 'cc', controller: 2 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 },
+    ],
+  }).success).toBe(false)
+  expect(controlActionSchemaV1.safeParse({
+    ...action,
+    mappings: Array.from({ length: 65 }, (_, index) => ({
+      id: `mapping-${index}`,
+      source: { kind: 'cc' as const, controller: index },
+      target: { parameterId: 'gain' },
+      outputMin: 0,
+      outputMax: 1,
+    })),
+  }).success).toBe(true)
 })

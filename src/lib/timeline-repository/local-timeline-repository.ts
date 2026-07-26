@@ -1,11 +1,12 @@
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp, normalizeTrackRouting } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
 import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,
+  RestoreHistoryClipInput,
   CreateTrackInput,
   UpdateTrackInput,
   UpdateClipInput,
@@ -24,6 +25,7 @@ import type {
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
+import { externalPluginEntityKind } from '@daw-browser/external-plugins'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -33,6 +35,7 @@ const SIDECHAIN_KIND = 'sidechain-route'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
 const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
+const projectMutationTails = new Map<string, Promise<void>>()
 let lifecycleFlushAttached = false
 
 const now = () => Date.now()
@@ -118,7 +121,19 @@ const requireUngroupable = (
 const toEntityRow = createLocalProjectEntityRow
 
 const trackValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
-const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isClipRow(row.value) ? [row.value] : [])
+const normalizeClipRow = (value: unknown): TimelineClipRow | null => {
+  if (!isClipRow(value)) return null
+  try {
+    return { ...value, midi: value.midi === undefined ? undefined : normalizeLegacyMidiClip(value.midi) }
+  } catch {
+    return null
+  }
+}
+
+const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => {
+  const clip = normalizeClipRow(row.value)
+  return clip ? [clip] : []
+})
 
 const sendsEqual = (
   left: TimelineTrackRow['sends'],
@@ -162,7 +177,7 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.gain === right.gain
   && clipFadesEqual(left.fades, right.fades, left.duration)
   && left.color === right.color
-  && left.midi === right.midi
+  && midiClipEquals(left.midi, right.midi)
   && left.midiOffsetBeats === right.midiOffsetBeats
 )
 
@@ -376,8 +391,15 @@ const flushScheduledLocalTimelineWrites = async (projectId?: string) => {
   await flushEntityWriteQueues(projectId)
 }
 
-const trackRepositoryWrite = <T>(projectId: string, write: Promise<T>): Promise<T> => {
-  const tracked = write.finally(() => {
+const trackRepositoryWrite = <T>(projectId: string, write: () => Promise<T>): Promise<T> => {
+  const previous = projectMutationTails.get(projectId) ?? Promise.resolve()
+  const operation = previous.catch(() => undefined).then(write)
+  const tail = operation.then(() => undefined, () => undefined)
+  projectMutationTails.set(projectId, tail)
+  void tail.finally(() => {
+    if (projectMutationTails.get(projectId) === tail) projectMutationTails.delete(projectId)
+  })
+  const tracked = operation.finally(() => {
     const writes = pendingRepositoryWritesByProject.get(projectId)
     writes?.delete(tracked)
     if (writes?.size === 0) pendingRepositoryWritesByProject.delete(projectId)
@@ -452,7 +474,10 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     return track
   }
 
-  const createClip = async (input: CreateClipInput): Promise<TimelineClipRow> => {
+  const createClipRow = async (
+    input: CreateClipInput,
+    normalizeMidi: (midi: NonNullable<CreateClipInput['midi']>) => NonNullable<CreateClipInput['midi']>,
+  ): Promise<TimelineClipRow> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const trackRow = await db.get('entities', [TRACK_KIND, input.trackId])
@@ -481,7 +506,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       gain: input.gain,
       fades: input.fades ? normalizeClipFades(input.fades, input.duration) : undefined,
       sampleUrl: input.sampleUrl,
-      midi: input.midi,
+      midi: input.midi === undefined ? undefined : normalizeMidi(input.midi),
       midiOffsetBeats: input.midiOffsetBeats,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -490,6 +515,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     markChanged()
     return clip
   }
+
+  const createClip = async (input: CreateClipInput) => (
+    await createClipRow(input, normalizeMidiClip)
+  )
+
+  const restoreHistoryClip = async (input: RestoreHistoryClipInput) => (
+    await createClipRow(input, normalizeLegacyMidiClip)
+  )
 
   const updateTrack = async (input: UpdateTrackInput): Promise<TimelineTrackRow | null> => {
     const [row, trackRows] = await Promise.all([
@@ -536,10 +569,11 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
+    const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
       tx.store.index('by-kind').getAll(TRACK_KIND),
       tx.store.index('by-kind').getAll(CLIP_KIND),
       tx.store.index('by-kind').getAll(EFFECT_KIND),
+      tx.store.index('by-kind').getAll(externalPluginEntityKind),
       tx.store.index('by-kind').getAll(AUTOMATION_KIND),
       tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
     ])
@@ -553,6 +587,9 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...effectRows
+        .filter((row) => isEffectForTrack(row.value, trackId))
+        .map((row) => tx.store.delete([row.kind, row.id])),
+      ...externalPluginRows
         .filter((row) => isEffectForTrack(row.value, trackId))
         .map((row) => tx.store.delete([row.kind, row.id])),
       ...automationRows
@@ -614,13 +651,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
     const updates = rows.flatMap((row, index) => {
-      if (!row || !isClipRow(row.value)) {
+      const current = row ? normalizeClipRow(row.value) : null
+      if (!current) {
         throw new Error('Failed to move local clip because a clip was not found.')
       }
       const move = moves[index]
-      if (row.value.trackId === move.trackId && row.value.startSec === move.startSec) return []
+      if (current.trackId === move.trackId && current.startSec === move.startSec) return []
       return [{
-        ...row.value,
+        ...current,
         trackId: move.trackId,
         startSec: move.startSec,
         updatedAt: timestamp,
@@ -640,39 +678,40 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
           .then(trackValues)
         : Promise.resolve([]),
     ])
-    if (!row || !isClipRow(row.value)) return null
+    const current = row ? normalizeClipRow(row.value) : null
+    if (!current) return null
     if (input.trackId) requireTrackIds([input.trackId], tracks)
     const timestamp = now()
     const clip: TimelineClipRow = {
-      ...row.value,
-      name: input.name ?? row.value.name,
-      trackId: input.trackId ?? row.value.trackId,
-      startSec: input.startSec ?? row.value.startSec,
-      duration: input.duration ?? row.value.duration,
-      sourceAssetId: input.sourceAssetId ?? row.value.sourceAssetId,
-      sourceAssetKey: input.sourceAssetKey ?? row.value.sourceAssetKey,
-      sourceKind: input.sourceKind ?? row.value.sourceKind,
-      sourceDurationSec: input.sourceDurationSec ?? row.value.sourceDurationSec,
-      sourceSampleRate: input.sourceSampleRate ?? row.value.sourceSampleRate,
-      sourceChannelCount: input.sourceChannelCount ?? row.value.sourceChannelCount,
-      sampleUrl: patchOptionalString(row.value.sampleUrl, input.sampleUrl),
-      leftPadSec: input.leftPadSec ?? row.value.leftPadSec,
-      bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
-      audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
-      gain: input.gain ?? row.value.gain,
+      ...current,
+      name: input.name ?? current.name,
+      trackId: input.trackId ?? current.trackId,
+      startSec: input.startSec ?? current.startSec,
+      duration: input.duration ?? current.duration,
+      sourceAssetId: input.sourceAssetId ?? current.sourceAssetId,
+      sourceAssetKey: input.sourceAssetKey ?? current.sourceAssetKey,
+      sourceKind: input.sourceKind ?? current.sourceKind,
+      sourceDurationSec: input.sourceDurationSec ?? current.sourceDurationSec,
+      sourceSampleRate: input.sourceSampleRate ?? current.sourceSampleRate,
+      sourceChannelCount: input.sourceChannelCount ?? current.sourceChannelCount,
+      sampleUrl: patchOptionalString(current.sampleUrl, input.sampleUrl),
+      leftPadSec: input.leftPadSec ?? current.leftPadSec,
+      bufferOffsetSec: input.bufferOffsetSec ?? current.bufferOffsetSec,
+      audioWarp: input.audioWarp === undefined ? current.audioWarp : normalizeAudioWarp(input.audioWarp),
+      gain: input.gain ?? current.gain,
       fades: input.fades
-        ? normalizeClipFades(input.fades, input.duration ?? row.value.duration)
+        ? normalizeClipFades(input.fades, input.duration ?? current.duration)
         : input.duration === undefined
-          ? row.value.fades
-          : row.value.fades
-            ? transformClipFadesForDuration(row.value.fades, row.value.duration, input.duration)
+          ? current.fades
+          : current.fades
+            ? transformClipFadesForDuration(current.fades, current.duration, input.duration)
             : undefined,
-      color: input.color ?? row.value.color,
-      midi: input.midi ?? row.value.midi,
-      midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,
+      color: input.color ?? current.color,
+      midi: input.midi === undefined ? current.midi : normalizeMidiClip(input.midi),
+      midiOffsetBeats: input.midiOffsetBeats ?? current.midiOffsetBeats,
       updatedAt: timestamp,
     }
-    if (clipPersistenceFieldsEqual(row.value, clip)) return row.value
+    if (clipPersistenceFieldsEqual(current, clip)) return current
     markChanged()
     entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
     await entityQueue.flush()
@@ -946,19 +985,20 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
   return {
     loadSnapshot,
-    createTrack: (input) => trackRepositoryWrite(projectId, createTrack(input)),
-    updateTrack: (input) => trackRepositoryWrite(projectId, updateTrack(input)),
-    createClip: (input) => trackRepositoryWrite(projectId, createClip(input)),
-    updateClip: (input) => trackRepositoryWrite(projectId, updateClip(input)),
-    moveClips: (moves) => trackRepositoryWrite(projectId, moveClips(moves)),
-    reorderAndGroup: (updates) => trackRepositoryWrite(projectId, reorderAndGroup(updates)),
-    ungroupTrack: (groupId) => trackRepositoryWrite(projectId, ungroupTrack(groupId)),
-    restoreUngroup: (input) => trackRepositoryWrite(projectId, restoreUngroup(input)),
-    applyColorBatch: (updates) => trackRepositoryWrite(projectId, applyColorBatch(updates)),
-    deleteTrack: (trackId) => trackRepositoryWrite(projectId, deleteTrack(trackId)),
-    deleteClip: (clipId) => trackRepositoryWrite(projectId, deleteClip(clipId)),
-    deleteClips: (clipIds) => trackRepositoryWrite(projectId, deleteClips(clipIds)),
-    setSidechainRoute: (route) => trackRepositoryWrite(projectId, setSidechainRoute(route)),
-    removeSidechainRoute: (targetTrackId, effectInstanceId) => trackRepositoryWrite(projectId, removeSidechainRoute(targetTrackId, effectInstanceId)),
+    createTrack: (input) => trackRepositoryWrite(projectId, () => createTrack(input)),
+    updateTrack: (input) => trackRepositoryWrite(projectId, () => updateTrack(input)),
+    createClip: (input) => trackRepositoryWrite(projectId, () => createClip(input)),
+    restoreHistoryClip: (input) => trackRepositoryWrite(projectId, () => restoreHistoryClip(input)),
+    updateClip: (input) => trackRepositoryWrite(projectId, () => updateClip(input)),
+    moveClips: (moves) => trackRepositoryWrite(projectId, () => moveClips(moves)),
+    reorderAndGroup: (updates) => trackRepositoryWrite(projectId, () => reorderAndGroup(updates)),
+    ungroupTrack: (groupId) => trackRepositoryWrite(projectId, () => ungroupTrack(groupId)),
+    restoreUngroup: (input) => trackRepositoryWrite(projectId, () => restoreUngroup(input)),
+    applyColorBatch: (updates) => trackRepositoryWrite(projectId, () => applyColorBatch(updates)),
+    deleteTrack: (trackId) => trackRepositoryWrite(projectId, () => deleteTrack(trackId)),
+    deleteClip: (clipId) => trackRepositoryWrite(projectId, () => deleteClip(clipId)),
+    deleteClips: (clipIds) => trackRepositoryWrite(projectId, () => deleteClips(clipIds)),
+    setSidechainRoute: (route) => trackRepositoryWrite(projectId, () => setSidechainRoute(route)),
+    removeSidechainRoute: (targetTrackId, effectInstanceId) => trackRepositoryWrite(projectId, () => removeSidechainRoute(targetTrackId, effectInstanceId)),
   }
 }

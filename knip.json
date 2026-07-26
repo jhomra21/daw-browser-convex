@@ -51,6 +51,9 @@
       "exports",
       "types"
     ],
+    "src/lib/external-plugins.ts": [
+      "exports"
+    ],
     "src/lib/session.ts": [
       "exports"
     ],
@@ -75,6 +78,10 @@
     "api/control-oauth.ts": [
       "exports",
       "types"
+    ],
+    "apps/desktop/plugin-catalog.ts": [
+      "files",
+      "exports"
     ],
     "src/components/ui/**/*.tsx": [
       "exports",

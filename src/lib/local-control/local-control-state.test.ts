@@ -8,6 +8,8 @@ import {
   openLocalProjectDb,
 } from '~/lib/local-project-db'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
+import { createMidiEditorPersistence } from '~/lib/midi/editor-persistence'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { withLocalControlTransaction } from './local-control-state'
 
 const openNativeDb = (name: string) => new Promise<IDBDatabase>((resolve, reject) => {
@@ -88,7 +90,7 @@ test('fails closed when an existing control state row is malformed', async () =>
   }
 
   for (const value of [
-    { ...valid.value, version: 2 },
+    { ...valid.value, version: 3 },
     { ...valid.value, revision: -1 },
     { ...valid.value, digest: 'not-a-digest' },
     { ...valid.value, updatedAt: -1 },
@@ -98,4 +100,24 @@ test('fails closed when an existing control state row is malformed', async () =>
       .rejects.toMatchObject({ kind: 'corruption' })
     expect(await db.get('controlState', 'snapshot')).toEqual({ ...valid, value })
   }
+})
+
+test('flushes pending MIDI before queuing a generic control transaction', async () => {
+  const project = await createLocalProject(`Control MIDI ordering ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const track = await repository.createTrack({ id: 'midi-track', kind: 'instrument' })
+  await repository.createClip({
+    id: 'midi-clip',
+    trackId: track.id,
+    startSec: 0,
+    duration: 1,
+    midi: { wave: 'sine', notes: [{ id: 'note', beat: 0, length: 1, pitch: 60 }] },
+  })
+  const persistence = createMidiEditorPersistence({ projectId: project.id, clipId: 'midi-clip' })
+  persistence.enqueue({ kind: 'update', id: 'note', changes: { pitch: 64 } })
+
+  const snapshot = await withLocalControlTransaction(project.id, 'readonly', (context) => context.snapshot)
+  persistence.dispose()
+
+  expect(snapshot.clips[0]?.midi?.notes[0]?.pitch).toBe(64)
 })

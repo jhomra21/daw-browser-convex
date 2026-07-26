@@ -8,24 +8,23 @@ import { collectTrackDescendantIds, isLocalId, type AutomationEnvelope } from '@
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import { isClipCompatibleWithTrack } from '@daw-browser/timeline-core/track-routing'
-import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { loadTrackEffectSnapshot } from '~/lib/track-state-snapshot'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
+import { createProjectControlClient, isProjectControlError, isProjectControlRevisionConflict } from '~/lib/project-control-client'
+import type { ControlActionV1, ControlCommitRequestV1 } from '@daw-browser/control'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createTimelineClipWriteAdapter } from '~/lib/timeline-clip-write-adapter'
 import { createTimelineAutomationWriteAdapter } from '~/lib/timeline-automation-write-adapter'
 import { createTimelineSectionClipboard, type TimelineSectionClipboard } from '~/lib/timeline-section-clipboard'
+import { flushMidiProjectWrites } from '~/lib/midi/editor-persistence'
 import {
   buildAutomationFragment,
-  buildClipRangeDeletePatch,
   buildSectionClipFragments,
-  deleteAutomationRange,
-  intersectingSectionClipIds,
   pasteAutomationFragment,
   type SectionAutomationFragment,
 } from '~/lib/timeline-section-edit'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
-import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildClipTimingHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
+import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildControlRangeDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-browser/timeline-core/types'
@@ -47,6 +46,7 @@ type TimelineClipActionsOptions = {
   commitClipAudioWarp: (clipId: string, audioWarp: Clip['audioWarp']) => void
   removeLocalTrack: (trackId: Track['id']) => void
   canWriteClip: (clipId: string) => boolean
+  canEditClip?: (clipId: string) => boolean
   selection: TimelineSelectionController
   setPendingDeleteTrackId: Setter<Track['id'] | null>
   setConfirmOpen: Setter<boolean>
@@ -64,6 +64,7 @@ type TimelineClipActionsOptions = {
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
+  settleActiveRecording?: (trackIds: ReadonlySet<Track['id']>) => Promise<void>
   notify: (title: string, message: string) => void
 }
 
@@ -88,10 +89,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     tracks,
     insertLocalClip,
     removeLocalClips,
-    commitClipTiming,
-    commitClipAudioWarp,
     removeLocalTrack,
     canWriteClip,
+    canEditClip,
     selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
@@ -109,6 +109,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     sidechainRoutes,
     applyAutomationEnvelope,
     grantClipWrites,
+    settleActiveRecording,
     notify,
   } = options
   const sectionClipboard = createTimelineSectionClipboard()
@@ -124,7 +125,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   }
 
   const getWritableSelectedClipIds = (selectedIds: Set<string>) => new Set(
-    Array.from(selectedIds).filter((clipId) => canWriteClip(clipId)),
+    Array.from(selectedIds).filter((clipId) => canWriteClip(clipId) && (!canEditClip || canEditClip(clipId))),
   )
 
   const selectedClipIds = selection.selectedClipIds
@@ -152,6 +153,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const rid = projectId()
     const uid = userId()
     if (!rid || (!isLocalId('project', rid) && !uid)) return
+    await flushMidiProjectWrites(rid)
     const snapshot = tracks()
     const reconcileSelectionAfterDelete = (removedIds: Set<string>) => {
       const remainingSelectedIds = new Set(Array.from(selectedIds).filter((clipId) => !removedIds.has(clipId)))
@@ -174,11 +176,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       })
     }
 
-    const removedIds = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
+    const deletion = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
+    const removedIds = deletion.removedIds
     if (removedIds.size === 0) return
 
     try {
-      const entry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: snapshot, clipIds: removedIds })
+      const entry = buildClipDeleteHistoryEntry({
+        projectId: rid, tracks: snapshot, clipIds: removedIds,
+        recoveryIdsByClipId: deletion.recoveryIdsByClipId,
+        recoveryOperationId: deletion.recoveryOperationId,
+      })
       if (entry.data.items.length > 0) historyPush(entry)
     } catch {}
 
@@ -430,126 +437,78 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     const rid = projectId()
     const uid = userId()
     if (!rid || (!isLocalId('project', rid) && !uid)) return
-    const tsSnapshot = tracks()
-    const trackIndex = createTimelineTrackIndex(tsSnapshot)
-    const intersectingClipIds = intersectingSectionClipIds({
-      tracks: tsSnapshot,
-      section: { range, trackIds: range.trackIds },
-    })
-    const blockedClipId = intersectingClipIds.find((clipId) => !canWriteClip(clipId))
-    if (blockedClipId) {
-      notify('Section delete blocked', 'You do not have permission to edit every clip in this selected range.')
-      return
+    await flushMidiProjectWrites(rid)
+    const control = createProjectControlClient({ projectId: rid, userId: uid, convexClient, convexApi })
+    const snapshotTracks = tracks()
+    const runDelete = async () => {
+      const snapshot = await control.snapshotV2()
+      const action: Extract<ControlActionV1, { kind: 'timeline.range.delete' }> = {
+        kind: 'timeline.range.delete',
+        tracks: range.trackIds.map((id) => ({ source: 'persisted', id })),
+        startSec: range.startSec,
+        endSec: range.endSec,
+      }
+      const preview = await control.previewV1({
+        version: 'v1',
+        projectId: rid,
+        expectedRevision: snapshot.project.revision,
+        actions: [action],
+      })
+      if (!preview.applied) return
+      const approval = await control.requestApprovalV1({
+        version: 'v1',
+        projectId: rid,
+        expectedRevision: snapshot.project.revision,
+        actions: [action],
+      })
+      const commitRequest: ControlCommitRequestV1 = {
+        version: 'v1',
+        projectId: rid,
+        expectedRevision: snapshot.project.revision,
+        idempotencyKey: crypto.randomUUID(),
+        approvalToken: approval.approvalToken,
+        actions: [action],
+      }
+      let commit
+      try {
+        commit = await control.commitV1(commitRequest)
+      } catch (error) {
+        if (isProjectControlError(error)) throw error
+        commit = await control.commitV1(commitRequest)
+      }
+      const recovery = commit.recoveries.find((entry) => entry.actionIndex === 0 && entry.kind === 'timeline.range.delete')
+      if (!recovery) throw new Error('Range deletion did not return a recovery descriptor.')
+      historyPush(buildControlRangeDeleteHistoryEntry({
+        projectId: rid,
+        tracks: snapshotTracks,
+        trackIds: range.trackIds,
+        startSec: range.startSec,
+        endSec: range.endSec,
+        recoveryId: recovery.id,
+      }))
     }
-    const patch = buildClipRangeDeletePatch({
-      tracks: tsSnapshot,
-      section: { range, trackIds: range.trackIds },
-      bpm: bpm(),
-    })
-    const clipWriter = createTimelineClipWriteAdapter({ projectId: rid, userId: uid })
-    const removedIds = await clipWriter.deleteClips(patch.deleteClipIds)
-    if (removedIds.size !== patch.deleteClipIds.length) return
-    const appliedUpdates: typeof patch.updateClips = []
-    for (const update of patch.updateClips) {
-      if (await clipWriter.updateClipTiming({ clipId: update.clipId, ...update.timing })) {
-        appliedUpdates.push(update)
-      } else {
+    try {
+      await runDelete()
+    } catch (error) {
+      if (!isProjectControlRevisionConflict(error)) {
+        notify('Section delete failed', error instanceof Error ? error.message : 'This selected range could not be deleted.')
         return
       }
-    }
-    let created: Array<{ trackId: Track['id']; clipId: string; clip: BatchClipCreateItem['clip'] }> = []
-    if (patch.createClips.length > 0) {
-      if (isLocalId('project', rid)) {
-        created = await createProjectedLocalClips({
-          projectId: rid,
-          items: patch.createClips,
-          insertLocalClip,
-          removeLocalClips,
-          audioBufferCache: audioBufferCache.writer,
-          canProject: () => projectId() === rid,
-        })
-      } else if (uid) {
-        created = await createProjectedClips({
-          projectId: rid,
-          items: patch.createClips,
-          createMany: async (items, operationId) => {
-            const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
-            return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
-          },
-          insertLocalClip,
-          audioBufferCache: audioBufferCache.writer,
-          grantClipWrites,
-          grantScope: { projectId: rid, userId: uid },
-        })
-      }
-      if (created.length !== patch.createClips.length) return
-    }
-    const historyEntries: HistoryEntry[] = []
-    if (removedIds.size > 0) removeLocalClips(removedIds)
-    const deleteEntry = buildClipDeleteHistoryEntry({ projectId: rid, tracks: tsSnapshot, clipIds: removedIds })
-    if (deleteEntry.data.items.length > 0) historyEntries.push(deleteEntry)
-    for (const update of appliedUpdates) {
-      commitClipTiming(update.clipId, update.timing)
-      if (update.timing.audioWarp) commitClipAudioWarp(update.clipId, update.timing.audioWarp)
-      const match = trackIndex.clipById.get(update.clipId)
-      if (match) {
-        historyEntries.push(
-          buildClipTimingHistoryEntry({
-            projectId: rid,
-            clip: match,
-            from: {
-              startSec: match.startSec,
-              duration: match.duration,
-              leftPadSec: match.leftPadSec,
-              bufferOffsetSec: match.bufferOffsetSec,
-              midiOffsetBeats: match.midiOffsetBeats,
-              audioWarp: match.audioWarp,
-              fades: match.fades,
-            },
-            to: update.timing,
-          }),
-        )
+      try {
+        await runDelete()
+      } catch (retryError) {
+        notify('Section delete failed', retryError instanceof Error ? retryError.message : 'This selected range could not be deleted.')
       }
     }
-    if (created.length > 0) {
-      for (const item of created) {
-        historyEntries.push({
-          type: 'clip-create',
-          projectId: rid,
-          data: {
-            trackRef: getTrackHistoryRef(trackIndex.trackById.get(item.trackId)),
-            clip: {
-              clipRef: String(item.clip.historyRef ?? item.clipId),
-              currentId: item.clipId,
-              ...item.clip,
-            },
-          },
-        })
-      }
-    }
-    const automationWriter = createTimelineAutomationWriteAdapter({ projectId: rid, userId: uid })
-    const selectedTrackIds = new Set(range.trackIds)
-    const updatedAt = Date.now()
-    for (const envelope of automationEnvelopes()) {
-      if (envelope.target.kind !== 'track' || !selectedTrackIds.has(envelope.target.trackId)) continue
-      const next = deleteAutomationRange({ envelope, range, updatedAt })
-      if (!next) continue
-      if (await automationWriter.setEnvelope(next)) {
-        historyEntries.push(buildAutomationEnvelopeHistoryEntry({ projectId: rid, before: envelope, after: next }))
-        applyAutomationEnvelope(next, next.targetKey)
-      }
-    }
-    const historyEntry = buildSectionHistoryEntry(rid, historyEntries)
-    if (historyEntry) historyPush(historyEntry)
-    selection.selectTimeRange(range)
   }
 
   const performDeleteTrack = async (trackId: Track['id']) => {
+    const rid = projectId()
+    if (!rid) return
+    await flushMidiProjectWrites(rid)
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
     if (!track) return
-    const rid = projectId()
-    if (!rid) return
     const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
     const trackAutomation = automationEnvelopes().filter((envelope) => (
       envelope.target.kind === 'track' && deletedTrackIds.has(envelope.target.trackId)
@@ -570,6 +529,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     if (rid && isLocalId('project', rid)) {
+      await settleActiveRecording?.(deletedTrackIds)
       const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
       try {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {

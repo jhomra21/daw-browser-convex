@@ -4,6 +4,12 @@ import {
   ControlApiError,
   ControlTransportError,
   createControlClient,
+  normalizeControlOrigin,
+  type ControlAccessToken,
+  type ControlAccessTokenResolver,
+  type ControlClient,
+  type ControlClientOptions,
+  type ControlFetch,
 } from "./index"
 
 const snapshot = {
@@ -52,7 +58,7 @@ describe("control SDK", () => {
     const bodies: string[] = []
     let calls = 0
     const client = createControlClient({
-      baseUrl: "https://control.example/base",
+      baseUrl: "https://control.example",
       accessToken: () => `access-${++calls}`,
       fetch: async (input, init) => {
         urls.push(String(input))
@@ -78,11 +84,11 @@ describe("control SDK", () => {
     await client.history({ projectId: "project-1", limit: 1 })
 
     expect(urls).toEqual([
-      "https://control.example/base/api/control/v1/capabilities",
-      "https://control.example/base/api/control/v1/projects/project-1/snapshot",
-      "https://control.example/base/api/control/v1/projects/project-1/preview",
-      "https://control.example/base/api/control/v1/projects/project-1/commit",
-      "https://control.example/base/api/control/v1/projects/project-1/history?limit=1",
+      "https://control.example/api/control/v1/capabilities",
+      "https://control.example/api/control/v1/projects/project-1/snapshot",
+      "https://control.example/api/control/v1/projects/project-1/preview",
+      "https://control.example/api/control/v1/projects/project-1/commit",
+      "https://control.example/api/control/v1/projects/project-1/history?limit=1",
     ])
     expect(authorizations).toEqual([
       "Bearer access-1",
@@ -97,12 +103,63 @@ describe("control SDK", () => {
     ])
   })
 
+  test("exports consumer types and normalizes each valid base origin once", async () => {
+    const resolver: ControlAccessTokenResolver = () => "fixture-access"
+    const accessToken: ControlAccessToken = resolver
+    const fetchTransport: ControlFetch = async (input) => {
+      expect(String(input)).toBe("https://control.example/api/control/v1/capabilities")
+      return Response.json(controlCapabilitiesV1)
+    }
+    let baseUrlReads = 0
+    const options: ControlClientOptions = {
+      get baseUrl() {
+        baseUrlReads += 1
+        return "https://control.example/"
+      },
+      accessToken,
+      fetch: fetchTransport,
+    }
+    const client: ControlClient = createControlClient(options)
+
+    await client.capabilities()
+
+    expect(baseUrlReads).toBe(1)
+    expect(normalizeControlOrigin("https://control.example/")).toBe("https://control.example")
+    expect(normalizeControlOrigin("https://control.example:8443")).toBe("https://control.example:8443")
+    expect(normalizeControlOrigin("http://localhost:3000")).toBe("http://localhost:3000")
+    expect(normalizeControlOrigin("http://127.0.0.1:3000")).toBe("http://127.0.0.1:3000")
+    expect(normalizeControlOrigin("http://[::1]:3000")).toBe("http://[::1]:3000")
+  })
+
+  test("rejects hostile base origins before requests can expose a bearer", () => {
+    let fetches = 0
+    for (const baseUrl of [
+      "http://control.example",
+      "http://[::2]",
+      "ftp://control.example",
+      "https://control.example/fixture",
+      "https://control.example/base",
+      "https://control.example/?query=value",
+      "https://control.example/#fragment",
+    ]) {
+      expect(() => createControlClient({
+        baseUrl,
+        accessToken: "fixture-access",
+        fetch: async () => {
+          fetches += 1
+          return Response.json(controlCapabilitiesV1)
+        },
+      })).toThrow("Control base URL")
+    }
+    expect(fetches).toBe(0)
+  })
+
   test("uses a fixed project path and does not retry failures", async () => {
     let calls = 0
     let url = ""
     const client = createControlClient({
       baseUrl: "https://control.example",
-      accessToken: "secret",
+      accessToken: "fixture-access",
       fetch: async (input) => {
         calls += 1
         url = String(input)
@@ -126,7 +183,7 @@ describe("control SDK", () => {
     const urls: URL[] = []
     const client = createControlClient({
       baseUrl: "https://control.example",
-      accessToken: "secret",
+      accessToken: "fixture-access",
       fetch: async (input) => {
         urls.push(new URL(String(input)))
         return Response.json({
@@ -152,7 +209,7 @@ describe("control SDK", () => {
   test("rejects malformed server bodies without exposing the bearer", async () => {
     const client = createControlClient({
       baseUrl: "https://control.example",
-      accessToken: "very-secret-token",
+      accessToken: "fixture-access",
       fetch: async () => new Response("{", { headers: { "Content-Type": "application/json" } }),
     })
     await expect(client.capabilities()).rejects.toBeInstanceOf(ControlTransportError)
@@ -162,14 +219,14 @@ describe("control SDK", () => {
       code: "invalid-request",
       message: "Invalid request.",
     })
-    expect(apiError.message).not.toContain("very-secret-token")
+    expect(apiError.message).not.toContain("fixture-access")
   })
 
   test("rejects invalid outgoing requests before fetching", async () => {
     let calls = 0
     const client = createControlClient({
       baseUrl: "https://control.example",
-      accessToken: "secret",
+      accessToken: "fixture-access",
       fetch: async () => {
         calls += 1
         return Response.json(controlCapabilitiesV1)
@@ -191,7 +248,7 @@ describe("control SDK", () => {
   test("preserves canonical action-indexed API errors", async () => {
     const client = createControlClient({
       baseUrl: "https://control.example",
-      accessToken: "secret",
+      accessToken: "fixture-access",
       fetch: async () => Response.json({
         version: "v1",
         code: "validation",

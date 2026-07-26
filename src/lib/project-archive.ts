@@ -146,6 +146,10 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
         assets: localAssets,
         projectState: manifest.projectState,
         syncState: [],
+        externalPluginArtifacts: manifest.externalPluginArtifacts.map((artifact) => ({
+          ...artifact,
+          updatedAt: Date.now(),
+        })),
       })
     })
   } catch (error) {

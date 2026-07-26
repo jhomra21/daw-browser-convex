@@ -433,8 +433,13 @@ export function useTimelineActions(
           effects,
           automation,
         },
+        completionOwner: 'caller',
       })
-      const committed = readSharedUngroupResult(result)
+      const completion = typeof result === 'object' && result !== null && 'completionOwner' in result && 'result' in result
+        ? result
+        : undefined
+      if (completion?.completionOwner === 'background') return
+      const committed = readSharedUngroupResult(completion?.result ?? result)
       assert(committed, 'Invalid shared ungroup result')
       const historyEntry = buildCommittedSharedUngroupHistoryEntry({
         projectId,

@@ -19,12 +19,14 @@ type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
 
 type TrackSynthRuntimeState = {
+  generation: number
   instanceId?: string
   params: SynthParams
   output: GainNode
   outputPan: StereoPannerNode
   voices: SynthVoiceHandle[]
   allocation: SynthVoiceHandle[]
+  liveVoiceRefs: Map<number, number>
   nextVoiceId: number
 }
 
@@ -83,6 +85,7 @@ const synthParamsEqual = (left: SynthParams, right: SynthParams) => left === rig
 
 export function createSynthRuntime(options: SynthRuntimeOptions) {
   const states = new Map<string, TrackSynthRuntimeState>()
+  let nextStateGeneration = 1
   const smooth = (param: AudioParam | undefined, value: number, now: number) => {
     if (!param) return
     param.cancelScheduledValues(now)
@@ -96,7 +99,16 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     if (!state) {
       const params = createDefaultSynthParams()
       const { output, outputPan } = createSynthOutputChain(ctx, options.ensureTrackInput(trackId), params.gain, params.pan, ctx.currentTime)
-      state = { params, output, outputPan, voices: [], allocation: [], nextVoiceId: 1 }
+      state = {
+        generation: nextStateGeneration++,
+        params,
+        output,
+        outputPan,
+        voices: [],
+        allocation: [],
+        liveVoiceRefs: new Map(),
+        nextVoiceId: 1,
+      }
       states.set(trackId, state)
     }
     return state
@@ -125,11 +137,12 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     }
     state.allocation = current
   }
-  const removeVoice = (trackId: string, voice: SynthVoiceHandle) => {
+  const removeVoice = (trackId: string, expectedState: TrackSynthRuntimeState, voice: SynthVoiceHandle) => {
     const state = states.get(trackId)
-    if (!state) return
+    if (state !== expectedState) return
     state.voices = state.voices.filter((candidate) => candidate !== voice)
     state.allocation = state.allocation.filter((candidate) => candidate !== voice)
+    state.liveVoiceRefs.delete(voice.noteInstanceId)
     if (voice.clipId) for (const source of voice.sources) options.sources.remove(voice.clipId, source)
   }
   const triggerNote = (input: {
@@ -144,13 +157,31 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     automationEnvelopes?: SynthAutomationEnvelopes
     scheduleVoiceAutomation?: boolean
     deferPolyphonyEnforcement?: boolean
+    live?: boolean
   }): number | undefined => {
+    if (
+      !Number.isFinite(input.pitch)
+      || !Number.isInteger(input.pitch)
+      || input.pitch < 0
+      || input.pitch > 127
+      || input.velocity !== undefined && (!Number.isFinite(input.velocity) || input.velocity < 0 || input.velocity > 1)
+      || !Number.isFinite(input.when)
+      || !Number.isFinite(input.durationSec)
+      || input.durationSec <= 0
+    ) return undefined
     const state = ensureState(input.trackId)
     const ctx = options.getAudioContext()
     if (!state || !ctx) return undefined
-    if (!state.params.retrigger) {
-      const legato = state.voices.find((voice) => voice.pitch === input.pitch && isSynthVoiceSoundingAt(voice, input.when))
-      if (legato) return legato.noteInstanceId
+    if (input.live && !state.params.retrigger) {
+      const legato = state.voices.find((voice) => (
+        state.liveVoiceRefs.has(voice.noteInstanceId)
+        && voice.pitch === input.pitch
+        && isSynthVoiceSoundingAt(voice, input.when)
+      ))
+      if (legato) {
+        state.liveVoiceRefs.set(legato.noteInstanceId, (state.liveVoiceRefs.get(legato.noteInstanceId) ?? 0) + 1)
+        return legato.noteInstanceId
+      }
     }
     const noteInstanceId = state.nextVoiceId
     state.nextVoiceId += 1
@@ -172,10 +203,11 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         : ((timelineStartSec) => (timelineSec: number) => input.when + (timelineSec - timelineStartSec))(input.timelineStartSec),
       automationEnvelopes: input.automationEnvelopes ?? getTrackAutomationEnvelopes(input.trackId, state.instanceId),
       scheduleVoiceAutomation: input.scheduleVoiceAutomation,
-      onEnded: (ended) => removeVoice(input.trackId, ended),
+      onEnded: (ended) => removeVoice(input.trackId, state, ended),
     })
     state.voices.push(voice)
     state.allocation.push(voice)
+    if (input.live) state.liveVoiceRefs.set(voice.noteInstanceId, 1)
     if (!input.deferPolyphonyEnforcement) enforcePolyphony(state, ctx.currentTime)
     if (input.clipId) for (const source of voice.sources) options.sources.add(input.clipId, source)
     return noteInstanceId
@@ -311,13 +343,14 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
       disposeTrack(trackId)
     },
     triggerNote,
+    getLiveVoiceGeneration: (trackId: string) => states.get(trackId)?.generation,
     previewNote: (trackId: string, pitch: number, velocity = 0.9, durationSec = 0.5) => {
       const ctx = options.getAudioContext()
       return ctx ? triggerNote({ trackId, pitch, velocity, when: ctx.currentTime, durationSec }) : undefined
     },
     startPreviewNote: (trackId: string, pitch: number, velocity = 0.9) => {
       const ctx = options.getAudioContext()
-      return ctx ? triggerNote({ trackId, pitch, velocity, when: ctx.currentTime, durationSec: 86_400 }) : undefined
+      return ctx ? triggerNote({ trackId, pitch, velocity, when: ctx.currentTime, durationSec: 86_400, live: true }) : undefined
     },
     resolveAutomationBindings: (trackId: string, parameterId: string): AutomationAudioBinding[] => {
       const state = states.get(trackId)
@@ -366,10 +399,31 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         }]
       })
     },
-    releasePreviewNote: (trackId: string, noteInstanceId: number) => {
-      const voice = states.get(trackId)?.voices.find((candidate) => candidate.noteInstanceId === noteInstanceId)
-      const when = options.getAudioContext()?.currentTime
-      if (voice && when !== undefined) voice.release(when)
+    releasePreviewNote: (
+      trackId: string,
+      noteInstanceId: number,
+      requestedWhen?: number,
+      force = false,
+      generation?: number,
+    ) => {
+      const state = states.get(trackId)
+      if (generation !== undefined && state?.generation !== generation) return
+      const voice = state?.voices.find((candidate) => candidate.noteInstanceId === noteInstanceId)
+      const now = options.getAudioContext()?.currentTime
+      const when = now === undefined ? undefined : Math.max(now, requestedWhen ?? now)
+      if (!voice || when === undefined) return
+      if (force) {
+        state?.liveVoiceRefs.delete(noteInstanceId)
+        voice.stop(when)
+        return
+      }
+      const refs = state?.liveVoiceRefs.get(noteInstanceId)
+      if (refs !== undefined && refs > 1) {
+        state?.liveVoiceRefs.set(noteInstanceId, refs - 1)
+        return
+      }
+      state?.liveVoiceRefs.delete(noteInstanceId)
+      voice.release(when)
     },
     scheduleMidiClip: (
       track: RuntimeTrack,

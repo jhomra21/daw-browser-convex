@@ -1,6 +1,7 @@
 import {
   canonicalJson,
   controlCapabilitiesSchemaV1,
+  controlCapabilitiesSchemaV2,
   controlCommitResultSchemaV1,
   controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
@@ -14,7 +15,9 @@ import {
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
+  projectSnapshotSchemaV2,
   type ControlCapabilitiesV1,
+  type ControlCapabilitiesV2,
   type ControlCommitRequestV1,
   type ControlCommitResultV1,
   type ControlApprovalRequestV1,
@@ -27,15 +30,29 @@ import {
   type ControlPreviewRequestV1,
   type ControlPreviewResultV1,
   type ProjectSnapshotV1,
+  type ProjectSnapshotV2,
 } from "@daw-browser/control"
 
-type AccessToken = string | (() => string | Promise<string>)
-type ControlFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+export type ControlAccessTokenResolver = () => string | Promise<string>
+export type ControlAccessToken = string | ControlAccessTokenResolver
+export type ControlFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-type ControlClientOptions = {
+export type ControlClientOptions = {
   baseUrl: string;
-  accessToken: AccessToken;
+  accessToken: ControlAccessToken;
   fetch?: ControlFetch;
+}
+
+export type ControlClient = {
+  capabilities: () => Promise<ControlCapabilitiesV1>;
+  capabilitiesV2: () => Promise<ControlCapabilitiesV2>;
+  snapshot: (projectId: string) => Promise<ProjectSnapshotV1>;
+  snapshotV2: (projectId: string) => Promise<ProjectSnapshotV2>;
+  preview: (input: ControlPreviewRequestV1) => Promise<ControlPreviewResultV1>;
+  commit: (input: ControlCommitRequestV1) => Promise<ControlCommitResultV1>;
+  requestApproval: (input: ControlApprovalRequestV1) => Promise<ControlApprovalResultV1>;
+  history: (input: ControlHistoryQueryV1) => Promise<ControlHistoryResultV1>;
+  recoveries: (input: ControlRecoveriesQueryV1) => Promise<ControlRecoveriesResultV1>;
 }
 
 export class ControlApiError extends Error {
@@ -66,14 +83,32 @@ export class ControlTransportError extends Error {
   }
 }
 
-const readToken = async (accessToken: AccessToken) => (
+const readToken = async (accessToken: ControlAccessToken) => (
   typeof accessToken === "function" ? await accessToken() : accessToken
 )
 
-const controlUrl = (baseUrl: string, pathname: string) => {
-  const root = new URL(baseUrl)
+export const normalizeControlOrigin = (value: string) => {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error("Control base URL must be a valid origin.")
+  }
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || value.includes("?") || value.includes("#")) {
+    throw new Error("Control base URL must be an origin.")
+  }
+  const loopbackHttp = url.protocol === "http:"
+    && (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]")
+  if (url.protocol !== "https:" && !loopbackHttp) {
+    throw new Error("Control base URL must use HTTPS except for loopback HTTP.")
+  }
+  return url.origin
+}
+
+const controlUrl = (origin: string, pathname: string, version = "v1") => {
+  const root = new URL(origin)
   const [routePath, search] = pathname.split("?", 2)
-  root.pathname = `${root.pathname.replace(/\/$/, "")}/api/control/v1${routePath}`
+  root.pathname = `${root.pathname.replace(/\/$/, "")}/api/control/${version}${routePath}`
   root.search = search === undefined ? "" : `?${search}`
   root.hash = ""
   return root
@@ -110,8 +145,8 @@ const response = async <Value>(
   }
 }
 
-export const createControlClient = (options: ControlClientOptions) => {
-  const baseUrl = new URL(options.baseUrl).toString()
+export const createControlClient = (options: ControlClientOptions): ControlClient => {
+  const baseUrl = normalizeControlOrigin(options.baseUrl)
   const requestFetch = options.fetch ?? globalThis.fetch
   if (!requestFetch) throw new ControlTransportError("A fetch implementation is required.")
 
@@ -119,11 +154,12 @@ export const createControlClient = (options: ControlClientOptions) => {
     pathname: string,
     schema: { parse: (value: unknown) => Value },
     init?: { method?: "GET" | "POST"; body?: string },
+    version = "v1",
   ) => {
     const token = await readToken(options.accessToken)
     if (!token) throw new ControlTransportError("An access token is required.")
     return response(
-      () => requestFetch(controlUrl(baseUrl, pathname), {
+      () => requestFetch(controlUrl(baseUrl, pathname, version), {
         method: init?.method ?? "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -140,9 +176,16 @@ export const createControlClient = (options: ControlClientOptions) => {
     capabilities: (): Promise<ControlCapabilitiesV1> => (
       request("/capabilities", controlCapabilitiesSchemaV1)
     ),
+    capabilitiesV2: (): Promise<ControlCapabilitiesV2> => (
+      request("/capabilities", controlCapabilitiesSchemaV2, undefined, "v2")
+    ),
     snapshot: (projectId: string): Promise<ProjectSnapshotV1> => {
       const query = parseControlSnapshotQueryV1({ projectId })
       return request(`/projects/${encodeURIComponent(query.projectId)}/snapshot`, projectSnapshotSchemaV1)
+    },
+    snapshotV2: (projectId: string): Promise<ProjectSnapshotV2> => {
+      const query = parseControlSnapshotQueryV1({ projectId })
+      return request(`/projects/${encodeURIComponent(query.projectId)}/snapshot`, projectSnapshotSchemaV2, undefined, "v2")
     },
     preview: (input: ControlPreviewRequestV1): Promise<ControlPreviewResultV1> => {
       const requestBody = parseControlPreviewRequestV1(input)

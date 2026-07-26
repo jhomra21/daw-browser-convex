@@ -7,22 +7,28 @@ import path from "node:path"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
+  desktopHelloSchemaV2,
   desktopHostExportRunInputSchemaV1,
   desktopHostExportRunResultSchemaV1,
   desktopHostImportInputSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
   desktopProtocolVersion,
+  desktopProtocolVersionV2,
   desktopRegistrationSchemaV1,
   desktopRendererRequestSchemaV1,
   desktopTrustedRendererRequestSchemaV1,
   hostError,
+  hostErrorV2,
+  hostErrorSchemaV1,
   isDesktopControlOperation,
   type DesktopFrameV1,
   type DesktopOperationV1,
+  type DesktopProtocolVersion,
   type DesktopRendererRequestV1,
   type DesktopTrustedRendererRequestV1,
 } from "@daw-browser/desktop-protocol"
+import { controlErrorSchemaV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
@@ -31,12 +37,34 @@ import { createNativeFileCapabilityHelper } from "./native-file-capability-helpe
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
 import { desktopOperations } from "./desktop-operations"
+import { createContentSecurityPolicy } from "./content-security-policy"
+import { createPluginCatalogStore } from "./plugin-catalog"
+import { createVst3ScannerSupervisor, packagedVst3ScannerPath } from "./vst3-scanner"
+import { catalogViewForRenderer } from "./vst3-attachment"
+import { preflightVst3Insertion } from "./vst3-insertion-preflight"
+import { packagedVst3WorkerPath } from "./vst3-preflight"
+import { createNativeAudioHostSupervisor, packagedAudioHostPath } from "./audio-host"
+import {
+  nativeReleaseArtifactManifestName,
+  verifyPackagedNativeReleaseArtifacts,
+} from "./native-release-artifacts"
+import type {
+  NativeHostDeviceConfiguration,
+  NativeHostPcmAsset,
+  NativeHostRecordingConfiguration,
+  NativeHostTransport,
+} from "@daw-browser/audio-engine/native-host-wire"
+import { nativeVst3InsertionPreflightRequestSchema } from "@daw-browser/plugin-host-protocol"
+import {
+  allowsTrustedAudioCapturePermission,
+  allowsTrustedMidiPermission,
+  isTrustedDesktopOrigin,
+} from "./permission-policy"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
-const allowedOrigin = "daw://app"
 const appName = "daw-browser"
 const rendererRoot = path.join(import.meta.dirname, "../renderer/main_window")
 const preloadPath = path.join(import.meta.dirname, "preload.js")
@@ -47,16 +75,12 @@ const externalUrl = (url: string) => {
     return false
   }
 }
-const sameAppOrigin = (url: string) => url === allowedOrigin || url.startsWith(`${allowedOrigin}/`)
-const isAudioCaptureRequest = (details: Electron.PermissionRequest | Electron.FilesystemPermissionRequest | Electron.MediaAccessPermissionRequest | Electron.OpenExternalPermissionRequest) =>
-  "mediaTypes" in details && details.mediaTypes !== undefined && details.mediaTypes.length === 1 && details.mediaTypes[0] === "audio"
-
+const sameAppOrigin = isTrustedDesktopOrigin
 type PendingRendererRequest = {
   generation: number
   resolve: (frame: Extract<DesktopFrameV1, { type: "reply" }>) => void
   reject: (error: Error) => void
 }
-
 let window_: BrowserWindow | undefined
 let generation = 0
 const rendererPending = new Map<string, PendingRendererRequest>()
@@ -78,6 +102,17 @@ let socketServer: ReturnType<typeof createServer> | undefined
 const acceptedSockets = new Set<Socket>()
 let finishingQuit = false
 let nativeMediaAvailable = false
+let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
+let audioHostPath: string | undefined
+let vst3WorkerPath: string | undefined
+let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
+let vst3ScannerSupervisor: ReturnType<typeof createVst3ScannerSupervisor> | undefined
+let nativeReleaseArtifactVerification:
+  | { status: "disabled" | "development" | "verified" }
+  | { status: "failed"; reason: string } = { status: "disabled" }
+let removeAudioHostLossListener: (() => void) | undefined
+let removeAudioHostRecordingBlockListener: (() => void) | undefined
+let removeAudioHostRecordingStatusListener: (() => void) | undefined
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
 const fileCapabilities = createFileCapabilityManager({
   dialog: {
@@ -93,6 +128,41 @@ const settleCapabilityRevocation = (operation: Promise<void>) => {
 }
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
 const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
+const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
+const translateRendererError = (
+  operation: DesktopOperationV1,
+  error: unknown,
+  protocolVersion: DesktopProtocolVersion,
+) => {
+  if (protocolVersion !== desktopProtocolVersionV2) return error
+  if (isDesktopControlOperation(operation) && controlErrorSchemaV1.safeParse(error).success) return error
+  const host = hostErrorSchemaV1.safeParse(error)
+  return host.success ? hostErrorV2(host.data.code, host.data.message) : error
+}
+const writeSocketFailure = (
+  socket: Socket,
+  protocolVersion: DesktopProtocolVersion,
+  operation: DesktopOperationV1,
+  id: string,
+  code: Parameters<typeof hostError>[0],
+  message: string,
+) => {
+  if (protocolVersion === desktopProtocolVersionV2) {
+    socket.write(encodeDesktopFrame({
+      version: desktopProtocolVersionV2,
+      type: "reply",
+      id,
+      error: operationFailureV2(operation, code, message),
+    }))
+    return
+  }
+  socket.write(encodeDesktopFrame({
+    version: desktopProtocolVersion,
+    type: "reply",
+    id,
+    error: operationFailure(operation, code, message),
+  }))
+}
 
 const cancelRendererRequest = (id: string, requestGeneration: number) => {
   const target = window_?.webContents
@@ -292,6 +362,7 @@ const startSocket = async () => {
 
 const handleSocket = (socket: Socket) => {
   let authenticated = false
+  let protocolVersion: DesktopProtocolVersion | undefined
   let actorSubject: string | undefined
   const correlation = createRequestCorrelation()
   const preparationControllers = new Map<string, AbortController>()
@@ -321,14 +392,34 @@ const handleSocket = (socket: Socket) => {
   }
   const decoder = createDesktopFrameDecoder((frame) => {
     if (!authenticated) {
-      const hello = desktopHelloSchemaV1.safeParse(frame)
+      const hello = desktopHelloSchemaV1.safeParse(frame).success
+        ? desktopHelloSchemaV1.safeParse(frame)
+        : desktopHelloSchemaV2.safeParse(frame)
       if (!hello.success || !authenticate(hello.data.secret)) {
         socket.destroy()
         return
       }
       authenticated = true
+      protocolVersion = hello.data.version
       actorSubject = `local:${hello.data.actorId}`
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: availableDesktopOperations() }))
+      socket.write(encodeDesktopFrame(
+        protocolVersion === desktopProtocolVersionV2
+          ? { version: desktopProtocolVersionV2, type: "helloAck", selectedVersion: desktopProtocolVersionV2, sessionId, capabilities: availableDesktopOperations() }
+          : { version: desktopProtocolVersion, type: "helloAck", sessionId, capabilities: availableDesktopOperations() },
+      ))
+      return
+    }
+    const sessionProtocolVersion = protocolVersion
+    if (
+      sessionProtocolVersion === "v1"
+      && frame.version === desktopProtocolVersionV2
+      && frame.type === "request"
+    ) {
+      writeSocketFailure(socket, sessionProtocolVersion, frame.operation, frame.id, "unsupported-version", "Protocol version v2 is not available in this session.")
+      return
+    }
+    if (sessionProtocolVersion === undefined || frame.version !== sessionProtocolVersion) {
+      socket.destroy()
       return
     }
     if (frame.type === "cancel") {
@@ -352,7 +443,7 @@ const handleSocket = (socket: Socket) => {
       return
     }
     if (!availableDesktopOperations().includes(frame.operation)) {
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: frame.id, error: operationFailure(frame.operation, "unavailable", "The requested desktop operation is unavailable on this platform.") }))
+      writeSocketFailure(socket, sessionProtocolVersion, frame.operation, frame.id, "unavailable", "The requested desktop operation is unavailable on this platform.")
       return
     }
     const rendererId = correlation.create(frame.id)
@@ -400,11 +491,21 @@ const handleSocket = (socket: Socket) => {
         await fileCapabilities.revokeRequest(scope)
       }
       try {
-        for (const outbound of serializeDesktopReply(frame.operation, { ...reply, id: externalId })) {
+        const translatedError = translateRendererError(
+          frame.operation,
+          reply.error,
+          sessionProtocolVersion,
+        )
+        for (const outbound of serializeDesktopReply(
+          frame.operation,
+          frame.input,
+          { ...reply, error: translatedError, id: externalId, version: sessionProtocolVersion },
+          sessionProtocolVersion,
+        )) {
           socket.write(encodeDesktopFrame(outbound))
         }
       } catch {
-        socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: externalId, error: operationFailure(frame.operation, "internal", "The desktop response could not be serialized.") }))
+        writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, "internal", "The desktop response could not be serialized.")
       }
     }).catch(async (error: unknown) => {
       preparationControllers.delete(rendererId)
@@ -416,7 +517,7 @@ const handleSocket = (socket: Socket) => {
       correlation.removeExternal(externalId)
       const message = error instanceof Error && error.message === "Renderer deadline exceeded." ? "The request deadline elapsed." : "The renderer is unavailable."
       const code = error instanceof Error && error.message === "Renderer deadline exceeded." ? "deadline-exceeded" : "unavailable"
-      socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "reply", id: externalId, error: operationFailure(frame.operation, code, message) }))
+      writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, code, message)
     })
   })
   socket.on("data", (chunk: Buffer) => {
@@ -456,6 +557,355 @@ const registerIpc = () => {
     if (typeof value !== "object" || value === null || !("requestId" in value) || typeof value.requestId !== "string") return undefined
     return { requestId: value.requestId, rendererGeneration: generation }
   }
+  const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
+    process.platform === "darwin"
+    && window_ !== undefined
+    && event.sender.id === window_.webContents.id
+    && event.senderFrame !== null
+    && sameAppOrigin(event.senderFrame.url)
+    && pluginCatalogStore !== undefined
+  )
+  const catalogFailure = (message: string): { ok: false; error: string } => ({ ok: false, error: message })
+  const catalogStoreFor = (event: Electron.IpcMainInvokeEvent) => (
+    catalogAllowed(event) ? pluginCatalogStore : undefined
+  )
+  const audioHostAllowed = (event: Electron.IpcMainInvokeEvent) => (
+    process.platform === "darwin"
+    && process.arch === "arm64"
+    && window_ !== undefined
+    && event.sender.id === window_.webContents.id
+    && event.senderFrame !== null
+    && sameAppOrigin(event.senderFrame.url)
+  )
+  ipcMain.handle("daw:audio-host:diagnostics", async (event) => {
+    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+      return {
+        ok: false,
+        error: "The native audio host is unavailable.",
+        artifactVerification: nativeReleaseArtifactVerification,
+      }
+    }
+    try {
+      return {
+        ok: true,
+        hello: await audioHostSupervisor.start(),
+        status: audioHostSupervisor.status(),
+        diagnostics: await audioHostSupervisor.diagnostics(),
+        artifactVerification: nativeReleaseArtifactVerification,
+      }
+    } catch {
+      return {
+        ok: false,
+        error: "The native audio host is unavailable.",
+        artifactVerification: nativeReleaseArtifactVerification,
+      }
+    }
+  })
+  ipcMain.handle("daw:audio-host:resolve-output-device", async (event, value: unknown) => {
+    if (!audioHostAllowed(event) || !audioHostSupervisor || (value !== undefined && typeof value !== "string")) {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+    try {
+      return { ok: true as const, device: await audioHostSupervisor.resolveOutputDevice(value) }
+    } catch {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+  })
+  ipcMain.handle("daw:audio-host:resolve-input-device", async (event, value: unknown) => {
+    if (!audioHostAllowed(event) || !audioHostSupervisor || (value !== undefined && typeof value !== "string")) {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+    try {
+      return { ok: true as const, device: await audioHostSupervisor.resolveInputDevice(value) }
+    } catch {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+  })
+  const nativeSessionFailure = () => ({ ok: false as const, error: "The native audio session is unavailable." })
+  const sessionSupervisorFor = (event: Electron.IpcMainInvokeEvent) => (
+    audioHostAllowed(event) ? audioHostSupervisor : undefined
+  )
+  const validUnsigned32 = (value: unknown): value is number => (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
+  )
+  const nativeSessionConfiguration = (value: unknown): NativeHostDeviceConfiguration | undefined => {
+    if (
+      typeof value !== "object" || value === null
+      || !("deviceId" in value) || typeof value.deviceId !== "string"
+      || !("sampleRateHz" in value) || !validUnsigned32(value.sampleRateHz)
+      || !("maxFramesPerBlock" in value) || !validUnsigned32(value.maxFramesPerBlock)
+      || !("channelCount" in value) || !validUnsigned32(value.channelCount)
+      || !("revision" in value) || !validUnsigned32(value.revision)
+    ) return undefined
+    return {
+      deviceId: value.deviceId,
+      sampleRateHz: value.sampleRateHz,
+      maxFramesPerBlock: value.maxFramesPerBlock,
+      channelCount: value.channelCount,
+      revision: value.revision,
+    }
+  }
+  const nativeSessionTransport = (value: unknown): NativeHostTransport | undefined => {
+    if (
+      typeof value !== "object" || value === null
+      || !("epoch" in value) || !validUnsigned32(value.epoch)
+      || !("running" in value) || typeof value.running !== "boolean"
+      || !("frame" in value) || typeof value.frame !== "number" || !Number.isSafeInteger(value.frame)
+    ) return undefined
+    return { epoch: value.epoch, running: value.running, frame: value.frame }
+  }
+  const nativeSessionRecordingConfiguration = (value: unknown): NativeHostRecordingConfiguration | undefined => {
+    if (
+      typeof value !== "object" || value === null
+      || !Object.keys(value).every((key) => (
+        key === "deviceUid" || key === "generation" || key === "sessionId" || key === "channelCount"
+        || key === "inputChannels" || key === "gain" || key === "polarity"
+        || key === "punchStartFrame" || key === "punchEndFrame" || key === "monitoring"
+      ))
+      || !("deviceUid" in value) || typeof value.deviceUid !== "string"
+      || !("generation" in value) || !validUnsigned32(value.generation) || value.generation === 0
+      || !("sessionId" in value) || typeof value.sessionId !== "bigint" || value.sessionId <= 0n
+      || !("channelCount" in value) || (value.channelCount !== 1 && value.channelCount !== 2)
+      || !("inputChannels" in value) || !Array.isArray(value.inputChannels)
+      || value.inputChannels.length !== value.channelCount
+      || !value.inputChannels.every(validUnsigned32)
+      || !("gain" in value) || typeof value.gain !== "number" || !Number.isFinite(value.gain) || value.gain < 0
+      || !("polarity" in value) || (value.polarity !== 1 && value.polarity !== -1)
+      || !("punchStartFrame" in value) || typeof value.punchStartFrame !== "number"
+      || !Number.isSafeInteger(value.punchStartFrame) || value.punchStartFrame < 0
+      || !("punchEndFrame" in value)
+      || (value.punchEndFrame !== null && (
+        typeof value.punchEndFrame !== "number"
+        || !Number.isSafeInteger(value.punchEndFrame)
+        || value.punchEndFrame < value.punchStartFrame
+      ))
+      || !("monitoring" in value) || typeof value.monitoring !== "boolean"
+    ) return undefined
+    return {
+      deviceUid: value.deviceUid,
+      generation: value.generation,
+      sessionId: value.sessionId,
+      channelCount: value.channelCount,
+      inputChannels: value.inputChannels,
+      gain: value.gain,
+      polarity: value.polarity,
+      punchStartFrame: value.punchStartFrame,
+      punchEndFrame: value.punchEndFrame,
+      monitoring: value.monitoring,
+    }
+  }
+  const nativeSessionAsset = (value: unknown): NativeHostPcmAsset | undefined => {
+    if (
+      typeof value !== "object" || value === null
+      || !Object.keys(value).every((key) => (
+        key === "sessionAssetId" || key === "frameCount" || key === "sampleRateHz"
+        || key === "channelCount" || key === "planarPcm" || key === "contentHashPrefix"
+      ))
+      || !("sessionAssetId" in value) || !validUnsigned32(value.sessionAssetId)
+      || !("frameCount" in value) || !validUnsigned32(value.frameCount)
+      || !("sampleRateHz" in value) || !validUnsigned32(value.sampleRateHz)
+      || !("channelCount" in value) || !validUnsigned32(value.channelCount)
+      || !("planarPcm" in value) || !(value.planarPcm instanceof Uint8Array)
+      || ("contentHashPrefix" in value && value.contentHashPrefix !== undefined && !(value.contentHashPrefix instanceof Uint8Array))
+    ) return undefined
+    return {
+      sessionAssetId: value.sessionAssetId,
+      frameCount: value.frameCount,
+      sampleRateHz: value.sampleRateHz,
+      channelCount: value.channelCount,
+      planarPcm: value.planarPcm,
+      ...("contentHashPrefix" in value && value.contentHashPrefix instanceof Uint8Array
+        ? { contentHashPrefix: value.contentHashPrefix }
+        : {}),
+    }
+  }
+  const nativeSessionBytes = (value: unknown) => value instanceof Uint8Array ? value : undefined
+  ipcMain.handle("daw:audio-host:session:configure", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    const configuration = nativeSessionConfiguration(value)
+    if (!supervisor || !configuration) return nativeSessionFailure()
+    try {
+      await supervisor.configure(configuration)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:install-asset", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    const asset = nativeSessionAsset(value)
+    if (!supervisor || !asset) return nativeSessionFailure()
+    try {
+      await supervisor.installAsset(asset)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:release-asset", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (!supervisor || !validUnsigned32(value) || value === 0) return nativeSessionFailure()
+    try {
+      await supervisor.releaseAsset(value)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:detach-vst", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (!supervisor || typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+      return nativeSessionFailure()
+    }
+    try {
+      await supervisor.detachVst(value)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  const registerNativeSessionBytes = (
+    channel: string,
+    operation: (supervisor: NonNullable<typeof audioHostSupervisor>, bytes: Uint8Array) => Promise<void>,
+  ) => ipcMain.handle(channel, async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    const bytes = nativeSessionBytes(value)
+    if (!supervisor || !bytes) return nativeSessionFailure()
+    try {
+      await operation(supervisor, bytes)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  registerNativeSessionBytes("daw:audio-host:session:publish-graph", (supervisor, bytes) => supervisor.publishGraph(bytes))
+  registerNativeSessionBytes("daw:audio-host:session:queue-parameter-events", (supervisor, bytes) => supervisor.queueParameterEvents(bytes))
+  registerNativeSessionBytes("daw:audio-host:session:queue-instrument-events", (supervisor, bytes) => supervisor.queueInstrumentEvents(bytes))
+  registerNativeSessionBytes("daw:audio-host:session:queue-source-events", (supervisor, bytes) => supervisor.queueSourceEvents(bytes))
+  ipcMain.handle("daw:audio-host:session:set-transport", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    const transport = nativeSessionTransport(value)
+    if (!supervisor || !transport) return nativeSessionFailure()
+    try {
+      await supervisor.setTransport(transport)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:configure-recording", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    const configuration = nativeSessionRecordingConfiguration(value)
+    if (!supervisor || !configuration) return nativeSessionFailure()
+    try {
+      await supervisor.configureRecording(configuration)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:stop-recording", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (!supervisor || (value !== undefined && (
+      typeof value !== "number" || !Number.isSafeInteger(value) || value < 0
+    ))) return nativeSessionFailure()
+    try {
+      await supervisor.stopRecording(value)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  const registerNativeSessionControl = (
+    channel: string,
+    operation: (supervisor: NonNullable<typeof audioHostSupervisor>) => Promise<void>,
+  ) => ipcMain.handle(channel, async (event) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (!supervisor) return nativeSessionFailure()
+    try {
+      await operation(supervisor)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
+  registerNativeSessionControl("daw:audio-host:session:begin-transaction", (supervisor) => supervisor.beginTransaction())
+  registerNativeSessionControl("daw:audio-host:session:commit-transaction", (supervisor) => supervisor.commitTransaction())
+  registerNativeSessionControl("daw:audio-host:session:rollback-transaction", (supervisor) => supervisor.rollbackTransaction())
+  registerNativeSessionControl("daw:audio-host:session:start", (supervisor) => supervisor.startAudio())
+  registerNativeSessionControl("daw:audio-host:session:stop", (supervisor) => supervisor.stopAudio())
+  registerNativeSessionControl("daw:audio-host:session:start-recording", (supervisor) => supervisor.startRecording())
+  registerNativeSessionControl("daw:audio-host:session:cancel-recording", (supervisor) => supervisor.cancelRecording())
+  registerNativeSessionControl("daw:audio-host:session:teardown", (supervisor) => supervisor.teardown())
+  ipcMain.handle("daw:plugin-catalog:read", async (event) => {
+    const store = catalogStoreFor(event)
+    if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
+    try {
+      return { ok: true, catalog: catalogViewForRenderer(await store.load()) }
+    } catch {
+      return catalogFailure("The plug-in catalog could not be read.")
+    }
+  })
+  ipcMain.handle("daw:plugin-catalog:choose-directory", async (event) => {
+    const store = catalogStoreFor(event)
+    const currentWindow = window_
+    if (!store || !currentWindow) return catalogFailure("The desktop plug-in catalog is unavailable.")
+    const selection = await dialog.showOpenDialog(currentWindow, { properties: ["openDirectory", "createDirectory"] })
+    if (selection.canceled || selection.filePaths.length !== 1) return { ok: true, canceled: true }
+    try {
+      return { ok: true, canceled: false, catalog: catalogViewForRenderer(await store.addDirectory(selection.filePaths[0])) }
+    } catch {
+      return catalogFailure("The selected plug-in directory could not be added.")
+    }
+  })
+  ipcMain.handle("daw:plugin-catalog:remove-directory", async (event, value: unknown) => {
+    const store = catalogStoreFor(event)
+    if (!store) return catalogFailure("The desktop plug-in catalog is unavailable.")
+    if (typeof value !== "object" || value === null || !("directory" in value) || typeof value.directory !== "string") {
+      return catalogFailure("A plug-in directory is required.")
+    }
+    try {
+      return { ok: true, catalog: catalogViewForRenderer(await store.removeDirectory(value.directory)) }
+    } catch {
+      return catalogFailure("The plug-in directory could not be removed.")
+    }
+  })
+  ipcMain.handle("daw:plugin-catalog:scan", async (event) => {
+    const store = catalogStoreFor(event)
+    const scanner = vst3ScannerSupervisor
+    if (!store || !scanner) return catalogFailure("The desktop plug-in catalog is unavailable.")
+    try {
+      const catalog = await store.load()
+      return { ok: true, catalog: catalogViewForRenderer(await store.scan((entry) => scanner.scan(entry, catalog.directories))) }
+    } catch {
+      return catalogFailure("The plug-in catalog could not be scanned.")
+    }
+  })
+  ipcMain.handle("daw:plugin-catalog:preflight-insertion", async (event, value: unknown) => {
+    const store = catalogStoreFor(event)
+    const request = nativeVst3InsertionPreflightRequestSchema.safeParse(value)
+    const workerPath = vst3WorkerPath
+    if (!store || !request.success) {
+      return { ok: false as const, code: "untrusted-catalog" as const, message: "The native VST3 insertion request is invalid." }
+    }
+    if (!audioHostAllowed(event) || !audioHostSupervisor || !workerPath) {
+      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host is unavailable." }
+    }
+    try {
+      const device = await audioHostSupervisor.resolveOutputDevice()
+      if (!device?.available) {
+        return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
+      }
+      return await preflightVst3Insertion({
+        request: request.data,
+        catalog: await store.reload(),
+        workerPath,
+        sampleRateHz: device.nominalSampleRateHz,
+      })
+    } catch {
+      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host preflight failed." }
+    }
+  })
   ipcMain.handle("daw:capability:readChunk", async (event, value: unknown) => {
     const scope = scopeFor(event, value)
     if (!scope || typeof value !== "object" || value === null || !("token" in value) || typeof value.token !== "string") throw new Error("Invalid capability request.")
@@ -555,6 +1005,10 @@ const finishQuit = async () => {
   preparationRegistry.abortAll()
   rejectRendererPending("Application is closing.")
   await fileCapabilities.revokeAll()
+  await audioHostSupervisor?.teardown()
+  removeAudioHostLossListener?.()
+  removeAudioHostRecordingBlockListener?.()
+  removeAudioHostRecordingStatusListener?.()
   await closeSocket()
   app.exit()
 }
@@ -567,6 +1021,54 @@ else {
   })
   app.whenReady().then(async () => {
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
+    let scannerPath: string | undefined
+    if (process.platform === "darwin" && app.isPackaged) {
+      const manifestPath = path.join(process.resourcesPath, nativeReleaseArtifactManifestName)
+      if (existsSync(manifestPath)) {
+        try {
+          const artifacts = await verifyPackagedNativeReleaseArtifacts(process.resourcesPath)
+          scannerPath = artifacts.scannerPath
+          vst3WorkerPath = artifacts.workerPath
+          audioHostPath = artifacts.audioHostPath
+          nativeReleaseArtifactVerification = { status: "verified" }
+        } catch (error) {
+          nativeReleaseArtifactVerification = {
+            status: "failed",
+            reason: error instanceof Error ? error.message : "Native release artifact verification failed.",
+          }
+        }
+      }
+    } else if (process.platform === "darwin") {
+      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, process.env.DAW_VST3_SCANNER_PATH)
+      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, process.env.DAW_VST3_WORKER_PATH)
+      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, process.env.DAW_AUDIO_HOST_PATH)
+      nativeReleaseArtifactVerification = { status: "development" }
+    }
+    vst3ScannerSupervisor = scannerPath ? createVst3ScannerSupervisor({
+      platform: process.platform,
+      arch: process.arch,
+      scannerPath,
+    }) : undefined
+    pluginCatalogStore = createPluginCatalogStore({
+      filePath: path.join(app.getPath("userData"), "plugin-catalog-v1.json"),
+    })
+    audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath) : undefined
+    removeAudioHostLossListener = audioHostSupervisor?.onLoss(() => {
+      const target = window_?.webContents
+      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) target.send("daw:audio-host:loss")
+    })
+    removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
+      const target = window_?.webContents
+      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
+        target.send("daw:audio-host:recording-block", block)
+      }
+    })
+    removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
+      const target = window_?.webContents
+      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
+        target.send("daw:audio-host:recording-status", status)
+      }
+    })
     protocol.handle("daw", (request) => {
       const relative = new URL(request.url).pathname
       const safePath = path.resolve(rendererRoot, `.${relative === "/" ? "/index.html" : relative}`)
@@ -576,19 +1078,41 @@ else {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({
       responseHeaders: {
         ...details.responseHeaders,
-        "Content-Security-Policy": ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"],
+        "Content-Security-Policy": [createContentSecurityPolicy(Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL))],
       },
     }))
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(
-      permission === "media"
-      && sameAppOrigin(webContents.getURL())
-      && isAudioCaptureRequest(details),
+      (
+        allowsTrustedAudioCapturePermission({
+          permission,
+          requestingUrl: webContents.getURL(),
+          mediaTypes: "mediaTypes" in details ? details.mediaTypes : undefined,
+        })
+      )
+      || allowsTrustedMidiPermission({
+        permission,
+        trustedRendererId: window_?.webContents.id,
+        requestingRendererId: webContents.id,
+        requestingUrl: details.requestingUrl,
+        isMainFrame: details.isMainFrame,
+      }),
     ))
     session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
-      webContents !== null
-      && permission === "media"
-      && sameAppOrigin(requestingOrigin)
-      && details.mediaType === "audio")
+      (
+        webContents !== null
+        && allowsTrustedAudioCapturePermission({
+          permission,
+          requestingUrl: requestingOrigin,
+          mediaTypes: details.mediaType === "audio" ? ["audio"] : undefined,
+        })
+      )
+      || allowsTrustedMidiPermission({
+        permission,
+        trustedRendererId: window_?.webContents.id,
+        requestingRendererId: webContents?.id,
+        requestingUrl: requestingOrigin,
+        isMainFrame: details.isMainFrame,
+      }))
     registerIpc()
     await startSocket()
     createWindow()

@@ -1,10 +1,12 @@
 import { getMidiNoteLabel } from '@daw-browser/shared'
 
 export type MidiEditorNote = {
+  id: string
   beat: number
   length: number
   pitch: number
   velocity?: number
+  channel: number
 }
 
 type MidiGridCell = {
@@ -96,16 +98,19 @@ export const createMidiEditorGrid = (
     noteTop: (note: MidiEditorNote) => getMidiRowForPitch(note.pitch) * MIDI_EDITOR_ROW_HEIGHT,
     noteHeight: Math.max(2, MIDI_EDITOR_ROW_HEIGHT - 2),
     notesEqual: midiNotesEqual,
-    noteFromCell: (cell: MidiGridCell): MidiEditorNote => ({
+    noteFromCell: (cell: MidiGridCell, id: string, channel: number): MidiEditorNote => ({
+      id,
       beat: cell.col / stepsPerBeat,
       length: 1 / stepsPerBeat,
       pitch: getMidiPitchForRow(cell.row),
       velocity: DEFAULT_NOTE_VELOCITY,
+      channel,
     }),
     findNoteAtCell: (notes: MidiEditorNote[], cell: MidiGridCell) => {
       const beat = cell.col / stepsPerBeat
-      return notes.findIndex(note => Math.abs(note.beat - beat) < 1e-6 && note.pitch === getMidiPitchForRow(cell.row))
+      return notes.find(note => Math.abs(note.beat - beat) < 1e-6 && note.pitch === getMidiPitchForRow(cell.row))
     },
+    findNoteById: (notes: MidiEditorNote[], id: string) => notes.find((note) => note.id === id),
     noteDurationSeconds: (lengthBeats: number, maxSeconds: number) => Math.min(maxSeconds, lengthBeats * secondsPerBeat),
     pointerStep: (container: HTMLElement, event: PointerEvent) => {
       const rect = container.getBoundingClientRect()
@@ -140,7 +145,8 @@ export const createMidiEditorGrid = (
         pitch: getMidiPitchForRow(cell.row),
       }
     },
-    replaceNote,
+    replaceNoteById,
+    removeNoteById,
   }
 }
 
@@ -176,6 +182,7 @@ const midiNotesEqual = (a: MidiEditorNote, b: MidiEditorNote) => (
   && a.length === b.length
   && a.pitch === b.pitch
   && a.velocity === b.velocity
+  && a.channel === b.channel
 )
 
 const hasStartedMidiNoteDrag = (
@@ -185,8 +192,12 @@ const hasStartedMidiNoteDrag = (
   startRow: number,
 ) => Math.abs(pointerStep - startPointerStep) >= 0.25 || Math.abs(row - startRow) >= 0.5
 
-const replaceNote = (
+const replaceNoteById = (
   notes: MidiEditorNote[],
-  index: number,
+  id: string,
   note: MidiEditorNote,
-) => notes.map((current, currentIndex) => currentIndex === index ? note : current)
+) => notes.map((current) => current.id === id ? note : current)
+
+const removeNoteById = (notes: MidiEditorNote[], id: string) => (
+  notes.filter((note) => note.id !== id)
+)

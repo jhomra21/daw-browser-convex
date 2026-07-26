@@ -1,7 +1,9 @@
-import { buildLocalClip, createManyClips } from '~/lib/clip-create'
+import { buildLocalClip } from '~/lib/clip-create'
+import { isProjectControlError, isProjectControlRevisionConflict, type ProjectControlClient } from '~/lib/project-control-client'
+import type { ControlActionV1, ControlCommitRequestV1 } from '@daw-browser/control'
+import { flushMidiProjectWrites } from '~/lib/midi/editor-persistence'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import type { convexApi, convexClient } from '~/lib/convex'
-import { buildSharedClipCreateManyOperation, publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { AUDIO_EFFECT_ORDER, assert, assertDefined, trackCreationCollapsed, type AutomationEnvelope } from '@daw-browser/shared'
@@ -10,6 +12,7 @@ import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import { applyTrackClipCreateEntry, applyTrackDeleteEntry } from './track-entry-executors'
+import { flushSharedOutboxOperation, readQueuedClipDeletionRecoveryIds } from '~/lib/shared-outbox'
 
 import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
 import type { EffectParamsByEffect, EffectType, HistoryEntry } from './types'
@@ -59,6 +62,8 @@ export type Deps = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string, scope?: OptimisticGrantScope | null) => void
+  persistHistory?: () => void
+  controlClient?: ProjectControlClient
   actions: {
     insertLocalTrack: (track: Track, index: number) => void
     removeLocalTrack: (trackId: Track['id']) => void
@@ -70,6 +75,8 @@ export type Deps = {
     commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
     commitClipFades: (clipId: string, fades: NonNullable<Track['clips'][number]['fades']>) => void
     rescheduleChangedClips: (clipIds: string[]) => void
+    rescheduleTimeline?: () => void
+    refreshLocalTimeline?: () => Promise<void>
     cancelTrackVolumeWrite: (trackId: Track['id']) => void
     cancelTrackRoutingWrite: (trackId: Track['id']) => void
     cancelTrackMixWrite: (trackId: Track['id']) => void
@@ -471,6 +478,48 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
       clip,
     }
   })
+  if (!isLocalHistoryProject(deps)) {
+    const persistedRecoveryIdsByOperation = new Map<string, Map<string, string>>()
+    for (const item of items) {
+      const { recoveryId, recoveryOperationId, recoverySourceClipId } = item.clip
+      if (recoveryId || !recoveryOperationId || !recoverySourceClipId) continue
+      let recoveryIds = persistedRecoveryIdsByOperation.get(recoveryOperationId)
+      if (!recoveryIds) {
+        recoveryIds = readQueuedClipDeletionRecoveryIds(deps.projectId, deps.userId, recoveryOperationId)
+        persistedRecoveryIdsByOperation.set(recoveryOperationId, recoveryIds)
+      }
+      const persistedRecoveryId = recoveryIds.get(recoverySourceClipId)
+      if (persistedRecoveryId) item.clip.recoveryId = persistedRecoveryId
+    }
+    const pendingOperationIds = new Set(
+      items.flatMap((item) => item.clip.recoveryId || !item.clip.recoveryOperationId ? [] : [item.clip.recoveryOperationId]),
+    )
+    for (const operationId of pendingOperationIds) {
+      const flushed = await flushSharedOutboxOperation(deps.projectId, deps.userId, operationId)
+      if (flushed.status !== 'applied') {
+        throw new Error('Cloud clip deletion recovery is still pending.')
+      }
+      const recoveryIds = readQueuedClipDeletionRecoveryIds(deps.projectId, deps.userId, operationId)
+      if (typeof flushed.result === 'object' && flushed.result !== null && 'recoveries' in flushed.result && Array.isArray(flushed.result.recoveries)) {
+        for (const recovery of flushed.result.recoveries) {
+          if (
+            typeof recovery === 'object'
+            && recovery !== null
+            && 'sourceClipId' in recovery
+            && 'recoveryId' in recovery
+            && typeof recovery.sourceClipId === 'string'
+            && typeof recovery.recoveryId === 'string'
+          ) recoveryIds.set(recovery.sourceClipId, recovery.recoveryId)
+        }
+      }
+      for (const item of items) {
+        if (item.clip.recoveryOperationId !== operationId || !item.clip.recoverySourceClipId) continue
+        const recoveryId = recoveryIds.get(item.clip.recoverySourceClipId)
+        if (!recoveryId) throw new Error('Cloud clip deletion recovery is still pending.')
+        item.clip.recoveryId = recoveryId
+      }
+    }
+  }
 
   const recreatedClipIdsByRef = new Map((entry.data.recreatedClips ?? []).map((item) => [item.clipRef, item.clipId]))
   const pendingItems = items.filter((item) => !recreatedClipIdsByRef.has(item.clip.clipRef))
@@ -482,19 +531,26 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
         recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
       }
     } else {
-      const created = await createManyClips({
-        projectId: deps.projectId,
-        items: pendingItems,
-        createMany: async (clipPayloads, operationId) => {
-          const result = await publishSharedTimelineOperation(
-            deps.projectId,
-            buildSharedClipCreateManyOperation({ items: clipPayloads }, operationId),
-          )
-          return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
-        },
-      })
-      for (let indexValue = 0; indexValue < created.length; indexValue++) {
-        recreatedClipIdsByRef.set(pendingItems[indexValue].clip.clipRef, created[indexValue].clipId)
+      for (const item of pendingItems) {
+        if (!item.clip.recoveryId) {
+          if (!entry.data.legacyRecreate) {
+            throw new Error('Cloud clip deletion history is missing its recovery descriptor.')
+          }
+          const clipId = await createHistoryClip(deps, item.trackId, item.clip)
+          assert(clipId, 'Failed to recreate legacy cloud clip')
+          recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
+          continue
+        }
+        const result = await deps.convexClient.mutation(deps.convexApi.clips.restoreDeleted, {
+          recoveryId: item.clip.recoveryId,
+        })
+        if (
+          (result.status !== 'applied' && result.status !== 'noop')
+          || typeof result.clipId !== 'string'
+        ) {
+          throw new Error('Failed to restore deleted cloud clip.')
+        }
+        recreatedClipIdsByRef.set(item.clip.clipRef, result.clipId)
       }
     }
   }
@@ -524,6 +580,134 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   syncHistoryClipCreateEntryIds(deps.getHistoryEntries(), recreatedClipIdsByRef)
 }
 
+async function applyControlRangeDeleteEntry(
+  entry: Extract<HistoryEntry, { type: 'control-range-delete' }>,
+  deps: Deps,
+  direction: HistoryDirection,
+) {
+  const control = requireResolved(deps.controlClient, 'Control client is unavailable for range deletion history.')
+  await flushMidiProjectWrites(deps.projectId)
+  if (direction === 'undo') {
+    if (entry.data.restoreOperationId === undefined || entry.data.restoreExpectedRevision === undefined) {
+      const snapshot = await control.snapshotV2()
+      entry.data.restoreOperationId = crypto.randomUUID()
+      entry.data.restoreExpectedRevision = snapshot.project.revision
+      deps.persistHistory?.()
+    }
+    const restoreRequest = (): ControlCommitRequestV1 => ({
+      version: 'v1',
+      projectId: deps.projectId,
+      expectedRevision: entry.data.restoreExpectedRevision,
+      idempotencyKey: entry.data.restoreOperationId!,
+      actions: [{ kind: 'recovery.restore', recovery: { id: entry.data.recoveryId } }],
+    })
+    let restored
+    try {
+      restored = await control.commitV1(restoreRequest())
+    } catch (error) {
+      if (isProjectControlRevisionConflict(error)) {
+        entry.data.restoreOperationId = undefined
+        entry.data.restoreExpectedRevision = undefined
+        const snapshot = await control.snapshotV2()
+        entry.data.restoreOperationId = crypto.randomUUID()
+        entry.data.restoreExpectedRevision = snapshot.project.revision
+        deps.persistHistory?.()
+        try {
+          restored = await control.commitV1(restoreRequest())
+        } catch (retryError) {
+          if (isProjectControlRevisionConflict(retryError)) {
+            entry.data.restoreOperationId = undefined
+            entry.data.restoreExpectedRevision = undefined
+            deps.persistHistory?.()
+          }
+          throw retryError
+        }
+      } else if (isProjectControlError(error)) {
+        throw error
+      } else {
+        restored = await control.commitV1(restoreRequest())
+      }
+    }
+    if (!restored.applied) throw new Error('Range deletion undo did not restore the project.')
+    entry.data.restoreOperationId = undefined
+    entry.data.restoreExpectedRevision = undefined
+    deps.persistHistory?.()
+    if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
+    deps.actions.rescheduleTimeline?.()
+    return
+  }
+
+  const index = buildRefIndex(deps)
+  const trackIds = entry.data.trackRefs.map((trackRef) => (
+    requireResolved(resolveTrackId(index, trackRef), 'Track not found for range deletion history')
+  ))
+  const action: Extract<ControlActionV1, { kind: 'timeline.range.delete' }> = {
+    kind: 'timeline.range.delete',
+    tracks: trackIds.map((id) => ({ source: 'persisted', id })),
+    startSec: entry.data.startSec,
+    endSec: entry.data.endSec,
+  }
+  if (
+    entry.data.deleteOperationId === undefined
+    || entry.data.deleteExpectedRevision === undefined
+    || entry.data.deleteApprovalToken === undefined
+  ) {
+    const snapshot = await control.snapshotV2()
+    const preview = await control.previewV1({
+      version: 'v1',
+      projectId: deps.projectId,
+      expectedRevision: snapshot.project.revision,
+      actions: [action],
+    })
+    if (!preview.applied) throw new Error('Range deletion redo did not change the project.')
+    const approval = await control.requestApprovalV1({
+      version: 'v1',
+      projectId: deps.projectId,
+      expectedRevision: snapshot.project.revision,
+      actions: [action],
+    })
+    entry.data.deleteOperationId = crypto.randomUUID()
+    entry.data.deleteExpectedRevision = snapshot.project.revision
+    entry.data.deleteApprovalToken = approval.approvalToken
+    deps.persistHistory?.()
+  }
+  const commitRequest = (): ControlCommitRequestV1 => ({
+    version: 'v1',
+    projectId: deps.projectId,
+    expectedRevision: entry.data.deleteExpectedRevision,
+    idempotencyKey: entry.data.deleteOperationId!,
+    approvalToken: entry.data.deleteApprovalToken,
+    actions: [action],
+  })
+  let committed
+  try {
+    committed = await control.commitV1(commitRequest())
+  } catch (error) {
+    if (isProjectControlRevisionConflict(error)) {
+      entry.data.deleteOperationId = undefined
+      entry.data.deleteExpectedRevision = undefined
+      entry.data.deleteApprovalToken = undefined
+      deps.persistHistory?.()
+      return await applyControlRangeDeleteEntry(entry, deps, direction)
+    }
+    if (isProjectControlError(error)) throw error
+    committed = await control.commitV1(commitRequest())
+  }
+  const recovery = committed.recoveries.find((candidate) => (
+    candidate.actionIndex === 0 && candidate.kind === 'timeline.range.delete'
+  ))
+  if (!recovery) throw new Error('Range deletion redo did not return a recovery descriptor.')
+  entry.data.recoveryId = recovery.id
+  entry.data.restoreOperationId = undefined
+  entry.data.restoreExpectedRevision = undefined
+  entry.data.deleteOperationId = undefined
+  entry.data.deleteExpectedRevision = undefined
+  entry.data.deleteApprovalToken = undefined
+  deps.persistHistory?.()
+  if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
+  deps.actions.rescheduleTimeline?.()
+}
+
 async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: HistoryDirection) {
   assert(entry.projectId === deps.projectId, `History entry room mismatch: expected ${deps.projectId}, received ${entry.projectId}`)
   const { projectId, userId } = deps
@@ -535,15 +719,40 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const trackDeleteContext = direction === 'redo'
         ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
         : null
-      for (const child of entries) {
-        if (trackDeleteContext && child.type === 'track-delete') {
-          await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
-          continue
+      const completed: HistoryEntry[] = []
+      try {
+        for (const child of entries) {
+          if (trackDeleteContext && child.type === 'track-delete') {
+            await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
+          } else {
+            await execHistoryEntry(child, deps, direction)
+          }
+          completed.push(child)
         }
-        await execHistoryEntry(child, deps, direction)
+      } catch (error) {
+        const compensationErrors: unknown[] = []
+        const inverseDirection = direction === 'undo' ? 'redo' : 'undo'
+        for (const child of completed.reverse()) {
+          try {
+            await execHistoryEntry(child, deps, inverseDirection)
+          } catch (compensationError) {
+            compensationErrors.push(compensationError)
+          }
+        }
+        if (compensationErrors.length > 0) {
+          throw new AggregateError(
+            [error, ...compensationErrors],
+            'Section history replay failed and compensation was incomplete.',
+          )
+        }
+        throw error
       }
       return
     }
+
+    case 'control-range-delete':
+      await applyControlRangeDeleteEntry(entry, deps, direction)
+      return
 
     case 'clip-create': {
       const index = buildRefIndex(deps)
@@ -551,9 +760,17 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         const clipId = requireResolved(resolveClipId(index, entry.data.clip.clipRef) ?? entry.data.clip.currentId, 'Clip not found for clip-create undo')
         const trackIdByClipId = createTimelineTrackIndex(deps.getTracks()).clipTrackIdById
         requireResolved(trackIdByClipId.get(clipId) ?? resolveTrackId(index, entry.data.trackRef), 'Track not found for clip-create undo')
-        await removeHistoryClipIdsOrThrow(deps, [clipId], 'Failed to remove clip during clip-create undo')
+        const deleteOperationId = entry.data.clip.deleteOperationId ?? crypto.randomUUID()
+        entry.data.clip.deleteOperationId = deleteOperationId
+        await removeHistoryClipIdsOrThrow(
+          deps,
+          [clipId],
+          deleteOperationId,
+          'Failed to remove clip during clip-create undo',
+        )
         deps.actions.removeLocalClips([clipId])
         entry.data.clip.currentId = undefined
+        entry.data.clip.deleteOperationId = undefined
         return
       }
 
@@ -579,9 +796,23 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       }
       const ids = (entry.data.recreatedClips ?? []).map((item) => item.clipId)
       if (ids.length === 0) return
-      await removeHistoryClipIdsOrThrow(deps, ids, 'Failed to remove clips during clip-delete redo')
+      const deleteOperationId = entry.data.deleteOperationId ?? crypto.randomUUID()
+      entry.data.deleteOperationId = deleteOperationId
+      const recoveryIdsByClipId = await removeHistoryClipIdsOrThrow(
+        deps,
+        ids,
+        deleteOperationId,
+        'Failed to remove clips during clip-delete redo',
+      )
       deps.actions.removeLocalClips(ids)
+      for (const item of entry.data.items) {
+        const recreated = (entry.data.recreatedClips ?? []).find((entry) => entry.clipRef === item.clip.clipRef)
+        if (!recreated) continue
+        const recoveryId = recoveryIdsByClipId.get(recreated.clipId)
+        if (recoveryId) item.clip.recoveryId = recoveryId
+      }
       entry.data.recreatedClips = []
+      entry.data.deleteOperationId = undefined
       return
     }
 

@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import {
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { controlCapabilitiesV1 } from "@daw-browser/control"
+import { controlCapabilitiesV1, controlCapabilitiesV2 } from "@daw-browser/control"
 import type { ControlService } from "@daw-browser/control-mcp"
 import type { ApiBindings } from "../app-types"
 import type { ControlBearer } from "../control-oauth"
@@ -43,10 +43,14 @@ const snapshot = {
 
 const controlService = (overrides: Partial<ControlService> = {}): ControlService => ({
   capabilities: async () => controlCapabilitiesV1,
+  capabilitiesV2: async () => controlCapabilitiesV2,
   snapshot: async () => snapshot,
+  snapshotV2: async () => ({ ...snapshot, version: "v2" }),
   preview: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
   commit: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, idempotencyReplay: false, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
+  requestApproval: async () => ({ version: "v1", approvalToken: "a".repeat(32), requestDigest: "0".repeat(64), baseRevision: 1, actionIndexes: [0], expiresAt: 2 }),
   history: async () => ({ entries: [], continueCursor: "cursor-1", isDone: true }),
+  recoveries: async () => ({ entries: [], continueCursor: "cursor-1", isDone: true }),
   ...overrides,
 })
 
@@ -116,6 +120,37 @@ describe("hosted control MCP route", () => {
       expect(response.status).toBe(200)
       expect((await response.json()).result.isError).not.toBeTrue()
     }
+  })
+
+  test("serves static V2 capabilities without a gateway while keeping V2 snapshots gateway-backed", async () => {
+    let gatewayCalls = 0
+    let snapshotCalls = 0
+    const application = new Hono<ApiBindings>()
+    registerControlMcpRoutes(application, {
+      resolveBearer: async () => readBearer,
+      createGateway: async () => {
+        gatewayCalls += 1
+        return controlService({
+          snapshotV2: async () => {
+            snapshotCalls += 1
+            return { ...snapshot, version: "v2" }
+          },
+        })
+      },
+    })
+
+    const capabilitiesResponse = await application.request(mcpRequest(call("control_capabilities_v2", {})))
+    expect(capabilitiesResponse.status).toBe(200)
+    expect((await capabilitiesResponse.json()).result.structuredContent).toEqual(controlCapabilitiesV2)
+    expect(gatewayCalls).toBe(0)
+
+    const snapshotResponse = await application.request(mcpRequest(call("control_snapshot_v2", {
+      projectId: "project-1",
+    })))
+    expect(snapshotResponse.status).toBe(200)
+    expect((await snapshotResponse.json()).result.structuredContent.version).toBe("v2")
+    expect(gatewayCalls).toBe(1)
+    expect(snapshotCalls).toBe(1)
   })
 
   test("requires a bearer rather than a cookie and sends the OAuth challenge", async () => {

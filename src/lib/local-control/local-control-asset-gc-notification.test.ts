@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto'
-import { expect, mock, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import { createLocalProject, openLocalProjectDb } from '~/lib/local-project-db'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
+import { runLocalControlAssetGc } from './local-control-asset-gc'
+import { createLocalControlService } from './local-control-service'
 
 const actor = { subject: 'local:00000000-0000-4000-8000-000000000000' }
 let failingStoragePath: string | undefined
@@ -13,11 +15,6 @@ const localAssets = () => ({
   },
 })
 
-mock.module('~/lib/local-assets', localAssets)
-
-const { runLocalControlAssetGc } = await import('./local-control-asset-gc')
-const { createLocalControlService } = await import('./local-control-service')
-
 const createExpiredAssetRecovery = async (
   assetId: string,
   existing?: {
@@ -27,7 +24,7 @@ const createExpiredAssetRecovery = async (
 ) => {
   const project = existing?.project ?? await createLocalProject(`GC notification ${crypto.randomUUID()}`)
   const db = existing?.db ?? await openLocalProjectDb(project.id)
-  const service = createLocalControlService({ actor })
+  const service = createLocalControlService({ actor, removeAssetFile: localAssets().removeLocalAssetFileUnlocked })
   await db.put('assets', {
     id: assetId,
     name: `${assetId}.wav`,
@@ -76,7 +73,9 @@ test('isolates a failed GC job and notifies after another job finalizes', async 
   let changes = 0
   const unsubscribe = subscribeToLocalProjectChanges(first.project.id, () => { changes += 1 })
   try {
-    expect(await runLocalControlAssetGc(first.project.id)).toEqual({ finalized: true })
+    expect(await runLocalControlAssetGc(first.project.id, {
+      removeAssetFile: localAssets().removeLocalAssetFileUnlocked,
+    })).toEqual({ finalized: true })
     expect(changes).toBe(1)
     expect(await first.db.get('controlAssetGc', first.jobId)).toBeUndefined()
     expect(await first.db.get('controlRecoveries', first.recoveryId)).toBeUndefined()

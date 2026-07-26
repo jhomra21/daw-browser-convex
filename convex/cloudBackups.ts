@@ -6,6 +6,7 @@ import { projectManifestValidator } from "./projectManifestValidator";
 import {
   assertProjectManifestBaseIntegrity,
   assertProjectManifestPublishIntegrity,
+  normalizeProjectManifest,
   readProjectManifestCloudKeys,
   type ProjectManifest,
 } from "@daw-browser/shared";
@@ -86,8 +87,9 @@ export const checkConflict = query({
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
-    assertConflictManifest(projectId, manifest);
-    return readBackupConflict(await latestBackup(ctx, projectId), manifest, baseManifestVersion);
+    const normalizedManifest = normalizeProjectManifest(manifest);
+    assertConflictManifest(projectId, normalizedManifest);
+    return readBackupConflict(await latestBackup(ctx, projectId), normalizedManifest, baseManifestVersion);
   },
 });
 
@@ -103,13 +105,15 @@ export const upsertLatest = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"]);
     await assertProjectNotDeleting(ctx, projectId);
-    assertPublishManifest(projectId, manifest);
+    const normalizedManifest = normalizeProjectManifest(manifest);
+    assertPublishManifest(projectId, normalizedManifest);
     const existing = await latestBackup(ctx, projectId);
-    const conflict = readBackupConflict(existing, manifest, baseManifestVersion);
+    const existingManifest = existing ? normalizeProjectManifest(existing.manifest) : undefined;
+    const conflict = readBackupConflict(existing, normalizedManifest, baseManifestVersion);
     if (conflictAction === "detect" && conflict) {
       return { ok: false, conflict };
     }
-    const supersededCloudKeys = readSupersededCloudKeys(projectId, existing?.manifest, manifest);
+    const supersededCloudKeys = readSupersededCloudKeys(projectId, existingManifest, normalizedManifest);
     const queuedDeletedCloudKeys = [...new Set([...(pendingDeletedCloudKeys ?? []), ...supersededCloudKeys])];
     const project = await requireProjectRow(ctx, projectId);
     await enqueueR2DeleteRows(ctx, {
@@ -121,12 +125,12 @@ export const upsertLatest = mutation({
     const row = {
       projectId,
       ownerUserId: userId,
-      manifest,
+      manifest: normalizedManifest,
       manifestVersion,
       updatedAt: now,
-      manifestUpdatedAt: Number(manifest.updatedAt) || 0,
-      entityCount: Number(manifest.entityCount) || 0,
-      assetCount: Number(manifest.assetCount) || 0,
+      manifestUpdatedAt: Number(normalizedManifest.updatedAt) || 0,
+      entityCount: Number(normalizedManifest.entityCount) || 0,
+      assetCount: Number(normalizedManifest.assetCount) || 0,
     };
     if (existing) {
       await ctx.db.patch(existing._id, row);

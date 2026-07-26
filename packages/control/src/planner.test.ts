@@ -61,6 +61,209 @@ const snapshot = (): any => ({
 });
 
 const persisted = (id: string) => ({ source: "persisted", id });
+const mappings = (count: number) => Array.from({ length: count }, (_, index) => ({
+  id: `mapping-${index}`,
+  source: { kind: "cc" as const, controller: index },
+  target: { parameterId: "volume" },
+  outputMin: 0,
+  outputMax: 1,
+}));
+
+test("limits MIDI mappings per clip rather than across actions", () => {
+  const base = snapshot()
+  base.clips[0].midi = { wave: "sine", notes: [], cc: [], pitchBends: [], channelPressure: [], polyPressure: [], mappings: [] }
+  expect(planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [
+      { kind: "clip.midi.set", clip: persisted("clip-1"), wave: "sine", notes: [], mappings: mappings(40) },
+      { kind: "clip.midi.set", clip: persisted("clip-1"), wave: "sine", notes: [], mappings: mappings(40) },
+    ],
+  }).applied).toBe(true)
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "clip.midi.set", clip: persisted("clip-1"), wave: "sine", notes: [], mappings: mappings(65) }],
+  })).toThrow(expect.objectContaining({ code: "limit-exceeded", actionIndex: 0 }))
+})
+
+test("validates every MIDI mapping against the destination track when moving a clip", () => {
+  const base = snapshot()
+  base.tracks.push({
+    ...base.tracks[0],
+    id: "track-2",
+    name: "Destination",
+    index: 1,
+  })
+  base.clips[0].midi = {
+    wave: "sine",
+    notes: [],
+    cc: [],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [{
+      id: "volume",
+      source: { kind: "cc", controller: 1 },
+      target: { parameterId: "volume" },
+      outputMin: 0,
+      outputMax: 1,
+    }],
+  }
+  expect(planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "clip.move", clip: persisted("clip-1"), track: persisted("track-2"), startSec: 1 }],
+  }).snapshot.clips[0]?.trackId).toBe("track-2")
+
+  base.clips[0].midi.mappings = [{
+    id: "source-effect",
+    source: { kind: "cc", controller: 1 },
+    target: { parameterId: "gain", effectInstanceId: "audio-effect:one" },
+    outputMin: 0,
+    outputMax: 1,
+  }]
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "clip.move", clip: persisted("clip-1"), track: persisted("track-2"), startSec: 1 }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }))
+})
+
+test("plans an atomic selected-track range split with automation boundaries", () => {
+  const base = snapshot()
+  base.version = "v2"
+  base.clips[0].duration = 8
+  base.automation = [{
+    target: { trackId: "track-1" },
+    parameterId: "volume",
+    enabled: true,
+    points: [
+      { id: "a", timeSec: 1, value: 0, interpolation: "linear" },
+      { id: "b", timeSec: 3, value: 1, interpolation: "linear" },
+      { id: "c", timeSec: 7, value: 0, interpolation: "linear" },
+    ],
+  }]
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "timeline.range.delete",
+      tracks: [persisted("track-1")],
+      startSec: 2,
+      endSec: 6,
+    }],
+  })
+  const action = plan.actions[0]
+  expect(action?.changed).toBe(true)
+  expect(action?.timelineRangeDelete?.clipUpdates[0]?.after.duration).toBe(2)
+  expect(action?.timelineRangeDelete?.clipCreates[0]?.after.startSec).toBe(6)
+  expect(action?.timelineRangeDelete?.automationUpdates[0]?.after.points.map((point) => point.timeSec)).toEqual([1, 2, 6, 7])
+  expect(plan.snapshot.clips).toHaveLength(2)
+})
+
+test("keeps expanded MIDI unchanged for a matching legacy action", () => {
+  const base = snapshot()
+  base.clips[0].midi = {
+    wave: "sine",
+    gain: 0.5,
+    inputChannel: 2,
+    notes: [{ id: "note-1", beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+    cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 2 }],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [{ id: "mapping-1", source: { kind: "cc", controller: 1, channel: 2 }, target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }],
+  }
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "clip.midi.set",
+      clip: persisted("clip-1"),
+      wave: "sine",
+      gain: 0.5,
+      notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
+    }],
+  })
+  expect(plan.applied).toBe(false)
+  expect(plan.snapshot.clips[0]?.midi).toEqual(base.clips[0].midi)
+})
+
+test("preserves expanded MIDI when an action note supplies an ID or channel", () => {
+  const base = snapshot()
+  base.clips[0].midi = {
+    wave: "sine",
+    inputChannel: 2,
+    notes: [{ id: "note-1", beat: 0, length: 1, pitch: 60, channel: 2 }],
+    cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 2 }],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [],
+  }
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "clip.midi.set",
+      clip: persisted("clip-1"),
+      wave: "sine",
+      notes: [{ id: "replacement-note", beat: 1, length: 1, pitch: 61, channel: 3 }],
+    }],
+  })
+  expect(plan.snapshot.clips[0]?.midi).toEqual({
+    wave: "sine",
+    inputChannel: 2,
+    notes: [{ id: "replacement-note", beat: 1, length: 1, pitch: 61, channel: 3 }],
+    cc: [{ id: "cc-1", beat: 0, controller: 1, value: 0.5, channel: 2 }],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [],
+  })
+})
+
+test("reports MIDI resolver failures as bounded action-scoped planner errors", () => {
+  const base = snapshot()
+  base.clips[0].midi = {
+    wave: "sine",
+    notes: [{ id: "note-1", beat: 0, length: 1, pitch: 60 }],
+    cc: [],
+    pitchBends: [],
+    channelPressure: [],
+    polyPressure: [],
+    mappings: [],
+  }
+  const request = {
+    projectId: "project-1",
+    actions: [
+      { kind: "project.rename", name: "Earlier action" },
+      {
+        kind: "clip.midi.set",
+        clip: persisted("clip-1"),
+        wave: "unsupported-wave",
+        notes: [{ beat: 0, length: 1, pitch: 60 }],
+      },
+    ],
+  }
+  expect(() => planControlRequestV1(base, request)).toThrow(expect.objectContaining({
+    code: "validation",
+    actionIndex: 1,
+  }))
+  expect(() => planControlRequestV1(base, {
+    ...request,
+    actions: [
+      request.actions[0],
+      {
+        kind: "clip.midi.set",
+        clip: persisted("clip-1"),
+        wave: "sine",
+        notes: Array.from({ length: 501 }, (_, index) => ({
+          beat: index,
+          length: 1,
+          pitch: 60,
+        })),
+      },
+    ],
+  })).toThrow(expect.objectContaining({
+    code: "limit-exceeded",
+    actionIndex: 1,
+  }))
+})
 
 test("traces canonically ordered snapshots for every action and the final plan", () => {
   const base = snapshot()
@@ -140,6 +343,37 @@ test("does not require approval for create-then-delete net no-ops", () => {
   expect(controlApprovalRequirementV1(plan, "a".repeat(64)).required).toBe(false);
 });
 
+test("requires approval to delete an asset restored earlier in the request", () => {
+  const plan = planControlRequestV1(snapshot(), {
+    projectId: "project-1",
+    actions: [
+      { kind: "recovery.restore", recovery: { id: "asset-recovery" } },
+      { kind: "asset.delete", asset: persisted("restored-asset") },
+    ],
+  }, new Map([["asset-recovery", {
+    payload: {
+      kind: "asset.delete",
+      data: {
+        asset: {
+          assetKey: "restored-asset",
+          name: "Restored",
+          sourceKind: "upload",
+          mimeType: "audio/wav",
+          sizeBytes: 1,
+          contentSha256: "a".repeat(64),
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      },
+    },
+  }]]));
+  expect(controlApprovalRequirementV1(plan, "a".repeat(64))).toMatchObject({
+    required: true,
+    actionIndexes: [1],
+    actionKinds: ["asset.delete"],
+  });
+});
+
 test("rejects track deletion exceeding dedicated recovery limits before approval", () => {
   const base = snapshot();
   base.tracks = Array.from({ length: controlLimitsV1.maxRecoveryEntities + 1 }, (_, index) => ({
@@ -160,6 +394,19 @@ test("rejects track deletion exceeding dedicated recovery limits before approval
     projectId: "project-1",
     actions: [{ kind: "track.delete", track: persisted("track-0") }],
   })).toThrow();
+});
+
+test("plans track deletion for a legacy MIDI clip beyond new write event limits", () => {
+  const base = snapshot();
+  base.clips[0].midi = {
+    wave: "sine",
+    notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+    cc: [{ beat: 0, controller: 1, value: 0 }],
+  };
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.delete", track: persisted("track-1") }],
+  })).not.toThrow();
 });
 
 test("requires approval when a client-ref deletion cascades persisted descendants", () => {
@@ -282,6 +529,34 @@ test("validates recovered audio clip sources against the projected asset set", (
     actions: [{ kind: "recovery.restore", recovery: { id: "track" } }],
   }, new Map([["track", trackRecovery]]))).toThrow('Asset "asset-1" was not found.')
 });
+
+test("restores a historical 501-note MIDI recovery without V2 write validation", () => {
+  const base = snapshot()
+  base.clips = []
+  const recovery = {
+    payload: {
+      kind: "clip.delete",
+      data: {
+        clipId: "clip-1",
+        clip: {
+          projectId: "project-1",
+          trackId: "track-1",
+          startSec: 0,
+          duration: 501,
+          midi: {
+            wave: "sine",
+            notes: Array.from({ length: 501 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+          },
+        },
+      },
+    },
+  }
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "recovery.restore", recovery: { id: "recovery-1" } }],
+  }, new Map([["recovery-1", recovery]]))
+  expect(plan.snapshot.clips[0]?.midi?.notes).toHaveLength(501)
+})
 
 test("normalizes fades when shrinking a clip and preserves omitted offsets", () => {
   const plan = planControlRequestV1(snapshot(), {

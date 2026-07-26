@@ -18,6 +18,15 @@ export const utilityWorklet = {
   modulePath: 'audio-worklets/daw-utility-processor-v1.js',
 }
 
+export const portableAudioCoreWorklet = {
+  processorName: 'daw-portable-audio-core-processor-v1',
+  modulePath: 'audio-worklets/daw-portable-audio-core-processor-v1.js',
+}
+
+export const portableAudioCoreWasmManifest = {
+  manifestPath: 'audio-core/daw-audio-core.manifest.json',
+}
+
 export const autoFilterWorklet = {
   processorName: 'daw-autofilter-processor',
   modulePath: 'audio-worklets/daw-autofilter-processor-v1.js',
@@ -56,4 +65,8 @@ export const spectralWorklet = {
 export function resolveWorkletModuleUrl(modulePath: string, baseUrl = import.meta.env.BASE_URL ?? '/'): string {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
   return `${normalizedBase}${modulePath}`
+}
+
+export function resolvePortableWasmManifestUrl(baseUrl = import.meta.env.BASE_URL ?? '/'): string {
+  return resolveWorkletModuleUrl(portableAudioCoreWasmManifest.manifestPath, baseUrl)
 }

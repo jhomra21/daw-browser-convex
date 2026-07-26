@@ -1,0 +1,16 @@
+{
+  "name": "@daw-browser/external-plugins",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/plugin-host-protocol": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

@@ -50,6 +50,7 @@ type ClipDragOptions = {
   setPreviewClipsByTrack: (previews: Map<TrackId, Clip[]>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   canWriteClip: (clipId: string) => boolean
+  canEditClip?: (clipId: string) => boolean
   selection: TimelineSelectionController
   projectId: Accessor<string>
   userId: () => string
@@ -99,6 +100,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     setPreviewClipsByTrack,
     commitClipMoves,
     canWriteClip,
+    canEditClip,
     selection,
     projectId,
     userId,
@@ -239,6 +241,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
   const onClipPointerDown = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     if (event.button !== 0) return
+    if (canEditClip && !canEditClip(clipId)) return
     event.preventDefault()
     event.stopPropagation()
     const currentTracks = visiblePlacementTracks()

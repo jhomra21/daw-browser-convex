@@ -1,9 +1,39 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { createLocalProject, openLocalProjectDb } from '~/lib/local-project-db'
+import { canonicalRecoveryPayloadV1, hashRecoveryPayloadSyncV1 } from '@daw-browser/control'
+import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
+import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { createLocalControlService, LocalControlServiceError } from './local-control-service'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 
 const actor = { subject: 'local:00000000-0000-4000-8000-000000000000' }
+
+test('flushes pending MIDI writes before acquiring the local asset lock for a generic commit', async () => {
+  const project = await createLocalProject(`MIDI flush ${crypto.randomUUID()}`)
+  const nested = createLocalControlService({ actor, excludePendingWriteKinds: ['midi'] })
+  let flushed = 0
+  const unregister = registerPendingLocalProjectWriteFlusher('midi', project.id, async () => {
+    flushed += 1
+    await nested.commit({
+      version: 'v1',
+      projectId: project.id,
+      idempotencyKey: 'midi-runtime-write',
+      actions: [{ kind: 'project.rename', name: 'MIDI flushed' }],
+    })
+  })
+  try {
+    const service = createLocalControlService({ actor })
+    await service.commit({
+      version: 'v1',
+      projectId: project.id,
+      idempotencyKey: 'generic-commit',
+      actions: [{ kind: 'project.rename', name: 'Committed' }],
+    })
+    expect(flushed).toBeGreaterThanOrEqual(1)
+  } finally {
+    unregister()
+  }
+})
 
 class AvailabilityError extends Error {}
 
@@ -28,6 +58,136 @@ test('provides canonical local snapshot, preview, commit, and history with idemp
   expect(entry.actorSubject).toBe(actor.subject)
   expect(history.entries).toHaveLength(1)
   expect((await service.recoveries({ projectId: project.id, limit: 10 })).entries).toEqual([])
+})
+
+test('projects historical finite MIDI values through the local V1 snapshot', async () => {
+  const project = await createLocalProject(`Legacy local snapshot ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const track = await repository.createTrack({ id: 'legacy-instrument', kind: 'instrument' })
+  const db = await openLocalProjectDb(project.id)
+  const midi = {
+    wave: 'custom-legacy',
+    gain: 7,
+    notes: [{ beat: -2, length: -1, pitch: 200, velocity: 2 }],
+  }
+  await db.put('entities', createLocalProjectEntityRow('clip', 'legacy-midi-clip', {
+    id: 'legacy-midi-clip', trackId: track.id, historyRef: 'legacy-midi-clip',
+    name: 'Legacy MIDI', startSec: 0, duration: 1, color: 'clip-midi', midi,
+    createdAt: 1, updatedAt: 1,
+  }, 1))
+
+  expect((await createLocalControlService({ actor }).snapshot({ projectId: project.id }))
+    .clips[0]?.midi).toEqual(midi)
+})
+
+test('previews, approves, and commits restore-then-delete asset recovery with a canonical recapture', async () => {
+  const project = await createLocalProject(`Restore then delete asset ${crypto.randomUUID()}`)
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'restore-then-delete',
+    name: 'Recovered.wav',
+    mimeType: 'audio/wav',
+    sizeBytes: 1,
+    storagePath: 'recovered.wav',
+    sourceKind: 'upload',
+    contentHash: 'a'.repeat(64),
+    durationSec: 1,
+    sampleRate: 48_000,
+    channelCount: 2,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  const service = createLocalControlService({ actor })
+  const initialRequest = {
+    version: 'v1' as const,
+    projectId: project.id,
+    actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'restore-then-delete' } }],
+  }
+  const initialApproval = await service.requestApproval(initialRequest)
+  const initialCommit = await service.commit({
+    ...initialRequest,
+    idempotencyKey: 'restore-then-delete-initial',
+    approvalToken: initialApproval.approvalToken,
+  })
+  const recovery = initialCommit.recoveries[0]
+  if (!recovery) throw new Error('Expected asset recovery.')
+
+  const request = {
+    version: 'v1' as const,
+    projectId: project.id,
+    actions: [
+      { kind: 'recovery.restore' as const, recovery: { id: recovery.id } },
+      { kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'restore-then-delete' } },
+    ],
+  }
+  expect((await service.preview(request)).applied).toBe(true)
+  const approval = await service.requestApproval(request)
+  const committed = await service.commit({
+    ...request,
+    idempotencyKey: 'restore-then-delete-commit',
+    approvalToken: approval.approvalToken,
+  })
+  const recaptured = committed.recoveries[0]
+  if (!recaptured) throw new Error('Expected recaptured asset recovery.')
+  const row = await db.get('controlRecoveries', recaptured.id)
+  if (!row) throw new Error('Expected recaptured recovery row.')
+  expect(hashRecoveryPayloadSyncV1(row.payload)).toBe(row.payloadHash)
+  expect(await db.get('assets', 'restore-then-delete')).toBeUndefined()
+})
+
+test('lists and restores an unexpired stored V1 local clip recovery', async () => {
+  const project = await createLocalProject(`Stored V1 recovery ${crypto.randomUUID()}`)
+  const service = createLocalControlService({ actor })
+  const track = (await service.snapshot({ projectId: project.id })).tracks[0]
+  if (!track) throw new Error('Expected initial track.')
+  const payload = canonicalRecoveryPayloadV1({
+    version: 1,
+    kind: 'clip.delete',
+    data: {
+      clipId: 'legacy-local-clip',
+      ownership: { projectId: project.id, localActorSubject: actor.subject },
+      clip: {
+        projectId: project.id,
+        trackId: track.id,
+        startSec: 2,
+        duration: 3,
+        name: 'Stored local V1 clip',
+      },
+    },
+  })
+  const recoveryId = 'local-recovery:stored-v1'
+  const db = await openLocalProjectDb(project.id)
+  await db.put('controlRecoveries', {
+    id: recoveryId,
+    version: 1,
+    projectId: project.id,
+    actorSubject: actor.subject,
+    sourceActionIndex: 0,
+    kind: 'clip.delete',
+    payload,
+    payloadHash: hashRecoveryPayloadSyncV1(payload),
+    createdAt: Date.now() - 1_000,
+    expiresAt: Date.now() + 60_000,
+  })
+  expect((await service.recoveries({ projectId: project.id, limit: 10 })).entries)
+    .toEqual([expect.objectContaining({ id: recoveryId, kind: 'clip.delete' })])
+  const restored = await service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'stored-v1-recovery-restore',
+    actions: [{ kind: 'recovery.restore', recovery: { id: recoveryId } }],
+  })
+  expect(restored.restored[0]?.entities).toEqual([
+    expect.objectContaining({ entity: 'clip', sourceId: 'legacy-local-clip' }),
+  ])
+  expect((await service.snapshot({ projectId: project.id })).clips).toEqual([
+    expect.objectContaining({
+      trackId: track.id,
+      startSec: 2,
+      duration: 3,
+      name: 'Stored local V1 clip',
+    }),
+  ])
 })
 
 test('maps malformed inputs and duplicate recovery restores to parsed local errors', async () => {
@@ -266,13 +426,11 @@ test('rejects a new asset deletion at the operational GC ceiling without changin
     idempotencyKey: 'reject-gc-ceiling',
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'ceiling-asset' } }],
   }
-  const approval = await service.requestApproval({
+  await expect(service.requestApproval({
     version: request.version,
     projectId: request.projectId,
     actions: request.actions,
-  })
-  await expect(service.commit({ ...request, approvalToken: approval.approvalToken }))
-    .rejects.toMatchObject({ data: { code: 'limit-exceeded' } })
+  })).rejects.toMatchObject({ data: { code: 'limit-exceeded' } })
   expect(await db.count('controlAssetGc')).toBe(1_000)
   expect(await db.get('assets', 'ceiling-asset')).toBeDefined()
   expect((await service.snapshot({ projectId: project.id })).project.revision).toBe(initial.project.revision)

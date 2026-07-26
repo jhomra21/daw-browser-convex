@@ -2,8 +2,18 @@ import { api as convexApi } from '../../convex/_generated/api'
 import type { App } from '../app-types'
 import { parseJsonBody } from '../json-body'
 import { requireProjectRoleContextForApi } from '../project-access'
-import { sharedTimelineOperationSchema } from '@daw-browser/shared'
+import { parseSharedTimelineOperation, type SharedTimelineOperation } from '@daw-browser/shared'
 import { executeTimelineOperation, TimelineOperationTargetError } from '../timeline-operation-executor'
+import { z } from 'zod'
+
+export const parseTimelineOperationRequest = (
+  value: unknown,
+): SharedTimelineOperation | null => parseSharedTimelineOperation(value)
+
+const timelineOperationRequestSchema = () => z.preprocess(
+  parseTimelineOperationRequest,
+  z.custom<SharedTimelineOperation>((value) => value !== null),
+)
 
 export function registerTimelineOperationRoutes(app: App) {
   app.get('/api/projects/:projectId/timeline/full-view', async (c) => {
@@ -24,9 +34,13 @@ export function registerTimelineOperationRoutes(app: App) {
   app.post('/api/projects/:projectId/timeline/operations', async (c) => {
     try {
       const projectId = c.req.param('projectId')
+      if (!c.get('user')) return c.json({ error: 'Unauthorized' }, 401)
       const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
       if (!access) return c.json({ error: 'Forbidden' }, 403)
-      const operation = await parseJsonBody(c, sharedTimelineOperationSchema)
+      const operation = await parseJsonBody(
+        c,
+        timelineOperationRequestSchema(),
+      )
       if (!operation) return c.json({ error: 'Invalid timeline operation' }, 400)
 
       const result = await executeTimelineOperation({ convex: access.convex, projectId }, operation)
@@ -34,7 +48,7 @@ export function registerTimelineOperationRoutes(app: App) {
     } catch (error) {
       console.error('Timeline operation error', error)
       if (error instanceof TimelineOperationTargetError) {
-        return c.json({ error: error.message }, 400)
+        return c.json({ error: error.message }, error.status)
       }
       return c.json({ error: 'Timeline operation failed' }, 500)
     }

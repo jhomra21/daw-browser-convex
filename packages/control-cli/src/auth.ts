@@ -5,6 +5,7 @@ import {
   type ControlCredentialIdentity,
   type ControlCredentials,
 } from "./credentials"
+import { normalizeControlOrigin } from "@daw-browser/control-sdk"
 
 const requestedScopes = ["control:read", "control:write", "offline_access"]
 const refreshSkewMs = 60_000
@@ -65,14 +66,7 @@ export const pkceChallenge = async (verifier: string) => (
   Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))).toString("base64url")
 )
 
-export const normalizeBaseUrl = (value: string) => {
-  const url = new URL(value)
-  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("Base URL must be an origin.")
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "127.0.0.1")) {
-    throw new Error("Base URL must use HTTPS.")
-  }
-  return url.origin
-}
+export const normalizeBaseUrl = normalizeControlOrigin
 
 const urlAtOrigin = (value: unknown, origin: string, field: string) => {
   if (typeof value !== "string") throw new Error(`OAuth metadata is missing ${field}.`)

@@ -1,5 +1,5 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, synthAutomationKey, trackCreationIndex } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sanitizeLegacyMidiClipForCreate, synthAutomationKey, trackCreationIndex } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffectInstance } from "~/lib/local-effects";
@@ -389,16 +389,34 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
 export const createHistoryClip = async (
   deps: Deps,
   trackId: Track["id"],
-  clip: ClipCreateSnapshot & { clipRef?: string; currentId?: string },
+  clip: ClipCreateSnapshot & { clipRef?: string; currentId?: string; legacyHistory?: boolean },
 ) => {
   if (isLocalHistoryProject(deps)) {
     const clipRef = clip.clipRef ?? clip.currentId;
     assert(clipRef, "Missing clip reference for local history clip creation");
-    return (await createLocalTimelineRepository(deps.projectId).createClip(
+    return (await createLocalTimelineRepository(deps.projectId).restoreHistoryClip(
       toHistoryCreateClipInput(trackId, buildLocalClip({ id: clipRef, clip })),
     )).id;
   }
-  const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId: deps.projectId, trackId, clip }));
+  if (clip.legacyHistory) {
+    const result = await deps.convexClient.mutation(deps.convexApi.clips.restoreLegacyHistory, {
+      ...buildClipCreatePayload({
+        projectId: deps.projectId,
+        trackId,
+        clip,
+      }),
+      operationId: `legacy-history:${crypto.randomUUID()}`,
+    });
+    return typeof result === "string" ? result : null;
+  }
+  const operation = buildSharedClipCreateOperation(buildClipCreatePayload({
+    projectId: deps.projectId,
+    trackId,
+    clip: {
+      ...clip,
+      ...(clip.midi ? { midi: sanitizeLegacyMidiClipForCreate(clip.midi) } : {}),
+    },
+  }));
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
   return typeof result === "string" ? result : null;
 };
@@ -435,6 +453,7 @@ export const persistHistoryTrackEffects = async (
     await restoreLocalTrackEffectChain(deps.projectId, trackId, {
       audioEffects: restoredAudioEffects,
       instrument: effects.instrument,
+      synth: effects.synth,
       arp: effects.arp,
     });
     return;
@@ -449,6 +468,12 @@ export const persistHistoryTrackEffects = async (
       operationId: crypto.randomUUID(),
     },
   });
+  if (!effects.instrument && effects.synth) {
+    await publishHistoryOperation(deps, {
+      kind: "effects.setSynthParams",
+      payload: { trackId, params: effects.synth, instanceId: `instrument:synth:${trackId}` },
+    });
+  }
 };
 
 export const persistHistoryTrackAutomation = async (
@@ -725,15 +750,20 @@ export const persistHistoryAutomationEnvelope = async (
   });
 };
 
-export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[], message: string) => {
-  if (clipIds.length === 0) return;
+export const removeHistoryClipIdsOrThrow = async (
+  deps: Deps,
+  clipIds: string[],
+  operationId: string,
+  message: string,
+) => {
+  if (clipIds.length === 0) return new Map<string, string>();
   if (isLocalHistoryProject(deps)) {
     await createLocalTimelineRepository(deps.projectId).deleteClips(clipIds);
-    return;
+    return new Map<string, string>();
   }
   const result = await deps.convexClient.mutation(
     deps.convexApi.clips.removeMany,
-    buildClipRemoveManyMutationInput({ clipIds }),
+    buildClipRemoveManyMutationInput({ projectId: deps.projectId, clipIds, operationId }),
   );
   const removedIds = new Set(
     Array.isArray(result?.removedClipIds)
@@ -741,6 +771,16 @@ export const removeHistoryClipIdsOrThrow = async (deps: Deps, clipIds: string[],
       : [],
   );
   assert(clipIds.every((clipId) => removedIds.has(String(clipId))), message);
+  const recoveryIdsByClipId = new Map<string, string>();
+  if (Array.isArray(result?.recoveries)) {
+    for (const recovery of result.recoveries) {
+      if (
+        typeof recovery?.sourceClipId === "string"
+        && typeof recovery.recoveryId === "string"
+      ) recoveryIdsByClipId.set(recovery.sourceClipId, recovery.recoveryId);
+    }
+  }
+  return recoveryIdsByClipId;
 };
 
 export const removeHistoryTrackOrThrow = async (deps: Deps, trackId: Track["id"], message: string) => {

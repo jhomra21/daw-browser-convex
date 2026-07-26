@@ -14,6 +14,11 @@ import {
   renameLocalProject,
 } from '~/lib/local-project-db'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
+import {
+  discardMidiProjectWrites,
+  flushAllMidiProjectWrites,
+  flushMidiProjectWrites,
+} from '~/lib/midi/editor-persistence'
 import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 import { useSessionQuery } from '~/lib/session'
 import { cacheRemoteTimelineSnapshot } from '~/lib/remote-timeline-cache'
@@ -41,6 +46,31 @@ type CreateOwnedRoomResult =
   | { status: 'created' }
   | { status: 'error' }
 
+export const leaveCloudProjectAccess = async (input: {
+  settleActiveRecording: () => Promise<void>
+  flushMidiWrites: () => Promise<void>
+  revokeAccess: () => Promise<void>
+  purgeCache: () => Promise<void>
+  reloadProjects: () => Promise<void>
+}) => {
+  await input.settleActiveRecording()
+  await input.flushMidiWrites()
+  await input.revokeAccess()
+  await input.purgeCache()
+  await input.reloadProjects()
+}
+
+export const deleteCurrentCloudProjectAccess = async (input: {
+  settleActiveRecording: () => Promise<void>
+  deleteCurrentProject: () => Promise<DeleteCurrentOwnedRoomResult>
+  navigate: (result: Extract<DeleteCurrentOwnedRoomResult, { status: 'deleted' }>) => Promise<void>
+}): Promise<DeleteCurrentOwnedRoomResult> => {
+  await input.settleActiveRecording()
+  const result = await input.deleteCurrentProject()
+  if (result.status === 'deleted') await input.navigate(result)
+  return result
+}
+
 type EnsureOwnedRoomOptions = {
   showAlertOnError?: boolean
 }
@@ -53,12 +83,13 @@ type UseTimelineDataInput = {
 type UseTimelineDataReturn = {
   projectId: Accessor<string>
   mountedProjectGeneration: Accessor<number>
-  setProjectId: (projectId: string) => void
+  setProjectId: (projectId: string) => Promise<void>
   userId: () => string
   projects: Accessor<TimelineProject[]>
   currentProjectRole: Accessor<ProjectRole | null>
   fullView: UseQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
-  navigateToRoom: (projectId: string) => void
+  navigateToRoom: (projectId: string) => Promise<void>
+  setProjectTransitionSettlement: (settle: (() => Promise<void>) | undefined) => void
   createProject: () => Promise<void>
   renameProject: (projectId: string, name: string) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
@@ -80,7 +111,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   const pendingOwnedRoomKeys = new Set<string>()
 
   const session = useSessionQuery()
-  const userId = () => session.data?.user.id ?? ''
+  const userId = () => session.data?.user?.id ?? ''
 
   const loadLocalProjects = async () => {
     const rows = await listLocalProjects()
@@ -103,10 +134,16 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   const setProjectId = route.setProjectId
   const replaceRoom = route.replaceRoom
   const navigateToRoom = route.navigateToRoom
+  const setProjectTransitionSettlement = route.setProjectTransitionSettlement
   const clearBootstrapProjectId = route.clearBootstrapProjectId
 
   onMount(() => {
     void loadLocalProjects()
+    const flushMidi = () => {
+      void flushAllMidiProjectWrites().catch(() => undefined)
+    }
+    window.addEventListener('pagehide', flushMidi)
+    onCleanup(() => window.removeEventListener('pagehide', flushMidi))
   })
 
   createEffect(() => {
@@ -178,7 +215,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
       .then((result) => {
         setAcceptingShareToken(null)
         clearShareTokenFromUrl()
-        if (result?.projectId) replaceRoom(result.projectId)
+        if (result?.projectId) void replaceRoom(result.projectId)
       })
       .catch(() => {
         setAcceptingShareToken(null)
@@ -252,6 +289,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     options?: { showAlertOnError?: boolean },
   ): Promise<DeleteOwnedRoomResult> => {
     try {
+      await flushMidiProjectWrites(targetProjectId)
       const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}`, { method: 'DELETE' })
       if (!response.ok) throw new Error('Project delete failed.')
       return { status: 'deleted' as const }
@@ -267,10 +305,18 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     targetProjectId: string,
   ): Promise<LeaveCloudProjectResult> => {
     try {
-      const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}/access`, { method: 'DELETE' })
-      if (!response.ok) throw new Error('Project leave failed.')
-      await purgeLocalProjectCache(targetProjectId)
-      await loadLocalProjects()
+      await leaveCloudProjectAccess({
+        settleActiveRecording: async () => {
+          if (targetProjectId === projectId()) await route.settleProjectTransition()
+        },
+        flushMidiWrites: async () => await flushMidiProjectWrites(targetProjectId),
+        revokeAccess: async () => {
+          const response = await fetch(`/api/cloud-projects/${encodeURIComponent(targetProjectId)}/access`, { method: 'DELETE' })
+          if (!response.ok) throw new Error('Project leave failed.')
+        },
+        purgeCache: async () => await purgeLocalProjectCache(targetProjectId),
+        reloadProjects: async () => await loadLocalProjects(),
+      })
       return { status: 'left' as const }
     } catch {
       input.notify('Project remove failed', 'This project could not be removed from your account.')
@@ -279,16 +325,25 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   }
 
   const navigateAfterAccessLoss = async (targetProjectId: string) => {
+    try {
+      await flushMidiProjectWrites(targetProjectId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : ''
+      if (!message.includes('access') && !message.includes('permission') && !message.includes('authorization')) {
+        throw error
+      }
+      discardMidiProjectWrites(targetProjectId)
+    }
     await purgeLocalProjectCache(targetProjectId)
     await loadLocalProjects()
     const destinationProjectId = projects().find((project) => project.projectId !== targetProjectId)?.projectId
     if (destinationProjectId) {
-      navigateToRoom(destinationProjectId)
+      await navigateToRoom(destinationProjectId)
       return
     }
     const replacement = await createLocalProject('Untitled')
     await loadLocalProjects()
-    navigateToRoom(replacement.id)
+    await navigateToRoom(replacement.id)
   }
 
   createEffect(() => {
@@ -299,7 +354,9 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     const message = error instanceof Error ? error.message : ''
     const lowerMessage = message.toLowerCase()
     if (!lowerMessage.includes('access') && !lowerMessage.includes('permission')) return
-    void navigateAfterAccessLoss(currentProjectId)
+    void navigateAfterAccessLoss(currentProjectId).catch(() => {
+      input.notify('Project access changed', 'Pending MIDI changes could not be saved.')
+    })
   })
 
   const deleteCurrentOwnedRoom = async (
@@ -336,9 +393,10 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     const ownerUserId = userId()
     if (!ownerUserId || isLocalId('project', currentProjectId)) {
       try {
+        if (currentProjectId) await flushMidiProjectWrites(currentProjectId)
         const project = await createLocalProject('Untitled')
         await loadLocalProjects()
-        navigateToRoom(project.id)
+        await navigateToRoom(project.id)
       } catch {
         input.notify('Local project create failed', 'This local project could not be created.')
       }
@@ -348,7 +406,8 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     const nextProjectId = crypto.randomUUID()
     const result = await createOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
     if (result.status !== 'created') return
-    navigateToRoom(nextProjectId)
+    await flushMidiProjectWrites(currentProjectId)
+    await navigateToRoom(nextProjectId)
   }
 
   const renameProject = async (targetProjectId: string, name: string) => {
@@ -383,7 +442,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
         if (targetProjectId === projectId()) {
           const replacement = await createLocalProject('Untitled')
           await loadLocalProjects()
-          navigateToRoom(replacement.id)
+          await navigateToRoom(replacement.id)
         }
       } catch {
         input.notify('Local project delete failed', 'This local project could not be deleted.')
@@ -402,12 +461,12 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
       if (result.status !== 'left' || targetProjectId !== projectId()) return
       const destinationProjectId = projects().find((project) => project.projectId !== targetProjectId)?.projectId
       if (destinationProjectId) {
-        navigateToRoom(destinationProjectId)
+        await navigateToRoom(destinationProjectId)
         return
       }
       const replacement = await createLocalProject('Untitled')
       await loadLocalProjects()
-      navigateToRoom(replacement.id)
+      await navigateToRoom(replacement.id)
       return
     }
 
@@ -416,14 +475,15 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
       return
     }
 
-    const result = await deleteCurrentOwnedRoom(
-      targetProjectId,
-      ownerUserId,
-    )
-    if (result.status !== 'deleted') {
-      return
+    try {
+      await deleteCurrentCloudProjectAccess({
+        settleActiveRecording: async () => await route.settleProjectTransition(),
+        deleteCurrentProject: async () => await deleteCurrentOwnedRoom(targetProjectId, ownerUserId),
+        navigate: async (result) => await navigateToRoom(result.destinationProjectId),
+      })
+    } catch {
+      input.notify('Project delete failed', 'This project could not be deleted.')
     }
-    navigateToRoom(result.destinationProjectId)
   }
 
   return {
@@ -435,6 +495,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     currentProjectRole,
     fullView,
     navigateToRoom,
+    setProjectTransitionSettlement,
     createProject,
     renameProject,
     deleteProject,

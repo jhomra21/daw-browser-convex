@@ -8,7 +8,11 @@ import {
   isCloudIdMappingMetadataKey,
 } from '~/lib/local-cloud-id-map'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
-import { PROJECT_MANIFEST_SCHEMA_VERSION, type ProjectManifest } from '@daw-browser/shared'
+import {
+  normalizeProjectManifestPluginArtifact,
+  PROJECT_MANIFEST_SCHEMA_VERSION,
+  type ProjectManifest,
+} from '@daw-browser/shared'
 
 export const CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY = 'cloudBackup:lastProjectUpdatedAt'
 export const CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY = 'cloudBackup:lastManifestVersion'
@@ -25,6 +29,15 @@ export const isProjectManifestSyncStateKey = (key: string) => (
   && key !== 'shared-outbox-status'
 )
 
+const archiveSafeEntity = (entity: Awaited<ReturnType<typeof exportLocalProjectRows>>["entities"][number]) => {
+  if (entity.kind !== "external-plugin" || typeof entity.value !== "object" || entity.value === null
+    || !("manifest" in entity.value) || typeof entity.value.manifest !== "object" || entity.value.manifest === null
+    || !("identity" in entity.value.manifest) || typeof entity.value.manifest.identity !== "object"
+    || entity.value.manifest.identity === null || !("discoveredPath" in entity.value.manifest.identity)) return entity
+  const { discoveredPath: _discoveredPath, ...identity } = entity.value.manifest.identity
+  return { ...entity, value: { ...entity.value, manifest: { ...entity.value.manifest, identity } } }
+}
+
 const latestLocalProjectUpdate = (
   projectUpdatedAt: number,
   rows: Awaited<ReturnType<typeof exportLocalProjectRows>>,
@@ -36,6 +49,7 @@ const latestLocalProjectUpdate = (
   for (const row of rows.syncState) {
     if (!isLocalSyncMetadataKey(row.key)) latest = Math.max(latest, row.updatedAt)
   }
+  for (const row of rows.externalPluginArtifacts) latest = Math.max(latest, row.updatedAt)
   return latest
 }
 
@@ -75,10 +89,13 @@ export const buildProjectManifest = async (
     updatedAt,
     entityCount: rows.entities.length,
     assetCount: assets.length,
-    entities: rows.entities,
+    entities: rows.entities.map(archiveSafeEntity),
     assets,
     projectState: rows.projectState,
     syncState,
+    externalPluginArtifacts: rows.externalPluginArtifacts.map(({ updatedAt: _updatedAt, ...artifact }) => (
+      normalizeProjectManifestPluginArtifact(artifact)
+    )),
   }
 }
 

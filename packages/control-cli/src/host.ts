@@ -6,13 +6,21 @@ import { homedir, platform } from "node:os"
 import { randomBytes } from "node:crypto"
 import {
   desktopProtocolVersion,
+  desktopProtocolVersionV2,
+  desktopControlCapabilitiesInputSchemaV2,
+  desktopControlSnapshotInputSchemaV2,
+  desktopControlCapabilitiesInputSchemaV1,
+  desktopControlSnapshotInputSchemaV1,
   desktopRegistrationSchemaV1,
   hostErrorSchemaV1,
+  hostErrorSchemaV2,
   parseDesktopReplyError,
   parseDesktopResult,
   isDesktopControlOperation,
   type HostErrorV1,
+  type HostErrorV2,
   type DesktopOperationV1,
+  type DesktopProtocolVersion,
 } from "@daw-browser/desktop-protocol"
 import { controlErrorSchemaV1, type ControlErrorV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
@@ -36,7 +44,7 @@ export class DesktopControlError extends Error {
   }
 }
 export class DesktopHostError extends Error {
-  constructor(readonly data: HostErrorV1) {
+  constructor(readonly data: HostErrorV1 | HostErrorV2) {
     super(data.message)
     this.name = "DesktopHostError"
   }
@@ -125,15 +133,25 @@ const readHostRegistration = async (paths?: HostPaths) => {
   return registration
 }
 
-export const createHostClient = async (options: { paths?: HostPaths; handshakeDeadlineMs?: number } = {}) => {
+type HostClient = {
+  protocolVersion: DesktopProtocolVersion
+  capabilities: () => Set<DesktopOperationV1>
+  request: (operation: DesktopOperationV1, input: unknown, deadlineMs?: number) => Promise<unknown>
+  requestV2: (operation: "control.capabilities" | "control.snapshot", input: unknown, deadlineMs?: number) => Promise<unknown>
+  close: () => void
+}
+
+export const createHostClient = async (options: { paths?: HostPaths; handshakeDeadlineMs?: number } = {}): Promise<HostClient> => {
   const registration = await readHostRegistration(options.paths)
   const actorId = await loadHostActorIdentity(
     path.join(path.dirname(credentialPath()), "host-actor-v1.json"),
     options.paths?.actorPath,
   )
+  const connectWithVersion = async (protocolVersion: DesktopProtocolVersion): Promise<HostClient> => {
   const socket = connect(registration.address)
   type PendingRequest = {
     operation: DesktopOperationV1
+    input: unknown
     mode: "normal" | "chunks" | undefined
     resolve: (value: unknown) => void
     reject: (error: Error) => void
@@ -193,15 +211,15 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     disposeRequest(id, request)
     try {
       if (reply.error !== undefined) {
-        const parsedError = parseDesktopReplyError(request.operation, reply.error)
+        const parsedError = parseDesktopReplyError(request.operation, reply.error, protocolVersion)
         const controlError = controlErrorSchemaV1.safeParse(parsedError)
         if (isDesktopControlOperation(request.operation) && controlError.success) {
           request.reject(new DesktopControlError(controlError.data))
         } else {
-          request.reject(new DesktopHostError(hostErrorSchemaV1.parse(parsedError)))
+          request.reject(new DesktopHostError((protocolVersion === desktopProtocolVersionV2 ? hostErrorSchemaV2 : hostErrorSchemaV1).parse(parsedError)))
         }
       } else {
-        request.resolve(parseDesktopResult(request.operation, reply.result))
+        request.resolve(parseDesktopResult(request.operation, reply.result, request.input, protocolVersion))
       }
     } catch (error) {
       request.reject(error instanceof Error ? error : new Error("Invalid desktop host reply."))
@@ -211,7 +229,10 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
 
   const decoder = createDesktopFrameDecoder((frame, payloadByteLength) => {
     if (frame.type === "helloAck") {
-      if (helloAccepted) closeConnection(new Error("Duplicate desktop host handshake."))
+      const validAck = protocolVersion === desktopProtocolVersionV2
+        ? frame.version === desktopProtocolVersionV2 && "selectedVersion" in frame && frame.selectedVersion === desktopProtocolVersionV2
+        : frame.version === desktopProtocolVersion
+      if (helloAccepted || !validAck) closeConnection(new Error("Invalid desktop host handshake."))
       else {
         helloAccepted = true
         capabilities = new Set(frame.capabilities)
@@ -222,6 +243,10 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     }
     if (!helloAccepted) {
       closeConnection(new Error("Desktop host sent a frame before the handshake acknowledgement."))
+      return
+    }
+    if (frame.version !== protocolVersion) {
+      closeConnection(new Error("Desktop host sent a mixed protocol frame."))
       return
     }
     if (frame.type !== "reply" && frame.type !== "replyChunk") return
@@ -276,41 +301,73 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     rejectPending(new Error("Desktop host connection closed."))
   })
   socket.on("connect", () => {
-    socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "hello", secret: registration.secret, client: "daw-control", actorId }))
+    socket.write(encodeDesktopFrame(
+      protocolVersion === desktopProtocolVersionV2
+        ? { version: desktopProtocolVersionV2, type: "hello", secret: registration.secret, client: "daw-control", actorId, supportedVersions: [desktopProtocolVersion, desktopProtocolVersionV2] }
+        : { version: desktopProtocolVersion, type: "hello", secret: registration.secret, client: "daw-control", actorId },
+    ))
   })
   await hello
   if (closed || socket.destroyed) throw new Error("Desktop host connection closed.")
-  return {
-    capabilities: () => new Set(capabilities),
-    request: (operation: DesktopOperationV1, input: unknown, deadlineMs = 10_000): Promise<unknown> => {
-      if (closed || socket.destroyed) return Promise.reject(new Error("Desktop host connection closed."))
-      if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
-      const id = randomBytes(16).toString("hex")
-      return new Promise((resolve, reject) => {
-        // A client deadline prevents a wedged renderer from retaining a CLI request.
-        const timeout = setTimeout(() => {
-          const pendingRequest = pending.get(id)
-          if (!pendingRequest) return
-          disposeRequest(id, pendingRequest)
-          if (!closed && !socket.destroyed) {
-            socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "cancel", id }))
-          }
-          reject(new Error("Desktop host request deadline exceeded."))
-        }, deadlineMs)
-        pending.set(id, {
-          operation,
-          mode: undefined,
-          resolve,
-          reject,
-          timeout,
-          reassembler: createDesktopReplyReassembler(id, operation),
-        })
-        socket.write(encodeDesktopFrame({ version: desktopProtocolVersion, type: "request", id, operation, input, deadlineMs }))
+  const request = (operation: DesktopOperationV1, input: unknown, deadlineMs = 10_000): Promise<unknown> => {
+    if (closed || socket.destroyed) return Promise.reject(new Error("Desktop host connection closed."))
+    if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
+    const id = randomBytes(16).toString("hex")
+    return new Promise((resolve, reject) => {
+      // A client deadline prevents a wedged renderer from retaining a CLI request.
+      const timeout = setTimeout(() => {
+        const pendingRequest = pending.get(id)
+        if (!pendingRequest) return
+        disposeRequest(id, pendingRequest)
+        if (!closed && !socket.destroyed) {
+          socket.write(encodeDesktopFrame({ version: protocolVersion, type: "cancel", id }))
+        }
+        reject(new Error("Desktop host request deadline exceeded."))
+      }, deadlineMs)
+      pending.set(id, {
+        operation,
+        input,
+        mode: undefined,
+        resolve,
+        reject,
+        timeout,
+        reassembler: createDesktopReplyReassembler(id, operation, input, protocolVersion),
       })
+      socket.write(encodeDesktopFrame({ version: protocolVersion, type: "request", id, operation, input, deadlineMs }))
+    })
+  }
+  return {
+    protocolVersion,
+    capabilities: () => new Set(capabilities),
+    request,
+    requestV2: (operation, input, deadlineMs = 10_000) => {
+      if (protocolVersion !== desktopProtocolVersionV2) {
+        return Promise.reject(new DesktopHostError({
+          version: desktopProtocolVersion,
+          code: "unsupported-version",
+          message: "Desktop host does not support protocol V2 control reads.",
+        }))
+      }
+      const v2Input = operation === "control.capabilities"
+        ? desktopControlCapabilitiesInputSchemaV2.parse({
+            ...desktopControlCapabilitiesInputSchemaV1.parse(input),
+            readVersion: "v2",
+          })
+        : desktopControlSnapshotInputSchemaV2.parse({
+            ...desktopControlSnapshotInputSchemaV1.parse(input),
+            readVersion: "v2",
+          })
+      return request(operation, v2Input, deadlineMs)
     },
     close: () => {
       rejectPending(new Error("Desktop host connection closed."))
       socket.destroy()
     },
+  }
+  }
+  try {
+    return await connectWithVersion(desktopProtocolVersionV2)
+  } catch {
+    return connectWithVersion(desktopProtocolVersion)
   }
 }

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { audioWarpValidator } from "./audioWarpValidator";
 import { clipFadesValidator } from "./clipFadesValidator";
 import { projectManifestValidator } from "./projectManifestValidator";
+import { midiValidator } from "./midiValidator";
 
 // Shared collaboration model scoped by a stable projectId.
 export default defineSchema({
@@ -48,6 +49,7 @@ export default defineSchema({
   clips: defineTable({
     projectId: v.string(),
     trackId: v.id("tracks"),
+    historyRef: v.optional(v.string()),
     startSec: v.number(),
     duration: v.number(),
     sourceAssetKey: v.optional(v.string()),
@@ -63,16 +65,7 @@ export default defineSchema({
     color: v.optional(v.string()),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
-    midi: v.optional(v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(),
-        length: v.number(),
-        pitch: v.number(),
-        velocity: v.optional(v.number()),
-      })),
-    })),
+    midi: v.optional(midiValidator),
     midiOffsetBeats: v.optional(v.number()),
   })
     .index("by_room", ["projectId"])
@@ -221,6 +214,33 @@ export default defineSchema({
   })
     .index("by_room_user_operation", ["projectId", "userId", "operationId"]),
 
+  clipDeletionRecoveries: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    sourceClipId: v.string(),
+    deleteOperationId: v.string(),
+    payload: v.any(),
+    payloadDigest: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    restoredClipId: v.optional(v.string()),
+  })
+    .index("by_project_actor_source", ["projectId", "actorUserId", "sourceClipId"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
+  clipDeletionRecoveryReceipts: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    recoveryId: v.string(),
+    restoredClipId: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_recovery", ["recoveryId"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
   controlCommits: defineTable({
     projectId: v.string(),
     apiVersion: v.literal("v1"),
@@ -273,6 +293,7 @@ export default defineSchema({
       v.literal("asset.delete"),
       v.literal("track.delete"),
       v.literal("track.ungroup"),
+      v.literal("timeline.range.delete"),
     ),
     payload: v.string(),
     payloadHash: v.string(),

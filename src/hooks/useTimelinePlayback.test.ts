@@ -4,6 +4,7 @@ import { createRoot } from 'solid-js'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 
 type ScheduleCall = {
   playheadSec: number
@@ -101,6 +102,21 @@ describe('useTimelinePlayback deferred stretch retries', () => {
         expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
         dispose()
       })
+    })
+  })
+
+  test('paused seek updates the transport epoch before applying destination automation', async () => {
+    const transportEvents: string[] = []
+    const engine = {
+      ...createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 }).engine,
+      onTransportSeek: () => transportEvents.push('onTransportSeek'),
+      applyAutomationAtTimelineSec: () => transportEvents.push('applyAutomationAtTimelineSec'),
+    }
+    await createRoot((dispose) => {
+      const playback = useTimelinePlayback(engine)
+      playback.setPlayhead(4, [track])
+      expect(transportEvents).toEqual(['onTransportSeek', 'applyAutomationAtTimelineSec'])
+      dispose()
     })
   })
 
@@ -204,6 +220,24 @@ describe('useTimelinePlayback deferred stretch retries', () => {
             clipIds: ['clip-1'],
           },
         })
+        dispose()
+      })
+    })
+  })
+
+  test('restarts active playback from the current transport position', async () => {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine)
+        await playback.handlePlay([track])
+        fake.setCurrentTimelineSec(4)
+        fake.transportEvents.length = 0
+
+        playback.restartTimelineSchedule([track])
+
+        expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
+        expect(fake.scheduleCalls.at(-1)?.playheadSec).toBe(4)
         dispose()
       })
     })
@@ -338,4 +372,107 @@ describe('useTimelinePlayback deferred stretch retries', () => {
       })
     })
   })
+})
+
+test('uses the committed native backend without scheduling Web Audio', async () => {
+  const previousWindow = globalThis.window
+  const calls: string[] = []
+  const reply = (name: string) => async () => {
+    calls.push(name)
+    return { ok: true as const }
+  }
+  const deviceId: `coreaudio:${string}` = 'coreaudio:default'
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      dawDesktop: {
+        audioHost: {
+          resolveOutputDevice: async () => ({
+            ok: true as const,
+            device: {
+              deviceId,
+              name: 'Default',
+              nominalSampleRateHz: 48_000,
+              outputChannelCount: 2,
+              maximumFramesPerBlock: 512,
+              available: true,
+            },
+          }),
+          session: {
+            configure: reply('configure'),
+            beginTransaction: reply('begin'),
+            commitTransaction: reply('commit'),
+            rollbackTransaction: reply('rollback'),
+            installAsset: reply('install'),
+            releaseAsset: reply('release'),
+            publishGraph: reply('graph'),
+            queueParameterEvents: reply('parameter'),
+            queueInstrumentEvents: reply('instrument'),
+            queueSourceEvents: reply('source'),
+            setTransport: reply('transport'),
+            start: reply('start'),
+            stop: reply('stop'),
+            teardown: reply('teardown'),
+            onLoss: () => () => {},
+          },
+        },
+      },
+    },
+  })
+  try {
+    await withFakeRaf(async () => {
+      let nativeEnabled = true
+      let webSchedules = 0
+      let webEnsures = 0
+      const engine = {
+        ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+        ensureAudio: () => { webEnsures += 1 },
+        scheduleAllClipsFromPlayhead: () => {
+          webSchedules += 1
+          return { deferredStretchWindows: [] }
+        },
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => nativeEnabled,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        })
+        await playback.handlePlay([track])
+        expect(webEnsures).toBe(0)
+        expect(webSchedules).toBe(0)
+        expect(calls).toEqual(['begin', 'configure', 'graph', 'source', 'transport', 'commit', 'start'])
+        expect(playback.backendDiagnostics()).toEqual({
+          version: 1,
+          defaultBackend: 'legacy',
+          selection: 'startup-only',
+          runtimeFailure: 'stop-and-mute',
+          portableBrowserRequiresOptIn: true,
+          nativeRequiresOptIn: true,
+          activeBackend: 'native',
+          requestedNative: true,
+          requestedPortableBrowser: false,
+        })
+        await playback.handlePlay([track])
+        expect(calls).toEqual(['begin', 'configure', 'graph', 'source', 'transport', 'commit', 'start'])
+        await playback.handlePause()
+        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        nativeEnabled = false
+        await playback.handlePlay([track])
+        expect(playback.backendDiagnostics().activeBackend).toBe('native')
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
+        expect(calls.filter((call) => call === 'start')).toHaveLength(2)
+        expect(calls).not.toContain('release')
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
 })

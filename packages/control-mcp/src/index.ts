@@ -5,6 +5,7 @@ import {
   canonicalJson,
   controlCapabilitiesQuerySchemaV1,
   controlCapabilitiesSchemaV1,
+  controlCapabilitiesSchemaV2,
   controlCommitRequestSchemaV1,
   controlCommitResultSchemaV1,
   controlApprovalRequestSchemaV1,
@@ -18,8 +19,10 @@ import {
   controlPreviewResultSchemaV1,
   controlSnapshotQuerySchemaV1,
   projectSnapshotSchemaV1,
+  projectSnapshotSchemaV2,
   type ControlErrorV1,
   type ControlCapabilitiesV1,
+  type ControlCapabilitiesV2,
   type ControlCommitRequestV1,
   type ControlCommitResultV1,
   type ControlApprovalRequestV1,
@@ -32,16 +35,20 @@ import {
   type ControlPreviewResultV1,
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
+  type ProjectSnapshotV2,
 } from "@daw-browser/control"
 import {
   hostErrorSchemaV1,
+  hostErrorSchemaV2,
   type HostErrorV1,
 } from "@daw-browser/desktop-protocol"
 import { executeHostTool, registerHostTools, type HostToolService } from "./host-tools"
 
 export type ControlService = {
   capabilities: () => Promise<ControlCapabilitiesV1>;
+  capabilitiesV2: () => Promise<ControlCapabilitiesV2>;
   snapshot: (input: ControlSnapshotQueryV1) => Promise<ProjectSnapshotV1>;
+  snapshotV2: (input: ControlSnapshotQueryV1) => Promise<ProjectSnapshotV2>;
   preview: (input: ControlPreviewRequestV1) => Promise<ControlPreviewResultV1>;
   commit: (input: ControlCommitRequestV1) => Promise<ControlCommitResultV1>;
   requestApproval: (input: ControlApprovalRequestV1) => Promise<ControlApprovalResultV1>;
@@ -67,6 +74,8 @@ const annotations = {
   approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 }
 
+const instructions = "Workflow: call control_capabilities, observe control_snapshot, and preview every mutation with control_preview. Request approval only when required, then commit the exact previewed request with a stable idempotencyKey. Re-observe control_snapshot and control_history after committing. Use target: \"host\" and host_* tools only for capabilities exposed by an attached desktop host."
+
 const internalError = (): ControlErrorV1 => ({
   version: "v1",
   code: "internal",
@@ -89,6 +98,12 @@ const hostUnavailable = (): ControlErrorV1 => ({
   code: "not-found",
   message: "A local desktop host is unavailable.",
 })
+const canonicalHostError = (value: unknown): HostErrorV1 | undefined => {
+  const v1 = hostErrorSchemaV1.safeParse(value)
+  if (v1.success) return v1.data
+  const v2 = hostErrorSchemaV2.safeParse(value)
+  return v2.success ? { version: 'v1', code: v2.data.code, message: v2.data.message } : undefined
+}
 const hostTransportError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
     error,
@@ -97,8 +112,8 @@ const hostTransportError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   ]) {
     const control = controlErrorSchemaV1.safeParse(candidate)
     if (control.success) return control.data
-    const host = hostErrorSchemaV1.safeParse(candidate)
-    if (host.success) return host.data
+    const host = canonicalHostError(candidate)
+    if (host) return host
   }
   return hostUnavailable()
 }
@@ -115,8 +130,8 @@ const serviceError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   ]) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
     if (parsed.success) return parsed.data
-    const host = hostErrorSchemaV1.safeParse(candidate)
-    if (host.success) return host.data
+    const host = canonicalHostError(candidate)
+    if (host) return host
   }
   return internalError()
 }
@@ -163,7 +178,10 @@ export const createControlMcpServer = (
   service: ControlService | undefined,
   options: ControlMcpOptions = {},
 ) => {
-  const server = new McpServer({ name: "daw-browser-control", version: "1.0.0" })
+  const server = new McpServer(
+    { name: "daw-browser-control", version: "1.0.0" },
+    { instructions },
+  )
   const canWrite = async () => options.authorize === undefined || await options.authorize("control:write")
   const executeRouted = async <Input, Output>(
     input: unknown,
@@ -214,7 +232,9 @@ export const createControlMcpServer = (
     }
   }
   const capabilities = (input: unknown) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
+  const capabilitiesV2 = (input: unknown) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
   const snapshot = (input: unknown) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
+  const snapshotV2 = (input: unknown) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshotV2(value), projectSnapshotSchemaV2.parse, false)
   const preview = (input: unknown) => executeRouted(input, controlPreviewRequestSchemaV1.parse, (service_, value) => service_.preview(value), controlPreviewResultSchemaV1.parse, true)
   const commit = (input: unknown) => executeRouted(input, controlCommitRequestSchemaV1.parse, (service_, value) => service_.commit(value), controlCommitResultSchemaV1.parse, true)
   const requestApproval = (input: unknown) => executeRouted(input, controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
@@ -234,6 +254,18 @@ export const createControlMcpServer = (
     outputSchema: projectSnapshotSchemaV1,
     annotations: annotations.read,
   }, snapshot)
+  server.registerTool("control_capabilities_v2", {
+    description: "Return the supported DAW control API V2 capabilities.",
+    inputSchema: withTarget(controlCapabilitiesQuerySchemaV1),
+    outputSchema: controlCapabilitiesSchemaV2,
+    annotations: annotations.read,
+  }, capabilitiesV2)
+  server.registerTool("control_snapshot_v2", {
+    description: "Return the canonical V2 snapshot for a DAW project.",
+    inputSchema: withTarget(controlSnapshotQuerySchemaV1),
+    outputSchema: projectSnapshotSchemaV2,
+    annotations: annotations.read,
+  }, snapshotV2)
 
   server.registerTool("control_preview", {
     description: "Validate and preview a DAW control request without committing it.",
@@ -275,6 +307,8 @@ export const createControlMcpServer = (
     const input = request.params.arguments
     if (request.params.name === "control_capabilities") return capabilities(input)
     if (request.params.name === "control_snapshot") return snapshot(input)
+    if (request.params.name === "control_capabilities_v2") return capabilitiesV2(input)
+    if (request.params.name === "control_snapshot_v2") return snapshotV2(input)
     if (request.params.name === "control_preview") return preview(input)
     if (request.params.name === "control_commit") return commit(input)
     if (request.params.name === "control_request_approval") return requestApproval(input)

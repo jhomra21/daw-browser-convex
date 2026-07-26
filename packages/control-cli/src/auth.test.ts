@@ -40,10 +40,13 @@ afterEach(async () => {
 })
 
 describe("control OAuth primitives", () => {
-  test("normalizes only secure origins and produces S256 PKCE", async () => {
+  test("uses the SDK's secure loopback-aware origin normalizer and produces S256 PKCE", async () => {
     expect(normalizeBaseUrl("https://control.example/")).toBe("https://control.example")
     expect(() => normalizeBaseUrl("https://control.example/path")).toThrow()
-    expect(() => normalizeBaseUrl("http://localhost:3000")).toThrow()
+    expect(normalizeBaseUrl("http://localhost:3000")).toBe("http://localhost:3000")
+    expect(normalizeBaseUrl("http://127.0.0.1:3000")).toBe("http://127.0.0.1:3000")
+    expect(normalizeBaseUrl("http://[::1]:3000")).toBe("http://[::1]:3000")
+    expect(() => normalizeBaseUrl("http://control.example")).toThrow()
     const verifier = "a".repeat(43)
     const expected = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))).toString("base64url")
     const challenge = await pkceChallenge(verifier)

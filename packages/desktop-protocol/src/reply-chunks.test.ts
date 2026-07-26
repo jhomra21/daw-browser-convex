@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { localControlCapabilitiesV1 } from "@daw-browser/control"
+import { localControlCapabilitiesV1, localControlCapabilitiesV2 } from "@daw-browser/control"
 import {
   assertDesktopReplyAggregateByteLength,
   createDesktopReplyReassembler,
@@ -11,6 +11,7 @@ import {
 import {
   desktopReplyChunkSchemaV1,
   desktopReplySchemaV1,
+  desktopProtocolVersionV2,
   maxDesktopFrameBytes,
   maxDesktopReplyBytes,
   maxDesktopReplyChunks,
@@ -71,6 +72,15 @@ const controlReplyWithPayload = (size: number) => ({
     actionKinds: ["x".repeat(size)],
   },
 })
+const controlV2Reply = (actionCount = 1) => ({
+  version: "v1" as const,
+  type: "reply" as const,
+  id: "control-v2",
+  result: {
+    ...localControlCapabilitiesV2,
+    actionKinds: Array.from({ length: actionCount }, (_, index) => `v2-action-${index}`),
+  },
+})
 
 describe("desktop reply chunks", () => {
   test("returns a regular validated reply within one frame", () => {
@@ -92,6 +102,27 @@ describe("desktop reply chunks", () => {
     for (const chunk of chunks) assembled = reassembler.push(chunk)
     expect(assembled).toEqual(desktopReplySchemaV1.parse(largeControlReply()))
     expect(reassembler.pending()).toBe(0)
+  })
+
+  test("round trips V2 control capabilities only with an explicit V2 read input", () => {
+    const v1 = serializeDesktopReply("control.capabilities", {}, {
+      version: "v1", type: "reply", id: "control-1", result: localControlCapabilitiesV1,
+    })
+    expect(v1).toHaveLength(1)
+
+    for (const actionCount of [1, 60_000]) {
+      const reply = { ...controlV2Reply(actionCount), version: desktopProtocolVersionV2 }
+      const input = { readVersion: "v2" }
+      const frames = serializeDesktopReply("control.capabilities", input, reply, "v2")
+      if (frames.length === 1) {
+        expect(frames[0]).toEqual(reply)
+        continue
+      }
+      const reassembler = createDesktopReplyReassembler("control-v2", "control.capabilities", input, "v2")
+      let assembled: unknown
+      for (const frame of frames) assembled = reassembler.push(frame)
+      expect(assembled).toEqual(reply)
+    }
   })
 
   test("chunks valid replies larger than the general frame encoder limit", () => {

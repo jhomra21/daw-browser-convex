@@ -10,6 +10,7 @@ import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
   automationTargetKey,
   getAutomationParameterOptionsForTarget,
+  isClipKindCompatibleWithTrack,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import {
@@ -195,7 +196,9 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
   const muteDisabled = lockedByOther;
   const soloDisabled = lockedByOther;
   const volumeDisabled = lockedByOther;
-  const recordDisabled = lockedByOther || !canTrackReceiveAudioClip(track);
+  const recordDisabled = lockedByOther || !(
+    canTrackReceiveAudioClip(track) || isClipKindCompatibleWithTrack(track, "midi")
+  );
   const volume = () => displayVolume(track);
   const muted = () => !!track.muted;
   const soloed = () => !!track.soloed;
@@ -643,9 +646,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                     ? "Return tracks cannot be armed for recording"
                     : isGroupTrack
                       ? "Group tracks cannot be armed for recording"
-                      : track.kind === "instrument"
-                        ? "Instrument tracks cannot be armed for audio recording"
-                        : isRecordArmed()
+                      : isRecordArmed()
                           ? "Disarm recording"
                           : "Arm for recording"
               }
@@ -745,9 +746,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                         ? "Return tracks cannot be armed for recording"
                         : isGroupTrack
                           ? "Group tracks cannot be armed for recording"
-                          : track.kind === "instrument"
-                            ? "Instrument tracks cannot be armed for audio recording"
-                            : isRecordArmed()
+                        : isRecordArmed()
                               ? "Disarm recording"
                               : "Arm for recording"
                   }

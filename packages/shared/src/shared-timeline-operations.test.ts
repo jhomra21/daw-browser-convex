@@ -1,9 +1,86 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
+import { parseDurableSharedTimelineOperation, parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
 import { createDefaultSpectralParams } from './spectral-params'
 
 describe('shared timeline operations', () => {
+  test('builds expanded MIDI clip creates while retaining note-only creates', () => {
+    const expanded = parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi: {
+          wave: 'sine',
+          inputChannel: 2,
+          notes: [{ id: 'note-1', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+          cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+          pitchBends: [{ id: 'bend-1', beat: 0, value: 0.25, channel: 2 }],
+          channelPressure: [{ id: 'pressure-1', beat: 0, value: 0.5, channel: 2 }],
+          polyPressure: [{ id: 'poly-1', beat: 0, pitch: 60, value: 0.5, channel: 2 }],
+          mappings: [{
+            id: 'mapping-1',
+            source: { kind: 'cc', controller: 1, channel: 2 },
+            target: { parameterId: 'gain', effectInstanceId: 'effect-1' },
+            outputMin: 0,
+            outputMax: 1,
+          }],
+        },
+      },
+    })
+    expect(expanded?.kind === 'clips.create' ? expanded.payload.midi : undefined).toMatchObject({
+      inputChannel: 2,
+      notes: [{ id: 'note-1', channel: 2 }],
+      cc: [{ id: 'cc-1', channel: 2 }],
+      pitchBends: [{ id: 'bend-1', channel: 2 }],
+      channelPressure: [{ id: 'pressure-1', channel: 2 }],
+      polyPressure: [{ id: 'poly-1', channel: 2 }],
+      mappings: [{ id: 'mapping-1' }],
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1', startSec: 0, duration: 1, clipKind: 'midi',
+        midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+      },
+    })?.kind).toBe('clips.create')
+  })
+
+  test('accepts historical durable MIDI creates without relaxing new writes', () => {
+    const legacy = {
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi: { wave: 'legacy-wave', gain: 4, notes: Array.from({ length: 501 }, (_, pitch) => ({ beat: pitch, length: 1, pitch: pitch % 128 })) },
+      },
+    }
+    expect(parseSharedTimelineOperation(legacy)).toBeNull()
+    expect(parseDurableSharedTimelineOperation(legacy)?.kind).toBe('clips.create')
+  })
+  test('accepts historical durable MIDI create-many entries without relaxing new writes', () => {
+    const legacy = {
+      kind: 'clips.createMany',
+      payload: {
+        items: [{
+          trackId: 'track-1',
+          startSec: 0,
+          duration: 1,
+          clipKind: 'midi',
+          midi: { wave: 'custom-legacy', gain: 7, notes: [] },
+        }],
+      },
+    }
+    expect(parseSharedTimelineOperation(legacy)).toBeNull()
+    expect(parseDurableSharedTimelineOperation(legacy)).toMatchObject({
+      kind: 'clips.createMany',
+      payload: { items: [{ midi: { wave: 'custom-legacy', gain: 7 } }] },
+    })
+  })
   test('parses fade operations and reports their clip target', () => {
     const operation = parseSharedTimelineOperation({
       kind: 'clips.setFades',
@@ -81,7 +158,15 @@ describe('shared timeline operations', () => {
         operationId: 'midi-1',
         midi: {
           wave: 'sine',
-          notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }, { beat: 2, length: 1, pitch: 72 }],
+          notes: [
+            { id: 'midi:note:[["beat",0],["channel",1],["length",1],["pitch",60],["velocity",0.5]]:0', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 1 },
+            { id: 'midi:note:[["beat",2],["channel",1],["length",1],["pitch",72]]:0', beat: 2, length: 1, pitch: 72, channel: 1 },
+          ],
+          cc: [],
+          pitchBends: [],
+          channelPressure: [],
+          polyPressure: [],
+          mappings: [],
         },
       },
     })
@@ -112,6 +197,31 @@ describe('shared timeline operations', () => {
       kind: 'effects.removeArpeggiator',
       payload: { trackId: 'track-1', operationId: '', extra: true },
     })).toBeNull()
+  })
+
+  test('rejects supplied MIDI create payloads that exceed write limits', () => {
+    const create = (midi: unknown) => parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi,
+      },
+    })
+    expect(create({
+      wave: 'sine',
+      notes: Array.from({ length: 501 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+    })).toBeNull()
+    expect(create({
+      wave: 'sine',
+      notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+      cc: [{ beat: 0, controller: 1, value: 0 }],
+    })).toBeNull()
+    expect(create({ wave: 'custom-legacy', gain: 7, notes: [] })).toBeNull()
+    expect(create({ wave: '', gain: 7, notes: [] })).toBeNull()
+    expect(create({ wave: 'sine', gain: 7, notes: [] })).toBeNull()
   })
 
   test('roundtrips synth parameters only with a durable instance identity', () => {

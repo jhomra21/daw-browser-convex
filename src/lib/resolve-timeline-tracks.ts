@@ -2,7 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import type { convexApi } from '~/lib/convex'
-import { audioWarpEqual, isLocalId, isLocalProjectAssetKey, normalizeAudioWarp, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, isLocalId, isLocalProjectAssetKey, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
@@ -109,7 +109,6 @@ type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackLocksById: Map<TTrackId, string | null>
 }
 
-const MIDI_WAVES = ['sine', 'square', 'sawtooth', 'triangle'] as const
 
 const nearlyEqual = (left: number | undefined, right: number | undefined) => {
   if (left === undefined || right === undefined) return left === right
@@ -148,17 +147,11 @@ const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
 }
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['midi'] => {
-  const wave = MIDI_WAVES.find((entry) => entry === value?.wave)
-  if (!value || !wave) return undefined
-  return {
-    wave,
-    gain: value.gain,
-    notes: value.notes.map((note) => ({
-      beat: note.beat,
-      length: note.length,
-      pitch: note.pitch,
-      velocity: note.velocity,
-    })),
+  if (!value) return undefined
+  try {
+    return normalizeLegacyMidiClip(value)
+  } catch {
+    return undefined
   }
 }
 

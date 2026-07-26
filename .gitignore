@@ -17,6 +17,9 @@ app.config.timestamp_*.js
 
 # dependencies
 /node_modules
+/native/build
+/native/audio-core/build
+/public/audio-core
 
 # IDEs and editors
 /.idea

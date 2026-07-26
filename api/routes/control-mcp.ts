@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import {
   controlCapabilitiesV1,
+  controlCapabilitiesV2,
   controlLimitsV1,
 } from "@daw-browser/control"
 import {
@@ -15,6 +16,11 @@ import {
   type ControlBearer,
   type ControlOAuthScope,
 } from "../control-oauth"
+import {
+  controlInsufficientScopeHeaders,
+  controlNoStore,
+  controlUnauthorizedHeaders,
+} from "../control-authorization"
 
 type ControlMcpRouteDependencies = {
   resolveBearer?: (
@@ -25,27 +31,21 @@ type ControlMcpRouteDependencies = {
   createGateway?: (context: ApiContext, bearer: ControlBearer) => Promise<ControlService>;
 }
 
-const noStore = { "Cache-Control": "no-store" }
-
-const controlChallenge = (url: string) => (
-  `Bearer resource_metadata="${new URL(url).origin}/.well-known/oauth-protected-resource/api"`
-)
+const noStore = controlNoStore
 
 const unauthorized = (context: ApiContext) => context.json({
   version: "v1",
   code: "authorization",
   message: "Bearer authentication is required.",
 }, 401, {
-  ...noStore,
-  "WWW-Authenticate": controlChallenge(context.req.url),
+  ...controlUnauthorizedHeaders(context.req.url),
 })
 
 const insufficientScope = (context: ApiContext) => context.json({
   error: "insufficient_scope",
   error_description: "Control write scope is required.",
 }, 403, {
-  ...noStore,
-  "WWW-Authenticate": `Bearer error="insufficient_scope", scope="control:write", resource_metadata="${new URL(context.req.url).origin}/.well-known/oauth-protected-resource/api"`,
+  ...controlInsufficientScopeHeaders(context.req.url, "control:write"),
 })
 
 const unsupportedMethod = () => new Response(null, {
@@ -97,7 +97,9 @@ const controlGateway = async (context: ApiContext, bearer: ControlBearer): Promi
   const gateway = await createControlConvexClient(context, bearer)
   return {
     capabilities: async () => controlCapabilitiesV1,
+    capabilitiesV2: async () => controlCapabilitiesV2,
     snapshot: async (input) => await gateway.query(convexApi.control.snapshotV1, input),
+    snapshotV2: async (input) => await gateway.query(convexApi.control.snapshotV2, input),
     preview: async (input) => await gateway.query(convexApi.control.previewV1, { request: input }),
     commit: async (input) => await gateway.mutation(convexApi.control.commitV1, { request: input }),
     requestApproval: async (input) => await gateway.mutation(convexApi.control.requestApprovalV1, { request: input }),
@@ -118,7 +120,9 @@ const lazyService = (
   }
   return {
     capabilities: async () => controlCapabilitiesV1,
+    capabilitiesV2: async () => controlCapabilitiesV2,
     snapshot: async (input) => (await resolveGateway()).snapshot(input),
+    snapshotV2: async (input) => (await resolveGateway()).snapshotV2(input),
     preview: async (input) => (await resolveGateway()).preview(input),
     commit: async (input) => (await resolveGateway()).commit(input),
     requestApproval: async (input) => (await resolveGateway()).requestApproval(input),

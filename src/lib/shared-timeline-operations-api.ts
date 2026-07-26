@@ -14,6 +14,13 @@ export class SharedTimelineOperationHttpError extends Error {
   }
 }
 
+export class SharedTimelineOperationRejectedError extends Error {
+  constructor(detail?: string) {
+    super(detail ?? 'Shared timeline operation was rejected.')
+    this.name = 'SharedTimelineOperationRejectedError'
+  }
+}
+
 export const isAppliedSharedTimelineOperationResult = (value: unknown) => (
   typeof value === 'object' && value !== null && 'status' in value && value.status === 'applied'
 )
@@ -24,11 +31,31 @@ export const assertAppliedSharedTimelineOperationResult = (result: unknown) => {
   }
 }
 
+const assertValidClipCreateResult = (
+  operation: SharedTimelineOperation,
+  result: unknown,
+) => {
+  if (operation.kind === 'clips.create' && result === null) {
+    throw new SharedTimelineOperationRejectedError('Clip creation was rejected.')
+  }
+  if (
+    operation.kind === 'clips.createMany'
+    && (
+      !Array.isArray(result)
+      || result.length !== operation.payload.items.length
+      || result.some((item) => item === null)
+    )
+  ) {
+    throw new SharedTimelineOperationRejectedError('One or more clip creations were rejected.')
+  }
+}
+
 export const publishSharedTimelineOperation = async (
   projectId: string,
   operation: SharedTimelineOperation,
+  options?: { fetch?: typeof fetch },
 ): Promise<unknown> => {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/timeline/operations`, {
+  const response = await (options?.fetch ?? fetch)(`/api/projects/${encodeURIComponent(projectId)}/timeline/operations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(operation),
@@ -37,7 +64,23 @@ export const publishSharedTimelineOperation = async (
     const detail = await response.text().catch(() => '')
     throw new SharedTimelineOperationHttpError(response.status, detail || undefined)
   }
-  return await response.json().catch(() => null)
+  const result = await response.json().catch(() => null)
+  if (
+    typeof result === 'object'
+    && result !== null
+    && 'status' in result
+    && result.status === 'rejected'
+  ) {
+    const detail = (
+      typeof result === 'object'
+      && result !== null
+      && 'reason' in result
+      && typeof result.reason === 'string'
+    ) ? result.reason : undefined
+    throw new SharedTimelineOperationRejectedError(detail)
+  }
+  assertValidClipCreateResult(operation, result)
+  return result
 }
 
 export const buildSharedTrackCreateOperation = (

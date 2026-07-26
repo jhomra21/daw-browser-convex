@@ -4,6 +4,9 @@ import { getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { resolveClipSampleUrl } from '@daw-browser/shared'
 import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
 import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
+import {
+  resolveSamplePlaybackUrlForRuntime,
+} from '~/lib/renderer-api-url'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 
 type ClipWaveformViewModelOptions = {
@@ -33,7 +36,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const midi = clip.midi
     const buffer = clip.buffer ?? null
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
-    const sampleUrl = resolveClipSampleUrl(clip)
+    const unresolvedSampleUrl = resolveClipSampleUrl(clip)
+    const sampleUrl = unresolvedSampleUrl ? resolveSamplePlaybackUrlForRuntime(unresolvedSampleUrl) ?? undefined : undefined
     const layout = getAudioWaveformLayout(clip, options.cssWidthPx(), buffer?.duration, options.projectBpm())
     const metadata = getPersistableAudioSourceMetadata({
       buffer,

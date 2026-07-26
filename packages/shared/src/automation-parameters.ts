@@ -440,6 +440,7 @@ export const valueAtAutomationTime = (
   const previous = points[nextIndex - 1]
   const next = points[nextIndex]
   if (!previous || !next) return fallbackValue
+  if (timeSec === next.timeSec) return next.value
   if (previous.interpolation === 'hold') return previous.value
   const span = next.timeSec - previous.timeSec
   if (span <= 0) return next.value

@@ -3,8 +3,10 @@ import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMi
 import { createAudioStretchCache } from './audio-stretch-cache'
 import {
   getAutomationParameterDescriptor,
+  midiMappingTargetKey,
+  valueAtAutomationTime,
   assert,
-  type ArpParams,
+  cloneMidiClip,
   type AutomationEnvelope,
   type DrumRackParams,
   normalizeSynthParams,
@@ -23,27 +25,41 @@ import { scheduleSamplerVoice, type SamplerResolvedBuffers } from './sampler-run
 import { resetSamplerRoundRobin, selectSamplerZone } from './sampler-core'
 import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
-import { createMixerChannels } from './mixer/channels'
-import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { ResolvedMixerGraph } from './mixer/types'
-import { scheduleAutomationEnvelope } from './automation'
+import { scheduleAutomationEnvelope, type AutomationAudioBinding } from './automation'
+import { compileTrackMidiExpressionSchedule } from './midi-expression-scheduling'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
 import { scanTruePeak } from './true-peak-scanner'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
+import { resolveExportMixerGraph } from './export-mixer-graph'
+import type { ExportFx } from './export-types'
+import {
+  loadAudioCoreWasmArtifact,
+  type AudioCoreWasmArtifact,
+  type AudioCoreWasmArtifactResult,
+} from '../../audio-core-wasm/src/index'
+import { compilePortableExportSnapshot, type PortableExportSnapshot } from './portable-export-snapshot'
+import { PortableExportWorker } from './portable-export-worker'
+import {
+  portableExportWorkerMaxAssets,
+  portableExportWorkerMaxEvents,
+  portableExportWorkerMaxFrames,
+  portableExportWorkerMaxGraphEdges,
+  portableExportWorkerMaxGraphNodes,
+} from './portable-export-worker-protocol'
+import { resolvePortableWasmManifestUrl } from './worklet-manifest'
+import { preparePortableStretchAssets } from './portable-stretch-preparation'
 export { encodeAudioBuffer, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'
 
-export type ExportFx = {
-  masterVolume?: number
-  masterFxInstances: AudioEffectRuntimeInstance[]
-  trackFx?: Record<string, { instances: AudioEffectRuntimeInstance[]; arp?: ArpParams; synth?: SynthParamsInput; instrument?: TrackInstrumentParams; drumRackBuffers?: DrumRackResolvedBuffers; samplerBuffers?: SamplerResolvedBuffers; granularBuffer?: GranularInstalledBuffer }>
-}
+export type { ExportFx } from './export-types'
+export { resolveExportMixerGraph } from './export-mixer-graph'
 
 export type ExportRequest = {
   tracks: Track<AudioBuffer>[]
@@ -58,6 +74,7 @@ export type ExportRequest = {
   sidechainRoutes?: ExternalSidechainRoute[]
   cueTrackIds?: readonly string[]
   resourceObserver?: ResourceObserver
+  onRenderProgress?: (completedFrames: number, totalFrames: number) => void
 }
 
 export type StemMode =
@@ -118,6 +135,14 @@ type SourceAutomationScope = {
   trackIds?: ReadonlySet<string>
   includeMasterFx: boolean
 }
+
+type PortableMixdownSelection =
+  | {
+    selected: true
+    artifact: AudioCoreWasmArtifact
+    snapshot: Extract<PortableExportSnapshot, { supported: true }>
+  }
+  | { selected: false }
 
 export function resolveExportLimiterCeilingDbtp(
   graph: ResolvedMixerGraph,
@@ -213,6 +238,133 @@ export const downmixStereoBufferToMono = <Buffer extends StereoSampleBuffer>(
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
   signal?.throwIfAborted()
+}
+
+const portableSnapshotRange = (range: PreparedExportRange): ExportRange => ({
+  mode: 'custom',
+  startSec: range.startSec,
+  endSec: range.sourceEndSec,
+})
+
+const selectPortableMixdown = async (
+  req: ExportRequest,
+  prepared: PreparedExportRender,
+  loadArtifact: (manifestUrl: string) => Promise<AudioCoreWasmArtifactResult> = loadAudioCoreWasmArtifact,
+): Promise<PortableMixdownSelection> => {
+  if (typeof Worker === 'undefined' || typeof AudioBuffer === 'undefined') return { selected: false }
+  if (prepared.automationEnvelopes.length > 0 || prepared.sidechainRoutes.length > 0 || req.cueTrackIds?.length) {
+    return { selected: false }
+  }
+  const artifact = await loadArtifact(resolvePortableWasmManifestUrl())
+  if (!artifact.available) return { selected: false }
+  throwIfAborted(req.signal)
+  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
+  if (frameCount > portableExportWorkerMaxFrames) return { selected: false }
+  const projectGeneration = 1
+  const preparedStretchAssets = await preparePortableStretchAssets({
+    tracks: req.tracks,
+    projectBpm: req.bpm,
+    projectGeneration,
+    requiredSampleRateHz: prepared.sampleRate,
+    createBuffer: (channels, frames, sampleRate) => new AudioBuffer({
+      numberOfChannels: channels,
+      length: frames,
+      sampleRate,
+    }),
+    signal: req.signal,
+  })
+  throwIfAborted(req.signal)
+  if (!preparedStretchAssets.supported) return { selected: false }
+  const snapshot = compilePortableExportSnapshot({
+    tracks: req.tracks,
+    bpm: req.bpm,
+    range: portableSnapshotRange(prepared.range),
+    sampleRateHz: prepared.sampleRate,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx: req.fx,
+    hasExternalPlugins: false,
+    projectGeneration,
+    preparedStretchAssets: preparedStretchAssets.assets,
+  })
+  if (!snapshot.supported
+    || snapshot.assets.length > portableExportWorkerMaxAssets
+    || snapshot.events.length > portableExportWorkerMaxEvents
+    || snapshot.graph.nodes.length > portableExportWorkerMaxGraphNodes
+    || snapshot.graph.edges.length > portableExportWorkerMaxGraphEdges) {
+    return { selected: false }
+  }
+  return { selected: true, artifact: artifact.artifact, snapshot }
+}
+
+export const createPortableOutputBuffer = (
+  chunks: ReadonlyMap<number, { frameCount: number; planes: readonly Float32Array[] }>,
+  frameCount: number,
+  sampleRate: number,
+  numberOfChannels: number,
+): AudioBuffer => {
+  const stereo = new AudioBuffer({ numberOfChannels: 2, length: frameCount, sampleRate })
+  let destinationFrame = 0
+  for (let index = 0; index < chunks.size; index += 1) {
+    const chunk = chunks.get(index)
+    if (!chunk
+      || chunk.frameCount <= 0
+      || chunk.planes.length !== 2
+      || chunk.planes[0]?.length !== chunk.frameCount
+      || chunk.planes[1]?.length !== chunk.frameCount
+      || destinationFrame + chunk.frameCount > frameCount) {
+      throw new Error('Portable export Worker returned invalid PCM output.')
+    }
+    stereo.getChannelData(0).set(chunk.planes[0], destinationFrame)
+    stereo.getChannelData(1).set(chunk.planes[1], destinationFrame)
+    destinationFrame += chunk.frameCount
+  }
+  if (destinationFrame !== frameCount) throw new Error('Portable export Worker returned incomplete PCM output.')
+  return numberOfChannels === 1
+    ? downmixStereoBufferToMono(
+      stereo,
+      (channels, frames, outputSampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate: outputSampleRate }),
+    )
+    : stereo
+}
+
+const renderPortableMixdown = async (
+  req: ExportRequest,
+  prepared: PreparedExportRender,
+  selection: Extract<PortableMixdownSelection, { selected: true }>,
+): Promise<AudioBuffer> => {
+  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
+  const chunks = new Map<number, { frameCount: number; planes: readonly Float32Array[] }>()
+  let hasDuplicateChunk = false
+  const worker = new PortableExportWorker(undefined, undefined, selection.artifact)
+  const releaseWorker = observeResource(prepared.resourceObserver, 'workers', worker)
+  const cancel = () => worker.cancel()
+  req.signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    await worker.render({
+      snapshot: selection.snapshot,
+      sampleRateHz: prepared.sampleRate,
+      frameCount,
+      generation: 1,
+      signal: req.signal,
+      onProgress: req.onRenderProgress,
+      onChunk: (index, pcm) => {
+        if (chunks.has(index)) {
+          hasDuplicateChunk = true
+          return
+        }
+        chunks.set(index, { frameCount: pcm.frameCount, planes: pcm.planes })
+      },
+    })
+    throwIfAborted(req.signal)
+    if (hasDuplicateChunk) throw new Error('Portable export Worker returned duplicate PCM output.')
+    return createPortableOutputBuffer(chunks, frameCount, prepared.sampleRate, prepared.numberOfChannels)
+  } finally {
+    req.signal?.removeEventListener('abort', cancel)
+    worker.dispose()
+    releaseWorker()
+  }
 }
 
 const readTrackInstrument = (
@@ -431,10 +583,7 @@ const snapshotTracks = (tracks: Track<AudioBuffer>[]): Track<AudioBuffer>[] => t
   clips: track.clips.map((clip) => ({
     ...clip,
     audioWarp: clip.audioWarp ? { ...clip.audioWarp } : undefined,
-    midi: clip.midi ? {
-      ...clip.midi,
-      notes: clip.midi.notes.map((note) => ({ ...note })),
-    } : undefined,
+    midi: clip.midi ? cloneMidiClip(clip.midi) : undefined,
   })),
 }))
 
@@ -482,19 +631,6 @@ const snapshotTrackFx = (trackFx: ExportFx['trackFx']): ExportFx['trackFx'] => {
       instrument: entry.instrument ? snapshotInstrument(entry.instrument) : undefined,
     },
   ]))
-}
-
-export function resolveExportMixerGraph(req: Pick<ExportRequest, 'tracks' | 'fx'>): ResolvedMixerGraph {
-  const { tracks, fx } = req
-  return resolveMixerGraph({
-    channels: createMixerChannels(tracks),
-    sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
-      track.id,
-      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
-    ])),
-    masterFxInstances: fx?.masterFxInstances ?? [],
-    trackFx: fx?.trackFx,
-  })
 }
 
 function prepareExportRender(req: ExportRequest): PreparedExportRender {
@@ -739,6 +875,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const granularRuntimes: Array<Awaited<ReturnType<typeof createGranularRuntime>>> = []
 
   try {
+    const mappingBindingBaselines = new Map<string, Map<AutomationAudioBinding['param'], number>>()
     for (const envelope of prepared.automationEnvelopes) {
       if (!envelope.enabled) continue
       if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
@@ -758,6 +895,47 @@ async function renderSourceIsolatedMixdownFromPrepared(
         (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
         fallback,
       )
+    }
+    for (const resolvedTrack of graph.channels) {
+      const track = prepared.trackById.get(resolvedTrack.channel.id)
+      if (!track) continue
+      for (const event of compileTrackMidiExpressionSchedule({
+        clips: track.clips,
+        trackId: track.id,
+        automationEnvelopes: prepared.automationEnvelopes,
+        bpm: prepared.bpm,
+        rangeStartSec: prepared.range.startSec,
+        rangeEndSec: prepared.range.sourceEndSec,
+      })) {
+        const bindings = mixerNodes.resolveTrackAutomationBindings(
+          { trackId: track.id, ...(event.target.effectInstanceId === undefined ? {} : { effectInstanceId: event.target.effectInstanceId }) },
+          event.target.parameterId,
+        )
+        const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
+        const mappingKey = `${track.id}\u0000${midiMappingTargetKey(event.target)}`
+        const baselines = mappingBindingBaselines.get(mappingKey) ?? new Map<AutomationAudioBinding['param'], number>()
+        const envelope = prepared.automationEnvelopes.find((candidate) => (
+          candidate.enabled
+          && candidate.target.kind === 'track'
+          && candidate.target.trackId === track.id
+          && candidate.target.effectInstanceId === event.target.effectInstanceId
+          && candidate.parameterId === event.target.parameterId
+        ))
+        const value = event.phase === 'restore'
+          ? envelope
+            ? valueAtAutomationTime(envelope.points, event.timeSec, descriptor?.defaultValue ?? 0)
+            : event.target.parameterId === 'volume'
+              ? track.volume
+              : descriptor?.defaultValue
+          : event.value
+        if (value === undefined) continue
+        for (const binding of bindings) {
+          if (!baselines.has(binding.param)) baselines.set(binding.param, binding.param.value ?? binding.valueToAudioValue(value))
+          const baseline = event.phase === 'restore' && !envelope ? baselines.get(binding.param) : undefined
+          binding.param.setValueAtTime(baseline ?? binding.valueToAudioValue(value), Math.max(0, event.timeSec - prepared.range.startSec))
+        }
+        if (baselines.size > 0) mappingBindingBaselines.set(mappingKey, baselines)
+      }
     }
 
     for (const resolvedTrack of graph.channels) {
@@ -934,7 +1112,11 @@ async function renderSourceIsolatedMixdownFromPrepared(
 }
 
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
-  return renderSourceIsolatedMixdownFromPrepared(prepareExportRender(req))
+  const prepared = prepareExportRender(req)
+  const portable = await selectPortableMixdown(req, prepared)
+  return portable.selected
+    ? renderPortableMixdown(req, prepared, portable)
+    : renderSourceIsolatedMixdownFromPrepared(prepared)
 }
 
 export function createStemRenderSession(req: ExportRequest): {

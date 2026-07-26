@@ -1,13 +1,17 @@
 import type { DatabaseReader } from "./_generated/server";
 import { controlLimitsV1 } from "@daw-browser/control";
-import { projectControlSnapshotV1 } from "./controlProjection";
+import { projectControlSnapshotV1, projectControlSnapshotV2 } from "./controlProjection";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireProjectRow } from "./projectRows";
 
 type SnapshotContext = { db: DatabaseReader };
 
-export async function readProjectControlSnapshotV1(ctx: SnapshotContext, projectId: string) {
+const readProjectControlSnapshot = async (
+  ctx: SnapshotContext,
+  projectId: string,
+  projectSnapshot: typeof projectControlSnapshotV1 | typeof projectControlSnapshotV2,
+) => {
   const [project, tracks, mixerSettings, clips, automationEnvelopes, effects, sidechainRoutes, assets, assetFolders] = await Promise.all([
     requireProjectRow(ctx, projectId),
     listProjectTracksWithMixerChannels(ctx, projectId),
@@ -24,7 +28,7 @@ export async function readProjectControlSnapshotV1(ctx: SnapshotContext, project
   if (assets.length > controlLimitsV1.maxAssetsPerSnapshot || assetFolders.length > controlLimitsV1.maxAssetFoldersPerSnapshot) {
     throw new Error("Project asset snapshot limit exceeded.");
   }
-  return projectControlSnapshotV1({
+  return projectSnapshot({
     project,
     tracks,
     clips,
@@ -35,4 +39,12 @@ export async function readProjectControlSnapshotV1(ctx: SnapshotContext, project
     assets,
     assetFolders,
   });
+}
+
+export async function readProjectControlSnapshotV1(ctx: SnapshotContext, projectId: string) {
+  return readProjectControlSnapshot(ctx, projectId, projectControlSnapshotV1);
+}
+
+export async function readProjectControlSnapshotV2(ctx: SnapshotContext, projectId: string) {
+  return readProjectControlSnapshot(ctx, projectId, projectControlSnapshotV2);
 }

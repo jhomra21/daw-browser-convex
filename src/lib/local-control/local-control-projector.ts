@@ -1,8 +1,10 @@
 import {
   assetSnapshotSchemaV1,
   projectControlSnapshotV1,
+  projectControlSnapshotV2,
   stableIdSchemaV1,
   type ProjectSnapshotV1,
+  type ProjectSnapshotV2,
 } from '@daw-browser/control'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { LocalEffectRow } from '~/lib/local-effects'
@@ -160,20 +162,25 @@ const completeAssets = (assets: readonly LocalProjectAssetRow[]) => assets.flatM
   }]
 })
 
-export const projectLocalControlSnapshotV1 = (input: {
+type LocalControlSnapshotInput = {
   projectId: string
   fallbackMetadata: LocalControlProjectMetadata
   entities: readonly LocalProjectEntityRow[]
   assets: readonly LocalProjectAssetRow[]
   projectState: readonly LocalProjectStateRow[]
   revision: number
-}): ProjectSnapshotV1 => {
+}
+
+const projectLocalControlSnapshot = <Snapshot>(
+  input: LocalControlSnapshotInput,
+  projectSnapshot: (value: Parameters<typeof projectControlSnapshotV1>[0]) => Snapshot,
+): Snapshot => {
   const metadata = projectMetadata(input.projectState, input.fallbackMetadata)
   const bpm = input.projectState.find((row) => row.key === 'bpm')?.value
   const loop = input.projectState.find((row) => row.key === 'loop')?.value
   const projectMix = input.projectState.find((row) => row.key === 'projectMix')?.value
   const effects = valueOfKind(input.entities, 'effect', isEffect)
-  return projectControlSnapshotV1({
+  return projectSnapshot({
     omitUnavailableClipSources: true,
     project: {
       projectId: input.projectId,
@@ -236,3 +243,11 @@ export const projectLocalControlSnapshotV1 = (input: {
     }),
   })
 }
+
+export const projectLocalControlSnapshotV1 = (input: LocalControlSnapshotInput): ProjectSnapshotV1 => (
+  projectLocalControlSnapshot(input, projectControlSnapshotV1)
+)
+
+export const projectLocalControlSnapshotV2 = (input: LocalControlSnapshotInput): ProjectSnapshotV2 => (
+  projectLocalControlSnapshot(input, projectControlSnapshotV2)
+)

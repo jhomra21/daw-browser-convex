@@ -1,8 +1,8 @@
 import { AUDIO_EFFECT_ORDER, isAudioEffectKind, normalizeAudioWarp } from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 
-const PERSISTED_HISTORY_VERSION = 4 as const
-const READABLE_PERSISTED_HISTORY_VERSIONS: ReadonlySet<number> = new Set([2, 3, PERSISTED_HISTORY_VERSION])
+const PERSISTED_HISTORY_VERSION = 7 as const
+const READABLE_PERSISTED_HISTORY_VERSIONS: ReadonlySet<number> = new Set([2, 3, 4, 5, 6, PERSISTED_HISTORY_VERSION])
 
 type PersistedHistoryEnvelope = {
   version: number
@@ -68,6 +68,10 @@ const isClipSnapshot = (value: unknown) => isRecord(value)
   && isNumber(value.startSec)
   && isNumber(value.duration)
   && (value.currentId === undefined || isString(value.currentId))
+  && (value.recoveryId === undefined || isString(value.recoveryId))
+  && (value.recoveryOperationId === undefined || isString(value.recoveryOperationId))
+  && (value.recoverySourceClipId === undefined || isString(value.recoverySourceClipId))
+  && (value.deleteOperationId === undefined || isString(value.deleteOperationId))
   && (value.name === undefined || isString(value.name))
   && (value.sampleUrl === undefined || isString(value.sampleUrl))
   && (value.sourceAssetKey === undefined || isString(value.sourceAssetKey))
@@ -148,11 +152,26 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
       return allowSectionEdit
         && Array.isArray(data.entries)
         && data.entries.every((entry) => isHistoryEntryValue(entry, false, version))
+    case 'control-range-delete':
+      return Array.isArray(data.trackRefs)
+        && data.trackRefs.length > 0
+        && data.trackRefs.every(isString)
+        && isNumber(data.startSec)
+        && isNumber(data.endSec)
+        && data.endSec > data.startSec
+        && isString(data.recoveryId)
+        && (data.restoreOperationId === undefined || isString(data.restoreOperationId))
+        && (data.deleteOperationId === undefined || isString(data.deleteOperationId))
+        && (data.restoreExpectedRevision === undefined || isNumber(data.restoreExpectedRevision))
+        && (data.deleteExpectedRevision === undefined || isNumber(data.deleteExpectedRevision))
+        && (data.deleteApprovalToken === undefined || isString(data.deleteApprovalToken))
     case 'clip-create':
       return isString(data.trackRef) && isClipSnapshot(data.clip)
     case 'clip-delete':
       return Array.isArray(data.items)
         && data.items.every((item) => isRecord(item) && isString(item.trackRef) && isClipSnapshot(item.clip))
+        && (data.legacyRecreate === undefined || isBoolean(data.legacyRecreate))
+        && (data.deleteOperationId === undefined || isString(data.deleteOperationId))
     case 'clips-move':
       return Array.isArray(data.moves)
         && data.moves.every((move) => isRecord(move)
@@ -266,8 +285,34 @@ function isHistoryEntry(value: unknown, version: number): value is HistoryEntry 
   return isHistoryEntryValue(value, true, version)
 }
 
-function readHistoryEntries(entries: unknown[], version: number) {
-  return entries.filter((entry) => isHistoryEntry(entry, version))
+function readHistoryEntries(entries: unknown[], version: number): HistoryEntry[] {
+  return entries.flatMap((entry) => {
+    if (!isHistoryEntry(entry, version)) return []
+    if (version >= PERSISTED_HISTORY_VERSION) return [entry]
+    if (entry.type === 'section-edit') {
+      return [{
+        ...entry,
+        data: {
+          ...entry.data,
+          entries: readHistoryEntries(entry.data.entries, version),
+        },
+      }]
+    }
+    if (entry.type === 'clip-delete' && entry.data.items.some((item) => !item.clip.recoveryId)) {
+      return [{
+        ...entry,
+        data: {
+          ...entry.data,
+          items: entry.data.items.map((item) => ({
+            ...item,
+            clip: { ...item.clip, legacyHistory: true },
+          })),
+          legacyRecreate: true,
+        },
+      }]
+    }
+    return [entry]
+  })
 }
 
 export function normalizePersistedHistory(value: unknown): PersistedHistory {

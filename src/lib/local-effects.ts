@@ -271,6 +271,7 @@ export const restoreLocalTrackEffectChain = async (
   input: {
     audioEffects: Array<{ id: string; kind: AudioEffectKind; params: unknown }>
     instrument?: TrackInstrumentParams
+    synth?: SynthParamsInput
     arp?: unknown
   },
 ): Promise<void> => {
@@ -307,6 +308,16 @@ export const restoreLocalTrackEffectChain = async (
       targetId,
       effect: 'instrument',
       params: input.instrument,
+      updatedAt: timestamp,
+    }
+    await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, timestamp))
+  }
+  if (!input.instrument && input.synth) {
+    const row: LocalEffectRow<SynthParamsInput> = {
+      id: localEffectRowId(targetId, 'synth'),
+      targetId,
+      effect: 'synth',
+      params: input.synth,
       updatedAt: timestamp,
     }
     await tx.store.put(createLocalProjectEntityRow(EFFECT_KIND, row.id, row, timestamp))

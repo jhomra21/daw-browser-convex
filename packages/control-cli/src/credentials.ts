@@ -1,6 +1,7 @@
 import { watch } from "node:fs"
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { normalizeControlOrigin } from "@daw-browser/control-sdk"
 
 const credentialVersion = "v1"
 
@@ -34,15 +35,6 @@ const isStringArray = (value: unknown): value is string[] => (
   Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0)
 )
 
-const normalizeOrigin = (value: string) => {
-  const url = new URL(value)
-  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("Base URL must be an origin.")
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "127.0.0.1")) {
-    throw new Error("Base URL must use HTTPS.")
-  }
-  return url.origin
-}
-
 const parseCredentials = (value: unknown): ControlCredentials => {
   if (!isRecord(value)
     || value.version !== credentialVersion
@@ -55,7 +47,7 @@ const parseCredentials = (value: unknown): ControlCredentials => {
     || typeof value.resource !== "string"
     || typeof value.tokenEndpoint !== "string"
     || typeof value.revocationEndpoint !== "string") throw new Error("Credential file is invalid.")
-  const baseUrl = normalizeOrigin(value.baseUrl)
+  const baseUrl = normalizeControlOrigin(value.baseUrl)
   if (value.resource !== `${baseUrl}/api`) throw new Error("Credential file has an invalid resource.")
   const tokenEndpoint = new URL(value.tokenEndpoint)
   const revocationEndpoint = new URL(value.revocationEndpoint)

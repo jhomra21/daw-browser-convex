@@ -10,6 +10,8 @@
         "@daw-browser/control": "workspace:*",
         "@daw-browser/control-mcp": "workspace:*",
         "@daw-browser/desktop-protocol": "workspace:*",
+        "@daw-browser/external-plugins": "workspace:*",
+        "@daw-browser/plugin-host-protocol": "workspace:*",
         "@daw-browser/shared": "workspace:*",
         "@daw-browser/timeline-core": "workspace:*",
         "@daw-browser/waveforms": "workspace:*",
@@ -60,7 +62,13 @@
       "name": "@daw-browser/desktop",
       "version": "0.0.0",
       "dependencies": {
+        "@daw-browser/audio-core-contract": "workspace:*",
+        "@daw-browser/audio-core-wasm": "workspace:*",
+        "@daw-browser/audio-engine": "workspace:*",
+        "@daw-browser/control": "workspace:*",
         "@daw-browser/desktop-protocol": "workspace:*",
+        "@daw-browser/external-plugins": "workspace:*",
+        "@daw-browser/plugin-host-protocol": "workspace:*",
       },
       "devDependencies": {
         "@electron-forge/cli": "7.11.2",
@@ -69,14 +77,28 @@
         "@electron-forge/maker-zip": "7.11.2",
         "@electron-forge/plugin-fuses": "7.11.2",
         "@electron-forge/plugin-vite": "7.11.2",
+        "@electron-forge/shared-types": "7.11.2",
         "@electron/fuses": "2.1.3",
         "electron": "43.1.1",
+      },
+    },
+    "packages/audio-core-contract": {
+      "name": "@daw-browser/audio-core-contract",
+      "version": "0.0.0",
+    },
+    "packages/audio-core-wasm": {
+      "name": "@daw-browser/audio-core-wasm",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/audio-core-contract": "workspace:*",
       },
     },
     "packages/audio-engine": {
       "name": "@daw-browser/audio-engine",
       "version": "0.0.0",
       "dependencies": {
+        "@daw-browser/audio-core-contract": "workspace:*",
+        "@daw-browser/audio-core-wasm": "workspace:*",
         "@daw-browser/shared": "workspace:*",
         "@daw-browser/timeline-core": "workspace:*",
         "mediabunny": "^1.35.1",
@@ -86,6 +108,8 @@
       "name": "@daw-browser/control",
       "version": "0.0.0",
       "dependencies": {
+        "@daw-browser/shared": "workspace:*",
+        "@daw-browser/timeline-core": "workspace:*",
         "@noble/hashes": "^2.0.1",
         "zod": "^4.3.6",
       },
@@ -113,6 +137,9 @@
         "@daw-browser/desktop-protocol": "workspace:*",
         "@modelcontextprotocol/sdk": "1.29.0",
       },
+      "devDependencies": {
+        "@daw-browser/control-sdk": "workspace:*",
+      },
     },
     "packages/control-sdk": {
       "name": "@daw-browser/control-sdk",
@@ -123,6 +150,22 @@
     },
     "packages/desktop-protocol": {
       "name": "@daw-browser/desktop-protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/control": "workspace:*",
+        "zod": "^4.3.6",
+      },
+    },
+    "packages/external-plugins": {
+      "name": "@daw-browser/external-plugins",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/plugin-host-protocol": "workspace:*",
+        "zod": "^4.3.6",
+      },
+    },
+    "packages/plugin-host-protocol": {
+      "name": "@daw-browser/plugin-host-protocol",
       "version": "0.0.0",
       "dependencies": {
         "zod": "^4.3.6",
@@ -146,6 +189,10 @@
       "name": "@daw-browser/waveforms",
       "version": "0.0.0",
     },
+  },
+  "patchedDependencies": {
+    "@electron-forge/core-utils@7.11.2": "patches/@electron-forge%2Fcore-utils@7.11.2.patch",
+    "@electron/osx-sign@1.3.3": "patches/@electron%2Fosx-sign@1.3.3.patch",
   },
   "overrides": {
     "@electron/fuses": "2.1.3",
@@ -380,6 +427,10 @@
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
+    "@daw-browser/audio-core-contract": ["@daw-browser/audio-core-contract@workspace:packages/audio-core-contract"],
+
+    "@daw-browser/audio-core-wasm": ["@daw-browser/audio-core-wasm@workspace:packages/audio-core-wasm"],
+
     "@daw-browser/audio-engine": ["@daw-browser/audio-engine@workspace:packages/audio-engine"],
 
     "@daw-browser/control": ["@daw-browser/control@workspace:packages/control"],
@@ -393,6 +444,10 @@
     "@daw-browser/desktop": ["@daw-browser/desktop@workspace:apps/desktop"],
 
     "@daw-browser/desktop-protocol": ["@daw-browser/desktop-protocol@workspace:packages/desktop-protocol"],
+
+    "@daw-browser/external-plugins": ["@daw-browser/external-plugins@workspace:packages/external-plugins"],
+
+    "@daw-browser/plugin-host-protocol": ["@daw-browser/plugin-host-protocol@workspace:packages/plugin-host-protocol"],
 
     "@daw-browser/shared": ["@daw-browser/shared@workspace:packages/shared"],
 
@@ -2412,7 +2467,7 @@
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
 
-    "yallist": ["yallist@3.1.1", "", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
+    "yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
 
     "yaml": ["yaml@2.8.3", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg=="],
 
@@ -2882,6 +2937,8 @@
 
     "log-update/ansi-escapes": ["ansi-escapes@5.0.0", "", { "dependencies": { "type-fest": "^1.0.2" } }, "sha512-5GFMVX8HqE/TB+FuBJGuO5XG0WrsA6ptUqoODaT/n9mmUaZFkqnBueB4leqGBCmrUHnCnC4PCZTCd0E7QQ83bA=="],
 
+    "lru-cache/yallist": ["yallist@3.1.1", "", {}, "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="],
+
     "make-fetch-happen/lru-cache": ["lru-cache@7.18.3", "", {}, "sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA=="],
 
     "make-fetch-happen/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
@@ -2903,8 +2960,6 @@
     "minipass-sized/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
 
     "minizlib/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
-
-    "minizlib/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
 
     "node-fetch/whatwg-url": ["whatwg-url@5.0.0", "", { "dependencies": { "tr46": "~0.0.3", "webidl-conversions": "^3.0.0" } }, "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw=="],
 
@@ -2963,8 +3018,6 @@
     "tar/minipass": ["minipass@5.0.0", "", {}, "sha512-3FnjYuehv9k6ovOEbyOswadCDPX1piCfhV8ncmYtHOjuPwylVWsghTLo7rabjC3Rx5xD4HDx8Wm1xnMF7S5qFQ=="],
 
     "tar/mkdirp": ["mkdirp@1.0.4", "", { "bin": { "mkdirp": "bin/cmd.js" } }, "sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw=="],
-
-    "tar/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
 
     "terser/commander": ["commander@2.20.3", "", {}, "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="],
 
@@ -3316,8 +3369,6 @@
 
     "cacache/glob/minimatch": ["minimatch@5.1.9", "", { "dependencies": { "brace-expansion": "^2.0.1" } }, "sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw=="],
 
-    "cacache/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
     "cacache/rimraf/glob": ["glob@7.2.3", "", { "dependencies": { "fs.realpath": "^1.0.0", "inflight": "^1.0.4", "inherits": "2", "minimatch": "^3.1.1", "once": "^1.3.0", "path-is-absolute": "^1.0.0" } }, "sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q=="],
 
     "cliui/string-width/emoji-regex": ["emoji-regex@8.0.0", "", {}, "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="],
@@ -3342,25 +3393,11 @@
 
     "filelist/minimatch/brace-expansion": ["brace-expansion@2.1.1", "", { "dependencies": { "balanced-match": "^1.0.0" } }, "sha512-WR1cURNjuvBLMZBMbqM0UoE+WAfdUcEV1ccD8PVBVOI+Z3ND4+SZbN8RsfT2bMuG1qwz5RFvPukSZm5fF2D5eA=="],
 
-    "fs-minipass/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
     "get-package-info/debug/ms": ["ms@2.0.0", "", {}, "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A=="],
 
     "glob/minimatch/brace-expansion": ["brace-expansion@5.0.6", "", { "dependencies": { "balanced-match": "^4.0.2" } }, "sha512-kLpxurY4Z4r9sgMsyG0Z9uzsBlgiU/EFKhj/h91/8yHu0edo7XuixOIH3VcJ8kkxs6/jPzoI6U9Vj3WqbMQ94g=="],
 
     "log-update/ansi-escapes/type-fest": ["type-fest@1.4.0", "", {}, "sha512-yGSza74xk0UG8k+pLh5oeoYirvIiWo5t0/o3zHHAO2tRDiZcxWP7fywNlXhqb6/r6sWvwi+RsyQMWhVLe4BVuA=="],
-
-    "make-fetch-happen/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
-    "minipass-collect/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
-    "minipass-fetch/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
-    "minipass-flush/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
-    "minipass-pipeline/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
-
-    "minipass-sized/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
 
     "node-fetch/whatwg-url/tr46": ["tr46@0.0.3", "", {}, "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw=="],
 
@@ -3399,8 +3436,6 @@
     "solid-refresh/@babel/generator/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "solid-refresh/@babel/types/@babel/helper-validator-identifier": ["@babel/helper-validator-identifier@7.27.1", "", {}, "sha512-D2hP9eA+Sqx1kBZgzxZh0y1trbuU+JoDkiEwqhQ36nodYqJwyEIhPSdMNd7lOm/4io72luTPWH20Yda0xOuUow=="],
-
-    "ssri/minipass/yallist": ["yallist@4.0.0", "", {}, "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="],
 
     "tsx/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.25.9", "", { "os": "aix", "cpu": "ppc64" }, "sha512-OaGtL73Jck6pBKjNIe24BnFE6agGl+6KxDtTfHhy1HmhthfKouEcOhqpSL64K4/0WCtbKFLOdzD/44cJ4k9opA=="],
 

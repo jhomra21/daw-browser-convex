@@ -1,5 +1,5 @@
 import type { AudioSourceKind } from '~/lib/audio-source'
-import type { AutomationEnvelope } from '@daw-browser/shared'
+import type { AutomationEnvelope, MidiClip } from '@daw-browser/shared'
 import type { AudioWarp, ExternalSidechainRoute, TrackChannelRole, TrackId } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
@@ -49,11 +49,7 @@ export type TimelineClipRow = {
   gain?: number
   fades?: ClipFades
   sampleUrl?: string
-  midi?: {
-    wave: 'sine' | 'square' | 'sawtooth' | 'triangle'
-    gain?: number
-    notes: { beat: number; length: number; pitch: number; velocity?: number }[]
-  }
+  midi?: MidiClip
   midiOffsetBeats?: number
   createdAt: number
   updatedAt: number
@@ -105,6 +101,10 @@ export type CreateClipInput = {
   sampleUrl?: string
   midi?: TimelineClipRow['midi']
   midiOffsetBeats?: number
+}
+
+export type RestoreHistoryClipInput = CreateClipInput & {
+  id: TimelineClipId
 }
 
 export type UpdateClipInput = {
@@ -191,6 +191,7 @@ export type TimelineRepository = {
   createTrack: (input: CreateTrackInput) => Promise<TimelineTrackRow>
   updateTrack: (input: UpdateTrackInput) => Promise<TimelineTrackRow | null>
   createClip: (input: CreateClipInput) => Promise<TimelineClipRow>
+  restoreHistoryClip: (input: RestoreHistoryClipInput) => Promise<TimelineClipRow>
   updateClip: (input: UpdateClipInput) => Promise<TimelineClipRow | null>
   moveClips: (moves: MoveClipInput[]) => Promise<void>
   reorderAndGroup: (updates: ReorderAndGroupTrackInput[]) => Promise<void>

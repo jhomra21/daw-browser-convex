@@ -1,13 +1,18 @@
 import {
-  canonicalRecoveryPayloadV1,
+  buildTimelineRangeDeletePatchV1,
+  canonicalCapturedRecoveryPayloadV2,
   hashRecoveryPayloadV1,
   isCloudRecoveryAssetV1,
   isCloudRecoveryOwnershipV1,
-  parseRecoveryPayloadV1,
-  recoveryPayloadSchemaV1,
+  parseStoredRecoveryPayload,
+  recoveryCapturedPayloadSchemaV2,
+  timelineRangeRecoveryAutomationDigestV2,
+  timelineRangeRecoveryClipDigestV2,
+  timelineRangeRecoveryOwnershipDigestV2,
   type ControlActionV1,
   type ContextualRefV1,
-  type RecoveryPayloadV1,
+  type RecoveryPayload,
+  type TimelineRangeDeletePatchV1,
   collectDeletedTrackIdsV1,
 } from "@daw-browser/control";
 import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
@@ -15,6 +20,7 @@ import {
   automationTargetKey,
   granularAutomationKey,
   instrumentAutomationKey,
+  normalizeLegacyMidiClip,
   normalizePersistedInstrumentParams,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
@@ -26,6 +32,7 @@ import {
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
+import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 
 const recoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 const maxRecoveriesPerProject = 1000;
@@ -33,6 +40,7 @@ const maxRecoveriesPerActorProject = 128;
 const recoveryKinds = new Set([
   "clip.delete", "effect.remove", "instrument.remove", "arpeggiator.remove",
   "automation.delete", "sidechain.remove", "asset.delete", "track.delete", "track.ungroup",
+  "timeline.range.delete",
 ]);
 
 type Mapping = { entity: "track" | "clip" | "effect" | "automation" | "sidechain" | "asset"; sourceId: string; restoredId: string };
@@ -44,8 +52,9 @@ type RecoveryResolver = <TableName extends "tracks" | "clips" | "effects">(
 type RecoverableAction = Extract<ControlActionV1, { kind:
   | "clip.delete" | "effect.remove" | "instrument.remove" | "arpeggiator.remove"
   | "automation.delete" | "sidechain.remove" | "asset.delete" | "track.delete" | "track.ungroup"
+  | "timeline.range.delete"
 }>;
-type EffectBundle = Extract<RecoveryPayloadV1, {
+type EffectBundle = Extract<RecoveryPayload, {
   kind: "effect.remove" | "instrument.remove" | "arpeggiator.remove"
 }>["data"];
 type RecoveryEffect = EffectBundle["effects"][number]["effect"];
@@ -133,6 +142,7 @@ const postDeleteTrackState = (row: any, deletedIds: Set<string>, index: number) 
 const clipPayload = (row: Doc<"clips">) => ({
   projectId: row.projectId,
   trackId: String(row.trackId),
+  ...(row.historyRef === undefined ? {} : { historyRef: row.historyRef }),
   startSec: row.startSec,
   duration: row.duration,
   ...(row.sourceAssetKey === undefined ? {} : { sourceAssetKey: row.sourceAssetKey }),
@@ -218,10 +228,128 @@ export const isRecoverableAction = (action: { kind: string }) => recoveryKinds.h
 
 export const captureRecoveryPayload = async (
   ctx: RecoveryCtx,
-  input: { projectId: string; action: RecoverableAction; resolveRef: RecoveryResolver },
+  input: {
+    projectId: string;
+    action: RecoverableAction;
+    resolveRef: RecoveryResolver;
+    actionIndex?: number;
+    timelineRangeDelete?: TimelineRangeDeletePatchV1;
+  },
 ) => {
   const { action } = input;
   if (!isRecoverableAction(action)) return null;
+  if (action.kind === "timeline.range.delete") {
+    const snapshot = await readProjectControlSnapshotV2(ctx, input.projectId);
+    const trackIds = action.tracks.map((track) => String(input.resolveRef("tracks", track)));
+    const plannedPatch = input.timelineRangeDelete ?? buildTimelineRangeDeletePatchV1(
+      snapshot,
+      trackIds,
+      action.startSec,
+      action.endSec,
+      input.actionIndex ?? 0,
+    );
+    const snapshotClipById = new Map(snapshot.clips.map((clip) => [clip.id, clip]));
+    const patch = {
+      ...plannedPatch,
+      clipUpdates: plannedPatch.clipUpdates.map((entry) => {
+        const current = snapshotClipById.get(entry.clipId);
+        if (!current) throw new Error("Range recovery clip is unavailable.");
+        return {
+          ...entry,
+          after: {
+            ...current,
+            id: entry.clipId,
+            startSec: entry.after.startSec,
+            duration: entry.after.duration,
+            leftPadSec: entry.after.leftPadSec,
+            bufferOffsetSec: entry.after.bufferOffsetSec,
+            midiOffsetBeats: entry.after.midiOffsetBeats,
+            fades: entry.after.fades,
+            audioWarp: entry.after.audioWarp,
+          },
+        };
+      }),
+      clipCreates: plannedPatch.clipCreates.map((entry) => {
+        const source = snapshotClipById.get(entry.sourceClipId);
+        if (!source) throw new Error("Range fragment source is unavailable.");
+        return {
+          ...entry,
+          after: {
+            ...source,
+            id: entry.placeholderId,
+            startSec: entry.after.startSec,
+            duration: entry.after.duration,
+            leftPadSec: entry.after.leftPadSec,
+            bufferOffsetSec: entry.after.bufferOffsetSec,
+            midiOffsetBeats: entry.after.midiOffsetBeats,
+            fades: entry.after.fades,
+            audioWarp: entry.after.audioWarp,
+          },
+        };
+      }),
+    };
+    if (
+      patch.clipDeletes.length === 0
+      && patch.clipUpdates.length === 0
+      && patch.clipCreates.length === 0
+      && patch.automationUpdates.length === 0
+    ) return null;
+    const clips = await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
+    const clipById = new Map(clips.map((clip) => [String(clip._id), clip]));
+    const deleted = await Promise.all(patch.clipDeletes.map(async (entry) => {
+      const clip = clipById.get(entry.clipId);
+      if (!clip) return null;
+      const clipOwnership = await ctx.db.query("ownerships").withIndex("by_clip", (q) => q.eq("clipId", clip._id)).unique();
+      return clipOwnership
+        ? { id: entry.clipId, clip: clipPayload(clip), ownership: ownershipPayload(clipOwnership) }
+        : null;
+    }));
+    if (deleted.some((entry) => entry === null)) return null;
+    const automationRows = await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect();
+    return {
+      range: { trackIds: patch.trackIds, startSec: action.startSec, endSec: action.endSec },
+      deletedClips: deleted.filter((entry) => entry !== null).map((entry) => ({
+        id: entry.id,
+        before: entry.clip,
+        ownership: entry.ownership,
+      })),
+      updatedClips: patch.clipUpdates.map((entry) => {
+        const clip = clipById.get(entry.clipId);
+        if (!clip) throw new Error("Range recovery clip is unavailable.");
+        return {
+          id: entry.clipId,
+          before: clipPayload(clip),
+          expectedAfterDigest: timelineRangeRecoveryClipDigestV2(entry.after),
+        };
+      }),
+      createdClips: await Promise.all(patch.clipCreates.map(async (entry) => {
+        const sourceId = ctx.db.normalizeId("clips", entry.sourceClipId);
+        const sourceOwnership = sourceId
+          ? await ctx.db.query("ownerships").withIndex("by_clip", (q) => q.eq("clipId", sourceId)).unique()
+          : null;
+        if (!sourceOwnership) throw new Error("Range fragment ownership is unavailable.");
+        return {
+          id: entry.placeholderId,
+          expectedAfterDigest: timelineRangeRecoveryClipDigestV2(entry.after),
+          expectedOwnershipDigest: timelineRangeRecoveryOwnershipDigestV2(ownershipPayload(sourceOwnership)),
+        };
+      })),
+      automation: patch.automationUpdates.map((entry) => {
+        const row = automationRows.find((candidate) => (
+          candidate.targetKind === ("master" in entry.identity.target ? "master" : "track")
+          && String(candidate.trackId ?? "") === String("trackId" in entry.identity.target ? entry.identity.target.trackId : "")
+          && candidate.effectInstanceId === entry.identity.effectInstanceId
+          && candidate.parameterId === entry.identity.parameterId
+        ));
+        if (!row) throw new Error("Range recovery automation is unavailable.");
+        return {
+          id: String(row._id),
+          before: automationPayload(row),
+          expectedAfterDigest: timelineRangeRecoveryAutomationDigestV2(entry.after),
+        };
+      }),
+    };
+  }
   if (action.kind === "track.delete" || action.kind === "track.ungroup") {
     const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
     const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
@@ -326,7 +454,7 @@ export const captureRecoveryPayload = async (
     const asset = await ctx.db.query("samples").withIndex("by_room_assetKey", (q) => (
       q.eq("projectId", input.projectId).eq("assetKey", action.asset.id)
     )).unique();
-    return asset ? { asset: assetPayload(asset), assetId: String(asset._id) } : null;
+    return asset ? { asset: assetPayload(asset), assetId: asset.assetKey } : null;
   }
   if (action.kind === "automation.delete") {
     const trackId = action.target.kind === "track" ? input.resolveRef("tracks", action.target.track) : undefined;
@@ -384,17 +512,22 @@ export const captureRecoveryPayload = async (
   };
 };
 
-const impact = (payload: RecoveryPayloadV1) => {
+const impact = (payload: RecoveryPayload) => {
   const data = payload.data;
   const bundle = "effects" in data ? data : undefined;
   const trackBundle = payload.kind === "track.delete" || payload.kind === "track.ungroup"
     ? payload.data
     : undefined;
+  const rangeBundle = payload.kind === "timeline.range.delete" ? payload.data : undefined;
   return {
     tracks: trackBundle?.tracks.length ?? 0,
-    clips: payload.kind === "clip.delete" ? 1 : (trackBundle?.clips.length ?? 0),
+    clips: payload.kind === "clip.delete"
+      ? 1
+      : rangeBundle
+        ? rangeBundle.deletedClips.length + rangeBundle.updatedClips.length + rangeBundle.createdClips.length
+        : (trackBundle?.clips.length ?? 0),
     processors: bundle?.effects.length ?? 0,
-    automation: bundle?.automation.length ?? 0,
+    automation: rangeBundle?.automation.length ?? bundle?.automation.length ?? 0,
     sidechains: bundle?.sidechains.length ?? 0,
     assets: payload.kind === "asset.delete" ? 1 : 0,
   };
@@ -425,12 +558,12 @@ const pruneRecoveries = async (ctx: RecoveryCtx, projectId: string, actorSubject
 
 export const createRecovery = async (
   ctx: RecoveryCtx,
-  input: { projectId: string; actorSubject: string; sourceActionIndex: number; kind: RecoveryPayloadV1["kind"]; data: unknown },
+  input: { projectId: string; actorSubject: string; sourceActionIndex: number; kind: RecoveryPayload["kind"]; data: unknown },
 ) => {
   if (!recoveryKinds.has(input.kind)) return null;
   const data = JSON.parse(JSON.stringify(input.data));
-  const validated = recoveryPayloadSchemaV1.parse({ version: 1, kind: input.kind, data });
-  const payload = canonicalRecoveryPayloadV1(validated);
+  const validated = recoveryCapturedPayloadSchemaV2.parse({ version: 2, kind: input.kind, data });
+  const payload = canonicalCapturedRecoveryPayloadV2(validated);
   await pruneRecoveries(ctx, input.projectId, input.actorSubject);
   const createdAt = Date.now();
   const expiresAt = createdAt + recoveryLifetimeMs;
@@ -451,7 +584,7 @@ export const createRecovery = async (
 export const loadRecovery = async (
   ctx: RecoveryCtx,
   input: { projectId: string; id: string },
-): Promise<{ row: Doc<"controlRecoveries">; payload: RecoveryPayloadV1 }> => {
+): Promise<{ row: Doc<"controlRecoveries">; payload: RecoveryPayload }> => {
   const id = ctx.db.normalizeId("controlRecoveries", input.id);
   const row = id ? await ctx.db.get(id) : null;
   if (!row || row.projectId !== input.projectId || row.consumedAt !== undefined || row.expiresAt <= Date.now()) {
@@ -460,7 +593,7 @@ export const loadRecovery = async (
   if (await hashRecoveryPayloadV1(row.payload) !== row.payloadHash) throw new Error("Recovery payload integrity check failed.");
   let payload;
   try {
-    payload = parseRecoveryPayloadV1(row.payload);
+    payload = parseStoredRecoveryPayload(row.payload);
   } catch {
     throw new Error("Recovery payload is invalid.");
   }
@@ -722,7 +855,8 @@ const restoreTrackBundle = async (
     const clip = item.clip;
     const trackId = resolve(clip.trackId);
     if (!trackId) throw new ControlDomainError("not-found", "Recovery clip target is unavailable.", input.actionIndex);
-    const id = await ctx.db.insert("clips", { ...clip, trackId });
+    const normalizedClip = clip.midi === undefined ? clip : { ...clip, midi: normalizeLegacyMidiClip(clip.midi) };
+    const id = await ctx.db.insert("clips", { ...normalizedClip, trackId });
     await ctx.db.insert("ownerships", {
       projectId: item.ownership.projectId, ownerUserId: item.ownership.ownerUserId,
       ...(item.ownership.role === undefined ? {} : { role: item.ownership.role }), clipId: id,
@@ -776,6 +910,127 @@ const restoreTrackBundle = async (
   }
 };
 
+type RangeRecoveryData = Extract<RecoveryPayload, { kind: "timeline.range.delete" }>["data"];
+
+const restoredClipFields = (
+  clip: RangeRecoveryData["updatedClips"][number]["before"],
+  trackId: Id<"tracks">,
+) => {
+  const midi = clip.midi === undefined ? undefined : normalizeLegacyMidiClip(clip.midi);
+  return {
+    projectId: clip.projectId,
+    trackId,
+    ...(clip.historyRef === undefined ? {} : { historyRef: clip.historyRef }),
+    startSec: clip.startSec,
+    duration: clip.duration,
+    sourceAssetKey: clip.sourceAssetKey,
+    sourceKind: clip.sourceKind,
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+    leftPadSec: clip.leftPadSec,
+    bufferOffsetSec: clip.bufferOffsetSec,
+    audioWarp: clip.audioWarp,
+    gain: clip.gain,
+    fades: clip.fades,
+    color: clip.color,
+    name: clip.name,
+    sampleUrl: clip.sampleUrl,
+    midi,
+    midiOffsetBeats: clip.midiOffsetBeats,
+  };
+};
+
+const restoreTimelineRange = async (
+  ctx: RecoveryCtx,
+  input: { projectId: string; data: RangeRecoveryData; actionIndex: number },
+  mappings: Mapping[],
+) => {
+  for (const trackId of input.data.range.trackIds) await requireTrack(ctx, input.projectId, trackId, input.actionIndex);
+  const snapshot = await readProjectControlSnapshotV2(ctx, input.projectId);
+  const snapshotClipById = new Map(snapshot.clips.map((clip) => [clip.id, clip]));
+  for (const deletion of input.data.deletedClips) {
+    const originalId = ctx.db.normalizeId("clips", deletion.id);
+    if (originalId && await ctx.db.get(originalId)) {
+      throw new ControlDomainError("validation", "Recovery clip collides with current state.", input.actionIndex);
+    }
+    if (!isCloudRecoveryOwnershipV1(deletion.ownership)) {
+      throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
+    }
+  }
+  for (const update of input.data.updatedClips) {
+    const current = snapshotClipById.get(update.id);
+    if (!current || timelineRangeRecoveryClipDigestV2(current) !== update.expectedAfterDigest) {
+      throw new ControlDomainError("validation", "Recovery state has drifted.", input.actionIndex);
+    }
+  }
+  const selectedTrackIds = new Set(input.data.range.trackIds);
+  for (const creation of input.data.createdClips) {
+    const current = snapshotClipById.get(creation.id);
+    const id = ctx.db.normalizeId("clips", creation.id);
+    const ownership = id ? await ctx.db.query("ownerships").withIndex("by_clip", (q) => q.eq("clipId", id)).unique() : null;
+    if (
+      !current || !selectedTrackIds.has(current.trackId)
+      || timelineRangeRecoveryClipDigestV2(current) !== creation.expectedAfterDigest
+      || !ownership || timelineRangeRecoveryOwnershipDigestV2(ownershipPayload(ownership)) !== creation.expectedOwnershipDigest
+    ) throw new ControlDomainError("validation", "Recovery state has drifted.", input.actionIndex);
+  }
+  for (const update of input.data.automation) {
+    const currentId = ctx.db.normalizeId("automationEnvelopes", update.id);
+    const row = currentId ? await ctx.db.get(currentId) : null;
+    const current = row && row.projectId === input.projectId
+      ? snapshot.automation.find((automation) => (
+          ("master" in automation.target ? "master" : "track") === row.targetKind
+          && String("trackId" in automation.target ? automation.target.trackId : "") === String(row.trackId ?? "")
+          && automation.effectInstanceId === row.effectInstanceId
+          && automation.parameterId === row.parameterId
+        ))
+      : undefined;
+    if (!current || timelineRangeRecoveryAutomationDigestV2(current) !== update.expectedAfterDigest) {
+      throw new ControlDomainError("validation", "Recovery state has drifted.", input.actionIndex);
+    }
+  }
+  for (const creation of input.data.createdClips) {
+    const id = ctx.db.normalizeId("clips", creation.id);
+    if (!id) throw new Error("Range recovery clip mapping is unavailable.");
+    const clipOwnership = await ctx.db.query("ownerships").withIndex("by_clip", (q) => q.eq("clipId", id)).unique();
+    if (!clipOwnership) throw new Error("Range recovery clip ownership is unavailable.");
+    await ctx.db.delete(clipOwnership._id);
+    await ctx.db.delete(id);
+  }
+  for (const update of input.data.updatedClips) {
+    const id = ctx.db.normalizeId("clips", update.id);
+    const track = await requireTrack(ctx, input.projectId, update.before.trackId, input.actionIndex);
+    if (!id) throw new Error("Range recovery clip mapping is unavailable.");
+    await ctx.db.patch(id, restoredClipFields(update.before, track._id));
+  }
+  for (const deletion of input.data.deletedClips) {
+    const track = await requireTrack(ctx, input.projectId, deletion.before.trackId, input.actionIndex);
+    const ownership = deletion.ownership;
+    if (!isCloudRecoveryOwnershipV1(ownership)) {
+      throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
+    }
+    const id = await ctx.db.insert("clips", restoredClipFields(deletion.before, track._id));
+    await ctx.db.insert("ownerships", {
+      projectId: ownership.projectId,
+      ownerUserId: ownership.ownerUserId,
+      ...(ownership.role === undefined ? {} : { role: ownership.role }),
+      clipId: id,
+    });
+    mappings.push({ entity: "clip", sourceId: deletion.id, restoredId: String(id) });
+  }
+  for (const update of input.data.automation) {
+    const currentId = ctx.db.normalizeId("automationEnvelopes", update.id);
+    const current = currentId ? await ctx.db.get(currentId) : null;
+    if (!current) throw new Error("Range recovery automation is unavailable.");
+    await ctx.db.patch(current._id, {
+      enabled: update.before.enabled,
+      points: update.before.points,
+      updatedAt: Date.now(),
+    });
+  }
+};
+
 export const restoreRecovery = async (
   ctx: RecoveryCtx,
   input: { projectId: string; recovery: Awaited<ReturnType<typeof loadRecovery>>; actionIndex: number },
@@ -810,12 +1065,19 @@ export const restoreRecovery = async (
       })),
       actionIndex: input.actionIndex,
     }, mappings);
+  } else if (payload.kind === "timeline.range.delete") {
+    await restoreTimelineRange(ctx, {
+      projectId: input.projectId,
+      data: payload.data,
+      actionIndex: input.actionIndex,
+    }, mappings);
   } else if (payload.kind === "clip.delete") {
     const data = payload.data;
     if (!isCloudRecoveryOwnershipV1(data.ownership)) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
     const track = await requireTrack(ctx, input.projectId, data.clip.trackId, input.actionIndex);
+    const midi = data.clip.midi === undefined ? undefined : normalizeLegacyMidiClip(data.clip.midi);
     const id = await ctx.db.insert("clips", {
       projectId: data.clip.projectId,
       trackId: track._id,
@@ -834,7 +1096,7 @@ export const restoreRecovery = async (
       ...(data.clip.color === undefined ? {} : { color: data.clip.color }),
       ...(data.clip.name === undefined ? {} : { name: data.clip.name }),
       ...(data.clip.sampleUrl === undefined ? {} : { sampleUrl: data.clip.sampleUrl }),
-      ...(data.clip.midi === undefined ? {} : { midi: data.clip.midi }),
+      ...(midi === undefined ? {} : { midi }),
       ...(data.clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: data.clip.midiOffsetBeats }),
     });
     await ctx.db.insert("ownerships", {

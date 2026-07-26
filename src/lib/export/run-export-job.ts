@@ -25,6 +25,9 @@ import type { ExportOutputTargetFactory } from '~/lib/export/export-output-targe
 import { preflightExportResources } from '~/lib/export/export-resource-preflight'
 import { captureLocalExportRenderRowsSnapshot } from '~/lib/export/capture-local-export-render-rows'
 import type { ExportEffectRow, ExportEffectsProjection } from '~/lib/export/export-effect-rows'
+import { listLocalExternalProcessors } from '~/lib/external-plugins'
+import { getLocalProject } from '~/lib/local-project-db'
+import { assertBrowserExportHasNoLiveExternalPlugins } from '@daw-browser/external-plugins'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -378,9 +381,11 @@ export const createExportRenderStateSnapshot = async (input: {
 }): Promise<ExportRenderStateSnapshot> => {
   const { projectId, userId, masterVolume, cloudRows, effectsProjection, automationPatches } = input
   const fx = createExportFx(masterVolume)
-  const localOnly = projectId ? isLocalId('project', projectId) : false
+  const localProject = projectId ? await getLocalProject(projectId) : undefined
+  const localOnly = projectId ? isLocalId('project', projectId) || localProject !== undefined : false
   if (localOnly && projectId) {
     const rows = await captureLocalExportRenderRowsSnapshot(projectId)
+    assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
     applyLocalEffectRowsToFx(fx, rows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
     return {

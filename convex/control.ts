@@ -13,14 +13,15 @@ import {
   parseControlHistoryQueryV1,
   parseControlRecoveriesQueryV1,
   assertControlSerializedBodyV1,
-  canonicalRecoveryPayloadV1,
+  canonicalCapturedRecoveryPayloadV2,
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   planControlRequestV1,
   projectSnapshotSchemaV1,
-  recoveryPayloadSchemaV1,
+  projectSnapshotSchemaV2,
+  recoveryCapturedPayloadSchemaV2,
   type ResolvedRefV1,
 } from "@daw-browser/control";
 import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
@@ -28,7 +29,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { executeControlPlanV1 } from "./controlExecution";
 import { ControlDomainError, preflightControlRequestV1 } from "./controlPreflight";
-import { readProjectControlSnapshotV1 } from "./controlSnapshot";
+import { readProjectControlSnapshotV1, readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
 import { advanceProjectRevision } from "./projectRows";
 import { captureRecoveryPayload, isRecoverableAction, loadRecovery } from "./controlRecovery";
@@ -249,10 +250,16 @@ const plan = (
   try {
     return planControlRequestV1(snapshot, request, recoveries)
   } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && "message" in error && "actionIndex" in error) {
+    if (typeof error === "object" && error !== null && "code" in error && "message" in error) {
       const value = error
-      if (value.code === "validation" || value.code === "not-found" || value.code === "limit-exceeded") {
-        return failure(value.code, String(value.message), typeof value.actionIndex === "number" ? value.actionIndex : undefined)
+      if (
+        (value.code === "validation" || value.code === "not-found" || value.code === "limit-exceeded")
+        && typeof value.message === "string"
+      ) {
+        const actionIndex = "actionIndex" in value && typeof value.actionIndex === "number"
+          ? value.actionIndex
+          : undefined
+        return failure(value.code, value.message.slice(0, 512), actionIndex)
       }
     }
     return failure("internal", "Control planning failed.")
@@ -302,11 +309,12 @@ const validateRecoveryDrafts = async (
   ctx: any,
   input: { projectId: string; actions: any[] },
 ) => {
-  for (const action of input.actions) {
+  for (const [actionIndex, action] of input.actions.entries()) {
     if (!isRecoverableAction(action) || hasClientReference(action)) continue
     const data = await captureRecoveryPayload(ctx, {
       projectId: input.projectId,
       action,
+      actionIndex,
       resolveRef: (table, ref) => {
         if (ref.source !== "persisted") throw new Error("Recovery draft has an unresolved reference.");
         const id = ctx.db.normalizeId(table, ref.id);
@@ -315,8 +323,8 @@ const validateRecoveryDrafts = async (
       },
     })
     if (data) {
-      canonicalRecoveryPayloadV1(recoveryPayloadSchemaV1.parse({
-        version: 1,
+      canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse({
+        version: 2,
         kind: action.kind,
         data: JSON.parse(JSON.stringify(data)),
       }))
@@ -335,6 +343,7 @@ const recoveryTrackIds = (recovery: any): string[] => {
   if (recovery.payload.kind === "automation.delete") return data.automation.trackId ? [String(data.automation.trackId)] : []
   if (recovery.payload.kind === "sidechain.remove") return [String(data.sidechain.sourceTrackId), String(data.sidechain.targetTrackId)]
   if (recovery.payload.kind === "asset.delete") return []
+  if (recovery.payload.kind === "timeline.range.delete") return data.range.trackIds.map(String)
   if (recovery.payload.kind === "track.delete") {
     return [
       ...data.survivors.map((entry: any) => entry.id),
@@ -420,7 +429,7 @@ export const previewV1 = query({
       }
       return failure("internal", "Control preflight failed.")
     }
-    const snapshot = await readProjectControlSnapshotV1(ctx, parsed.projectId)
+    const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
       failure("revision-conflict", "Project revision does not match the expected revision.")
     }
@@ -464,7 +473,7 @@ export const requestApprovalV1 = mutation({
       if (error instanceof ControlDomainError) return failure(error.code, error.message, error.actionIndex, error.details)
       return failure("internal", "Control preflight failed.")
     }
-    const snapshot = await readProjectControlSnapshotV1(ctx, parsed.projectId)
+    const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
       return failure("revision-conflict", "Project revision does not match the expected revision.")
     }
@@ -559,7 +568,7 @@ export const commitV1 = mutation({
       }
       return failure("internal", "Control preflight failed.")
     }
-    const snapshot = await readProjectControlSnapshotV1(ctx, parsed.projectId)
+    const snapshot = await readProjectControlSnapshotV2(ctx, parsed.projectId)
     if (parsed.expectedRevision !== undefined && parsed.expectedRevision !== snapshot.project.revision) {
       failure("revision-conflict", "Project revision does not match the expected revision.")
     }
@@ -660,6 +669,26 @@ export const snapshotV1 = query({
       return failure("forbidden", "You do not have read access to this project.")
     }
     return projectSnapshotSchemaV1.parse(await readProjectControlSnapshotV1(ctx, parsed.projectId))
+  },
+})
+
+export const snapshotV2 = query({
+  args: { projectId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const parsed = parseSnapshotQuery(args)
+    let userId: string
+    try {
+      userId = (await requireAuthenticatedIdentity(ctx)).subject
+    } catch {
+      return failure("authorization", "Authentication is required.")
+    }
+    try {
+      await requireProjectAccess(ctx, parsed.projectId, userId)
+    } catch {
+      return failure("forbidden", "You do not have read access to this project.")
+    }
+    return projectSnapshotSchemaV2.parse(await readProjectControlSnapshotV2(ctx, parsed.projectId))
   },
 })
 

@@ -1,3 +1,5 @@
+import { resolveSamplePlaybackUrlForRuntime } from '~/lib/renderer-api-url'
+
 type SampleLoadState =
   | { status: 'pending'; promise: Promise<AudioBuffer | null> }
   | { status: 'ready'; buffer: AudioBuffer }
@@ -7,6 +9,7 @@ type SampleFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Res
 
 type SampleBufferLoaderOptions = {
   fetchImpl?: SampleFetch
+  resolveUrl?: (url: string) => string | null
 }
 
 const awaitWithSignal = async <Value,>(promise: Promise<Value>, signal?: AbortSignal): Promise<Value> => {
@@ -75,11 +78,14 @@ async function fetchArrayBufferWithRetry(fetchImpl: SampleFetch, url: string, si
 
 export function createSampleBufferLoader(options: SampleBufferLoaderOptions = {}) {
   const fetchImpl = options.fetchImpl ?? fetch
+  const resolveUrl = options.resolveUrl ?? resolveSamplePlaybackUrlForRuntime
   const states = new Map<string, SampleLoadState>()
 
   const load = async (url: string, decodeAudioData: (data: ArrayBuffer) => Promise<AudioBuffer>, signal?: AbortSignal): Promise<AudioBuffer | null> => {
     signal?.throwIfAborted()
-    const current = states.get(url)
+    const resolvedUrl = resolveUrl(url)
+    if (!resolvedUrl) return null
+    const current = states.get(resolvedUrl)
     if (current?.status === 'ready') return current.buffer
     if (current?.status === 'pending' && !signal) return current.promise
     if (current?.status === 'failed' && Date.now() < current.retryAfterMs) return null
@@ -87,15 +93,15 @@ export function createSampleBufferLoader(options: SampleBufferLoaderOptions = {}
     const attempts = current?.status === 'failed' ? current.attempts + 1 : 1
     const promise = (async () => {
       try {
-        const arrayBuffer = await fetchArrayBufferWithRetry(fetchImpl, url, signal)
+        const arrayBuffer = await fetchArrayBufferWithRetry(fetchImpl, resolvedUrl, signal)
         const buffer = await awaitWithSignal(decodeAudioData(arrayBuffer), signal)
         signal?.throwIfAborted()
-        states.set(url, { status: 'ready', buffer })
+        states.set(resolvedUrl, { status: 'ready', buffer })
         return buffer
       } catch (error) {
         if (signal?.aborted) throw error
         const lastError = error instanceof Error ? error.message : String(error)
-        states.set(url, {
+        states.set(resolvedUrl, {
           status: 'failed',
           attempts,
           retryAfterMs: Date.now() + computeRetryDelayMs(attempts, lastError),
@@ -105,13 +111,14 @@ export function createSampleBufferLoader(options: SampleBufferLoaderOptions = {}
       }
     })()
 
-    if (!signal) states.set(url, { status: 'pending', promise })
+    if (!signal) states.set(resolvedUrl, { status: 'pending', promise })
     return promise
   }
 
   const invalidate = (url?: string) => {
     if (url) {
-      states.delete(url)
+      const resolvedUrl = resolveUrl(url)
+      if (resolvedUrl) states.delete(resolvedUrl)
       return
     }
     states.clear()

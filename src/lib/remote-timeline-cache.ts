@@ -1,7 +1,7 @@
 import type { FunctionReturnType } from 'convex/server'
 
 import type { convexApi } from '~/lib/convex'
-import { normalizeAudioWarp, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
@@ -37,17 +37,10 @@ const normalizeTrackKind = (value: string | undefined): TimelineTrackRow['kind']
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): TimelineClipRow['midi'] => {
   if (!value) return undefined
-  const wave = value.wave
-  if (wave !== 'sine' && wave !== 'square' && wave !== 'sawtooth' && wave !== 'triangle') return undefined
-  return {
-    wave,
-    gain: value.gain,
-    notes: value.notes.map((note) => ({
-      beat: note.beat,
-      length: note.length,
-      pitch: note.pitch,
-      velocity: note.velocity,
-    })),
+  try {
+    return normalizeLegacyMidiClip(value)
+  } catch {
+    return undefined
   }
 }
 

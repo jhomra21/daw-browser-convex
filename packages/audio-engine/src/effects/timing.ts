@@ -128,3 +128,32 @@ export const getEffectChainTiming = (
   }
   return { latencyFrames, tail: finite(tailFrames) }
 }
+
+type ExternalEffectTimingInput = {
+  latencyFrames: number
+  tailFrames: number | null
+}
+
+export const getEffectChainTimingWithExternal = (
+  instances: readonly AudioEffectRuntimeInstance[],
+  external: readonly ExternalEffectTimingInput[],
+  sampleRate: number,
+  bpm = 120,
+): EffectTiming => {
+  const timing = getEffectChainTiming(instances, sampleRate, bpm)
+  let latencyFrames = timing.latencyFrames
+  let tailFrames = timing.tail.kind === 'finite' ? timing.tail.frames : 0
+  let hasUnboundedTail = timing.tail.kind === 'unbounded'
+  for (const processor of external) {
+    latencyFrames += Math.max(0, Math.ceil(processor.latencyFrames))
+    if (processor.tailFrames === null) {
+      hasUnboundedTail = true
+      continue
+    }
+    tailFrames += Math.max(0, Math.ceil(processor.tailFrames))
+  }
+  return {
+    latencyFrames,
+    tail: hasUnboundedTail ? { kind: 'unbounded' } : finite(tailFrames),
+  }
+}

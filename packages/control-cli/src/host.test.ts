@@ -6,13 +6,16 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   desktopFrameSchemaV1,
+  desktopFrameSchema,
   desktopProtocolVersion,
+  desktopProtocolVersionV2,
   maxDesktopReplyBytes,
   maxDesktopReplyFrameBytes,
   type DesktopFrameV1,
+  type DesktopFrame,
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
-import type { ControlErrorV1 } from "@daw-browser/control"
+import { localControlCapabilitiesV2, type ControlErrorV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { createHostClient, DesktopControlError, registrationFile } from "./host"
 
@@ -65,6 +68,15 @@ const acknowledge = (socket: Socket, capabilities: DesktopOperationV1[]) => {
     capabilities,
   })
 }
+const acknowledgeV2 = (socket: Socket, capabilities: DesktopOperationV1[]) => {
+  socket.write(encodeDesktopFrame(desktopFrameSchema.parse({
+    version: desktopProtocolVersionV2,
+    type: "helloAck",
+    selectedVersion: desktopProtocolVersionV2,
+    sessionId: "session-identifier",
+    capabilities,
+  })))
+}
 
 const waitForClose = (socket: Socket) => (
   socket.destroyed
@@ -83,6 +95,48 @@ type HostFixture = {
 
 const createHostFixture = async (
   onFrame: (socket: Socket, frame: DesktopFrameV1) => void,
+): Promise<HostFixture> => {
+  const userDataDirectory = await temporaryDirectory()
+  const hostDirectory = path.join(userDataDirectory, "host")
+  const socketPath = path.join(hostDirectory, "host.sock")
+  await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+  await chmod(hostDirectory, 0o700)
+  const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.once("close", () => sockets.delete(socket))
+    const decoder = createDesktopFrameDecoder((frame: DesktopFrame) => {
+      if (frame.version !== "v1") {
+        socket.destroy()
+        return
+      }
+      onFrame(socket, frame)
+    })
+    socket.on("data", decoder)
+  })
+  servers.push(server)
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
+  const registration = path.join(hostDirectory, "registration-v1.json")
+  await writeFile(registration, JSON.stringify({
+    version: "v1",
+    instanceId: "a".repeat(32),
+    pid: process.pid,
+    createdAt: Date.now(),
+    address: socketPath,
+    secret: "b".repeat(64),
+  }), { mode: 0o600 })
+  await chmod(registration, 0o600)
+  return {
+    paths: {
+      platform: "linux",
+      homeDirectory: userDataDirectory,
+      userDataDirectory,
+      actorPath: path.join(userDataDirectory, "identity", "host-actor-v1.json"),
+    },
+  }
+}
+
+const createV2HostFixture = async (
+  onFrame: (socket: Socket, frame: DesktopFrame) => void,
 ): Promise<HostFixture> => {
   const userDataDirectory = await temporaryDirectory()
   const hostDirectory = path.join(userDataDirectory, "host")
@@ -243,6 +297,61 @@ describe("desktop host client", () => {
     const client = await createHostClient({ paths: fixture.paths })
     expect(await client.request("host.status", {})).toEqual(hostStatus)
     client.close()
+  })
+
+  test("negotiates V2 and accepts an unchunked V2 capabilities reply", async () => {
+    const fixture = await createV2HostFixture((socket, frame) => {
+      if (frame.type === "hello") {
+        expect(frame.version).toBe("v2")
+        if (frame.version === "v2") expect(frame.supportedVersions).toEqual(["v1", "v2"])
+        acknowledgeV2(socket, ["control.capabilities"])
+      }
+      if (frame.type === "request") {
+        expect(frame.version).toBe("v2")
+        socket.write(encodeDesktopFrame(desktopFrameSchema.parse({
+          version: "v2",
+          type: "reply",
+          id: frame.id,
+          result: localControlCapabilitiesV2,
+        })))
+      }
+    })
+    const client = await createHostClient({ paths: fixture.paths })
+    expect(client.protocolVersion).toBe("v2")
+    expect(await client.requestV2("control.capabilities", {})).toEqual(localControlCapabilitiesV2)
+    client.close()
+  })
+
+  test("falls back to V1 and rejects an explicit V2 read without sending a request", async () => {
+    let requestCount = 0
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["control.capabilities"])
+      if (frame.type === "request") requestCount += 1
+    })
+    const client = await createHostClient({ paths: fixture.paths })
+    expect(client.protocolVersion).toBe("v1")
+    await expect(client.requestV2("control.capabilities", {})).rejects.toMatchObject({
+      name: "DesktopHostError",
+      data: { version: "v1", code: "unsupported-version" },
+    })
+    expect(requestCount).toBe(0)
+    client.close()
+  })
+
+  test("rejects mixed V1 replies after a V2 handshake", async () => {
+    const fixture = await createV2HostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledgeV2(socket, ["host.status"])
+      if (frame.type === "request") {
+        socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          result: hostStatus,
+        })))
+      }
+    })
+    const client = await createHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {})).rejects.toThrow("mixed protocol frame")
   })
 
   test("rejects a normal reply whose wire JSON exceeds the reply frame limit", async () => {

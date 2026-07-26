@@ -1,5 +1,5 @@
 import { collectTrackDeletionAffectedIdsV1, type ControlActionV1 } from "@daw-browser/control";
-import { readProjectControlSnapshotV1 } from "./controlSnapshot";
+import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectRole } from "./projectAccess";
 
@@ -38,7 +38,7 @@ const addTrack = (trackIds: Set<string>, ref: { source: "persisted"; id: string 
 
 const actionTrackIds = (
   action: ControlActionV1,
-  snapshot: Awaited<ReturnType<typeof readProjectControlSnapshotV1>>,
+  snapshot: Awaited<ReturnType<typeof readProjectControlSnapshotV2>>,
 ) => {
   const trackIds = new Set<string>();
   const tracks = new Map(snapshot.tracks.map((track) => [track.id, track]));
@@ -129,6 +129,9 @@ const actionTrackIds = (
     case "clip.delete":
       addClipTrack(action.clip);
       break;
+    case "timeline.range.delete":
+      for (const track of action.tracks) addTrack(trackIds, track);
+      break;
     case "effect.upsert":
     case "effect.remove":
       addTargetTrack(action.target);
@@ -180,7 +183,7 @@ export async function preflightControlRequestV1(
   if (role === "viewer") {
     throw new ControlDomainError("forbidden", "Viewers cannot execute control actions.");
   }
-  const snapshot = await readProjectControlSnapshotV1(ctx, input.projectId);
+  const snapshot = await readProjectControlSnapshotV2(ctx, input.projectId);
   const tracksWithLocks = await listProjectTracksWithMixerChannels(ctx, input.projectId);
   const lockedByTrackId = new Map(tracksWithLocks.map((track) => [String(track._id), track.lockedBy]));
   for (const [actionIndex, action] of input.actions.entries()) {

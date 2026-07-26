@@ -1,6 +1,6 @@
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
-import { buildClipFadesMutationArgs, buildClipMidiMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
+import { buildClipFadesMutationArgs, buildClipMidiMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs, classifyBulkClipDeleteError } from './timeline-operation-executor'
 
 declare function test(name: string, run: () => void): void
 declare function expect(value: unknown): {
@@ -123,6 +123,26 @@ test('forwards a parsed durable MIDI operation to the server mutation', () => {
     projectId: 'project-1',
     clipId: 'clip-1',
     operationId: 'midi-1',
-    midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+    midi: {
+      wave: 'sine',
+      notes: [{ id: 'midi:note:[["beat",0],["channel",1],["length",1],["pitch",60]]:0', beat: 0, length: 1, pitch: 60, channel: 1 }],
+      cc: [],
+      pitchBends: [],
+      channelPressure: [],
+      polyPressure: [],
+      mappings: [],
+    },
+  })
+})
+
+test('classifies wrapped lock and access errors as terminal forbidden responses', () => {
+  const wrapped = new Error('Convex request failed')
+  wrapped.cause = {
+    code: 'track-locked',
+    message: 'Request failed: Actor cannot delete clips on a locked track.',
+  }
+  expect(classifyBulkClipDeleteError(wrapped)).toMatchObject({ status: 403 })
+  expect(classifyBulkClipDeleteError(new Error('[CONVEX] Actor cannot delete one or more clips.'))).toMatchObject({
+    status: 403,
   })
 })

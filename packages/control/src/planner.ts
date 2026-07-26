@@ -1,6 +1,5 @@
 import {
   canonicalTrackCreation,
-  canonicalControlMidiNotes,
   audioWarpEqual,
   createDefaultSynthParams,
   getAutomationParameterDescriptor,
@@ -9,12 +8,14 @@ import {
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
   normalizeMasterVolume,
+  normalizeLegacyMidiClip,
   normalizePersistedInstrumentParams,
   normalizeTrackRouting,
   normalizeTrackInstrumentParams,
   normalizeAudioWarp,
   normalizeClipColor,
   normalizeTrackColor,
+  midiMappingDescriptor,
   trackCreationCollapsed,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
@@ -26,9 +27,12 @@ import {
   sidechainTargetEligibilityError,
 } from '@daw-browser/shared'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { ControlMidiResolutionError, resolveControlMidiActionV1 } from './midi'
 import { collectDeletedTrackIdsV1 } from './trackDeletion'
 import { recoveryLimitsV1 } from './recovery-limits'
 import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
+import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
 
 type ContextualRefV1 = { source: 'persisted'; id: string } | { source: 'client'; clientRef: string }
 type TrackRefV1 = ContextualRefV1
@@ -60,6 +64,7 @@ export type PlannedControlActionV1 = {
   changed: boolean
   destructivePersisted?: boolean
   generatedInstrumentInstanceId?: string
+  timelineRangeDelete?: TimelineRangeDeletePatchV1
 }
 
 export type ControlPlanV1 = {
@@ -97,6 +102,7 @@ export const destructiveControlActionKindsV1 = [
   'automation.delete',
   'sidechain.remove',
   'asset.delete',
+  'timeline.range.delete',
 ] as const
 
 const destructiveKinds = new Set<string>(destructiveControlActionKindsV1)
@@ -171,6 +177,16 @@ const canonical = (value: unknown): string => {
 }
 
 const same = (left: unknown, right: unknown) => canonical(left) === canonical(right)
+const plannerSha256 = (value: string) => (
+  Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+)
+const timelineRangeClipDigest = (clip: ProjectSnapshotV1['clips'][number]) => {
+  const { id: _id, ...semantic } = clip
+  return plannerSha256(canonical(semantic))
+}
+const timelineRangeAutomationDigest = (automation: ProjectSnapshotV1['automation'][number]) => (
+  plannerSha256(canonical(automation))
+)
 
 export const canonicalizePlannerSnapshotV1 = (
   snapshot: ProjectSnapshotV1,
@@ -214,7 +230,6 @@ const validateRecoveryLimits = (
   const automation = snapshot.automation.filter((entry) => 'trackId' in entry.target && trackIds.has(entry.target.trackId))
   const sidechains = snapshot.sidechains.filter((entry) => trackIds.has(entry.sourceTrackId) || trackIds.has(entry.targetTrackId))
   const entities = trackIds.size + clips.length + processors.length + automation.length + sidechains.length
-  const notes = clips.reduce((total, clip) => total + (clip.midi?.notes.length ?? 0), 0)
   const points = automation.reduce((total, entry) => total + entry.points.length, 0)
   const markers = clips.reduce((total, clip) => total + (clip.audioWarp?.markers?.length ?? 0), 0)
   const sends = Array.from(trackIds, (id) => tracksById(snapshot.tracks).get(id)?.sends.length ?? 0)
@@ -223,7 +238,6 @@ const validateRecoveryLimits = (
   if (
     entities > recoveryLimitsV1.maxEntities
     || transitions.length > recoveryLimitsV1.maxEntities
-    || notes > recoveryLimitsV1.maxMidiNotes
     || points > recoveryLimitsV1.maxAutomationPoints
     || markers > recoveryLimitsV1.maxWarpMarkers
     || sends > recoveryLimitsV1.maxSends
@@ -363,7 +377,7 @@ const recoveredClip = (
   ...(clip.fades === undefined ? {} : { fades: clip.fades }),
   ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
   ...(clip.color === undefined ? {} : { color: clip.color }),
-  ...(clip.midi === undefined ? {} : { midi: clip.midi }),
+  ...(clip.midi === undefined ? {} : { midi: normalizeLegacyMidiClip(clip.midi) }),
   ...(clip.sourceAssetKey === undefined ? {} : {
     source: requireAudioAssetSource(clip.sourceAssetKey, assets, actionIndex),
   }),
@@ -461,6 +475,31 @@ const validateAutomationTarget = (
   return descriptor
 }
 
+const validateMidiMappings = (
+  midi: ReturnType<typeof normalizeLegacyMidiClip>,
+  previous: ReturnType<typeof normalizeLegacyMidiClip> | undefined,
+  clipTrackId: string,
+  processors: Map<string, ProjectSnapshotV1['processors'][number]>,
+  actionIndex: number,
+) => {
+  const previousById = new Map((previous?.mappings ?? []).map((mapping) => [mapping.id, mapping]))
+  for (const mapping of midi.mappings) {
+    const before = previousById.get(mapping.id)
+    if (before && same(before, mapping)) continue
+    const descriptor = midiMappingDescriptor(mapping.target)
+      ?? planError(actionIndex, 'validation', 'Unsupported MIDI mapping target.')
+    if (mapping.target.effectInstanceId === undefined) continue
+    const processor = Array.from(processors.values()).find((entry) => (
+      'trackId' in entry.target
+      && entry.target.trackId === clipTrackId
+      && entry.instanceId === mapping.target.effectInstanceId
+    ))
+    if (!processor || processor.processor.kind !== descriptor.owner) {
+      planError(actionIndex, 'validation', 'MIDI mapping effect does not belong to the clip track.')
+    }
+  }
+}
+
 export const planControlRequestV1 = (
   base: ProjectSnapshotV1,
   request: PlannerRequest,
@@ -476,11 +515,27 @@ export const planControlRequestV1 = (
   const clips = new Map(snapshot.clips.map((clip) => [clip.id, clip]))
   const processors = new Map(snapshot.processors.map((processor) => [processor.id, processor]))
   const assets = new Map(snapshot.assets.map((asset) => [asset.id, asset]))
+  const restoredAssetIds = new Set<string>()
   const trackRefs = new Map<string, string>()
   const clipRefs = new Map<string, string>()
   const effectRefs = new Map<string, string>()
   const resolvedRefs: ControlPlanV1['resolvedRefs'] = []
   const planned: PlannedControlActionV1[] = []
+  let resolvedMidiEvents = 0
+  const enforceResolvedMidiAggregate = (
+    actionIndex: number,
+    midi: ReturnType<typeof normalizeLegacyMidiClip>,
+    previous?: ReturnType<typeof normalizeLegacyMidiClip>,
+  ) => {
+    const performanceEvents = midi.notes.length + midi.cc.length + midi.pitchBends.length
+      + midi.channelPressure.length + midi.polyPressure.length
+    const previousEvents = previous === undefined ? 0 : previous.notes.length + previous.cc.length
+      + previous.pitchBends.length + previous.channelPressure.length + previous.polyPressure.length
+    if (previous === undefined || previousEvents <= 500) resolvedMidiEvents += performanceEvents
+    if (resolvedMidiEvents > 500) {
+      planError(actionIndex, 'limit-exceeded', 'Control request exceeds 500 MIDI performance events.')
+    }
+  }
   const traceAction = (
     actionIndex: number,
     action: ControlActionV1,
@@ -794,6 +849,18 @@ export const planControlRequestV1 = (
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         if (track.kind !== 'instrument' || track.channelRole !== 'track') planError(actionIndex, 'validation', 'MIDI clips require an instrument track.')
         const id = placeholderId('clip', action.clientRef, actionIndex)
+        const midi = (() => {
+          try {
+            return resolveControlMidiActionV1(action)
+          } catch (error) {
+            if (error instanceof ControlMidiResolutionError) {
+              return planError(actionIndex, error.code, error.message.slice(0, 512))
+            }
+            throw error
+          }
+        })()
+        validateMidiMappings(midi, undefined, track.id, processors, actionIndex)
+        enforceResolvedMidiAggregate(actionIndex, midi)
         const clip = {
           id,
           trackId: track.id,
@@ -804,7 +871,7 @@ export const planControlRequestV1 = (
           leftPadSec: 0,
           bufferOffsetSec: 0,
           midiOffsetBeats: 0,
-          midi: { wave: action.wave, gain: action.gain, notes: action.notes },
+          midi,
         }
         clips.set(id, clip)
         snapshot.clips.push(clip)
@@ -851,9 +918,18 @@ export const planControlRequestV1 = (
       case 'clip.midi.set': {
         const clip = requireClip(action.clip, clips, clipRefs, actionIndex)
         if (!clip.midi) planError(actionIndex, 'validation', 'Audio clips cannot contain MIDI.')
-        const midi = { wave: action.wave, gain: action.gain, notes: action.notes }
-        midi.notes = canonicalControlMidiNotes(midi.notes)
-        changed = !same({ ...clip.midi, notes: canonicalControlMidiNotes(clip.midi.notes) }, midi)
+        let midi
+        try {
+          midi = resolveControlMidiActionV1(action, clip.midi)
+        } catch (error) {
+          if (error instanceof ControlMidiResolutionError) {
+            planError(actionIndex, error.code, error.message.slice(0, 512))
+          }
+          throw error
+        }
+        validateMidiMappings(midi, normalizeLegacyMidiClip(clip.midi), clip.trackId, processors, actionIndex)
+        enforceResolvedMidiAggregate(actionIndex, midi, normalizeLegacyMidiClip(clip.midi))
+        changed = !same(normalizeLegacyMidiClip(clip.midi), midi)
         clip.midi = midi
         break
       }
@@ -886,6 +962,7 @@ export const planControlRequestV1 = (
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
         if (clip.midi && (track.kind !== 'instrument' || track.channelRole !== 'track')) planError(actionIndex, 'validation', 'MIDI clips require an instrument track.')
         if (!clip.midi && (track.kind !== 'audio' || track.channelRole !== 'track')) planError(actionIndex, 'validation', 'Audio clips require an audio track.')
+        if (clip.midi) validateMidiMappings(normalizeLegacyMidiClip(clip.midi), undefined, track.id, processors, actionIndex)
         changed = clip.trackId !== track.id || clip.startSec !== action.startSec
         clip.trackId = track.id
         clip.startSec = action.startSec
@@ -938,6 +1015,60 @@ export const planControlRequestV1 = (
         snapshot.clips = snapshot.clips.filter((entry) => entry.id !== clip.id)
         changed = true
         break
+      }
+      case 'timeline.range.delete': {
+        const targetIds = action.tracks.map((track: TrackRefV1) => (
+          requireTrack(track, tracks, trackRefs, actionIndex).id
+        ))
+        const patch = buildTimelineRangeDeletePatchV1(
+          snapshot,
+          targetIds,
+          action.startSec,
+          action.endSec,
+          actionIndex,
+        )
+        for (const deletion of patch.clipDeletes) clips.delete(deletion.clipId)
+        for (const update of patch.clipUpdates) clips.set(update.clipId, update.after)
+        for (const creation of patch.clipCreates) clips.set(creation.placeholderId, creation.after)
+        snapshot.clips = [
+          ...Array.from(clips.values()).filter((clip) => (
+            !patch.clipCreates.some((creation) => creation.placeholderId === clip.id)
+          )),
+          ...patch.clipCreates.map((creation) => creation.after),
+        ]
+        const automationByIdentity = (entry: ProjectSnapshotV1['automation'][number]) => canonical({
+          target: entry.target,
+          effectInstanceId: entry.effectInstanceId,
+          parameterId: entry.parameterId,
+        })
+        const updates = new Map(patch.automationUpdates.map((update) => [
+          canonical(update.identity),
+          update.after,
+        ]))
+        snapshot.automation = snapshot.automation.map((entry) => (
+          updates.get(automationByIdentity(entry)) ?? entry
+        ))
+        changed = patch.clipDeletes.length > 0
+          || patch.clipUpdates.length > 0
+          || patch.clipCreates.length > 0
+          || patch.automationUpdates.length > 0
+        const baseClipIds = new Set(base.clips.map((clip) => clip.id))
+        const destructivePersisted = patch.clipDeletes.some((entry) => baseClipIds.has(entry.clipId))
+          || patch.clipUpdates.some((entry) => baseClipIds.has(entry.clipId))
+          || patch.automationUpdates.some((update) => base.automation.some((entry) => (
+            same(entry.target, update.identity.target)
+            && entry.effectInstanceId === update.identity.effectInstanceId
+            && entry.parameterId === update.identity.parameterId
+          )))
+        planned.push({
+          actionIndex,
+          action,
+          changed,
+          timelineRangeDelete: patch,
+          ...(destructivePersisted ? { destructivePersisted } : {}),
+        })
+        traceAction(actionIndex, action, changed, beforeAction)
+        continue
       }
       case 'asset.delete': {
         const asset = assets.get(action.asset.id)
@@ -1188,7 +1319,65 @@ export const planControlRequestV1 = (
         if (!recovery) planError(actionIndex, 'not-found', 'Recovery is unavailable.')
         const availableRecovery = recovery ?? planError(actionIndex, 'not-found', 'Recovery is unavailable.')
         const data = availableRecovery.payload.data
-        if (availableRecovery.payload.kind === 'track.delete' || availableRecovery.payload.kind === 'track.ungroup') {
+        if (availableRecovery.payload.kind === 'timeline.range.delete') {
+          const selectedTrackIds = new Set(data.range.trackIds)
+          for (const trackId of selectedTrackIds) {
+            if (!tracks.has(trackId)) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
+          }
+          for (const deletion of data.deletedClips) {
+            if (clips.has(deletion.id)) planError(actionIndex, 'validation', 'Recovery clip collides with current state.')
+          }
+          for (const update of data.updatedClips) {
+            const current = clips.get(update.id)
+            if (!current || timelineRangeClipDigest(current) !== update.expectedAfterDigest) {
+              planError(actionIndex, 'validation', 'Recovery state has drifted.')
+            }
+          }
+          const createdClipIds = new Set<string>()
+          for (const creation of data.createdClips) {
+            const current = clips.get(creation.id)
+            if (!current || !selectedTrackIds.has(current.trackId) || timelineRangeClipDigest(current) !== creation.expectedAfterDigest) {
+              planError(actionIndex, 'validation', 'Recovery state has drifted.')
+            }
+            createdClipIds.add(creation.id)
+          }
+          for (const update of data.automation) {
+            const current = snapshot.automation.find((automation) => (
+              ("master" in automation.target ? "master" : "track") === update.before.targetKind
+              && String("trackId" in automation.target ? automation.target.trackId : "") === String(update.before.trackId ?? "")
+              && automation.effectInstanceId === update.before.effectInstanceId
+              && automation.parameterId === update.before.parameterId
+            ))
+            if (!current || timelineRangeAutomationDigest(current) !== update.expectedAfterDigest) {
+              planError(actionIndex, 'validation', 'Recovery state has drifted.')
+            }
+          }
+          for (const clipId of createdClipIds) clips.delete(clipId)
+          snapshot.clips = snapshot.clips.filter((clip) => !createdClipIds.has(clip.id))
+          for (const update of data.updatedClips) {
+            const restored = recoveredClip(update.id, update.before, update.before.trackId, assets, actionIndex)
+            clips.set(update.id, restored)
+            const index = snapshot.clips.findIndex((clip) => clip.id === update.id)
+            if (index < 0) throw new Error('Range recovery clip is unavailable.')
+            snapshot.clips[index] = restored
+          }
+          for (const deletion of data.deletedClips) {
+            const id = `recovery:clip:${action.recovery.id}:${deletion.id}`
+            const restored = recoveredClip(id, deletion.before, deletion.before.trackId, assets, actionIndex)
+            clips.set(id, restored)
+            snapshot.clips.push(restored)
+          }
+          for (const update of data.automation) {
+            const index = snapshot.automation.findIndex((automation) => (
+              ("master" in automation.target ? "master" : "track") === update.before.targetKind
+              && String("trackId" in automation.target ? automation.target.trackId : "") === String(update.before.trackId ?? "")
+              && automation.effectInstanceId === update.before.effectInstanceId
+              && automation.parameterId === update.before.parameterId
+            ))
+            if (index < 0) throw new Error('Range recovery automation is unavailable.')
+            snapshot.automation[index] = update.before
+          }
+        } else if (availableRecovery.payload.kind === 'track.delete' || availableRecovery.payload.kind === 'track.ungroup') {
           const restoreTracks = data.tracks
           const restoredIds = new Map(restoreTracks.map((entry: any) => [entry.id, `recovery:track:${action.recovery.id}:${entry.id}`]))
           const survivorStates = availableRecovery.payload.kind === 'track.delete' ? data.survivors : data.children
@@ -1342,6 +1531,7 @@ export const planControlRequestV1 = (
         } else if (availableRecovery.payload.kind === 'asset.delete') {
           const id = String(data.asset.assetKey)
           if (assets.has(id)) planError(actionIndex, 'validation', 'Recovery asset key collides with current state.')
+          restoredAssetIds.add(id)
           assets.set(id, {
             id,
             name: String(data.asset.name),
@@ -1446,7 +1636,10 @@ export const planControlRequestV1 = (
     }
     const destructivePersisted = beforeAction === undefined
       ? false
-      : destructiveKinds.has(action.kind) && hasPersistedDestructiveEffect(base, beforeAction, snapshot)
+      : destructiveKinds.has(action.kind) && (
+        hasPersistedDestructiveEffect(base, beforeAction, snapshot)
+        || action.kind === 'asset.delete' && restoredAssetIds.has(action.asset.id)
+      )
     planned.push({ actionIndex, action, changed, ...(destructivePersisted ? { destructivePersisted } : {}) })
     traceAction(actionIndex, action, changed, beforeAction)
   }

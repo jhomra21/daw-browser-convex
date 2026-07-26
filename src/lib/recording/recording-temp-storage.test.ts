@@ -140,6 +140,25 @@ describe("recording temp storage", () => {
     expect(await session.finalize()).toEqual(descriptor)
   })
 
+  test("writes an already contiguous planar block without re-encoding samples", async () => {
+    const memory = createMemoryFilesystem()
+    const storage = createRecordingTempStorage({ filesystem: memory.filesystem, now: () => 100 })
+    const session = await storage.createSession({ sessionId: "take-planar", sampleRate: 48000, channelCount: 2 })
+    const buffer = new ArrayBuffer(2048 * 2 * Float32Array.BYTES_PER_ELEMENT)
+    const planar = new Float32Array(buffer)
+    planar[0] = 1
+    planar[1] = 2
+    planar[2048] = 3
+    planar[2049] = 4
+    await session.appendPlanar(buffer, 2)
+    await session.finalize()
+    const bytes = memory.readBytes(["recording-sessions", "take-planar", "capture.pcm"])
+    expect(bytes).not.toBeNull()
+    expect(decodePlanarPcmBlocks(bytes ?? new Uint8Array(), 2)).toEqual([
+      { frameCount: 2, channels: [Float32Array.of(1, 2), Float32Array.of(3, 4)] },
+    ])
+  })
+
   test("rejects duplicate session creation without changing the first session", async () => {
     const memory = createMemoryFilesystem()
     const storage = createRecordingTempStorage({ filesystem: memory.filesystem, now: () => 100 })

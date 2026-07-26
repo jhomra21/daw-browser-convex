@@ -63,6 +63,19 @@ export const useMissingMediaRecovery = (input: Input) => {
     Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
   >(null);
 
+  const reloadLocalTimeline = async () => {
+    const rid = input.projectId();
+    const isLocalProject = isLocalId("project", rid);
+    if (!isLocalProject && input.remoteTimelineAvailable()) {
+      setLocalTimelineSnapshot(null);
+      return;
+    }
+    const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
+    if (input.projectId() === rid) {
+      setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+    }
+  };
+
   createEffect(() => {
     const rid = input.projectId();
     const isLocalProject = isLocalId("project", rid);
@@ -72,11 +85,7 @@ export const useMissingMediaRecovery = (input: Input) => {
     }
     input.localTimelineReloadVersion();
     let cancelled = false;
-    void createLocalTimelineRepository(rid).loadSnapshot().then((snapshot) => {
-      if (!cancelled && input.projectId() === rid) {
-        setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
-      }
-    }).catch(() => {
+    void reloadLocalTimeline().catch(() => {
       if (!cancelled && input.projectId() === rid) setLocalTimelineSnapshot(null);
     });
     onCleanup(() => {
@@ -154,6 +163,7 @@ export const useMissingMediaRecovery = (input: Input) => {
 
   return {
     localTimelineSnapshot,
+    reloadLocalTimeline,
     removeMissingMediaClip,
     replaceMissingMediaClip,
   };

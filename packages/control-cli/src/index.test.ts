@@ -148,6 +148,10 @@ const createHost = async (
   await chmod(hostDirectory, 0o700)
   const server = createServer((socket) => {
     const decoder = createDesktopFrameDecoder((frame) => {
+      if (frame.version !== "v1") {
+        socket.destroy()
+        return
+      }
       if (frame.type === "hello") {
         socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
           version: desktopProtocolVersion,
@@ -271,6 +275,29 @@ describe("control CLI output", () => {
     expect(exitCode).toBe(1)
     expect(stdout).toEqual([])
     expect(JSON.parse(stderr[0]).error.message).toBe("Invalid host command.")
+  })
+
+  test("dispatches host transport-status with the canonical protocol input and output", async () => {
+    const observed: Array<{ operation: DesktopOperationV1; input: unknown }> = []
+    await createHost((socket, frame) => {
+      observed.push({ operation: frame.operation, input: frame.input })
+      socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result: { state: "paused", playheadSec: 12.5 },
+      })))
+    }, ["transport.status"])
+    const output = io()
+    expect(await runCli(["host", "transport-status"], output.value)).toBe(0)
+    expect(observed).toEqual([{ operation: "transport.status", input: {} }])
+    expect(JSON.parse(output.stdout[0])).toEqual({
+      version: "v1",
+      ok: true,
+      command: "host transport-status",
+      data: { state: "paused", playheadSec: 12.5 },
+    })
+    expect(output.stderr).toEqual([])
   })
 
   test("preserves host transport failures as transport errors", async () => {

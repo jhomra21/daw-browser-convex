@@ -1,0 +1,4399 @@
+#include "daw/audio_core.h"
+#include "processor_contract_generated.h"
+#include "daw/audio_core.h"
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+#include "daw/audio_core_native.h"
+#endif
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <new>
+
+namespace {
+
+constexpr uint32_t kMaximumFramesPerBlock = 8192;
+constexpr uint32_t kMaximumChannels = 64;
+constexpr uint32_t kMaximumAssets = 64;
+constexpr uint32_t kMaximumSampleSources = 256;
+constexpr uint32_t kMaximumGraphNodes = 64;
+constexpr uint32_t kMaximumGraphEdges = 256;
+constexpr uint32_t kMaximumGraphProcessors = kMaximumGraphNodes * DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
+constexpr uint32_t kMaximumModulationDelayFrames = 4132;
+constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
+constexpr uint32_t kMaximumTimeEffectProcessors = 8;
+constexpr uint32_t kMaximumSpectralProcessors = 8;
+constexpr uint32_t kMaximumSpectralFftSize = 4096;
+constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
+constexpr uint32_t kSpectralHpssFrames = 31;
+constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
+// One extra frame lets a 48 kHz processor read the full 3,000 ms contract maximum.
+constexpr uint32_t kMaximumTimeEffectDelayFrames = 144001;
+static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
+static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == DAW_AUDIO_CORE_ABI_VERSION);
+
+struct AssetSlot {
+  uint32_t generation = 1;
+  uint32_t revision = 0;
+  uint32_t frame_count = 0;
+  uint32_t sample_rate_hz = 0;
+  uint32_t channel_count = 0;
+  const float *const *planes = nullptr;
+  bool occupied = false;
+};
+
+struct SampleSource {
+  uint64_t source_node_id = 0;
+  daw_audio_asset_handle asset = 0;
+  int64_t start_frame = 0;
+  int64_t stop_frame = 0;
+  uint64_t source_offset_frame = 0;
+  uint64_t source_frame_count = 0;
+  float gain = 0.0F;
+  int64_t fade_in_start_frame = 0;
+  int64_t fade_in_end_frame = 0;
+  int64_t fade_out_start_frame = 0;
+  int64_t fade_out_end_frame = 0;
+  bool active = false;
+};
+
+struct GraphRevision {
+  struct Range {
+    uint16_t start = 0;
+    uint16_t count = 0;
+  };
+  uint32_t revision = 0;
+  uint32_t node_count = 0;
+  uint32_t edge_count = 0;
+  uint32_t master_index = kMaximumGraphNodes;
+  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
+  std::array<uint32_t, kMaximumGraphNodes> node_lookup{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
+  std::array<uint16_t, kMaximumGraphEdges> edge_source_indices{};
+  std::array<uint16_t, kMaximumGraphEdges> edge_target_indices{};
+  std::array<uint16_t, kMaximumGraphEdges> incoming_edge_indices{};
+  std::array<Range, kMaximumGraphNodes> incoming_edge_ranges{};
+  std::array<uint16_t, kMaximumGraphEdges> sidechain_edge_indices{};
+  std::array<uint32_t, kMaximumGraphNodes> process_order{};
+  struct Processor {
+    uint64_t node_id = 0;
+    uint16_t node_index = 0;
+    uint64_t instance_id = 0;
+    uint32_t kind = 0;
+    uint32_t bypassed = 0;
+    uint32_t input_layout = 0;
+    uint32_t output_layout = 0;
+    uint32_t latency_frames = 0;
+    uint32_t tail_frames = 0;
+    uint32_t parameter_count = 0;
+    std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> parameter_targets{};
+    uint32_t state_size = 0;
+    std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES> state{};
+    daw_audio_utility_state utility{};
+    daw_audio_saturator_state saturator{};
+    daw_audio_eq_state eq{};
+    daw_audio_delay_modulation_state delay_modulation{};
+    daw_audio_phaser_state phaser{};
+    daw_audio_amplitude_modulation_state amplitude_modulation{};
+    daw_audio_ensemble_state ensemble{};
+    daw_audio_gate_state gate{};
+    daw_audio_compressor_state compressor{};
+    daw_audio_limiter_state limiter{};
+    daw_audio_delay_state delay{};
+    daw_audio_reverb_state reverb{};
+    daw_audio_spectral_state spectral{};
+    uint32_t modulation_slot = 0;
+    uint32_t time_effect_slot = kMaximumTimeEffectProcessors;
+    uint32_t spectral_slot = kMaximumSpectralProcessors;
+    struct BiquadHistory {
+      float x1 = 0.0F;
+      float x2 = 0.0F;
+      float y1 = 0.0F;
+      float y2 = 0.0F;
+    };
+    std::array<std::array<BiquadHistory, 2>, 8> eq_history{};
+    BiquadHistory saturator_color_history_left{};
+    BiquadHistory saturator_color_history_right{};
+    float saturator_previous_left = 0.0F;
+    float saturator_previous_right = 0.0F;
+    std::array<float, kMaximumDynamicsDelayFrames> dynamics_delay_left{};
+    std::array<float, kMaximumDynamicsDelayFrames> dynamics_delay_right{};
+    std::array<float, kMaximumDynamicsDelayFrames> dynamics_detector_left{};
+    std::array<float, kMaximumDynamicsDelayFrames> dynamics_detector_right{};
+    uint32_t dynamics_write = 0;
+    std::array<float, 2> dynamics_gain{1.0F, 1.0F};
+    std::array<float, 2> dynamics_rms{};
+    std::array<uint32_t, 2> dynamics_hold{};
+    std::array<uint32_t, 2> dynamics_open{1, 1};
+    std::array<uint32_t, 2> dynamics_started{};
+    std::array<BiquadHistory, 2> dynamics_sidechain_history{};
+    float compressor_envelope_db = 0.0F;
+    float compressor_rms = 0.0F;
+    float compressor_sc_low = 0.0F;
+    float compressor_sc_band = 0.0F;
+  };
+  uint32_t processor_count = 0;
+  std::array<Processor, kMaximumGraphProcessors> processors{};
+  std::array<uint16_t, kMaximumGraphProcessors> processor_indices{};
+  std::array<Range, kMaximumGraphNodes> processor_ranges{};
+  std::array<Range, kMaximumGraphProcessors> sidechain_edge_ranges{};
+};
+
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+struct NativeGraphHooks {
+  uint32_t revision = 0;
+  daw::audio_core::NativeGraphNodeHook hook = nullptr;
+  std::array<void *, kMaximumGraphNodes> attachments{};
+  std::array<bool, kMaximumGraphNodes> attached{};
+};
+#endif
+
+struct InstrumentVoice {
+  uint64_t note_id = 0;
+  uint32_t channel = 0;
+  uint32_t note = 0;
+  float velocity = 0.0F;
+  uint32_t references = 0;
+  uint64_t age = 0;
+  float oscillator_phase[2]{};
+  float lfo_phase = 0.0F;
+  uint32_t noise_state = 1;
+  float amp_level = 0.0F;
+  float filter_level = 0.0F;
+  float filter_left = 0.0F;
+  float filter_right = 0.0F;
+  uint32_t amp_stage = 0;
+  uint32_t filter_stage = 0;
+  bool held = false;
+  bool active = false;
+  bool released = false;
+};
+
+struct SampleVoice {
+  uint64_t note_id = 0;
+  uint32_t note = 0;
+  daw_audio_asset_handle asset = 0;
+  double position = 0.0;
+  double increment = 1.0;
+  uint32_t end_frame = 0;
+  uint32_t loop_start_frame = 0;
+  uint32_t loop_end_frame = 0;
+  uint32_t playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
+  uint32_t choke_group = 0;
+  float gain = 0.0F;
+  float pan = 0.0F;
+  float amp_level = 0.0F;
+  float filter_left = 0.0F;
+  float filter_right = 0.0F;
+  float forced_release_ms = 0.0F;
+  uint32_t amp_stage = 0;
+  uint64_t age = 0;
+  bool active = false;
+  bool released = false;
+};
+
+struct GranularGrain {
+  double cursor = 0.0;
+  double step = 1.0;
+  uint32_t age = 0;
+  uint32_t length = 0;
+  float pan = 0.0F;
+  bool active = false;
+};
+
+struct InstrumentNodeState {
+  std::array<InstrumentVoice, kMaximumInstrumentVoices> voices{};
+  daw_audio_synth_state synth{};
+  bool sustain = false;
+  float expression = 1.0F;
+  uint64_t next_age = 1;
+  daw_audio_sampler_state sampler{};
+  std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
+  std::array<uint32_t, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> round_robin_cursors{};
+  std::array<SampleVoice, kMaximumInstrumentVoices> sample_voices{};
+  daw_audio_granular_state granular{};
+  std::array<GranularGrain, DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS> grains{};
+  std::array<uint64_t, kMaximumInstrumentVoices> granular_note_ids{};
+  uint32_t granular_note_count = 0;
+  uint32_t granular_random_state = 1;
+  double granular_next_frame = 0.0;
+  float granular_frozen_position = -1.0F;
+};
+
+struct ModulationHistory {
+  std::array<float, kMaximumModulationDelayFrames> delay_left{};
+  std::array<float, kMaximumModulationDelayFrames> delay_right{};
+  std::array<float, 12> allpass_x_left{};
+  std::array<float, 12> allpass_x_right{};
+  std::array<float, 12> allpass_y_left{};
+  std::array<float, 12> allpass_y_right{};
+  uint32_t write = 0;
+  float feedback_left = 0.0F;
+  float feedback_right = 0.0F;
+  double phase = 0.0;
+  float bypass = 0.0F;
+};
+
+struct TimeEffectHistory {
+  std::array<float, kMaximumTimeEffectDelayFrames> left{};
+  std::array<float, kMaximumTimeEffectDelayFrames> right{};
+  uint32_t write = 0;
+  float feedback_left = 0.0F;
+  float feedback_right = 0.0F;
+  float low_left = 0.0F;
+  float low_right = 0.0F;
+  float high_input_left = 0.0F;
+  float high_input_right = 0.0F;
+  float high_left = 0.0F;
+  float high_right = 0.0F;
+  double phase = 0.0;
+  float bypass = 0.0F;
+};
+
+struct SpectralHistory {
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> input{};
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> sidechain{};
+  std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> output{};
+  std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> dry{};
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> real{};
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> imaginary{};
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> side_real{};
+  std::array<std::array<float, kMaximumSpectralFftSize>, 2> side_imaginary{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_magnitude{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_phase{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> gate_gain{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> noise_profile{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> scratch{};
+  std::array<std::array<float, kMaximumSpectralBins>, 2> hpss_median{};
+  std::array<std::array<float, kMaximumSpectralBins * kSpectralHpssFrames>, 2> hpss_history{};
+  std::array<uint32_t, 2> hpss_index{};
+  std::array<bool, 2> freeze_captured{};
+  uint32_t fft_size = 0;
+  uint32_t overlap = 0;
+  uint32_t hop_size = 0;
+  uint32_t write_index = 0;
+  uint32_t samples_until_frame = 0;
+  float bypass = 0.0F;
+};
+
+struct Core {
+  daw_audio_core_config config{};
+  uint32_t prepared_revision = 0;
+  uint32_t published_revision = 0;
+  daw_audio_utility_state utility{};
+  float dc_x1_left = 0.0F;
+  float dc_x1_right = 0.0F;
+  float dc_y1_left = 0.0F;
+  float dc_y1_right = 0.0F;
+  float bypass = 0.0F;
+  bool utility_configured = false;
+  std::array<AssetSlot, kMaximumAssets> assets{};
+  daw_audio_transport_state transport{};
+  uint64_t last_event_sequence = 0;
+  std::array<SampleSource, kMaximumSampleSources> sample_sources{};
+  GraphRevision prepared_graph{};
+  GraphRevision published_graph{};
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  NativeGraphHooks prepared_native_hooks{};
+  NativeGraphHooks published_native_hooks{};
+#endif
+  std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphNodes> graph_buffers{};
+  std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphEdges> graph_delay_lines{};
+  std::array<uint32_t, kMaximumGraphEdges> graph_delay_cursors{};
+  std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
+  std::array<TimeEffectHistory, kMaximumTimeEffectProcessors> time_effect_histories{};
+  std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
+  std::array<const daw_audio_processor_parameter_block *, kMaximumGraphProcessors> active_parameter_blocks{};
+  std::array<uint32_t, kMaximumGraphProcessors> event_starts{};
+  std::array<uint32_t, kMaximumGraphProcessors> event_ends{};
+  const daw_audio_processor_event *active_events = nullptr;
+  uint32_t active_event_count = 0;
+  const daw_audio_instrument_event *active_instrument_events = nullptr;
+  uint32_t active_instrument_event_count = 0;
+  std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes> instrument_event_indices{};
+  std::array<uint16_t, kMaximumGraphNodes> instrument_event_counts{};
+  std::array<uint16_t, kMaximumSampleSources> active_source_indices{};
+  std::array<GraphRevision::Range, kMaximumGraphNodes> active_source_ranges{};
+  GraphRevision::Range root_source_range{};
+  std::array<InstrumentNodeState, kMaximumGraphNodes> instruments{};
+};
+
+Core *to_core(daw_audio_core_handle handle) {
+  return reinterpret_cast<Core *>(static_cast<uintptr_t>(handle));
+}
+
+daw_audio_core_handle to_handle(Core *core) {
+  return static_cast<daw_audio_core_handle>(reinterpret_cast<uintptr_t>(core));
+}
+
+bool valid_abi(uint32_t version) {
+  return version == DAW_AUDIO_CORE_ABI_VERSION;
+}
+
+bool valid_config(const daw_audio_core_config &config) {
+  return valid_abi(config.abi_version)
+    && config.max_frames_per_block > 0
+    && config.max_frames_per_block <= kMaximumFramesPerBlock
+    && config.max_channels > 0
+    && config.max_channels <= kMaximumChannels
+    && config.max_assets > 0
+    && config.max_assets <= kMaximumAssets
+    && config.sample_rate_hz > 0;
+}
+
+bool valid_graph_layout(uint32_t layout) {
+  return layout == DAW_AUDIO_GRAPH_LAYOUT_MONO || layout == DAW_AUDIO_GRAPH_LAYOUT_STEREO;
+}
+
+bool valid_graph_node_kind(uint32_t kind) {
+  return kind == DAW_AUDIO_GRAPH_NODE_SOURCE
+    || kind == DAW_AUDIO_GRAPH_NODE_UTILITY
+    || kind == DAW_AUDIO_GRAPH_NODE_MIXER
+    || kind == DAW_AUDIO_GRAPH_NODE_MASTER
+    || kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT;
+}
+
+AssetSlot *find_asset(Core *core, daw_audio_asset_handle handle);
+
+constexpr daw_audio_synth_state default_synth_state() {
+  return {
+    .version = 1, .seed = 0xA341316CU,
+    .oscillators = {
+      {.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, .level = 0.5F, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+      {.enabled = 0, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 0.5F, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+    },
+    .noise_enabled = 0, .noise_level = 0.0F,
+    .filter_enabled = 1, .filter_mode = DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS,
+    .filter_cutoff_hz = 20000.0F, .filter_resonance = 0.707F, .filter_key_tracking = 0.0F,
+    .filter_envelope_amount_octaves = 0.0F, .filter_attack_ms = 1.0F, .filter_decay_ms = 1.0F,
+    .filter_sustain = 1.0F, .filter_release_ms = 10.0F,
+    .amp_attack_ms = 1.0F, .amp_decay_ms = 1.0F, .amp_sustain = 1.0F, .amp_release_ms = 10.0F,
+    .lfo_enabled = 0, .lfo_waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .lfo_rate_hz = 1.0F,
+    .lfo_pitch_cents = 0.0F, .lfo_filter_octaves = 0.0F, .lfo_amplitude = 0.0F, .lfo_pan = 0.0F,
+    .output_gain = 1.0F, .output_pan = 0.0F,
+  };
+}
+
+bool valid_synth_state(const daw_audio_synth_state &state) {
+  if (state.version != 1 || state.seed == 0 || state.noise_enabled > 1 || state.filter_enabled > 1
+    || state.filter_mode > DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS || state.lfo_enabled > 1
+    || state.lfo_waveform > DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE
+    || !std::isfinite(state.noise_level) || state.noise_level < 0.0F || state.noise_level > 1.0F
+    || !std::isfinite(state.filter_cutoff_hz) || state.filter_cutoff_hz < 20.0F || state.filter_cutoff_hz > 20000.0F
+    || !std::isfinite(state.filter_resonance) || state.filter_resonance < 0.05F || state.filter_resonance > 30.0F
+    || !std::isfinite(state.filter_key_tracking) || state.filter_key_tracking < 0.0F || state.filter_key_tracking > 1.0F
+    || !std::isfinite(state.filter_envelope_amount_octaves) || state.filter_envelope_amount_octaves < -8.0F || state.filter_envelope_amount_octaves > 8.0F
+    || !std::isfinite(state.filter_attack_ms) || state.filter_attack_ms < 0.0F || state.filter_attack_ms > 10000.0F
+    || !std::isfinite(state.filter_decay_ms) || state.filter_decay_ms < 0.0F || state.filter_decay_ms > 10000.0F
+    || !std::isfinite(state.filter_sustain) || state.filter_sustain < 0.0F || state.filter_sustain > 1.0F
+    || !std::isfinite(state.filter_release_ms) || state.filter_release_ms < 0.0F || state.filter_release_ms > 10000.0F
+    || !std::isfinite(state.amp_attack_ms) || state.amp_attack_ms < 0.0F || state.amp_attack_ms > 10000.0F
+    || !std::isfinite(state.amp_decay_ms) || state.amp_decay_ms < 0.0F || state.amp_decay_ms > 10000.0F
+    || !std::isfinite(state.amp_sustain) || state.amp_sustain < 0.0F || state.amp_sustain > 1.0F
+    || !std::isfinite(state.amp_release_ms) || state.amp_release_ms < 0.0F || state.amp_release_ms > 10000.0F
+    || !std::isfinite(state.lfo_rate_hz) || state.lfo_rate_hz < 0.01F || state.lfo_rate_hz > 100.0F
+    || !std::isfinite(state.lfo_pitch_cents) || state.lfo_pitch_cents < -2400.0F || state.lfo_pitch_cents > 2400.0F
+    || !std::isfinite(state.lfo_filter_octaves) || state.lfo_filter_octaves < -8.0F || state.lfo_filter_octaves > 8.0F
+    || !std::isfinite(state.lfo_amplitude) || state.lfo_amplitude < 0.0F || state.lfo_amplitude > 1.0F
+    || !std::isfinite(state.lfo_pan) || state.lfo_pan < -1.0F || state.lfo_pan > 1.0F
+    || !std::isfinite(state.output_gain) || state.output_gain < 0.0F || state.output_gain > 2.0F
+    || !std::isfinite(state.output_pan) || state.output_pan < -1.0F || state.output_pan > 1.0F) return false;
+  for (const daw_audio_synth_oscillator_state &oscillator : state.oscillators) {
+    if (oscillator.enabled > 1 || oscillator.waveform > DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE
+      || !std::isfinite(oscillator.level) || oscillator.level < 0.0F || oscillator.level > 1.0F
+      || oscillator.octave < -4 || oscillator.octave > 4 || oscillator.semitone < -24 || oscillator.semitone > 24
+      || !std::isfinite(oscillator.detune_cents) || oscillator.detune_cents < -2400.0F || oscillator.detune_cents > 2400.0F) return false;
+  }
+  return true;
+}
+
+bool valid_sampler_state(const daw_audio_sampler_state &state) {
+  return state.version == 1 && state.zone_count > 0 && state.zone_count <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
+    && std::isfinite(state.amp_attack_ms) && state.amp_attack_ms >= 0.0F && state.amp_attack_ms <= 10000.0F
+    && std::isfinite(state.amp_decay_ms) && state.amp_decay_ms >= 0.0F && state.amp_decay_ms <= 10000.0F
+    && std::isfinite(state.amp_sustain) && state.amp_sustain >= 0.0F && state.amp_sustain <= 1.0F
+    && std::isfinite(state.amp_release_ms) && state.amp_release_ms >= 0.0F && state.amp_release_ms <= 10000.0F
+    && state.filter_enabled <= 1 && state.filter_mode <= DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
+    && std::isfinite(state.filter_cutoff_hz) && state.filter_cutoff_hz >= 20.0F && state.filter_cutoff_hz <= 20000.0F
+    && std::isfinite(state.filter_resonance) && state.filter_resonance >= 0.05F && state.filter_resonance <= 30.0F
+    && state.retrigger <= 1;
+}
+
+bool valid_granular_state(Core &core, const daw_audio_granular_state &state) {
+  return state.version == 1 && find_asset(&core, state.asset) != nullptr && state.seed != 0
+    && state.max_grains > 0 && state.max_grains <= DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS
+    && state.window_shape <= DAW_AUDIO_GRANULAR_WINDOW_GAUSSIAN && state.freeze <= 1
+    && std::isfinite(state.grain_size_ms) && state.grain_size_ms >= 5.0F && state.grain_size_ms <= 1000.0F
+    && std::isfinite(state.density_hz) && state.density_hz >= 0.25F && state.density_hz <= 200.0F
+    && std::isfinite(state.position) && state.position >= 0.0F && state.position <= 1.0F
+    && std::isfinite(state.spray) && state.spray >= 0.0F && state.spray <= 1.0F
+    && std::isfinite(state.pitch_semitones) && state.pitch_semitones >= -48.0F && state.pitch_semitones <= 48.0F
+    && std::isfinite(state.reverse_probability) && state.reverse_probability >= 0.0F && state.reverse_probability <= 1.0F
+    && std::isfinite(state.stereo_spread) && state.stereo_spread >= 0.0F && state.stereo_spread <= 1.0F;
+}
+
+bool valid_sample_zone(Core &core, const daw_audio_sample_zone &zone) {
+  AssetSlot *asset = find_asset(&core, zone.asset);
+  return asset != nullptr && zone.key_low <= zone.key_high && zone.key_high <= 127
+    && zone.velocity_low > 0 && zone.velocity_low <= zone.velocity_high && zone.velocity_high <= 127
+    && zone.root_note <= 127 && std::isfinite(zone.tune_cents) && zone.tune_cents >= -4800.0F && zone.tune_cents <= 4800.0F
+    && std::isfinite(zone.gain) && zone.gain >= 0.0F && zone.gain <= 4.0F
+    && std::isfinite(zone.pan) && zone.pan >= -1.0F && zone.pan <= 1.0F
+    && zone.playback_mode <= DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP
+    && zone.start_frame < zone.end_frame && zone.end_frame <= asset->frame_count
+    && (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT
+      || (zone.loop_start_frame >= zone.start_frame && zone.loop_start_frame < zone.loop_end_frame && zone.loop_end_frame <= zone.end_frame));
+}
+
+bool valid_instrument_descriptor(const daw_audio_graph_node_descriptor &node) {
+  const daw_audio_instrument_state_descriptor &instrument = node.instrument;
+  if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+    return instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_NONE && instrument.version == 0
+      && instrument.voice_capacity == 0 && instrument.parameter_count == 0;
+  }
+  if (node.input_layout != DAW_AUDIO_GRAPH_LAYOUT_STEREO || node.output_layout != DAW_AUDIO_GRAPH_LAYOUT_STEREO
+    || node.input_bus != 0
+    || instrument.version != 1 || instrument.voice_capacity == 0
+    || instrument.voice_capacity > kMaximumInstrumentVoices
+    || instrument.parameter_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS) return false;
+  if (instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK
+    || instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+    return instrument.parameter_count == 0;
+  }
+  if (instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_SYNTH) return false;
+  for (uint32_t index = 0; index < instrument.parameter_count; ++index) {
+    const uint32_t target = instrument.parameter_targets[index];
+    if (target < DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN || target > DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS) return false;
+    for (uint32_t previous = 0; previous < index; ++previous) {
+      if (instrument.parameter_targets[previous] == target) return false;
+    }
+  }
+  return true;
+}
+
+bool valid_mixer_state(const daw_audio_mixer_state &mixer) {
+  if (mixer.instance_id == 0) {
+    return mixer.gain == 0.0F && mixer.pan == 0.0F && mixer.muted == 0 && mixer.soloed == 0;
+  }
+  return mixer.instance_id != 0 && std::isfinite(mixer.gain) && mixer.gain >= 0.0F && mixer.gain <= 4.0F
+    && std::isfinite(mixer.pan) && mixer.pan >= -1.0F && mixer.pan <= 1.0F
+    && mixer.muted <= 1 && mixer.soloed <= 1;
+}
+
+bool valid_graph_tap(uint32_t tap) {
+  return tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX
+    || tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER
+    || tap == DAW_AUDIO_GRAPH_EDGE_POST_FADER;
+}
+
+struct ProcessorContract {
+  uint32_t kind;
+  uint32_t schema_version;
+  uint32_t state_bytes;
+  bool implemented;
+};
+
+constexpr std::array<ProcessorContract, DAW_AUDIO_CORE_PROCESSOR_REGISTRY_COUNT> kProcessorContracts{{
+  {DAW_AUDIO_PROCESSOR_KIND_UTILITY, DAW_AUDIO_CORE_PROCESSOR_UTILITY_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_UTILITY_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_SATURATOR, DAW_AUDIO_CORE_PROCESSOR_SATURATOR_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_SATURATOR_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_EQ, DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_EQ_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_CHORUS, DAW_AUDIO_CORE_PROCESSOR_CHORUS_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_CHORUS_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_FLANGER, DAW_AUDIO_CORE_PROCESSOR_FLANGER_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_FLANGER_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_PHASER, DAW_AUDIO_CORE_PROCESSOR_PHASER_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_PHASER_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_TREMOLO, DAW_AUDIO_CORE_PROCESSOR_TREMOLO_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_TREMOLO_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_AUTOPAN, DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE, DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_GATE, DAW_AUDIO_CORE_PROCESSOR_GATE_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_GATE_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_LIMITER, DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_LIMITER_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_DELAY, DAW_AUDIO_CORE_PROCESSOR_DELAY_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_DELAY_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_REVERB, DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_REVERB_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_STATE_BYTES, true},
+}};
+
+const ProcessorContract *find_processor_contract(uint32_t kind) {
+  for (const ProcessorContract &contract : kProcessorContracts) {
+    if (contract.kind == kind) return &contract;
+  }
+  return nullptr;
+}
+
+bool decode_processor_state(
+  const daw_audio_processor_descriptor &descriptor,
+  GraphRevision::Processor *out_processor);
+
+uint32_t read_u32_le(const uint8_t *input) {
+  return static_cast<uint32_t>(input[0])
+    | (static_cast<uint32_t>(input[1]) << 8u)
+    | (static_cast<uint32_t>(input[2]) << 16u)
+    | (static_cast<uint32_t>(input[3]) << 24u);
+}
+
+float read_f32_le(const uint8_t *input) {
+  const uint32_t bits = read_u32_le(input);
+  float value = 0.0F;
+  static_assert(sizeof(value) == sizeof(bits));
+  __builtin_memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+int32_t graph_node_index_linear(const GraphRevision &graph, uint64_t id) {
+  for (uint32_t index = 0; index < graph.node_count; ++index) {
+    if (graph.nodes[index].id == id) return static_cast<int32_t>(index);
+  }
+  return -1;
+}
+
+int32_t graph_node_index(const GraphRevision &graph, uint64_t id) {
+  uint32_t first = 0;
+  uint32_t last = graph.node_count;
+  while (first < last) {
+    const uint32_t middle = first + (last - first) / 2;
+    const uint32_t node_index = graph.node_lookup[middle];
+    const uint64_t candidate = graph.nodes[node_index].id;
+    if (candidate < id) first = middle + 1;
+    else last = middle;
+  }
+  if (first >= graph.node_count) return -1;
+  const uint32_t node_index = graph.node_lookup[first];
+  return graph.nodes[node_index].id == id ? static_cast<int32_t>(node_index) : -1;
+}
+
+daw_audio_core_result prepare_graph_revision(
+  Core &core,
+  const daw_audio_graph_prepare_request &request,
+  GraphRevision *out_graph) {
+  if (!valid_abi(request.abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (request.graph_revision == 0 || request.node_count == 0 || request.node_count > kMaximumGraphNodes
+    || request.edge_count > kMaximumGraphEdges || request.processor_count > kMaximumGraphProcessors || request.nodes == nullptr
+    || (request.edge_count > 0 && request.edges == nullptr)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (request.processor_count > 0 && request.processors == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const auto next_graph = std::unique_ptr<GraphRevision>(new (std::nothrow) GraphRevision{});
+  if (!next_graph) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  GraphRevision &graph = *next_graph;
+  graph.revision = request.graph_revision;
+  graph.node_count = request.node_count;
+  graph.edge_count = request.edge_count;
+  for (uint32_t index = 0; index < graph.node_count; ++index) {
+    const daw_audio_graph_node_descriptor node = request.nodes[index];
+    if (node.id == 0 || !valid_graph_node_kind(node.kind) || !valid_graph_layout(node.input_layout)
+      || !valid_graph_layout(node.output_layout) || !valid_instrument_descriptor(node) || !valid_mixer_state(node.mixer)
+      || (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE && node.input_bus >= core.config.max_channels)) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    if (graph_node_index_linear(graph, node.id) >= 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    graph.nodes[index] = node;
+    if (node.kind == DAW_AUDIO_GRAPH_NODE_MASTER) {
+      if (graph.master_index != kMaximumGraphNodes) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      graph.master_index = index;
+    }
+  }
+  if (graph.master_index == kMaximumGraphNodes) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  for (uint32_t index = 0; index < graph.node_count; ++index) graph.node_lookup[index] = index;
+  std::sort(graph.node_lookup.begin(), graph.node_lookup.begin() + graph.node_count, [&graph](uint32_t left, uint32_t right) {
+    return graph.nodes[left].id < graph.nodes[right].id;
+  });
+  std::array<uint32_t, kMaximumGraphNodes> processor_counts{};
+  uint32_t time_effect_count = 0;
+  uint32_t spectral_count = 0;
+  for (uint32_t index = 0; index < request.processor_count; ++index) {
+    const daw_audio_processor_descriptor &descriptor = request.processors[index];
+    const int32_t node_index = graph_node_index(graph, descriptor.node_id);
+    if (node_index < 0 || descriptor.instance_id == 0
+      || descriptor.bypassed > 1 || !valid_graph_layout(descriptor.input_layout)
+      || !valid_graph_layout(descriptor.output_layout)
+      || descriptor.parameter_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS
+      || (descriptor.parameter_count > 0 && descriptor.parameter_targets == nullptr)) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    const ProcessorContract *contract = find_processor_contract(descriptor.kind);
+    if (contract == nullptr) return DAW_AUDIO_CORE_PROCESSOR_KIND_UNKNOWN;
+    if (descriptor.state_version != contract->schema_version || descriptor.state_size != contract->state_bytes
+      || descriptor.state == nullptr) return DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID;
+    if (!contract->implemented) return DAW_AUDIO_CORE_PROCESSOR_IMPLEMENTATION_UNAVAILABLE;
+    if (processor_counts[static_cast<uint32_t>(node_index)] >= DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE) {
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
+    for (uint32_t existing = 0; existing < index; ++existing) {
+      if (graph.processors[existing].instance_id == descriptor.instance_id) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    GraphRevision::Processor &processor = graph.processors[index];
+    processor.node_index = static_cast<uint16_t>(node_index);
+    processor.modulation_slot = index;
+    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
+      if (time_effect_count >= kMaximumTimeEffectProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.time_effect_slot = time_effect_count++;
+    }
+    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
+      if (spectral_count >= kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.spectral_slot = spectral_count++;
+    }
+    processor.node_id = descriptor.node_id;
+    processor.instance_id = descriptor.instance_id;
+    processor.kind = descriptor.kind;
+    processor.bypassed = descriptor.bypassed;
+    processor.input_layout = descriptor.input_layout;
+    processor.output_layout = descriptor.output_layout;
+    processor.latency_frames = descriptor.latency_frames;
+    processor.tail_frames = descriptor.tail_frames;
+    processor.parameter_count = descriptor.parameter_count;
+    for (uint32_t parameter = 0; parameter < descriptor.parameter_count; ++parameter) {
+      const uint32_t target = descriptor.parameter_targets[parameter];
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > 25) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      for (uint32_t previous = 0; previous < parameter; ++previous) {
+        if (processor.parameter_targets[previous] == target) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      }
+      processor.parameter_targets[parameter] = target;
+    }
+    processor.state_size = descriptor.state_size;
+    for (uint32_t byte = 0; byte < descriptor.state_size; ++byte) processor.state[byte] = descriptor.state[byte];
+    if (!decode_processor_state(descriptor, &processor)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    ++processor_counts[static_cast<uint32_t>(node_index)];
+    ++graph.processor_count;
+  }
+  for (uint32_t node_index = 0; node_index < graph.node_count; ++node_index) {
+    uint64_t chain_latency = 0;
+    bool has_chain = false;
+    uint32_t previous_layout = graph.nodes[node_index].input_layout;
+    for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+      const GraphRevision::Processor &processor = graph.processors[processor_index];
+      if (processor.node_id == graph.nodes[node_index].id) {
+        has_chain = true;
+        if (processor.input_layout != previous_layout) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+        previous_layout = processor.output_layout;
+        chain_latency += processor.latency_frames;
+      }
+    }
+    if (has_chain && (chain_latency != graph.nodes[node_index].latency_frames
+      || previous_layout != graph.nodes[node_index].output_layout)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  std::array<uint32_t, kMaximumGraphNodes> incoming{};
+  for (uint32_t index = 0; index < graph.edge_count; ++index) {
+    const daw_audio_graph_edge_descriptor edge = request.edges[index];
+    const int32_t from_index = graph_node_index(graph, edge.from_node_id);
+    const int32_t to_index = graph_node_index(graph, edge.to_node_id);
+    if (edge.id == 0 || from_index < 0 || to_index < 0 || from_index == to_index
+      || !std::isfinite(edge.gain) || !valid_graph_tap(edge.tap) || edge.sidechain > 1) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    if ((edge.sidechain == 0 && edge.target_processor_id != 0) || (edge.sidechain != 0 && edge.target_processor_id == 0)) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    if (edge.sidechain != 0) {
+      const GraphRevision::Processor *target = nullptr;
+      for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+        const GraphRevision::Processor &processor = graph.processors[processor_index];
+        if (processor.instance_id == edge.target_processor_id) {
+          target = &processor;
+          break;
+        }
+      }
+      if (target == nullptr || target->node_id != edge.to_node_id
+        || target->input_layout != graph.nodes[static_cast<uint32_t>(to_index)].input_layout) {
+        return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      }
+    }
+    if (edge.pdc_delay_frames > core.config.max_frames_per_block) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    for (uint32_t existing = 0; existing < index; ++existing) {
+      if (graph.edges[existing].id == edge.id) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    graph.edges[index] = edge;
+    graph.edge_source_indices[index] = static_cast<uint16_t>(from_index);
+    graph.edge_target_indices[index] = static_cast<uint16_t>(to_index);
+    if (edge.sidechain == 0) ++incoming[static_cast<uint32_t>(to_index)];
+  }
+  std::array<uint32_t, kMaximumGraphNodes> remaining = incoming;
+  uint32_t order_count = 0;
+  while (order_count < graph.node_count) {
+    uint32_t next = kMaximumGraphNodes;
+    for (uint32_t index = 0; index < graph.node_count; ++index) {
+      bool already_ordered = false;
+      for (uint32_t ordered = 0; ordered < order_count; ++ordered) {
+        if (graph.process_order[ordered] == index) {
+          already_ordered = true;
+          break;
+        }
+      }
+      if (!already_ordered && remaining[index] == 0) {
+        next = index;
+        break;
+      }
+    }
+    if (next == kMaximumGraphNodes) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    graph.process_order[order_count++] = next;
+    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+      const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
+      if (edge.sidechain == 0 && edge.from_node_id == graph.nodes[next].id) {
+        const uint32_t target = graph.edge_target_indices[edge_index];
+        if (remaining[target] == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+        --remaining[target];
+      }
+    }
+  }
+  for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+    const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
+    if (edge.sidechain == 0) continue;
+    uint32_t source_order = graph.node_count;
+    uint32_t target_order = graph.node_count;
+    for (uint32_t order = 0; order < graph.node_count; ++order) {
+      if (graph.nodes[graph.process_order[order]].id == edge.from_node_id) source_order = order;
+      if (graph.nodes[graph.process_order[order]].id == edge.to_node_id) target_order = order;
+    }
+    if (source_order >= target_order) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  std::array<uint32_t, kMaximumGraphNodes> path_latency{};
+  for (uint32_t ordered = 0; ordered < graph.node_count; ++ordered) {
+    const uint32_t node_index = graph.process_order[ordered];
+    uint32_t upstream_latency = 0;
+    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+      const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
+      if (edge.sidechain != 0 || edge.to_node_id != graph.nodes[node_index].id) continue;
+      const uint32_t source_index = graph.edge_source_indices[edge_index];
+      uint32_t arrival = path_latency[source_index];
+      if (edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX) {
+        const uint32_t source_latency = graph.nodes[source_index].latency_frames;
+        if (arrival < source_latency) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+        arrival -= source_latency;
+      }
+      if (arrival > upstream_latency) upstream_latency = arrival;
+    }
+    path_latency[node_index] = upstream_latency + graph.nodes[node_index].latency_frames;
+    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+      const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
+      if (edge.sidechain != 0 || edge.to_node_id != graph.nodes[node_index].id) continue;
+      const uint32_t source_index = graph.edge_source_indices[edge_index];
+      uint32_t arrival = path_latency[source_index];
+      if (edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX) arrival -= graph.nodes[source_index].latency_frames;
+      if (edge.pdc_delay_frames != upstream_latency - arrival) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+  }
+  uint16_t incoming_edge_count = 0;
+  uint16_t processor_index_count = 0;
+  for (uint32_t node_index = 0; node_index < graph.node_count; ++node_index) {
+    GraphRevision::Range &edge_range = graph.incoming_edge_ranges[node_index];
+    edge_range.start = incoming_edge_count;
+    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+      if (graph.edges[edge_index].sidechain == 0 && graph.edge_target_indices[edge_index] == node_index) {
+        graph.incoming_edge_indices[incoming_edge_count++] = static_cast<uint16_t>(edge_index);
+        ++edge_range.count;
+      }
+    }
+    GraphRevision::Range &processor_range = graph.processor_ranges[node_index];
+    processor_range.start = processor_index_count;
+    for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+      if (graph.processors[processor_index].node_index == node_index) {
+        graph.processor_indices[processor_index_count++] = static_cast<uint16_t>(processor_index);
+        ++processor_range.count;
+      }
+    }
+  }
+  uint16_t sidechain_edge_count = 0;
+  for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+    GraphRevision::Range &sidechain_range = graph.sidechain_edge_ranges[processor_index];
+    sidechain_range.start = sidechain_edge_count;
+    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+      if (graph.edges[edge_index].sidechain != 0
+        && graph.edges[edge_index].target_processor_id == graph.processors[processor_index].instance_id) {
+        graph.sidechain_edge_indices[sidechain_edge_count++] = static_cast<uint16_t>(edge_index);
+        ++sidechain_range.count;
+      }
+    }
+  }
+  *out_graph = graph;
+  return DAW_AUDIO_CORE_OK;
+}
+
+bool has_pdc_change(const GraphRevision &current, const GraphRevision &next) {
+  if (current.revision == 0) return false;
+  for (uint32_t next_index = 0; next_index < next.edge_count; ++next_index) {
+    const daw_audio_graph_edge_descriptor &next_edge = next.edges[next_index];
+    for (uint32_t current_index = 0; current_index < current.edge_count; ++current_index) {
+      const daw_audio_graph_edge_descriptor &current_edge = current.edges[current_index];
+      if (current_edge.id == next_edge.id && current_edge.pdc_delay_frames != next_edge.pdc_delay_frames) return true;
+    }
+  }
+  return false;
+}
+
+bool valid_utility_state(const daw_audio_utility_state &state) {
+  return (state.enabled == 0 || state.enabled == 1)
+    && std::isfinite(state.gain_db)
+    && state.gain_db >= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MIN
+    && state.gain_db <= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MAX
+    && (state.polarity == DAW_AUDIO_UTILITY_POLARITY_NORMAL || state.polarity == DAW_AUDIO_UTILITY_POLARITY_INVERT)
+    && (state.input_mode == DAW_AUDIO_UTILITY_INPUT_MODE_STEREO || state.input_mode == DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM)
+    && std::isfinite(state.pan)
+    && state.pan >= DAW_AUDIO_CORE_UTILITY_PAN_MIN
+    && state.pan <= DAW_AUDIO_CORE_UTILITY_PAN_MAX
+    && std::isfinite(state.balance)
+    && state.balance >= DAW_AUDIO_CORE_UTILITY_BALANCE_MIN
+    && state.balance <= DAW_AUDIO_CORE_UTILITY_BALANCE_MAX
+    && std::isfinite(state.width)
+    && state.width >= DAW_AUDIO_CORE_UTILITY_WIDTH_MIN
+    && state.width <= DAW_AUDIO_CORE_UTILITY_WIDTH_MAX
+    && (state.matrix == DAW_AUDIO_UTILITY_MATRIX_STEREO
+      || state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_ENCODE
+      || state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE)
+    && (state.swap == 0 || state.swap == 1)
+    && (state.dc_block == 0 || state.dc_block == 1);
+}
+
+bool valid_saturator_state(const daw_audio_saturator_state &state) {
+  return (state.enabled == 0 || state.enabled == 1)
+    && std::isfinite(state.drive_db) && state.drive_db >= 0.0F && state.drive_db <= 36.0F
+    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_CLIP
+    && (state.color == 0 || state.color == 1)
+    && std::isfinite(state.color_frequency_hz) && state.color_frequency_hz >= 100.0F && state.color_frequency_hz <= 10000.0F
+    && std::isfinite(state.color_amount) && state.color_amount >= 0.0F && state.color_amount <= 1.0F
+    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
+    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F;
+}
+
+bool valid_eq_band(const daw_audio_eq_band_state &band) {
+  return (band.enabled == 0 || band.enabled == 1)
+    && band.type <= DAW_AUDIO_EQ_BAND_ALLPASS
+    && std::isfinite(band.frequency_hz) && band.frequency_hz >= 20.0F && band.frequency_hz <= 20000.0F
+    && std::isfinite(band.gain_db) && band.gain_db >= -24.0F && band.gain_db <= 24.0F
+    && std::isfinite(band.q) && band.q >= 0.2F && band.q <= 18.0F;
+}
+
+bool valid_eq_state(const daw_audio_eq_state &state) {
+  if ((state.enabled != 0 && state.enabled != 1) || state.mono > 1) return false;
+  for (const daw_audio_eq_band_state &band : state.bands) {
+    if (!valid_eq_band(band)) return false;
+  }
+  return true;
+}
+
+bool valid_delay_modulation_state(const daw_audio_delay_modulation_state &state, bool chorus) {
+  return (state.enabled == 0 || state.enabled == 1)
+    && std::isfinite(state.delay_ms) && state.delay_ms >= (chorus ? 5.0F : 0.1F) && state.delay_ms <= (chorus ? 30.0F : 10.0F)
+    && std::isfinite(state.depth_ms) && state.depth_ms >= 0.0F && state.depth_ms <= (chorus ? 10.0F : 5.0F)
+    && std::isfinite(state.rate_hz) && state.rate_hz >= 0.01F && state.rate_hz <= 20.0F
+    && std::isfinite(state.feedback) && state.feedback >= (chorus ? 0.0F : -0.95F) && state.feedback <= (chorus ? 0.5F : 0.95F)
+    && std::isfinite(state.stereo_phase) && state.stereo_phase >= -0.5F && state.stereo_phase <= 0.5F
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
+}
+
+bool valid_phaser_state(const daw_audio_phaser_state &state) {
+  return (state.enabled == 0 || state.enabled == 1)
+    && (state.stages == 4 || state.stages == 6 || state.stages == 8 || state.stages == 12)
+    && std::isfinite(state.center_hz) && state.center_hz >= 100.0F && state.center_hz <= 8000.0F
+    && std::isfinite(state.depth_octaves) && state.depth_octaves >= 0.0F && state.depth_octaves <= 5.0F
+    && std::isfinite(state.rate_hz) && state.rate_hz >= 0.01F && state.rate_hz <= 20.0F
+    && std::isfinite(state.feedback) && state.feedback >= -0.95F && state.feedback <= 0.95F
+    && std::isfinite(state.stereo_phase) && state.stereo_phase >= -0.5F && state.stereo_phase <= 0.5F
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
+}
+
+bool valid_amplitude_modulation_state(const daw_audio_amplitude_modulation_state &state) {
+  return (state.enabled == 0 || state.enabled == 1) && state.waveform <= 1
+    && std::isfinite(state.rate_hz) && state.rate_hz >= 0.01F && state.rate_hz <= 20.0F
+    && std::isfinite(state.depth) && state.depth >= 0.0F && state.depth <= 1.0F
+    && std::isfinite(state.shape) && state.shape >= 0.0F && state.shape <= 1.0F
+    && std::isfinite(state.phase) && state.phase >= 0.0F && state.phase <= 1.0F;
+}
+
+bool valid_ensemble_state(const daw_audio_ensemble_state &state) {
+  return (state.enabled == 0 || state.enabled == 1) && state.voices == 3
+    && std::isfinite(state.delay_ms) && state.delay_ms >= 10.0F && state.delay_ms <= 30.0F
+    && std::isfinite(state.depth_ms) && state.depth_ms >= 1.0F && state.depth_ms <= 12.0F
+    && std::isfinite(state.rate_hz) && state.rate_hz >= 0.05F && state.rate_hz <= 5.0F
+    && std::isfinite(state.spread) && state.spread >= 0.0F && state.spread <= 1.0F
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
+}
+
+bool valid_gate_state(const daw_audio_gate_state &state) {
+  return state.enabled <= 1 && state.mode <= 1
+    && std::isfinite(state.threshold_db) && state.threshold_db >= -80.0F && state.threshold_db <= 0.0F
+    && std::isfinite(state.ratio) && state.ratio >= 1.0F && state.ratio <= 20.0F
+    && std::isfinite(state.attack_ms) && state.attack_ms >= 0.1F && state.attack_ms <= 100.0F
+    && std::isfinite(state.hold_ms) && state.hold_ms >= 0.0F && state.hold_ms <= 500.0F
+    && std::isfinite(state.release_ms) && state.release_ms >= 5.0F && state.release_ms <= 2000.0F
+    && std::isfinite(state.hysteresis_db) && state.hysteresis_db >= 0.0F && state.hysteresis_db <= 24.0F
+    && std::isfinite(state.range_db) && state.range_db >= -80.0F && state.range_db <= 0.0F
+    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 0.0F && state.lookahead_ms <= 2.0F
+    && state.detector <= 1 && std::isfinite(state.link) && state.link >= 0.0F && state.link <= 1.0F
+    && state.sidechain_enabled <= 1 && std::isfinite(state.sidechain_frequency_hz)
+    && state.sidechain_frequency_hz >= 20.0F && state.sidechain_frequency_hz <= 20000.0F
+    && std::isfinite(state.sidechain_q) && state.sidechain_q >= 0.1F && state.sidechain_q <= 18.0F;
+}
+
+bool valid_compressor_state(const daw_audio_compressor_state &state) {
+  return state.enabled <= 1 && std::isfinite(state.threshold_db) && state.threshold_db >= -60.0F && state.threshold_db <= 0.0F
+    && std::isfinite(state.ratio) && state.ratio >= 1.0F && state.ratio <= 100.0F
+    && std::isfinite(state.attack_ms) && state.attack_ms >= 0.1F && state.attack_ms <= 100.0F
+    && std::isfinite(state.release_ms) && state.release_ms >= 5.0F && state.release_ms <= 1000.0F
+    && state.auto_release <= 1 && std::isfinite(state.makeup_db) && state.makeup_db >= -36.0F && state.makeup_db <= 36.0F
+    && std::isfinite(state.output_db) && state.output_db >= -36.0F && state.output_db <= 36.0F
+    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F
+    && std::isfinite(state.knee_db) && state.knee_db >= 0.0F && state.knee_db <= 24.0F
+    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 0.0F && state.lookahead_ms <= 10.0F
+    && state.detector_mode <= 1 && state.dynamics_mode <= 1 && state.envelope_curve <= 1 && state.sidechain_enabled <= 1
+    && state.sidechain_filter_type <= 2 && std::isfinite(state.sidechain_frequency_hz)
+    && state.sidechain_frequency_hz >= 20.0F && state.sidechain_frequency_hz <= 20000.0F
+    && std::isfinite(state.sidechain_q) && state.sidechain_q >= 0.1F && state.sidechain_q <= 18.0F;
+}
+
+bool valid_limiter_state(const daw_audio_limiter_state &state) {
+  return state.enabled <= 1 && std::isfinite(state.ceiling_dbtp) && state.ceiling_dbtp >= -12.0F && state.ceiling_dbtp <= 0.0F
+    && std::isfinite(state.release_ms) && state.release_ms >= 20.0F && state.release_ms <= 1000.0F
+    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 1.0F && state.lookahead_ms <= 5.0F
+    && std::isfinite(state.link) && state.link >= 0.0F && state.link <= 1.0F && state.detector_oversampling == 4;
+}
+
+bool valid_delay_state(const daw_audio_delay_state &state) {
+  return state.enabled <= 1 && std::isfinite(state.delay_ms) && state.delay_ms >= DAW_AUDIO_CORE_DELAY_DELAY_MS_MIN && state.delay_ms <= DAW_AUDIO_CORE_DELAY_DELAY_MS_MAX
+    && std::isfinite(state.feedback) && state.feedback >= 0.0F && state.feedback <= 0.95F
+    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F
+    && state.ping_pong <= 1 && state.filter_enabled <= 1
+    && std::isfinite(state.low_cut_hz) && state.low_cut_hz >= 20.0F && state.low_cut_hz <= 2000.0F
+    && std::isfinite(state.high_cut_hz) && state.high_cut_hz >= 1000.0F && state.high_cut_hz <= 20000.0F
+    && state.high_cut_hz >= state.low_cut_hz;
+}
+
+bool valid_reverb_state(const daw_audio_reverb_state &state) {
+  return state.enabled <= 1 && std::isfinite(state.wet) && state.wet >= 0.0F && state.wet <= 1.0F
+    && std::isfinite(state.decay_sec) && state.decay_sec >= 0.05F && state.decay_sec <= 12.0F
+    && std::isfinite(state.pre_delay_ms) && state.pre_delay_ms >= 0.0F && state.pre_delay_ms <= 250.0F
+    && std::isfinite(state.reflections) && state.reflections >= 0.0F && state.reflections <= 1.0F
+    && state.reflection_spin <= 1 && std::isfinite(state.reflection_mod_amount_ms)
+    && state.reflection_mod_amount_ms >= 0.0F && state.reflection_mod_amount_ms <= 25.0F
+    && std::isfinite(state.reflection_mod_rate_hz) && state.reflection_mod_rate_hz >= 0.01F && state.reflection_mod_rate_hz <= 5.0F
+    && std::isfinite(state.reflection_shape) && state.reflection_shape >= 0.0F && state.reflection_shape <= 1.0F
+    && std::isfinite(state.diffuse) && state.diffuse >= 0.0F && state.diffuse <= 1.0F
+    && std::isfinite(state.size) && state.size >= 0.0F && state.size <= 1.0F
+    && std::isfinite(state.diffusion) && state.diffusion >= 0.0F && state.diffusion <= 1.0F
+    && std::isfinite(state.density) && state.density >= 0.0F && state.density <= 1.0F
+    && std::isfinite(state.low_cut_hz) && state.low_cut_hz >= 20.0F && state.low_cut_hz <= 1200.0F
+    && std::isfinite(state.high_cut_hz) && state.high_cut_hz >= 1200.0F && state.high_cut_hz <= 20000.0F
+    && std::isfinite(state.diffusion_low_cut_hz) && state.diffusion_low_cut_hz >= 20.0F && state.diffusion_low_cut_hz <= 1200.0F
+    && std::isfinite(state.diffusion_high_cut_hz) && state.diffusion_high_cut_hz >= 1200.0F && state.diffusion_high_cut_hz <= 20000.0F
+    && std::isfinite(state.stereo_width) && state.stereo_width >= 0.0F && state.stereo_width <= 2.0F;
+}
+
+bool valid_spectral_state(const daw_audio_spectral_state &state) {
+  return state.enabled <= 1
+    && (state.fft_size == 512 || state.fft_size == 1024 || state.fft_size == 2048 || state.fft_size == 4096)
+    && (state.overlap == 2 || state.overlap == 4)
+    && state.mode <= DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
+    && std::isfinite(state.freeze) && state.freeze >= 0.0F && state.freeze <= 1.0F
+    && std::isfinite(state.gate_threshold_db) && state.gate_threshold_db >= -120.0F && state.gate_threshold_db <= 0.0F
+    && std::isfinite(state.gate_attack_ms) && state.gate_attack_ms >= 0.1F && state.gate_attack_ms <= 1000.0F
+    && std::isfinite(state.gate_release_ms) && state.gate_release_ms >= 1.0F && state.gate_release_ms <= 5000.0F
+    && std::isfinite(state.morph) && state.morph >= 0.0F && state.morph <= 1.0F
+    && std::isfinite(state.bin_shift) && state.bin_shift >= -2048.0F && state.bin_shift <= 2048.0F
+    && std::isfinite(state.blur) && state.blur >= 0.0F && state.blur <= 1.0F
+    && std::isfinite(state.harmonic_percussive_balance) && state.harmonic_percussive_balance >= -1.0F && state.harmonic_percussive_balance <= 1.0F
+    && std::isfinite(state.noise_reduction) && state.noise_reduction >= 0.0F && state.noise_reduction <= 1.0F
+    && std::isfinite(state.profile_learn) && state.profile_learn >= 0.0F && state.profile_learn <= 1.0F
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
+}
+
+bool decode_processor_state(
+  const daw_audio_processor_descriptor &descriptor,
+  GraphRevision::Processor *out_processor) {
+  if (descriptor.state_version != DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION || descriptor.state == nullptr) return false;
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY && descriptor.state_size == 40) {
+    const daw_audio_utility_state state{
+      .enabled = read_u32_le(descriptor.state), .gain_db = read_f32_le(descriptor.state + 4),
+      .polarity = read_u32_le(descriptor.state + 8), .input_mode = read_u32_le(descriptor.state + 12),
+      .pan = read_f32_le(descriptor.state + 16), .balance = read_f32_le(descriptor.state + 20),
+      .width = read_f32_le(descriptor.state + 24), .matrix = read_u32_le(descriptor.state + 28),
+      .swap = read_u32_le(descriptor.state + 32), .dc_block = read_u32_le(descriptor.state + 36),
+    };
+    if (!valid_utility_state(state)) return false;
+    out_processor->utility = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR && descriptor.state_size == 32) {
+    const daw_audio_saturator_state state{
+      .enabled = read_u32_le(descriptor.state), .drive_db = read_f32_le(descriptor.state + 4),
+      .curve = read_u32_le(descriptor.state + 8), .color = read_u32_le(descriptor.state + 12),
+      .color_frequency_hz = read_f32_le(descriptor.state + 16), .color_amount = read_f32_le(descriptor.state + 20),
+      .output_db = read_f32_le(descriptor.state + 24), .dry_wet = read_f32_le(descriptor.state + 28),
+    };
+    if (!valid_saturator_state(state) || descriptor.latency_frames != 0
+      || descriptor.tail_frames != 0 || descriptor.parameter_count != 0) return false;
+    out_processor->saturator = state;
+    return true;
+  }
+  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER) && descriptor.state_size == 28) {
+    const daw_audio_delay_modulation_state state{
+      .enabled = read_u32_le(descriptor.state), .delay_ms = read_f32_le(descriptor.state + 4),
+      .depth_ms = read_f32_le(descriptor.state + 8), .rate_hz = read_f32_le(descriptor.state + 12),
+      .feedback = read_f32_le(descriptor.state + 16), .stereo_phase = read_f32_le(descriptor.state + 20), .mix = read_f32_le(descriptor.state + 24),
+    };
+    if (!valid_delay_modulation_state(state, descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS)) return false;
+    out_processor->delay_modulation = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER && descriptor.state_size == 32) {
+    const daw_audio_phaser_state state{
+      .enabled = read_u32_le(descriptor.state), .stages = read_u32_le(descriptor.state + 4),
+      .center_hz = read_f32_le(descriptor.state + 8), .depth_octaves = read_f32_le(descriptor.state + 12),
+      .rate_hz = read_f32_le(descriptor.state + 16), .feedback = read_f32_le(descriptor.state + 20),
+      .stereo_phase = read_f32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
+    };
+    if (!valid_phaser_state(state)) return false;
+    out_processor->phaser = state;
+    return true;
+  }
+  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN) && descriptor.state_size == 24) {
+    const daw_audio_amplitude_modulation_state state{
+      .enabled = read_u32_le(descriptor.state), .waveform = read_u32_le(descriptor.state + 4),
+      .rate_hz = read_f32_le(descriptor.state + 8), .depth = read_f32_le(descriptor.state + 12),
+      .shape = read_f32_le(descriptor.state + 16), .phase = read_f32_le(descriptor.state + 20),
+    };
+    if (!valid_amplitude_modulation_state(state)) return false;
+    out_processor->amplitude_modulation = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE && descriptor.state_size == 28) {
+    const daw_audio_ensemble_state state{
+      .enabled = read_u32_le(descriptor.state), .voices = read_u32_le(descriptor.state + 4),
+      .delay_ms = read_f32_le(descriptor.state + 8), .depth_ms = read_f32_le(descriptor.state + 12),
+      .rate_hz = read_f32_le(descriptor.state + 16), .spread = read_f32_le(descriptor.state + 20), .mix = read_f32_le(descriptor.state + 24),
+    };
+    if (!valid_ensemble_state(state)) return false;
+    out_processor->ensemble = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE && descriptor.state_size == 60) {
+    const daw_audio_gate_state state{
+      .enabled = read_u32_le(descriptor.state), .mode = read_u32_le(descriptor.state + 4),
+      .threshold_db = read_f32_le(descriptor.state + 8), .ratio = read_f32_le(descriptor.state + 12),
+      .attack_ms = read_f32_le(descriptor.state + 16), .hold_ms = read_f32_le(descriptor.state + 20),
+      .release_ms = read_f32_le(descriptor.state + 24), .hysteresis_db = read_f32_le(descriptor.state + 28),
+      .range_db = read_f32_le(descriptor.state + 32), .lookahead_ms = read_f32_le(descriptor.state + 36),
+      .detector = read_u32_le(descriptor.state + 40), .link = read_f32_le(descriptor.state + 44),
+      .sidechain_enabled = read_u32_le(descriptor.state + 48), .sidechain_frequency_hz = read_f32_le(descriptor.state + 52),
+      .sidechain_q = read_f32_le(descriptor.state + 56),
+    };
+    if (!valid_gate_state(state)) return false;
+    out_processor->gate = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR && descriptor.state_size == 72) {
+    const daw_audio_compressor_state state{
+      .enabled = read_u32_le(descriptor.state), .threshold_db = read_f32_le(descriptor.state + 4),
+      .ratio = read_f32_le(descriptor.state + 8), .attack_ms = read_f32_le(descriptor.state + 12),
+      .release_ms = read_f32_le(descriptor.state + 16), .auto_release = read_u32_le(descriptor.state + 20),
+      .makeup_db = read_f32_le(descriptor.state + 24), .output_db = read_f32_le(descriptor.state + 28),
+      .dry_wet = read_f32_le(descriptor.state + 32), .knee_db = read_f32_le(descriptor.state + 36),
+      .lookahead_ms = read_f32_le(descriptor.state + 40), .detector_mode = read_u32_le(descriptor.state + 44),
+      .dynamics_mode = read_u32_le(descriptor.state + 48), .envelope_curve = read_u32_le(descriptor.state + 52),
+      .sidechain_enabled = read_u32_le(descriptor.state + 56), .sidechain_filter_type = read_u32_le(descriptor.state + 60),
+      .sidechain_frequency_hz = read_f32_le(descriptor.state + 64), .sidechain_q = read_f32_le(descriptor.state + 68),
+    };
+    if (!valid_compressor_state(state)) return false;
+    out_processor->compressor = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER && descriptor.state_size == 24) {
+    const daw_audio_limiter_state state{
+      .enabled = read_u32_le(descriptor.state), .ceiling_dbtp = read_f32_le(descriptor.state + 4),
+      .release_ms = read_f32_le(descriptor.state + 8), .lookahead_ms = read_f32_le(descriptor.state + 12),
+      .link = read_f32_le(descriptor.state + 16), .detector_oversampling = read_u32_le(descriptor.state + 20),
+    };
+    if (!valid_limiter_state(state)) return false;
+    out_processor->limiter = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && descriptor.state_size == 32) {
+    const daw_audio_delay_state state{
+      .enabled = read_u32_le(descriptor.state), .delay_ms = read_f32_le(descriptor.state + 4),
+      .feedback = read_f32_le(descriptor.state + 8), .dry_wet = read_f32_le(descriptor.state + 12),
+      .ping_pong = read_u32_le(descriptor.state + 16), .filter_enabled = read_u32_le(descriptor.state + 20),
+      .low_cut_hz = read_f32_le(descriptor.state + 24), .high_cut_hz = read_f32_le(descriptor.state + 28),
+    };
+    if (!valid_delay_state(state)) return false;
+    out_processor->delay = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && descriptor.state_size == 72) {
+    const daw_audio_reverb_state state{
+      .enabled = read_u32_le(descriptor.state), .wet = read_f32_le(descriptor.state + 4),
+      .decay_sec = read_f32_le(descriptor.state + 8), .pre_delay_ms = read_f32_le(descriptor.state + 12),
+      .reflections = read_f32_le(descriptor.state + 16), .reflection_spin = read_u32_le(descriptor.state + 20),
+      .reflection_mod_amount_ms = read_f32_le(descriptor.state + 24), .reflection_mod_rate_hz = read_f32_le(descriptor.state + 28),
+      .reflection_shape = read_f32_le(descriptor.state + 32), .diffuse = read_f32_le(descriptor.state + 36),
+      .size = read_f32_le(descriptor.state + 40), .diffusion = read_f32_le(descriptor.state + 44),
+      .density = read_f32_le(descriptor.state + 48), .low_cut_hz = read_f32_le(descriptor.state + 52),
+      .high_cut_hz = read_f32_le(descriptor.state + 56), .diffusion_low_cut_hz = read_f32_le(descriptor.state + 60),
+      .diffusion_high_cut_hz = read_f32_le(descriptor.state + 64), .stereo_width = read_f32_le(descriptor.state + 68),
+    };
+    if (!valid_reverb_state(state)) return false;
+    out_processor->reverb = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && descriptor.state_size == 60) {
+    const daw_audio_spectral_state state{
+      .enabled = read_u32_le(descriptor.state), .fft_size = read_u32_le(descriptor.state + 4),
+      .overlap = read_u32_le(descriptor.state + 8), .mode = read_u32_le(descriptor.state + 12),
+      .freeze = read_f32_le(descriptor.state + 16), .gate_threshold_db = read_f32_le(descriptor.state + 20),
+      .gate_attack_ms = read_f32_le(descriptor.state + 24), .gate_release_ms = read_f32_le(descriptor.state + 28),
+      .morph = read_f32_le(descriptor.state + 32), .bin_shift = read_f32_le(descriptor.state + 36),
+      .blur = read_f32_le(descriptor.state + 40), .harmonic_percussive_balance = read_f32_le(descriptor.state + 44),
+      .noise_reduction = read_f32_le(descriptor.state + 48), .profile_learn = read_f32_le(descriptor.state + 52),
+      .mix = read_f32_le(descriptor.state + 56),
+    };
+    if (!valid_spectral_state(state) || descriptor.latency_frames != state.fft_size || descriptor.tail_frames != 0) return false;
+    out_processor->spectral = state;
+    return true;
+  }
+  if (descriptor.kind != DAW_AUDIO_PROCESSOR_KIND_EQ || descriptor.state_size != 200) return false;
+  daw_audio_eq_state state{
+    .enabled = read_u32_le(descriptor.state),
+    .mono = read_u32_le(descriptor.state + 4),
+    .bands = {},
+  };
+  for (uint32_t index = 0; index < 8; ++index) {
+    const uint32_t offset = 8 + index * 24;
+    state.bands[index] = {
+      .enabled = read_u32_le(descriptor.state + offset), .type = read_u32_le(descriptor.state + offset + 4),
+      .frequency_hz = read_f32_le(descriptor.state + offset + 8), .gain_db = read_f32_le(descriptor.state + offset + 12),
+      .q = read_f32_le(descriptor.state + offset + 16), .reserved = 0,
+    };
+  }
+  if (!valid_eq_state(state) || descriptor.latency_frames != 0
+    || descriptor.tail_frames != 0 || descriptor.parameter_count != 0) return false;
+  out_processor->eq = state;
+  return true;
+}
+
+bool valid_asset_descriptor(const daw_audio_asset_descriptor &descriptor) {
+  if (!valid_abi(descriptor.abi_version)
+    || descriptor.revision == 0
+    || descriptor.frame_count == 0
+    || descriptor.sample_rate_hz == 0
+    || descriptor.channel_count == 0
+    || descriptor.channel_count > kMaximumChannels
+    || descriptor.planes == nullptr) return false;
+  const uint64_t expected_byte_length = static_cast<uint64_t>(descriptor.frame_count)
+    * static_cast<uint64_t>(descriptor.channel_count)
+    * sizeof(float);
+  if (descriptor.byte_length != expected_byte_length) return false;
+  for (uint32_t channel = 0; channel < descriptor.channel_count; ++channel) {
+    if (descriptor.planes[channel] == nullptr) return false;
+  }
+  return true;
+}
+
+float summed_input(const daw_audio_core_process_block &block, uint32_t channel, uint32_t frame) {
+  float value = 0.0F;
+  if (block.inputs == nullptr) return value;
+  for (uint32_t bus = 0; bus < block.input_bus_count; ++bus) {
+    const float *input = block.inputs[bus * block.channel_count + channel];
+    if (input != nullptr) value += input[frame];
+  }
+  return value;
+}
+
+float processor_parameter_value(
+  const Core &core,
+  const GraphRevision::Processor &processor,
+  uint32_t target,
+  uint32_t frame,
+  float fallback) {
+  const uint32_t slot = processor.modulation_slot;
+  float value = fallback;
+  const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[slot];
+  if (parameters != nullptr) {
+    for (uint32_t index = 0; index < parameters->parameter_count; ++index) {
+      if (parameters->parameter_targets[index] == target) {
+        value = parameters->values[index * parameters->frame_count + (parameters->frame_count == 1 ? 0 : frame)];
+        break;
+      }
+    }
+  }
+  for (uint32_t index = core.event_starts[slot]; index < core.event_ends[slot]; ++index) {
+    const daw_audio_processor_event &event = core.active_events[index];
+    if (event.parameter_target == target && event.frame_offset <= frame) value = event.value;
+  }
+  return value;
+}
+
+float mixer_parameter_value(
+  const Core &core,
+  uint64_t instance_id,
+  uint32_t target,
+  uint32_t frame,
+  float fallback) {
+  float value = fallback;
+  for (uint32_t index = 0; index < core.active_event_count; ++index) {
+    const daw_audio_processor_event &event = core.active_events[index];
+    if (event.processor_instance_id == instance_id && event.parameter_target == target && event.frame_offset <= frame) {
+      value = event.value;
+    }
+  }
+  return value;
+}
+
+bool mixer_solo_active(const Core &core, uint32_t frame) {
+  for (uint32_t index = 0; index < core.published_graph.node_count; ++index) {
+    const daw_audio_mixer_state &mixer = core.published_graph.nodes[index].mixer;
+    if (mixer.instance_id != 0
+      && mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_SOLO, frame,
+        mixer.soloed == 0 ? 0.0F : 1.0F) == 1.0F) return true;
+  }
+  return false;
+}
+
+void apply_mixer_frame(const Core &core, const daw_audio_mixer_state &mixer, uint32_t frame,
+  float *left, float *right) {
+  if (mixer.instance_id == 0) return;
+  const float muted = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_MUTE, frame,
+    mixer.muted == 0 ? 0.0F : 1.0F);
+  const float soloed = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_SOLO, frame,
+    mixer.soloed == 0 ? 0.0F : 1.0F);
+  if (muted == 1.0F || (mixer_solo_active(core, frame) && soloed != 1.0F)) {
+    *left = 0.0F;
+    *right = 0.0F;
+    return;
+  }
+  const float gain = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_GAIN, frame, mixer.gain);
+  const float pan = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_PAN, frame, mixer.pan);
+  const float left_gain = std::min(1.0F, 1.0F - pan) * gain;
+  const float right_gain = std::min(1.0F, 1.0F + pan) * gain;
+  *left *= left_gain;
+  *right *= right_gain;
+}
+
+float clamp_bypass_step(float current, float target, float step) {
+  if (target > current + step) return current + step;
+  if (target < current - step) return current - step;
+  return target;
+}
+
+void process_utility_frame(
+  Core &core,
+  const GraphRevision::Processor *processor,
+  uint32_t frame,
+  float dry_left,
+  float dry_right,
+  float *left_output,
+  float *right_output) {
+  float left = dry_left;
+  float right = dry_right;
+  if (!std::isfinite(left) || !std::isfinite(right)) left = right = 0.0F;
+  const float sanitized_dry_left = left;
+  const float sanitized_dry_right = right;
+
+  daw_audio_utility_state state = processor == nullptr ? core.utility : processor->utility;
+  if (processor != nullptr) {
+    state.gain_db = processor_parameter_value(core, *processor, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB, frame, state.gain_db);
+    state.pan = processor_parameter_value(core, *processor, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN, frame, state.pan);
+    state.balance = processor_parameter_value(core, *processor, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE, frame, state.balance);
+    state.width = processor_parameter_value(core, *processor, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH, frame, state.width);
+  }
+  if (state.input_mode == DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM) left = right = 0.5F * left + 0.5F * right;
+  if (state.polarity == DAW_AUDIO_UTILITY_POLARITY_INVERT) {
+    left = -left;
+    right = -right;
+  }
+
+  constexpr float sqrt_half = 0.7071067811865475244F;
+  if (state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_ENCODE) {
+    const float mid = (left + right) * sqrt_half;
+    right = (left - right) * sqrt_half;
+    left = mid;
+  } else if (state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE) {
+    const float mid = left;
+    left = (mid + right) * sqrt_half;
+    right = (mid - right) * sqrt_half;
+  }
+
+  if (state.swap != 0) {
+    const float swapped = left;
+    left = right;
+    right = swapped;
+  }
+
+  const float mid = (left + right) * sqrt_half;
+  const float side = (left - right) * sqrt_half * state.width;
+  left = (mid + side) * sqrt_half;
+  right = (mid - side) * sqrt_half;
+  if (state.balance > 0.0F) left *= 1.0F - state.balance;
+  if (state.balance < 0.0F) right *= 1.0F + state.balance;
+  const float pan_angle = (state.pan + 1.0F) * 0.7853981633974483096F;
+  left *= std::cos(pan_angle) * 1.4142135623730950488F;
+  right *= std::sin(pan_angle) * 1.4142135623730950488F;
+  const float gain = std::pow(10.0F, state.gain_db / 20.0F);
+  left *= gain;
+  right *= gain;
+
+  if (state.dc_block != 0) {
+    const float dc_coefficient = std::exp(-6.2831853071795864769F * 10.0F / static_cast<float>(core.config.sample_rate_hz));
+    const float next_left = left - core.dc_x1_left + dc_coefficient * core.dc_y1_left;
+    const float next_right = right - core.dc_x1_right + dc_coefficient * core.dc_y1_right;
+    core.dc_x1_left = left;
+    core.dc_x1_right = right;
+    core.dc_y1_left = next_left;
+    core.dc_y1_right = next_right;
+    left = next_left;
+    right = next_right;
+  }
+
+  if (!std::isfinite(left) || !std::isfinite(right)) {
+    left = right = 0.0F;
+    core.dc_x1_left = core.dc_x1_right = core.dc_y1_left = core.dc_y1_right = 0.0F;
+  }
+
+  const uint32_t bypass_frames = (core.config.sample_rate_hz + 50u) / 100u;
+  const float bypass_step = 1.0F / static_cast<float>(bypass_frames == 0 ? 1u : bypass_frames);
+  core.bypass = clamp_bypass_step(core.bypass, state.enabled != 0 ? 0.0F : 1.0F, bypass_step);
+  *left_output = left + (sanitized_dry_left - left) * core.bypass;
+  *right_output = right + (sanitized_dry_right - right) * core.bypass;
+}
+
+using ProcessorRenderer = void (*)(
+  Core &core,
+  GraphRevision::Processor &processor,
+  uint32_t frame,
+  float input_left,
+  float input_right,
+  float sidechain_left,
+  float sidechain_right,
+  float *output_left,
+  float *output_right);
+
+void render_utility_processor(
+  Core &core,
+  GraphRevision::Processor &processor,
+  uint32_t frame,
+  float input_left,
+  float input_right,
+  float,
+  float,
+  float *output_left,
+  float *output_right) {
+  daw_audio_utility_state state = processor.utility;
+  state.enabled = processor.bypassed == 0 ? state.enabled : 0;
+  const daw_audio_utility_state previous_state = core.utility;
+  const bool previous_configured = core.utility_configured;
+  core.utility = state;
+  core.utility_configured = true;
+  process_utility_frame(core, processor.parameter_count == 0 ? nullptr : &processor, frame, input_left, input_right, output_left, output_right);
+  core.utility = previous_state;
+  core.utility_configured = previous_configured;
+}
+
+struct BiquadCoefficients {
+  float b0;
+  float b1;
+  float b2;
+  float a1;
+  float a2;
+};
+
+BiquadCoefficients rbj_coefficients(uint32_t type, float frequency_hz, float q, float gain_db, uint32_t sample_rate_hz) {
+  const float frequency = std::fmin(frequency_hz, static_cast<float>(sample_rate_hz) * 0.49F);
+  const float omega = 6.2831853071795864769F * frequency / static_cast<float>(sample_rate_hz);
+  const float cosine = std::cos(omega);
+  const float sine = std::sin(omega);
+  const float alpha = sine / (2.0F * q);
+  const float amplitude = std::pow(10.0F, gain_db / 40.0F);
+  const float root_amplitude = std::sqrt(amplitude);
+  float b0 = 1.0F;
+  float b1 = 0.0F;
+  float b2 = 0.0F;
+  float a0 = 1.0F;
+  float a1 = 0.0F;
+  float a2 = 0.0F;
+  if (type == DAW_AUDIO_EQ_BAND_LOWPASS) {
+    b0 = (1.0F - cosine) * 0.5F; b1 = 1.0F - cosine; b2 = b0; a0 = 1.0F + alpha; a1 = -2.0F * cosine; a2 = 1.0F - alpha;
+  } else if (type == DAW_AUDIO_EQ_BAND_HIGHPASS) {
+    b0 = (1.0F + cosine) * 0.5F; b1 = -(1.0F + cosine); b2 = b0; a0 = 1.0F + alpha; a1 = -2.0F * cosine; a2 = 1.0F - alpha;
+  } else if (type == DAW_AUDIO_EQ_BAND_BANDPASS) {
+    b0 = alpha; b2 = -alpha; a0 = 1.0F + alpha; a1 = -2.0F * cosine; a2 = 1.0F - alpha;
+  } else if (type == DAW_AUDIO_EQ_BAND_NOTCH) {
+    b0 = 1.0F; b1 = -2.0F * cosine; b2 = 1.0F; a0 = 1.0F + alpha; a1 = b1; a2 = 1.0F - alpha;
+  } else if (type == DAW_AUDIO_EQ_BAND_ALLPASS) {
+    b0 = 1.0F - alpha; b1 = -2.0F * cosine; b2 = 1.0F + alpha; a0 = b2; a1 = b1; a2 = b0;
+  } else if (type == DAW_AUDIO_EQ_BAND_LOWSHELF || type == DAW_AUDIO_EQ_BAND_HIGHSHELF) {
+    const float beta = 2.0F * root_amplitude * alpha;
+    if (type == DAW_AUDIO_EQ_BAND_LOWSHELF) {
+      b0 = amplitude * ((amplitude + 1.0F) - (amplitude - 1.0F) * cosine + beta);
+      b1 = 2.0F * amplitude * ((amplitude - 1.0F) - (amplitude + 1.0F) * cosine);
+      b2 = amplitude * ((amplitude + 1.0F) - (amplitude - 1.0F) * cosine - beta);
+      a0 = (amplitude + 1.0F) + (amplitude - 1.0F) * cosine + beta;
+      a1 = -2.0F * ((amplitude - 1.0F) + (amplitude + 1.0F) * cosine);
+      a2 = (amplitude + 1.0F) + (amplitude - 1.0F) * cosine - beta;
+    } else {
+      b0 = amplitude * ((amplitude + 1.0F) + (amplitude - 1.0F) * cosine + beta);
+      b1 = -2.0F * amplitude * ((amplitude - 1.0F) + (amplitude + 1.0F) * cosine);
+      b2 = amplitude * ((amplitude + 1.0F) + (amplitude - 1.0F) * cosine - beta);
+      a0 = (amplitude + 1.0F) - (amplitude - 1.0F) * cosine + beta;
+      a1 = 2.0F * ((amplitude - 1.0F) - (amplitude + 1.0F) * cosine);
+      a2 = (amplitude + 1.0F) - (amplitude - 1.0F) * cosine - beta;
+    }
+  } else {
+    b0 = 1.0F + alpha * amplitude; b1 = -2.0F * cosine; b2 = 1.0F - alpha * amplitude;
+    a0 = 1.0F + alpha / amplitude; a1 = b1; a2 = 1.0F - alpha / amplitude;
+  }
+  return {.b0 = b0 / a0, .b1 = b1 / a0, .b2 = b2 / a0, .a1 = a1 / a0, .a2 = a2 / a0};
+}
+
+float process_biquad(float input, const BiquadCoefficients &coefficients, GraphRevision::Processor::BiquadHistory &history) {
+  const float output = coefficients.b0 * input + coefficients.b1 * history.x1 + coefficients.b2 * history.x2
+    - coefficients.a1 * history.y1 - coefficients.a2 * history.y2;
+  history.x2 = history.x1; history.x1 = input; history.y2 = history.y1; history.y1 = output;
+  return output;
+}
+
+float saturator_curve(uint32_t curve, float input) {
+  if (curve == DAW_AUDIO_SATURATOR_CURVE_SOFT) return std::tanh(1.8F * input);
+  if (curve == DAW_AUDIO_SATURATOR_CURVE_MEDIUM) return input < -0.666F ? -1.0F : input > 0.666F ? 1.0F : 1.5F * input - 0.5F * input * input * input;
+  if (curve == DAW_AUDIO_SATURATOR_CURVE_HARD) return std::atan(4.0F * input) / std::atan(4.0F);
+  return std::fmax(-0.82F, std::fmin(0.82F, input)) / 0.82F;
+}
+
+float render_saturator_channel(
+  Core &core, GraphRevision::Processor &processor, float input, float *previous,
+  GraphRevision::Processor::BiquadHistory &color_history) {
+  const daw_audio_saturator_state &state = processor.saturator;
+  const float dry = std::isfinite(input) ? input : 0.0F;
+  if (processor.bypassed != 0 || state.enabled == 0) return dry;
+  const float drive = std::pow(10.0F, state.drive_db / 20.0F);
+  const BiquadCoefficients color = rbj_coefficients(DAW_AUDIO_EQ_BAND_PEAKING, state.color_frequency_hz, 0.8F,
+    state.color != 0 ? state.color_amount * 12.0F : 0.0F, core.config.sample_rate_hz);
+  float wet = 0.0F;
+  for (uint32_t phase = 1; phase <= 4; ++phase) {
+    const float interpolated = *previous + (dry - *previous) * static_cast<float>(phase) * 0.25F;
+    wet += saturator_curve(state.curve, process_biquad(interpolated * drive, color, color_history));
+  }
+  *previous = dry;
+  wet = wet * 0.25F * std::pow(10.0F, state.output_db / 20.0F);
+  return dry + (wet - dry) * state.dry_wet;
+}
+
+void render_saturator_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t,
+  float input_left, float input_right, float, float, float *output_left, float *output_right) {
+  *output_left = render_saturator_channel(core, processor, input_left, &processor.saturator_previous_left, processor.saturator_color_history_left);
+  *output_right = render_saturator_channel(core, processor, input_right, &processor.saturator_previous_right, processor.saturator_color_history_right);
+}
+
+void render_eq_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t,
+  float input_left, float input_right, float, float, float *output_left, float *output_right) {
+  float left = std::isfinite(input_left) ? input_left : 0.0F;
+  float right = std::isfinite(input_right) ? input_right : 0.0F;
+  if (processor.bypassed != 0 || processor.eq.enabled == 0) {
+    *output_left = left; *output_right = right; return;
+  }
+  if (processor.eq.mono != 0) left = right = 0.5F * (left + right);
+  for (uint32_t index = 0; index < 8; ++index) {
+    const daw_audio_eq_band_state &band = processor.eq.bands[index];
+    if (band.enabled == 0) continue;
+    const BiquadCoefficients coefficients = rbj_coefficients(band.type, band.frequency_hz, band.q, band.gain_db, core.config.sample_rate_hz);
+    left = process_biquad(left, coefficients, processor.eq_history[index][0]);
+    right = process_biquad(right, coefficients, processor.eq_history[index][1]);
+  }
+  *output_left = std::isfinite(left) ? left : 0.0F;
+  *output_right = std::isfinite(right) ? right : 0.0F;
+}
+
+float modulation_lfo(uint32_t waveform, float phase) {
+  const float wrapped = phase - std::floor(phase);
+  return waveform == 1 ? 1.0F - 4.0F * std::abs(wrapped - 0.5F) : std::sin(6.2831853071795864769F * wrapped);
+}
+
+float shaped_unipolar(const daw_audio_amplitude_modulation_state &state, float phase) {
+  return std::pow(0.5F + 0.5F * modulation_lfo(state.waveform, phase), std::pow(2.0F, 4.0F * (state.shape - 0.5F)));
+}
+
+float read_modulation_delay(const std::array<float, kMaximumModulationDelayFrames> &buffer, uint32_t write, float delay_frames) {
+  float position = static_cast<float>(write) - delay_frames;
+  while (position < 0.0F) position += static_cast<float>(buffer.size());
+  const uint32_t index1 = static_cast<uint32_t>(std::floor(position)) % buffer.size();
+  const float fraction = position - std::floor(position);
+  const uint32_t index0 = (index1 + buffer.size() - 1) % buffer.size();
+  const uint32_t index2 = (index1 + 1) % buffer.size();
+  const uint32_t index3 = (index1 + 2) % buffer.size();
+  const float a = buffer[index1];
+  const float b = 0.5F * (-buffer[index0] + buffer[index2]);
+  const float c = 0.5F * (2.0F * buffer[index0] - 5.0F * buffer[index1] + 4.0F * buffer[index2] - buffer[index3]);
+  const float d = 0.5F * (-buffer[index0] + 3.0F * buffer[index1] - 3.0F * buffer[index2] + buffer[index3]);
+  return ((d * fraction + c) * fraction + b) * fraction + a;
+}
+
+float phaser_sample(
+  Core &core, GraphRevision::Processor &processor, ModulationHistory &history,
+  float input, uint32_t channel, float lfo) {
+  const daw_audio_phaser_state &state = processor.phaser;
+  const float center = state.center_hz * std::pow(2.0F, state.depth_octaves * lfo);
+  const float frequency = std::fmax(20.0F, std::fmin(static_cast<float>(core.config.sample_rate_hz) * 0.49F, center));
+  const float tangent = std::tan(3.14159265358979323846F * frequency / static_cast<float>(core.config.sample_rate_hz));
+  const float coefficient = (tangent - 1.0F) / (tangent + 1.0F);
+  auto &xs = channel == 0 ? history.allpass_x_left : history.allpass_x_right;
+  auto &ys = channel == 0 ? history.allpass_y_left : history.allpass_y_right;
+  float value = input + (channel == 0 ? history.feedback_left : history.feedback_right) * state.feedback;
+  for (uint32_t stage = 0; stage < state.stages; ++stage) {
+    const float output = coefficient * value + xs[stage] - coefficient * ys[stage];
+    xs[stage] = value; ys[stage] = output; value = output;
+  }
+  if (channel == 0) history.feedback_left = value; else history.feedback_right = value;
+  return value;
+}
+
+void render_modulation_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t,
+  float input_left, float input_right, float, float, float *output_left, float *output_right) {
+  ModulationHistory &history = core.modulation_histories[processor.modulation_slot];
+  const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
+  const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
+  float left = dry_left;
+  float right = dry_right;
+  const bool is_delay = processor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS || processor.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER;
+  const bool is_amplitude = processor.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO || processor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN;
+  float rate = 0.0F;
+  bool enabled = false;
+  if (is_delay) {
+    const daw_audio_delay_modulation_state &state = processor.delay_modulation;
+    const float phase_left = static_cast<float>(history.phase);
+    const float phase_right = phase_left + state.stereo_phase;
+    history.delay_left[history.write] = dry_left + history.feedback_left * state.feedback;
+    history.delay_right[history.write] = dry_right + history.feedback_right * state.feedback;
+    const float left_delay = std::fmax(1.0F, (state.delay_ms + state.depth_ms * modulation_lfo(0, phase_left)) * static_cast<float>(core.config.sample_rate_hz) / 1000.0F);
+    const float right_delay = std::fmax(1.0F, (state.delay_ms + state.depth_ms * modulation_lfo(0, phase_right)) * static_cast<float>(core.config.sample_rate_hz) / 1000.0F);
+    const float wet_left = read_modulation_delay(history.delay_left, history.write, left_delay);
+    const float wet_right = read_modulation_delay(history.delay_right, history.write, right_delay);
+    history.feedback_left = wet_left; history.feedback_right = wet_right;
+    history.write = (history.write + 1) % kMaximumModulationDelayFrames;
+    left = dry_left * (1.0F - state.mix) + wet_left * state.mix;
+    right = dry_right * (1.0F - state.mix) + wet_right * state.mix;
+    rate = state.rate_hz; enabled = state.enabled != 0;
+  } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE) {
+    const daw_audio_ensemble_state &state = processor.ensemble;
+    history.delay_left[history.write] = dry_left; history.delay_right[history.write] = dry_right;
+    float wet_left = 0.0F; float wet_right = 0.0F;
+    for (uint32_t voice = 0; voice < 3; ++voice) {
+      const float voice_phase = static_cast<float>(history.phase) + static_cast<float>(voice) / 3.0F;
+      const float spread = state.spread * (static_cast<float>(voice) - 1.0F) * 0.25F;
+      wet_left += read_modulation_delay(history.delay_left, history.write, std::fmax(1.0F, (state.delay_ms + state.depth_ms * modulation_lfo(0, voice_phase - spread)) * static_cast<float>(core.config.sample_rate_hz) / 1000.0F));
+      wet_right += read_modulation_delay(history.delay_right, history.write, std::fmax(1.0F, (state.delay_ms + state.depth_ms * modulation_lfo(0, voice_phase + spread)) * static_cast<float>(core.config.sample_rate_hz) / 1000.0F));
+    }
+    history.write = (history.write + 1) % kMaximumModulationDelayFrames;
+    left = dry_left * (1.0F - state.mix) + wet_left * state.mix / 3.0F;
+    right = dry_right * (1.0F - state.mix) + wet_right * state.mix / 3.0F;
+    rate = state.rate_hz; enabled = state.enabled != 0;
+  } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER) {
+    const daw_audio_phaser_state &state = processor.phaser;
+    const float wet_left = phaser_sample(core, processor, history, dry_left, 0, modulation_lfo(0, static_cast<float>(history.phase)));
+    const float wet_right = phaser_sample(core, processor, history, dry_right, 1, modulation_lfo(0, static_cast<float>(history.phase) + state.stereo_phase));
+    left = dry_left * (1.0F - state.mix) + wet_left * state.mix;
+    right = dry_right * (1.0F - state.mix) + wet_right * state.mix;
+    rate = state.rate_hz; enabled = state.enabled != 0;
+  } else if (is_amplitude) {
+    const daw_audio_amplitude_modulation_state &state = processor.amplitude_modulation;
+    const float shaped = shaped_unipolar(state, static_cast<float>(history.phase) + state.phase);
+    if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO) {
+      const float gain = 1.0F - state.depth + state.depth * shaped;
+      left = dry_left * gain; right = dry_right * gain;
+    } else {
+      const float position = state.depth * (2.0F * shaped - 1.0F);
+      left = dry_left * std::cos((position + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
+      right = dry_right * std::sin((position + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
+    }
+    rate = state.rate_hz; enabled = state.enabled != 0;
+  }
+  history.phase += static_cast<double>(rate) / static_cast<double>(core.config.sample_rate_hz);
+  history.phase -= std::floor(history.phase);
+  if (!std::isfinite(left) || !std::isfinite(right)) {
+    left = right = 0.0F; history.feedback_left = history.feedback_right = 0.0F;
+  }
+  const float target_bypass = !enabled || processor.bypassed != 0 ? 1.0F : 0.0F;
+  history.bypass = clamp_bypass_step(history.bypass, target_bypass, 1.0F / std::fmax(1.0F, std::round(0.01F * static_cast<float>(core.config.sample_rate_hz))));
+  *output_left = left + (dry_left - left) * history.bypass;
+  *output_right = right + (dry_right - right) * history.bypass;
+}
+
+float read_time_effect_delay(
+  const std::array<float, kMaximumTimeEffectDelayFrames> &buffer,
+  uint32_t write,
+  uint32_t delay_frames) {
+  const uint32_t delay = std::min(delay_frames, static_cast<uint32_t>(buffer.size() - 1));
+  return buffer[(write + buffer.size() - delay) % buffer.size()];
+}
+
+float filter_time_effect_sample(
+  float input,
+  float low_cut_hz,
+  float high_cut_hz,
+  Core &core,
+  float *low,
+  float *high_input,
+  float *high) {
+  const float rate = static_cast<float>(core.config.sample_rate_hz);
+  const float lowpass_alpha = 1.0F - std::exp(-6.2831853071795864769F * std::fmin(high_cut_hz, rate * 0.49F) / rate);
+  *low += lowpass_alpha * (input - *low);
+  const float highpass_alpha = std::exp(-6.2831853071795864769F * low_cut_hz / rate);
+  *high = highpass_alpha * (*high + *low - *high_input);
+  *high_input = *low;
+  return *high;
+}
+
+void render_time_effect_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float, float, float *output_left, float *output_right) {
+  TimeEffectHistory &history = core.time_effect_histories[processor.time_effect_slot];
+  const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
+  const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
+  const bool delay = processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY;
+  const daw_audio_delay_state &delay_state = processor.delay;
+  const daw_audio_reverb_state &reverb_state = processor.reverb;
+  const float rate = static_cast<float>(core.config.sample_rate_hz);
+  const float delay_parameter_ms = processor_parameter_value(core, processor, 5, frame, delay_state.delay_ms);
+  const float delay_feedback = processor_parameter_value(core, processor, 6, frame, delay_state.feedback);
+  const float delay_dry_wet = processor_parameter_value(core, processor, 7, frame, delay_state.dry_wet);
+  const float delay_low_cut = processor_parameter_value(core, processor, 8, frame, delay_state.low_cut_hz);
+  const float delay_high_cut = processor_parameter_value(core, processor, 9, frame, delay_state.high_cut_hz);
+  const float reverb_wet = processor_parameter_value(core, processor, 10, frame, reverb_state.wet);
+  const float reverb_pre_delay = processor_parameter_value(core, processor, 11, frame, reverb_state.pre_delay_ms);
+  const float reverb_low_cut = processor_parameter_value(core, processor, 12, frame, reverb_state.low_cut_hz);
+  const float reverb_high_cut = processor_parameter_value(core, processor, 13, frame, reverb_state.high_cut_hz);
+  const float reverb_width = processor_parameter_value(core, processor, 14, frame, reverb_state.stereo_width);
+  const float reverb_modulation_ms = reverb_state.reflection_spin != 0
+    ? std::sin(static_cast<float>(history.phase) * 6.2831853071795864769F) * reverb_state.reflection_mod_amount_ms * 0.5F
+    : 0.0F;
+  const float delay_ms = delay ? delay_parameter_ms : std::fmax(1.0F, 30.0F + reverb_state.size * 90.0F + reverb_modulation_ms);
+  const uint32_t delay_frames = std::max(1u, static_cast<uint32_t>(std::round(delay_ms * rate / 1000.0F)));
+  const float raw_left = read_time_effect_delay(history.left, history.write, delay_frames);
+  const float raw_right = read_time_effect_delay(history.right, history.write, delay_frames);
+  const float low_cut = delay ? (delay_state.filter_enabled != 0 ? delay_low_cut : 20.0F)
+    : std::fmax(reverb_low_cut, reverb_state.diffusion_low_cut_hz);
+  const float high_cut = delay ? (delay_state.filter_enabled != 0 ? delay_high_cut : 20000.0F)
+    : std::fmin(reverb_high_cut, reverb_state.diffusion_high_cut_hz);
+  const float wet_left = filter_time_effect_sample(raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
+  const float wet_right = filter_time_effect_sample(raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
+  float feedback = delay ? delay_feedback : std::pow(1.0e-4F, delay_ms / (1000.0F * reverb_state.decay_sec));
+  if (!delay) {
+    feedback *= (0.55F + 0.45F * reverb_state.diffuse)
+      * (0.55F + 0.45F * reverb_state.diffusion)
+      * (0.5F + 0.5F * reverb_state.density);
+  }
+  const float feedback_left = delay && delay_state.ping_pong != 0 ? wet_right : wet_left;
+  const float feedback_right = delay && delay_state.ping_pong != 0 ? wet_left : wet_right;
+  history.left[history.write] = dry_left + feedback_left * feedback;
+  history.right[history.write] = dry_right + feedback_right * feedback;
+  history.write = (history.write + 1) % kMaximumTimeEffectDelayFrames;
+  float left = 0.0F;
+  float right = 0.0F;
+  bool enabled = false;
+  if (delay) {
+    left = dry_left * (1.0F - delay_dry_wet) + wet_left * delay_dry_wet;
+    right = dry_right * (1.0F - delay_dry_wet) + wet_right * delay_dry_wet;
+    enabled = delay_state.enabled != 0;
+  } else {
+    const uint32_t pre_delay_frames = static_cast<uint32_t>(std::round(reverb_pre_delay * rate / 1000.0F));
+    const float reflection_gain = reverb_state.reflections * (0.65F + reverb_state.reflection_shape * 0.7F);
+    const float early_left = read_time_effect_delay(history.left, history.write, pre_delay_frames + 1) * reflection_gain;
+    const float early_right = read_time_effect_delay(history.right, history.write, pre_delay_frames + 1) * reflection_gain;
+    const float width = reverb_width;
+    const float wide_left = wet_left * (1.0F + width) * 0.5F + wet_right * (1.0F - width) * 0.5F;
+    const float wide_right = wet_right * (1.0F + width) * 0.5F + wet_left * (1.0F - width) * 0.5F;
+    left = dry_left * (1.0F - reverb_wet) + (wide_left + early_left) * reverb_wet;
+    right = dry_right * (1.0F - reverb_wet) + (wide_right + early_right) * reverb_wet;
+    history.phase += static_cast<double>(reverb_state.reflection_mod_rate_hz) / static_cast<double>(core.config.sample_rate_hz);
+    history.phase -= std::floor(history.phase);
+    enabled = reverb_state.enabled != 0;
+  }
+  if (!std::isfinite(left) || !std::isfinite(right)) {
+    left = right = 0.0F;
+    history = TimeEffectHistory{};
+  }
+  const float target_bypass = !enabled || processor.bypassed != 0 ? 1.0F : 0.0F;
+  history.bypass = clamp_bypass_step(history.bypass, target_bypass, 1.0F / std::fmax(1.0F, std::round(0.01F * rate)));
+  *output_left = left + (dry_left - left) * history.bypass;
+  *output_right = right + (dry_right - right) * history.bypass;
+}
+
+
+float dynamics_db_to_gain(float db) {
+  return std::pow(10.0F, db / 20.0F);
+}
+
+float dynamics_gain_to_db(float gain) {
+  return gain > 0.0F ? 20.0F * std::log10(gain) : -120.0F;
+}
+
+uint32_t dynamics_delay_frames(float milliseconds, uint32_t sample_rate) {
+  return std::min(kMaximumDynamicsDelayFrames - 1, static_cast<uint32_t>(std::ceil(milliseconds * static_cast<float>(sample_rate) / 1000.0F)));
+}
+
+float compressor_curve_db(float input_db, const daw_audio_compressor_state &state) {
+  if (state.dynamics_mode != 0) {
+    if (input_db >= state.threshold_db) return input_db;
+    const float expanded = state.threshold_db + (input_db - state.threshold_db) * state.ratio;
+    if (state.knee_db <= 0.0F || input_db <= state.threshold_db - state.knee_db * 0.5F) return expanded;
+    const float distance = state.threshold_db - input_db;
+    return input_db - (2.0F * (state.ratio - 1.0F) * distance * distance) / state.knee_db;
+  }
+  const float compressed = state.threshold_db + (input_db - state.threshold_db) / state.ratio;
+  if (state.knee_db <= 0.0F) return input_db <= state.threshold_db ? input_db : compressed;
+  const float lower = state.threshold_db - state.knee_db * 0.5F;
+  const float upper = state.threshold_db + state.knee_db * 0.5F;
+  if (input_db <= lower) return input_db;
+  if (input_db >= upper) return compressed;
+  const float x = input_db - lower;
+  return input_db + ((1.0F / state.ratio - 1.0F) * x * x) / (2.0F * state.knee_db);
+}
+
+void render_dynamics_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t,
+  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right) {
+  const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
+  const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
+  const bool gate = processor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE;
+  const bool compressor = processor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR;
+  const uint32_t fixed_delay = dynamics_delay_frames(
+    gate ? 2.0F : compressor ? 10.0F : 5.0F, core.config.sample_rate_hz);
+  const uint32_t write = processor.dynamics_write;
+  const uint32_t read = (write + kMaximumDynamicsDelayFrames - fixed_delay) % kMaximumDynamicsDelayFrames;
+  processor.dynamics_delay_left[write] = dry_left;
+  processor.dynamics_delay_right[write] = dry_right;
+  float left = processor.dynamics_delay_left[read];
+  float right = processor.dynamics_delay_right[read];
+  if (gate) {
+    const daw_audio_gate_state &state = processor.gate;
+    float detector_left = sidechain_left;
+    float detector_right = sidechain_right;
+    if (state.sidechain_enabled != 0) {
+      const BiquadCoefficients filter = rbj_coefficients(DAW_AUDIO_EQ_BAND_HIGHPASS, state.sidechain_frequency_hz, state.sidechain_q, 0.0F, core.config.sample_rate_hz);
+      detector_left = process_biquad(detector_left, filter, processor.dynamics_sidechain_history[0]);
+      detector_right = process_biquad(detector_right, filter, processor.dynamics_sidechain_history[1]);
+    }
+    processor.dynamics_detector_left[write] = detector_left;
+    processor.dynamics_detector_right[write] = detector_right;
+    const uint32_t detector_delay = fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz));
+    const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - detector_delay) % kMaximumDynamicsDelayFrames;
+    const std::array<float, 2> detector{processor.dynamics_detector_left[detector_read], processor.dynamics_detector_right[detector_read]};
+    std::array<float, 2> levels{std::abs(detector[0]), std::abs(detector[1])};
+    if (state.detector != 0) {
+      const float alpha = std::exp(-1.0F / (0.01F * static_cast<float>(core.config.sample_rate_hz)));
+      for (uint32_t channel = 0; channel < 2; ++channel) {
+        processor.dynamics_rms[channel] = alpha * processor.dynamics_rms[channel] + (1.0F - alpha) * detector[channel] * detector[channel];
+        levels[channel] = std::sqrt(processor.dynamics_rms[channel]);
+      }
+    }
+    const float linked = std::fmax(levels[0], levels[1]);
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      const float level = levels[channel] + (linked - levels[channel]) * state.link;
+      const float db = dynamics_gain_to_db(std::fmax(level, 1e-8F));
+      if (level > 1e-8F) processor.dynamics_started[channel] = 1;
+      const uint32_t hold = static_cast<uint32_t>(std::round(state.hold_ms * static_cast<float>(core.config.sample_rate_hz) / 1000.0F));
+      if (processor.dynamics_open[channel] == 0 && db >= state.threshold_db) {
+        processor.dynamics_open[channel] = 1; processor.dynamics_hold[channel] = hold;
+      } else if (processor.dynamics_open[channel] != 0 && processor.dynamics_started[channel] != 0) {
+        if (db >= state.threshold_db - state.hysteresis_db) processor.dynamics_hold[channel] = hold;
+        else if (processor.dynamics_hold[channel] > 0) --processor.dynamics_hold[channel];
+        else processor.dynamics_open[channel] = 0;
+      }
+      const float target_db = processor.dynamics_open[channel] != 0 ? 0.0F
+        : state.mode != 0 ? std::fmax(state.range_db, (db - state.threshold_db) * (state.ratio - 1.0F)) : state.range_db;
+      const float target = state.enabled != 0 && processor.bypassed == 0 ? dynamics_db_to_gain(target_db) : 1.0F;
+      const float milliseconds = target > processor.dynamics_gain[channel] ? state.attack_ms : state.release_ms;
+      const float coefficient = std::exp(-1.0F / (std::fmax(0.1F, milliseconds) * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
+      processor.dynamics_gain[channel] = target + coefficient * (processor.dynamics_gain[channel] - target);
+    }
+  } else if (compressor) {
+    const daw_audio_compressor_state &state = processor.compressor;
+    const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
+    processor.dynamics_detector_left[write] = 0.5F * (sidechain_left + sidechain_right);
+    float detector = processor.dynamics_detector_left[detector_read];
+    if (state.sidechain_enabled != 0) {
+      const float coefficient = 1.0F - std::exp(-6.2831853071795864769F * std::fmin(state.sidechain_frequency_hz, static_cast<float>(core.config.sample_rate_hz) * 0.45F) / static_cast<float>(core.config.sample_rate_hz));
+      processor.compressor_sc_low += coefficient * (detector - processor.compressor_sc_low);
+      processor.compressor_sc_band += coefficient * (detector - processor.compressor_sc_low - processor.compressor_sc_band / state.sidechain_q);
+      detector = state.sidechain_filter_type == 1 ? processor.compressor_sc_low : state.sidechain_filter_type == 2 ? processor.compressor_sc_band : detector - processor.compressor_sc_low;
+    }
+    const float level = state.detector_mode != 0
+      ? std::sqrt(processor.compressor_rms = processor.compressor_rms * 0.99F + detector * detector * 0.01F)
+      : std::abs(detector);
+    const float target_db = state.enabled != 0 && processor.bypassed == 0 ? compressor_curve_db(dynamics_gain_to_db(level), state) - dynamics_gain_to_db(level) : 0.0F;
+    const float release_ms = state.auto_release != 0 ? std::fmax(state.release_ms, state.release_ms * (1.0F + std::fmin(1.0F, -processor.compressor_envelope_db / 24.0F))) : state.release_ms;
+    if (state.envelope_curve != 0) {
+      const float milliseconds = target_db < processor.compressor_envelope_db ? state.attack_ms : release_ms;
+      const float step_db = 60.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * milliseconds / 1000.0F);
+      processor.compressor_envelope_db += std::fmax(-step_db, std::fmin(step_db, target_db - processor.compressor_envelope_db));
+    } else {
+      const float milliseconds = target_db < processor.compressor_envelope_db ? state.attack_ms : release_ms;
+      const float coefficient = std::exp(-1.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * milliseconds / 1000.0F));
+      processor.compressor_envelope_db = target_db + coefficient * (processor.compressor_envelope_db - target_db);
+    }
+    const float gain = dynamics_db_to_gain(processor.compressor_envelope_db + state.makeup_db + state.output_db);
+    left = left * (1.0F - state.dry_wet) + left * gain * state.dry_wet;
+    right = right * (1.0F - state.dry_wet) + right * gain * state.dry_wet;
+  } else {
+    const daw_audio_limiter_state &state = processor.limiter;
+    const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
+    const float detector_left = std::abs(processor.dynamics_delay_left[detector_read]);
+    const float detector_right = std::abs(processor.dynamics_delay_right[detector_read]);
+    const float ceiling = dynamics_db_to_gain(state.ceiling_dbtp);
+    const float target_left = std::fmin(1.0F, ceiling / std::fmax(detector_left, 1e-12F));
+    const float target_right = std::fmin(1.0F, ceiling / std::fmax(detector_right, 1e-12F));
+    const float linked = std::fmin(target_left, target_right);
+    const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
+    const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
+    for (uint32_t channel = 0; channel < 2; ++channel) processor.dynamics_gain[channel] = targets[channel] < processor.dynamics_gain[channel] ? targets[channel] : 1.0F + release * (processor.dynamics_gain[channel] - 1.0F);
+    if (state.enabled == 0 || processor.bypassed != 0) processor.dynamics_gain = {1.0F, 1.0F};
+  }
+  processor.dynamics_write = (write + 1) % kMaximumDynamicsDelayFrames;
+  if (gate) {
+    left *= processor.dynamics_gain[0];
+    right *= processor.dynamics_gain[1];
+  } else if (!compressor) {
+    left *= processor.dynamics_gain[0];
+    right *= processor.dynamics_gain[1];
+  }
+  *output_left = std::isfinite(left) ? left : 0.0F;
+  *output_right = std::isfinite(right) ? right : 0.0F;
+}
+
+float spectral_parameter(
+  const Core &core, const GraphRevision::Processor &processor, uint32_t target, uint32_t frame, float fallback) {
+  return processor_parameter_value(core, processor, target, frame, fallback);
+}
+
+void spectral_fft(std::array<float, kMaximumSpectralFftSize> &real,
+                  std::array<float, kMaximumSpectralFftSize> &imaginary,
+                  uint32_t size, bool inverse) {
+  for (uint32_t index = 1, reversed = 0; index < size; ++index) {
+    uint32_t bit = size >> 1u;
+    while ((reversed & bit) != 0) {
+      reversed ^= bit;
+      bit >>= 1u;
+    }
+    reversed ^= bit;
+    if (index < reversed) {
+      const float real_value = real[index]; real[index] = real[reversed]; real[reversed] = real_value;
+      const float imaginary_value = imaginary[index]; imaginary[index] = imaginary[reversed]; imaginary[reversed] = imaginary_value;
+    }
+  }
+  for (uint32_t length = 2; length <= size; length <<= 1u) {
+    const float angle = (inverse ? 2.0F : -2.0F) * 3.14159265358979323846F / static_cast<float>(length);
+    const float step_real = std::cos(angle);
+    const float step_imaginary = std::sin(angle);
+    for (uint32_t start = 0; start < size; start += length) {
+      float twiddle_real = 1.0F;
+      float twiddle_imaginary = 0.0F;
+      for (uint32_t offset = 0; offset < length / 2; ++offset) {
+        const uint32_t even = start + offset;
+        const uint32_t odd = even + length / 2;
+        const float odd_real = real[odd] * twiddle_real - imaginary[odd] * twiddle_imaginary;
+        const float odd_imaginary = real[odd] * twiddle_imaginary + imaginary[odd] * twiddle_real;
+        real[odd] = real[even] - odd_real; imaginary[odd] = imaginary[even] - odd_imaginary;
+        real[even] += odd_real; imaginary[even] += odd_imaginary;
+        const float next_real = twiddle_real * step_real - twiddle_imaginary * step_imaginary;
+        twiddle_imaginary = twiddle_real * step_imaginary + twiddle_imaginary * step_real;
+        twiddle_real = next_real;
+      }
+    }
+  }
+  if (inverse) for (uint32_t index = 0; index < size; ++index) {
+    real[index] /= static_cast<float>(size); imaginary[index] /= static_cast<float>(size);
+  }
+}
+
+float spectral_median(std::array<float, kMaximumSpectralBins> &values, uint32_t count) {
+  for (uint32_t index = 1; index < count; ++index) {
+    const float value = values[index];
+    uint32_t cursor = index;
+    while (cursor > 0 && values[cursor - 1] > value) {
+      values[cursor] = values[cursor - 1];
+      --cursor;
+    }
+    values[cursor] = value;
+  }
+  return values[count / 2];
+}
+
+void reset_spectral_history(SpectralHistory &history, const daw_audio_spectral_state &state) {
+  if (history.fft_size == state.fft_size && history.overlap == state.overlap) return;
+  history = SpectralHistory{};
+  history.fft_size = state.fft_size;
+  history.overlap = state.overlap;
+  history.hop_size = state.fft_size / state.overlap;
+  history.samples_until_frame = state.fft_size;
+  for (auto &gain : history.gate_gain) gain.fill(1.0F);
+}
+
+void transform_spectrum(
+  Core &core, GraphRevision::Processor &processor, SpectralHistory &history, uint32_t channel, uint32_t frame) {
+  const daw_audio_spectral_state &state = processor.spectral;
+  auto &real = history.real[channel];
+  auto &imaginary = history.imaginary[channel];
+  auto &side_real = history.side_real[channel];
+  auto &side_imaginary = history.side_imaginary[channel];
+  const uint32_t bins = state.fft_size / 2 + 1;
+  const float freeze = spectral_parameter(core, processor, 15, frame, state.freeze);
+  const float threshold_db = spectral_parameter(core, processor, 16, frame, state.gate_threshold_db);
+  const float attack_ms = spectral_parameter(core, processor, 17, frame, state.gate_attack_ms);
+  const float release_ms = spectral_parameter(core, processor, 18, frame, state.gate_release_ms);
+  const float morph = spectral_parameter(core, processor, 19, frame, state.morph);
+  const float bin_shift = spectral_parameter(core, processor, 20, frame, state.bin_shift);
+  const float blur = spectral_parameter(core, processor, 21, frame, state.blur);
+  const float hpss_balance = spectral_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
+  const float noise_reduction = spectral_parameter(core, processor, 23, frame, state.noise_reduction);
+  const float profile_learn = spectral_parameter(core, processor, 24, frame, state.profile_learn);
+  if (state.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
+    if (freeze > 0.0F && !history.freeze_captured[channel]) {
+      for (uint32_t bin = 0; bin < bins; ++bin) {
+        history.frozen_magnitude[channel][bin] = std::hypot(real[bin], imaginary[bin]);
+        history.frozen_phase[channel][bin] = std::atan2(imaginary[bin], real[bin]);
+      }
+      history.freeze_captured[channel] = true;
+    } else if (freeze == 0.0F) history.freeze_captured[channel] = false;
+    if (history.freeze_captured[channel]) for (uint32_t bin = 0; bin < bins; ++bin) {
+      real[bin] = history.frozen_magnitude[channel][bin] * std::cos(history.frozen_phase[channel][bin]);
+      imaginary[bin] = history.frozen_magnitude[channel][bin] * std::sin(history.frozen_phase[channel][bin]);
+    }
+  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_GATE) {
+    const float threshold = std::pow(10.0F, threshold_db / 20.0F);
+    const float attack = std::exp(-static_cast<float>(history.hop_size) / std::fmax(1.0F, attack_ms * 0.001F * core.config.sample_rate_hz));
+    const float release = std::exp(-static_cast<float>(history.hop_size) / std::fmax(1.0F, release_ms * 0.001F * core.config.sample_rate_hz));
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+      const float target = std::hypot(real[bin], imaginary[bin]) >= threshold ? 1.0F : 0.0F;
+      const float coefficient = target > history.gate_gain[channel][bin] ? attack : release;
+      history.gate_gain[channel][bin] = target + coefficient * (history.gate_gain[channel][bin] - target);
+      real[bin] *= history.gate_gain[channel][bin]; imaginary[bin] *= history.gate_gain[channel][bin];
+    }
+  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_MORPH) {
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+      const float phase = std::atan2(imaginary[bin], real[bin]);
+      const float magnitude = std::hypot(real[bin], imaginary[bin]) * (1.0F - morph)
+        + std::hypot(side_real[bin], side_imaginary[bin]) * morph;
+      real[bin] = magnitude * std::cos(phase); imaginary[bin] = magnitude * std::sin(phase);
+    }
+  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_SHIFT_BLUR) {
+    for (uint32_t bin = 0; bin < bins; ++bin) history.scratch[channel][bin] = std::hypot(real[bin], imaginary[bin]);
+    const int32_t radius = std::min(15, static_cast<int32_t>(std::ceil(blur * 15.0F)));
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+      const float source = static_cast<float>(bin) - bin_shift;
+      const int32_t lower = static_cast<int32_t>(std::floor(source));
+      const float fraction = source - static_cast<float>(lower);
+      const float shifted = lower >= 0 && static_cast<uint32_t>(lower + 1) < bins
+        ? history.scratch[channel][static_cast<uint32_t>(lower)] * (1.0F - fraction) + history.scratch[channel][static_cast<uint32_t>(lower + 1)] * fraction : 0.0F;
+      float sum = 0.0F; uint32_t count = 0;
+      for (int32_t offset = -radius; offset <= radius; ++offset) {
+        const int32_t candidate = lower + offset;
+        if (candidate >= 0 && static_cast<uint32_t>(candidate) < bins) {
+          sum += history.scratch[channel][static_cast<uint32_t>(candidate)]; ++count;
+        }
+      }
+      const float magnitude = shifted * (1.0F - blur) + (count == 0 ? 0.0F : sum / static_cast<float>(count)) * blur;
+      const float phase = std::atan2(imaginary[bin], real[bin]);
+      real[bin] = magnitude * std::cos(phase); imaginary[bin] = magnitude * std::sin(phase);
+    }
+  } else if (state.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS) {
+    const uint32_t history_offset = history.hpss_index[channel] * kMaximumSpectralBins;
+    for (uint32_t bin = 0; bin < bins; ++bin) history.hpss_history[channel][history_offset + bin] = std::hypot(real[bin], imaginary[bin]);
+    history.hpss_index[channel] = (history.hpss_index[channel] + 1) % kSpectralHpssFrames;
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+      uint32_t count = 0;
+      for (int32_t offset = -15; offset <= 15; ++offset) {
+        const int32_t candidate = static_cast<int32_t>(bin) + offset;
+        if (candidate >= 0 && static_cast<uint32_t>(candidate) < bins) history.scratch[channel][count++] = history.hpss_history[channel][history_offset + static_cast<uint32_t>(candidate)];
+      }
+      const float percussive = spectral_median(history.scratch[channel], count);
+      for (uint32_t sample = 0; sample < kSpectralHpssFrames; ++sample) history.scratch[channel][sample] = history.hpss_history[channel][sample * kMaximumSpectralBins + bin];
+      const float harmonic = spectral_median(history.scratch[channel], kSpectralHpssFrames);
+      const float balance = (hpss_balance + 1.0F) * 0.5F;
+      const float mask = (harmonic * balance + percussive * (1.0F - balance)) / std::fmax(1e-12F, harmonic + percussive);
+      real[bin] *= mask; imaginary[bin] *= mask;
+    }
+  } else {
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+      const float magnitude = std::hypot(real[bin], imaginary[bin]);
+      const float detector = std::hypot(side_real[bin], side_imaginary[bin]);
+      const float profile_input = detector > 0.0F ? detector : magnitude;
+      history.noise_profile[channel][bin] += (profile_input - history.noise_profile[channel][bin]) * profile_learn;
+      const float gain = magnitude > 0.0F ? std::fmax(0.0F, 1.0F - noise_reduction * history.noise_profile[channel][bin] / magnitude) : 0.0F;
+      real[bin] *= gain; imaginary[bin] *= gain;
+    }
+  }
+  for (uint32_t bin = 1; bin < state.fft_size / 2; ++bin) {
+    real[state.fft_size - bin] = real[bin]; imaginary[state.fft_size - bin] = -imaginary[bin];
+  }
+}
+
+void process_spectral_frame(Core &core, GraphRevision::Processor &processor, SpectralHistory &history, uint32_t frame) {
+  const uint32_t input_mask = kMaximumSpectralFftSize - 1;
+  const uint32_t output_mask = kMaximumSpectralFftSize * 2 - 1;
+  const uint32_t frame_start = (history.write_index - processor.spectral.fft_size + kMaximumSpectralFftSize) & input_mask;
+  for (uint32_t channel = 0; channel < 2; ++channel) {
+    for (uint32_t index = 0; index < processor.spectral.fft_size; ++index) {
+      const uint32_t source = (frame_start + index) & input_mask;
+      const float window = std::sqrt(0.5F - 0.5F * std::cos(6.2831853071795864769F * static_cast<float>(index) / processor.spectral.fft_size));
+      history.real[channel][index] = history.input[channel][source] * window; history.imaginary[channel][index] = 0.0F;
+      history.side_real[channel][index] = history.sidechain[channel][source] * window; history.side_imaginary[channel][index] = 0.0F;
+    }
+    spectral_fft(history.real[channel], history.imaginary[channel], processor.spectral.fft_size, false);
+    if (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_MORPH || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) {
+      spectral_fft(history.side_real[channel], history.side_imaginary[channel], processor.spectral.fft_size, false);
+    }
+    transform_spectrum(core, processor, history, channel, frame);
+    spectral_fft(history.real[channel], history.imaginary[channel], processor.spectral.fft_size, true);
+    for (uint32_t index = 0; index < processor.spectral.fft_size; ++index) {
+      const float window = std::sqrt(0.5F - 0.5F * std::cos(6.2831853071795864769F * static_cast<float>(index) / processor.spectral.fft_size));
+      const uint32_t target = (history.write_index + index) & output_mask;
+      history.output[channel][target] += history.real[channel][index] * window * (2.0F / processor.spectral.overlap);
+    }
+  }
+}
+
+void render_spectral_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right) {
+  SpectralHistory &history = core.spectral_histories[processor.spectral_slot];
+  reset_spectral_history(history, processor.spectral);
+  const uint32_t input_mask = kMaximumSpectralFftSize - 1;
+  const uint32_t output_mask = kMaximumSpectralFftSize * 2 - 1;
+  const std::array<float, 2> input{std::isfinite(input_left) ? input_left : 0.0F, std::isfinite(input_right) ? input_right : 0.0F};
+  const std::array<float, 2> sidechain{std::isfinite(sidechain_left) ? sidechain_left : 0.0F, std::isfinite(sidechain_right) ? sidechain_right : 0.0F};
+  const float bypass_step = 1.0F / std::fmax(1.0F, std::round(0.01F * core.config.sample_rate_hz));
+  history.bypass = clamp_bypass_step(history.bypass, processor.bypassed != 0 || processor.spectral.enabled == 0 ? 1.0F : 0.0F, bypass_step);
+  std::array<float, 2> output{};
+  for (uint32_t channel = 0; channel < 2; ++channel) {
+    history.input[channel][history.write_index & input_mask] = input[channel];
+    history.sidechain[channel][history.write_index & input_mask] = sidechain[channel];
+    history.dry[channel][(history.write_index + processor.spectral.fft_size) & output_mask] = input[channel];
+    const float wet = history.output[channel][history.write_index];
+    const float dry = history.dry[channel][history.write_index];
+    history.output[channel][history.write_index] = 0.0F;
+    history.dry[channel][history.write_index] = 0.0F;
+    const float mix = spectral_parameter(core, processor, 25, frame, processor.spectral.mix);
+    const float processed = dry * (1.0F - mix) + wet * mix;
+    output[channel] = processed + (dry - processed) * history.bypass;
+  }
+  history.write_index = (history.write_index + 1) & output_mask;
+  if (--history.samples_until_frame == 0) {
+    process_spectral_frame(core, processor, history, frame);
+    history.samples_until_frame = history.hop_size;
+  }
+  *output_left = output[0];
+  *output_right = output[1];
+}
+
+struct ProcessorImplementation {
+  uint32_t kind;
+  ProcessorRenderer render;
+};
+
+constexpr std::array<ProcessorImplementation, 15> kProcessorImplementations{{
+  {DAW_AUDIO_PROCESSOR_KIND_UTILITY, render_utility_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_SATURATOR, render_saturator_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_EQ, render_eq_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_CHORUS, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_FLANGER, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_PHASER, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_TREMOLO, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_AUTOPAN, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE, render_modulation_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_GATE, render_dynamics_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, render_dynamics_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_LIMITER, render_dynamics_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_DELAY, render_time_effect_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_REVERB, render_time_effect_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, render_spectral_processor},
+}};
+
+ProcessorRenderer find_processor_renderer(uint32_t kind) {
+  for (const ProcessorImplementation &implementation : kProcessorImplementations) {
+    if (implementation.kind == kind) return implementation.render;
+  }
+  return nullptr;
+}
+
+daw_audio_asset_handle make_asset_handle(uint32_t index, uint32_t generation) {
+  return (static_cast<daw_audio_asset_handle>(generation) << 32u) | static_cast<daw_audio_asset_handle>(index + 1u);
+}
+
+bool decode_asset_handle(daw_audio_asset_handle handle, uint32_t *index, uint32_t *generation) {
+  const uint32_t encoded_index = static_cast<uint32_t>(handle);
+  if (encoded_index == 0) return false;
+  *index = encoded_index - 1u;
+  *generation = static_cast<uint32_t>(handle >> 32u);
+  return true;
+}
+
+AssetSlot *find_asset(Core *core, daw_audio_asset_handle handle) {
+  uint32_t index = 0;
+  uint32_t generation = 0;
+  if (!decode_asset_handle(handle, &index, &generation) || index >= core->config.max_assets) return nullptr;
+  AssetSlot &slot = core->assets[index];
+  if (!slot.occupied || slot.generation != generation) return nullptr;
+  return &slot;
+}
+
+bool valid_transport_state(const daw_audio_transport_state &state) {
+  return (state.running == 0 || state.running == 1) && state.epoch != 0;
+}
+
+bool valid_sample_source_event(const daw_audio_sample_source_event &event) {
+  return valid_abi(event.abi_version)
+    && event.epoch != 0
+    && event.sequence != 0
+    && event.asset != 0
+    && event.stop_frame > event.start_frame
+    && event.source_frame_count > 0
+    && std::isfinite(event.gain)
+    && event.fade_in_start_frame <= event.fade_in_end_frame
+    && event.fade_out_start_frame <= event.fade_out_end_frame;
+}
+
+void clear_sample_sources(Core &core) {
+  for (SampleSource &source : core.sample_sources) source.active = false;
+}
+
+bool asset_is_active(const Core &core, daw_audio_asset_handle asset) {
+  for (const SampleSource &source : core.sample_sources) {
+    if (source.active && source.asset == asset) return true;
+  }
+  for (const InstrumentNodeState &instrument : core.instruments) {
+    for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
+      if (instrument.zones[index].asset == asset) return true;
+    }
+    for (const SampleVoice &voice : instrument.sample_voices) {
+      if (voice.active && voice.asset == asset) return true;
+    }
+    if (instrument.granular.asset == asset && (instrument.granular_note_count > 0
+      || std::any_of(instrument.grains.begin(), instrument.grains.end(), [](const GranularGrain &grain) { return grain.active; }))) return true;
+  }
+  return false;
+}
+
+float linear_fade_gain(int64_t frame, int64_t start, int64_t end, float before, float after) {
+  if (end <= start) return frame < end ? before : after;
+  if (frame <= start) return before;
+  if (frame >= end) return after;
+  return before + (after - before) * static_cast<float>(frame - start) / static_cast<float>(end - start);
+}
+
+float source_envelope_gain(const SampleSource &source, int64_t transport_frame) {
+  const float fade_in = linear_fade_gain(
+    transport_frame, source.fade_in_start_frame, source.fade_in_end_frame, 0.0F, 1.0F);
+  const float fade_out = linear_fade_gain(
+    transport_frame, source.fade_out_start_frame, source.fade_out_end_frame, 1.0F, 0.0F);
+  return source.gain * fade_in * fade_out;
+}
+
+void prepare_active_source_ranges(Core &core, const GraphRevision *graph) {
+  core.active_source_ranges = {};
+  core.root_source_range = {};
+  uint16_t count = 0;
+  if (graph != nullptr) {
+    for (uint32_t node_index = 0; node_index < graph->node_count; ++node_index) {
+      GraphRevision::Range &range = core.active_source_ranges[node_index];
+      range.start = count;
+      if (graph->nodes[node_index].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) continue;
+      for (uint32_t source_index = 0; source_index < core.sample_sources.size(); ++source_index) {
+        const SampleSource &source = core.sample_sources[source_index];
+        if (source.active && source.source_node_id == graph->nodes[node_index].id) {
+          core.active_source_indices[count++] = static_cast<uint16_t>(source_index);
+          ++range.count;
+        }
+      }
+    }
+  }
+  core.root_source_range.start = count;
+  for (uint32_t source_index = 0; source_index < core.sample_sources.size(); ++source_index) {
+    const SampleSource &source = core.sample_sources[source_index];
+    if (source.active && source.source_node_id == 0) {
+      core.active_source_indices[count++] = static_cast<uint16_t>(source_index);
+      ++core.root_source_range.count;
+    }
+  }
+}
+
+void render_sample_source_range(
+  Core &core,
+  GraphRevision::Range range,
+  int64_t transport_frame,
+  float *left_output,
+  float *right_output) {
+  if (core.transport.running == 0) return;
+  const uint32_t end = static_cast<uint32_t>(range.start) + range.count;
+  for (uint32_t position = range.start; position < end; ++position) {
+    SampleSource &source = core.sample_sources[core.active_source_indices[position]];
+    if (!source.active) continue;
+    if (transport_frame >= source.stop_frame) {
+      source.active = false;
+      continue;
+    }
+    if (transport_frame < source.start_frame) continue;
+    AssetSlot *asset = find_asset(&core, source.asset);
+    if (asset == nullptr) {
+      source.active = false;
+      continue;
+    }
+    const uint64_t elapsed_output_frames = static_cast<uint64_t>(transport_frame - source.start_frame);
+    const uint64_t elapsed_source_frames = (elapsed_output_frames / core.config.sample_rate_hz) * asset->sample_rate_hz
+      + (elapsed_output_frames % core.config.sample_rate_hz) * asset->sample_rate_hz / core.config.sample_rate_hz;
+    if (elapsed_source_frames >= source.source_frame_count
+      || source.source_offset_frame > asset->frame_count
+      || elapsed_source_frames > asset->frame_count - source.source_offset_frame) {
+      source.active = false;
+      continue;
+    }
+    const uint64_t source_frame = source.source_offset_frame + elapsed_source_frames;
+    const float gain = source_envelope_gain(source, transport_frame);
+    const float left = asset->planes[0][source_frame];
+    const float right = asset->planes[asset->channel_count > 1 ? 1 : 0][source_frame];
+    *left_output += std::isfinite(left) ? left * gain : 0.0F;
+    if (right_output != left_output) *right_output += std::isfinite(right) ? right * gain : 0.0F;
+  }
+}
+
+float graph_edge_sample(
+  Core &core,
+  const GraphRevision &graph,
+  uint32_t edge_index,
+  uint32_t channel,
+  uint32_t frame) {
+  const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
+  const uint32_t source_index = graph.edge_source_indices[edge_index];
+  const uint32_t delay = edge.pdc_delay_frames;
+  const float source = core.graph_buffers[source_index][channel][frame] * edge.gain;
+  if (delay == 0) return source;
+  const uint32_t cursor = (core.graph_delay_cursors[edge_index] + frame) % delay;
+  float &stored = core.graph_delay_lines[edge_index][channel][cursor];
+  const float delayed = stored;
+  stored = source;
+  return delayed;
+}
+
+void clear_instrument_voices(Core &core) {
+  for (InstrumentNodeState &instrument : core.instruments) {
+    instrument.voices = {};
+    instrument.sample_voices = {};
+    instrument.grains = {};
+    instrument.granular_note_ids = {};
+    instrument.granular_note_count = 0;
+    instrument.granular_next_frame = 0.0;
+    instrument.granular_frozen_position = -1.0F;
+    instrument.granular_random_state = instrument.granular.seed == 0 ? 1 : instrument.granular.seed;
+    instrument.expression = 1.0F;
+    instrument.sustain = false;
+    instrument.next_age = 1;
+  }
+}
+
+float next_granular_random(InstrumentNodeState &instrument) {
+  instrument.granular_random_state = instrument.granular_random_state * 1664525U + 1013904223U;
+  return static_cast<float>(instrument.granular_random_state) / 4294967296.0F;
+}
+
+float granular_window(uint32_t shape, float phase) {
+  const float x = std::fmax(0.0F, std::fmin(1.0F, phase));
+  if (shape == DAW_AUDIO_GRANULAR_WINDOW_TUKEY) {
+    if (x < 0.25F) return 0.5F * (1.0F - std::cos(12.5663706143591729538F * x));
+    if (x > 0.75F) return 0.5F * (1.0F - std::cos(12.5663706143591729538F * (1.0F - x)));
+    return 1.0F;
+  }
+  if (shape == DAW_AUDIO_GRANULAR_WINDOW_GAUSSIAN) {
+    const float normalized = (x - 0.5F) / 0.18F;
+    return std::exp(-0.5F * normalized * normalized);
+  }
+  return 0.5F - 0.5F * std::cos(6.2831853071795864769F * x);
+}
+
+float midi_frequency(uint32_t note) {
+  return 440.0F * std::pow(2.0F, (static_cast<float>(note) - 69.0F) / 12.0F);
+}
+
+float next_noise(InstrumentVoice &voice) {
+  uint32_t value = voice.noise_state;
+  value ^= value << 13U;
+  value ^= value >> 17U;
+  value ^= value << 5U;
+  voice.noise_state = value == 0 ? 0xA341316CU : value;
+  return static_cast<float>(voice.noise_state) / 2147483647.5F - 1.0F;
+}
+
+float waveform(uint32_t shape, float phase) {
+  if (shape == DAW_AUDIO_SYNTH_WAVEFORM_SQUARE) return phase < 0.5F ? 1.0F : -1.0F;
+  if (shape == DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH) return 2.0F * phase - 1.0F;
+  if (shape == DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE) return 1.0F - 4.0F * std::fabs(phase - 0.5F);
+  return std::sin(6.2831853071795864769F * phase);
+}
+
+float envelope_step(float level, uint32_t *stage, bool released, float attack, float decay, float sustain, float release) {
+  if (released) {
+    *stage = 3;
+    return std::fmax(0.0F, level - release);
+  }
+  if (*stage == 0) {
+    level += attack;
+    if (level >= 1.0F) {
+      level = 1.0F;
+      *stage = 1;
+    }
+    return level;
+  }
+  if (*stage == 1) {
+    level -= decay;
+    if (level <= sustain) {
+      level = sustain;
+      *stage = 2;
+    }
+  }
+  return level;
+}
+
+float synth_parameter_value(const InstrumentNodeState &instrument, uint32_t target, float fallback) {
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN) return instrument.synth.output_gain;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN) return instrument.synth.output_pan;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ) return instrument.synth.filter_cutoff_hz;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE) return instrument.synth.filter_resonance;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS) return instrument.synth.amp_attack_ms;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS) return instrument.synth.amp_decay_ms;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN) return instrument.synth.amp_sustain;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS) return instrument.synth.amp_release_ms;
+  return fallback;
+}
+
+bool instrument_declares_target(const daw_audio_instrument_state_descriptor &descriptor, uint32_t target) {
+  for (uint32_t index = 0; index < descriptor.parameter_count; ++index) {
+    if (descriptor.parameter_targets[index] == target) return true;
+  }
+  return false;
+}
+
+bool set_synth_parameter(InstrumentNodeState &instrument, uint32_t target, float value) {
+  if (!std::isfinite(value)) return false;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN && value >= 0.0F && value <= 2.0F) instrument.synth.output_gain = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN && value >= -1.0F && value <= 1.0F) instrument.synth.output_pan = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ && value >= 20.0F && value <= 20000.0F) instrument.synth.filter_cutoff_hz = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE && value >= 0.05F && value <= 30.0F) instrument.synth.filter_resonance = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS && value >= 0.0F && value <= 10000.0F) instrument.synth.amp_attack_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS && value >= 0.0F && value <= 10000.0F) instrument.synth.amp_decay_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN && value >= 0.0F && value <= 1.0F) instrument.synth.amp_sustain = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS && value >= 0.0F && value <= 10000.0F) instrument.synth.amp_release_ms = value;
+  else return false;
+  return true;
+}
+
+void render_instrument_frame(
+  InstrumentNodeState &instrument,
+  const daw_audio_instrument_state_descriptor &descriptor,
+  uint32_t sample_rate_hz,
+  float *left_output,
+  float *right_output) {
+  float left = 0.0F;
+  float right = 0.0F;
+  const daw_audio_synth_state &synth = instrument.synth;
+  const float amp_attack = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS, synth.amp_attack_ms) * sample_rate_hz / 1000.0F);
+  const float amp_decay = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS, synth.amp_decay_ms) * sample_rate_hz / 1000.0F);
+  const float amp_release = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS, synth.amp_release_ms) * sample_rate_hz / 1000.0F);
+  const float amp_sustain = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN, synth.amp_sustain);
+  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
+    InstrumentVoice &voice = instrument.voices[index];
+    if (!voice.active) continue;
+    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, amp_attack, amp_decay, amp_sustain, amp_release);
+    const float filter_attack = 1.0F / std::fmax(1.0F, synth.filter_attack_ms * sample_rate_hz / 1000.0F);
+    const float filter_decay = 1.0F / std::fmax(1.0F, synth.filter_decay_ms * sample_rate_hz / 1000.0F);
+    const float filter_release = 1.0F / std::fmax(1.0F, synth.filter_release_ms * sample_rate_hz / 1000.0F);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, synth.filter_sustain, filter_release);
+    if (voice.amp_level <= 0.0F && voice.released) {
+      voice = {};
+      continue;
+    }
+    voice.lfo_phase += synth.lfo_rate_hz / static_cast<float>(sample_rate_hz);
+    voice.lfo_phase -= std::floor(voice.lfo_phase);
+    const float lfo = synth.lfo_enabled == 0 ? 0.0F : waveform(synth.lfo_waveform, voice.lfo_phase);
+    const float base_frequency = midi_frequency(voice.note);
+    float sample = synth.noise_enabled != 0 ? next_noise(voice) * synth.noise_level : 0.0F;
+    for (uint32_t oscillator_index = 0; oscillator_index < 2; ++oscillator_index) {
+      const daw_audio_synth_oscillator_state &oscillator = synth.oscillators[oscillator_index];
+      if (oscillator.enabled == 0) continue;
+      const float semitones = static_cast<float>(oscillator.octave * 12 + oscillator.semitone)
+        + (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
+      const float increment = base_frequency * std::pow(2.0F, semitones / 12.0F) / static_cast<float>(sample_rate_hz);
+      voice.oscillator_phase[oscillator_index] += increment;
+      voice.oscillator_phase[oscillator_index] -= std::floor(voice.oscillator_phase[oscillator_index]);
+      sample += waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index]) * oscillator.level;
+    }
+    float cutoff = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ, synth.filter_cutoff_hz);
+    cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking
+      + voice.filter_level * synth.filter_envelope_amount_octaves + lfo * synth.lfo_filter_octaves);
+    cutoff = std::fmax(20.0F, std::fmin(cutoff, static_cast<float>(sample_rate_hz) * 0.45F));
+    const float filter_coefficient = std::exp(-6.2831853071795864769F * cutoff / static_cast<float>(sample_rate_hz));
+    const float resonance = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE, synth.filter_resonance);
+    const float filtered = synth.filter_enabled == 0 ? sample : (
+      synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS
+        ? (voice.filter_left = (1.0F - filter_coefficient) * sample + filter_coefficient * voice.filter_left)
+        : sample - (voice.filter_left = (1.0F - filter_coefficient) * sample + filter_coefficient * voice.filter_left)
+    );
+    const float amplitude = voice.amp_level * voice.velocity * instrument.expression * synth.output_gain
+      * std::fmax(0.0F, 1.0F - std::fmin(0.95F, resonance * 0.01F))
+      * std::fmax(0.0F, 1.0F - lfo * synth.lfo_amplitude);
+    const float pan = std::fmax(-1.0F, std::fmin(1.0F, synth.output_pan + lfo * synth.lfo_pan));
+    left += filtered * amplitude * std::cos((pan + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
+    right += filtered * amplitude * std::sin((pan + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
+  }
+  *left_output = std::isfinite(left) ? left : 0.0F;
+  *right_output = std::isfinite(right) ? right : 0.0F;
+}
+
+void render_sample_instrument_frame(
+  Core &core,
+  InstrumentNodeState &instrument,
+  const daw_audio_instrument_state_descriptor &descriptor,
+  float *left_output,
+  float *right_output) {
+  float left = 0.0F;
+  float right = 0.0F;
+  const daw_audio_sampler_state &state = instrument.sampler;
+  const float attack = 1.0F / std::fmax(1.0F, state.amp_attack_ms * core.config.sample_rate_hz / 1000.0F);
+  const float decay = 1.0F / std::fmax(1.0F, state.amp_decay_ms * core.config.sample_rate_hz / 1000.0F);
+  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
+    SampleVoice &voice = instrument.sample_voices[index];
+    if (!voice.active) continue;
+    const float release_ms = voice.forced_release_ms > 0.0F ? voice.forced_release_ms : state.amp_release_ms;
+    const float release = 1.0F / std::fmax(1.0F, release_ms * core.config.sample_rate_hz / 1000.0F);
+    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
+    AssetSlot *asset = find_asset(&core, voice.asset);
+    if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
+      voice = {};
+      continue;
+    }
+    if (voice.position >= static_cast<double>(voice.end_frame)) {
+      if (voice.playback_mode != DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP) {
+        voice = {};
+        continue;
+      }
+      const double loop_length = static_cast<double>(voice.loop_end_frame - voice.loop_start_frame);
+      voice.position = static_cast<double>(voice.loop_start_frame) + std::fmod(
+        voice.position - static_cast<double>(voice.loop_start_frame), loop_length);
+    }
+    const uint32_t frame = static_cast<uint32_t>(voice.position);
+    const uint32_t next = frame + 1 < asset->frame_count ? frame + 1 : frame;
+    const float fraction = static_cast<float>(voice.position - static_cast<double>(frame));
+    const float sample_left = asset->planes[0][frame] + (asset->planes[0][next] - asset->planes[0][frame]) * fraction;
+    const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
+    const float sample_right = asset->planes[right_channel][frame]
+      + (asset->planes[right_channel][next] - asset->planes[right_channel][frame]) * fraction;
+    float filtered_left = sample_left;
+    float filtered_right = sample_right;
+    if (state.filter_enabled != 0) {
+      const float cutoff = std::fmin(state.filter_cutoff_hz, static_cast<float>(core.config.sample_rate_hz) * 0.45F);
+      const float coefficient = std::exp(-6.2831853071795864769F * cutoff / static_cast<float>(core.config.sample_rate_hz));
+      voice.filter_left = (1.0F - coefficient) * sample_left + coefficient * voice.filter_left;
+      voice.filter_right = (1.0F - coefficient) * sample_right + coefficient * voice.filter_right;
+      if (state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS) {
+        filtered_left = voice.filter_left;
+        filtered_right = voice.filter_right;
+      } else {
+        filtered_left -= voice.filter_left;
+        filtered_right -= voice.filter_right;
+      }
+    }
+    const float gain = voice.gain * voice.amp_level;
+    const float pan_angle = (voice.pan + 1.0F) * 0.7853981633974483096F;
+    left += filtered_left * gain * std::cos(pan_angle) * 1.4142135623730950488F;
+    right += filtered_right * gain * std::sin(pan_angle) * 1.4142135623730950488F;
+    voice.position += voice.increment;
+  }
+  *left_output = std::isfinite(left) ? left : 0.0F;
+  *right_output = std::isfinite(right) ? right : 0.0F;
+}
+
+void render_granular_instrument_frame(
+  Core &core,
+  InstrumentNodeState &instrument,
+  float *left_output,
+  float *right_output) {
+  const daw_audio_granular_state &state = instrument.granular;
+  AssetSlot *asset = find_asset(&core, state.asset);
+  if (asset == nullptr || instrument.granular_note_count == 0) {
+    *left_output = 0.0F;
+    *right_output = 0.0F;
+    return;
+  }
+  if (instrument.granular_next_frame <= 0.0) {
+    GranularGrain *grain = nullptr;
+    for (uint32_t index = 0; index < state.max_grains; ++index) {
+      if (!instrument.grains[index].active) {
+        grain = &instrument.grains[index];
+        break;
+      }
+    }
+    if (grain != nullptr) {
+      const float requested_position = state.position;
+      if (state.freeze != 0 && instrument.granular_frozen_position < 0.0F) instrument.granular_frozen_position = requested_position;
+      const float position = state.freeze != 0 ? instrument.granular_frozen_position : requested_position;
+      const float spray = state.freeze != 0 ? 0.0F : (next_granular_random(instrument) * 2.0F - 1.0F) * state.spray * asset->frame_count;
+      const bool reverse = next_granular_random(instrument) < state.reverse_probability;
+      const double rate = std::pow(2.0, static_cast<double>(state.pitch_semitones) / 12.0)
+        * static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz;
+      *grain = {
+        .cursor = std::fmax(0.0, std::fmin(static_cast<double>(asset->frame_count - 1),
+          static_cast<double>(position) * static_cast<double>(asset->frame_count - 1) + spray)),
+        .step = reverse ? -rate : rate,
+        .age = 0,
+        .length = std::max(1U, static_cast<uint32_t>(std::lround(state.grain_size_ms * 0.001F * core.config.sample_rate_hz))),
+        .pan = (next_granular_random(instrument) * 2.0F - 1.0F) * state.stereo_spread,
+        .active = true,
+      };
+    }
+    instrument.granular_next_frame += std::fmax(1.0, static_cast<double>(core.config.sample_rate_hz) / state.density_hz);
+  }
+  instrument.granular_next_frame -= 1.0;
+  float left = 0.0F;
+  float right = 0.0F;
+  for (uint32_t index = 0; index < state.max_grains; ++index) {
+    GranularGrain &grain = instrument.grains[index];
+    if (!grain.active) continue;
+    const int64_t base = static_cast<int64_t>(std::floor(grain.cursor));
+    if (base < 0 || static_cast<uint64_t>(base + 1) >= asset->frame_count || grain.age >= grain.length) {
+      grain = {};
+      continue;
+    }
+    const uint32_t frame = static_cast<uint32_t>(base);
+    const float fraction = static_cast<float>(grain.cursor - base);
+    const float source_left = asset->planes[0][frame] + (asset->planes[0][frame + 1] - asset->planes[0][frame]) * fraction;
+    const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
+    const float source_right = asset->planes[right_channel][frame]
+      + (asset->planes[right_channel][frame + 1] - asset->planes[right_channel][frame]) * fraction;
+    const float window = granular_window(state.window_shape, static_cast<float>(grain.age) / std::max(1U, grain.length - 1));
+    const float pan = grain.pan;
+    left += source_left * window * std::sqrt((1.0F - pan) * 0.5F);
+    right += source_right * window * std::sqrt((1.0F + pan) * 0.5F);
+    grain.cursor += grain.step;
+    ++grain.age;
+  }
+  *left_output = std::isfinite(left) ? left : 0.0F;
+  *right_output = std::isfinite(right) ? right : 0.0F;
+}
+
+bool apply_granular_instrument_event(
+  InstrumentNodeState &instrument,
+  const daw_audio_instrument_event &event) {
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) {
+    for (uint64_t &note_id : instrument.granular_note_ids) {
+      if (note_id == event.note_id) return true;
+      if (note_id == 0) {
+        note_id = event.note_id;
+        ++instrument.granular_note_count;
+        return true;
+      }
+    }
+    return false;
+  }
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+    for (uint64_t &note_id : instrument.granular_note_ids) {
+      if (note_id == event.note_id) {
+        note_id = 0;
+        --instrument.granular_note_count;
+        if (instrument.granular_note_count == 0) instrument.grains = {};
+        return true;
+      }
+    }
+    return true;
+  }
+  return event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION;
+}
+
+bool apply_sample_instrument_event(
+  Core &core,
+  InstrumentNodeState &instrument,
+  const daw_audio_instrument_state_descriptor &descriptor,
+  const daw_audio_instrument_event &event) {
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+    for (SampleVoice &voice : instrument.sample_voices) if (voice.active && voice.note_id == event.note_id) voice.released = true;
+    return true;
+  }
+  if (event.type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return event.type != DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER;
+  const daw_audio_sample_zone *selected = nullptr;
+  uint32_t matching_group = 0;
+  for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
+    const daw_audio_sample_zone &zone = instrument.zones[index];
+    if (event.note >= zone.key_low && event.note <= zone.key_high
+      && event.value * 127.0F >= zone.velocity_low && event.value * 127.0F <= zone.velocity_high) {
+      matching_group = zone.round_robin_group;
+      if (matching_group == 0) {
+        selected = &zone;
+        break;
+      }
+      const uint32_t cursor = instrument.round_robin_cursors[matching_group % DAW_AUDIO_CORE_MAX_SAMPLE_ZONES]++;
+      uint32_t group_count = 0;
+      for (uint32_t group_index = 0; group_index < instrument.sampler.zone_count; ++group_index) {
+        const daw_audio_sample_zone &candidate = instrument.zones[group_index];
+        if (candidate.round_robin_group == matching_group
+          && event.note >= candidate.key_low && event.note <= candidate.key_high
+          && event.value * 127.0F >= candidate.velocity_low && event.value * 127.0F <= candidate.velocity_high) {
+          ++group_count;
+        }
+      }
+      const uint32_t selected_rank = cursor % group_count;
+      for (uint32_t group_index = 0; group_index < instrument.sampler.zone_count; ++group_index) {
+        const daw_audio_sample_zone &candidate = instrument.zones[group_index];
+        if (candidate.round_robin_group != matching_group
+          || event.note < candidate.key_low || event.note > candidate.key_high
+          || event.value * 127.0F < candidate.velocity_low || event.value * 127.0F > candidate.velocity_high) continue;
+        uint32_t rank = 0;
+        for (uint32_t other_index = 0; other_index < instrument.sampler.zone_count; ++other_index) {
+          const daw_audio_sample_zone &other = instrument.zones[other_index];
+          if (other.round_robin_group == matching_group
+            && event.note >= other.key_low && event.note <= other.key_high
+            && event.value * 127.0F >= other.velocity_low && event.value * 127.0F <= other.velocity_high
+            && (other.round_robin_index < candidate.round_robin_index
+              || (other.round_robin_index == candidate.round_robin_index && other_index < group_index))) {
+            ++rank;
+          }
+        }
+        if (rank == selected_rank) {
+          selected = &candidate;
+          break;
+        }
+      }
+      if (selected == nullptr) selected = &zone;
+      break;
+    }
+  }
+  if (selected == nullptr) return true;
+  if (instrument.sampler.retrigger != 0) {
+    for (SampleVoice &voice : instrument.sample_voices) {
+      if (voice.active && voice.note == event.note) {
+        voice.released = true;
+        voice.forced_release_ms = kSampleTerminationFadeMilliseconds;
+      }
+    }
+  }
+  if (selected->choke_group != 0) {
+    for (SampleVoice &voice : instrument.sample_voices) {
+      if (voice.active && voice.choke_group == selected->choke_group) {
+        voice.released = true;
+        voice.forced_release_ms = kSampleTerminationFadeMilliseconds;
+      }
+    }
+  }
+  SampleVoice *voice = nullptr;
+  for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
+    if (!instrument.sample_voices[index].active) {
+      voice = &instrument.sample_voices[index];
+      break;
+    }
+  }
+  if (voice == nullptr) {
+    voice = &instrument.sample_voices[0];
+    for (uint32_t index = 1; index < descriptor.voice_capacity; ++index) {
+      if (instrument.sample_voices[index].age < voice->age) voice = &instrument.sample_voices[index];
+    }
+  }
+  AssetSlot *asset = find_asset(&core, selected->asset);
+  if (asset == nullptr) return false;
+  const float cents = (static_cast<float>(event.note) - static_cast<float>(selected->root_note)) * 100.0F + selected->tune_cents;
+  *voice = {.note_id = event.note_id, .note = event.note, .asset = selected->asset, .position = static_cast<double>(selected->start_frame),
+    .increment = std::pow(2.0, cents / 1200.0) * static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz,
+    .end_frame = selected->end_frame, .loop_start_frame = selected->loop_start_frame, .loop_end_frame = selected->loop_end_frame,
+    .playback_mode = selected->playback_mode, .choke_group = selected->choke_group,
+    .gain = selected->gain * event.value, .pan = selected->pan, .age = instrument.next_age++, .active = true};
+  return true;
+}
+
+bool apply_instrument_event(
+  InstrumentNodeState &instrument,
+  const daw_audio_instrument_state_descriptor &descriptor,
+  const daw_audio_instrument_event &event) {
+  const uint32_t capacity = descriptor.voice_capacity;
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER) {
+    return instrument_declares_target(descriptor, event.note)
+      && set_synth_parameter(instrument, event.note, event.value);
+  }
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) {
+    instrument.sustain = event.value >= 0.5F;
+    if (!instrument.sustain) {
+      for (InstrumentVoice &voice : instrument.voices) {
+        if (voice.active && !voice.held && voice.references == 0) voice.released = true;
+      }
+    }
+    return true;
+  }
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION) {
+    instrument.expression = event.value;
+    return true;
+  }
+  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+    for (InstrumentVoice &voice : instrument.voices) {
+      if (voice.active && voice.note_id == event.note_id) {
+        if (voice.references > 1) {
+          --voice.references;
+          return true;
+        }
+        voice.references = 0;
+        voice.held = false;
+        voice.released = !instrument.sustain;
+        return true;
+      }
+    }
+    return true;
+  }
+  if (event.type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return false;
+  for (uint32_t index = 0; index < capacity; ++index) {
+    InstrumentVoice &voice = instrument.voices[index];
+    if (voice.active && voice.note_id == event.note_id) {
+      ++voice.references;
+      voice.held = true;
+      voice.released = false;
+      return true;
+    }
+    if (!voice.active) {
+      uint32_t seed = instrument.synth.seed ^ static_cast<uint32_t>(event.note_id) ^ (event.note * 0x9E3779B1U);
+      if (seed == 0) seed = 0xA341316CU;
+      voice = {.note_id = event.note_id, .channel = event.channel, .note = event.note, .velocity = event.value, .references = 1,
+        .age = instrument.next_age++, .noise_state = seed, .held = true, .active = true, .released = false};
+      return true;
+    }
+  }
+  InstrumentVoice *victim = nullptr;
+  for (uint32_t index = 0; index < capacity; ++index) {
+    InstrumentVoice &candidate = instrument.voices[index];
+    if (victim == nullptr || (candidate.released && !victim->released) || (candidate.released == victim->released && candidate.age < victim->age)) {
+      victim = &candidate;
+    }
+  }
+  if (victim == nullptr) return false;
+  uint32_t seed = instrument.synth.seed ^ static_cast<uint32_t>(event.note_id) ^ (event.note * 0x9E3779B1U);
+  if (seed == 0) seed = 0xA341316CU;
+  *victim = {.note_id = event.note_id, .channel = event.channel, .note = event.note, .velocity = event.value, .references = 1,
+    .age = instrument.next_age++, .noise_state = seed, .held = true, .active = true, .released = false};
+  return true;
+}
+
+void process_graph(Core &core, const daw_audio_core_process_block &block) {
+  GraphRevision &graph = core.published_graph;
+  for (uint32_t ordered = 0; ordered < graph.node_count; ++ordered) {
+    const uint32_t node_index = graph.process_order[ordered];
+    const daw_audio_graph_node_descriptor &node = graph.nodes[node_index];
+    uint16_t instrument_event_cursor = 0;
+    const uint16_t instrument_event_count = core.instrument_event_counts[node_index];
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      float left = 0.0F;
+      float right = 0.0F;
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+        while (instrument_event_cursor < instrument_event_count) {
+          const uint16_t event_index = core.instrument_event_indices[node_index][instrument_event_cursor];
+          const daw_audio_instrument_event &event = core.active_instrument_events[event_index];
+          if (event.frame_offset != frame) break;
+          ++instrument_event_cursor;
+          if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+            (void)apply_instrument_event(core.instruments[node_index], node.instrument, event);
+          } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+            (void)apply_granular_instrument_event(core.instruments[node_index], event);
+          } else {
+            (void)apply_sample_instrument_event(core, core.instruments[node_index], node.instrument, event);
+          }
+        }
+        if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+          render_instrument_frame(core.instruments[node_index], node.instrument, core.config.sample_rate_hz, &left, &right);
+        } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+          render_granular_instrument_frame(core, core.instruments[node_index], &left, &right);
+        } else {
+          render_sample_instrument_frame(core, core.instruments[node_index], node.instrument, &left, &right);
+        }
+      }
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE && node.input_bus < block.input_bus_count && block.inputs != nullptr) {
+        const float *source_left = block.inputs[node.input_bus * block.channel_count];
+        const float *source_right = block.channel_count > 1 ? block.inputs[node.input_bus * block.channel_count + 1] : source_left;
+        left = source_left == nullptr ? 0.0F : source_left[frame];
+        right = source_right == nullptr ? left : source_right[frame];
+      }
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE) {
+        render_sample_source_range(
+          core, core.active_source_ranges[node_index],
+          core.transport.frame + static_cast<int64_t>(frame), &left, &right);
+      }
+      if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+        const GraphRevision::Range incoming_range = graph.incoming_edge_ranges[node_index];
+        const uint32_t incoming_end = static_cast<uint32_t>(incoming_range.start) + incoming_range.count;
+        for (uint32_t position = incoming_range.start; position < incoming_end; ++position) {
+          const uint32_t edge_index = graph.incoming_edge_indices[position];
+          left += graph_edge_sample(core, graph, edge_index, 0, frame);
+          right += graph_edge_sample(core, graph, edge_index, 1, frame);
+        }
+      }
+      if (node.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
+      bool processed_chain = false;
+      const GraphRevision::Range processor_range = graph.processor_ranges[node_index];
+      const uint32_t processor_end = static_cast<uint32_t>(processor_range.start) + processor_range.count;
+      for (uint32_t position = processor_range.start; position < processor_end; ++position) {
+        const uint32_t processor_index = graph.processor_indices[position];
+        GraphRevision::Processor &processor = graph.processors[processor_index];
+        const ProcessorRenderer render = find_processor_renderer(processor.kind);
+        if (render != nullptr) {
+          float sidechain_left = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : left;
+          float sidechain_right = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : right;
+          const GraphRevision::Range sidechain_range = graph.sidechain_edge_ranges[processor_index];
+          if (sidechain_range.count > 0) {
+            sidechain_left = 0.0F;
+            sidechain_right = 0.0F;
+          }
+          const uint32_t sidechain_end = static_cast<uint32_t>(sidechain_range.start) + sidechain_range.count;
+          for (uint32_t sidechain_position = sidechain_range.start; sidechain_position < sidechain_end; ++sidechain_position) {
+            const uint32_t edge_index = graph.sidechain_edge_indices[sidechain_position];
+            sidechain_left += graph_edge_sample(core, graph, edge_index, 0, frame);
+            sidechain_right += graph_edge_sample(core, graph, edge_index, 1, frame);
+          }
+          float processed_left = 0.0F;
+          float processed_right = 0.0F;
+          render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
+          left = processed_left;
+          right = processed_right;
+          processed_chain = true;
+        }
+      }
+      if (!processed_chain && node.kind == DAW_AUDIO_GRAPH_NODE_UTILITY && core.utility_configured) {
+        float utility_left = 0.0F;
+        float utility_right = 0.0F;
+        process_utility_frame(core, nullptr, frame, left, right, &utility_left, &utility_right);
+        left = utility_left;
+        right = utility_right;
+      }
+      apply_mixer_frame(core, node.mixer, frame, &left, &right);
+      if (node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
+      core.graph_buffers[node_index][0][frame] = std::isfinite(left) ? left : 0.0F;
+      core.graph_buffers[node_index][1][frame] = std::isfinite(right) ? right : 0.0F;
+    }
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+    if (core.published_native_hooks.hook != nullptr && core.published_native_hooks.attached[node_index]) {
+      core.published_native_hooks.hook({
+        .graph_revision = graph.revision,
+        .node_id = node.id,
+        .frame_count = block.frame_count,
+        .channel_count = node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1U : 2U,
+        .sample_rate_hz = core.config.sample_rate_hz,
+        .transport_epoch = core.transport.epoch,
+        .transport_running = core.transport.running != 0,
+        .transport_frame = core.transport.frame,
+        .planes = {core.graph_buffers[node_index][0].data(), core.graph_buffers[node_index][1].data()},
+        .attachment = core.published_native_hooks.attachments[node_index],
+      });
+    }
+#endif
+  }
+  for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
+    const uint32_t delay = graph.edges[edge_index].pdc_delay_frames;
+    if (delay > 0) core.graph_delay_cursors[edge_index] = (core.graph_delay_cursors[edge_index] + block.frame_count) % delay;
+  }
+  for (uint32_t channel = 0; channel < block.channel_count; ++channel) {
+    const uint32_t graph_channel = channel == 0 ? 0 : 1;
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      block.outputs[channel][frame] = core.graph_buffers[graph.master_index][graph_channel][frame];
+    }
+  }
+}
+
+bool valid_processor_parameter_value(uint32_t target, float value) {
+  if (!std::isfinite(value)) return false;
+  if (target == 1) return value >= -60.0F && value <= 24.0F;
+  if (target == 2 || target == 3) return value >= -1.0F && value <= 1.0F;
+  if (target == 4) return value >= 0.0F && value <= 2.0F;
+  if (target == 5) return value >= 1.0F && value <= 3000.0F;
+  if (target == 6) return value >= 0.0F && value <= 0.95F;
+  if (target == 7 || target == 10) return value >= 0.0F && value <= 1.0F;
+  if (target == 8) return value >= 20.0F && value <= 2000.0F;
+  if (target == 9 || target == 13) return value >= 1000.0F && value <= 20000.0F;
+  if (target == 11) return value >= 0.0F && value <= 250.0F;
+  if (target == 12) return value >= 20.0F && value <= 1200.0F;
+  if (target == 13) return value >= 1000.0F && value <= 20000.0F;
+  if (target == 14) return value >= 0.0F && value <= 2.0F;
+  if (target == 15 || target == 19 || target == 21 || target == 23 || target == 24 || target == 25) return value >= 0.0F && value <= 1.0F;
+  if (target == 16) return value >= -120.0F && value <= 0.0F;
+  if (target == 17) return value >= 0.1F && value <= 1000.0F;
+  if (target == 18) return value >= 1.0F && value <= 5000.0F;
+  if (target == 20) return value >= -2048.0F && value <= 2048.0F;
+  return target == 22 && value >= -1.0F && value <= 1.0F;
+}
+
+const GraphRevision::Processor *find_processor(
+  const GraphRevision &graph,
+  uint64_t instance_id,
+  uint32_t *out_index) {
+  for (uint32_t index = 0; index < graph.processor_count; ++index) {
+    if (graph.processors[index].instance_id == instance_id) {
+      *out_index = index;
+      return &graph.processors[index];
+    }
+  }
+  return nullptr;
+}
+
+bool processor_declares_target(const GraphRevision::Processor &processor, uint32_t target) {
+  for (uint32_t index = 0; index < processor.parameter_count; ++index) {
+    if (processor.parameter_targets[index] == target) return true;
+  }
+  return false;
+}
+
+const daw_audio_graph_node_descriptor *find_mixer_node(
+  const GraphRevision &graph,
+  uint64_t instance_id) {
+  for (uint32_t index = 0; index < graph.node_count; ++index) {
+    if (graph.nodes[index].mixer.instance_id == instance_id) return &graph.nodes[index];
+  }
+  return nullptr;
+}
+
+bool valid_mixer_parameter_value(uint32_t target, float value) {
+  if (!std::isfinite(value)) return false;
+  if (target == DAW_AUDIO_MIXER_PARAMETER_GAIN) return value >= 0.0F && value <= 4.0F;
+  if (target == DAW_AUDIO_MIXER_PARAMETER_PAN) return value >= -1.0F && value <= 1.0F;
+  return (target == DAW_AUDIO_MIXER_PARAMETER_MUTE || target == DAW_AUDIO_MIXER_PARAMETER_SOLO)
+    && (value == 0.0F || value == 1.0F);
+}
+
+bool bind_process_transport(Core &core, const daw_audio_core_process_block &block) {
+  if (block.parameter_block_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS
+    || block.event_count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS
+    || block.instrument_event_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS
+    || (block.parameter_block_count > 0 && block.parameter_blocks == nullptr)
+    || (block.event_count > 0 && block.events == nullptr)
+    || (block.instrument_event_count > 0 && block.instrument_events == nullptr)) return false;
+  core.active_parameter_blocks.fill(nullptr);
+  core.event_starts.fill(0);
+  core.event_ends.fill(0);
+  core.active_events = nullptr;
+  core.active_event_count = 0;
+  core.active_instrument_events = nullptr;
+  core.active_instrument_event_count = 0;
+  core.instrument_event_counts.fill(0);
+  if (block.parameter_block_count == 0 && block.event_count == 0 && block.instrument_event_count == 0) return true;
+  if (block.graph_revision != core.published_graph.revision
+    || (block.instrument_event_count > 0 && block.transport_epoch != core.transport.epoch)) return false;
+  core.active_events = block.events;
+  core.active_event_count = block.event_count;
+  for (uint32_t block_index = 0; block_index < block.parameter_block_count; ++block_index) {
+    const daw_audio_processor_parameter_block &parameters = block.parameter_blocks[block_index];
+    uint32_t processor_index = 0;
+    const GraphRevision::Processor *processor = find_processor(core.published_graph, parameters.processor_instance_id, &processor_index);
+    if (processor == nullptr || core.active_parameter_blocks[processor_index] != nullptr
+      || parameters.frame_count == 0 || (parameters.frame_count != 1 && parameters.frame_count != block.frame_count)
+      || parameters.parameter_count == 0 || parameters.parameter_count > processor->parameter_count
+      || parameters.parameter_targets == nullptr || parameters.values == nullptr) return false;
+    for (uint32_t parameter = 0; parameter < parameters.parameter_count; ++parameter) {
+      const uint32_t target = parameters.parameter_targets[parameter];
+      if (!processor_declares_target(*processor, target)) return false;
+      for (uint32_t previous = 0; previous < parameter; ++previous) {
+        if (parameters.parameter_targets[previous] == target) return false;
+      }
+      for (uint32_t frame = 0; frame < parameters.frame_count; ++frame) {
+        if (!valid_processor_parameter_value(target, parameters.values[parameter * parameters.frame_count + frame])) return false;
+      }
+    }
+    core.active_parameter_blocks[processor_index] = &parameters;
+  }
+  uint64_t previous_processor = 0;
+  uint32_t previous_offset = 0;
+  bool has_previous = false;
+  for (uint32_t event_index = 0; event_index < block.event_count; ++event_index) {
+    const daw_audio_processor_event &event = block.events[event_index];
+    uint32_t processor_index = 0;
+    const GraphRevision::Processor *processor = find_processor(core.published_graph, event.processor_instance_id, &processor_index);
+    const daw_audio_graph_node_descriptor *mixer = processor == nullptr
+      ? find_mixer_node(core.published_graph, event.processor_instance_id)
+      : nullptr;
+    if ((processor == nullptr && mixer == nullptr) || event.frame_offset >= block.frame_count
+      || (processor != nullptr && (!processor_declares_target(*processor, event.parameter_target)
+        || !valid_processor_parameter_value(event.parameter_target, event.value)))
+      || (mixer != nullptr && !valid_mixer_parameter_value(event.parameter_target, event.value))
+      || (has_previous && (event.processor_instance_id < previous_processor
+        || (event.processor_instance_id == previous_processor && event.frame_offset < previous_offset)))) return false;
+    if (processor != nullptr && (!has_previous || event.processor_instance_id != previous_processor)) {
+      core.event_starts[processor_index] = event_index;
+      if (has_previous && find_processor(core.published_graph, previous_processor, &processor_index) != nullptr) {
+        uint32_t previous_index = 0;
+        find_processor(core.published_graph, previous_processor, &previous_index);
+        core.event_ends[previous_index] = event_index;
+      }
+    }
+    previous_processor = event.processor_instance_id;
+    previous_offset = event.frame_offset;
+    has_previous = true;
+  }
+  if (has_previous && find_processor(core.published_graph, previous_processor, &previous_offset) != nullptr) {
+    uint32_t previous_index = 0;
+    find_processor(core.published_graph, previous_processor, &previous_index);
+    core.event_ends[previous_index] = block.event_count;
+  }
+  auto proposed_instruments = core.instruments;
+  std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes> proposed_instrument_event_indices{};
+  std::array<uint16_t, kMaximumGraphNodes> proposed_instrument_event_counts{};
+  uint32_t previous_instrument_offset = 0;
+  uint64_t previous_instrument_sequence = 0;
+  bool has_previous_instrument = false;
+  for (uint32_t event_index = 0; event_index < block.instrument_event_count; ++event_index) {
+    const daw_audio_instrument_event &event = block.instrument_events[event_index];
+    const int32_t node_index = graph_node_index(core.published_graph, event.node_id);
+    if (node_index < 0 || core.published_graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+      || event.epoch != core.transport.epoch || event.sequence == 0 || event.frame_offset >= block.frame_count
+      || event.type < DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON || event.type > DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
+      || event.channel > 15 || event.note > 127 || !std::isfinite(event.value)
+      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON && (event.note_id == 0 || event.value < 0.0F || event.value > 1.0F))
+      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF && event.note_id == 0)
+      || ((event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION)
+        && (event.value < 0.0F || event.value > 1.0F))
+      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
+        && !instrument_declares_target(core.published_graph.nodes[static_cast<uint32_t>(node_index)].instrument, event.note))
+      || (has_previous_instrument && (event.frame_offset < previous_instrument_offset
+        || event.sequence <= previous_instrument_sequence))) return false;
+    const uint32_t index = static_cast<uint32_t>(node_index);
+    if (core.published_graph.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+      if (!apply_instrument_event(proposed_instruments[index], core.published_graph.nodes[index].instrument, event)) return false;
+    } else if (core.published_graph.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+      if (!apply_granular_instrument_event(proposed_instruments[index], event)) return false;
+    } else if (!apply_sample_instrument_event(core, proposed_instruments[index], core.published_graph.nodes[index].instrument, event)) {
+      return false;
+    }
+    const uint16_t count = proposed_instrument_event_counts[index];
+    if (count >= DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return false;
+    proposed_instrument_event_indices[index][count] = static_cast<uint16_t>(event_index);
+    proposed_instrument_event_counts[index] = static_cast<uint16_t>(count + 1);
+    previous_instrument_offset = event.frame_offset;
+    previous_instrument_sequence = event.sequence;
+    has_previous_instrument = true;
+  }
+  core.active_instrument_events = block.instrument_events;
+  core.active_instrument_event_count = block.instrument_event_count;
+  core.instrument_event_indices = proposed_instrument_event_indices;
+  core.instrument_event_counts = proposed_instrument_event_counts;
+  return true;
+}
+
+Core wasm_utility_core{};
+bool wasm_utility_initialized = false;
+Core wasm_asset_core{};
+bool wasm_asset_initialized = false;
+/* Asset-only and graph bridges are mutually exclusive Wasm control planes.
+ * Reuse their fixed storage so enabling graph processing does not inflate the
+ * fixed linear-memory artifact by an additional Core instance. */
+Core &wasm_graph_core = wasm_asset_core;
+bool wasm_graph_initialized = false;
+uint32_t wasm_graph_max_input_buses = 0;
+daw_audio_core_handle wasm_recording_capture = 0;
+
+bool wasm_read_u32(const uint8_t *bytes, uint32_t byte_count, uint32_t *offset, uint32_t *out) {
+  if (*offset > byte_count || byte_count - *offset < 4) return false;
+  *out = read_u32_le(bytes + *offset);
+  *offset += 4;
+  return true;
+}
+
+bool wasm_read_u64(const uint8_t *bytes, uint32_t byte_count, uint32_t *offset, uint64_t *out) {
+  uint32_t low = 0;
+  uint32_t high = 0;
+  if (!wasm_read_u32(bytes, byte_count, offset, &low) || !wasm_read_u32(bytes, byte_count, offset, &high)) return false;
+  *out = static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32u);
+  return true;
+}
+
+bool wasm_read_f32(const uint8_t *bytes, uint32_t byte_count, uint32_t *offset, float *out) {
+  uint32_t bits = 0;
+  if (!wasm_read_u32(bytes, byte_count, offset, &bits)) return false;
+  __builtin_memcpy(out, &bits, sizeof(bits));
+  return true;
+}
+
+uint32_t wasm_graph_kind(uint32_t kind) {
+  if (kind == 1) return DAW_AUDIO_GRAPH_NODE_SOURCE;
+  if (kind == 2) return DAW_AUDIO_GRAPH_NODE_INSTRUMENT;
+  if (kind == 6) return DAW_AUDIO_GRAPH_NODE_MASTER;
+  return DAW_AUDIO_GRAPH_NODE_MIXER;
+}
+
+bool wasm_parse_graph(
+  const uint8_t *bytes,
+  uint32_t byte_count,
+  daw_audio_graph_prepare_request *out_request,
+  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> *nodes,
+  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> *edges,
+  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> *processors,
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> *targets,
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> *states) {
+  if (bytes == nullptr || byte_count < DAW_AUDIO_CORE_WASM_GRAPH_HEADER_BYTES) return false;
+  uint32_t offset = 0;
+  uint32_t version = 0;
+  uint32_t revision = 0;
+  uint32_t node_count = 0;
+  uint32_t edge_count = 0;
+  uint32_t processor_count = 0;
+  uint32_t reserved = 0;
+  if (!wasm_read_u32(bytes, byte_count, &offset, &version) || !wasm_read_u32(bytes, byte_count, &offset, &revision)
+    || !wasm_read_u32(bytes, byte_count, &offset, &node_count) || !wasm_read_u32(bytes, byte_count, &offset, &edge_count)
+    || !wasm_read_u32(bytes, byte_count, &offset, &processor_count) || !wasm_read_u32(bytes, byte_count, &offset, &reserved)
+    || (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
+      && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY_2
+      && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) || reserved != 0
+    || revision == 0 || node_count == 0 || node_count > kMaximumGraphNodes || edge_count > kMaximumGraphEdges
+    || processor_count > kMaximumGraphProcessors) return false;
+  for (uint32_t index = 0; index < node_count; ++index) {
+    uint64_t id = 0;
+    uint32_t kind = 0;
+    uint32_t input_layout = 0;
+    uint32_t output_layout = 0;
+    uint32_t input_bus = 0;
+    uint32_t latency = 0;
+    if (!wasm_read_u64(bytes, byte_count, &offset, &id) || !wasm_read_u32(bytes, byte_count, &offset, &kind)
+      || !wasm_read_u32(bytes, byte_count, &offset, &input_layout) || !wasm_read_u32(bytes, byte_count, &offset, &output_layout)
+      || !wasm_read_u32(bytes, byte_count, &offset, &input_bus) || !wasm_read_u32(bytes, byte_count, &offset, &latency)) return false;
+    daw_audio_instrument_state_descriptor instrument{};
+    if (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) {
+      if (!wasm_read_u32(bytes, byte_count, &offset, &instrument.kind)
+        || !wasm_read_u32(bytes, byte_count, &offset, &instrument.version)
+        || !wasm_read_u32(bytes, byte_count, &offset, &instrument.voice_capacity)
+        || !wasm_read_u32(bytes, byte_count, &offset, &instrument.parameter_count)
+        || instrument.parameter_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS) return false;
+      for (uint32_t target = 0; target < instrument.parameter_count; ++target) {
+        if (!wasm_read_u32(bytes, byte_count, &offset, &instrument.parameter_targets[target])) return false;
+      }
+      for (uint32_t target = instrument.parameter_count; target < DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS; ++target) {
+        uint32_t ignored = 0;
+        if (!wasm_read_u32(bytes, byte_count, &offset, &ignored)) return false;
+      }
+    }
+    daw_audio_mixer_state mixer{};
+    if (version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION) {
+      if (!wasm_read_u64(bytes, byte_count, &offset, &mixer.instance_id)
+        || !wasm_read_f32(bytes, byte_count, &offset, &mixer.gain)
+        || !wasm_read_f32(bytes, byte_count, &offset, &mixer.pan)
+        || !wasm_read_u32(bytes, byte_count, &offset, &mixer.muted)
+        || !wasm_read_u32(bytes, byte_count, &offset, &mixer.soloed)) return false;
+    }
+    (*nodes)[index] = {
+      .id = id, .kind = wasm_graph_kind(kind), .input_layout = input_layout, .output_layout = output_layout,
+      .input_bus = input_bus, .latency_frames = latency, .instrument = instrument, .mixer = mixer,
+    };
+  }
+  for (uint32_t index = 0; index < edge_count; ++index) {
+    uint64_t id = 0;
+    uint64_t from = 0;
+    uint64_t to = 0;
+    uint64_t target = 0;
+    float gain = 0.0F;
+    uint32_t tap = 0;
+    uint32_t sidechain = 0;
+    uint32_t delay = 0;
+    if (!wasm_read_u64(bytes, byte_count, &offset, &id) || !wasm_read_u64(bytes, byte_count, &offset, &from)
+      || !wasm_read_u64(bytes, byte_count, &offset, &to) || !wasm_read_u64(bytes, byte_count, &offset, &target)
+      || !wasm_read_f32(bytes, byte_count, &offset, &gain) || !wasm_read_u32(bytes, byte_count, &offset, &tap)
+      || !wasm_read_u32(bytes, byte_count, &offset, &sidechain) || !wasm_read_u32(bytes, byte_count, &offset, &delay)) return false;
+    (*edges)[index] = {
+      .id = id, .from_node_id = from, .to_node_id = to, .target_processor_id = target,
+      .gain = gain, .tap = tap, .sidechain = sidechain, .pdc_delay_frames = delay,
+    };
+  }
+  for (uint32_t index = 0; index < processor_count; ++index) {
+    uint64_t node_id = 0;
+    uint32_t kind = 0;
+    uint32_t schema = 0;
+    uint32_t state_size = 0;
+    uint32_t instance = 0;
+    uint32_t bypassed = 0;
+    uint32_t input_layout = 0;
+    uint32_t output_layout = 0;
+    uint32_t target_count = 0;
+    uint32_t latency = 0;
+    uint32_t tail = 0;
+    if (!wasm_read_u64(bytes, byte_count, &offset, &node_id) || !wasm_read_u32(bytes, byte_count, &offset, &kind)
+      || !wasm_read_u32(bytes, byte_count, &offset, &schema) || !wasm_read_u32(bytes, byte_count, &offset, &state_size)
+      || !wasm_read_u32(bytes, byte_count, &offset, &instance) || !wasm_read_u32(bytes, byte_count, &offset, &bypassed)
+      || !wasm_read_u32(bytes, byte_count, &offset, &input_layout) || !wasm_read_u32(bytes, byte_count, &offset, &output_layout)
+      || !wasm_read_u32(bytes, byte_count, &offset, &target_count) || !wasm_read_u32(bytes, byte_count, &offset, &latency)
+      || !wasm_read_u32(bytes, byte_count, &offset, &tail) || state_size > DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES
+      || target_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS || offset > byte_count || byte_count - offset < state_size) return false;
+    for (uint32_t byte = 0; byte < state_size; ++byte) (*states)[index][byte] = bytes[offset + byte];
+    offset += state_size;
+    for (uint32_t target = 0; target < target_count; ++target) {
+      if (!wasm_read_u32(bytes, byte_count, &offset, &(*targets)[index][target])) return false;
+    }
+    (*processors)[index] = {
+      .node_id = node_id, .instance_id = instance, .kind = kind, .state_version = schema, .state_size = state_size,
+      .bypassed = bypassed, .input_layout = input_layout, .output_layout = output_layout, .latency_frames = latency,
+      .tail_frames = tail, .parameter_count = target_count, .parameter_targets = (*targets)[index].data(), .state = (*states)[index].data(),
+    };
+  }
+  if (offset != byte_count) return false;
+  *out_request = {
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = revision, .node_count = node_count,
+    .edge_count = edge_count, .processor_count = processor_count, .reserved0 = 0, .nodes = nodes->data(),
+    .edges = edges->data(), .processors = processors->data(),
+  };
+  return true;
+}
+
+enum class RecordingBlockOwner : uint8_t {
+  available,
+  capture,
+  queued,
+  transport,
+};
+
+struct RecordingCaptureBlock {
+  std::array<std::array<float, DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES>,
+    DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS> planes{};
+  std::atomic<RecordingBlockOwner> owner{RecordingBlockOwner::available};
+  uint32_t sequence = 0;
+  uint32_t frame_count = 0;
+  int64_t start_frame = 0;
+};
+
+struct RecordingCapture {
+  daw_audio_recording_capture_config config{};
+  std::array<RecordingCaptureBlock, DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS> blocks{};
+  uint32_t current = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+  uint32_t pending = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+  uint32_t next_sequence = 0;
+  std::atomic<uint64_t> captured_frames{0};
+  std::atomic<uint64_t> dropped_frames{0};
+  std::atomic<uint32_t> dropped_blocks{0};
+  std::atomic<float> rms{0.0F};
+  std::atomic<float> peak{0.0F};
+  std::atomic<bool> fatal{false};
+  std::atomic<bool> active{true};
+};
+
+RecordingCapture *to_capture(daw_audio_core_handle handle) {
+  return reinterpret_cast<RecordingCapture *>(static_cast<uintptr_t>(handle));
+}
+
+daw_audio_core_handle to_capture_handle(RecordingCapture *capture) {
+  return static_cast<daw_audio_core_handle>(reinterpret_cast<uintptr_t>(capture));
+}
+
+bool valid_recording_capture_config(const daw_audio_recording_capture_config &config) {
+  if (!valid_abi(config.abi_version)
+    || config.channel_count == 0 || config.channel_count > DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS
+    || !std::isfinite(config.gain) || config.gain < 0.0F
+    || (config.polarity != 1 && config.polarity != -1)
+    || config.punch_start_frame < 0
+    || (config.punch_end_frame != -1 && config.punch_end_frame < config.punch_start_frame)) return false;
+  for (uint32_t channel = 0; channel < config.channel_count; ++channel) {
+    if (config.input_channels[channel] >= kMaximumChannels) return false;
+  }
+  return true;
+}
+
+uint32_t recording_acquire_block(RecordingCapture &capture) {
+  for (uint32_t index = 0; index < capture.blocks.size(); ++index) {
+    RecordingBlockOwner expected = RecordingBlockOwner::available;
+    if (!capture.blocks[index].owner.compare_exchange_strong(
+      expected, RecordingBlockOwner::capture, std::memory_order_acq_rel)) continue;
+    return index;
+  }
+  return DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+}
+
+void recording_update_meter(RecordingCapture &capture, const RecordingCaptureBlock &block) {
+  double sum = 0.0;
+  float peak = 0.0F;
+  for (uint32_t channel = 0; channel < capture.config.channel_count; ++channel) {
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      const float value = block.planes[channel][frame];
+      sum += static_cast<double>(value) * static_cast<double>(value);
+      peak = std::fmax(peak, std::abs(value));
+    }
+  }
+  const uint64_t samples = static_cast<uint64_t>(block.frame_count) * capture.config.channel_count;
+  capture.rms.store(samples == 0 ? 0.0F : static_cast<float>(std::sqrt(sum / samples)), std::memory_order_release);
+  capture.peak.store(peak, std::memory_order_release);
+}
+
+void recording_queue_pending(RecordingCapture &capture) {
+  if (capture.pending == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) return;
+  RecordingCaptureBlock &block = capture.blocks[capture.pending];
+  block.sequence = capture.next_sequence++;
+  block.owner.store(RecordingBlockOwner::queued, std::memory_order_release);
+  recording_update_meter(capture, block);
+  capture.pending = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+}
+
+void recording_discard_current(RecordingCapture &capture) {
+  if (capture.current == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) return;
+  RecordingCaptureBlock &block = capture.blocks[capture.current];
+  capture.captured_frames.fetch_sub(block.frame_count, std::memory_order_relaxed);
+  block.sequence = 0;
+  block.frame_count = 0;
+  block.start_frame = 0;
+  block.owner.store(RecordingBlockOwner::available, std::memory_order_release);
+  capture.current = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+}
+
+void recording_complete_current(RecordingCapture &capture) {
+  if (capture.current == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) return;
+  recording_queue_pending(capture);
+  capture.pending = capture.current;
+  capture.current = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+}
+
+float recording_processed_sample(
+  const RecordingCapture &capture,
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  uint32_t output_channel,
+  uint32_t frame) {
+  const uint32_t input_channel = capture.config.input_channels[output_channel];
+  const float *input = input_channel < input_channel_count ? inputs[input_channel] : nullptr;
+  const float sample = input == nullptr ? 0.0F : input[frame];
+  return std::isfinite(sample)
+    ? sample * capture.config.gain * static_cast<float>(capture.config.polarity)
+    : 0.0F;
+}
+
+daw_audio_core_result recording_capture_process(
+  RecordingCapture &capture,
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  float *const *monitor_outputs,
+  uint32_t monitor_channel_count,
+  uint32_t frame_count,
+  int64_t start_frame) {
+  if (!capture.active.load(std::memory_order_acquire) || capture.fatal.load(std::memory_order_acquire)) {
+    return DAW_AUDIO_CORE_NOT_PREPARED;
+  }
+  if (frame_count > DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES || start_frame < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (monitor_channel_count > 0 && monitor_outputs == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  for (uint32_t channel = 0; channel < monitor_channel_count; ++channel) {
+    if (monitor_outputs[channel] == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  for (uint32_t frame = 0; frame < frame_count; ++frame) {
+    for (uint32_t channel = 0; channel < monitor_channel_count; ++channel) {
+      monitor_outputs[channel][frame] = channel < capture.config.channel_count
+        ? recording_processed_sample(capture, inputs, input_channel_count, channel, frame)
+        : 0.0F;
+    }
+    const int64_t absolute_frame = start_frame + static_cast<int64_t>(frame);
+    if (absolute_frame < capture.config.punch_start_frame
+      || (capture.config.punch_end_frame != -1 && absolute_frame >= capture.config.punch_end_frame)) continue;
+    if (capture.current == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+      capture.current = recording_acquire_block(capture);
+      if (capture.current != DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+        capture.blocks[capture.current].start_frame = absolute_frame;
+      }
+    }
+    if (capture.current == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+      const uint64_t dropped = capture.dropped_frames.fetch_add(1, std::memory_order_relaxed) + 1;
+      if ((dropped - 1) % DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES == 0) {
+        capture.dropped_blocks.fetch_add(1, std::memory_order_relaxed);
+      }
+      capture.fatal.store(true, std::memory_order_release);
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
+    RecordingCaptureBlock &block = capture.blocks[capture.current];
+    for (uint32_t channel = 0; channel < capture.config.channel_count; ++channel) {
+      block.planes[channel][block.frame_count] =
+        recording_processed_sample(capture, inputs, input_channel_count, channel, frame);
+    }
+    ++block.frame_count;
+    capture.captured_frames.fetch_add(1, std::memory_order_relaxed);
+    if (block.frame_count == DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES) recording_complete_current(capture);
+  }
+  return DAW_AUDIO_CORE_OK;
+}
+
+}  // namespace
+
+extern "C" uint32_t daw_audio_core_get_abi_version(void) {
+  return DAW_AUDIO_CORE_ABI_VERSION;
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_create(
+  const daw_audio_recording_capture_config *config,
+  daw_audio_core_handle *out_capture) {
+  if (config == nullptr || out_capture == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(config->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (!valid_recording_capture_config(*config)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  RecordingCapture *capture = new (std::nothrow) RecordingCapture{};
+  if (capture == nullptr) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  capture->config = *config;
+  *out_capture = to_capture_handle(capture);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" void daw_audio_recording_capture_destroy(daw_audio_core_handle capture) {
+  delete to_capture(capture);
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_process(
+  daw_audio_core_handle capture_handle,
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  uint32_t frame_count,
+  int64_t start_frame) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || (input_channel_count > 0 && inputs == nullptr)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  return recording_capture_process(*capture, inputs, input_channel_count, nullptr, 0, frame_count, start_frame);
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_process_monitor(
+  daw_audio_core_handle capture_handle,
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  float *const *monitor_outputs,
+  uint32_t monitor_channel_count,
+  uint32_t frame_count,
+  int64_t start_frame) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || (input_channel_count > 0 && inputs == nullptr)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  return recording_capture_process(
+    *capture, inputs, input_channel_count, monitor_outputs, monitor_channel_count, frame_count, start_frame);
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_dequeue(
+  daw_audio_core_handle capture_handle,
+  daw_audio_recording_capture_block *out_block) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || out_block == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  uint32_t selected = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+  uint32_t sequence = UINT32_MAX;
+  for (uint32_t index = 0; index < capture->blocks.size(); ++index) {
+    const RecordingCaptureBlock &block = capture->blocks[index];
+    if (block.owner.load(std::memory_order_acquire) == RecordingBlockOwner::queued && block.sequence < sequence) {
+      selected = index;
+      sequence = block.sequence;
+    }
+  }
+  if (selected == DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) return DAW_AUDIO_CORE_NO_DATA;
+  RecordingCaptureBlock &block = capture->blocks[selected];
+  block.owner.store(RecordingBlockOwner::transport, std::memory_order_release);
+  *out_block = {
+    .generation = capture->config.generation,
+    .session_id = capture->config.session_id,
+    .sequence = block.sequence,
+    .block_id = selected,
+    .frame_count = block.frame_count,
+    .channel_count = capture->config.channel_count,
+    .planes = {block.planes[0].data(), block.planes[1].data()},
+    .rms = capture->rms.load(std::memory_order_acquire),
+    .peak = capture->peak.load(std::memory_order_acquire),
+  };
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_release_block(
+  daw_audio_core_handle capture_handle,
+  uint32_t block_id) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || block_id >= capture->blocks.size()) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  RecordingCaptureBlock &block = capture->blocks[block_id];
+  if (block.owner.load(std::memory_order_acquire) != RecordingBlockOwner::transport) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  block.sequence = 0;
+  block.frame_count = 0;
+  block.start_frame = 0;
+  block.owner.store(RecordingBlockOwner::available, std::memory_order_release);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_finalize(
+  daw_audio_core_handle capture_handle,
+  int64_t stop_frame) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || stop_frame < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!capture->active.load(std::memory_order_acquire)) return DAW_AUDIO_CORE_OK;
+  if (capture->fatal.load(std::memory_order_acquire)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (capture->current != DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+    RecordingCaptureBlock &current = capture->blocks[capture->current];
+    const int64_t retained = std::clamp(stop_frame - current.start_frame, int64_t{0}, static_cast<int64_t>(current.frame_count));
+    capture->captured_frames.fetch_sub(current.frame_count - static_cast<uint32_t>(retained), std::memory_order_relaxed);
+    current.frame_count = static_cast<uint32_t>(retained);
+    if (current.frame_count == 0) recording_discard_current(*capture);
+    else recording_complete_current(*capture);
+  }
+  recording_queue_pending(*capture);
+  capture->active.store(false, std::memory_order_release);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_cancel(daw_audio_core_handle capture_handle) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (capture->current != DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+    RecordingCaptureBlock &current = capture->blocks[capture->current];
+    current.sequence = 0;
+    current.frame_count = 0;
+    current.start_frame = 0;
+    current.owner.store(RecordingBlockOwner::available, std::memory_order_release);
+  }
+  if (capture->pending != DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS) {
+    RecordingCaptureBlock &pending = capture->blocks[capture->pending];
+    pending.sequence = 0;
+    pending.frame_count = 0;
+    pending.start_frame = 0;
+    pending.owner.store(RecordingBlockOwner::available, std::memory_order_release);
+  }
+  capture->current = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+  capture->pending = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
+  capture->captured_frames.store(0, std::memory_order_release);
+  capture->rms.store(0.0F, std::memory_order_release);
+  capture->peak.store(0.0F, std::memory_order_release);
+  capture->active.store(false, std::memory_order_release);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_recording_capture_get_diagnostics(
+  daw_audio_core_handle capture_handle,
+  daw_audio_recording_capture_diagnostics *out_diagnostics) {
+  RecordingCapture *capture = to_capture(capture_handle);
+  if (capture == nullptr || out_diagnostics == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  uint32_t available = 0;
+  uint32_t queued = 0;
+  for (const RecordingCaptureBlock &block : capture->blocks) {
+    const RecordingBlockOwner owner = block.owner.load(std::memory_order_acquire);
+    available += owner == RecordingBlockOwner::available ? 1 : 0;
+    queued += owner == RecordingBlockOwner::queued || owner == RecordingBlockOwner::transport ? 1 : 0;
+  }
+  *out_diagnostics = {
+    .generation = capture->config.generation, .session_id = capture->config.session_id,
+    .captured_frames = capture->captured_frames.load(std::memory_order_acquire),
+    .dropped_frames = capture->dropped_frames.load(std::memory_order_acquire),
+    .dropped_blocks = capture->dropped_blocks.load(std::memory_order_acquire),
+    .available_blocks = available, .queued_blocks = queued,
+    .rms = capture->rms.load(std::memory_order_acquire),
+    .peak = capture->peak.load(std::memory_order_acquire),
+    .fatal = capture->fatal.load(std::memory_order_acquire) ? 1u : 0u,
+    .active = capture->active.load(std::memory_order_acquire) ? 1u : 0u,
+  };
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_create(
+  const daw_audio_core_config *config,
+  daw_audio_core_handle *out_core) {
+  if (config == nullptr || out_core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(config->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (!valid_config(*config)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  Core *core = new (std::nothrow) Core;
+  if (core == nullptr) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  core->config = *config;
+  *out_core = to_handle(core);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" void daw_audio_core_destroy(daw_audio_core_handle core) {
+  delete to_core(core);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_prepare(
+  daw_audio_core_handle core_handle,
+  const daw_audio_core_prepare_request *request) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || request == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(request->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (request->graph_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  core->prepared_revision = request->graph_revision;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
+  daw_audio_core_handle core_handle,
+  const daw_audio_graph_prepare_request *request) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || request == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const auto prepared = std::unique_ptr<GraphRevision>(new (std::nothrow) GraphRevision{});
+  if (!prepared) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  const daw_audio_core_result result = prepare_graph_revision(*core, *request, prepared.get());
+  if (result != DAW_AUDIO_CORE_OK) return result;
+  /* PDC delay storage belongs to a revision. Resizing it while rendering
+   * would click and violate RT ownership, so callers retire then publish. */
+  if (has_pdc_change(core->published_graph, *prepared)) return DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED;
+  core->prepared_graph = *prepared;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  core->prepared_native_hooks = {};
+  core->prepared_native_hooks.revision = request->graph_revision;
+#endif
+  core->prepared_revision = request->graph_revision;
+  return DAW_AUDIO_CORE_OK;
+}
+
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
+  const daw_audio_core_handle core_handle,
+  const NativeGraphHookRegistration& registration
+) noexcept {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || registration.graph_revision == 0 || registration.hook == nullptr
+    || registration.bindings.size() > kMaximumGraphNodes
+    || core->prepared_revision != registration.graph_revision
+    || core->prepared_graph.revision != registration.graph_revision) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  NativeGraphHooks next{};
+  next.revision = registration.graph_revision;
+  next.hook = registration.hook;
+  for (const NativeGraphHookBinding& binding : registration.bindings) {
+    const int32_t node_index = graph_node_index(core->prepared_graph, binding.node_id);
+    if (node_index < 0 || binding.attachment == nullptr || next.attached[static_cast<uint32_t>(node_index)]
+      || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].output_layout != binding.output_layout
+      || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].latency_frames != binding.pdc_latency_frames) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    next.attached[static_cast<uint32_t>(node_index)] = true;
+    next.attachments[static_cast<uint32_t>(node_index)] = binding.attachment;
+  }
+  core->prepared_native_hooks = next;
+  return DAW_AUDIO_CORE_OK;
+}
+#endif
+
+extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
+  daw_audio_core_handle core_handle,
+  const uint8_t *graph_bytes,
+  const uint32_t graph_byte_count) {
+  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
+  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> processors{};
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> targets{};
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> states{};
+  daw_audio_graph_prepare_request request{};
+  if (!wasm_parse_graph(
+    graph_bytes,
+    graph_byte_count,
+    &request,
+    &nodes,
+    &edges,
+    &processors,
+    &targets,
+    &states
+  )) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  return daw_audio_core_prepare_graph(core_handle, &request);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_publish(
+  daw_audio_core_handle core_handle,
+  uint32_t expected_revision) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (core->prepared_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
+  if (core->prepared_graph.revision == expected_revision) {
+    const auto next_modulation_histories = std::unique_ptr<std::array<ModulationHistory, kMaximumGraphProcessors>>(
+      new (std::nothrow) std::array<ModulationHistory, kMaximumGraphProcessors>{});
+    const auto next_time_effect_histories = std::unique_ptr<std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>>(
+      new (std::nothrow) std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>{});
+    if (!next_modulation_histories || !next_time_effect_histories) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    for (uint32_t next_index = 0; next_index < core->prepared_graph.processor_count; ++next_index) {
+      const GraphRevision::Processor &next_processor = core->prepared_graph.processors[next_index];
+      for (uint32_t current_index = 0; current_index < core->published_graph.processor_count; ++current_index) {
+        const GraphRevision::Processor &current_processor = core->published_graph.processors[current_index];
+        if (next_processor.instance_id == current_processor.instance_id && next_processor.kind == current_processor.kind) {
+          (*next_modulation_histories)[next_processor.modulation_slot] = core->modulation_histories[current_processor.modulation_slot];
+          if (next_processor.time_effect_slot < kMaximumTimeEffectProcessors
+            && current_processor.time_effect_slot < kMaximumTimeEffectProcessors) {
+            (*next_time_effect_histories)[next_processor.time_effect_slot] = core->time_effect_histories[current_processor.time_effect_slot];
+          }
+          break;
+        }
+      }
+    }
+    core->published_graph = core->prepared_graph;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+    core->published_native_hooks = core->prepared_native_hooks;
+#endif
+    clear_instrument_voices(*core);
+    for (uint32_t node_index = 0; node_index < core->published_graph.node_count; ++node_index) {
+      const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[node_index];
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+        core->instruments[node_index].synth = default_synth_state();
+      }
+    }
+    for (auto &edge_delay : core->graph_delay_lines) {
+      for (auto &plane : edge_delay) plane.fill(0.0F);
+    }
+    core->graph_delay_cursors.fill(0);
+    core->modulation_histories = *next_modulation_histories;
+    core->time_effect_histories = *next_time_effect_histories;
+  }
+  core->published_revision = expected_revision;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_retire(
+  daw_audio_core_handle core_handle,
+  uint32_t expected_revision) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (core->published_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
+  core->published_revision = 0;
+  core->published_graph.revision = 0;
+  core->published_graph.node_count = 0;
+  core->published_graph.edge_count = 0;
+  core->published_graph.processor_count = 0;
+  core->published_graph.master_index = kMaximumGraphNodes;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  core->published_native_hooks = {};
+#endif
+  clear_instrument_voices(*core);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_configure_utility(
+  daw_audio_core_handle core_handle,
+  const daw_audio_utility_state *state) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || state == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_utility_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  core->utility = *state;
+  core->utility_configured = true;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_process(
+  daw_audio_core_handle core_handle,
+  const daw_audio_core_process_block *block) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || block == nullptr || block->outputs == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(block->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (core->published_revision == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  if (block->frame_count == 0 || block->frame_count > core->config.max_frames_per_block
+    || block->channel_count > core->config.max_channels
+    || block->input_bus_count > kMaximumChannels) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (block->parameter_block_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS
+    || block->event_count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS
+    || block->instrument_event_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (block->instrument_event_count > 0 && block->transport_epoch != core->transport.epoch) return DAW_AUDIO_CORE_STALE_REVISION;
+  if (!bind_process_transport(*core, *block)) {
+    return (block->parameter_block_count > 0 || block->event_count > 0 || block->instrument_event_count > 0)
+      && block->graph_revision != core->published_graph.revision ? DAW_AUDIO_CORE_STALE_REVISION : DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  if (core->published_graph.revision == core->published_revision) {
+    prepare_active_source_ranges(*core, &core->published_graph);
+    process_graph(*core, *block);
+    if (core->transport.running != 0) core->transport.frame += static_cast<int64_t>(block->frame_count);
+    return DAW_AUDIO_CORE_OK;
+  }
+  prepare_active_source_ranges(*core, nullptr);
+  for (uint32_t channel = 0; channel < block->channel_count; ++channel) {
+    float *output = block->outputs[channel];
+    if (output == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    for (uint32_t frame = 0; frame < block->frame_count; ++frame) output[frame] = summed_input(*block, channel, frame);
+  }
+  for (uint32_t frame = 0; frame < block->frame_count; ++frame) {
+    render_sample_source_range(*core, core->root_source_range, core->transport.frame + static_cast<int64_t>(frame), &block->outputs[0][frame],
+      block->channel_count > 1 ? &block->outputs[1][frame] : &block->outputs[0][frame]);
+  }
+  if (core->utility_configured && block->channel_count > 0) {
+    float *left_output = block->outputs[0];
+    float *right_output = block->channel_count > 1 ? block->outputs[1] : nullptr;
+    for (uint32_t frame = 0; frame < block->frame_count; ++frame) {
+      const float dry_left = left_output[frame];
+      const float dry_right = right_output == nullptr ? dry_left : right_output[frame];
+      float left = 0.0F;
+      float right = 0.0F;
+      process_utility_frame(*core, nullptr, frame, dry_left, dry_right, &left, &right);
+      left_output[frame] = left;
+      if (right_output != nullptr) right_output[frame] = right;
+    }
+  }
+  if (core->transport.running != 0) core->transport.frame += static_cast<int64_t>(block->frame_count);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_set_transport(
+  daw_audio_core_handle core_handle,
+  const daw_audio_transport_state *state) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || state == nullptr || !valid_transport_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (state->epoch < core->transport.epoch) return DAW_AUDIO_CORE_STALE_REVISION;
+  if (state->epoch != core->transport.epoch) {
+    clear_sample_sources(*core);
+    clear_instrument_voices(*core);
+    core->last_event_sequence = 0;
+  }
+  core->transport = *state;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_configure_synth(
+  daw_audio_core_handle core_handle,
+  uint64_t node_id,
+  const daw_audio_synth_state *state) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || state == nullptr || !valid_synth_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const int32_t node_index = graph_node_index(core->published_graph, node_id);
+  if (node_index < 0 || core->published_graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  core->instruments[static_cast<uint32_t>(node_index)].synth = *state;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_configure_sampler(
+  daw_audio_core_handle core_handle,
+  uint64_t node_id,
+  const daw_audio_sampler_state *state,
+  const daw_audio_sample_zone *zones) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || state == nullptr || zones == nullptr || !valid_sampler_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const int32_t node_index = graph_node_index(core->published_graph, node_id);
+  if (node_index < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[static_cast<uint32_t>(node_index)];
+  if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+    || (node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_SAMPLER && node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK)) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  for (uint32_t index = 0; index < state->zone_count; ++index) {
+    if (!valid_sample_zone(*core, zones[index])) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK
+      && (zones[index].key_low != zones[index].key_high || zones[index].round_robin_group != 0)) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+  }
+  InstrumentNodeState &instrument = core->instruments[static_cast<uint32_t>(node_index)];
+  instrument.sampler = *state;
+  for (uint32_t index = 0; index < state->zone_count; ++index) instrument.zones[index] = zones[index];
+  for (uint32_t index = state->zone_count; index < instrument.zones.size(); ++index) instrument.zones[index] = {};
+  instrument.round_robin_cursors.fill(0);
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_configure_granular(
+  daw_audio_core_handle core_handle,
+  uint64_t node_id,
+  const daw_audio_granular_state *state) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || state == nullptr || !valid_granular_state(*core, *state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const int32_t node_index = graph_node_index(core->published_graph, node_id);
+  if (node_index < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[static_cast<uint32_t>(node_index)];
+  if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT || node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  InstrumentNodeState &instrument = core->instruments[static_cast<uint32_t>(node_index)];
+  instrument.granular = *state;
+  instrument.grains = {};
+  instrument.granular_note_ids = {};
+  instrument.granular_note_count = 0;
+  instrument.granular_random_state = state->seed;
+  instrument.granular_next_frame = 0.0;
+  instrument.granular_frozen_position = -1.0F;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
+  daw_audio_core_handle core_handle,
+  const daw_audio_sample_source_event *event) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || event == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(event->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (!valid_sample_source_event(*event)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (event->epoch != core->transport.epoch || event->sequence <= core->last_event_sequence) return DAW_AUDIO_CORE_STALE_REVISION;
+  AssetSlot *asset = find_asset(core, event->asset);
+  if (asset == nullptr
+    || event->source_offset_frame >= asset->frame_count
+    || event->source_frame_count > asset->frame_count - event->source_offset_frame) return DAW_AUDIO_CORE_INVALID_HANDLE;
+  if (core->published_graph.revision == core->published_revision) {
+    const int32_t node_index = graph_node_index(core->published_graph, event->source_node_id);
+    if (node_index < 0 || core->published_graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+  } else if (event->source_node_id != 0) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  SampleSource *target = nullptr;
+  for (SampleSource &source : core->sample_sources) {
+    if (!source.active) {
+      target = &source;
+      break;
+    }
+  }
+  if (target == nullptr) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  *target = {
+    .source_node_id = event->source_node_id,
+    .asset = event->asset,
+    .start_frame = event->start_frame,
+    .stop_frame = event->stop_frame,
+    .source_offset_frame = event->source_offset_frame,
+    .source_frame_count = event->source_frame_count,
+    .gain = event->gain,
+    .fade_in_start_frame = event->fade_in_start_frame,
+    .fade_in_end_frame = event->fade_in_end_frame,
+    .fade_out_start_frame = event->fade_out_start_frame,
+    .fade_out_end_frame = event->fade_out_end_frame,
+    .active = true,
+  };
+  core->last_event_sequence = event->sequence;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_utility_initialize(
+  uint32_t sample_rate_hz,
+  uint32_t max_frames_per_block) {
+  const daw_audio_core_config config{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .max_frames_per_block = max_frames_per_block,
+    .max_channels = 2,
+    .max_assets = 1,
+    .sample_rate_hz = sample_rate_hz,
+  };
+  if (!valid_config(config)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  wasm_utility_core.~Core();
+  new (&wasm_utility_core) Core{};
+  wasm_utility_core.config = config;
+  wasm_utility_core.prepared_revision = 1;
+  wasm_utility_core.published_revision = 1;
+  wasm_utility_initialized = true;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_utility_process(
+  uint32_t frame_count,
+  const float *left_input,
+  const float *right_input,
+  float *left_output,
+  float *right_output,
+  const daw_audio_utility_state *state) {
+  if (!wasm_utility_initialized || left_output == nullptr || right_output == nullptr || state == nullptr) return DAW_AUDIO_CORE_NOT_PREPARED;
+  if (frame_count > wasm_utility_core.config.max_frames_per_block || !valid_utility_state(*state)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  wasm_utility_core.utility = *state;
+  wasm_utility_core.utility_configured = true;
+  const float *inputs[2]{left_input, right_input == nullptr ? left_input : right_input};
+  float *outputs[2]{left_output, right_output};
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .frame_count = frame_count,
+    .channel_count = 2,
+    .input_bus_count = 1,
+    .inputs = inputs,
+    .outputs = outputs,
+    .graph_revision = 0,
+    .parameter_block_count = 0,
+    .parameter_blocks = nullptr,
+    .event_count = 0,
+    .events = nullptr,
+    .transport_epoch = 0,
+    .instrument_event_count = 0,
+    .instrument_events = nullptr,
+  };
+  return daw_audio_core_process(to_handle(&wasm_utility_core), &block);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_asset_initialize(
+  uint32_t sample_rate_hz,
+  uint32_t max_assets) {
+  const daw_audio_core_config config{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .max_frames_per_block = 1,
+    .max_channels = kMaximumChannels,
+    .max_assets = max_assets,
+    .sample_rate_hz = sample_rate_hz,
+  };
+  if (!valid_config(config)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  wasm_asset_core.~Core();
+  new (&wasm_asset_core) Core{};
+  wasm_asset_core.config = config;
+  wasm_asset_initialized = true;
+  wasm_graph_initialized = false;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_register_pcm_asset(
+  uint32_t frame_count,
+  uint32_t sample_rate_hz,
+  uint32_t channel_count,
+  const float *const *planes,
+  daw_audio_asset_handle *out_asset) {
+  if (!wasm_asset_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  const daw_audio_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .revision = 1,
+    .byte_length = static_cast<uint64_t>(frame_count) * static_cast<uint64_t>(channel_count) * sizeof(float),
+    .content_hash_prefix = 0,
+    .frame_count = frame_count,
+    .sample_rate_hz = sample_rate_hz,
+    .channel_count = channel_count,
+    .planes = planes,
+  };
+  return daw_audio_core_create_asset(to_handle(&wasm_asset_core), &descriptor, out_asset);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_release_asset(
+  daw_audio_asset_handle asset) {
+  if (!wasm_asset_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_release_asset(to_handle(&wasm_asset_core), asset);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_initialize(
+  uint32_t sample_rate_hz,
+  uint32_t max_frames_per_block,
+  uint32_t max_assets) {
+  return daw_audio_core_wasm_graph_initialize_planar(
+    sample_rate_hz, max_frames_per_block, kMaximumChannels, 2, max_assets);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_initialize_planar(
+  uint32_t sample_rate_hz,
+  uint32_t max_frames_per_block,
+  uint32_t max_input_buses,
+  uint32_t max_channels,
+  uint32_t max_assets) {
+  const daw_audio_core_config config{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .max_frames_per_block = max_frames_per_block,
+    .max_channels = max_channels,
+    .max_assets = max_assets,
+    .sample_rate_hz = sample_rate_hz,
+  };
+  if (!valid_config(config) || max_input_buses == 0 || max_input_buses > kMaximumChannels) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  wasm_graph_core.~Core();
+  new (&wasm_graph_core) Core{};
+  wasm_graph_core.config = config;
+  wasm_graph_max_input_buses = max_input_buses;
+  wasm_asset_initialized = false;
+  wasm_graph_initialized = true;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_prepare(
+  const uint8_t *graph_bytes,
+  uint32_t graph_byte_count) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
+  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> processors{};
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> targets{};
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> states{};
+  daw_audio_graph_prepare_request request{};
+  if (!wasm_parse_graph(graph_bytes, graph_byte_count, &request, &nodes, &edges, &processors, &targets, &states)) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  return daw_audio_core_prepare_graph(to_handle(&wasm_graph_core), &request);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_publish(uint32_t expected_revision) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_publish(to_handle(&wasm_graph_core), expected_revision);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_process(
+  uint32_t frame_count,
+  const float *left_input,
+  const float *right_input,
+  float *left_output,
+  float *right_output,
+  uint32_t graph_revision,
+  const uint8_t *parameter_bytes,
+  uint32_t parameter_byte_count,
+  const uint8_t *event_bytes,
+  uint32_t event_byte_count) {
+  const float *inputs[2]{left_input, right_input == nullptr ? left_input : right_input};
+  float *outputs[2]{left_output, right_output};
+  return daw_audio_core_wasm_graph_process_planar(
+    frame_count, 1, 2, inputs, outputs, graph_revision, parameter_bytes, parameter_byte_count,
+    event_bytes, event_byte_count, nullptr, 0);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_process_planar(
+  uint32_t frame_count,
+  uint32_t input_bus_count,
+  uint32_t channel_count,
+  const float *const *inputs,
+  float *const *outputs,
+  uint32_t graph_revision,
+  const uint8_t *parameter_bytes,
+  uint32_t parameter_byte_count,
+  const uint8_t *event_bytes,
+  uint32_t event_byte_count,
+  const uint8_t *instrument_event_bytes,
+  uint32_t instrument_event_byte_count) {
+  if (!wasm_graph_initialized || outputs == nullptr) return DAW_AUDIO_CORE_NOT_PREPARED;
+  if (frame_count == 0 || frame_count > wasm_graph_core.config.max_frames_per_block
+    || input_bus_count > wasm_graph_max_input_buses || channel_count == 0
+    || channel_count > wasm_graph_core.config.max_channels) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if ((input_bus_count > 0 && inputs == nullptr) || outputs == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  std::array<daw_audio_processor_parameter_block, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS> blocks{};
+  std::array<daw_audio_processor_event, DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS> events{};
+  std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS> instrument_events{};
+  uint32_t block_count = 0;
+  uint32_t event_count = 0;
+  uint32_t offset = 0;
+  if (parameter_byte_count == 0) {
+    if (parameter_bytes != nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  } else {
+    if (parameter_bytes == nullptr || !wasm_read_u32(parameter_bytes, parameter_byte_count, &offset, &block_count)
+      || block_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    for (uint32_t index = 0; index < block_count; ++index) {
+      uint64_t processor_id = 0;
+      uint32_t values_frame_count = 0;
+      uint32_t target_count = 0;
+      if (!wasm_read_u64(parameter_bytes, parameter_byte_count, &offset, &processor_id)
+        || !wasm_read_u32(parameter_bytes, parameter_byte_count, &offset, &values_frame_count)
+        || !wasm_read_u32(parameter_bytes, parameter_byte_count, &offset, &target_count)
+        || target_count == 0 || target_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS
+        || (values_frame_count != 1 && values_frame_count != frame_count)
+        || offset > parameter_byte_count || parameter_byte_count - offset < target_count * 4u) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      const uint32_t *targets = reinterpret_cast<const uint32_t *>(parameter_bytes + offset);
+      offset += target_count * 4u;
+      const uint64_t value_bytes = static_cast<uint64_t>(target_count) * static_cast<uint64_t>(values_frame_count) * sizeof(float);
+      if (value_bytes > parameter_byte_count - offset) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      const float *values = reinterpret_cast<const float *>(parameter_bytes + offset);
+      offset += static_cast<uint32_t>(value_bytes);
+      blocks[index] = {.processor_instance_id = processor_id, .frame_count = values_frame_count, .parameter_count = target_count, .parameter_targets = targets, .values = values};
+    }
+    if (offset != parameter_byte_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  offset = 0;
+  if (event_byte_count == 0) {
+    if (event_bytes != nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  } else {
+    if (event_bytes == nullptr || !wasm_read_u32(event_bytes, event_byte_count, &offset, &event_count)
+      || event_count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    for (uint32_t index = 0; index < event_count; ++index) {
+      uint64_t processor_id = 0;
+      uint32_t target = 0;
+      uint32_t frame_offset = 0;
+      float value = 0.0F;
+      if (!wasm_read_u64(event_bytes, event_byte_count, &offset, &processor_id)
+        || !wasm_read_u32(event_bytes, event_byte_count, &offset, &target)
+        || !wasm_read_u32(event_bytes, event_byte_count, &offset, &frame_offset)
+        || !wasm_read_f32(event_bytes, event_byte_count, &offset, &value)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      events[index] = {.processor_instance_id = processor_id, .parameter_target = target, .frame_offset = frame_offset, .value = value};
+    }
+    if (offset != event_byte_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  uint32_t instrument_event_count = 0;
+  offset = 0;
+  if (instrument_event_byte_count == 0) {
+    if (instrument_event_bytes != nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  } else {
+    if (instrument_event_bytes == nullptr
+      || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &instrument_event_count)
+      || instrument_event_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    for (uint32_t index = 0; index < instrument_event_count; ++index) {
+      daw_audio_instrument_event &event = instrument_events[index];
+      if (!wasm_read_u64(instrument_event_bytes, instrument_event_byte_count, &offset, &event.node_id)
+        || !wasm_read_u64(instrument_event_bytes, instrument_event_byte_count, &offset, &event.note_id)
+        || !wasm_read_u64(instrument_event_bytes, instrument_event_byte_count, &offset, &event.sequence)
+        || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.epoch)
+        || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.frame_offset)
+        || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.type)
+        || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.channel)
+        || !wasm_read_u32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.note)
+        || !wasm_read_f32(instrument_event_bytes, instrument_event_byte_count, &offset, &event.value)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    if (offset != instrument_event_byte_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = frame_count, .channel_count = channel_count, .input_bus_count = input_bus_count,
+    .inputs = inputs, .outputs = outputs, .graph_revision = graph_revision, .parameter_block_count = block_count,
+    .parameter_blocks = block_count == 0 ? nullptr : blocks.data(), .event_count = event_count,
+    .events = event_count == 0 ? nullptr : events.data(), .transport_epoch = wasm_graph_core.transport.epoch,
+    .instrument_event_count = instrument_event_count,
+    .instrument_events = instrument_event_count == 0 ? nullptr : instrument_events.data(),
+  };
+  return daw_audio_core_process(to_handle(&wasm_graph_core), &block);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_set_transport(
+  uint32_t epoch,
+  uint32_t running,
+  int64_t frame) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  const daw_audio_transport_state state{.epoch = epoch, .running = running, .frame = frame};
+  return daw_audio_core_set_transport(to_handle(&wasm_graph_core), &state);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_source(
+  uint32_t epoch,
+  uint64_t sequence,
+  uint64_t source_node_id,
+  daw_audio_asset_handle asset,
+  int64_t start_frame,
+  int64_t stop_frame,
+  uint64_t source_offset_frame,
+  uint64_t source_frame_count,
+  float gain,
+  int64_t fade_in_start_frame,
+  int64_t fade_in_end_frame,
+  int64_t fade_out_start_frame,
+  int64_t fade_out_end_frame) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  const daw_audio_sample_source_event event{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .epoch = epoch,
+    .sequence = sequence,
+    .source_node_id = source_node_id,
+    .asset = asset,
+    .start_frame = start_frame,
+    .stop_frame = stop_frame,
+    .source_offset_frame = source_offset_frame,
+    .source_frame_count = source_frame_count,
+    .gain = gain,
+    .fade_in_start_frame = fade_in_start_frame,
+    .fade_in_end_frame = fade_in_end_frame,
+    .fade_out_start_frame = fade_out_start_frame,
+    .fade_out_end_frame = fade_out_end_frame,
+  };
+  return daw_audio_core_schedule_sample_source(to_handle(&wasm_graph_core), &event);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_register_pcm_asset(
+  uint32_t frame_count,
+  uint32_t sample_rate_hz,
+  uint32_t channel_count,
+  const float *const *planes,
+  daw_audio_asset_handle *out_asset) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  const daw_audio_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .revision = 1,
+    .byte_length = static_cast<uint64_t>(frame_count) * static_cast<uint64_t>(channel_count) * sizeof(float),
+    .content_hash_prefix = 0, .frame_count = frame_count, .sample_rate_hz = sample_rate_hz,
+    .channel_count = channel_count, .planes = planes,
+  };
+  return daw_audio_core_create_asset(to_handle(&wasm_graph_core), &descriptor, out_asset);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_release_asset(daw_audio_asset_handle asset) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_release_asset(to_handle(&wasm_graph_core), asset);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_configure_synth(
+  uint64_t node_id,
+  const daw_audio_synth_state *state) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_configure_synth(to_handle(&wasm_graph_core), node_id, state);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_configure_sampler(
+  uint64_t node_id,
+  const daw_audio_sampler_state *state,
+  const daw_audio_sample_zone *zones) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_configure_sampler(to_handle(&wasm_graph_core), node_id, state, zones);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_configure_granular(
+  uint64_t node_id,
+  const daw_audio_granular_state *state) {
+  if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_core_configure_granular(to_handle(&wasm_graph_core), node_id, state);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_initialize(
+  const daw_audio_recording_capture_config *config) {
+  if (wasm_recording_capture != 0) {
+    daw_audio_recording_capture_destroy(wasm_recording_capture);
+    wasm_recording_capture = 0;
+  }
+  return daw_audio_recording_capture_create(config, &wasm_recording_capture);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_process(
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  uint32_t frame_count,
+  int64_t start_frame) {
+  if (wasm_recording_capture == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_recording_capture_process(
+    wasm_recording_capture, inputs, input_channel_count, frame_count, start_frame);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_process_monitor(
+  const float *const *inputs,
+  uint32_t input_channel_count,
+  float *const *monitor_outputs,
+  uint32_t monitor_channel_count,
+  uint32_t frame_count,
+  int64_t start_frame) {
+  if (wasm_recording_capture == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_recording_capture_process_monitor(
+    wasm_recording_capture, inputs, input_channel_count, monitor_outputs, monitor_channel_count, frame_count, start_frame);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_dequeue(
+  float *const *outputs,
+  daw_audio_recording_capture_block *out_block) {
+  if (wasm_recording_capture == 0 || outputs == nullptr || out_block == nullptr) return DAW_AUDIO_CORE_NOT_PREPARED;
+  daw_audio_recording_capture_block block{};
+  const daw_audio_core_result result = daw_audio_recording_capture_dequeue(wasm_recording_capture, &block);
+  if (result != DAW_AUDIO_CORE_OK) return result;
+  for (uint32_t channel = 0; channel < block.channel_count; ++channel) {
+    if (outputs[channel] == nullptr) {
+      (void)daw_audio_recording_capture_release_block(wasm_recording_capture, block.block_id);
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      outputs[channel][frame] = block.planes[channel][frame];
+    }
+    block.planes[channel] = outputs[channel];
+  }
+  *out_block = block;
+  return daw_audio_recording_capture_release_block(wasm_recording_capture, block.block_id);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_finalize(int64_t stop_frame) {
+  if (wasm_recording_capture == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_recording_capture_finalize(wasm_recording_capture, stop_frame);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_cancel(void) {
+  if (wasm_recording_capture == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_recording_capture_cancel(wasm_recording_capture);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_get_diagnostics(
+  daw_audio_recording_capture_diagnostics *out_diagnostics) {
+  if (wasm_recording_capture == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
+  return daw_audio_recording_capture_get_diagnostics(wasm_recording_capture, out_diagnostics);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_create_asset(
+  daw_audio_core_handle core_handle,
+  const daw_audio_asset_descriptor *descriptor,
+  daw_audio_asset_handle *out_asset) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || descriptor == nullptr || out_asset == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (!valid_abi(descriptor->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
+  if (!valid_asset_descriptor(*descriptor)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  for (uint32_t index = 0; index < core->config.max_assets; ++index) {
+    AssetSlot &slot = core->assets[index];
+    if (slot.occupied) continue;
+    slot.occupied = true;
+    slot.revision = descriptor->revision;
+    slot.frame_count = descriptor->frame_count;
+    slot.sample_rate_hz = descriptor->sample_rate_hz;
+    slot.channel_count = descriptor->channel_count;
+    slot.planes = descriptor->planes;
+    *out_asset = make_asset_handle(index, slot.generation);
+    return DAW_AUDIO_CORE_OK;
+  }
+  return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_get_asset_revision(
+  daw_audio_core_handle core_handle,
+  daw_audio_asset_handle asset,
+  uint32_t *out_revision) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || out_revision == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  AssetSlot *slot = find_asset(core, asset);
+  if (slot == nullptr) return DAW_AUDIO_CORE_INVALID_HANDLE;
+  *out_revision = slot->revision;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_release_asset(
+  daw_audio_core_handle core_handle,
+  daw_audio_asset_handle asset) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  AssetSlot *slot = find_asset(core, asset);
+  if (slot == nullptr) return DAW_AUDIO_CORE_INVALID_HANDLE;
+  if (asset_is_active(*core, asset)) return DAW_AUDIO_CORE_ASSET_IN_USE;
+  slot->occupied = false;
+  slot->revision = 0;
+  slot->frame_count = 0;
+  slot->sample_rate_hz = 0;
+  slot->channel_count = 0;
+  slot->planes = nullptr;
+  ++slot->generation;
+  if (slot->generation == 0) ++slot->generation;
+  return DAW_AUDIO_CORE_OK;
+}

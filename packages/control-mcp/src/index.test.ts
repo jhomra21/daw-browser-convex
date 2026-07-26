@@ -100,6 +100,22 @@ const request = async (
 }
 
 describe("control MCP tools", () => {
+  test("publishes the canonical agent workflow instructions", async () => {
+    const response = await request({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "DRAFT-2026-v1",
+        capabilities: {},
+        clientInfo: { name: "test-client", version: "1.0.0" },
+      },
+    })
+    expect(response.result.instructions).toBe(
+      "Workflow: call control_capabilities, observe control_snapshot, and preview every mutation with control_preview. Request approval only when required, then commit the exact previewed request with a stable idempotencyKey. Re-observe control_snapshot and control_history after committing. Use target: \"host\" and host_* tools only for capabilities exposed by an attached desktop host.",
+    )
+  })
+
   test("adds local host tools only when explicitly composed", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
     expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-11)).toEqual([
@@ -156,12 +172,14 @@ describe("control MCP tools", () => {
     expect(plays).toBe(1)
   })
 
-  test("lists exactly the seven canonical tools with accurate annotations", async () => {
+  test("lists V1 and V2 read tools with accurate annotations", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
       "control_capabilities",
       "control_snapshot",
+      "control_capabilities_v2",
+      "control_snapshot_v2",
       "control_preview",
       "control_commit",
       "control_request_approval",

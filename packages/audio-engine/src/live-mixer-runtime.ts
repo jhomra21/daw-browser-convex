@@ -40,7 +40,7 @@ export const findExternalSidechainTarget = (
 
 type RuntimeTrack = Track<AudioBuffer>
 
-type MasterMixerFx = Pick<ResolveMixerGraphOptions, 'masterFxInstances'>
+type MasterMixerFx = Pick<ResolveMixerGraphOptions, 'masterFxInstances' | 'masterVolume'>
 
 export function resolveLiveMixerGraph(
   tracks: RuntimeTrack[],

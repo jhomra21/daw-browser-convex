@@ -94,6 +94,31 @@ describe('recording writer handler', () => {
     expect(output.at(-1)).toMatchObject({ type: 'finalized', capturedFrames: 4 })
   })
 
+  test('passes contiguous transferable PCM directly to storage', async () => {
+    const planarBlocks: ArrayBuffer[] = []
+    const output: unknown[] = []
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        appendPlanar: async (buffer) => {
+          planarBlocks.push(buffer)
+        },
+        append: async () => {
+          throw new Error('channel slicing should not be used')
+        },
+        finalize: async () => ({ capturedFrames: 2 }),
+        abort: async () => undefined,
+      }),
+    }, (message) => output.push(message))
+    handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
+    await handler.testing.settled()
+    const input = block(0)
+    new Float32Array(input.buffer).set([1, 2])
+    handler.handle(input)
+    await handler.testing.settled()
+    expect(planarBlocks).toEqual([input.buffer])
+    expect(output.at(-1)).toMatchObject({ type: 'return', blockId: 0 })
+  })
+
   test('ignores stale sessions and rejects malformed messages', async () => {
     const output: unknown[] = []
     const handler = createRecordingWriterHandler({

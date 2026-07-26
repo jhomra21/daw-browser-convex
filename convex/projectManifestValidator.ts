@@ -43,4 +43,14 @@ export const projectManifestValidator = v.object({
   })),
   projectState: v.array(manifestStateRowValidator),
   syncState: v.array(manifestStateRowValidator),
+  externalPluginArtifacts: v.optional(v.array(v.object({
+    id: v.string(),
+    sha256: v.string(),
+    byteLength: v.number(),
+    kind: v.union(v.literal("plugin-state"), v.literal("plugin-freeze")),
+    ownerId: v.string(),
+    acl: v.union(v.literal("owner"), v.literal("project-members")),
+    bucket: v.union(v.literal("local"), v.literal("r2-plugin-artifacts")),
+    location: v.string(),
+  }))),
 });

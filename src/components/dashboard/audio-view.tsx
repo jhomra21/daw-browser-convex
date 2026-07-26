@@ -262,9 +262,39 @@ export function DashboardAudioView() {
           </select>
         } />
         <DashboardRow label="Buffer size" value="Managed by the browser and operating system." />
+        <Show when={window.dawDesktop?.audioHost}>
+          <DashboardRow
+            label="Experimental native playback"
+            value="Uses the desktop CoreAudio host for supported source-only sessions."
+            action={<input
+              type="checkbox"
+              checked={preferences.audio.preferences().nativePlaybackEnabled}
+              onChange={(event) => preferences.audio.setNativePlaybackEnabled(event.currentTarget.checked)}
+            />}
+          />
+        </Show>
+        <DashboardRow
+          label="Experimental portable browser playback"
+          value="Uses the Wasm AudioWorklet only for fully supported source-only sessions."
+          action={<input
+            type="checkbox"
+            checked={preferences.audio.preferences().portableBrowserPlaybackEnabled}
+            onChange={(event) => preferences.audio.setPortableBrowserPlaybackEnabled(event.currentTarget.checked)}
+          />}
+        />
       </DashboardSection>
 
       <DashboardSection title="Recording">
+        <DashboardRow
+          label="Experimental portable recording"
+          value="Uses the portable Wasm recorder only while portable browser playback is active. Legacy recording remains the default."
+          action={<input
+            type="checkbox"
+            disabled={!preferences.audio.preferences().portableBrowserPlaybackEnabled}
+            checked={recording().portableEnabled}
+            onChange={(event) => preferences.recording.setPortableEnabled(event.currentTarget.checked)}
+          />}
+        />
         <DashboardRow label="Input layout" controlId="recording-layout" action={<select id="recording-layout" class="h-8 border border-border bg-background px-2 text-sm" value={recording().layout} onChange={(event) => setRecording({ layout: event.currentTarget.value === "stereo" ? "stereo" : "mono" })}><option value="mono">Mono</option><option value="stereo" disabled={!canUseStereoRecording(activeInputSettings()?.channelCount, recording().inputChannel)}>Stereo</option></select>} />
         <DashboardRow label="Mono input channel" controlId="recording-input-channel" value="Channels are shown one-based." action={<select id="recording-input-channel" class="h-8 border border-border bg-background px-2 text-sm" value={recording().inputChannel} disabled={recording().layout === "stereo"} onChange={(event) => setRecording({ inputChannel: Number(event.currentTarget.value) })}><For each={resolveRecordingChannelOptions(activeInputSettings()?.channelCount)}>{(option) => <option value={option.channel} disabled={option.disabled}>{option.label}</option>}</For></select>} />
         <DashboardRow label="Software monitoring" controlId="recording-monitor" value="Monitoring runs through the armed track FX. Disable interface direct monitoring to avoid doubled sound; speakers can cause feedback." action={<select id="recording-monitor" class="h-8 border border-border bg-background px-2 text-sm" value={recording().monitor} onChange={(event) => setRecording({ monitor: event.currentTarget.value === "auto" || event.currentTarget.value === "on" ? event.currentTarget.value : "off" })}><option value="off">Off</option><option value="auto">Auto</option><option value="on">On</option></select>} />

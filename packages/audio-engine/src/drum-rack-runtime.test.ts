@@ -12,6 +12,7 @@ type ScheduledStart = {
 
 type TestParam = {
   value: number
+  linearRamps: Array<[number, number]>
   setValueAtTime: (value: number, time: number) => void
   cancelScheduledValues: (time: number) => void
   linearRampToValueAtTime: (value: number, time: number) => void
@@ -29,6 +30,7 @@ type TestSource = {
   stop: (when?: number) => void
   onended?: () => void
   starts: ScheduledStart[]
+  stops: number[]
 }
 
 type TestGain = {
@@ -44,12 +46,14 @@ type TestPan = {
 const createMutableParam = (initial = 0): TestParam => {
   const param: TestParam = {
     value: initial,
+    linearRamps: [],
     setValueAtTime: (value) => {
       param.value = value
     },
     cancelScheduledValues: () => {},
-    linearRampToValueAtTime: (value) => {
+    linearRampToValueAtTime: (value, time) => {
       param.value = value
+      param.linearRamps.push([value, time])
     },
     exponentialRampToValueAtTime: (value) => {
       param.value = value
@@ -76,8 +80,11 @@ const createTestAudio = () => {
         start: (when, offset = 0, duration = 0) => {
           source.starts.push({ when, offset, duration })
         },
-        stop: () => {},
+        stop: (when) => {
+          if (when !== undefined) source.stops.push(when)
+        },
         starts: [],
+        stops: [],
       }
       sources.push(source)
       return source
@@ -286,5 +293,46 @@ describe('Drum Rack runtime', () => {
       when: 5,
       velocity: 1,
     })).toBeNull()
+  })
+
+  test('chokes prior hits in the matching group with the browser six-millisecond fade', () => {
+    const audio = createTestAudio()
+    const defaults = createDefaultDrumRackParams()
+    const first = defaults.pads[0]
+    const second = defaults.pads[1]
+    if (!first || !second) throw new Error('Missing default drum rack pads')
+    const params = {
+      ...defaults,
+      pads: [
+        { ...first, chokeGroup: 1 },
+        { ...second, chokeGroup: 1 },
+        ...defaults.pads.slice(2),
+      ],
+    }
+    const runtime = createDrumRackRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => audio.ctx,
+      getBpm: () => 120,
+      timelineToCtxTime: (timelineSec) => timelineSec,
+      ensureTrackInput: () => audio.ctx.createGain(),
+      sources: {
+        add: () => {},
+        remove: () => {},
+        snapshot: () => [],
+        clear: () => {},
+        stopClip: () => {},
+      },
+      getArpeggiator: () => undefined,
+    })
+    runtime.setTrackDrumRack('track-1', params, new Map([
+      [first.id, createBuffer(1)],
+      [second.id, createBuffer(1)],
+    ]))
+
+    runtime.startLiveNote('track-1', first.note, 1)
+    runtime.startLiveNote('track-1', second.note, 1)
+
+    expect(audio.gains[1]?.gain.linearRamps).toEqual([[0, 0.006]])
+    expect(audio.sources[0]?.stops).toEqual([0.006])
   })
 })

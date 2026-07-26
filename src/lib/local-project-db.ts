@@ -1,5 +1,6 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { createLocalProjectId, createLocalTrackId } from '@daw-browser/shared'
+import type { ProjectManifestPluginArtifact } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
@@ -9,7 +10,7 @@ export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
 const GLOBAL_DB_VERSION = 1
-const PROJECT_DB_VERSION = 2
+const PROJECT_DB_VERSION = 4
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
 export type LocalProjectMode = 'local-only' | 'backup'
@@ -82,6 +83,9 @@ export type LocalProjectSyncStateRow = {
   value: unknown
   updatedAt: number
 }
+export type LocalProjectExternalPluginArtifactRow = ProjectManifestPluginArtifact & {
+  updatedAt: number
+}
 export type LocalControlStateRow = LocalProjectStateRow
 export type LocalControlCommitRow = {
   id: string
@@ -125,6 +129,7 @@ export type LocalControlRecoveryRow = {
   kind: string
   payload: string
   payloadHash: string
+  localSampleUrls?: Record<string, string>
   consumedAt?: number
 }
 export type LocalControlAssetGcRow = {
@@ -188,6 +193,13 @@ type ProjectDB = DBSchema & {
   syncState: {
     key: string
     value: LocalProjectSyncStateRow
+  }
+  externalPluginArtifacts: {
+    key: string
+    value: LocalProjectExternalPluginArtifactRow
+    indexes: {
+      'by-updated-at': number
+    }
   }
   controlState: { key: string; value: LocalControlStateRow }
   controlCommits: {
@@ -351,6 +363,10 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
       if (!db.objectStoreNames.contains('syncState')) {
         db.createObjectStore('syncState', { keyPath: 'key' })
       }
+      if (!db.objectStoreNames.contains('externalPluginArtifacts')) {
+        const artifacts = db.createObjectStore('externalPluginArtifacts', { keyPath: 'id' })
+        artifacts.createIndex('by-updated-at', 'updatedAt')
+      }
       if (!db.objectStoreNames.contains('controlState')) db.createObjectStore('controlState', { keyPath: 'key' })
       if (!db.objectStoreNames.contains('controlCommits')) {
         const store = db.createObjectStore('controlCommits', { keyPath: 'id' })
@@ -505,16 +521,18 @@ export const importLocalProjectUnlocked = async (
     assets: LocalProjectAssetRow[]
     projectState: LocalProjectStateRow[]
     syncState: LocalProjectSyncStateRow[]
+    externalPluginArtifacts?: LocalProjectExternalPluginArtifactRow[]
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
   const projectState = normalizedProjectState(project, rows.projectState)
-  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
+  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
   await Promise.all([
     ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
     ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
+    ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
     tx.done,
   ])
   const globalDb = await openGlobalProjectsDb()
@@ -528,6 +546,7 @@ export const importLocalProject = (
     assets: LocalProjectAssetRow[]
     projectState: LocalProjectStateRow[]
     syncState: LocalProjectSyncStateRow[]
+    externalPluginArtifacts?: LocalProjectExternalPluginArtifactRow[]
   },
 ): Promise<void> => withLocalProjectAssetLock(project.id, () => importLocalProjectUnlocked(project, rows))
 
@@ -538,6 +557,7 @@ const replaceLocalProjectUnlocked = async (
     assets: LocalProjectAssetRow[]
     projectState: LocalProjectStateRow[]
     syncState: LocalProjectSyncStateRow[]
+    externalPluginArtifacts?: LocalProjectExternalPluginArtifactRow[]
   },
 ): Promise<void> => {
   const globalDb = await openGlobalProjectsDb()
@@ -547,13 +567,14 @@ const replaceLocalProjectUnlocked = async (
   const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
   const projectState = normalizedProjectState(project, rows.projectState)
-  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
+  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   await Promise.all([
     tx.objectStore('entities').clear(),
     tx.objectStore('assets').clear(),
     tx.objectStore('projectState').clear(),
     tx.objectStore('history').clear(),
     tx.objectStore('syncState').clear(),
+    tx.objectStore('externalPluginArtifacts').clear(),
     tx.objectStore('controlState').clear(),
     tx.objectStore('controlCommits').clear(),
     tx.objectStore('controlApprovals').clear(),
@@ -563,6 +584,7 @@ const replaceLocalProjectUnlocked = async (
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
     ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
+    ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
     tx.done,
   ])
   await globalDb.put('projects', project)
@@ -577,18 +599,20 @@ export const replaceLocalProject = (
     assets: LocalProjectAssetRow[]
     projectState: LocalProjectStateRow[]
     syncState: LocalProjectSyncStateRow[]
+    externalPluginArtifacts?: LocalProjectExternalPluginArtifactRow[]
   },
 ): Promise<void> => withLocalProjectAssetLock(project.id, () => replaceLocalProjectUnlocked(project, rows))
 
 export const exportLocalProjectRows = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
-  const [entities, assets, projectState, syncState] = await Promise.all([
+  const [entities, assets, projectState, syncState, externalPluginArtifacts] = await Promise.all([
     db.getAll('entities'),
     db.getAll('assets'),
     db.getAll('projectState'),
     db.getAll('syncState'),
+    db.getAll('externalPluginArtifacts'),
   ])
-  return { entities, assets, projectState, syncState }
+  return { entities, assets, projectState, syncState, externalPluginArtifacts }
 }
 
 const deleteLocalProjectAssetFiles = async (

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
-import { createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
@@ -8,9 +8,11 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from './export-fidelity'
 
 const originalOfflineAudioContext = globalThis.OfflineAudioContext
+const originalAudioBuffer = globalThis.AudioBuffer
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: originalOfflineAudioContext })
+  Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: originalAudioBuffer })
 })
 
 const channel = (
@@ -453,6 +455,42 @@ describe('final master channel conversion', () => {
     stereo.getChannelData(1).set([-1, 0.5, -0.25])
     const mono = downmixStereoBufferToMono(stereo, createBuffer)
     expect(Array.from(mono.getChannelData(0))).toEqual([0, 0, 0])
+  })
+})
+
+describe('portable mixdown output adapter', () => {
+  class TestAudioBuffer {
+    readonly duration: number
+    private readonly channels: Float32Array<ArrayBuffer>[]
+
+    constructor(options: { numberOfChannels: number; length: number; sampleRate: number }) {
+      this.numberOfChannels = options.numberOfChannels
+      this.length = options.length
+      this.sampleRate = options.sampleRate
+      this.duration = options.length / options.sampleRate
+      this.channels = Array.from({ length: options.numberOfChannels }, () => new Float32Array(options.length))
+    }
+
+    readonly numberOfChannels: number
+    readonly length: number
+    readonly sampleRate: number
+
+    getChannelData(channel: number) {
+      const data = this.channels[channel]
+      if (!data) throw new Error('Missing channel')
+      return data
+    }
+  }
+
+  test('assembles ordered Worker PCM chunks into the normal AudioBuffer result', () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const output = createPortableOutputBuffer(new Map([
+      [0, { frameCount: 2, planes: [new Float32Array([0.25, -0.5]), new Float32Array([0.5, -0.25])] }],
+      [1, { frameCount: 2, planes: [new Float32Array([0.75, 1]), new Float32Array([-0.75, -1])] }],
+    ]), 4, 48_000, 2)
+
+    expect(Array.from(output.getChannelData(0))).toEqual([0.25, -0.5, 0.75, 1])
+    expect(Array.from(output.getChannelData(1))).toEqual([0.5, -0.25, -0.75, -1])
   })
 })
 

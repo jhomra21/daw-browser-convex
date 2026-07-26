@@ -31,6 +31,17 @@ export type ProjectManifestAsset = {
   cloudKey?: string;
 };
 
+export type ProjectManifestPluginArtifact = {
+  id: string;
+  sha256: string;
+  byteLength: number;
+  kind: "plugin-state" | "plugin-freeze";
+  ownerId: string;
+  acl: "owner" | "project-members";
+  bucket: "local" | "r2-plugin-artifacts";
+  location: string;
+};
+
 export type ProjectManifest = {
   schemaVersion: number;
   projectId: string;
@@ -43,10 +54,13 @@ export type ProjectManifest = {
   assets: ProjectManifestAsset[];
   projectState: ProjectManifestStateRow[];
   syncState: ProjectManifestStateRow[];
+  externalPluginArtifacts: ProjectManifestPluginArtifact[];
 };
 
-export const PROJECT_MANIFEST_SCHEMA_VERSION = 2;
+export const PROJECT_MANIFEST_SCHEMA_VERSION = 3;
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
+  1,
+  2,
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
@@ -77,6 +91,50 @@ const readOptionalNumber = (value: unknown) => typeof value === "number" && Numb
 const readOptionalSourceKind = (value: unknown): ProjectManifestAsset["sourceKind"] => (
   value === "upload" || value === "url" || value === "recording" ? value : undefined
 );
+const readPluginArtifact = (value: unknown): ProjectManifestPluginArtifact => {
+  if (!isRecord(value)) throw new Error("Project manifest has invalid external plugin artifact.");
+  const id = readString(value.id, "externalPluginArtifact.id");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("Project manifest has invalid external plugin artifact id.");
+  }
+  const sha256 = readString(value.sha256, "externalPluginArtifact.sha256");
+  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error("Project manifest has invalid external plugin artifact hash.");
+  const kind = value.kind;
+  if (kind !== "plugin-state" && kind !== "plugin-freeze") {
+    throw new Error("Project manifest has invalid external plugin artifact kind.");
+  }
+  const acl = value.acl;
+  if (acl !== "owner" && acl !== "project-members") {
+    throw new Error("Project manifest has invalid external plugin artifact ACL.");
+  }
+  const bucket = value.bucket;
+  if (bucket !== "local" && bucket !== "r2-plugin-artifacts") {
+    throw new Error("Project manifest has invalid external plugin artifact bucket.");
+  }
+  const byteLength = readNumber(value.byteLength, "externalPluginArtifact.byteLength");
+  if (!Number.isInteger(byteLength) || byteLength <= 0 || byteLength > 512 * 1024 * 1024) {
+    throw new Error("Project manifest has invalid external plugin artifact byte length.");
+  }
+  const ownerId = readString(value.ownerId, "externalPluginArtifact.ownerId");
+  const location = readString(value.location, "externalPluginArtifact.location");
+  if (ownerId.length > 256 || location.length > 1024) {
+    throw new Error("Project manifest has invalid external plugin artifact metadata.");
+  }
+  return {
+    id,
+    sha256,
+    byteLength,
+    kind,
+    ownerId,
+    acl,
+    bucket,
+    location,
+  };
+};
+
+export const normalizeProjectManifestPluginArtifact = (
+  value: unknown,
+): ProjectManifestPluginArtifact => readPluginArtifact(value);
 
 const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
   if (!isRecord(value)) throw new Error("Project manifest has invalid entity.");
@@ -134,10 +192,14 @@ export const assertProjectManifestBaseIntegrity = (manifest: ProjectManifest) =>
   assertUnique(manifest.assets, (row) => row.storagePath, "asset storage path");
   assertUnique(manifest.projectState, (row) => row.key, "project state key");
   assertUnique(manifest.syncState, (row) => row.key, "sync state key");
+  assertUnique(manifest.externalPluginArtifacts, (artifact) => artifact.id, "external plugin artifact id");
 };
 
 export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest) => {
   assertProjectManifestBaseIntegrity(manifest);
+  if (manifest.externalPluginArtifacts.some((artifact) => artifact.bucket === "r2-plugin-artifacts")) {
+    throw new Error("Project manifest external plugin artifacts cannot be published to the configured backup bucket.");
+  }
   const hasInvalidCloudKey = manifest.assets.some((asset) => (
     asset.missing
       ? asset.cloudKey !== undefined
@@ -150,7 +212,7 @@ export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest)
 
 const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
-  if (schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
+  if (!SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS.includes(schemaVersion)) {
     throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
   }
   if (raw.mode !== "backup" && raw.mode !== "shared") {
@@ -181,7 +243,7 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
     };
   });
   const manifest = {
-    schemaVersion,
+    schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId: readString(raw.projectId, "projectId"),
     name: readString(raw.name, "name"),
     mode,
@@ -192,6 +254,9 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
     assets,
     projectState: readArray(raw.projectState, "projectState").map(readProjectStateRow),
     syncState: readArray(raw.syncState, "syncState").map(readSyncStateRow),
+    externalPluginArtifacts: schemaVersion === 3
+      ? readArray(raw.externalPluginArtifacts, "externalPluginArtifacts").map(readPluginArtifact)
+      : [],
   };
   assertProjectManifestBaseIntegrity(manifest);
   return manifest;

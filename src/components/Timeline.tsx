@@ -36,6 +36,8 @@ import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
+import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
+import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
@@ -78,6 +80,7 @@ import {
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
+import { listLocalExternalProcessors } from "~/lib/external-plugins";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -102,7 +105,8 @@ import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapte
 import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
-import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
+import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
+import { compileLivePlaybackSnapshot, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -120,12 +124,21 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
+  const [activeMidiRecordingTargetId, setActiveMidiRecordingTargetId] =
+    createSignal<string | null>(null);
+  const [provisionalMidiClipId, setProvisionalMidiClipId] =
+    createSignal<string | null>(null);
+  const recordingStopRef: {
+    stop: () => Promise<void>;
+    activeTrackId: () => string | null;
+  } = { stop: async () => {}, activeTrackId: () => null };
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
   // Audio engine
   const audioEngine = getAudioEngine();
+  const appPreferences = useAppPreferences();
   // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
   const notify = (title: string, message: string) => {
     setAppMessage({ title, message });
@@ -140,6 +153,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     currentProjectRole,
     fullView,
     navigateToRoom,
+    setProjectTransitionSettlement,
     createProject,
     renameProject,
     deleteProject,
@@ -281,6 +295,31 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [effectsExportSnapshot, setEffectsExportSnapshot] =
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
+  let nativePlaybackRevision = 0;
+  const compilePlaybackSnapshot = async (transport: LivePlaybackTransport) => {
+    const effects = effectsExportSnapshot();
+    await effects?.flushPending();
+    return compileLivePlaybackSnapshot({
+      revision: ++nativePlaybackRevision,
+      bpm: bpm(),
+      transport,
+      tracks: renderTracks(),
+      renderState: await createExportRenderStateSnapshot({
+        projectId: projectId(),
+        userId: userId(),
+        masterVolume: masterVolume.volume(),
+        cloudRows: fullView.data
+          ? {
+              effects: fullView.data.effects,
+              automationEnvelopes: fullView.data.automationEnvelopes,
+            }
+          : undefined,
+        effectsProjection: effects?.snapshotEffectsProjection(),
+        automationPatches: getAutomationPatches(),
+      }),
+      sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
+    });
+  };
   const exportService = createTimelineExportService({
     queue: exportQueue,
     getTracks: renderTracks,
@@ -340,6 +379,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     stopScrub,
     setScrollElement,
     rescheduleChangedClips: playbackRescheduleChangedClips,
+    restartTimelineSchedule,
+    portableRecording,
+    nativeRecording,
   } = usePlayheadControls({
     audioEngine,
     tracks: renderTracks,
@@ -348,6 +390,30 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopStartSec,
     loopEndSec,
     pixelsPerSecond,
+    preflightPlayback: async () => {
+      const currentProjectId = projectId();
+      if (!isLocalId("project", currentProjectId)) return true;
+      const liveProcessor = (await listLocalExternalProcessors(currentProjectId))
+        .find((processor) => !processor.bypassed);
+      if (!liveProcessor) return true;
+      notify(
+        "External plug-in playback is gated",
+        liveProcessor.health.reason ?? "Freeze or bypass the external plug-in before playback.",
+      );
+      return false;
+    },
+    nativePlayback: {
+      enabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+      projectGeneration: mountedProjectGeneration,
+      compileSnapshot: compilePlaybackSnapshot,
+      reportFault: (message) => notify("Native playback stopped", message),
+    },
+    portableBrowserPlayback: {
+      enabled: () => appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
+      projectGeneration: mountedProjectGeneration,
+      compileSnapshot: compilePlaybackSnapshot,
+      reportFault: (message) => notify("Portable browser playback stopped", message),
+    },
   });
 
   function rescheduleChangedClips(clipIds: string[]) {
@@ -362,6 +428,17 @@ const Timeline: Component<TimelineProps> = (props) => {
         clipIds,
         lenOk ? { endLimitSec: end } : undefined,
       );
+      audioEngine.cancelAutomationSchedules();
+      audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
+        ...(lenOk ? { horizonSec: end - playheadSec() } : {}),
+        tracks: renderTracks(),
+      });
+    } catch {}
+  }
+
+  function rescheduleTimeline() {
+    try {
+      restartTimelineSchedule(renderTracks())
     } catch {}
   }
 
@@ -470,6 +547,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       projection.commitClipAudioWarp(clipId, audioWarp),
     commitClipFades: (clipId, fades) => projection.commitClipFades(clipId, fades),
     rescheduleChangedClips,
+    rescheduleTimeline,
+    refreshLocalTimeline: async () => {
+      await mediaRecovery.reloadLocalTimeline();
+      await Promise.resolve();
+    },
     cancelTrackVolumeWrite,
     cancelTrackRoutingWrite,
     cancelTrackMixWrite,
@@ -574,7 +656,6 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   const [deviceInsertActions, setDeviceInsertActions] =
     createSignal<TimelineDeviceInsertActions>();
-  const appPreferences = useAppPreferences();
 
   createEffect(() => {
     sidebarWidth();
@@ -593,7 +674,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     audioEngine,
     tracks: renderTracks,
     projectId,
+    isPlaying,
+    playheadSec,
     selection,
+    activeRecordingTargetId: activeMidiRecordingTargetId,
+    canOpenMidiEditorFor: (clipId) => clipId !== provisionalMidiClipId(),
   });
   const removeCreatedCloudTrack = (track: Track | undefined) =>
     removeAutoCreatedCloudTrack({
@@ -763,6 +848,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     setPreviewClipsByTrack: projection.setPreviewClipsByTrackId,
     commitClipMoves: projection.commitClipMoves,
     canWriteClip,
+    canEditClip: (clipId) => clipId !== provisionalMidiClipId(),
     selection,
     projectId,
     userId,
@@ -790,6 +876,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     setDraftClipTiming: projection.setDraftClipTiming,
     commitClipTiming: projection.commitClipTiming,
     canWriteClip,
+    canEditClip: (clipId) => clipId !== provisionalMidiClipId(),
     selection,
     convexClient,
     convexApi,
@@ -868,6 +955,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     commitClipAudioWarp: projection.commitClipAudioWarp,
     removeLocalTrack: projection.removeLocalTrack,
     canWriteClip,
+    canEditClip: (clipId) => clipId !== provisionalMidiClipId(),
     selection,
     setPendingDeleteTrackId,
     setConfirmOpen,
@@ -885,6 +973,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     sidechainRoutes,
     applyAutomationEnvelope: automation.applyEnvelope,
     grantClipWrites,
+    settleActiveRecording: async (trackIds) => {
+      const activeMidiTrackId = activeMidiRecordingTargetId();
+      const activeAudioTrackId = recordingStopRef.activeTrackId();
+      if (
+        (activeMidiTrackId && trackIds.has(activeMidiTrackId))
+        || (activeAudioTrackId && trackIds.has(activeAudioTrackId))
+      ) await recordingStopRef.stop();
+    },
     notify,
   });
 
@@ -937,6 +1033,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexClient,
     convexApi,
     requestTransportPlay: requestPlay,
+    portableRecording: {
+      enabled: () => appPreferences.recording.preferences().portableEnabled
+        && appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
+      controller: portableRecording,
+    },
+    nativeRecording: {
+      enabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+      controller: nativeRecording,
+    },
     createTrackForRecording: async () =>
       await createTimelineTrack({}, { pushHistory: false, select: false }),
     notify: (message) => {
@@ -952,16 +1057,87 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const {
-    isRecording,
+    isRecording: isAudioRecording,
     recordArmTrackId,
-    toggleRecording,
+    toggleRecording: toggleAudioRecording,
     toggleRecordArm: handleToggleRecordArm,
     reconcileRecordArm,
-    stopRecording,
+    stopRecording: stopAudioRecording,
+    recordingTrackId: audioRecordingTrackId,
     previewPoints,
     previewStartSec,
-    recordingTrackId,
   } = recordingControls;
+
+  const midiRecording = useMidiTrackRecording({
+    audioEngine,
+    tracks: renderTracks,
+    projectId,
+    userId,
+    playheadSec,
+    bpm,
+    loopEnabled,
+    recordArmTrackId,
+    setTrackLock: projection.setTrackLock,
+    clearTrackLock: projection.clearTrackLock,
+    insertLocalClip: projection.insertLocalClip,
+    removeLocalClips: projection.removeLocalClips,
+    selection,
+    requestTransportPlay: requestPlay,
+    pauseTransport: handlePause,
+    notify: (message) => localProject.setLocalSaveFailure(message),
+    historyPush: (entry, key, win) => pushHistory(entry, key, win),
+    setActiveRecordingTarget: setActiveMidiRecordingTargetId,
+    setProvisionalClipId: setProvisionalMidiClipId,
+  });
+  recordingStopRef.stop = async () => {
+    if (isAudioRecording()) await stopAudioRecording();
+    if (midiRecording.isRecording()) await midiRecording.stopRecording();
+  };
+  recordingStopRef.activeTrackId = audioRecordingTrackId;
+  setProjectTransitionSettlement(async () => {
+    if (untrack(isAudioRecording)) await stopAudioRecording();
+    if (untrack(midiRecording.isRecording)) await midiRecording.stopRecording();
+    if (untrack(provisionalMidiClipId)) throw new Error("MIDI recording remains protected until it can be finalized.");
+  });
+  onCleanup(() => setProjectTransitionSettlement(undefined));
+  const isRecording = createMemo(() => isAudioRecording() || midiRecording.isRecording());
+  const recordingTrackId = createMemo(() => recordingControls.recordingTrackId() ?? midiRecording.recordingTrackId());
+  const stopRecording = async () => {
+    if (isAudioRecording()) await stopAudioRecording();
+    if (midiRecording.isRecording()) await midiRecording.stopRecording();
+  };
+  const deleteTimelineSelectionSafely = async () => {
+    await runTimelineMutationAfterRecordingSettlement({
+      isRecording,
+      stopRecording,
+      provisionalClipId: provisionalMidiClipId,
+      mutate: deleteTimelineSelection,
+    });
+  };
+  const toggleLoopSafely = () => {
+    if (midiRecording.isRecording()) {
+      localProject.setLocalSaveFailure("Stop MIDI recording before enabling loop.");
+      return;
+    }
+    setLoopEnabled((prev) => !prev);
+  };
+  const openProject = async (nextProjectId: string) => {
+    if (nextProjectId === projectId()) return;
+    if (isRecording()) await stopRecording();
+    await navigateToRoom(nextProjectId);
+  };
+  const toggleRecording = async () => {
+    if (isRecording()) {
+      await stopRecording();
+      return { ok: true, trackId: recordingTrackId() ?? undefined };
+    }
+    const armed = renderTracks().find((track) => track.id === recordArmTrackId());
+    if (armed?.kind === "instrument") {
+      const ok = await midiRecording.startRecording();
+      return { ok, trackId: ok ? armed.id : undefined };
+    }
+    return await toggleAudioRecording();
+  };
 
   const handleTransportPause = async () => {
     if (isRecording()) await stopRecording();
@@ -1000,7 +1176,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       }
     },
     onDelete: () => {
-      void deleteTimelineSelection();
+      void deleteTimelineSelectionSafely();
     },
     onDuplicate: () => {
       void duplicateTimelineSelection();
@@ -1300,6 +1476,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     currentEffectsTargetId: () => selection.selectedFXTarget(),
     handleInsertSample,
     onDeviceDrop: handleBrowserDeviceDrop,
+    onExternalPluginInsertionResult: (title, message) => notify(title, message),
   });
   const browserDropTargetLane = createMemo(() => {
     const target = timelineBrowser().devices.dragSession()?.target;
@@ -1370,7 +1547,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       currentUserId: userId(),
       canManageSharing: currentProjectRole() === "owner",
       projects: projects(),
-      onOpenProject: navigateToRoom,
+      onOpenProject: openProject,
       onCreateProject: createProject,
       onDeleteProject: deleteProject,
       onRenameProject: renameProject,
@@ -1410,7 +1587,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridDenominator: gridDenominator(),
     onChangeGridDenominator: setGridDenominator,
     loopEnabled: loopEnabled(),
-    onToggleLoop: () => setLoopEnabled((prev) => !prev),
+    onToggleLoop: toggleLoopSafely,
     isRecording: isRecording(),
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
@@ -1418,7 +1595,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     automationOverrideCount: automation.overrideCount(),
     onReEnableAutomation: automation.reEnable,
     onDeleteSelection: () => {
-      void deleteTimelineSelection();
+      void deleteTimelineSelectionSafely();
     },
     onDuplicateSelection: () => {
       void duplicateTimelineSelection();
@@ -1443,7 +1620,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridDenominator,
     setGridDenominator,
     loopEnabled,
-    toggleLoop: () => setLoopEnabled((prev) => !prev),
+    toggleLoop: toggleLoopSafely,
   }));
 
   const selectedExportTrackIds = createMemo(() =>
@@ -1728,6 +1905,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           card: midiCard(),
           userId: userId(),
           projectId: projectId(),
+          canWrite: canWriteClip(midiEditorClipId() ?? ''),
           close: closeMidiEditor,
           changeBounds: changeMidiCardBounds,
           auditionNote,

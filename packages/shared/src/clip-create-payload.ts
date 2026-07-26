@@ -4,7 +4,7 @@ import type { AudioSourceMetadata } from './audio-source-metadata'
 import { normalizeAudioWarp, type AudioWarpPayload } from './audio-warp'
 import { normalizeClipColor } from './clip-color'
 import type { SharedClipFadesInput, SharedTimelineClipCreatePayload } from './shared-timeline-operations'
-import type { SynthWave } from './synth-params'
+import type { MidiClip } from './midi'
 
 export type ClipTimingSnapshot = {
   leftPadSec?: number
@@ -23,11 +23,7 @@ export type ClipCreateSnapshot = {
   source?: AudioSourceMetadata
   sourceAssetKey?: string
   sourceKind?: AudioSourceKind
-  midi?: {
-    wave: SynthWave
-    gain?: number
-    notes: Array<{ beat: number; length: number; pitch: number; velocity?: number }>
-  }
+  midi?: MidiClip
   timing?: ClipTimingSnapshot
   audioWarp?: AudioWarpPayload
   color?: string

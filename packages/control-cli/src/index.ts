@@ -1,61 +1,29 @@
 #!/usr/bin/env bun
-import { readFile, stat } from "node:fs/promises"
-import path from "node:path"
 import {
   canonicalJson,
-  controlCommitRequestSchemaV1,
-  controlApprovalRequestSchemaV1,
   controlErrorSchemaV1,
-  controlHistoryQuerySchemaV1,
-  controlRecoveriesQuerySchemaV1,
-  controlPreviewRequestSchemaV1,
-  controlSnapshotQuerySchemaV1,
-  controlLimitsV1,
   type ControlErrorV1,
 } from "@daw-browser/control"
+import { hostError, type HostErrorV1 } from "@daw-browser/desktop-protocol"
+import { ControlApiError, ControlTransportError } from "@daw-browser/control-sdk"
+import { runAuthCommand } from "./cli-auth"
+import { isCanonicalCommand, runControlCommand } from "./cli-control"
 import {
-  desktopRequestSchemaV1,
-  desktopProtocolVersion,
-  hostError,
-  type HostErrorV1,
-  type DesktopControlOperationV1,
-} from "@daw-browser/desktop-protocol"
-import { ControlApiError, ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
-import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
-import { credentialIdentity, createCredentialStore } from "./credentials"
-import { createHostClient, DesktopControlError, DesktopHostError } from "./host"
-export { DesktopControlError, DesktopHostError } from "./host"
+  DesktopControlError,
+  DesktopHostError,
+  HostTargetUnavailableError,
+  runHostCommand,
+} from "./cli-host"
+import { processIo, type CliIo } from "./input"
 
 const commandNames = [
-  "auth login --base-url <origin>", "auth status", "auth logout", "capabilities [--target <cloud|host>]",
-  "snapshot <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
+  "auth login --base-url <origin>", "auth status", "auth logout", "capabilities [--target <cloud|host>]", "capabilities-v2 [--target <cloud|host>]",
+  "snapshot <project-id> [--target <cloud|host>]", "snapshot-v2 <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
   "history <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
-  "host status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
+  "host status", "host transport-status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
   "host import (--path <absolute-path>|--picker)", "host export --request <file|->", "host export-status", "host export-cancel <job-id>",
 ]
-
-type Io = {
-  stdout: (line: string) => void;
-  stderr: (line: string) => void;
-  readStdin: () => Promise<string>;
-}
-
-const processIo: Io = {
-  stdout: (line) => process.stdout.write(`${line}\n`),
-  stderr: (line) => process.stderr.write(`${line}\n`),
-  readStdin: async () => {
-    const chunks: Buffer[] = []
-    let bytes = 0
-    for await (const chunk of process.stdin) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      bytes += buffer.byteLength
-      if (bytes > controlLimitsV1.maxSerializedBodyBytes) throw new Error("Request input exceeds the size limit.")
-      chunks.push(buffer)
-    }
-    return Buffer.concat(chunks).toString("utf8")
-  },
-}
 
 const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 => ({
   version: "v1",
@@ -66,31 +34,11 @@ const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 =>
 const toCommandError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
   if (cause instanceof ControlApiError) return cause.data
   if (cause instanceof ControlTransportError) return hostError("unavailable", "Cloud control service is unavailable.")
-  if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) return cause.data
+  if (cause instanceof DesktopControlError || cause instanceof HostTargetUnavailableError) return cause.data
+  if (cause instanceof DesktopHostError) return hostError(cause.data.code, cause.data.message)
   const parsed = controlErrorSchemaV1.safeParse(cause)
   if (parsed.success) return parsed.data
   return error("invalid-request", cause instanceof Error ? cause.message.slice(0, 1000) : "Invalid command.")
-}
-
-const option = (arguments_: string[], name: string) => {
-  const index = arguments_.indexOf(name)
-  if (index === -1) return undefined
-  const value = arguments_[index + 1]
-  if (!value || value.startsWith("--")) throw new Error(`Missing ${name} value.`)
-  return value
-}
-
-const jsonRequest = async (source: string, io: Io) => {
-  const content = source === "-" ? await io.readStdin() : await (async () => {
-    const info = await stat(source)
-    if (!info.isFile() || info.size > controlLimitsV1.maxSerializedBodyBytes) throw new Error("Request input exceeds the size limit.")
-    return readFile(source, "utf8")
-  })()
-  try {
-    return JSON.parse(content)
-  } catch {
-    throw new Error("Request input is not valid JSON.")
-  }
 }
 
 const help = () => [
@@ -98,284 +46,23 @@ const help = () => [
   ...commandNames.map((name) => `  ${name}`),
 ].join("\n")
 
-const baseUrlFor = (arguments_: string[]) => {
-  if (arguments_.length !== 0 && (arguments_.length !== 2 || arguments_[0] !== "--base-url")) {
-    throw new Error("auth login accepts only --base-url <origin>.")
-  }
-  const explicit = arguments_.length === 2 ? arguments_[1] : undefined
-  const configured = explicit ?? process.env.DAW_CONTROL_BASE_URL
-  if (!configured) throw new Error("Provide --base-url.")
-  return normalizeBaseUrl(configured)
-}
-
 const parseCommand = (arguments_: string[]) => {
   const [first, second, ...rest] = arguments_
   if (first === "auth" && second) return { command: `auth ${second}`, arguments_: rest }
   return { command: first ?? "", arguments_: second === undefined ? [] : [second, ...rest] }
 }
-const audioExtension = (value: string) => [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm"].includes(path.extname(value).toLowerCase())
-const absoluteAudioPath = (value: string) => path.isAbsolute(value) && path.normalize(value) === value && audioExtension(value)
-const validateHostExportInput = (input: unknown) => {
-  if (typeof input !== "object" || input === null || !("mode" in input) || (input.mode !== "mixdown" && input.mode !== "stems") || !("destination" in input) || typeof input.destination !== "object" || input.destination === null || !("kind" in input.destination)) {
-    throw new Error("Invalid host export request.")
-  }
-  const destination = input.destination
-  if ((destination.kind === "file" || destination.kind === "directory") && (!("path" in destination) || typeof destination.path !== "string" || !path.isAbsolute(destination.path) || path.normalize(destination.path) !== destination.path || (destination.kind === "file" && !audioExtension(destination.path)))) {
-    throw new Error("Invalid host export media path.")
-  }
-}
-
-const historyArguments = (arguments_: string[]) => {
-  const [projectId, ...options] = arguments_
-  if (!projectId || projectId.startsWith("--")) throw new Error("history requires a project ID.")
-  let cursor: string | undefined
-  let limit: string | undefined
-  for (let index = 0; index < options.length; index += 2) {
-    const name = options[index]
-    const value = options[index + 1]
-    if (!value || value.startsWith("--") || (name !== "--cursor" && name !== "--limit")) throw new Error("Invalid history arguments.")
-    if (name === "--cursor" && cursor !== undefined) throw new Error("Invalid history arguments.")
-    if (name === "--limit" && limit !== undefined) throw new Error("Invalid history arguments.")
-    if (name === "--cursor") cursor = value
-    else limit = value
-  }
-  return { projectId, cursor, limit }
-}
-
-type ControlTarget = "cloud" | "host"
-
-const canonicalControlOperations = {
-  capabilities: "control.capabilities",
-  snapshot: "control.snapshot",
-  preview: "control.preview",
-  approval: "control.requestApproval",
-  commit: "control.commit",
-  history: "control.history",
-  recoveries: "control.recoveries",
-} satisfies Record<string, DesktopControlOperationV1>
-
-type CanonicalCommand = keyof typeof canonicalControlOperations
-
-const isCanonicalCommand = (command: string): command is CanonicalCommand => Object.hasOwn(canonicalControlOperations, command)
-
-const stripTarget = (arguments_: string[]): { target: ControlTarget; arguments_: string[] } => {
-  let target: ControlTarget = "cloud"
-  let targetSeen = false
-  const rest: string[] = []
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const value = arguments_[index]
-    if (value !== "--target") {
-      rest.push(value)
-      continue
-    }
-    if (targetSeen || index + 1 >= arguments_.length) throw new Error("Invalid control target.")
-    const targetValue = arguments_[index + 1]
-    if (targetValue !== "cloud" && targetValue !== "host") throw new Error("Invalid control target.")
-    target = targetValue
-    targetSeen = true
-    index += 1
-  }
-  return { target, arguments_: rest }
-}
-
-class HostTargetUnavailableError extends Error {
-  readonly data = hostError("unavailable", "Desktop control host is unavailable.")
-
-  constructor() {
-    super("Desktop control host is unavailable.")
-    this.name = "HostTargetUnavailableError"
-  }
-}
-
-const requestHostControl = async (operation: DesktopControlOperationV1, input: unknown) => {
-  try {
-    const client = await createHostClient()
-    try {
-      return await client.request(operation, input)
-    } finally {
-      client.close()
-    }
-  } catch (cause) {
-    if (cause instanceof DesktopControlError || cause instanceof DesktopHostError) throw cause
-    throw new HostTargetUnavailableError()
-  }
-}
-
-export const runCli = async (arguments_: string[], io: Io = processIo): Promise<number> => {
+export const runCli = async (arguments_: string[], io: CliIo = processIo): Promise<number> => {
   if (arguments_.length === 0 || arguments_[0] === "--help" || arguments_[0] === "-h") {
     io.stdout(help())
     return 0
   }
   const { command, arguments_: commandArguments } = parseCommand(arguments_)
   try {
-    if (command === "host") {
-      const [action, value, ...extra] = commandArguments
-      if (!action) throw new Error("Invalid host command.")
-      if (action === "import") {
-        const pathValue = option(commandArguments.slice(1), "--path")
-        const picker = commandArguments.length === 2 && commandArguments[1] === "--picker"
-        if ((!pathValue && !picker) || (pathValue && commandArguments.length !== 3) || (picker && commandArguments.length !== 2)) throw new Error("host import requires exactly one of --path <absolute-path> or --picker.")
-        if (pathValue && !absoluteAudioPath(pathValue)) throw new Error("host import requires an absolute supported audio path.")
-        const source = picker ? { kind: "picker" } : { kind: "path", path: pathValue }
-        const client = await createHostClient()
-        try {
-          const data = await client.request("host.import.audio", { source })
-          io.stdout(canonicalJson({ version: "v1", ok: true, command: "host import", data }))
-          return 0
-        } finally { client.close() }
-      }
-      if (action === "export") {
-        const source = option(commandArguments.slice(1), "--request")
-        if (!source || commandArguments.length !== 3 || commandArguments[1] !== "--request") throw new Error("host export requires --request <file|->.")
-        const requestInput = await jsonRequest(source, io)
-        validateHostExportInput(requestInput)
-        const input = desktopRequestSchemaV1.parse({ version: desktopProtocolVersion, type: "request", id: "cli-validation", operation: "host.export.run", input: requestInput }).input
-        const client = await createHostClient()
-        try {
-          const data = await client.request("host.export.run", input)
-          io.stdout(canonicalJson({ version: "v1", ok: true, command: "host export", data }))
-          return 0
-        } finally { client.close() }
-      }
-      if (action === "export-status" || action === "export-cancel") {
-        if ((action === "export-status" && commandArguments.length !== 1) || (action === "export-cancel" && commandArguments.length !== 2)) throw new Error("Invalid host export command.")
-        const operation = action === "export-status" ? "host.export.status" : "host.export.cancel"
-        const input = action === "export-status" ? {} : { jobId: value }
-        desktopRequestSchemaV1.parse({ version: desktopProtocolVersion, type: "request", id: "cli-validation", operation, input })
-        const client = await createHostClient()
-        try {
-          const data = await client.request(operation, input)
-          io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
-          return 0
-        } finally { client.close() }
-      }
-      if (extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
-      const operation = action === "status" ? "host.status"
-        : action === "play" ? "transport.play"
-          : action === "pause" ? "transport.pause"
-            : action === "stop" ? "transport.stop"
-              : action === "diagnostics" ? "diagnostics.snapshot"
-                : action === "seek" ? "transport.seek" : undefined
-      if (!operation) throw new Error("Invalid host command.")
-      let input: {} | { seconds: number } = {}
-      if (action === "seek") {
-        const seconds = Number(value)
-        if (!Number.isFinite(seconds)) throw new Error("host seek requires a finite number of seconds.")
-        input = { seconds }
-      }
-      const validation = desktopRequestSchemaV1.safeParse({
-        version: desktopProtocolVersion,
-        type: "request",
-        id: "cli-validation",
-        operation,
-        input,
-      })
-      if (!validation.success) throw new Error("Invalid host command.")
-      const client = await createHostClient()
-      try {
-        const data = await client.request(operation, input)
-        io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
-        return 0
-      } finally {
-        client.close()
-      }
-    }
-    if (command === "auth login") {
-      const store = createCredentialStore()
-      const baseUrl = baseUrlFor(commandArguments)
-      await login(baseUrl, { store, writeStderr: io.stderr })
-      io.stdout(canonicalJson({ version: "v1", ok: true, command, data: { baseUrl } }))
-      return 0
-    }
-    if (command === "auth status") {
-      if (commandArguments.length !== 0) throw new Error("auth status accepts no arguments.")
-      const store = createCredentialStore()
-      const credentials = await store.read()
-      io.stdout(canonicalJson({
-        version: "v1",
-        ok: true,
-        command,
-        data: credentials
-          ? { authenticated: true, baseUrl: credentials.baseUrl, expiresAt: credentials.expiresAt, scopes: credentials.scopes }
-          : { authenticated: false },
-      }))
-      return 0
-    }
-    if (command === "auth logout") {
-      if (commandArguments.length !== 0) throw new Error("auth logout accepts no arguments.")
-      const store = createCredentialStore()
-      const result = await logout(store)
-      io.stdout(canonicalJson({ version: "v1", ok: true, command, data: result }))
-      return 0
-    }
+    if (command === "host") return await runHostCommand(commandArguments, io)
+    const authResult = await runAuthCommand(command, commandArguments, io)
+    if (authResult !== undefined) return authResult
     if (!isCanonicalCommand(command)) throw new Error("Unknown command.")
-    const routing = stripTarget(commandArguments)
-    const canonicalArguments = routing.arguments_
-    const cloudClient = async () => {
-      const store = createCredentialStore()
-      const credentials = await store.read()
-      if (!credentials) throw new Error("Run daw-control auth login first.")
-      return createControlClient({
-        baseUrl: credentials.baseUrl,
-        accessToken: createAccessTokenProvider(credentialIdentity(credentials), store),
-      })
-    }
-    let data: unknown
-    if (command === "capabilities") {
-      if (canonicalArguments.length !== 0) throw new Error("capabilities accepts no arguments.")
-      if (routing.target === "host") {
-        data = await requestHostControl(canonicalControlOperations[command], {})
-      } else {
-        const client = await cloudClient()
-        data = await client.capabilities()
-      }
-    } else if (command === "snapshot") {
-      if (canonicalArguments.length !== 1) throw new Error("snapshot requires a project ID.")
-      const input = controlSnapshotQuerySchemaV1.parse({ projectId: canonicalArguments[0] })
-      if (routing.target === "host") {
-        data = await requestHostControl(canonicalControlOperations[command], input)
-      } else {
-        const client = await cloudClient()
-        data = await client.snapshot(input.projectId)
-      }
-    } else if (command === "preview" || command === "approval" || command === "commit") {
-      const source = option(canonicalArguments, "--request")
-      if (!source || canonicalArguments.length !== 2 || canonicalArguments[0] !== "--request") throw new Error(`${command} requires --request <file|->.`)
-      const parsed = await jsonRequest(source, io)
-      const input = command === "preview"
-        ? controlPreviewRequestSchemaV1.parse(parsed)
-        : command === "approval"
-          ? controlApprovalRequestSchemaV1.parse(parsed)
-          : controlCommitRequestSchemaV1.parse(parsed)
-      if (routing.target === "host") {
-        data = await requestHostControl(canonicalControlOperations[command], input)
-      } else {
-        const client = await cloudClient()
-        if (command === "preview") data = await client.preview(input)
-        else if (command === "approval") data = await client.requestApproval(input)
-        else data = await client.commit(controlCommitRequestSchemaV1.parse(parsed))
-      }
-    } else if (command === "history" || command === "recoveries") {
-      const { projectId, cursor, limit } = historyArguments(canonicalArguments)
-      const query = {
-        projectId,
-        ...(cursor === undefined ? {} : { cursor }),
-        ...(limit === undefined ? {} : { limit: Number(limit) }),
-      }
-      const input = command === "history"
-        ? controlHistoryQuerySchemaV1.parse(query)
-        : controlRecoveriesQuerySchemaV1.parse(query)
-      if (routing.target === "host") {
-        data = await requestHostControl(canonicalControlOperations[command], input)
-      } else {
-        const client = await cloudClient()
-        data = command === "history"
-          ? await client.history(input)
-          : await client.recoveries(input)
-      }
-    }
-    io.stdout(canonicalJson({ version: "v1", ok: true, command, data }))
-    return 0
+    return await runControlCommand(command, commandArguments, io)
   } catch (cause) {
     const commandError = toCommandError(cause)
     io.stderr(canonicalJson({ version: "v1", ok: false, command, error: commandError }))

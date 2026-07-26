@@ -1,9 +1,13 @@
 import { type Accessor, untrack } from 'solid-js'
 
 import { clearWaveformAssetCache } from '@daw-browser/waveforms/asset-store'
+import { audioCoreContractVersion, type AudioAssetRef, type PlanarPcm } from '../../packages/audio-core-contract/src/index'
 import { isLocalId, resolveClipSampleUrl } from '@daw-browser/shared'
 import { createClipBufferCache, type ClipBuffers, type ClipBufferWriter, type EnsureClipBuffer } from '~/lib/clip-buffer-cache'
 import { readLocalOrCloudAssetFile } from '~/lib/cloud-asset-cache'
+import {
+  resolveSamplePlaybackUrlForRuntime,
+} from '~/lib/renderer-api-url'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
@@ -24,6 +28,7 @@ type CapturedClipMediaLoaderDependencies = {
   readAsset: (projectId: string, sourceAssetKey: string) => ReturnType<typeof readLocalOrCloudAssetFile>
   fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
   decode: (data: ArrayBuffer) => Promise<AudioBuffer>
+  resolveSampleUrl?: (value: string) => string | null
 }
 
 export const createCapturedClipMediaLoader = (dependencies: CapturedClipMediaLoaderDependencies) => {
@@ -44,8 +49,10 @@ export const createCapturedClipMediaLoader = (dependencies: CapturedClipMediaLoa
     })
   }
   const loadUrl = async (sampleUrl: string, signal?: AbortSignal): Promise<CapturedClipBufferLoadResult> => {
+    const url = dependencies.resolveSampleUrl ? dependencies.resolveSampleUrl(sampleUrl) : sampleUrl
+    if (!url) return { status: 'missing' }
     try {
-      const response = await awaitWithSignal(dependencies.fetch(sampleUrl, signal ? { signal } : undefined), signal)
+      const response = await awaitWithSignal(dependencies.fetch(url, signal ? { signal } : undefined), signal)
       if (response.status === 401 || response.status === 403) return { status: 'permission-denied' }
       if (!response.ok) return { status: 'missing' }
       const data = await awaitWithSignal(response.arrayBuffer(), signal)
@@ -117,17 +124,33 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null
 }
 
+export const createAudioAssetRef = (assetId: string, buffer: AudioBuffer): AudioAssetRef => ({
+  version: audioCoreContractVersion,
+  assetId,
+  frameCount: buffer.length,
+  sampleRateHz: buffer.sampleRate,
+  channelCount: buffer.numberOfChannels,
+})
+
+const createPlanarPcm = (buffer: AudioBuffer): PlanarPcm => ({
+  frameCount: buffer.length,
+  planes: Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel)),
+})
+
 export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   const { audioEngine, tracks } = options
   const clipMediaStatus = new Map<string, ClipMediaStatus>()
   const loadingClipIds = new Set<string>()
   const sampleBufferLoader = createSampleBufferLoader()
+  const resolveSampleUrl = resolveSamplePlaybackUrlForRuntime
   const capturedMediaLoader = createCapturedClipMediaLoader({
     readAsset: readLocalOrCloudAssetFile,
     fetch,
     decode: (data) => audioEngine.decodeAudioData(data),
+    resolveSampleUrl,
   })
   let cacheGeneration = 0
+  const registeredAssetIds = new Set<string>()
 
   const publishBufferUpdate = () => {
     options.onBufferChange()
@@ -210,11 +233,25 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       }
     }
 
+    const registerSourceAsset = (sourceAssetKey: string, buffer: AudioBuffer) => {
+      if (isStaleLoad() || registeredAssetIds.has(sourceAssetKey)) return
+      const result = audioEngine.registerAsset(
+        createAudioAssetRef(sourceAssetKey, buffer),
+        createPlanarPcm(buffer),
+        loadGeneration,
+      )
+      if (result.status === 'registered') registeredAssetIds.add(sourceAssetKey)
+    }
+
     if (sampleUrl) {
+      const resolvedSampleUrl = resolveSampleUrl(sampleUrl)
+      if (!resolvedSampleUrl) return
       try {
-        const decoded = await sampleBufferLoader.load(sampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
+        const decoded = await sampleBufferLoader.load(resolvedSampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
         if (!decoded || audioBufferCache.hasBuffer(clipId)) return
-        applyMatchingBuffer(decoded, (clip) => resolveClipSampleUrl(clip) === sampleUrl, { storeWhenCurrentMissing: true })
+        const sourceAssetKey = findClip(clipId)?.sourceAssetKey
+        if (sourceAssetKey) registerSourceAsset(sourceAssetKey, decoded)
+        applyMatchingBuffer(decoded, (clip) => resolveSampleUrl(resolveClipSampleUrl(clip) ?? '') === resolvedSampleUrl, { storeWhenCurrentMissing: true })
       } catch {}
       return
     }
@@ -225,9 +262,13 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       const existing = findClip(clipId)
       const resolvedSampleUrl = existing ? resolveClipSampleUrl(existing) : undefined
       if (resolvedSampleUrl) {
-        const decoded = await sampleBufferLoader.load(resolvedSampleUrl, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
+        const url = resolveSampleUrl(resolvedSampleUrl)
+        if (!url) return
+        const decoded = await sampleBufferLoader.load(url, (arrayBuffer) => audioEngine.decodeAudioData(arrayBuffer))
         if (!decoded || audioBufferCache.hasBuffer(clipId)) return
-        applyMatchingBuffer(decoded, (clip) => resolveClipSampleUrl(clip) === resolvedSampleUrl)
+        const sourceAssetKey = existing?.sourceAssetKey
+        if (sourceAssetKey) registerSourceAsset(sourceAssetKey, decoded)
+        applyMatchingBuffer(decoded, (clip) => resolveSampleUrl(resolveClipSampleUrl(clip) ?? '') === url)
         return
       }
       const projectId = options.projectId()
@@ -237,6 +278,8 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
         if (captured.status === 'ready') {
           const decoded = captured.buffer
           if (audioBufferCache.hasBuffer(clipId)) return
+          registerSourceAsset(sourceAssetKey, decoded)
+          if (isStaleLoad()) return
           applyMatchingBuffer(decoded, (clip) => clip.sourceAssetKey === sourceAssetKey)
           return
         }
@@ -251,6 +294,11 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
   }
 
   const clearClipBufferCaches = () => {
+    for (const assetId of registeredAssetIds) {
+      audioEngine.releaseAsset(assetId, cacheGeneration)
+    }
+    registeredAssetIds.clear()
+    audioEngine.retireAssetGeneration(cacheGeneration)
     cacheGeneration += 1
     loadingClipIds.clear()
     capturedMediaLoader.clear()

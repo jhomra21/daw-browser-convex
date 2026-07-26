@@ -252,6 +252,13 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     changedTargetKeys: ReadonlySet<string>,
   ) => {
     options.audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
+    const nextTargetKeys = new Set(next.map((envelope) => envelope.targetKey));
+    const removedTargetKeys = new Set(
+      [...changedTargetKeys].filter((targetKey) => !nextTargetKeys.has(targetKey)),
+    );
+    if (removedTargetKeys.size > 0) {
+      options.audioEngine.restoreAutomationTargets(removedTargetKeys, previous);
+    }
     const overrides = overriddenAutomationTargetKeys();
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
     if (options.isPlaying()) {

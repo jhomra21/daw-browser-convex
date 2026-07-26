@@ -1,10 +1,12 @@
-import { onCleanup } from 'solid-js'
+import { createEffect, createSignal, onCleanup } from 'solid-js'
 
-import { isLocalId } from '@daw-browser/shared'
-import { convexApi, convexClient } from '~/lib/convex'
-import { toCloudClipId } from '~/lib/cloud-id-args'
-import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { isLocalId, type NormalizedLegacyMidiClip } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
+import {
+  createMidiEditorPersistence,
+  type MidiEditorPersistenceError,
+  type MidiEditorOperation,
+} from '~/lib/midi/editor-persistence'
 
 type MidiClipData = NonNullable<Clip['midi']>
 
@@ -12,80 +14,124 @@ type MidiEditorPersistenceOptions = {
   clipId: () => string
   projectId: () => string | undefined
   userId: () => string | undefined
-  midi: () => MidiClipData
+  canWrite: () => boolean
   onLocalMidiSaved?: (clipId: string, midi: MidiClipData) => void
   onCannotPersist?: () => void
 }
 
-type PendingMidiSave = {
-  clipId: string
-  projectId?: string
-  userId?: string
-  midi: MidiClipData
-}
-
-const canPersistSave = (save: PendingMidiSave) => (
-  Boolean(save.projectId && isLocalId('project', save.projectId)) || Boolean(save.userId)
-)
+export const canPersistMidiEditor = (
+  projectId: string | undefined,
+  userId: string | undefined,
+  canWrite: boolean,
+) => Boolean(canWrite && projectId && (isLocalId('project', projectId) || userId))
 
 export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) {
   let saveTimer: number | null = null
-  let pendingMidiSave: PendingMidiSave | null = null
+  let adapter: ReturnType<typeof createMidiEditorPersistence> | undefined
+  const [error, setError] = createSignal<MidiEditorPersistenceError>()
+  const [pendingVersion, setPendingVersion] = createSignal(0)
 
-  const canPersist = () => {
-    const projectId = options.projectId()
-    return Boolean((projectId && isLocalId('project', projectId)) || options.userId())
-  }
+  const isPersistenceError = (reason: unknown): reason is MidiEditorPersistenceError => (
+    typeof reason === 'object'
+    && reason !== null
+    && 'error' in reason
+    && 'retryable' in reason
+    && reason.error instanceof Error
+    && typeof reason.retryable === 'boolean'
+  )
 
-  const saveMidi = async (save: PendingMidiSave) => {
-    if (save.projectId && isLocalId('project', save.projectId)) {
-      const updated = await createLocalTimelineRepository(save.projectId).updateClip({
-        clipId: save.clipId,
-        midi: save.midi,
-      })
-      if (updated && options.projectId() === save.projectId && options.clipId() === save.clipId) {
-        options.onLocalMidiSaved?.(save.clipId, save.midi)
-      }
+  const retainError = (reason: MidiEditorPersistenceError | unknown) => {
+    if (isPersistenceError(reason)) {
+      setError(reason)
       return
     }
-    await convexClient.mutation(convexApi.clips.setMidi, {
-      clipId: toCloudClipId(save.clipId),
-      midi: save.midi,
+    setError({
+      error: reason instanceof Error ? reason : new Error('Unable to save MIDI changes.'),
+      retryable: true,
     })
   }
 
-  const flush = () => {
+  const canPersist = () => {
+    return canPersistMidiEditor(options.projectId(), options.userId(), options.canWrite())
+  }
+
+  createEffect(() => {
+    const projectId = options.projectId()
+    const clipId = options.clipId()
+    if (!projectId || (!isLocalId('project', projectId) && !options.userId())) {
+      adapter?.dispose()
+      adapter = undefined
+      return
+    }
+    const current = createMidiEditorPersistence({
+      projectId,
+      clipId,
+      onCommitted: (midi) => {
+        setPendingVersion((version) => version + 1)
+        if (isLocalId('project', projectId) && options.projectId() === projectId && options.clipId() === clipId) {
+          options.onLocalMidiSaved?.(clipId, midi)
+        }
+      },
+      onError: retainError,
+      onSettled: () => setPendingVersion((version) => version + 1),
+    })
+    adapter?.dispose()
+    adapter = current
+    onCleanup(current.dispose)
+  })
+
+  const flush = async (): Promise<void> => {
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
     }
-    const save = pendingMidiSave
-    pendingMidiSave = null
-    if (save) void saveMidi(save).catch(() => {})
+    try {
+      await adapter?.flush()
+      if (!adapter?.error()) setError()
+      setPendingVersion((version) => version + 1)
+    } catch (reason) {
+      retainError(reason)
+      throw reason
+    }
   }
 
-  const saveSoon = () => {
-    const pending = {
-      clipId: options.clipId(),
-      projectId: options.projectId(),
-      userId: options.userId(),
-      midi: options.midi(),
-    }
-    if (!canPersistSave(pending)) {
+  const saveSoon = (operation: MidiEditorOperation) => {
+    if (!canPersist() || !adapter) {
       options.onCannotPersist?.()
       return
     }
-    pendingMidiSave = pending
+    adapter.enqueue(operation)
+    setError()
+    setPendingVersion((version) => version + 1)
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
-      flush()
+      void flush().catch(() => undefined)
     }, 200)
   }
 
-  onCleanup(flush)
+  onCleanup(() => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    void flush().catch(() => undefined)
+  })
 
   return {
     canPersist,
     saveSoon,
+    flush,
+    error,
+    dismissError: () => {
+      adapter?.dismissError()
+      setError()
+    },
+    pendingOperations: () => {
+      pendingVersion()
+      return adapter?.pendingOperations() ?? []
+    },
+    reconcile: (midi: NormalizedLegacyMidiClip) => adapter?.reconcile(midi),
+    project: (midi: NormalizedLegacyMidiClip) => {
+      pendingVersion()
+      return adapter?.project(midi) ?? midi
+    },
   }
 }

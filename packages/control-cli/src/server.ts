@@ -2,11 +2,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   controlApprovalResultSchemaV1,
   controlCapabilitiesSchemaV1,
+  controlCapabilitiesSchemaV2,
   controlCommitResultSchemaV1,
   controlHistoryResultSchemaV1,
   controlPreviewResultSchemaV1,
   controlRecoveriesResultSchemaV1,
   projectSnapshotSchemaV1,
+  projectSnapshotSchemaV2,
 } from "@daw-browser/control"
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { createControlMcpServer } from "@daw-browser/control-mcp"
@@ -83,7 +85,9 @@ export const startControlMcp = async () => {
     }
     return {
       capabilities: async () => withTransportBoundary(client.capabilities),
+      capabilitiesV2: async () => withTransportBoundary(client.capabilitiesV2),
       snapshot: async ({ projectId }) => withTransportBoundary(() => client.snapshot(projectId)),
+      snapshotV2: async ({ projectId }) => withTransportBoundary(() => client.snapshotV2(projectId)),
       preview: async (input) => withTransportBoundary(() => client.preview(input)),
       requestApproval: async (input) => withTransportBoundary(() => client.requestApproval(input)),
       commit: async (input) => withTransportBoundary(() => client.commit(input)),
@@ -95,7 +99,9 @@ export const startControlMcp = async () => {
     const client = await createHostClient()
     const service: ControlService = {
       capabilities: async () => controlCapabilitiesSchemaV1.parse(await client.request("control.capabilities", {})),
+      capabilitiesV2: async () => controlCapabilitiesSchemaV2.parse(await client.requestV2("control.capabilities", {})),
       snapshot: async (input) => projectSnapshotSchemaV1.parse(await client.request("control.snapshot", input)),
+      snapshotV2: async (input) => projectSnapshotSchemaV2.parse(await client.requestV2("control.snapshot", input)),
       preview: async (input) => controlPreviewResultSchemaV1.parse(await client.request("control.preview", input)),
       requestApproval: async (input) => controlApprovalResultSchemaV1.parse(await client.request("control.requestApproval", input)),
       commit: async (input) => controlCommitResultSchemaV1.parse(await client.request("control.commit", input)),

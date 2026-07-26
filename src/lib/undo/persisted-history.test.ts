@@ -59,6 +59,34 @@ const automationEntry: HistoryEntry = {
 }
 
 describe('persisted undo history', () => {
+  test('round-trips pending clip deletion operation IDs', () => {
+    const clipCreate: HistoryEntry = {
+      type: 'clip-create',
+      projectId: 'project-1',
+      data: {
+        trackRef: 'track-ref-1',
+        clip: {
+          clipRef: 'clip-ref-1',
+          startSec: 0,
+          duration: 1,
+          deleteOperationId: 'clip-create-delete-1',
+        },
+      },
+    }
+    const clipDelete: HistoryEntry = {
+      type: 'clip-delete',
+      projectId: 'project-1',
+      data: {
+        deleteOperationId: 'clip-delete-redo-1',
+        items: [],
+      },
+    }
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [clipCreate],
+      redo: [clipDelete],
+    }))).toEqual({ undo: [clipCreate], redo: [clipDelete] })
+  })
+
   test('keeps compressor effect parameter entries', () => {
     const serialized = serializePersistedHistory({
       undo: [compressorEntry],
@@ -179,6 +207,45 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('marks version 2 and 3 clip deletes without recovery ids for legacy recreation', () => {
+    const clipDeleteEntry: HistoryEntry = {
+      type: 'clip-delete',
+      projectId: 'project-1',
+      data: {
+        items: [{
+          trackRef: 'track-ref-1',
+          clip: {
+            clipRef: 'clip-ref-1',
+            startSec: 0,
+            duration: 1,
+            midi: { wave: 'custom-legacy', gain: 7, notes: [] },
+          },
+        }],
+      },
+    }
+
+    for (const version of [2, 3]) {
+      expect(normalizePersistedHistory({
+        version,
+        undo: [clipDeleteEntry],
+        redo: [],
+      })).toEqual({
+        undo: [{
+          ...clipDeleteEntry,
+          data: {
+            ...clipDeleteEntry.data,
+            items: [{
+              ...clipDeleteEntry.data.items[0],
+              clip: { ...clipDeleteEntry.data.items[0]!.clip, legacyHistory: true },
+            }],
+            legacyRecreate: true,
+          },
+        }],
+        redo: [],
+      })
+    }
+  })
+
   test('round-trips version 3 automation entries', () => {
     expect(normalizePersistedHistory(serializePersistedHistory({
       undo: [automationEntry],
@@ -292,6 +359,29 @@ describe('persisted undo history', () => {
       undo: [sectionEntry],
       redo: [],
     })
+  })
+
+  test('keeps valid control range delete entries', () => {
+    const entry: HistoryEntry = {
+      type: 'control-range-delete',
+      projectId: 'project-1',
+      data: {
+        trackRefs: ['track-ref-1'],
+        startSec: 1,
+        endSec: 2,
+        recoveryId: 'recovery-1',
+        restoreOperationId: 'restore-operation-1',
+        restoreExpectedRevision: 4,
+        deleteOperationId: 'delete-operation-1',
+        deleteExpectedRevision: 5,
+        deleteApprovalToken: 'approval-token-1',
+      },
+    }
+
+    expect(normalizePersistedHistory(serializePersistedHistory({
+      undo: [entry],
+      redo: [],
+    }))).toEqual({ undo: [entry], redo: [] })
   })
 
   test('rejects malformed section edit entries safely', () => {

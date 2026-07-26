@@ -1,11 +1,15 @@
 export const createR2ObjectResponse = (
   object: R2ObjectBody,
   cacheControl: string,
+  corsOrigin?: string,
 ) => {
   const headers = new Headers()
   headers.set('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream')
   headers.set('Cache-Control', cacheControl)
-  headers.set('Access-Control-Allow-Origin', '*')
+  if (corsOrigin) {
+    headers.set('Access-Control-Allow-Origin', corsOrigin)
+    headers.set('Vary', 'Origin')
+  }
   headers.set('Accept-Ranges', 'bytes')
   if (object.httpMetadata?.contentDisposition) {
     headers.set('Content-Disposition', object.httpMetadata.contentDisposition)

@@ -1,0 +1,15 @@
+{
+  "name": "@daw-browser/audio-core-wasm",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/audio-core-contract": "workspace:*"
+  }
+}

@@ -7,10 +7,19 @@ import { requireProjectRoleContextForApi } from '../project-access'
 import { controlErrorSchemaV1 } from '@daw-browser/control'
 
 const maxUploadBytes = 10 * 1024 * 1024
+const trustedDesktopSampleOrigins = new Set([
+  'daw://app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+])
 
 type SampleRouteDependencies = {
   requireProjectRoleContext?: typeof requireProjectRoleContextForApi
   putObject?: (key: string, file: File, contentSha256: string) => Promise<void>
+}
+
+type PublicSampleRouteDependencies = {
+  listDefaultSamples?: typeof listDefaultSamples
 }
 
 const browserIdempotencyKey = async (assetKey: string) => {
@@ -32,26 +41,69 @@ const sampleUploadErrorStatus = (error: unknown) => {
   return 500
 }
 
-export function registerPublicSampleRoutes(app: App) {
-  app.get('/api/default-samples', async (c) => c.json(await listDefaultSamples(c.env, c.req.url)))
+const getTrustedDesktopSampleOrigin = (origin: string | undefined) => (
+  origin && trustedDesktopSampleOrigins.has(origin) ? origin : undefined
+)
+
+const withPublicSampleCors = (response: Response, origin: string | undefined) => {
+  const allowedOrigin = getTrustedDesktopSampleOrigin(origin)
+  const headers = new Headers(response.headers)
+  headers.delete('Access-Control-Allow-Origin')
+  headers.delete('Access-Control-Allow-Credentials')
+  if (!allowedOrigin) return new Response(response.body, { status: response.status, headers })
+  headers.set('Access-Control-Allow-Origin', allowedOrigin)
+  headers.set('Vary', 'Origin')
+  return new Response(response.body, { status: response.status, headers })
+}
+
+export function registerPublicSampleRoutes(app: App, dependencies: PublicSampleRouteDependencies = {}) {
+  const list = dependencies.listDefaultSamples ?? listDefaultSamples
+  app.options('/api/default-samples', (c) => {
+    const origin = getTrustedDesktopSampleOrigin(c.req.header('Origin'))
+    if (!origin) return c.body(null, 403)
+    return c.body(null, 204, {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Max-Age': '600',
+      Vary: 'Origin',
+    })
+  })
+
+  app.options('/api/default-sample', (c) => {
+    const origin = getTrustedDesktopSampleOrigin(c.req.header('Origin'))
+    if (!origin) return c.body(null, 403)
+    return c.body(null, 204, {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Max-Age': '600',
+      Vary: 'Origin',
+    })
+  })
+
+  app.get('/api/default-samples', async (c) => (
+    withPublicSampleCors(c.json(await list(c.env, c.req.url)), c.req.header('Origin'))
+  ))
 
   app.get('/api/default-sample', async (c) => {
+    const origin = getTrustedDesktopSampleOrigin(c.req.header('Origin'))
     try {
       const key = c.req.query('key')
-      if (!key) return c.json({ error: 'Missing key query parameter' }, 400)
-      if (!key.startsWith('default/')) return c.json({ error: 'Invalid key' }, 400)
+      if (!key) return withPublicSampleCors(c.json({ error: 'Missing key query parameter' }, 400), origin)
+      if (!key.startsWith('default/')) return withPublicSampleCors(c.json({ error: 'Invalid key' }, 400), origin)
 
       const obj = await c.env.daw_audio_samples.get(key)
       if (!obj) {
         const fallbackResponse = await fetchFallbackDefaultSample(c.env, c.req.url, key)
-        if (fallbackResponse) return fallbackResponse
-        return c.json({ error: 'Not found' }, 404)
+        if (fallbackResponse) return withPublicSampleCors(fallbackResponse, origin)
+        return withPublicSampleCors(c.json({ error: 'Not found' }, 404), origin)
       }
 
-      return createR2ObjectResponse(obj, 'public, max-age=31536000, immutable')
+      return createR2ObjectResponse(obj, 'public, max-age=31536000, immutable', origin)
     } catch (err) {
       console.error('Default sample fetch error', err)
-      return c.json({ error: 'Failed to fetch default sample' }, 500)
+      return withPublicSampleCors(c.json({ error: 'Failed to fetch default sample' }, 500), origin)
     }
   })
 }

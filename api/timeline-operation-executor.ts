@@ -49,10 +49,66 @@ export const buildClipMidiMutationArgs = (
 })
 
 export class TimelineOperationTargetError extends Error {
-  constructor(message: string) {
+  readonly status: 400 | 403
+
+  constructor(message: string, status: 400 | 403 = 400) {
     super(message)
     this.name = 'TimelineOperationTargetError'
+    this.status = status
   }
+}
+
+const bulkClipDeleteErrorDetails = (error: unknown) => {
+  const isErrorRecord = (value: unknown): value is {
+    message?: unknown
+    code?: unknown
+    cause?: unknown
+  } => typeof value === 'object' && value !== null
+  const details: Array<{ message?: string; code?: string }> = []
+  const visited = new Set<unknown>()
+  let current: unknown = error
+  while (isErrorRecord(current) && !visited.has(current)) {
+    visited.add(current)
+    details.push({
+      ...(typeof current.message === 'string' ? { message: current.message } : {}),
+      ...(typeof current.code === 'string' ? { code: current.code } : {}),
+    })
+    current = current.cause
+  }
+  return details
+}
+
+export const classifyBulkClipDeleteError = (error: unknown): TimelineOperationTargetError | undefined => {
+  const details = bulkClipDeleteErrorDetails(error)
+  const message = details.map((detail) => detail.message).find((value): value is string => value !== undefined)
+  const protectedCode = details.some((detail) => (
+    detail.code === 'forbidden'
+    || detail.code === 'access-denied'
+    || detail.code === 'track-locked'
+  ))
+  const protectedMessage = details
+    .map((detail) => detail.message)
+    .find((value): value is string => value !== undefined && (
+      value.includes('Actor cannot delete one or more clips.')
+      || value.includes('Actor cannot delete clips on a locked track.')
+    ))
+  if (protectedCode || protectedMessage) {
+    return new TimelineOperationTargetError(
+      protectedMessage ?? message ?? 'Actor cannot delete one or more clips.',
+      403,
+    )
+  }
+  if (!message) return undefined
+  if (
+    message.includes('Clip deletion requires at least one clip.')
+    || message.includes('Clip deletion cannot contain duplicate clip IDs.')
+    || message.includes('Invalid clip deletion ID:')
+    || message.includes('Clip deletion target was not found:')
+    || message.includes('Clip deletion targets must belong to the requested project.')
+    || message.includes('Clip deletion target changed during deletion.')
+    || message.includes('Clip deletion recovery limit exceeded.')
+  ) return new TimelineOperationTargetError(message)
+  return undefined
 }
 
 const verifyTimelineOperationTargets = async (
@@ -86,7 +142,9 @@ export const executeTimelineOperation = async (
   context: TimelineOperationContext,
   operation: SharedTimelineOperation,
 ): Promise<unknown> => {
-  await verifyTimelineOperationTargets(context, operation)
+  if (operation.kind !== 'clips.removeMany') {
+    await verifyTimelineOperationTargets(context, operation)
+  }
 
   switch (operation.kind) {
     case 'tracks.create':
@@ -116,9 +174,17 @@ export const executeTimelineOperation = async (
         operationId: operation.payload.operationId,
       })
     case 'clips.removeMany':
-      return await context.convex.mutation(convexApi.clips.serverRemoveMany, {
-        clipIds: operation.payload.clipIds,
-      })
+      try {
+        return await context.convex.mutation(convexApi.clips.serverRemoveMany, {
+          projectId: context.projectId,
+          clipIds: operation.payload.clipIds,
+          operationId: operation.payload.operationId,
+        })
+      } catch (error) {
+        const classified = classifyBulkClipDeleteError(error)
+        if (classified) throw classified
+        throw error
+      }
     case 'clips.moveMany':
       return await context.convex.mutation(convexApi.clips.serverMoveMany, {
         moves: operation.payload.moves.map((move) => ({
@@ -151,6 +217,11 @@ export const executeTimelineOperation = async (
     case 'clips.setMidi':
       return await context.convex.mutation(convexApi.clips.serverSetMidi, {
         ...buildClipMidiMutationArgs(context.projectId, operation.payload),
+      })
+    case 'clips.setMidiAndTiming':
+      return await context.convex.mutation(convexApi.clips.serverSetMidiAndTiming, {
+        projectId: context.projectId,
+        ...operation.payload,
       })
     case 'tracks.setRouting':
       await context.convex.mutation(convexApi.tracks.serverSetRouting, {

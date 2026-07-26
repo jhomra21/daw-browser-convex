@@ -1,6 +1,8 @@
 import {
   controlCapabilitiesSchemaV1,
   controlCapabilitiesV1,
+  controlCapabilitiesSchemaV2,
+  controlCapabilitiesV2,
   controlCommitResultSchemaV1,
   controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
@@ -17,6 +19,7 @@ import {
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
   projectSnapshotSchemaV1,
+  projectSnapshotSchemaV2,
 } from "@daw-browser/control"
 import { api as convexApi } from "../../convex/_generated/api"
 import type { App, ApiContext } from "../app-types"
@@ -28,6 +31,12 @@ import {
 } from "../control-oauth"
 import type { ControlErrorV1 } from "@daw-browser/control"
 import { createR2ObjectResponse } from "../r2-object-response"
+import {
+  controlAuthorizationError,
+  controlInsufficientScopeHeaders,
+  controlNoStore,
+  controlUnauthorizedHeaders,
+} from "../control-authorization"
 
 type ConvexGateway = {
   query: (reference: unknown, args: unknown) => Promise<unknown>;
@@ -48,7 +57,7 @@ type AuthResult = (
   | { kind: "rejected"; error: ControlErrorV1 }
 )
 
-const noStore = { "Cache-Control": "no-store" }
+const noStore = controlNoStore
 const assetUploadHeader = "x-content-sha256"
 const maxAssetUploadBytes = 10 * 1024 * 1024
 const supportedAssetMimeTypes = new Set([
@@ -65,10 +74,6 @@ const supportedAssetExtensions = new Map([
   ["audio/aac", [".aac"]],
   ["audio/webm", [".webm"]],
 ])
-
-const controlChallenge = (url: string) => (
-  `Bearer resource_metadata="${new URL(url).origin}/.well-known/oauth-protected-resource/api"`
-)
 
 const controlError = (
   code: ControlErrorV1["code"],
@@ -166,20 +171,18 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await resolveBearer(context.req.raw, context.env, scope)
     if (bearer) return { kind: "authenticated", bearer }
     if (scope === "control:write" && await resolveBearer(context.req.raw, context.env, "control:read")) {
-      return { kind: "rejected", error: controlError("forbidden", "Control write scope is required.") }
+      return { kind: "rejected", error: controlAuthorizationError("forbidden") }
     }
-    return { kind: "rejected", error: controlError("authorization", "Bearer authentication is required.") }
+    return { kind: "rejected", error: controlAuthorizationError("authorization") }
   }
 
   const respondWriteAuthorization = (context: ApiContext, error: ControlErrorV1) => (
     error.code === "forbidden"
       ? context.json(error, 403, {
-          ...noStore,
-          "WWW-Authenticate": `Bearer error="insufficient_scope", scope="control:write", resource_metadata="${new URL(context.req.url).origin}/.well-known/oauth-protected-resource/api"`,
+          ...controlInsufficientScopeHeaders(context.req.url, "control:write"),
         })
       : context.json(error, 401, {
-          ...noStore,
-          "WWW-Authenticate": controlChallenge(context.req.url),
+          ...controlUnauthorizedHeaders(context.req.url),
         })
   )
 
@@ -187,10 +190,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await authenticate(context, "control:read")
     if (bearer.kind === "rejected") {
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
-      return context.json(bearer.error, 401, {
-        ...noStore,
-        "WWW-Authenticate": controlChallenge(context.req.url),
-      })
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     return context.json(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1), 200, noStore)
   })
@@ -199,15 +199,36 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await authenticate(context, "control:read")
     if (bearer.kind === "rejected") {
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
-      return context.json(bearer.error, 401, {
-        ...noStore,
-        "WWW-Authenticate": controlChallenge(context.req.url),
-      })
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId
       const gateway = await createGateway(context, bearer.bearer)
       return context.json(projectSnapshotSchemaV1.parse(await gateway.query(convexApi.control.snapshotV1, { projectId })), 200, noStore)
+    } catch (error) {
+      return respondError(context, readControlError(error))
+    }
+  })
+
+  app.get("/api/control/v2/capabilities", async (context) => {
+    const bearer = await authenticate(context, "control:read")
+    if (bearer.kind === "rejected") {
+      if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
+    }
+    return context.json(controlCapabilitiesSchemaV2.parse(controlCapabilitiesV2), 200, noStore)
+  })
+
+  app.get("/api/control/v2/projects/:projectId/snapshot", async (context) => {
+    const bearer = await authenticate(context, "control:read")
+    if (bearer.kind === "rejected") {
+      if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
+    }
+    try {
+      const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId
+      const gateway = await createGateway(context, bearer.bearer)
+      return context.json(projectSnapshotSchemaV2.parse(await gateway.query(convexApi.control.snapshotV2, { projectId })), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }
@@ -262,10 +283,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await authenticate(context, "control:read")
     if (bearer.kind === "rejected") {
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
-      return context.json(bearer.error, 401, {
-        ...noStore,
-        "WWW-Authenticate": controlChallenge(context.req.url),
-      })
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     try {
       const query = parseControlHistoryQueryV1({
@@ -284,7 +302,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await authenticate(context, "control:read")
     if (bearer.kind === "rejected") {
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
-      return context.json(bearer.error, 401, { ...noStore, "WWW-Authenticate": controlChallenge(context.req.url) })
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     try {
       const query = parseControlRecoveriesQueryV1({
@@ -303,7 +321,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     const bearer = await authenticate(context, scope);
     if (bearer.kind === "authenticated") return bearer.bearer;
     if (scope === "control:write") return respondWriteAuthorization(context, bearer.error);
-    return context.json(bearer.error, 401, { ...noStore, "WWW-Authenticate": controlChallenge(context.req.url) });
+    return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url));
   };
 
   app.post("/api/control/v1/projects/:projectId/assets", async (context) => {

@@ -190,6 +190,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       const gate = node.parameters.get('gate')
       if (!gate) return
       scheduledGateEnd = 0
+      scheduledNotes.clear()
       gate.cancelScheduledValues(options.context.currentTime)
       gate.setValueAtTime(0, options.context.currentTime)
     },

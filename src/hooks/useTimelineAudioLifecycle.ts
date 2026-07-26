@@ -28,6 +28,7 @@ export function useTimelineAudioLifecycle(input: {
   createEffect(() => {
     input.projectId()
     onCleanup(() => {
+      input.clearClipBufferCaches()
       void flushLocalTimelineWrites()
     })
   })

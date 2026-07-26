@@ -6,6 +6,7 @@ import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
+import type { AutomationTargetDeviceInstance } from '@daw-browser/shared'
 import RecordingPreview from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
 import MidiEditorCard from '~/components/midi/MidiEditorCard'
@@ -42,6 +43,7 @@ type TimelineOverlaysProps = {
     card: TimelineMidiBounds
     userId?: string
     projectId?: string
+    canWrite: boolean
     close: () => void
     changeBounds: (next: TimelineMidiBounds) => void
     auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
@@ -50,6 +52,7 @@ type TimelineOverlaysProps = {
     }
     onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
   }
+  effectInstancesByOwnerKey: Record<string, AutomationTargetDeviceInstance[]>
 }
 
 const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
@@ -61,6 +64,10 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
   const layoutByTrackId = createMemo(() => new Map(
     props.timeline.rowLayouts.map((row) => [row.trackId, row]),
   ))
+  const midiTrackId = createMemo(() => {
+    const clip = midiClip()
+    return clip ? props.timeline.trackLookup.clipEntryById.get(clip.id)?.track.id : undefined
+  })
 
   const recordingPreview = createMemo(() => {
     const start = props.recording.previewStartSec
@@ -160,9 +167,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
             midi={clip().midi}
             userId={props.midi.userId}
             projectId={props.midi.projectId}
+            canWrite={props.midi.canWrite}
             onAuditionNote={props.midi.auditionNote}
             midiKeyboard={props.midi.keyboard}
             onLocalMidiSaved={props.midi.onLocalMidiSaved}
+            trackId={midiTrackId()}
+            effectInstances={midiTrackId() ? props.effectInstancesByOwnerKey[midiTrackId() ?? ''] : undefined}
           />
         )}
       </Show>

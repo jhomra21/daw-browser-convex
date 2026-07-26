@@ -7,6 +7,7 @@ import {
   rebaseRecoveryAutomationParameterIdV1,
   type ControlActionV1,
   type ControlPlanV1,
+  type RecoveryPayload,
 } from '@daw-browser/control'
 import {
   automationTargetKey,
@@ -22,9 +23,10 @@ import { withLocalControlTransaction, type LocalControlTransactionResult } from 
 import {
   captureLocalRecoveryPayload,
   localRecoveryLifetimeMs,
+  resolveLocalRecoveryAssets,
   serializeLocalRecoveryPayload,
 } from './local-control-recovery'
-import { projectLocalControlSnapshotV1 } from './local-control-projector'
+import { projectLocalControlSnapshotV2 } from './local-control-projector'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
 import { localControlAssetGcLeaseMs } from './local-control-asset-gc'
 
@@ -46,7 +48,7 @@ const digestFor = (snapshot: ControlPlanV1['snapshot']) => {
   })))
 }
 
-const rewriteActionReferences = (
+export const rewriteLocalControlActionReferences = (
   action: ControlActionV1,
   ids: ReadonlyMap<string, string>,
   clientRefs: ReadonlyMap<string, string>,
@@ -78,6 +80,7 @@ const isRecoverable = (action: ControlActionV1) => (
   || action.kind === 'automation.delete'
   || action.kind === 'sidechain.remove'
   || action.kind === 'asset.delete'
+  || action.kind === 'timeline.range.delete'
 )
 
 const recoveryMappings = (
@@ -103,6 +106,7 @@ const recoveryMappings = (
   }
   append('track', record.tracks, 'track')
   append('clip', record.clips, 'clip')
+  append('clip', record.deletedClips, 'clip')
   append('effect', record.effects, 'effect')
   const appendAutomation = (sourceId: unknown, automation: unknown) => {
     if (typeof sourceId !== 'string' || !isRecord(automation)) return
@@ -184,6 +188,38 @@ const replace = (value: string | undefined, ids: ReadonlyMap<string, string>) =>
 )
 const isGenerated = (value: string) => value.startsWith('control:') || value.startsWith('recovery:')
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
+const localSampleUrls = (entities: readonly { kind: string; id: string; value: unknown }[]) => new Map(
+  entities.flatMap((entity) => (
+    entity.kind === 'clip'
+      && isRecord(entity.value)
+      && typeof entity.value.sampleUrl === 'string'
+      ? [[entity.id, entity.value.sampleUrl] as const]
+      : []
+  )),
+)
+const localClipHistoryRefs = (entities: readonly { kind: string; id: string; value: unknown }[]) => new Map(
+  entities.flatMap((entity) => (
+    entity.kind === 'clip'
+      && isRecord(entity.value)
+      && typeof entity.value.historyRef === 'string'
+      ? [[entity.id, entity.value.historyRef] as const]
+      : []
+  )),
+)
+const recoveryClipHistoryRefs = (payload: unknown) => {
+  if (!isRecord(payload) || !isRecord(payload.data)) return []
+  const data = payload.data
+  const clips = [
+    ...(Array.isArray(data.clips) ? data.clips : []),
+    ...(Array.isArray(data.deletedClips) ? data.deletedClips : []),
+    ...(typeof data.clipId === 'string' && isRecord(data.clip) ? [{ id: data.clipId, clip: data.clip }] : []),
+  ]
+  return clips.flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.id !== 'string') return []
+    const clip = isRecord(entry.clip) ? entry.clip : isRecord(entry.before) ? entry.before : undefined
+    return clip && typeof clip.historyRef === 'string' ? [[entry.id, clip.historyRef] as const] : []
+  })
+}
 
 const rewriteInstanceIds = (value: unknown, instanceIds: ReadonlyMap<string, string>): unknown => {
   if (Array.isArray(value)) return value.map((entry) => rewriteInstanceIds(entry, instanceIds))
@@ -320,6 +356,10 @@ export const executeLocalControlRequestInTransactionV1 = (
   const recoveryRows: LocalControlRecoveryRow[] = []
   const restored: Array<{ actionIndex: number; recoveryId: string; entities: Array<{ entity: string; sourceId: string; restoredId: string }> }> = []
   const assetFallbacks = new Map<string, typeof context.rows.assets[number]>()
+  const restoredRecoveries = new Map<string, { payload: RecoveryPayload }>()
+  const sampleUrlFallbacks = new Map<string, string>()
+  const historyRefFallbacks = new Map<string, string>()
+  const sampleUrlByClipId = localSampleUrls(context.rows.entities)
   let current = context.snapshot
   let changed = false
   const invalidRecoveryIds = new Set<string>()
@@ -331,7 +371,7 @@ export const executeLocalControlRequestInTransactionV1 = (
       return []
     }
     if (parsed.projectId !== request.projectId || parsed.consumedAt !== undefined || parsed.expiresAt <= Date.now()) return []
-    return [[parsed.id, { payload: parsed.recovery }] as const]
+    return [[parsed.id, { payload: parsed.recovery, localSampleUrls: parsed.localSampleUrls }] as const]
   }))
   for (const action of request.actions) {
     if (action.kind === 'recovery.restore' && invalidRecoveryIds.has(action.recovery.id)) {
@@ -354,7 +394,7 @@ export const executeLocalControlRequestInTransactionV1 = (
     if (originalAction.kind === 'recovery.restore' && invalidRecoveryIds.has(originalAction.recovery.id)) {
       throw new Error('Recovery payload integrity check failed.')
     }
-    const action = rewriteActionReferences(originalAction, ids, clientRefs)
+    const action = rewriteLocalControlActionReferences(originalAction, ids, clientRefs)
     const stepPlan = planControlRequestV1(
       current,
       { projectId: request.projectId, actions: [action] },
@@ -368,13 +408,24 @@ export const executeLocalControlRequestInTransactionV1 = (
     if (!fullEntry || entry.changed !== fullEntry.changed) {
       throw new Error(`Local control action parity disagrees for action ${actionIndex}.`)
     }
+    if (action.kind === 'timeline.range.delete' && entry.timelineRangeDelete) {
+      for (const creation of entry.timelineRangeDelete.clipCreates) {
+        if (!ids.has(creation.placeholderId)) ids.set(creation.placeholderId, createLocalClipId())
+      }
+    }
     if (entry.changed && isRecoverable(action)) {
       const payload = captureLocalRecoveryPayload({
         projectId: request.projectId,
         actorSubject,
         action,
+        actionIndex,
         snapshot: current,
-        assets: context.rows.assets,
+        assets: resolveLocalRecoveryAssets(current, [
+          ...context.rows.assets,
+          ...assetFallbacks.values(),
+        ], restoredRecoveries),
+        materializedClipIds: ids,
+        clipHistoryRefs: localClipHistoryRefs(context.rows.entities),
       })
       if (!payload) {
         throw { code: 'limit-exceeded', message: 'Recovery payload cannot be captured.', actionIndex }
@@ -393,6 +444,7 @@ export const executeLocalControlRequestInTransactionV1 = (
           kind: payload.kind,
           payload: serialized.payload,
           payloadHash: serialized.payloadHash,
+        localSampleUrls: Object.fromEntries(localSampleUrls(context.rows.entities)),
           createdAt,
           expiresAt,
         }
@@ -486,6 +538,34 @@ export const executeLocalControlRequestInTransactionV1 = (
       throw new Error(`Local control sequential parity disagrees for action ${actionIndex}.`)
     }
     if (entry.changed) {
+      if (entry.timelineRangeDelete) {
+        for (const creation of entry.timelineRangeDelete.clipCreates) {
+          const sourceId = ids.get(creation.sourceClipId) ?? creation.sourceClipId
+          const createdId = ids.get(creation.placeholderId)
+          const sampleUrl = sampleUrlByClipId.get(sourceId)
+          if (createdId && sampleUrl) {
+            sampleUrlFallbacks.set(createdId, sampleUrl)
+            sampleUrlByClipId.set(createdId, sampleUrl)
+          }
+        }
+      }
+      if (originalAction.kind === 'recovery.restore') {
+        const recovery = recoveryById.get(originalAction.recovery.id)
+        if (recovery?.localSampleUrls) {
+          for (const [sourceId, sampleUrl] of Object.entries(recovery.localSampleUrls)) {
+            const restoredId = ids.get(`recovery:clip:${originalAction.recovery.id}:${sourceId}`)
+              ?? ids.get(`recovery:clip:${originalAction.recovery.id}`)
+            if (restoredId) sampleUrlFallbacks.set(restoredId, sampleUrl)
+          }
+        }
+        if (recovery) {
+          for (const [sourceId, historyRef] of recoveryClipHistoryRefs(recovery.payload)) {
+            const restoredId = ids.get(`recovery:clip:${originalAction.recovery.id}:${sourceId}`)
+              ?? ids.get(`recovery:clip:${originalAction.recovery.id}`)
+            if (restoredId) historyRefFallbacks.set(restoredId, historyRef)
+          }
+        }
+      }
       const materialized = materializeLocalControlSnapshot({
         entities: context.rows.entities,
         assets: context.rows.assets,
@@ -495,8 +575,8 @@ export const executeLocalControlRequestInTransactionV1 = (
         .map((asset) => asset.id)), new Set([
         ...removedCanonicalEntityKeys(context.snapshot, next),
         ...Array.from(migratedLegacySynthIds, (id) => `effect:${id}`),
-      ]), migratedLegacySynthIds)
-      const projected = projectLocalControlSnapshotV1({
+      ]), migratedLegacySynthIds, sampleUrlFallbacks, historyRefFallbacks)
+      const projected = projectLocalControlSnapshotV2({
         projectId: request.projectId,
         fallbackMetadata: {
           version: 1,
@@ -549,6 +629,7 @@ export const executeLocalControlRequestInTransactionV1 = (
         })
         context.remove.assetGc(`local-asset-gc:${originalAction.recovery.id}`)
       }
+      restoredRecoveries.set(originalAction.recovery.id, recovery)
       recoveryById.delete(originalAction.recovery.id)
       restored.push({
         actionIndex,
@@ -559,6 +640,7 @@ export const executeLocalControlRequestInTransactionV1 = (
     current = {
       ...current,
       ...next,
+      version: 'v2',
       project: { ...next.project, revision: context.snapshot.project.revision },
     }
     changed = changed || entry.changed
@@ -579,7 +661,7 @@ export const executeLocalControlRequestInTransactionV1 = (
     }, finalSnapshot, Date.now(), assetFallbacks, removedAssetIds, new Set([
       ...removedCanonicalEntityKeys(context.snapshot, finalSnapshot),
       ...Array.from(migratedLegacySynthIds, (id) => `effect:${id}`),
-    ]), migratedLegacySynthIds)
+    ]), migratedLegacySynthIds, sampleUrlFallbacks, historyRefFallbacks)
     for (const row of model.replaced.entities) context.remove.entity(row.kind, row.id)
     for (const id of model.replaced.assets) context.remove.asset(id)
     for (const key of model.replaced.projectState) context.remove.projectState(key)

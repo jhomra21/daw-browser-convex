@@ -8,6 +8,10 @@ import { ensureDefaultSampleMetadata, loadCachedDefaultSampleMetadata } from '~/
 import { listLocalAssets } from '~/lib/local-assets'
 import { listLocalAssetFolders } from '~/lib/local-asset-folders'
 import { getProjectDirectoryHandle } from '~/lib/local-project-db'
+import {
+  resolveDefaultSampleMediaUrlForRuntime,
+  resolveRendererApiUrlForRuntime,
+} from '~/lib/renderer-api-url'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 
 type SampleRow = FunctionReturnType<typeof convexApi.samples.listByRoom>[number]
@@ -238,6 +242,16 @@ function buildDefaultSampleCatalogItem(raw: unknown): DefaultSampleCatalogItem {
   }
 }
 
+export const normalizeDefaultSampleCatalogItem = (
+  raw: unknown,
+  resolveUrl: (value: string) => string | null = resolveDefaultSampleMediaUrlForRuntime,
+): DefaultSampleCatalogItem => {
+  const sample = buildDefaultSampleCatalogItem(raw)
+  const url = resolveUrl(sample.url)
+  if (!url) throw new Error('Invalid default sample URL')
+  return { ...sample, url }
+}
+
 function mergeDefaultSampleMetadata(
   sample: DefaultSampleCatalogItem,
   source: AudioSourceMetadata,
@@ -363,11 +377,19 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
     queryKey: ['default-samples'],
     enabled: enabled ? enabled() : true,
     queryFn: async (): Promise<DefaultSampleCatalogItem[]> => {
-      const res = await fetch('/api/default-samples').catch(() => null)
+      const catalogUrl = resolveRendererApiUrlForRuntime('/api/default-samples')
+      if (!catalogUrl) return []
+      const res = await fetch(catalogUrl).catch(() => null)
       if (!res || !res.ok) return []
       const data = await res.json().catch(() => null)
       const list = isRecord(data) && Array.isArray(data.samples) ? data.samples : []
-      return list.map(buildDefaultSampleCatalogItem)
+      return list.flatMap((sample) => {
+        try {
+          return [normalizeDefaultSampleCatalogItem(sample)]
+        } catch {
+          return []
+        }
+      })
     },
     staleTime: 1000 * 60 * 60,
     gcTime: 1000 * 60 * 60 * 24,

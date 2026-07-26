@@ -15,6 +15,27 @@ import type {
   SidechainRouteHistorySnapshot,
 } from './types'
 
+export function buildControlRangeDeleteHistoryEntry(input: {
+  projectId: string
+  tracks: Track[]
+  trackIds: Track['id'][]
+  startSec: number
+  endSec: number
+  recoveryId: string
+}): Extract<HistoryEntry, { type: 'control-range-delete' }> {
+  const tracksById = new Map(input.tracks.map((track) => [track.id, track]))
+  return {
+    type: 'control-range-delete',
+    projectId: input.projectId,
+    data: {
+      trackRefs: input.trackIds.map((trackId) => getTrackHistoryRef(tracksById.get(trackId))),
+      startSec: input.startSec,
+      endSec: input.endSec,
+      recoveryId: input.recoveryId,
+    },
+  }
+}
+
 export function buildTrackCreateHistoryEntry(input: {
   projectId: string
   trackId: Track['id']
@@ -391,6 +412,8 @@ export function buildClipDeleteHistoryEntry(input: {
   projectId: string
   tracks: Track[]
   clipIds: Iterable<string>
+  recoveryIdsByClipId?: ReadonlyMap<string, string>
+  recoveryOperationId?: string
 }): Extract<HistoryEntry, { type: 'clip-delete' }> {
   const selectedIds = new Set(input.clipIds)
   return {
@@ -401,7 +424,12 @@ export function buildClipDeleteHistoryEntry(input: {
         .filter((clip) => selectedIds.has(clip.id))
         .map((clip) => ({
           trackRef: getTrackHistoryRef(track),
-          clip: buildClipHistorySnapshot(clip),
+          clip: {
+            ...buildClipHistorySnapshot(clip),
+            ...(input.recoveryIdsByClipId?.get(clip.id) ? { recoveryId: input.recoveryIdsByClipId.get(clip.id) } : {}),
+            ...(input.recoveryOperationId ? { recoveryOperationId: input.recoveryOperationId } : {}),
+            ...(input.recoveryOperationId ? { recoverySourceClipId: clip.id } : {}),
+          },
         }))),
     },
   }

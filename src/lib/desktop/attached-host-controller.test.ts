@@ -94,6 +94,13 @@ const installBridge = (terminalJobs: string[]) => {
         exportTerminal: (jobId: string) => {
           terminalJobs.push(jobId)
         },
+        pluginCatalog: {
+          read: async () => ({ ok: true, catalog: { version: 3, directories: [], entries: [], diagnostics: [], scannedAtMs: null } }),
+          chooseDirectory: async () => ({ ok: true, canceled: true }),
+          removeDirectory: async () => ({ ok: true, catalog: { version: 3, directories: [], entries: [], diagnostics: [], scannedAtMs: null } }),
+          scan: async () => ({ ok: true, catalog: { version: 3, directories: [], entries: [], diagnostics: [], scannedAtMs: null } }),
+          preflightInsertion: async () => ({ ok: false, code: "host-unavailable", message: "unavailable" }),
+        },
       },
     },
   })

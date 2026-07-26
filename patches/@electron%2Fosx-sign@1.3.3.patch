@@ -1,0 +1,26 @@
+diff --git a/dist/cjs/sign.js b/dist/cjs/sign.js
+index 080036e410e2e4b0445f841416b3d5966915c66a..ffb5b087741095693b4ad44a3c94e9531443a927 100644
+--- a/dist/cjs/sign.js
++++ b/dist/cjs/sign.js
+@@ -77,7 +77,7 @@ async function verifySignApplication(opts) {
+     // Verify with codesign
+     (0, util_1.debugLog)('Verifying application bundle with codesign...');
+     const strictVerify = opts.strictVerify !== undefined ? opts.strictVerify : true;
+-    await (0, util_1.execFileAsync)('codesign', ['--verify', '--deep'].concat(strictVerify !== false && (0, compare_version_1.default)(osRelease, '15.0.0') >= 0 // Strict flag since darwin 15.0.0 --> OS X 10.11.0 El Capitan
++    await (0, util_1.execFileAsync)('codesign', ['--verify'].concat(strictVerify !== false && (0, compare_version_1.default)(osRelease, '15.0.0') >= 0 // Strict flag since darwin 15.0.0 --> OS X 10.11.0 El Capitan
+         ? [
+             '--strict' +
+                 (strictVerify !== true ? '=' + strictVerify : '')
+diff --git a/dist/esm/sign.js b/dist/esm/sign.js
+index c1615966d19abb6e9ee7b0a8afd76ad011c6d382..c9de64b64759ebd2c4d57e9d1b778fcadc851698 100644
+--- a/dist/esm/sign.js
++++ b/dist/esm/sign.js
+@@ -48,7 +48,7 @@ async function verifySignApplication(opts) {
+     // Verify with codesign
+     debugLog('Verifying application bundle with codesign...');
+     const strictVerify = opts.strictVerify !== undefined ? opts.strictVerify : true;
+-    await execFileAsync('codesign', ['--verify', '--deep'].concat(strictVerify !== false && compareVersion(osRelease, '15.0.0') >= 0 // Strict flag since darwin 15.0.0 --> OS X 10.11.0 El Capitan
++    await execFileAsync('codesign', ['--verify'].concat(strictVerify !== false && compareVersion(osRelease, '15.0.0') >= 0 // Strict flag since darwin 15.0.0 --> OS X 10.11.0 El Capitan
+         ? [
+             '--strict' +
+                 (strictVerify !== true ? '=' + strictVerify : '')

@@ -51,11 +51,11 @@ export const useTimelinePersistenceController = (input: Input) => {
     audioBufferCache: input.audioBufferCache,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
-      const removedIds = await createTimelineClipWriteAdapter({
+      const deletion = await createTimelineClipWriteAdapter({
         projectId,
         userId: input.userId(),
       }).deleteClips([clipId]);
-      return removedIds.has(clipId);
+      return deletion.removedIds.has(clipId);
     },
     projection: input.projection,
     selection: input.selection,

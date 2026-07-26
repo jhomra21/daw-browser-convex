@@ -38,12 +38,13 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" }
       })
     ).toEqual({
-      version: 3,
+      version: APP_PREFERENCES_VERSION,
       appearance: { theme: "dark", themeId: "catppuccin" },
       sidebar: { open: false },
       timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" },
       audio: defaultAppPreferences.audio,
-      recording: defaultAppPreferences.recording
+      recording: defaultAppPreferences.recording,
+      midi: defaultAppPreferences.midi
     })
   })
 
@@ -55,12 +56,13 @@ describe("normalizeAppPreferences", () => {
         sidebar: { open: false }
       })
     ).toEqual({
-      version: 3,
+      version: APP_PREFERENCES_VERSION,
       appearance: { theme: "light", themeId: "default" },
       sidebar: { open: false },
       timeline: defaultAppPreferences.timeline,
       audio: defaultAppPreferences.audio,
-      recording: defaultAppPreferences.recording
+      recording: defaultAppPreferences.recording,
+      midi: defaultAppPreferences.midi
     })
 
     expect(
@@ -71,12 +73,13 @@ describe("normalizeAppPreferences", () => {
         timeline: { defaultTrackColor: "red", defaultGroupColor: "#fedcba" }
       })
     ).toEqual({
-      version: 3,
+      version: APP_PREFERENCES_VERSION,
       appearance: { theme: "dark", themeId: "default" },
       sidebar: { open: false },
       timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" },
       audio: defaultAppPreferences.audio,
-      recording: defaultAppPreferences.recording
+      recording: defaultAppPreferences.recording,
+      midi: defaultAppPreferences.midi
     })
   })
 
@@ -99,7 +102,9 @@ describe("normalizeAppPreferences", () => {
       latencyMode: "interactive",
       echoCancellation: false,
       noiseSuppression: false,
-      autoGainControl: true
+      autoGainControl: true,
+      nativePlaybackEnabled: false,
+      portableBrowserPlaybackEnabled: false
     })
   })
 
@@ -113,7 +118,9 @@ describe("normalizeAppPreferences", () => {
         latencyMode: "balanced",
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
+        autoGainControl: true,
+        nativePlaybackEnabled: false,
+        portableBrowserPlaybackEnabled: false
       }
     })).toEqual({
       ...defaultAppPreferences,
@@ -124,9 +131,25 @@ describe("normalizeAppPreferences", () => {
         latencyMode: "balanced",
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
+        autoGainControl: true,
+        nativePlaybackEnabled: false,
+        portableBrowserPlaybackEnabled: false
       }
     })
+  })
+
+  test("migrates every prior version to empty local MIDI input selections", () => {
+    for (const version of [1, 2, 3]) {
+      expect(normalizeAppPreferences({ version }).midi).toEqual({ selectedInputIds: [] })
+    }
+  })
+
+  test("deduplicates and bounds persisted MIDI input selections", () => {
+    const selectedInputIds = Array.from({ length: 20 }, (_, index) => `input-${index}`)
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      midi: { selectedInputIds: ["input-0", "input-0", ...selectedInputIds, "", 3] }
+    }).midi.selectedInputIds).toEqual(selectedInputIds.slice(0, 16))
   })
 
   test("normalizes recording bounds and keeps the newest 32 stable calibrations", () => {
@@ -143,6 +166,7 @@ describe("normalizeAppPreferences", () => {
     const recording = normalizeAppPreferences({
       version: APP_PREFERENCES_VERSION,
       recording: {
+        portableEnabled: true,
         layout: "stereo",
         inputChannel: 99,
         monitor: "auto",
@@ -153,12 +177,24 @@ describe("normalizeAppPreferences", () => {
       }
     }).recording
 
+    expect(recording.portableEnabled).toBeTrue()
     expect(recording.inputChannel).toBe(31)
     expect(recording.gainDb).toBe(-60)
     expect(recording.manualOffsetFrames).toBe(1_920_000)
     expect(recording.calibrations).toHaveLength(32)
     expect(recording.calibrations[0]?.createdAtMs).toBe(34)
     expect(recording.calibrations[31]?.createdAtMs).toBe(3)
+  })
+
+  test("keeps portable recording opt-in across preference migration", () => {
+    expect(normalizeAppPreferences({
+      version: 6,
+      recording: { portableEnabled: true },
+    }).recording.portableEnabled).toBeFalse()
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      recording: { portableEnabled: true },
+    }).recording.portableEnabled).toBeTrue()
   })
 
   test("normalizes recording runtime updates before persistence", () => {

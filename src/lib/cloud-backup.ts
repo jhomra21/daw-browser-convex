@@ -2,7 +2,11 @@ import { readLocalAssetBytes } from '~/lib/local-assets'
 import { assetCloudIdMappingRows, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY, createRestoredProjectEntry, isProjectManifestSyncStateKey } from '~/lib/project-manifest'
-import { normalizeProjectManifest, type ProjectManifest } from '@daw-browser/shared'
+import {
+  assertProjectManifestPublishIntegrity,
+  normalizeProjectManifest,
+  type ProjectManifest,
+} from '@daw-browser/shared'
 
 type BackupResult = {
   ok: boolean
@@ -236,6 +240,11 @@ const restoreSyncRows = (
   ...backupBookkeepingRows(manifest, manifestVersion),
 ])
 
+const restoredExternalPluginArtifacts = (manifest: ProjectManifest) => {
+  const updatedAt = Date.now()
+  return manifest.externalPluginArtifacts.map((artifact) => ({ ...artifact, updatedAt }))
+}
+
 const fetchCloudBackupSnapshot = async (projectId: string): Promise<CloudBackupSnapshot> => {
   const response = await fetch(`/api/cloud-backups/${encodeURIComponent(projectId)}`)
   const snapshot = readCloudBackupSnapshot(await response.json().catch(() => null))
@@ -260,6 +269,7 @@ export const restoreCloudBackupToLocalProject = async (
     assets,
     projectState: manifest.projectState,
     syncState: restoreSyncRows(manifest, manifestVersion, { linkAssetsForBackup: true }),
+    externalPluginArtifacts: restoredExternalPluginArtifacts(manifest),
   })
   return projectId
 }
@@ -282,6 +292,7 @@ export const duplicateCloudBackupAsLocalProject = async (
     assets,
     projectState: duplicatedManifest.projectState,
     syncState: cloudAssetSourceRows(manifest),
+    externalPluginArtifacts: restoredExternalPluginArtifacts(duplicatedManifest),
   })
   return localProjectId
 }
@@ -306,6 +317,7 @@ export const runProjectBackup = async (
 ): Promise<BackupResult> => {
   try {
     const manifest = await buildProjectManifest(projectId, 'backup')
+    assertProjectManifestPublishIntegrity(manifest)
     const baseManifestVersion = await readLastBackedUpManifestVersion(projectId)
     const pendingDeletedCloudKeys = await readPendingDeletedCloudAssetKeys(projectId)
     if (

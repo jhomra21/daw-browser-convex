@@ -1,8 +1,10 @@
 import {
-  canonicalControlMidiNotes,
+  normalizeLegacyMidiClip,
+  type LegacyMidiClip,
   getAutomationParameterDescriptor,
   normalizeAutomationPoints,
   normalizePersistedInstrumentParams,
+  type MidiClip,
 } from "@daw-browser/shared";
 
 export type ControlProjectSnapshotInput = {
@@ -63,16 +65,7 @@ export type ControlProjectSnapshotInput = {
       fadeInCurvePosition?: number;
       fadeOutCurvePosition?: number;
     };
-    midi?: {
-      wave: string;
-      gain?: number;
-      notes: Array<{
-        beat: number;
-        length: number;
-        pitch: number;
-        velocity?: number;
-      }>;
-    };
+    midi?: Omit<MidiClip, "wave"> & { wave: string };
   }>;
   masterVolume: number;
   effects: Array<{
@@ -125,8 +118,10 @@ const effectiveControlClipName = (name: string | undefined) => name?.trim() || "
 const effectiveControlTimingOffset = (value: number | undefined) => value ?? 0;
 const effectiveControlMixerBoolean = (value: boolean | undefined) => value ?? false;
 
-export const projectControlSnapshotCoreV1 = <Snapshot>(
+const projectControlSnapshotCore = <Snapshot>(
   input: ControlProjectSnapshotInput,
+  version: "v1" | "v2",
+  projectMidi: (midi: LegacyMidiClip) => unknown,
   parseSnapshot: (snapshot: unknown) => Snapshot,
 ): Snapshot => {
   const assets = [...input.assets]
@@ -195,12 +190,7 @@ export const projectControlSnapshotCoreV1 = <Snapshot>(
       fades: clip.fades,
       ...(clip.color === undefined ? {} : { color: clip.color }),
       ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
-      midi: clip.midi
-        ? {
-          ...clip.midi,
-          notes: canonicalControlMidiNotes(clip.midi.notes),
-        }
-        : undefined,
+      midi: clip.midi ? projectMidi(normalizeLegacyMidiClip(clip.midi)) : undefined,
       ...(asset === undefined ? {} : {
         source: {
           assetId: asset.id,
@@ -278,7 +268,7 @@ export const projectControlSnapshotCoreV1 = <Snapshot>(
     ));
 
   return parseSnapshot({
-    version: "v1",
+    version,
     project: {
       id: input.project.projectId,
       name: input.project.name,
@@ -305,3 +295,27 @@ export const projectControlSnapshotCoreV1 = <Snapshot>(
     assetFolders,
   });
 };
+
+export const projectControlSnapshotCoreV1 = <Snapshot>(
+  input: ControlProjectSnapshotInput,
+  parseSnapshot: (snapshot: unknown) => Snapshot,
+) => projectControlSnapshotCore(
+  input,
+  "v1",
+  (midi) => ({
+    wave: midi.wave,
+    ...(midi.gain === undefined ? {} : { gain: midi.gain }),
+    notes: midi.notes.map(({ beat, length, pitch, velocity }) => ({
+      beat,
+      length,
+      pitch,
+      ...(velocity === undefined ? {} : { velocity }),
+    })),
+  }),
+  parseSnapshot,
+)
+
+export const projectControlSnapshotCoreV2 = <Snapshot>(
+  input: ControlProjectSnapshotInput,
+  parseSnapshot: (snapshot: unknown) => Snapshot,
+) => projectControlSnapshotCore(input, "v2", (midi) => midi, parseSnapshot)

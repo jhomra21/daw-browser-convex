@@ -1,12 +1,13 @@
 import type { ConfigColorMode } from "@kobalte/core"
 import { parseHexColor } from "~/lib/color"
+import { normalizeMidiSelectedInputIds } from "~/lib/midi/midi-input"
 import type { RecordingCalibration, RecordingInputPreferences } from "~/lib/recording/recording-preferences"
 import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
 
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 3
+export const APP_PREFERENCES_VERSION = 7
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -25,8 +26,11 @@ export type AudioPreferences = {
   echoCancellation: boolean
   noiseSuppression: boolean
   autoGainControl: boolean
+  nativePlaybackEnabled: boolean
+  portableBrowserPlaybackEnabled: boolean
 }
 export type RecordingPreferences = RecordingInputPreferences & {
+  portableEnabled: boolean
   manualOffsetFrames: number
   calibrations: RecordingCalibration[]
 }
@@ -46,6 +50,9 @@ export type AppPreferences = {
   }
   audio: AudioPreferences
   recording: RecordingPreferences
+  midi: {
+    selectedInputIds: string[]
+  }
 }
 
 
@@ -69,9 +76,12 @@ export const defaultAppPreferences: AppPreferences = {
     latencyMode: "interactive",
     echoCancellation: false,
     noiseSuppression: false,
-    autoGainControl: false
+    autoGainControl: false,
+    nativePlaybackEnabled: false,
+    portableBrowserPlaybackEnabled: false
   },
   recording: {
+    portableEnabled: false,
     layout: "mono",
     inputChannel: 0,
     monitor: "off",
@@ -79,6 +89,9 @@ export const defaultAppPreferences: AppPreferences = {
     invertPolarity: false,
     manualOffsetFrames: 0,
     calibrations: []
+  },
+  midi: {
+    selectedInputIds: []
   }
 }
 
@@ -195,13 +208,14 @@ export const updateRecordingCalibrations = (
 
 export const normalizeAppPreferences = (value: unknown): AppPreferences => {
   if (!isRecord(value)) return defaultAppPreferences
-  if (value.version !== 1 && value.version !== 2 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isRecord(value.appearance) ? value.appearance : {}
   const sidebar = isRecord(value.sidebar) ? value.sidebar : {}
   const timeline = isRecord(value.timeline) ? value.timeline : {}
   const audio = value.version !== 1 && isRecord(value.audio) ? value.audio : {}
-  const recording = value.version === APP_PREFERENCES_VERSION && isRecord(value.recording) ? value.recording : {}
+  const recording = (value.version === 3 || value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isRecord(value.recording) ? value.recording : {}
+  const midi = (value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isRecord(value.midi) ? value.midi : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
@@ -231,9 +245,18 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
       latencyMode: parseAudioLatencyMode(audio.latencyMode),
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
-      autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl)
+      autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl),
+      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION)
+        ? parseBoolean(audio.nativePlaybackEnabled, defaultAppPreferences.audio.nativePlaybackEnabled)
+        : defaultAppPreferences.audio.nativePlaybackEnabled,
+      portableBrowserPlaybackEnabled: (value.version === 6 || value.version === APP_PREFERENCES_VERSION)
+        ? parseBoolean(audio.portableBrowserPlaybackEnabled, defaultAppPreferences.audio.portableBrowserPlaybackEnabled)
+        : defaultAppPreferences.audio.portableBrowserPlaybackEnabled
     },
     recording: {
+      portableEnabled: value.version === APP_PREFERENCES_VERSION
+        ? parseBoolean(recording.portableEnabled, defaultAppPreferences.recording.portableEnabled)
+        : defaultAppPreferences.recording.portableEnabled,
       layout: recording.layout === "stereo" ? "stereo" : "mono",
       inputChannel: parseFiniteInteger(recording.inputChannel, 0, 31, defaultAppPreferences.recording.inputChannel),
       monitor: recording.monitor === "auto" || recording.monitor === "on" ? recording.monitor : "off",
@@ -245,6 +268,9 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
           : defaultAppPreferences.recording.manualOffsetFrames,
       ),
       calibrations: normalizeRecordingCalibrations(recording.calibrations)
+    },
+    midi: {
+      selectedInputIds: normalizeMidiSelectedInputIds(midi.selectedInputIds)
     }
   }
 }

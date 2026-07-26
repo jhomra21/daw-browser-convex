@@ -7,7 +7,7 @@ import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import { trackColorForClip } from '~/lib/clip-color'
-import { isLocalId } from '@daw-browser/shared'
+import { isClipKindCompatibleWithTrack, isLocalId } from '@daw-browser/shared'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import { isSharedOutboxQueuedError } from '~/lib/shared-outbox'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
@@ -43,6 +43,8 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/app-preferences'
 import { buildRecordingConstraints } from '~/lib/audio-settings-core'
 import { resolveCalibrationPlatformIdentity, resolveRecordingOffsetFrames } from '~/lib/recording/recording-calibration'
+import type { PortableRecordingDiagnostics } from '~/lib/portable-browser-playback-controller'
+import type { NativeRecordingDiagnostics } from '~/lib/desktop/native-playback-controller'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 
@@ -67,6 +69,48 @@ type UseTrackRecordingOptions = {
   convexClient: ConvexClientType
   convexApi: ConvexApiType
   requestTransportPlay: () => Promise<void>
+  portableRecording?: {
+    enabled: Accessor<boolean>
+    controller: {
+      start: (input: {
+        appSessionId: string
+        stream: MediaStream
+        layout: "mono" | "stereo"
+        inputChannel: number
+        gain: number
+        polarity: 1 | -1
+        monitoring: boolean
+        punchStartFrame: number
+        punchEndFrame?: number
+        onDiagnostics?: (diagnostics: PortableRecordingDiagnostics) => void
+        onFailure?: (error: Error) => void
+      }) => Promise<{ sampleRate: number; channelCount: number; startFrame: number }>
+      stop: () => Promise<{ capturedFrames: number }>
+      cancel: () => Promise<void>
+      isActive: () => boolean
+    }
+  }
+  nativeRecording?: {
+    enabled: Accessor<boolean>
+    controller: {
+      start: (input: {
+        appSessionId: string
+        layout: "mono" | "stereo"
+        inputChannel: number
+        gain: number
+        polarity: 1 | -1
+        monitoring: boolean
+        punchStartFrame: number
+        punchEndFrame?: number
+        onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
+        onFailure?: (error: Error) => void
+      }) => Promise<{ sampleRate: number; channelCount: number; startFrame: number }>
+      stop: () => Promise<{ capturedFrames: number }>
+      cancel: () => Promise<void>
+      isActive: () => boolean
+      sampleRate: () => number
+    }
+  }
   createTrackForRecording: () => Promise<Track | null>
   notify: (message: string) => void
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -112,6 +156,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     convexClient,
     convexApi,
     requestTransportPlay,
+    portableRecording,
+    nativeRecording,
     createTrackForRecording,
     notify,
     historyPush,
@@ -135,6 +181,19 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   let lockHeartbeatTimer: number | null = null
   let previewContextStartFrame = 0
   let previewSampleRate = 1
+
+  const publishLivePreview = (offset: number, amplitude: number) => {
+    const cutoff = Math.max(0, offset - 5)
+    livePreviewPoints.push({ offset, amplitude: Math.min(1, amplitude) })
+    while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
+      livePreviewStartIndex++
+    }
+    if (livePreviewStartIndex > 128) {
+      livePreviewPoints.splice(0, livePreviewStartIndex)
+      livePreviewStartIndex = 0
+    }
+    setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
+  }
 
   const unsubscribeRecordingStatus = audioEngine.subscribeRecordingStatus((status) => {
     if (status.state === 'recording') {
@@ -162,16 +221,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
     if (status.state !== 'recording' || !activeCtx?.engineCaptureActive || status.sessionId !== activeCtx.engineCaptureSessionId) return
     const offset = Math.max(0, (status.contextFrame - previewContextStartFrame) / previewSampleRate)
-    const cutoff = Math.max(0, offset - 5)
-    livePreviewPoints.push({ offset, amplitude: Math.min(1, status.rms) })
-    while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
-      livePreviewStartIndex++
-    }
-    if (livePreviewStartIndex > 128) {
-      livePreviewPoints.splice(0, livePreviewStartIndex)
-      livePreviewStartIndex = 0
-    }
-    setPreviewPoints(livePreviewStartIndex === 0 ? livePreviewPoints : livePreviewPoints.slice(livePreviewStartIndex))
+    publishLivePreview(offset, status.rms)
   })
 
   const emit = (message: string) => {
@@ -198,7 +248,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (isRecordingInternal()) return
     const uid = userId()
     const targetTrack = tracks().find((track) => track.id === trackId)
-    if (!canTrackReceiveAudioClip(targetTrack)) return
+    if (!canTrackReceiveAudioClip(targetTrack) && !isClipKindCompatibleWithTrack(targetTrack, 'midi')) return
     if (targetTrack?.lockedBy && targetTrack.lockedBy !== uid) return
     setRecordArmTrackId((current) => current === trackId ? null : trackId)
   }
@@ -208,7 +258,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!armedTrackId) return
     const uid = userId()
     const availableTrack = nextTracks.find((track) => track.id === armedTrackId)
-    if (!availableTrack || !canTrackReceiveAudioClip(availableTrack) || (availableTrack.lockedBy && availableTrack.lockedBy !== uid)) {
+    if (!availableTrack || (!canTrackReceiveAudioClip(availableTrack) && !isClipKindCompatibleWithTrack(availableTrack, 'midi')) || (availableTrack.lockedBy && availableTrack.lockedBy !== uid)) {
       setRecordArmTrackId(null)
     }
   }
@@ -241,7 +291,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const cleanupRecording = async () => {
     const ctx = activeCtx
     activeCtx = null
-    if (ctx?.engineCaptureActive) audioEngine.cancelRecordingCapture()
+    if (ctx?.nativeCaptureActive) {
+      await nativeRecording?.controller.cancel().catch(() => undefined)
+    } else if (ctx?.portableCaptureActive) {
+      await portableRecording?.controller.cancel().catch(() => undefined)
+    } else if (ctx?.engineCaptureActive) {
+      audioEngine.cancelRecordingCapture()
+    }
     await cleanupRecordingSession({
       activeCtx: ctx,
       clearLockHeartbeat: () => {
@@ -509,7 +565,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     const recordingSupport = getRecordingSupport()
     const productionSupported = getProductionRecordingSupport()
-    if (!productionSupported && !recordingSupport.supported) {
+    const nativeRequested = nativeRecording?.enabled() ?? false
+    if (!nativeRequested && !productionSupported && !recordingSupport.supported) {
       emit('Recording is not supported in this browser.')
       return { ok: false, reason: 'Recorder unsupported' }
     }
@@ -528,17 +585,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
     }
 
-    let stream: MediaStream
-    try {
+    let stream: MediaStream | null = null
+    const acquireStream = async () => {
+      if (stream) return stream
       stream = await navigator.mediaDevices.getUserMedia({
         audio: buildRecordingConstraints(audioPreferences(), navigator.mediaDevices.getSupportedConstraints())
       })
-    } catch (error) {
-      const missingDevice = error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'OverconstrainedError')
-      const permissionDenied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
-      emit(missingDevice ? 'The selected microphone is unavailable.' : permissionDenied ? 'Microphone access denied.' : 'Unable to capture microphone audio.')
-      await releaseTrackLock(trackId, uid, isLocalProject)
-      return { ok: false, reason: missingDevice ? 'Device unavailable' : permissionDenied ? 'Permission denied' : 'Capture failed' }
+      return stream
     }
 
     const mimeType = recordingSupport.mimeType
@@ -562,23 +615,163 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         }
       })()
     }
-    const startSec = Math.max(0, playheadSec())
+    let startSec = Math.max(0, playheadSec())
 
     let engineCaptureActive = false
+    let portableCaptureActive = false
+    let nativeCaptureActive = false
+    let transportStarted = false
     const engineCaptureSessionId = `take-${Date.now()}`
     const requestedSettings = recordingPreferences()
     await resolveCalibrationPlatformIdentity(navigator)
     ensureRecordingAudioContext(audioEngine)
     const engineContext = audioEngine.getAudioContext()
-    const trackSampleRate = stream.getAudioTracks()[0]?.getSettings().sampleRate
-    let sampleRate = Number.isFinite(trackSampleRate) && trackSampleRate !== undefined
-      ? trackSampleRate
-      : engineContext?.sampleRate ?? 1
-    if (productionSupported) try {
+    let sampleRate = engineContext?.sampleRate ?? 1
+    if (nativeRequested) try {
+      await requestTransportPlay()
+      transportStarted = true
+      if (!nativeRecording?.controller.isActive()) throw new Error('Native playback is unavailable.')
+      const nativeSampleRate = nativeRecording.controller.sampleRate()
+      if (nativeSampleRate <= 0) throw new Error('Native playback sample rate is unavailable.')
+      resetRecordingDiagnostics()
+      previewSampleRate = nativeSampleRate
+      previewContextStartFrame = Math.floor(startSec * nativeSampleRate)
+      const native = await nativeRecording.controller.start({
+        appSessionId: engineCaptureSessionId,
+        layout: requestedSettings.layout,
+        inputChannel: requestedSettings.inputChannel,
+        gain: 10 ** (requestedSettings.gainDb / 20),
+        polarity: requestedSettings.invertPolarity ? -1 : 1,
+        monitoring: requestedSettings.monitor === 'on' || requestedSettings.monitor === 'auto',
+        punchStartFrame: previewContextStartFrame,
+        onDiagnostics: (diagnostics) => {
+          updateRecordingDiagnostics({
+            capturedFrames: diagnostics.capturedFrames,
+            overrunFrames: diagnostics.droppedFrames,
+            droppedFrames: diagnostics.droppedFrames,
+            queuedFrames: diagnostics.queuedBlocks * 2048,
+            muted: false,
+            lastFailure: diagnostics.fatal ? 'native-recording-overflow' : null,
+          })
+          publishLivePreview(diagnostics.capturedFrames / previewSampleRate, diagnostics.rms)
+        },
+        onFailure: (error) => {
+          const failedContext = activeCtx
+          if (!failedContext?.nativeCaptureActive || failedContext.engineCaptureSessionId !== engineCaptureSessionId) return
+          updateRecordingDiagnostics({ deviceLost: true, lastFailure: error.message })
+          void (async () => {
+            await createRecordingTempStorage().remove(engineCaptureSessionId).catch(() => undefined)
+            await cleanupRecording()
+            await handleAutoCreatedTrackFailure(failedContext.createdTrack, failedContext)
+          })()
+        },
+      })
+      sampleRate = native.sampleRate
+      startSec = native.startFrame / native.sampleRate
+      const requestedSampleRate = audioPreferences().sampleRate
+      updateRecordingDiagnostics({
+        requestedFormat: 'pcm',
+        activeFormat: 'pcm',
+        requestedLayout: requestedSettings.layout,
+        activeChannels: native.channelCount,
+        requestedSampleRate: requestedSampleRate === 'default' ? null : requestedSampleRate,
+        activeSampleRate: native.sampleRate,
+        transport: 'transferable',
+        queuedFrames: 0,
+        overrunFrames: 0,
+        droppedFrames: 0,
+      })
+      nativeCaptureActive = true
+      engineCaptureActive = true
+    } catch (err) {
+      console.warn('[useTrackRecording] native PCM capture unavailable; using compatibility fallback', err)
+    }
+
+    if (!nativeCaptureActive) try {
+      stream = await acquireStream()
+      const trackSampleRate = stream.getAudioTracks()[0]?.getSettings().sampleRate
+      if (Number.isFinite(trackSampleRate) && trackSampleRate !== undefined) sampleRate = trackSampleRate
+    } catch (error) {
+      const missingDevice = error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'OverconstrainedError')
+      const permissionDenied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
+      emit(missingDevice ? 'The selected microphone is unavailable.' : permissionDenied ? 'Microphone access denied.' : 'Unable to capture microphone audio.')
+      await releaseTrackLock(trackId, uid, isLocalProject)
+      return { ok: false, reason: missingDevice ? 'Device unavailable' : permissionDenied ? 'Permission denied' : 'Capture failed' }
+    }
+
+    const portableRequested = !nativeRequested && (portableRecording?.enabled() ?? false)
+    if (portableRequested) try {
+      await requestTransportPlay()
+      transportStarted = true
+      if (!portableRecording?.controller.isActive()) throw new Error('Portable playback is unavailable.')
+      resetRecordingDiagnostics()
+      const captureContext = audioEngine.getAudioContext()
+      if (!captureContext) throw new Error('Audio engine context unavailable.')
+      if (!stream) throw new Error('Microphone capture is unavailable.')
+      previewSampleRate = captureContext.sampleRate
+      previewContextStartFrame = Math.floor(startSec * captureContext.sampleRate)
+      const portable = await portableRecording.controller.start({
+        appSessionId: engineCaptureSessionId,
+        stream,
+        layout: requestedSettings.layout,
+        inputChannel: requestedSettings.inputChannel,
+        gain: 10 ** (requestedSettings.gainDb / 20),
+        polarity: requestedSettings.invertPolarity ? -1 : 1,
+        monitoring: requestedSettings.monitor === 'on' || requestedSettings.monitor === 'auto',
+        punchStartFrame: previewContextStartFrame,
+        onDiagnostics: (diagnostics) => {
+          updateRecordingDiagnostics({
+            capturedFrames: diagnostics.capturedFrames,
+            overrunFrames: diagnostics.droppedFrames,
+            droppedFrames: diagnostics.droppedFrames,
+            queuedFrames: diagnostics.queuedBlocks * 2048,
+            muted: false,
+            lastFailure: diagnostics.fatal ? 'portable-recording-overflow' : null,
+          })
+          const offset = diagnostics.capturedFrames / previewSampleRate
+          publishLivePreview(offset, diagnostics.rms)
+        },
+        onFailure: (error) => {
+          const failedContext = activeCtx
+          if (!failedContext?.portableCaptureActive || failedContext.engineCaptureSessionId !== engineCaptureSessionId) return
+          updateRecordingDiagnostics({
+            deviceLost: error.message === 'Portable recording device ended.',
+            lastFailure: error.message,
+          })
+          void (async () => {
+            await createRecordingTempStorage().remove(engineCaptureSessionId).catch(() => undefined)
+            await cleanupRecording()
+            await handleAutoCreatedTrackFailure(failedContext.createdTrack, failedContext)
+          })()
+        },
+      })
+      sampleRate = portable.sampleRate
+      startSec = portable.startFrame / portable.sampleRate
+      const requestedSampleRate = audioPreferences().sampleRate
+      updateRecordingDiagnostics({
+        requestedFormat: 'pcm',
+        activeFormat: 'pcm',
+        requestedLayout: requestedSettings.layout,
+        activeChannels: portable.channelCount,
+        requestedSampleRate: requestedSampleRate === 'default' ? null : requestedSampleRate,
+        activeSampleRate: portable.sampleRate,
+        transport: 'transferable',
+        queuedFrames: 0,
+        overrunFrames: 0,
+        droppedFrames: 0,
+      })
+      portableCaptureActive = true
+      engineCaptureActive = true
+    } catch (err) {
+      console.warn('[useTrackRecording] portable PCM capture unavailable; using compatibility fallback', err)
+    }
+
+    if (!engineCaptureActive && productionSupported && !portableRequested) try {
       resetRecordingDiagnostics()
       await audioEngine.resume()
       const captureContext = audioEngine.getAudioContext()
       if (!captureContext) throw new Error('Audio engine context unavailable.')
+      if (!stream) throw new Error('Microphone capture is unavailable.')
       sampleRate = captureContext.sampleRate
       previewSampleRate = captureContext.sampleRate
       previewContextStartFrame = Math.floor(captureContext.currentTime * captureContext.sampleRate)
@@ -624,6 +817,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     if (!engineCaptureActive) {
+      if (!stream) {
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        return { ok: false, reason: 'Capture failed' }
+      }
       const requestedSampleRate = audioPreferences().sampleRate
       updateRecordingDiagnostics({
         requestedFormat: 'pcm',
@@ -665,6 +862,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       mimeType: mimeType || recorder?.mimeType || '',
       lockedByUserId: uid ?? '',
       engineCaptureActive,
+      portableCaptureActive,
+      nativeCaptureActive,
       engineCaptureSessionId,
       savedAudioSource: engineCaptureActive ? 'worklet-pcm-f32' : 'media-recorder-compressed',
       sampleRate,
@@ -712,10 +911,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     resetPreviewState()
     setPreviewStartSec(startSec)
 
-    try {
-      await requestTransportPlay()
-    } catch (err) {
-      console.warn('[useTrackRecording] requestTransportPlay failed', err)
+    if (!transportStarted) {
+      try {
+        await requestTransportPlay()
+      } catch (err) {
+        console.warn('[useTrackRecording] requestTransportPlay failed', err)
+      }
     }
 
     return { ok: true, trackId }
@@ -729,7 +930,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         ctx.recorder.stop()
       }
       if (ctx.engineCaptureActive) {
-        await audioEngine.stopRecordingCapture()
+        if (ctx.nativeCaptureActive) {
+          await nativeRecording?.controller.stop()
+        } else if (ctx.portableCaptureActive) {
+          await portableRecording?.controller.stop()
+        } else {
+          await audioEngine.stopRecordingCapture()
+        }
         haltLivePreview()
         await finalizeRecording()
         return

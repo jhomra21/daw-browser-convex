@@ -1,10 +1,14 @@
 import {
-  canonicalRecoveryPayloadV1,
+  buildTimelineRangeDeletePatchV1,
+  canonicalCapturedRecoveryPayloadV2,
   hashRecoveryPayloadSyncV1,
-  recoveryPayloadSchemaV1,
+  recoveryCapturedPayloadSchemaV2,
+  timelineRangeRecoveryAutomationDigestV2,
+  timelineRangeRecoveryClipDigestV2,
+  timelineRangeRecoveryOwnershipDigestV2,
   type ControlActionV1,
-  type ProjectSnapshotV1,
-  type RecoveryPayloadV1,
+  type ProjectSnapshotV2,
+  type CapturedRecoveryPayloadV2,
 } from '@daw-browser/control'
 import {
   automationTargetKey,
@@ -18,9 +22,54 @@ import { localSidechainRouteRowId } from '~/lib/local-effects'
 export const localRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
 
 const ownership = (projectId: string, localActorSubject: string) => ({ projectId, localActorSubject })
-const clipPayload = (projectId: string, clip: ProjectSnapshotV1['clips'][number]) => ({
+const recoveryAssetRow = (asset: Extract<CapturedRecoveryPayloadV2, { kind: 'asset.delete' }>['data']['asset']): LocalProjectAssetRow => {
+  if (!('storagePath' in asset)) throw new Error('Cloud recovery assets cannot be restored locally.')
+  return {
+    id: asset.assetKey,
+    name: asset.name,
+    mimeType: asset.mimeType,
+    sizeBytes: asset.sizeBytes,
+    storagePath: asset.storagePath,
+    sourceKind: asset.sourceKind,
+    contentHash: asset.contentSha256,
+    durationSec: asset.duration,
+    sampleRate: asset.sampleRate,
+    channelCount: asset.channelCount,
+    folderId: asset.folderId,
+    missing: asset.missing,
+    originalFileName: asset.originalFileName,
+    originalLastModified: asset.originalLastModified,
+    createdAt: asset.createdAt,
+    updatedAt: asset.updatedAt,
+  }
+}
+
+export const resolveLocalRecoveryAssets = (
+  snapshot: ProjectSnapshotV2,
+  persistedAssets: readonly LocalProjectAssetRow[],
+  recoveries: ReadonlyMap<string, { payload: CapturedRecoveryPayloadV2 }>,
+) => {
+  const assets = new Map(persistedAssets.map((asset) => [asset.id, asset]))
+  for (const recovery of recoveries.values()) {
+    if (recovery.payload.kind === 'asset.delete') {
+      const asset = recoveryAssetRow(recovery.payload.data.asset)
+      assets.set(asset.id, asset)
+    }
+  }
+  return snapshot.assets.flatMap((asset) => {
+    const metadata = assets.get(asset.id)
+    return metadata === undefined ? [] : [metadata]
+  })
+}
+
+const clipPayload = (
+  projectId: string,
+  clip: ProjectSnapshotV2['clips'][number],
+  historyRef?: string,
+) => ({
   projectId,
   trackId: clip.trackId,
+  ...(historyRef === undefined ? {} : { historyRef }),
   startSec: clip.startSec,
   duration: clip.duration,
   ...(clip.source ? {
@@ -40,7 +89,7 @@ const clipPayload = (projectId: string, clip: ProjectSnapshotV1['clips'][number]
   ...(clip.midi === undefined ? {} : { midi: clip.midi }),
   ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
 })
-const trackPayload = (projectId: string, track: ProjectSnapshotV1['tracks'][number], actorSubject: string) => ({
+const trackPayload = (projectId: string, track: ProjectSnapshotV2['tracks'][number], actorSubject: string) => ({
   id: track.id,
   track: {
     projectId,
@@ -65,7 +114,7 @@ const trackPayload = (projectId: string, track: ProjectSnapshotV1['tracks'][numb
   },
   ownership: ownership(projectId, actorSubject),
 })
-const effectPayload = (projectId: string, effect: ProjectSnapshotV1['processors'][number]) => ({
+const effectPayload = (projectId: string, effect: ProjectSnapshotV2['processors'][number]) => ({
   id: effect.id,
   effect: {
     projectId,
@@ -76,7 +125,7 @@ const effectPayload = (projectId: string, effect: ProjectSnapshotV1['processors'
     createdAt: 0,
   },
 })
-const automationPayload = (projectId: string, entry: ProjectSnapshotV1['automation'][number], id: string) => ({
+const automationPayload = (projectId: string, entry: ProjectSnapshotV2['automation'][number], id: string) => ({
   id,
   automation: {
     projectId,
@@ -90,7 +139,7 @@ const automationPayload = (projectId: string, entry: ProjectSnapshotV1['automati
     updatedAt: 0,
   },
 })
-const sidechainPayload = (projectId: string, entry: ProjectSnapshotV1['sidechains'][number], id: string) => ({
+const sidechainPayload = (projectId: string, entry: ProjectSnapshotV2['sidechains'][number], id: string) => ({
   id,
   sidechain: {
     projectId,
@@ -101,8 +150,8 @@ const sidechainPayload = (projectId: string, entry: ProjectSnapshotV1['sidechain
 })
 const effectBundle = (
   projectId: string,
-  snapshot: ProjectSnapshotV1,
-  effects: readonly ProjectSnapshotV1['processors'][number][],
+  snapshot: ProjectSnapshotV2,
+  effects: readonly ProjectSnapshotV2['processors'][number][],
 ) => {
   const effectInstanceIds = new Set(effects.flatMap((effect) => effect.instanceId === undefined ? [] : [effect.instanceId]))
   const targets = new Set(effects.map((effect) => (
@@ -131,8 +180,8 @@ const effectBundle = (
 
 const instrumentAutomation = (
   projectId: string,
-  snapshot: ProjectSnapshotV1,
-  effects: readonly ProjectSnapshotV1['processors'][number][],
+  snapshot: ProjectSnapshotV2,
+  effects: readonly ProjectSnapshotV2['processors'][number][],
 ) => {
   const instanceIds = new Set(effects.flatMap((effect) => {
     const params = effect.processor.params
@@ -158,20 +207,83 @@ export const captureLocalRecoveryPayload = (input: {
   projectId: string
   actorSubject: string
   action: ControlActionV1
-  snapshot: ProjectSnapshotV1
+  actionIndex: number
+  snapshot: ProjectSnapshotV2
   assets: readonly LocalProjectAssetRow[]
-}): RecoveryPayloadV1 | undefined => {
+  materializedClipIds?: ReadonlyMap<string, string>
+  clipHistoryRefs?: ReadonlyMap<string, string>
+}): CapturedRecoveryPayloadV2 | undefined => {
   const { action, snapshot } = input
   let raw: unknown
-  if (action.kind === 'clip.delete') {
+  if (action.kind === 'timeline.range.delete') {
+    const trackIds = action.tracks.flatMap((track) => (
+      track.source === 'persisted' ? [track.id] : []
+    ))
+    if (trackIds.length !== action.tracks.length) return undefined
+    const patch = buildTimelineRangeDeletePatchV1(
+      snapshot,
+      trackIds,
+      action.startSec,
+      action.endSec,
+      input.actionIndex,
+    )
+    const clipById = new Map(snapshot.clips.map((clip) => [clip.id, clip]))
+    raw = {
+      version: 2,
+      kind: action.kind,
+      data: {
+        range: { trackIds: patch.trackIds, startSec: action.startSec, endSec: action.endSec },
+        deletedClips: patch.clipDeletes.map((entry) => ({
+          id: entry.clipId,
+          before: clipPayload(input.projectId, entry.before, input.clipHistoryRefs?.get(entry.before.id)),
+          ownership: ownership(input.projectId, input.actorSubject),
+        })),
+        updatedClips: patch.clipUpdates.map((entry) => ({
+          id: entry.clipId,
+          before: clipPayload(
+            input.projectId,
+            clipById.get(entry.clipId) ?? entry.before,
+            input.clipHistoryRefs?.get(entry.clipId),
+          ),
+          expectedAfterDigest: timelineRangeRecoveryClipDigestV2(entry.after),
+        })),
+        createdClips: patch.clipCreates.map((entry) => ({
+          id: input.materializedClipIds?.get(entry.placeholderId) ?? entry.placeholderId,
+          expectedAfterDigest: timelineRangeRecoveryClipDigestV2(entry.after),
+          expectedOwnershipDigest: timelineRangeRecoveryOwnershipDigestV2(ownership(input.projectId, input.actorSubject)),
+        })),
+        automation: patch.automationUpdates.map((entry) => {
+          const id = automationTargetKey(
+            'master' in entry.before.target
+              ? { kind: 'master', effectInstanceId: entry.before.effectInstanceId }
+              : { kind: 'track', trackId: entry.before.target.trackId, effectInstanceId: entry.before.effectInstanceId },
+            entry.before.parameterId,
+          )
+          return {
+            id,
+            before: automationPayload(input.projectId, entry.before, id).automation,
+            expectedAfterDigest: timelineRangeRecoveryAutomationDigestV2(entry.after),
+          }
+        }),
+      },
+    }
+  } else if (action.kind === 'clip.delete') {
     const clipRef = action.clip
     if (clipRef.source !== 'persisted') return undefined
     const clip = snapshot.clips.find((entry) => entry.id === clipRef.id)
-    raw = clip ? { version: 1, kind: action.kind, data: { clip: clipPayload(input.projectId, clip), clipId: clip.id, ownership: ownership(input.projectId, input.actorSubject) } } : undefined
+    raw = clip ? {
+      version: 2,
+      kind: action.kind,
+      data: {
+        clip: clipPayload(input.projectId, clip, input.clipHistoryRefs?.get(clip.id)),
+        clipId: clip.id,
+        ownership: ownership(input.projectId, input.actorSubject),
+      },
+    } : undefined
   } else if (action.kind === 'asset.delete') {
     const asset = input.assets.find((entry) => entry.id === action.asset.id)
     raw = asset ? {
-      version: 1,
+      version: 2,
       kind: action.kind,
       data: {
         asset: {
@@ -197,7 +309,7 @@ export const captureLocalRecoveryPayload = (input: {
       && candidate.parameterId === action.parameterId
     ))
     raw = entry ? {
-      version: 1,
+      version: 2,
       kind: action.kind,
       data: {
         automation: automationPayload(input.projectId, entry, automationTargetKey(
@@ -224,7 +336,7 @@ export const captureLocalRecoveryPayload = (input: {
       candidate.targetTrackId === targetId && candidate.effectInstanceId === effect.instanceId
     ))
     raw = entry ? {
-      version: 1,
+      version: 2,
       kind: action.kind,
       data: {
         sidechain: sidechainPayload(
@@ -251,7 +363,7 @@ export const captureLocalRecoveryPayload = (input: {
     if (effects.length > 0) {
       const bundle = effectBundle(input.projectId, snapshot, effects)
       raw = {
-        version: 1,
+        version: 2,
         kind: action.kind,
         data: action.kind === 'instrument.remove'
           ? { ...bundle, automation: instrumentAutomation(input.projectId, snapshot, effects) }
@@ -280,7 +392,7 @@ export const captureLocalRecoveryPayload = (input: {
       tracks: tracks.map((track) => trackPayload(input.projectId, track, input.actorSubject)),
       clips: snapshot.clips.filter((clip) => selected.has(clip.trackId)).map((clip) => ({
         id: clip.id,
-        clip: clipPayload(input.projectId, clip),
+        clip: clipPayload(input.projectId, clip, input.clipHistoryRefs?.get(clip.id)),
         ownership: ownership(input.projectId, input.actorSubject),
       })),
       effects: snapshot.processors
@@ -321,11 +433,11 @@ export const captureLocalRecoveryPayload = (input: {
           const before = trackPayload(input.projectId, track, input.actorSubject).track
           return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ id: track.id, before, after }]
         })
-      raw = { version: 1, kind: action.kind, data: { rootTrackId: root.id, ...bundle, survivors } }
+      raw = { version: 2, kind: action.kind, data: { rootTrackId: root.id, ...bundle, survivors } }
     } else {
       if (root.channelRole !== 'group' || snapshot.clips.some((clip) => clip.trackId === root.id)) return undefined
       raw = {
-        version: 1,
+        version: 2,
         kind: action.kind,
         data: {
           groupId: root.id,
@@ -347,11 +459,11 @@ export const captureLocalRecoveryPayload = (input: {
       }
     }
   }
-  const parsed = recoveryPayloadSchemaV1.safeParse(raw)
+  const parsed = recoveryCapturedPayloadSchemaV2.safeParse(raw)
   return parsed.success ? parsed.data : undefined
 }
 
-export const serializeLocalRecoveryPayload = (payload: RecoveryPayloadV1) => {
-  const text = canonicalRecoveryPayloadV1(JSON.parse(JSON.stringify(payload)))
+export const serializeLocalRecoveryPayload = (payload: CapturedRecoveryPayloadV2) => {
+  const text = canonicalCapturedRecoveryPayloadV2(JSON.parse(JSON.stringify(payload)))
   return { payload: text, payloadHash: hashRecoveryPayloadSyncV1(text) }
 }

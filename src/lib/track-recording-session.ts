@@ -26,12 +26,14 @@ export type RecordingContext = {
   tracks: Track[]
   createdTrack: Track | null
   startSec: number
-  stream: MediaStream
+  stream: MediaStream | null
   recorder: MediaRecorder | null
   chunks: BlobPart[]
   mimeType: string
   lockedByUserId: string
   engineCaptureActive: boolean
+  portableCaptureActive: boolean
+  nativeCaptureActive: boolean
   engineCaptureSessionId: string
   savedAudioSource: 'worklet-pcm-f32' | 'media-recorder-compressed'
   sampleRate: number
@@ -174,11 +176,14 @@ export function startRecordingLockHeartbeat(options: {
   trackId: Track['id']
   locker: string
   onError?: (error: unknown) => void
+  onLost?: (reason?: string) => void
 }): number {
   return window.setInterval(() => {
     void publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
+    }).then((result) => {
+      if (isLockResult(result) && !result.ok) options.onLost?.(result.reason)
     }).catch((error) => {
       options.onError?.(error)
     })
@@ -207,7 +212,7 @@ export async function cleanupRecordingSession(options: {
   try {
     if (ctx.recorder && ctx.recorder.state !== 'inactive') ctx.recorder.stop()
   } catch {}
-  try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
+  try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
@@ -226,7 +231,7 @@ export function haltRecordingPreview(options: {
   if (!options.activeCtx) return
   const ctx = options.activeCtx
   try {
-    try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
+    try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
   } catch {}
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)

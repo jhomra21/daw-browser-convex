@@ -1,5 +1,11 @@
 import { api as convexApi } from '../../convex/_generated/api'
-import { isValidCloudBackupAssetKey, parseProjectManifest, type ProjectManifest, withProjectManifestAssetKeys } from '@daw-browser/shared'
+import {
+  assertProjectManifestPublishIntegrity,
+  isValidCloudBackupAssetKey,
+  parseProjectManifest,
+  type ProjectManifest,
+  withProjectManifestAssetKeys,
+} from '@daw-browser/shared'
 import type { App } from '../app-types'
 import type { ApiConvexClient } from '../convex-auth'
 import { hashFile } from '../hash-file'
@@ -160,6 +166,7 @@ export function registerCloudBackupRoutes(app: App) {
     let manifest: ProjectManifest
     try {
       manifest = parseProjectManifest(manifestRaw)
+      assertProjectManifestPublishIntegrity(manifest)
     } catch {
       return c.json({ error: 'Invalid manifest' }, 400)
     }

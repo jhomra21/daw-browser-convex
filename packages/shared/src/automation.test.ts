@@ -79,6 +79,10 @@ describe('automation helpers', () => {
       { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
       { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
     ], 5, 1)).toBe(0)
+    expect(valueAtAutomationTime([
+      { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
+      { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
+    ], 10, 1)).toBe(10)
   })
 
   test('evaluates enabled envelopes without mutating or sorting points', () => {

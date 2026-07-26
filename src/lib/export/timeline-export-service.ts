@@ -9,6 +9,7 @@ import { createExportRenderStateSnapshot, type ExportAutomationPatch, type Expor
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/hooks/useClipBuffers"
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
+import { flushMidiProjectWrites, projectMidiProjectTracks } from "~/lib/midi/editor-persistence"
 
 type TimelineExportDependencies = {
   queue: ExportQueue
@@ -90,8 +91,21 @@ export type TimelineExportService = {
 export const createTimelineExportService = (dependencies: TimelineExportDependencies): TimelineExportService => {
   const jobs = new Map<string, TimelineExportJobStatus>()
   const snapshotRequest = async (settings: ExportSettings) => {
+    let projectId = dependencies.getProjectId()
+    let tracks: RuntimeTrack[] | undefined
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (projectId) await flushMidiProjectWrites(projectId)
+      if (dependencies.getProjectId() === projectId) {
+        tracks = projectMidiProjectTracks(projectId ?? '', dependencies.getTracks())
+        if (dependencies.getProjectId() === projectId) break
+      }
+      projectId = dependencies.getProjectId()
+    }
+    if (!tracks || dependencies.getProjectId() !== projectId) {
+      throw new Error("Project changed while preparing export.")
+    }
     const snapshotClips = new Map<string, RuntimeTrack["clips"][number]>()
-    const tracks = dependencies.getTracks().map((track) => {
+    const capturedTracks = tracks.map((track) => {
       const { clips, ...trackWithoutClips } = track
       const clonedTrack = structuredClone(trackWithoutClips)
       return {
@@ -105,7 +119,6 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       }
     })
     const effectsSnapshot = dependencies.getEffectsExportSnapshot()
-    const projectId = dependencies.getProjectId()
     const userId = dependencies.getUserId()
     const bpm = dependencies.getBpm()
     const masterVolume = dependencies.getMasterVolume()
@@ -118,7 +131,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     await effectsSnapshot?.flushPending()
     return {
       settings: structuredClone(settings),
-      tracks,
+      tracks: capturedTracks,
       bpm,
       masterVolume,
       projectId,

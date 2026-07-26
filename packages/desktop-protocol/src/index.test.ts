@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { localControlCapabilitiesV1 } from "@daw-browser/control"
+import { localControlCapabilitiesV1, localControlCapabilitiesV2 } from "@daw-browser/control"
 import {
   desktopControlOperationSchemaV1,
+  desktopHelloSchemaV2,
+  desktopHelloAckSchemaV2,
   desktopHelloSchemaV1,
   desktopHelloAckSchemaV1,
   desktopOperationSchemaV1,
@@ -9,6 +11,7 @@ import {
   desktopRendererExportInputSchemaV1,
   desktopTrustedRendererRequestSchemaV1,
   desktopRequestSchemaV1,
+  desktopRequestSchemaV2,
   maxDesktopFrameBytes,
   parseDesktopReplyError,
   parseDesktopResult,
@@ -172,7 +175,7 @@ describe("desktop protocol v1", () => {
     expect(desktopHelloSchemaV1.safeParse({ version: "v1", type: "hello", secret: "a".repeat(64), client: "test", actorId: "not-a-uuid" }).success).toBe(false)
   })
 
-  test("derives the hello capability maximum from all 18 operations", () => {
+  test("keeps the V1 hello acknowledgment operation set exact", () => {
     expect(desktopOperationSchemaV1.options).toHaveLength(18)
     expect(desktopHelloAckSchemaV1.safeParse({
       version: "v1",
@@ -188,7 +191,31 @@ describe("desktop protocol v1", () => {
     }).success).toBe(false)
   })
 
-  test("directly validates all seven shared control request inputs", () => {
+  test("uses separate V2 hello, acknowledgement, and control read schemas", () => {
+    expect(desktopHelloSchemaV2.safeParse({
+      version: "v2",
+      type: "hello",
+      secret: "a".repeat(64),
+      client: "test",
+      actorId: "123e4567-e89b-42d3-a456-426614174000",
+      supportedVersions: ["v1", "v2"],
+    }).success).toBe(true)
+    expect(desktopHelloAckSchemaV2.safeParse({
+      version: "v2",
+      type: "helloAck",
+      selectedVersion: "v2",
+      sessionId: "session-12345678",
+      capabilities: desktopOperationSchemaV1.options,
+    }).success).toBe(true)
+    expect(desktopRequestSchemaV1.safeParse({
+      version: "v1", type: "request", id: "read-v1", operation: "control.capabilities", input: { readVersion: "v2" },
+    }).success).toBe(false)
+    expect(desktopRequestSchemaV2.safeParse({
+      version: "v2", type: "request", id: "read-v2", operation: "control.capabilities", input: {},
+    }).success).toBe(true)
+  })
+
+  test("directly validates all shared control request inputs", () => {
     expect(controlRequestInputs).toHaveLength(7)
     for (const [operation, input] of controlRequestInputs) {
       const request = { version: "v1", type: "request", id: "control-1", operation, input }
@@ -246,7 +273,7 @@ describe("desktop protocol v1", () => {
     expect(desktopRendererRequestSchemaV1.safeParse({ ...lifecycleRequest, actorSubject }).success).toBe(false)
   })
 
-  test("parses minimum valid results for all seven control operations", () => {
+  test("parses minimum valid results for all control operations", () => {
     const results = [
       ["control.capabilities", localControlCapabilitiesV1],
       ["control.snapshot", snapshot],
@@ -269,6 +296,11 @@ describe("desktop protocol v1", () => {
       expect(parseDesktopResult(parsedOperation, result)).toEqual(result)
       expect(() => parseDesktopResult(parsedOperation, {})).toThrow()
     }
+    expect(parseDesktopResult("control.capabilities", localControlCapabilitiesV1, {}, "v2")).toEqual(localControlCapabilitiesV1)
+    expect(parseDesktopResult("control.snapshot", snapshot, { projectId: "project-1" }, "v2")).toEqual(snapshot)
+    expect(parseDesktopResult("control.capabilities", localControlCapabilitiesV2, { readVersion: "v2" }, "v2")).toEqual(localControlCapabilitiesV2)
+    expect(parseDesktopResult("control.snapshot", { ...snapshot, version: "v2" }, { projectId: "project-1", readVersion: "v2" }, "v2"))
+      .toEqual({ ...snapshot, version: "v2" })
   })
 
   test("parses only the operation error family and preserves control metadata", () => {

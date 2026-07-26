@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createCapturedClipMediaLoader } from "./useClipBuffers"
+import { createAudioAssetRef, createCapturedClipMediaLoader } from "./useClipBuffers"
 import { createSampleBufferLoader } from "~/lib/sample-buffer-loader"
 
 class TestAudioBuffer implements AudioBuffer {
@@ -72,6 +72,36 @@ test("captured media loader falls back to URL and preserves permission failures"
   expect(await missing.load(reference)).toEqual({ status: "missing" })
 })
 
+test("captured media loading does not fetch unavailable default sample URLs", async () => {
+  let fetches = 0
+  const loader = createCapturedClipMediaLoader({
+    readAsset: async () => ({ status: "missing" }),
+    fetch: async () => {
+      fetches += 1
+      return new Response("audio")
+    },
+    decode: async () => new TestAudioBuffer(),
+    resolveSampleUrl: () => null,
+  })
+  expect(await loader.load({
+    sampleUrl: "/api/default-sample?key=default%2FKick.wav",
+  })).toEqual({ status: "missing" })
+  expect(fetches).toBe(0)
+})
+
+test("sample buffer loader resolves default sample URLs before fetching", async () => {
+  let fetches = 0
+  const loader = createSampleBufferLoader({
+    fetchImpl: async () => {
+      fetches += 1
+      return new Response("audio")
+    },
+    resolveUrl: () => null,
+  })
+  expect(await loader.load("/api/default-sample?key=default%2FKick.wav", async () => new TestAudioBuffer())).toBeNull()
+  expect(fetches).toBe(0)
+})
+
 test("captured media loading settles when its export signal aborts", async () => {
   const controller = new AbortController()
   const loader = createCapturedClipMediaLoader({
@@ -92,4 +122,17 @@ test("signal-bound sample loading settles when its fetch ignores abort", async (
   const loading = loader.load("https://samples.example/stalled.wav", async () => new TestAudioBuffer(), controller.signal)
   controller.abort()
   await expect(loading).rejects.toBeDefined()
+})
+
+test("decoded captured media maps to a portable identity without a URL or AudioBuffer", () => {
+  const asset = createAudioAssetRef("asset:1", new TestAudioBuffer())
+  expect(asset).toEqual({
+    version: 1,
+    assetId: "asset:1",
+    frameCount: 0,
+    sampleRateHz: 44_100,
+    channelCount: 1,
+  })
+  expect("url" in asset).toBe(false)
+  expect("buffer" in asset).toBe(false)
 })

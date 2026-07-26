@@ -4,6 +4,7 @@ import { clientXToSec } from '~/lib/timeline-utils'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
+import type { LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 
 type Options = {
   audioEngine: AudioEngine
@@ -13,15 +14,28 @@ type Options = {
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
   pixelsPerSecond: Accessor<number>
+  preflightPlayback?: () => Promise<boolean>
+  nativePlayback?: {
+    enabled: Accessor<boolean>
+    projectGeneration?: Accessor<number>
+    compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+    reportFault?: (message: string) => void
+  }
+  portableBrowserPlayback?: {
+    enabled: Accessor<boolean>
+    projectGeneration?: Accessor<number>
+    compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+    reportFault?: (message: string) => void
+  }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
-  })
+  }, nativePlayback, portableBrowserPlayback)
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false
@@ -67,6 +81,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
   }
 
   const requestPlay = async () => {
+    if (preflightPlayback && !await preflightPlayback()) return
     const initialTracks = tracks()
     const pendingBuffers: Promise<void>[] = []
     for (const track of initialTracks) {

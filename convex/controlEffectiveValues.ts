@@ -1,6 +1,6 @@
-import { canonicalControlMidiNotes } from "@daw-browser/shared";
+import { midiClipEquals, normalizeLegacyMidiClip, type MidiClip } from "@daw-browser/shared";
 
-export { canonicalControlMidiNotes } from "@daw-browser/shared";
+export { normalizeMidiClip } from "@daw-browser/shared";
 
 export const effectiveControlClipName = (name: string | undefined) => (
   name?.trim() || "Clip"
@@ -14,29 +14,9 @@ export const effectiveControlMixerBoolean = (value: boolean | undefined) => (
   value ?? false
 );
 
-type ControlMidi = {
-  wave: string;
-  gain?: number;
-  notes: Array<{
-    beat: number;
-    length: number;
-    pitch: number;
-    velocity?: number;
-  }>;
-};
+type ControlMidi = MidiClip;
 
 export const controlMidiEqual = (
-  left: ControlMidi | undefined,
+  left: ControlMidi | { wave: string } | undefined,
   right: ControlMidi,
-) => {
-  if (!left || left.wave !== right.wave || left.gain !== right.gain) return false;
-  const leftNotes = canonicalControlMidiNotes(left.notes);
-  const rightNotes = canonicalControlMidiNotes(right.notes);
-  return leftNotes.length === rightNotes.length
-    && leftNotes.every((note, index) => (
-      note.beat === rightNotes[index]?.beat
-      && note.length === rightNotes[index]?.length
-      && note.pitch === rightNotes[index]?.pitch
-      && note.velocity === rightNotes[index]?.velocity
-    ));
-};
+) => left === undefined ? false : midiClipEquals(normalizeLegacyMidiClip(left), right);

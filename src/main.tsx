@@ -8,6 +8,7 @@ import { routeTree } from './routeTree.gen'
 import './index.css'
 import { queryClient } from '~/lib/query-client'
 import { AppPreferencesProvider } from '~/context/app-preferences'
+import { MidiAccessProvider } from '~/context/midi-access'
 import { loadInitialAppPreferences } from '~/lib/preferences/app-preferences'
 
 if (import.meta.env.PROD && !import.meta.env.VITE_DESKTOP) {
@@ -41,7 +42,9 @@ render(() => (
   <QueryClientProvider client={queryClient}>
     <ColorModeProvider initialColorMode={initialColorMode} storageManager={appPreferencesColorModeManager}>
       <AppPreferencesProvider initialPreferences={initialAppPreferences}>
-        <RouterProvider router={router} />
+        <MidiAccessProvider>
+          <RouterProvider router={router} />
+        </MidiAccessProvider>
       </AppPreferencesProvider>
     </ColorModeProvider>
   </QueryClientProvider>

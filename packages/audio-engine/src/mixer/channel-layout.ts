@@ -20,7 +20,9 @@ const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pi
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
   for (const instance of fx.instances) {
-    if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
+    if (instance.kind === 'eq' && instance.params.enabled && instance.params.channelMode === 'mono') {
+      layout = 'mono'
+    } else if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
       if (instance.params.state.enabled) layout = 'stereo'
     } else if ((instance.kind === 'delay' || instance.kind === 'reverb') && expandsLayout(instance.kind, instance.params)) {
       layout = 'stereo'

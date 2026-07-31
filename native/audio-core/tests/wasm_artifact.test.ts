@@ -867,6 +867,10 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
           if (difference < minimum) {
             throw new Error(`${fixture.name} characterization pair ${fixture.characterizationPairKey} difference ${difference} did not exceed ${minimum}.`)
           }
+          const maximum = fixture.characterizationPairDifferenceMaximum
+          if (maximum !== undefined && difference > maximum) {
+            throw new Error(`${fixture.name} characterization pair ${fixture.characterizationPairKey} difference ${difference} exceeded ${maximum}.`)
+          }
         } else {
           characterizationPairs.set(fixture.characterizationPairKey, output)
         }
@@ -1080,8 +1084,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   const reverbFixtures = portableGraphParityFixtures.filter((fixture) => fixture.processorKind === 'reverb')
   expect(reverbFixtures.length).toBeGreaterThan(0)
   expect(reverbFixtures.every((fixture) =>
-    (fixture.knownGapIds?.length ?? 0) > 0
-      && fixture.knownGapIds?.every((gap) => REVERB_KNOWN_GAP_IDS.some((knownGap) => knownGap === gap)))).toBe(true)
+    fixture.knownGapIds?.every((gap) => REVERB_KNOWN_GAP_IDS.some((knownGap) => knownGap === gap)) ?? false)).toBe(true)
   expect([...portableWasmCapabilityMatrix.sampleRatesHz].sort()).toEqual([...new Set(
     portableGraphParityFixtures.filter((fixture) => fixture.capability === 'sampleRates').map((fixture) => fixture.sampleRateHz),
   )].sort())

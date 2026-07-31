@@ -9,6 +9,7 @@ import {
   type SaturatorParamsLite,
 } from '@daw-browser/shared'
 import type { AudioEffectRuntimeInstance } from './runtime-instance'
+import { getReverbImpulseSignatureParts } from './reverb-signature'
 
 type EffectTiming = {
   latencyFrames: number
@@ -86,7 +87,9 @@ export const getEffectTiming = (
     const normalized = normalizeReverbParams(input.params)
     return {
       latencyFrames: 0,
-      tail: finite(normalized.enabled ? (normalized.preDelayMs / 1000 + normalized.decaySec) * rate : 0),
+      tail: finite(normalized.enabled
+        ? (normalized.preDelayMs / 1000 + getReverbImpulseSignatureParts(normalized).bucketSec) * rate
+        : 0),
     }
   }
   if (input.kind === 'chorus' || input.kind === 'flanger') {

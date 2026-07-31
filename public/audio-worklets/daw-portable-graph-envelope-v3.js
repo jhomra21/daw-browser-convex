@@ -14,6 +14,21 @@ export const stableId = (value) => {
 
 export const writeId = (view, offset, id) => view.setBigUint64(offset, stableId(id), true)
 const writeOptionalProcessorId = (view, offset, id) => view.setBigUint64(offset, id ? stableId(id) : 0n, true)
+const processorStateUint32 = (state, offset) => state.byteLength >= offset + 4
+  ? new DataView(state.buffer, state.byteOffset, state.byteLength).getUint32(offset, true)
+  : 0
+const processorStateFloat32 = (state, offset) => state.byteLength >= offset + 4
+  ? new DataView(state.buffer, state.byteOffset, state.byteLength).getFloat32(offset, true)
+  : 0
+const processorOutputLayout = (processor, inputLayout) => {
+  if (processor.bypassed || processorStateUint32(processor.state, 0) === 0) return inputLayout
+  if (processor.kind === 'eq' && processorStateUint32(processor.state, 4) === 1) return 'mono'
+  if (processor.kind === 'delay' && processorStateUint32(processor.state, 16) === 1) return 'stereo'
+  if (processor.kind === 'reverb' && processorStateFloat32(processor.state, 68) > 0) return 'stereo'
+  if (processor.kind === 'chorus' || processor.kind === 'flanger' || processor.kind === 'phaser'
+    || processor.kind === 'autopan' || processor.kind === 'ensemble') return 'stereo'
+  return inputLayout
+}
 
 export const graphEnvelope = (snapshot) => {
   const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
@@ -62,15 +77,25 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 44, edge.pdcDelayFrames, true)
     offset += 48
   }
+  const processorLayouts = new Map()
+  for (const node of snapshot.nodes) {
+    let layout = node.inputLayout
+    for (const processor of node.processorOrder) {
+      const output = processorOutputLayout(processor, layout)
+      processorLayouts.set(processor.instanceId, { input: layout, output })
+      layout = output
+    }
+  }
   for (const { node, processor } of processors) {
+    const layout = processorLayouts.get(processor.instanceId)
     writeId(view, offset, node.id)
     view.setUint32(offset + 8, processor.kindId, true)
     view.setUint32(offset + 12, processor.stateVersion, true)
     view.setUint32(offset + 16, processor.state.byteLength, true)
     view.setUint32(offset + 20, processor.instanceId, true)
     view.setUint32(offset + 24, processor.bypassed ? 1 : 0, true)
-    view.setUint32(offset + 28, node.inputLayout === 'mono' ? 1 : 2, true)
-    view.setUint32(offset + 32, node.outputLayout === 'mono' ? 1 : 2, true)
+    view.setUint32(offset + 28, layout.input === 'mono' ? 1 : 2, true)
+    view.setUint32(offset + 32, layout.output === 'mono' ? 1 : 2, true)
     view.setUint32(offset + 36, processor.parameterTargets.length, true)
     view.setUint32(offset + 40, processor.latencyFrames, true)
     view.setUint32(offset + 44, processor.tailFrames, true)

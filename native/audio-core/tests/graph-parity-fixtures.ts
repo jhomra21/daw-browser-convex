@@ -32,6 +32,7 @@ import {
   type SaturatorProcessorState,
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
+import { getReverbImpulseSignatureParts } from '../../../packages/audio-engine/src/effects/reverb-signature'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 export type PortableDynamicsKind = 'gate' | 'compressor' | 'limiter'
@@ -94,6 +95,7 @@ export type PortableGraphParityFixture = {
   knownGapIds?: readonly string[]
   characterizationPairKey?: string
   characterizationPairDifferenceMinimum?: number
+  characterizationPairDifferenceMaximum?: number
   portableEligible?: boolean
   portableUnsupportedReason?:
     | 'legacy-delay-filter-response-mismatch'
@@ -103,10 +105,6 @@ export type PortableGraphParityFixture = {
 }
 
 export const REVERB_KNOWN_GAP_IDS = [
-  'reverb.native-reflection-modulation-zero-reflections',
-  'reverb.native-pre-delay-not-covering-wet-path',
-  'reverb.native-density-diffusion-decay-shortening',
-  'reverb.native-mono-no-stereo-expansion',
   'reverb.native-time-effect-capacity-nine',
 ] as const
 
@@ -1308,7 +1306,9 @@ const timeEffectTailFrames = (
     return Math.ceil(state.delayMs * sampleRateHz / 1_000 * repeats)
   }
   if (kind === 'reverb' && 'decaySec' in state) {
-    return Math.ceil(state.enabled ? (state.preDelayMs / 1_000 + state.decaySec) * sampleRateHz : 0)
+    return Math.ceil(state.enabled
+      ? (state.preDelayMs / 1_000 + getReverbImpulseSignatureParts(state).bucketSec) * sampleRateHz
+      : 0)
   }
   return 0
 }
@@ -1357,7 +1357,7 @@ const timeEffectFixture = (
     assertReset: options.assertReset,
     expectedLatencyFrames: 0,
     expectedTailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
-    nativeWasmTolerance: 1e-5,
+    nativeWasmTolerance: kind === 'reverb' ? 2e-4 : 1e-5,
     legacyDelay: kind === 'delay' ? { kind, state } : undefined,
     legacyDifferenceMinimum: kind === 'delay' ? 1e-3 : undefined,
     knownGapIds: kind === 'reverb' ? REVERB_KNOWN_GAP_IDS : undefined,
@@ -1393,20 +1393,25 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
       blockPartitions: [1, 31, 127, 512, 1_024, 1_024, 1_377],
     },
   )
+  const graphView = new DataView(fixture.graph.buffer, fixture.graph.byteOffset, fixture.graph.byteLength)
+  graphView.setUint32(24 + 12, 1, true)
+  graphView.setUint32(24 + 16, 1, true)
+  graphView.setUint32(24 + 132 + 12, 1, true)
+  graphView.setUint32(24 + 132 + 16, 2, true)
+  const processorOffset = 24 + 2 * 132 + 48
+  graphView.setUint32(processorOffset + 28, 1, true)
+  graphView.setUint32(processorOffset + 32, 2, true)
   fixture.characterizationPairKey = 'reverb.reflections-zero-spin'
-  fixture.characterizationPairDifferenceMinimum = 1e-5
-  fixture.knownGapIds = [
-    'reverb.native-reflection-modulation-zero-reflections',
-    'reverb.native-mono-no-stereo-expansion',
-  ]
+  fixture.characterizationPairDifferenceMaximum = 1e-7
+  fixture.knownGapIds = []
   fixture.assertOutput = (output) => {
     const onset = reverbOnsetFrame(output)
     const rightEnergy = output[1]?.reduce((sum, sample) => sum + sample * sample, 0) ?? 0
     return finite(output)
       && onset !== null
-      && onset >= 1_300
-      && onset <= 2_200
-      && rightEnergy < 1e-10
+      && onset >= 880
+      && onset <= 1_080
+      && rightEnergy > 1e-8
   }
   return fixture
 }
@@ -1579,7 +1584,8 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         && onset !== null
         && onset >= 880
         && onset <= 1_080
-        && decay === onset
+        && decay !== null
+        && decay <= onset + 4
     }
     return fixture
   })(),

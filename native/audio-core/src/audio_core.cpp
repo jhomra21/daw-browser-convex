@@ -25,7 +25,8 @@ constexpr uint32_t kMaximumGraphProcessors = kMaximumGraphNodes * DAW_AUDIO_CORE
 constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
 constexpr uint32_t kMaximumModulationDelayFrames = 4132;
 constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
-constexpr uint32_t kMaximumTimeEffectProcessors = 8;
+constexpr uint32_t kMaximumDelayProcessors = 8;
+constexpr uint32_t kMaximumReverbProcessors = 8;
 constexpr uint32_t kMaximumSpectralProcessors = 8;
 constexpr uint32_t kMaximumSpectralFftSize = 4096;
 constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
@@ -33,6 +34,9 @@ constexpr uint32_t kSpectralHpssFrames = 31;
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
 // One extra frame lets a 48 kHz processor read the full 3,000 ms contract maximum.
 constexpr uint32_t kMaximumTimeEffectDelayFrames = 144001;
+// Reverb only needs its bounded pre-delay and decorrelation window; its tail is
+// carried by the persistent feedback state below.
+constexpr uint32_t kMaximumReverbDelayFrames = 24001;
 static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
 static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == DAW_AUDIO_CORE_ABI_VERSION);
 
@@ -107,7 +111,8 @@ struct GraphRevision {
     daw_audio_reverb_state reverb{};
     daw_audio_spectral_state spectral{};
     uint32_t modulation_slot = 0;
-    uint32_t time_effect_slot = kMaximumTimeEffectProcessors;
+    uint32_t delay_slot = kMaximumDelayProcessors;
+    uint32_t reverb_slot = kMaximumReverbProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
     struct BiquadHistory {
       float x1 = 0.0F;
@@ -240,9 +245,10 @@ struct ModulationHistory {
   float bypass = 0.0F;
 };
 
+template <size_t DelayFrames>
 struct TimeEffectHistory {
-  std::array<float, kMaximumTimeEffectDelayFrames> left{};
-  std::array<float, kMaximumTimeEffectDelayFrames> right{};
+  std::array<float, DelayFrames> left{};
+  std::array<float, DelayFrames> right{};
   uint32_t write = 0;
   float feedback_left = 0.0F;
   float feedback_right = 0.0F;
@@ -255,6 +261,9 @@ struct TimeEffectHistory {
   double phase = 0.0;
   float bypass = 0.0F;
 };
+
+using DelayHistory = TimeEffectHistory<kMaximumTimeEffectDelayFrames>;
+using ReverbHistory = TimeEffectHistory<kMaximumReverbDelayFrames>;
 
 struct SpectralHistory {
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> input{};
@@ -309,7 +318,8 @@ struct Core {
   std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphEdges> graph_delay_lines{};
   std::array<uint32_t, kMaximumGraphEdges> graph_delay_cursors{};
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
-  std::array<TimeEffectHistory, kMaximumTimeEffectProcessors> time_effect_histories{};
+  std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
+  std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
   std::array<const daw_audio_processor_parameter_block *, kMaximumGraphProcessors> active_parameter_blocks{};
   std::array<uint32_t, kMaximumGraphProcessors> event_starts{};
@@ -616,7 +626,8 @@ daw_audio_core_result prepare_graph_revision(
     return graph.nodes[left].id < graph.nodes[right].id;
   });
   std::array<uint32_t, kMaximumGraphNodes> processor_counts{};
-  uint32_t time_effect_count = 0;
+  uint32_t delay_count = 0;
+  uint32_t reverb_count = 0;
   uint32_t spectral_count = 0;
   for (uint32_t index = 0; index < request.processor_count; ++index) {
     const daw_audio_processor_descriptor &descriptor = request.processors[index];
@@ -642,9 +653,13 @@ daw_audio_core_result prepare_graph_revision(
     GraphRevision::Processor &processor = graph.processors[index];
     processor.node_index = static_cast<uint16_t>(node_index);
     processor.modulation_slot = index;
-    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
-      if (time_effect_count >= kMaximumTimeEffectProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-      processor.time_effect_slot = time_effect_count++;
+    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
+      if (delay_count >= kMaximumDelayProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.delay_slot = delay_count++;
+    }
+    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
+      if (reverb_count >= kMaximumReverbProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.reverb_slot = reverb_count++;
     }
     if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
       if (spectral_count >= kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
@@ -1652,12 +1667,25 @@ void render_modulation_processor(
   *output_right = right + (dry_right - right) * history.bypass;
 }
 
+template <size_t DelayFrames>
 float read_time_effect_delay(
-  const std::array<float, kMaximumTimeEffectDelayFrames> &buffer,
+  const std::array<float, DelayFrames> &buffer,
   uint32_t write,
-  uint32_t delay_frames) {
-  const uint32_t delay = std::min(delay_frames, static_cast<uint32_t>(buffer.size() - 1));
-  return buffer[(write + buffer.size() - delay) % buffer.size()];
+  float delay_frames) {
+  const float delay = std::fmax(1.0F, std::fmin(delay_frames, static_cast<float>(DelayFrames - 1)));
+  const float read = static_cast<float>(write) - delay;
+  const float base = std::floor(read);
+  const float fraction = read - base;
+  const auto index = [&buffer, base](int32_t offset) {
+    const int64_t size = static_cast<int64_t>(buffer.size());
+    int64_t value = static_cast<int64_t>(base) + offset;
+    value %= size;
+    if (value < 0) value += size;
+    return static_cast<size_t>(value);
+  };
+  const float older = buffer[index(0)];
+  const float newer = buffer[index(1)];
+  return older + (newer - older) * fraction;
 }
 
 float filter_time_effect_sample(
@@ -1677,10 +1705,11 @@ float filter_time_effect_sample(
   return *high;
 }
 
-void render_time_effect_processor(
+template <typename History>
+void render_time_effect_processor_impl(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
-  float input_left, float input_right, float, float, float *output_left, float *output_right) {
-  TimeEffectHistory &history = core.time_effect_histories[processor.time_effect_slot];
+  History &history, float input_left, float input_right, float, float,
+  float *output_left, float *output_right) {
   const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
   const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
   const bool delay = processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY;
@@ -1697,45 +1726,60 @@ void render_time_effect_processor(
   const float reverb_low_cut = processor_parameter_value(core, processor, 12, frame, reverb_state.low_cut_hz);
   const float reverb_high_cut = processor_parameter_value(core, processor, 13, frame, reverb_state.high_cut_hz);
   const float reverb_width = processor_parameter_value(core, processor, 14, frame, reverb_state.stereo_width);
-  const float reverb_modulation_ms = reverb_state.reflection_spin != 0
+  const float reverb_modulation_ms = reverb_state.reflections > 0.0F && reverb_state.reflection_spin != 0
     ? std::sin(static_cast<float>(history.phase) * 6.2831853071795864769F) * reverb_state.reflection_mod_amount_ms * 0.5F
     : 0.0F;
-  const float delay_ms = delay ? delay_parameter_ms : std::fmax(1.0F, 30.0F + reverb_state.size * 90.0F + reverb_modulation_ms);
-  const uint32_t delay_frames = std::max(1u, static_cast<uint32_t>(std::round(delay_ms * rate / 1000.0F)));
-  const float raw_left = read_time_effect_delay(history.left, history.write, delay_frames);
-  const float raw_right = read_time_effect_delay(history.right, history.write, delay_frames);
-  const float low_cut = delay ? (delay_state.filter_enabled != 0 ? delay_low_cut : 20.0F)
-    : std::fmax(reverb_low_cut, reverb_state.diffusion_low_cut_hz);
-  const float high_cut = delay ? (delay_state.filter_enabled != 0 ? delay_high_cut : 20000.0F)
-    : std::fmin(reverb_high_cut, reverb_state.diffusion_high_cut_hz);
-  const float wet_left = filter_time_effect_sample(raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
-  const float wet_right = filter_time_effect_sample(raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
-  float feedback = delay ? delay_feedback : std::pow(1.0e-4F, delay_ms / (1000.0F * reverb_state.decay_sec));
-  if (!delay) {
-    feedback *= (0.55F + 0.45F * reverb_state.diffuse)
-      * (0.55F + 0.45F * reverb_state.diffusion)
-      * (0.5F + 0.5F * reverb_state.density);
-  }
-  const float feedback_left = delay && delay_state.ping_pong != 0 ? wet_right : wet_left;
-  const float feedback_right = delay && delay_state.ping_pong != 0 ? wet_left : wet_right;
-  history.left[history.write] = dry_left + feedback_left * feedback;
-  history.right[history.write] = dry_right + feedback_right * feedback;
-  history.write = (history.write + 1) % kMaximumTimeEffectDelayFrames;
   float left = 0.0F;
   float right = 0.0F;
   bool enabled = false;
   if (delay) {
+    const float delay_frames = std::fmax(1.0F, delay_parameter_ms * rate / 1000.0F);
+    const float raw_left = read_time_effect_delay(history.left, history.write, delay_frames);
+    const float raw_right = read_time_effect_delay(history.right, history.write, delay_frames);
+    const float low_cut = delay_state.filter_enabled != 0 ? delay_low_cut : 20.0F;
+    const float high_cut = delay_state.filter_enabled != 0 ? delay_high_cut : 20000.0F;
+    const float wet_left = filter_time_effect_sample(raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
+    const float wet_right = filter_time_effect_sample(raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
+    const float feedback_left = delay_state.ping_pong != 0 ? wet_right : wet_left;
+    const float feedback_right = delay_state.ping_pong != 0 ? wet_left : wet_right;
+    history.left[history.write] = dry_left + feedback_left * delay_feedback;
+    history.right[history.write] = dry_right + feedback_right * delay_feedback;
+    history.write = (history.write + 1) % static_cast<uint32_t>(history.left.size());
     left = dry_left * (1.0F - delay_dry_wet) + wet_left * delay_dry_wet;
     right = dry_right * (1.0F - delay_dry_wet) + wet_right * delay_dry_wet;
     enabled = delay_state.enabled != 0;
   } else {
-    const uint32_t pre_delay_frames = static_cast<uint32_t>(std::round(reverb_pre_delay * rate / 1000.0F));
+    const float pre_delay_frames = std::fmax(1.0F, reverb_pre_delay * rate / 1000.0F + reverb_modulation_ms * rate / 1000.0F);
+    const float stereo_spread_frames = processor.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO
+      ? (6.0F + reverb_state.size * 8.0F) * rate / 1000.0F
+      : 0.0F;
+    const float raw_left = read_time_effect_delay(history.left, history.write, pre_delay_frames);
+    const float raw_right = read_time_effect_delay(history.right, history.write, pre_delay_frames + stereo_spread_frames);
+    const float low_cut = std::fmax(reverb_low_cut, reverb_state.diffusion_low_cut_hz);
+    const float high_cut = std::fmin(reverb_high_cut, reverb_state.diffusion_high_cut_hz);
+    const float wet_left = filter_time_effect_sample(raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
+    const float wet_right = filter_time_effect_sample(raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
+    const float decay = std::fmax(0.05F, reverb_state.decay_sec);
+    const float decay_step = std::pow(1.0e-4F, 1.0F / (decay * rate));
+    const float texture_gain = reverb_state.diffuse
+      * reverb_state.density
+      * (0.5F + 0.5F * reverb_state.diffusion);
     const float reflection_gain = reverb_state.reflections * (0.65F + reverb_state.reflection_shape * 0.7F);
-    const float early_left = read_time_effect_delay(history.left, history.write, pre_delay_frames + 1) * reflection_gain;
-    const float early_right = read_time_effect_delay(history.right, history.write, pre_delay_frames + 1) * reflection_gain;
+    history.feedback_left = history.feedback_left * decay_step + wet_left * texture_gain;
+    history.feedback_right = history.feedback_right * decay_step + wet_right * texture_gain;
+    const float early_left = raw_left * reflection_gain;
+    const float early_right = raw_right * reflection_gain;
+    history.left[history.write] = dry_left;
+    history.right[history.write] = dry_right;
+    history.write = (history.write + 1) % static_cast<uint32_t>(history.left.size());
     const float width = reverb_width;
-    const float wide_left = wet_left * (1.0F + width) * 0.5F + wet_right * (1.0F - width) * 0.5F;
-    const float wide_right = wet_right * (1.0F + width) * 0.5F + wet_left * (1.0F - width) * 0.5F;
+    const bool has_late_texture = reverb_state.diffuse > 0.0F
+      && reverb_state.density > 0.0F
+      && reverb_state.diffusion > 0.0F;
+    const float late_left = has_late_texture ? wet_left + history.feedback_left : 0.0F;
+    const float late_right = has_late_texture ? wet_right + history.feedback_right : 0.0F;
+    const float wide_left = late_left * (1.0F + width) * 0.5F + late_right * (1.0F - width) * 0.5F;
+    const float wide_right = late_right * (1.0F + width) * 0.5F + late_left * (1.0F - width) * 0.5F;
     left = dry_left * (1.0F - reverb_wet) + (wide_left + early_left) * reverb_wet;
     right = dry_right * (1.0F - reverb_wet) + (wide_right + early_right) * reverb_wet;
     history.phase += static_cast<double>(reverb_state.reflection_mod_rate_hz) / static_cast<double>(core.config.sample_rate_hz);
@@ -1744,12 +1788,27 @@ void render_time_effect_processor(
   }
   if (!std::isfinite(left) || !std::isfinite(right)) {
     left = right = 0.0F;
-    history = TimeEffectHistory{};
+    history = History{};
   }
   const float target_bypass = !enabled || processor.bypassed != 0 ? 1.0F : 0.0F;
   history.bypass = clamp_bypass_step(history.bypass, target_bypass, 1.0F / std::fmax(1.0F, std::round(0.01F * rate)));
   *output_left = left + (dry_left - left) * history.bypass;
   *output_right = right + (dry_right - right) * history.bypass;
+}
+
+void render_time_effect_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float sidechain_left, float sidechain_right,
+  float *output_left, float *output_right) {
+  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
+    render_time_effect_processor_impl(
+      core, processor, frame, core.delay_histories[processor.delay_slot],
+      input_left, input_right, sidechain_left, sidechain_right, output_left, output_right);
+    return;
+  }
+  render_time_effect_processor_impl(
+    core, processor, frame, core.reverb_histories[processor.reverb_slot],
+    input_left, input_right, sidechain_left, sidechain_right, output_left, output_right);
 }
 
 
@@ -3916,15 +3975,17 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
   if (core->prepared_graph.revision == expected_revision) {
     const auto next_modulation_histories = std::unique_ptr<std::array<ModulationHistory, kMaximumGraphProcessors>>(
       new (std::nothrow) std::array<ModulationHistory, kMaximumGraphProcessors>{});
-    const auto next_time_effect_histories = std::unique_ptr<std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>>(
-      new (std::nothrow) std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>{});
-    if (!next_modulation_histories || !next_time_effect_histories) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    if (!next_modulation_histories) {
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
     const auto previous_instruments = std::unique_ptr<std::array<InstrumentNodeState, kMaximumGraphNodes>>(
       new (std::nothrow) std::array<InstrumentNodeState, kMaximumGraphNodes>{});
     const auto previous_graph_nodes = std::unique_ptr<std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>>(
       new (std::nothrow) std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>{});
     if (!previous_instruments || !previous_graph_nodes) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     const uint32_t previous_graph_node_count = core->published_graph.node_count;
+    std::array<bool, kMaximumDelayProcessors> preserve_delay{};
+    std::array<bool, kMaximumReverbProcessors> preserve_reverb{};
     std::copy(core->instruments.begin(), core->instruments.end(), previous_instruments->begin());
     std::copy(
       core->published_graph.nodes.begin(),
@@ -3934,15 +3995,33 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       const GraphRevision::Processor &next_processor = core->prepared_graph.processors[next_index];
       for (uint32_t current_index = 0; current_index < core->published_graph.processor_count; ++current_index) {
         const GraphRevision::Processor &current_processor = core->published_graph.processors[current_index];
-        if (next_processor.instance_id == current_processor.instance_id && next_processor.kind == current_processor.kind) {
+        if (next_processor.instance_id == current_processor.instance_id
+          && next_processor.kind == current_processor.kind
+          && next_processor.node_id == current_processor.node_id
+          && next_processor.input_layout == current_processor.input_layout
+          && next_processor.output_layout == current_processor.output_layout) {
           (*next_modulation_histories)[next_processor.modulation_slot] = core->modulation_histories[current_processor.modulation_slot];
-          if (next_processor.time_effect_slot < kMaximumTimeEffectProcessors
-            && current_processor.time_effect_slot < kMaximumTimeEffectProcessors) {
-            (*next_time_effect_histories)[next_processor.time_effect_slot] = core->time_effect_histories[current_processor.time_effect_slot];
+          if (next_processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
+            && next_processor.delay_slot < kMaximumDelayProcessors
+            && current_processor.delay_slot == next_processor.delay_slot
+            && current_processor.delay_slot < kMaximumDelayProcessors) {
+            preserve_delay[next_processor.delay_slot] = true;
+          }
+          if (next_processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
+            && next_processor.reverb_slot < kMaximumReverbProcessors
+            && current_processor.reverb_slot == next_processor.reverb_slot
+            && current_processor.reverb_slot < kMaximumReverbProcessors) {
+            preserve_reverb[next_processor.reverb_slot] = true;
           }
           break;
         }
       }
+    }
+    for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
+      if (!preserve_delay[slot]) core->delay_histories[slot] = DelayHistory{};
+    }
+    for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
+      if (!preserve_reverb[slot]) core->reverb_histories[slot] = ReverbHistory{};
     }
     core->published_graph = core->prepared_graph;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -3969,7 +4048,6 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
     }
     core->graph_delay_cursors.fill(0);
     core->modulation_histories = *next_modulation_histories;
-    core->time_effect_histories = *next_time_effect_histories;
   }
   core->published_revision = expected_revision;
   return DAW_AUDIO_CORE_OK;

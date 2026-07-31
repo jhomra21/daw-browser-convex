@@ -28,6 +28,7 @@ constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
 constexpr uint32_t kMaximumDelayProcessors = 8;
 constexpr uint32_t kMaximumReverbProcessors = 8;
 constexpr uint32_t kMaximumSpectralProcessors = 8;
+constexpr uint32_t kAutoFilterLatencyFrames = 6;
 constexpr uint32_t kMaximumSpectralFftSize = 4096;
 constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
 constexpr uint32_t kSpectralHpssFrames = 31;
@@ -126,6 +127,7 @@ struct GraphRevision {
     daw_audio_delay_state delay{};
     daw_audio_reverb_state reverb{};
     daw_audio_spectral_state spectral{};
+    daw_audio_autofilter_state autofilter{};
     uint32_t history_slot = 0;
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
@@ -328,6 +330,21 @@ struct SpectralHistory {
   float bypass = 0.0F;
 };
 
+struct AutoFilterChannelHistory {
+  float ic1 = 0.0F;
+  float ic2 = 0.0F;
+  float envelope = 0.0F;
+  float phase = 0.0F;
+  float previous = 0.0F;
+};
+
+struct AutoFilterHistory {
+  std::array<AutoFilterChannelHistory, 2> channels{};
+  std::array<std::array<float, kAutoFilterLatencyFrames>, 2> delay{};
+  uint32_t delay_index = 0;
+  float bypass = 0.0F;
+};
+
 struct ProcessorHistorySlot {
   uint64_t instance_id = 0;
   uint32_t kind = 0;
@@ -368,6 +385,7 @@ struct Core {
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
+  std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
   std::array<const daw_audio_processor_parameter_block *, kMaximumGraphProcessors> active_parameter_blocks{};
   std::array<uint32_t, kMaximumGraphProcessors> event_starts{};
   std::array<uint32_t, kMaximumGraphProcessors> event_ends{};
@@ -585,6 +603,7 @@ constexpr std::array<ProcessorContract, DAW_AUDIO_CORE_PROCESSOR_REGISTRY_COUNT>
   {DAW_AUDIO_PROCESSOR_KIND_DELAY, DAW_AUDIO_CORE_PROCESSOR_DELAY_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_DELAY_STATE_BYTES, true},
   {DAW_AUDIO_PROCESSOR_KIND_REVERB, DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_REVERB_STATE_BYTES, true},
   {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER, DAW_AUDIO_CORE_PROCESSOR_AUTOFILTER_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_AUTOFILTER_STATE_BYTES, true},
 }};
 
 const ProcessorContract *find_processor_contract(uint32_t kind) {
@@ -824,7 +843,7 @@ daw_audio_core_result prepare_graph_revision(
     processor.parameter_count = descriptor.parameter_count;
     for (uint32_t parameter = 0; parameter < descriptor.parameter_count; ++parameter) {
       const uint32_t target = descriptor.parameter_targets[parameter];
-      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > 25) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       for (uint32_t previous = 0; previous < parameter; ++previous) {
         if (processor.parameter_targets[previous] == target) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
@@ -1195,6 +1214,21 @@ bool valid_spectral_state(const daw_audio_spectral_state &state) {
     && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F;
 }
 
+bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
+  return state.enabled <= 1 && state.mode <= DAW_AUDIO_AUTOFILTER_MODE_PEAK && state.quality == 0
+    && std::isfinite(state.frequency_hz) && state.frequency_hz >= 20.0F && state.frequency_hz <= 20000.0F
+    && std::isfinite(state.resonance) && state.resonance >= 0.0F && state.resonance <= 1.0F
+    && std::isfinite(state.drive_db) && state.drive_db >= 0.0F && state.drive_db <= 24.0F
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F
+    && std::isfinite(state.envelope_amount_octaves) && state.envelope_amount_octaves >= -6.0F && state.envelope_amount_octaves <= 6.0F
+    && std::isfinite(state.envelope_attack_ms) && state.envelope_attack_ms >= 0.5F && state.envelope_attack_ms <= 500.0F
+    && std::isfinite(state.envelope_release_ms) && state.envelope_release_ms >= 5.0F && state.envelope_release_ms <= 2000.0F
+    && state.lfo_waveform <= 1 && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.01F && state.lfo_rate_hz <= 20.0F
+    && std::isfinite(state.lfo_depth_octaves) && state.lfo_depth_octaves >= 0.0F && state.lfo_depth_octaves <= 6.0F
+    && std::isfinite(state.lfo_phase_offset) && state.lfo_phase_offset >= 0.0F && state.lfo_phase_offset <= 1.0F
+    && std::isfinite(state.lfo_stereo_phase) && state.lfo_stereo_phase >= -0.5F && state.lfo_stereo_phase <= 0.5F;
+}
+
 bool decode_processor_state(
   const daw_audio_processor_descriptor &descriptor,
   GraphRevision::Processor *out_processor) {
@@ -1345,6 +1379,27 @@ bool decode_processor_state(
     };
     if (!valid_spectral_state(state) || descriptor.latency_frames != state.fft_size || descriptor.tail_frames != 0) return false;
     out_processor->spectral = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER && descriptor.state_size == 60) {
+    const daw_audio_autofilter_state state{
+      .enabled = read_u32_le(descriptor.state), .mode = read_u32_le(descriptor.state + 4),
+      .quality = read_u32_le(descriptor.state + 8), .frequency_hz = read_f32_le(descriptor.state + 12),
+      .resonance = read_f32_le(descriptor.state + 16), .drive_db = read_f32_le(descriptor.state + 20),
+      .mix = read_f32_le(descriptor.state + 24), .envelope_amount_octaves = read_f32_le(descriptor.state + 28),
+      .envelope_attack_ms = read_f32_le(descriptor.state + 32), .envelope_release_ms = read_f32_le(descriptor.state + 36),
+      .lfo_waveform = read_u32_le(descriptor.state + 40), .lfo_rate_hz = read_f32_le(descriptor.state + 44),
+      .lfo_depth_octaves = read_f32_le(descriptor.state + 48), .lfo_phase_offset = read_f32_le(descriptor.state + 52),
+      .lfo_stereo_phase = read_f32_le(descriptor.state + 56),
+    };
+    if (!valid_autofilter_state(state) || descriptor.latency_frames != kAutoFilterLatencyFrames
+      || descriptor.tail_frames != 0 || descriptor.parameter_count > 11) return false;
+    for (uint32_t index = 0; index < descriptor.parameter_count; ++index) {
+      const uint32_t target = descriptor.parameter_targets[index];
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ
+        || target > DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return false;
+    }
+    out_processor->autofilter = state;
     return true;
   }
   if (descriptor.kind != DAW_AUDIO_PROCESSOR_KIND_EQ || descriptor.state_size != 200) return false;
@@ -1703,6 +1758,117 @@ void render_eq_processor(
   }
   *output_left = std::isfinite(left) ? left : 0.0F;
   *output_right = std::isfinite(right) ? right : 0.0F;
+}
+
+float autofilter_lfo(uint32_t waveform, float phase) {
+  const float wrapped = phase - std::floor(phase);
+  return waveform == 1
+    ? 1.0F - 4.0F * std::abs(wrapped - 0.5F)
+    : std::sin(6.2831853071795864769F * wrapped);
+}
+
+float autofilter_filter(
+  AutoFilterChannelHistory &channel,
+  float input,
+  float cutoff,
+  float q,
+  uint32_t mode,
+  uint32_t sample_rate_hz) {
+  const float g = std::tan(3.14159265358979323846F * cutoff / (static_cast<float>(sample_rate_hz) * 2.0F));
+  const float k = 1.0F / q;
+  const float a1 = 1.0F / (1.0F + g * (g + k));
+  const float v1 = a1 * (channel.ic1 + g * (input - channel.ic2));
+  const float v2 = channel.ic2 + g * v1;
+  channel.ic1 = 2.0F * v1 - channel.ic1;
+  channel.ic2 = 2.0F * v2 - channel.ic2;
+  const float high = input - k * v1 - v2;
+  if (mode == DAW_AUDIO_AUTOFILTER_MODE_HIGHPASS) return high;
+  if (mode == DAW_AUDIO_AUTOFILTER_MODE_BANDPASS) return v1;
+  if (mode == DAW_AUDIO_AUTOFILTER_MODE_NOTCH) return high + v2;
+  if (mode == DAW_AUDIO_AUTOFILTER_MODE_PEAK) return v2 - high;
+  return v2;
+}
+
+float render_autofilter_channel(
+  Core &core,
+  GraphRevision::Processor &processor,
+  AutoFilterChannelHistory &channel,
+  uint32_t channel_index,
+  uint32_t frame,
+  float input) {
+  const daw_audio_autofilter_state &state = processor.autofilter;
+  const float attack_ms = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_ATTACK_MS, frame, state.envelope_attack_ms);
+  const float release_ms = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_RELEASE_MS, frame, state.envelope_release_ms);
+  const float attack = std::exp(-1.0F / (std::fmax(0.5F, attack_ms) * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
+  const float release = std::exp(-1.0F / (std::fmax(5.0F, release_ms) * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
+  const float peak = std::abs(input);
+  channel.envelope = peak > channel.envelope
+    ? attack * channel.envelope + (1.0F - attack) * peak
+    : release * channel.envelope + (1.0F - release) * peak;
+  const float rate = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_RATE_HZ, frame, state.lfo_rate_hz);
+  const float phase_offset = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET, frame, state.lfo_phase_offset);
+  const float stereo_phase = channel_index == 0 ? 0.0F : processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE, frame, state.lfo_stereo_phase);
+  const float lfo = autofilter_lfo(state.lfo_waveform, static_cast<float>(channel.phase) + phase_offset + stereo_phase);
+  channel.phase += static_cast<double>(rate) / static_cast<double>(core.config.sample_rate_hz);
+  channel.phase -= std::floor(channel.phase);
+  const float envelope_amount = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_AMOUNT_OCTAVES, frame, state.envelope_amount_octaves);
+  const float lfo_depth = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES, frame, state.lfo_depth_octaves);
+  const float frequency = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ, frame, state.frequency_hz);
+  const float cutoff = std::fmax(
+    20.0F,
+    std::fmin(
+      frequency * std::pow(2.0F, envelope_amount * channel.envelope + lfo_depth * lfo),
+      0.45F * static_cast<float>(core.config.sample_rate_hz)));
+  const float resonance = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_RESONANCE, frame, state.resonance);
+  const float q = 0.5F + 19.5F * resonance;
+  const float drive_db = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_DRIVE_DB, frame, state.drive_db);
+  const float driven = std::tanh(input * std::pow(10.0F, drive_db / 20.0F));
+  const float midpoint = 0.5F * (channel.previous + driven);
+  autofilter_filter(channel, midpoint, cutoff, q, state.mode, core.config.sample_rate_hz);
+  const float wet = autofilter_filter(channel, driven, cutoff, q, state.mode, core.config.sample_rate_hz);
+  channel.previous = driven;
+  const float mix = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_MIX, frame, state.mix);
+  return input + (wet - input) * mix;
+}
+
+void render_autofilter_processor(
+  Core &core,
+  GraphRevision::Processor &processor,
+  uint32_t frame,
+  float input_left,
+  float input_right,
+  float,
+  float,
+  float *output_left,
+  float *output_right) {
+  AutoFilterHistory &history = core.autofilter_histories[processor.history_slot];
+  const float left = std::isfinite(input_left) ? input_left : 0.0F;
+  const float right = std::isfinite(input_right) ? input_right : 0.0F;
+  const float bypass_step = 1.0F / std::fmax(1.0F, std::round(0.01F * static_cast<float>(core.config.sample_rate_hz)));
+  const float target_bypass = processor.bypassed != 0 || processor.autofilter.enabled == 0 ? 1.0F : 0.0F;
+  history.bypass = clamp_bypass_step(history.bypass, target_bypass, bypass_step);
+  const float processed_left = render_autofilter_channel(core, processor, history.channels[0], 0, frame, left);
+  const float processed_right = render_autofilter_channel(core, processor, history.channels[1], 1, frame, right);
+  const float mixed_left = std::isfinite(processed_left) ? processed_left + (left - processed_left) * history.bypass : 0.0F;
+  const float mixed_right = std::isfinite(processed_right) ? processed_right + (right - processed_right) * history.bypass : 0.0F;
+  if (!std::isfinite(processed_left)) history.channels[0] = {};
+  if (!std::isfinite(processed_right)) history.channels[1] = {};
+  *output_left = history.delay[0][history.delay_index];
+  *output_right = history.delay[1][history.delay_index];
+  history.delay[0][history.delay_index] = mixed_left;
+  history.delay[1][history.delay_index] = mixed_right;
+  history.delay_index = (history.delay_index + 1) % kAutoFilterLatencyFrames;
 }
 
 float modulation_lfo(uint32_t waveform, float phase) {
@@ -2356,7 +2522,7 @@ struct ProcessorImplementation {
   ProcessorRenderer render;
 };
 
-constexpr std::array<ProcessorImplementation, 15> kProcessorImplementations{{
+constexpr std::array<ProcessorImplementation, 16> kProcessorImplementations{{
   {DAW_AUDIO_PROCESSOR_KIND_UTILITY, render_utility_processor},
   {DAW_AUDIO_PROCESSOR_KIND_SATURATOR, render_saturator_processor},
   {DAW_AUDIO_PROCESSOR_KIND_EQ, render_eq_processor},
@@ -2372,6 +2538,7 @@ constexpr std::array<ProcessorImplementation, 15> kProcessorImplementations{{
   {DAW_AUDIO_PROCESSOR_KIND_DELAY, render_time_effect_processor},
   {DAW_AUDIO_PROCESSOR_KIND_REVERB, render_time_effect_processor},
   {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, render_spectral_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER, render_autofilter_processor},
 }};
 
 ProcessorRenderer find_processor_renderer(uint32_t kind) {
@@ -3330,6 +3497,17 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == 17) return value >= 0.1F && value <= 1000.0F;
   if (target == 18) return value >= 1.0F && value <= 5000.0F;
   if (target == 20) return value >= -2048.0F && value <= 2048.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ) return value >= 20.0F && value <= 20000.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_RESONANCE) return value >= 0.0F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_DRIVE_DB) return value >= 0.0F && value <= 24.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_MIX) return value >= 0.0F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_AMOUNT_OCTAVES) return value >= -6.0F && value <= 6.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_ATTACK_MS) return value >= 0.5F && value <= 500.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_RELEASE_MS) return value >= 5.0F && value <= 2000.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_RATE_HZ) return value >= 0.01F && value <= 20.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES) return value >= 0.0F && value <= 6.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET) return value >= 0.0F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return value >= -0.5F && value <= 0.5F;
   return target == 22 && value >= -1.0F && value <= 1.0F;
 }
 
@@ -4198,6 +4376,10 @@ bool compatible_processor_history(
         && current.spectral.fft_size == next.spectral.fft_size
         && current.spectral.overlap == next.spectral.overlap
         && current.spectral.mode == next.spectral.mode;
+    case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
+      return current.autofilter.enabled == next.autofilter.enabled
+        && current.autofilter.mode == next.autofilter.mode
+        && current.autofilter.quality == next.autofilter.quality;
     default:
       return current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
         || current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
@@ -4277,6 +4459,7 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
         core->eq_histories[slot] = {};
         core->dynamics_histories[slot] = {};
         core->modulation_histories[slot] = {};
+        core->autofilter_histories[slot] = {};
       }
     }
     for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {

@@ -21,6 +21,18 @@ export type UtilityProcessorContract = {
   state: UtilityProcessorState
 }
 
+export type AutoFilterProcessorState = {
+  enabled: boolean
+  mode: 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak'
+  quality: '2x'
+  frequencyHz: number
+  resonance: number
+  driveDb: number
+  mix: number
+  envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
+  lfo: { waveform: 'sine' | 'triangle'; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
+}
+
 export type SaturatorProcessorState = {
   enabled: boolean
   driveDb: number
@@ -692,6 +704,27 @@ export const encodeUtilityProcessorState = (state: UtilityProcessorState): Uint8
   view.setUint32(28, state.matrix === 'mid-side-encode' ? 1 : state.matrix === 'mid-side-decode' ? 2 : 0, true)
   view.setUint32(32, state.swap ? 1 : 0, true)
   view.setUint32(36, state.dcBlock ? 1 : 0, true)
+  return output
+}
+
+export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState): Uint8Array => {
+  const output = new Uint8Array(60)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, state.enabled ? 1 : 0, true)
+  view.setUint32(4, state.mode === 'highpass' ? 1 : state.mode === 'bandpass' ? 2 : state.mode === 'notch' ? 3 : state.mode === 'peak' ? 4 : 0, true)
+  view.setUint32(8, 0, true)
+  view.setFloat32(12, state.frequencyHz, true)
+  view.setFloat32(16, state.resonance, true)
+  view.setFloat32(20, state.driveDb, true)
+  view.setFloat32(24, state.mix, true)
+  view.setFloat32(28, state.envelope.amountOctaves, true)
+  view.setFloat32(32, state.envelope.attackMs, true)
+  view.setFloat32(36, state.envelope.releaseMs, true)
+  view.setUint32(40, state.lfo.waveform === 'triangle' ? 1 : 0, true)
+  view.setFloat32(44, state.lfo.rateHz, true)
+  view.setFloat32(48, state.lfo.depthOctaves, true)
+  view.setFloat32(52, state.lfo.phaseOffset, true)
+  view.setFloat32(56, state.lfo.stereoPhase, true)
   return output
 }
 

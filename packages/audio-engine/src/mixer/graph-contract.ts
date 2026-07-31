@@ -1,6 +1,7 @@
 import {
   audioCoreContractVersion,
   encodeAutoPanProcessorState,
+  encodeAutoFilterProcessorState,
   encodeChorusProcessorState,
   encodeCompressorProcessorState,
   encodeDelayProcessorState,
@@ -176,6 +177,26 @@ const toPortableProcessor = (
         { id: 'utility.width', target: 4 },
       ],
       bypassed: !instance.params.state.enabled,
+    }
+  }
+  if (instance.kind === 'autofilter') {
+    const params = instance.params.state
+    return {
+      ...common, kind: 'autofilter', kindId: 16, state: encodeAutoFilterProcessorState(params),
+      parameterTargets: [
+        { id: 'autofilter.frequencyHz', target: 30 },
+        { id: 'autofilter.resonance', target: 31 },
+        { id: 'autofilter.driveDb', target: 32 },
+        { id: 'autofilter.mix', target: 33 },
+        { id: 'autofilter.envelope.amountOctaves', target: 34 },
+        { id: 'autofilter.envelope.attackMs', target: 35 },
+        { id: 'autofilter.envelope.releaseMs', target: 36 },
+        { id: 'autofilter.lfo.rateHz', target: 37 },
+        { id: 'autofilter.lfo.depthOctaves', target: 38 },
+        { id: 'autofilter.lfo.phaseOffset', target: 39 },
+        { id: 'autofilter.lfo.stereoPhase', target: 40 },
+      ],
+      bypassed: !params.enabled,
     }
   }
   if (instance.kind === 'saturator') {

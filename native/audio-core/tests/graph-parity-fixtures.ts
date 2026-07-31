@@ -1,5 +1,6 @@
 import {
   encodeAudioCoreInstrumentState,
+  encodeAutoFilterProcessorState,
   encodeAutoPanProcessorState,
   encodeChorusProcessorState,
   encodeCompressorProcessorState,
@@ -19,6 +20,7 @@ import {
   type AudioCoreDrumRackState,
   type AudioCoreInstrumentState,
   type AudioCoreSampleZone,
+  type AutoFilterProcessorState,
   type AudioCoreSamplerState,
   type CompressorProcessorState,
   type DelayModulationProcessorState,
@@ -64,7 +66,7 @@ export type PortableLegacySpectralFixture = {
 export type PortableGraphParityFixture = {
   name: string
   capability: 'chains' | 'fullBlockAutomation' | 'sidechains' | 'synthMidi' | 'mixerAutomation' | 'variableBlocks' | 'sampleRates' | 'nonfinite' | 'sampledInstruments' | 'topology' | 'invalidTopology'
-  processorKind?: 'utility' | 'saturator' | 'eq' | PortableModulationKind | PortableDynamicsKind | PortableTimeEffectKind | PortableSpectralKind
+  processorKind?: 'utility' | 'saturator' | 'eq' | 'autofilter' | PortableModulationKind | PortableDynamicsKind | PortableTimeEffectKind | PortableSpectralKind
   sampleRateHz: number
   maxFramesPerBlock: number
   inputBusCount: number
@@ -245,10 +247,23 @@ const utilityState = (gainDb = 0, enabled = true) => encodeUtilityProcessorState
   dcBlock: true,
 })
 
+const autoFilterState = (overrides: Partial<AutoFilterProcessorState> = {}): AutoFilterProcessorState => ({
+  enabled: true,
+  mode: 'lowpass',
+  quality: '2x',
+  frequencyHz: 1_000,
+  resonance: 0.25,
+  driveDb: 0,
+  mix: 1,
+  envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
+  lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 },
+  ...overrides,
+})
+
 type FixtureProcessor = {
   nodeId: bigint
   instanceId: number
-  kindId?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
+  kindId?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
   state?: Uint8Array
   parameterTargets?: readonly number[]
   latencyFrames?: number
@@ -1970,6 +1985,117 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
   })(),
 ]
 
+const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
+  {
+    name: 'autofilter-lowpass-impulse-partitions-reset',
+    capability: 'chains',
+    processorKind: 'autofilter',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 32,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 16,
+      state: encodeAutoFilterProcessorState(autoFilterState()),
+      parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+      latencyFrames: 6,
+    }),
+    frames: 64,
+    blockPartitions: [1, 3, 12, 16, 32],
+    input: stereo([1, ...Array.from({ length: 63 }, () => 0)], [-0.5, ...Array.from({ length: 63 }, () => 0)]),
+    assertReset: true,
+    expectedLatencyFrames: 6,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: (output) => finite(output)
+      && output[0]?.slice(0, 6).every((sample) => sample === 0)
+      && output[0]?.slice(6).some((sample) => Math.abs(sample) > 1e-6),
+  },
+  ...(['highpass', 'bandpass', 'notch', 'peak'] as const).map((mode): PortableGraphParityFixture => ({
+    name: `autofilter-${mode}-extreme`,
+    capability: 'chains',
+    processorKind: 'autofilter',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 128,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 16,
+      state: encodeAutoFilterProcessorState(autoFilterState({
+        mode,
+        frequencyHz: 20_000,
+        resonance: 1,
+        driveDb: 24,
+        envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
+        lfo: { waveform: 'triangle', rateHz: 3, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0.25 },
+      })),
+      parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+      latencyFrames: 6,
+    }),
+    frames: 128,
+    input: new Float32Array([
+      Number.NaN, Number.POSITIVE_INFINITY, ...Array.from({ length: 126 }, (_, index) => Math.sin(index * 0.31) * 4),
+      Number.NEGATIVE_INFINITY, Number.NaN, ...Array.from({ length: 126 }, (_, index) => -Math.sin(index * 0.31) * 4),
+    ]),
+    expectedLatencyFrames: 6,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: finite,
+  })),
+  {
+    name: 'autofilter-automation-sample-rate-96000',
+    capability: 'sampleRates',
+    processorKind: 'autofilter',
+    sampleRateHz: 96_000,
+    maxFramesPerBlock: 68,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 16,
+      state: encodeAutoFilterProcessorState(autoFilterState({ mode: 'bandpass', resonance: 0.5 })),
+      parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+      latencyFrames: 6,
+    }),
+    frames: 68,
+    input: stereo(sine(68, 440, 96_000), sine(68, 880, 96_000, 0.25)),
+    parameters: parameterEnvelopeForTarget(30, Array.from({ length: 68 }, (_, frame) => 200 + frame * 25)),
+    expectedLatencyFrames: 6,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: (output) => finite(output) && changedFromInput(output, stereo(
+      sine(68, 440, 96_000), sine(68, 880, 96_000, 0.25),
+    )),
+  },
+  {
+    name: 'autofilter-bypass-fixed-latency',
+    capability: 'chains',
+    processorKind: 'autofilter',
+    sampleRateHz: 44_100,
+    maxFramesPerBlock: 16,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 16,
+      state: encodeAutoFilterProcessorState(autoFilterState({ enabled: false })),
+      parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+      latencyFrames: 6,
+      bypassed: true,
+    }),
+    frames: 16,
+    input: bypassInput,
+    expectedLatencyFrames: 6,
+    nativeWasmTolerance: 2e-5,
+    assertOutput: (output) => finite(output)
+      && output.every((plane) => plane.slice(0, 6).every((sample) => sample === 0))
+      && output.some((plane) => plane.slice(6).some((sample) => Math.abs(sample) > 1e-6)),
+  },
+]
+
 const topologyNodes = [
   { id: 1n, kind: 1, bus: 0 },
   { id: 2n, kind: 3, bus: 0, latencyFrames: 2 },
@@ -2252,6 +2378,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
   ...dynamicsSidechainFixtures,
   ...timeEffectFixtures,
   ...spectralFixtures,
+  ...autoFilterFixtures,
   {
     name: 'mixer-automation',
     capability: 'mixerAutomation',

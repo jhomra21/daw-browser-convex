@@ -43,11 +43,18 @@ const readParameters = (name: string, definition: Record<string, unknown>): Proc
   const stateDefinition = state.state
   if (!isRecord(stateDefinition) || !isRecord(stateDefinition.properties)) return []
   const stateProperties = stateDefinition.properties
-  return Object.entries(stateProperties).flatMap(([id, property]) => {
-    if (!isRecord(property) || property.portableParameter !== true) return []
-    if (typeof property.default !== 'number' || typeof property.minimum !== 'number' || typeof property.maximum !== 'number') throw new Error(`Processor contract schema is missing numeric ${name} metadata for ${id}.`)
-    return [{ id, defaultValue: property.default, minValue: property.minimum, maxValue: property.maximum }]
-  })
+  const visit = (properties: Record<string, unknown>, prefix: string): ProcessorParameterMetadata[] =>
+    Object.entries(properties).flatMap(([id, property]) => {
+      if (!isRecord(property)) return []
+      const fullId = prefix.length > 0 ? `${prefix}.${id}` : id
+      if (property.portableParameter === true) {
+        if (typeof property.default !== 'number' || typeof property.minimum !== 'number' || typeof property.maximum !== 'number') throw new Error(`Processor contract schema is missing numeric ${name} metadata for ${fullId}.`)
+        return [{ id: fullId, defaultValue: property.default, minValue: property.minimum, maxValue: property.maximum }]
+      }
+      const nested = property.properties
+      return isRecord(nested) ? visit(nested, fullId) : []
+    })
+  return visit(stateProperties, '')
 }
 
 const readProcessorRegistry = (schema: unknown): ProcessorMetadata[] => {

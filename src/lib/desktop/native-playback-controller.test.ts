@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { automationTargetKey, createDefaultAutoFilterParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultLoFiParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -788,9 +788,9 @@ test("blocks native-required playback with an active unsupported processor", asy
           fx: {
             masterVolume: 1,
             masterFxInstances: [{
-              id: "autofilter:1",
-              kind: "autofilter",
-              params: { version: 1, state: createDefaultAutoFilterParams() },
+              id: "lofi:1",
+              kind: "lofi",
+              params: { version: 1, state: createDefaultLoFiParams() },
             }],
             trackFx: {},
           },
@@ -810,7 +810,7 @@ test("blocks native-required playback with an active unsupported processor", asy
   })
 
   expect(await controller.start(input().transport)).toBe("blocked")
-  expect(faults).toEqual(['autofilter:1: processor "autofilter" is not supported by the native audio core.'])
+  expect(faults).toEqual(['lofi:1: processor "lofi" is not supported by the native audio core.'])
   expect(fixture.calls).toEqual([])
 })
 

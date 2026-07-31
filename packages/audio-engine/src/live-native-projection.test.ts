@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { createDefaultAutoFilterParams, createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import { createDefaultLoFiParams, createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compileLiveNativeProjection } from './live-native-projection'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -193,9 +193,9 @@ test('rejects active processors outside the native audio-core contract', () => {
     tracks: [track()],
     fx: {
       masterFxInstances: [{
-        id: 'active-autofilter',
-        kind: 'autofilter',
-        params: { version: 1, state: createDefaultAutoFilterParams() },
+        id: 'active-lofi',
+        kind: 'lofi',
+        params: { version: 1, state: createDefaultLoFiParams() },
       }],
     },
     bpm: 120,
@@ -207,7 +207,7 @@ test('rejects active processors outside the native audio-core contract', () => {
 
   expect(result).toMatchObject({
     supported: false,
-    reasons: ['active-autofilter: processor "autofilter" is not supported by the native audio core.'],
+    reasons: ['active-lofi: processor "lofi" is not supported by the native audio core.'],
   })
 })
 

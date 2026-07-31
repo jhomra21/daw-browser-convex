@@ -333,7 +333,8 @@ typedef enum daw_audio_processor_kind {
   DAW_AUDIO_PROCESSOR_KIND_LIMITER = 12,
   DAW_AUDIO_PROCESSOR_KIND_DELAY = 13,
   DAW_AUDIO_PROCESSOR_KIND_REVERB = 14,
-  DAW_AUDIO_PROCESSOR_KIND_SPECTRAL = 15
+  DAW_AUDIO_PROCESSOR_KIND_SPECTRAL = 15,
+  DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER = 16
 } daw_audio_processor_kind;
 
 typedef enum daw_audio_processor_parameter {
@@ -351,7 +352,18 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_HARMONIC_PERCUSSIVE_BALANCE = 22,
   DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_NOISE_REDUCTION = 23,
   DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_PROFILE_LEARN = 24,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX = 25
+  DAW_AUDIO_PROCESSOR_PARAMETER_SPECTRAL_MIX = 25,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_FREQUENCY_HZ = 30,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_RESONANCE = 31,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_DRIVE_DB = 32,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_MIX = 33,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_AMOUNT_OCTAVES = 34,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_ATTACK_MS = 35,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_ENVELOPE_RELEASE_MS = 36,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_RATE_HZ = 37,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES = 38,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET = 39,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE = 40
 } daw_audio_processor_parameter;
 
 /* Graph descriptors are copied into an immutable prepared revision. Node and
@@ -672,6 +684,32 @@ typedef struct daw_audio_spectral_state {
   float profile_learn;
   float mix;
 } daw_audio_spectral_state;
+
+typedef enum daw_audio_autofilter_mode {
+  DAW_AUDIO_AUTOFILTER_MODE_LOWPASS = 0,
+  DAW_AUDIO_AUTOFILTER_MODE_HIGHPASS = 1,
+  DAW_AUDIO_AUTOFILTER_MODE_BANDPASS = 2,
+  DAW_AUDIO_AUTOFILTER_MODE_NOTCH = 3,
+  DAW_AUDIO_AUTOFILTER_MODE_PEAK = 4
+} daw_audio_autofilter_mode;
+
+typedef struct daw_audio_autofilter_state {
+  uint32_t enabled;
+  uint32_t mode;
+  uint32_t quality;
+  float frequency_hz;
+  float resonance;
+  float drive_db;
+  float mix;
+  float envelope_amount_octaves;
+  float envelope_attack_ms;
+  float envelope_release_ms;
+  uint32_t lfo_waveform;
+  float lfo_rate_hz;
+  float lfo_depth_octaves;
+  float lfo_phase_offset;
+  float lfo_stereo_phase;
+} daw_audio_autofilter_state;
 
 typedef struct daw_audio_asset_descriptor {
   uint32_t abi_version;

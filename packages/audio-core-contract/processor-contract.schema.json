@@ -10,7 +10,7 @@
     "processors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["utility", "saturator", "eq", "chorus", "flanger", "phaser", "tremolo", "autopan", "ensemble", "gate", "compressor", "limiter", "delay", "reverb", "spectral"],
+      "required": ["utility", "autofilter", "saturator", "eq", "chorus", "flanger", "phaser", "tremolo", "autopan", "ensemble", "gate", "compressor", "limiter", "delay", "reverb", "spectral"],
       "properties": {
         "utility": {
           "type": "object",
@@ -36,6 +36,46 @@
                 "matrix": { "enum": ["stereo", "mid-side-encode", "mid-side-decode"] },
                 "swap": { "type": "boolean" },
                 "dcBlock": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "autofilter": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 16 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "mode", "quality", "frequencyHz", "resonance", "driveDb", "mix", "envelope", "lfo"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "mode": { "enum": ["lowpass", "highpass", "bandpass", "notch", "peak"] },
+                "quality": { "const": "2x" },
+                "frequencyHz": { "type": "number", "default": 1000, "minimum": 20, "maximum": 20000, "portableParameter": true },
+                "resonance": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
+                "driveDb": { "type": "number", "default": 0, "minimum": 0, "maximum": 24, "portableParameter": true },
+                "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true },
+                "envelope": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["amountOctaves", "attackMs", "releaseMs"],
+                  "properties": {
+                    "amountOctaves": { "type": "number", "default": 0, "minimum": -6, "maximum": 6, "portableParameter": true },
+                    "attackMs": { "type": "number", "default": 10, "minimum": 0.5, "maximum": 500, "portableParameter": true },
+                    "releaseMs": { "type": "number", "default": 100, "minimum": 5, "maximum": 2000, "portableParameter": true }
+                  }
+                },
+                "lfo": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["waveform", "rateHz", "depthOctaves", "phaseOffset", "stereoPhase"],
+                  "properties": {
+                    "waveform": { "enum": ["sine", "triangle"] },
+                    "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20, "portableParameter": true },
+                    "depthOctaves": { "type": "number", "default": 0, "minimum": 0, "maximum": 6, "portableParameter": true },
+                    "phaseOffset": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+                    "stereoPhase": { "type": "number", "default": 0, "minimum": -0.5, "maximum": 0.5, "portableParameter": true }
+                  }
+                }
               }
             }
           }

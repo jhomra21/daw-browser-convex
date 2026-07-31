@@ -1,5 +1,8 @@
 #include "daw/audio_host_macos.h"
+#include "daw/native-schedule-state.h"
+#include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
+#include "worker-control-protocol.h"
 #include "worker-control-service.h"
 
 #include <mach-o/dyld.h>
@@ -9,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -27,7 +31,7 @@ constexpr std::uint32_t kMaximumNativeVstFrames = 8'192;
 constexpr std::uint32_t kMaximumNativeVstChannels = 64;
 constexpr std::uint32_t kMaximumNativeVstSlots = 8;
 constexpr std::uint32_t kNativeVstMissLimit = 3;
-constexpr std::size_t kMaximumWorkerNotifications = 64;
+constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 
 std::optional<std::string> WorkerExecutablePath() {
   std::uint32_t size = 0;
@@ -37,9 +41,16 @@ std::optional<std::string> WorkerExecutablePath() {
   std::error_code error;
   const auto host = std::filesystem::canonical(executable.data(), error);
   if (error) return std::nullopt;
-  const auto worker = std::filesystem::canonical(host.parent_path() / daw::plugin_host::kWorkerArtifactId, error);
-  if (error || !std::filesystem::is_regular_file(worker, error) || error) return std::nullopt;
-  return worker.string();
+  const std::array candidates{
+    host.parent_path() / daw::plugin_host::kWorkerArtifactId,
+    host.parent_path().parent_path() / "plugin-host" / daw::plugin_host::kWorkerArtifactId,
+  };
+  for (const auto& candidate : candidates) {
+    error.clear();
+    const auto worker = std::filesystem::canonical(candidate, error);
+    if (!error && std::filesystem::is_regular_file(worker, error) && !error) return worker.string();
+  }
+  return std::nullopt;
 }
 
 std::uint32_t ReadU32(const std::uint8_t* bytes) {
@@ -108,6 +119,7 @@ bool ValidNativeVstAttachment(const NativeVstAttachment& attachment) {
   };
   const std::uint32_t input_channels = channels_for_layout(attachment.input_layout);
   const std::uint32_t output_channels = channels_for_layout(attachment.output_layout);
+  const bool instrument = attachment.role == NativeVstRole::kInstrument;
   if (attachment.graph_node_id == 0 || attachment.instance_id.empty() || attachment.instance_id.size() > 256
     || attachment.class_id.empty() || attachment.class_id.size() > 256 || attachment.vendor_id.empty()
     || attachment.vendor_id.size() > 256 || attachment.canonical_bundle_path.empty()
@@ -115,14 +127,16 @@ bool ValidNativeVstAttachment(const NativeVstAttachment& attachment) {
     || !attachment.canonical_executable_path.starts_with(attachment.canonical_bundle_path + "/")
     || attachment.architecture != 1 || attachment.scanner_catalog_version != 2
     || (attachment.role != NativeVstRole::kEffect && attachment.role != NativeVstRole::kInstrument)
-    || (attachment.input_layout != DAW_AUDIO_GRAPH_LAYOUT_MONO && attachment.input_layout != DAW_AUDIO_GRAPH_LAYOUT_STEREO)
+    || (!instrument && attachment.input_layout != DAW_AUDIO_GRAPH_LAYOUT_MONO
+      && attachment.input_layout != DAW_AUDIO_GRAPH_LAYOUT_STEREO)
+    || (instrument && attachment.input_layout != 0)
     || (attachment.output_layout != DAW_AUDIO_GRAPH_LAYOUT_MONO && attachment.output_layout != DAW_AUDIO_GRAPH_LAYOUT_STEREO)
     || attachment.transport.slot_count == 0 || attachment.transport.slot_count > kMaximumNativeVstSlots
     || attachment.transport.maximum_frames == 0 || attachment.transport.maximum_frames > kMaximumNativeVstFrames
-    || attachment.transport.input_channels == 0 || attachment.transport.input_channels > kMaximumNativeVstChannels
+    || attachment.transport.input_channels > kMaximumNativeVstChannels
     || attachment.transport.output_channels == 0 || attachment.transport.output_channels > kMaximumNativeVstChannels
     || attachment.transport.maximum_events_per_block == 0 || attachment.transport.maximum_events_per_block > daw::plugin_host::kMaximumWorkerEvents
-    || input_channels == 0 || output_channels == 0
+    || (!instrument && input_channels == 0) || output_channels == 0
     || attachment.transport.input_channels != input_channels || attachment.transport.output_channels != output_channels
     || attachment.transport_latency_frames != attachment.transport.maximum_frames
     || attachment.declared_latency_frames > std::numeric_limits<std::uint32_t>::max() - attachment.transport_latency_frames
@@ -130,7 +144,10 @@ bool ValidNativeVstAttachment(const NativeVstAttachment& attachment) {
     || std::all_of(attachment.binary_fingerprint.begin(), attachment.binary_fingerprint.end(), [](const auto value) { return value == 0; })) {
     return false;
   }
-  return attachment.role != NativeVstRole::kEffect || input_channels == output_channels;
+  if (attachment.chain_index >= DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE) return false;
+  return instrument
+    ? attachment.transport.input_channels == 0
+    : input_channels == output_channels && attachment.transport.input_channels > 0;
 }
 
 std::string HexFingerprint(const std::array<std::uint8_t, 32>& fingerprint) {
@@ -144,51 +161,337 @@ std::string HexFingerprint(const std::array<std::uint8_t, 32>& fingerprint) {
   return result;
 }
 
+std::uint8_t MidiValue(const float value) noexcept {
+  if (!std::isfinite(value) || value <= 0.0F) return 0;
+  if (value >= 1.0F) return 127;
+  return static_cast<std::uint8_t>(value * 127.0F);
+}
+
+bool ValidNativeInstrumentEvent(const daw_audio_instrument_event& event) {
+  const bool portable = event.type >= DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON
+    && event.type <= DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER;
+  const bool native = event.type >= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)
+    && event.type <= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff);
+  if (event.node_id == 0 || event.epoch == 0 || event.sequence == 0 || event.channel > 15
+    || event.note > 127 || !std::isfinite(event.value) || (!portable && !native)) return false;
+  if ((event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON
+      || event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn))
+    && (event.note_id == 0 || event.value < 0.0F || event.value > 1.0F)) return false;
+  if ((event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF
+      || event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff))
+    && event.note_id == 0) return false;
+  return true;
+}
+
+using NativeVstAutomationSegment = NativeScheduleAutomationSegment;
+
 struct NativeVstWorkerAttachment {
+  struct ActiveNote {
+    std::uint64_t note_id = 0;
+    std::uint32_t channel = 0;
+    std::uint32_t note = 0;
+    bool active = false;
+  };
+  static constexpr std::size_t kActiveNoteCapacity = 256;
   NativeVstAttachment metadata;
   struct WorkerNotificationSink* notification_sink = nullptr;
   daw::plugin_host::WorkerControlService worker;
   std::array<std::uint64_t, kMaximumNativeVstSlots> pending_sequences{};
+  std::array<std::uint32_t, kMaximumNativeVstSlots> pending_frames{};
   std::array<std::uint32_t, kMaximumNativeVstSlots> missed_callbacks{};
   std::array<float, kMaximumNativeVstFrames * 2> input{};
   std::array<float, kMaximumNativeVstFrames * 2> output{};
+  static constexpr std::size_t kCompletedOutputFrames = kMaximumNativeVstFrames * kMaximumNativeVstSlots;
+  std::array<float, kCompletedOutputFrames * 2> completed_output{};
+  std::size_t completed_output_read = 0;
+  std::size_t completed_output_write = 0;
   std::uint64_t next_sequence = 1;
   std::uint32_t next_slot = 0;
-  std::array<daw::plugin_host::WorkerTransportEvent, daw::plugin_host::kMaximumWorkerEvents> queued_events{};
   std::array<daw::plugin_host::WorkerTransportEvent, daw::plugin_host::kMaximumWorkerEvents> block_events{};
-  std::atomic<std::uint32_t> event_read = 0;
-  std::atomic<std::uint32_t> event_write = 0;
+  std::array<daw::plugin_host::WorkerTransportEvent, daw::plugin_host::kMaximumWorkerEvents> sorted_block_events{};
+  std::array<std::uint16_t, kMaximumNativeVstFrames> event_offsets{};
+  NativeVstEventScheduler event_scheduler{};
+  std::array<std::array<NativeVstAutomationSegment, kMaximumScheduleAutomationSegments>, 2>
+    automation_segments{};
+  std::atomic<std::uint32_t> automation_segment_count = 0;
+  std::atomic<std::uint32_t> automation_buffer = 0;
+  std::atomic<std::uint32_t> automation_epoch = 0;
+  mutable std::atomic<bool> automation_callback_reading = false;
+  mutable std::atomic<std::uint32_t> automation_callback_buffer = 0;
+  static constexpr std::size_t kAutomationOverrideSlots = 4'096;
+  std::array<std::uint32_t, kAutomationOverrideSlots> automation_override_ids{};
+  std::array<std::atomic<std::uint8_t>, kAutomationOverrideSlots> automation_override_state{};
+  std::array<ActiveNote, kActiveNoteCapacity> arranged_notes{};
+  std::array<ActiveNote, kActiveNoteCapacity> live_notes{};
+  std::atomic<std::uint32_t> note_epoch = 0;
+
+  static std::size_t OverrideSlot(const std::uint32_t parameter_id) noexcept {
+    return (static_cast<std::uint64_t>(parameter_id) * 2'654'435'761ULL) % kAutomationOverrideSlots;
+  }
+
+  bool HasAutomationOverride(const std::uint32_t parameter_id) const noexcept {
+    std::size_t slot = OverrideSlot(parameter_id);
+    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
+      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
+      if (state == 0) return false;
+      if (state == 1 && automation_override_ids[slot] == parameter_id) return true;
+      slot = (slot + 1) % kAutomationOverrideSlots;
+    }
+    return false;
+  }
+
+  bool SetAutomationOverride(const std::uint32_t parameter_id) noexcept {
+    std::size_t slot = OverrideSlot(parameter_id);
+    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
+      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
+      if (state != 1 || automation_override_ids[slot] == parameter_id) {
+        automation_override_ids[slot] = parameter_id;
+        automation_override_state[slot].store(1, std::memory_order_release);
+        return true;
+      }
+      slot = (slot + 1) % kAutomationOverrideSlots;
+    }
+    return false;
+  }
+
+  void ClearAutomationOverride(const std::uint32_t parameter_id) noexcept {
+    std::size_t slot = OverrideSlot(parameter_id);
+    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
+      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
+      if (state == 0) return;
+      if (state == 1 && automation_override_ids[slot] == parameter_id) {
+        automation_override_state[slot].store(2, std::memory_order_release);
+        return;
+      }
+      slot = (slot + 1) % kAutomationOverrideSlots;
+    }
+  }
 
   bool QueueEvents(const std::span<const daw::plugin_host::WorkerTransportEvent> events) {
-    const auto write = event_write.load(std::memory_order_relaxed);
-    const auto read = event_read.load(std::memory_order_acquire);
-    if (events.size() > queued_events.size() - (write - read)) return false;
-    for (std::size_t index = 0; index < events.size(); ++index) queued_events[(write + index) % queued_events.size()] = events[index];
-    event_write.store(write + static_cast<std::uint32_t>(events.size()), std::memory_order_release);
+    return event_scheduler.QueueEvents(events);
+  }
+
+  bool ProjectAutomation(
+    const std::int64_t block_start,
+    const std::uint32_t frame_count,
+    std::span<daw::plugin_host::WorkerTransportEvent> events,
+    std::size_t& event_count,
+    const std::size_t maximum_events
+  ) const noexcept {
+    const std::uint64_t block_end = static_cast<std::uint64_t>(block_start)
+      + static_cast<std::uint64_t>(frame_count);
+    const auto buffer = automation_callback_reading.load(std::memory_order_acquire)
+      ? automation_callback_buffer.load(std::memory_order_relaxed)
+      : automation_buffer.load(std::memory_order_acquire);
+    const auto segment_count = automation_segment_count.load(std::memory_order_acquire);
+    for (std::size_t index = 0; index < segment_count; ++index) {
+      const auto& segment = automation_segments[buffer][index];
+      if (segment.end_frame <= static_cast<std::uint64_t>(block_start)
+        || segment.start_frame >= block_end
+        || HasAutomationOverride(segment.parameter_id)) continue;
+      const auto value_at = [&segment](const std::uint64_t frame) {
+        if (!segment.linear || frame <= segment.start_frame) return segment.start_value;
+        if (frame >= segment.end_frame) return segment.end_value;
+        return segment.start_value + (segment.end_value - segment.start_value)
+          * static_cast<double>(frame - segment.start_frame)
+          / static_cast<double>(segment.end_frame - segment.start_frame);
+      };
+      const std::uint64_t first_frame = std::max<std::uint64_t>(
+        segment.start_frame,
+        static_cast<std::uint64_t>(block_start)
+      );
+      if (event_count >= maximum_events || event_count >= events.size()) return false;
+      events[event_count++] = {
+        .kind = daw::plugin_host::WorkerEventKind::kParameter,
+        .sampleOffset = static_cast<std::uint32_t>(first_frame - static_cast<std::uint64_t>(block_start)),
+        .parameterId = segment.parameter_id,
+        .parameterValue = value_at(first_frame),
+      };
+      if (segment.linear && segment.end_frame < block_end
+        && segment.end_frame > first_frame) {
+        if (event_count >= maximum_events || event_count >= events.size()) return false;
+        events[event_count++] = {
+          .kind = daw::plugin_host::WorkerEventKind::kParameter,
+          .sampleOffset = static_cast<std::uint32_t>(segment.end_frame - static_cast<std::uint64_t>(block_start)),
+          .parameterId = segment.parameter_id,
+          .parameterValue = value_at(segment.end_frame),
+        };
+      }
+    }
     return true;
   }
 
+  bool PublishAutomation(
+    const std::uint32_t epoch,
+    const std::uint64_t rendered_through_frame,
+    std::span<const NativeVstAutomationSegment> additions
+  ) noexcept {
+    const auto active_buffer = automation_buffer.load(std::memory_order_acquire);
+    const auto inactive_buffer = 1U - active_buffer;
+    if (
+      automation_callback_reading.load(std::memory_order_acquire)
+      && automation_callback_buffer.load(std::memory_order_acquire) == inactive_buffer
+    ) return false;
+    const auto retained_epoch = automation_epoch.load(std::memory_order_acquire);
+    const auto retained_count = retained_epoch == epoch
+      ? automation_segment_count.load(std::memory_order_acquire)
+      : 0U;
+    std::size_t count = 0;
+    auto& destination = automation_segments[inactive_buffer];
+    const auto value_at = [](const NativeVstAutomationSegment& segment, const std::uint64_t frame) {
+      if (!segment.linear || frame <= segment.start_frame) return segment.start_value;
+      if (frame >= segment.end_frame) return segment.end_value;
+      return segment.start_value + (segment.end_value - segment.start_value)
+        * static_cast<double>(frame - segment.start_frame)
+        / static_cast<double>(segment.end_frame - segment.start_frame);
+    };
+    for (std::size_t index = 0; index < retained_count; ++index) {
+      const auto& source = automation_segments[active_buffer][index];
+      if (source.end_frame <= rendered_through_frame) continue;
+      auto retained = source;
+      if (retained.start_frame < rendered_through_frame) {
+        retained.start_frame = rendered_through_frame;
+        retained.start_value = value_at(source, rendered_through_frame);
+      }
+      if (count >= destination.size()) return false;
+      destination[count++] = retained;
+    }
+    for (const auto& addition : additions) {
+      bool already_covered = false;
+      for (std::size_t index = 0; index < count; ++index) {
+        const auto& retained = destination[index];
+        if (
+          retained.parameter_id == addition.parameter_id
+          && retained.start_frame == addition.start_frame
+          && retained.linear == addition.linear
+          && retained.start_value == addition.start_value
+          && retained.end_value == addition.end_value
+          && retained.end_frame >= addition.end_frame
+        ) {
+          already_covered = true;
+          break;
+        }
+      }
+      if (already_covered) continue;
+      if (count >= destination.size()) return false;
+      destination[count++] = addition;
+    }
+    automation_segment_count.store(static_cast<std::uint32_t>(count), std::memory_order_release);
+    automation_epoch.store(epoch, std::memory_order_release);
+    automation_buffer.store(inactive_buffer, std::memory_order_release);
+    return true;
+  }
+
+  bool AddMidi(
+    const std::uint32_t sample_offset,
+    const std::uint8_t status,
+    const std::uint32_t channel,
+    const std::uint32_t note,
+    const std::uint8_t value,
+    std::size_t& event_count
+  ) noexcept {
+    if (event_count >= block_events.size()) return false;
+    block_events[event_count++] = {
+      .kind = daw::plugin_host::WorkerEventKind::kMidi,
+      .sampleOffset = sample_offset,
+      .midiData = {
+        static_cast<std::uint8_t>(status | std::min(channel, 15U)),
+        static_cast<std::uint8_t>(std::min(note, 127U)),
+        value,
+      },
+    };
+    return true;
+  }
+
+  bool UpdateLedger(
+    std::array<ActiveNote, kActiveNoteCapacity>& ledger,
+    const daw_audio_instrument_event& event,
+    const bool note_on
+  ) noexcept {
+    if (note_on) {
+      for (auto& note : ledger) {
+        if (!note.active) {
+          note = {.note_id = event.note_id, .channel = event.channel, .note = event.note, .active = true};
+          return true;
+        }
+      }
+      return false;
+    }
+    for (auto& note : ledger) {
+      if (note.active && note.note_id == event.note_id) {
+        note.active = false;
+        return true;
+      }
+    }
+    return true;
+  }
+
+  bool ReleaseArranged(
+    const std::uint32_t sample_offset,
+    std::size_t& event_count
+  ) noexcept {
+    for (auto& note : arranged_notes) {
+      if (!note.active) continue;
+      if (!AddMidi(sample_offset, 0x80, note.channel, note.note, 0, event_count)) return false;
+      note.active = false;
+    }
+    return true;
+  }
+
+  void ClearLedgers() noexcept {
+    arranged_notes.fill({});
+    live_notes.fill({});
+  }
+
   void WriteFallback(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
-    if (metadata.role != NativeVstRole::kInstrument) return;
     for (std::uint32_t channel = 0; channel < render.channel_count; ++channel) {
       std::fill_n(render.planes[channel], render.frame_count, 0.0F);
     }
   }
 
   void Process(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    const std::uint32_t input_channels = metadata.transport.input_channels;
+    const std::uint32_t output_channels = metadata.transport.output_channels;
+    if (render.frame_count == 0 || render.channel_count != output_channels
+      || render.channel_count > 2 || output_channels > 2) {
+      WriteFallback(render);
+      return;
+    }
+    if (input_channels > 0) {
+      for (std::uint32_t channel = 0; channel < input_channels; ++channel) {
+        std::memcpy(input.data() + channel * render.frame_count, render.planes[channel], render.frame_count * sizeof(float));
+      }
+    }
     WriteFallback(render);
     const auto port = worker.callbackPort();
-    const std::size_t samples = static_cast<std::size_t>(render.frame_count) * render.channel_count;
     for (std::uint32_t slot = 0; slot < metadata.transport.slot_count; ++slot) {
       const std::uint64_t sequence = pending_sequences[slot];
       if (sequence == 0) continue;
       if (port.ReadCompleted(slot, sequence)) {
-        if (port.CopyCompletedOutput(slot, sequence, std::span<float>(output.data(), samples))) {
+        const std::size_t completed_frames = pending_frames[slot];
+        if (port.CopyCompletedOutput(slot, sequence, std::span<float>(output.data(), output.size()))
+          && completed_frames <= kCompletedOutputFrames
+          && completed_output_write - completed_output_read + completed_frames <= kCompletedOutputFrames) {
+          const std::size_t write_offset = completed_output_write % kCompletedOutputFrames;
+          const std::size_t first_write = std::min(completed_frames, kCompletedOutputFrames - write_offset);
           for (std::uint32_t channel = 0; channel < render.channel_count; ++channel) {
-            std::memcpy(render.planes[channel], output.data() + channel * render.frame_count, render.frame_count * sizeof(float));
+            std::memcpy(
+              completed_output.data() + channel * kCompletedOutputFrames + write_offset,
+              output.data() + channel * completed_frames,
+              first_write * sizeof(float)
+            );
+            if (first_write < completed_frames) {
+              std::memcpy(
+                completed_output.data() + channel * kCompletedOutputFrames,
+                output.data() + channel * completed_frames + first_write,
+                (completed_frames - first_write) * sizeof(float)
+              );
+            }
           }
+          completed_output_write += completed_frames;
         }
         pending_sequences[slot] = 0;
+        pending_frames[slot] = 0;
         missed_callbacks[slot] = 0;
         continue;
       }
@@ -199,32 +502,148 @@ struct NativeVstWorkerAttachment {
           .sequence = sequence,
         }));
         pending_sequences[slot] = 0;
+        pending_frames[slot] = 0;
         missed_callbacks[slot] = 0;
       }
     }
+    const std::size_t available_frames = completed_output_write - completed_output_read;
+    const std::size_t copied_frames = std::min<std::size_t>(available_frames, render.frame_count);
+    if (copied_frames > 0) {
+      const std::size_t read_offset = completed_output_read % kCompletedOutputFrames;
+      const std::size_t first_copy = std::min(copied_frames, kCompletedOutputFrames - read_offset);
+      const auto copy_channel = [&](const std::size_t channel, const std::size_t offset, const std::size_t count) {
+        std::memcpy(
+          render.planes[channel] + offset,
+          completed_output.data() + channel * kCompletedOutputFrames + read_offset,
+          count * sizeof(float)
+        );
+      };
+      for (std::uint32_t channel = 0; channel < render.channel_count; ++channel) {
+        copy_channel(channel, 0, first_copy);
+        if (first_copy < copied_frames) {
+          std::memcpy(
+            render.planes[channel] + first_copy,
+            completed_output.data() + channel * kCompletedOutputFrames,
+            (copied_frames - first_copy) * sizeof(float)
+          );
+        }
+      }
+      completed_output_read += copied_frames;
+    }
+    // Keep the declared one-block transport pipeline bounded. Do not submit
+    // another block while an older completed block is still buffered, or
+    // editor control can trail the audible output by multiple blocks.
+    if (completed_output_write != completed_output_read) return;
     for (std::uint32_t attempt = 0; attempt < metadata.transport.slot_count; ++attempt) {
       const std::uint32_t slot = (next_slot + attempt) % metadata.transport.slot_count;
       if (pending_sequences[slot] != 0) continue;
-      for (std::uint32_t channel = 0; channel < render.channel_count; ++channel) {
-        std::memcpy(input.data() + channel * render.frame_count, render.planes[channel], render.frame_count * sizeof(float));
-      }
-      if (!port.CopyInput(slot, std::span<const float>(input.data(), samples))) return;
+      if (input_channels > 0
+        && !port.CopyInput(slot, std::span<const float>(
+          input.data(),
+          static_cast<std::size_t>(render.frame_count) * input_channels))) return;
       const std::uint64_t sequence = next_sequence++;
-      const auto write = event_write.load(std::memory_order_acquire);
-      std::uint32_t read = event_read.load(std::memory_order_relaxed);
-      std::size_t event_count = 0;
-      while (read != write && event_count < block_events.size()) {
-        const auto event = queued_events[read % queued_events.size()];
-        if (event.sampleOffset >= render.frame_count) break;
-        block_events[event_count++] = event;
-        ++read;
+      if (note_epoch.exchange(render.transport_epoch, std::memory_order_acq_rel) != render.transport_epoch) {
+        ClearLedgers();
       }
-      if (event_count > metadata.transport.maximum_events_per_block) return;
+      std::size_t event_count = 0;
+      const bool automation_current = automation_epoch.load(std::memory_order_acquire) == render.transport_epoch;
+      if (automation_current) {
+        automation_callback_buffer.store(
+          automation_buffer.load(std::memory_order_acquire),
+          std::memory_order_relaxed
+        );
+        automation_callback_reading.store(true, std::memory_order_release);
+        const bool projected = ProjectAutomation(
+          render.transport_frame,
+          render.frame_count,
+          std::span<daw::plugin_host::WorkerTransportEvent>(block_events.data(), block_events.size()),
+          event_count,
+          metadata.transport.maximum_events_per_block
+        );
+        automation_callback_reading.store(false, std::memory_order_release);
+        if (!projected) return;
+      }
+      for (const auto& event : render.instrument_events) {
+        if (event.node_id != metadata.graph_node_id || event.epoch != render.transport_epoch
+          || event.frame_offset >= render.frame_count) continue;
+        const auto live_on = event.type == static_cast<std::uint32_t>(
+          daw::audio_core::NativeInstrumentEventType::kLiveNoteOn
+        );
+        const auto live_off = event.type == static_cast<std::uint32_t>(
+          daw::audio_core::NativeInstrumentEventType::kLiveNoteOff
+        );
+        const auto transport_release = event.type == static_cast<std::uint32_t>(
+          daw::audio_core::NativeInstrumentEventType::kTransportRelease
+        );
+        const auto all_sound_off = event.type == static_cast<std::uint32_t>(
+          daw::audio_core::NativeInstrumentEventType::kAllSoundOff
+        );
+        if (transport_release) {
+          if (!ReleaseArranged(event.frame_offset, event_count)) return;
+          continue;
+        }
+        if (all_sound_off) {
+          if (!AddMidi(event.frame_offset, 0xB0, event.channel, 123, 0, event_count)
+            || !AddMidi(event.frame_offset, 0xB0, event.channel, 120, 0, event_count)) return;
+          ClearLedgers();
+          continue;
+        }
+        std::uint8_t status = 0;
+        if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON || live_on) status = 0x90;
+        else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF || live_off) status = 0x80;
+        else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) status = 0xB0;
+        else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION) status = 0xB0;
+        else continue;
+        if (live_on && !UpdateLedger(live_notes, event, true)) return;
+        if (live_off && !UpdateLedger(live_notes, event, false)) return;
+        if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON
+          && !UpdateLedger(arranged_notes, event, true)) return;
+        if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF
+          && !UpdateLedger(arranged_notes, event, false)) return;
+        if (event_count >= block_events.size()) return;
+        const std::uint8_t channel = static_cast<std::uint8_t>(std::min(event.channel, 15U));
+        const std::uint8_t data1 = status == 0xB0
+          ? static_cast<std::uint8_t>(event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN ? 64 : 11)
+          : static_cast<std::uint8_t>(std::min(event.note, 127U));
+        block_events[event_count++] = {
+          .kind = daw::plugin_host::WorkerEventKind::kMidi,
+          .sampleOffset = event.frame_offset,
+          .midiData = {
+            static_cast<std::uint8_t>(status | channel),
+            data1,
+            status == 0xB0 ? MidiValue(event.value) : MidiValue(event.value),
+          },
+        };
+      }
+      if (event_count > metadata.transport.maximum_events_per_block
+        || !event_scheduler.PrepareBlock(
+          render.frame_count,
+          std::span<daw::plugin_host::WorkerTransportEvent>(block_events.data(), block_events.size()),
+          event_count,
+          metadata.transport.maximum_events_per_block
+        )) return;
+      event_offsets.fill(0);
+      for (std::size_t index = 0; index < event_count; ++index) ++event_offsets[block_events[index].sampleOffset];
+      std::uint16_t offset = 0;
+      for (std::uint32_t frame = 0; frame < render.frame_count; ++frame) {
+        const auto count = event_offsets[frame];
+        event_offsets[frame] = offset;
+        offset = static_cast<std::uint16_t>(offset + count);
+      }
+      for (std::size_t index = 0; index < event_count; ++index) {
+        const auto event = block_events[index];
+        sorted_block_events[event_offsets[event.sampleOffset]++] = event;
+      }
+      std::copy_n(sorted_block_events.data(), event_count, block_events.data());
       if (port.Submit({.slotIndex = slot, .sequence = sequence, .numSamples = render.frame_count,
         .events = std::span<const daw::plugin_host::WorkerTransportEvent>(block_events.data(), event_count)})
-        != daw::plugin_host::WorkerSubmissionStatus::kAccepted) return;
-      event_read.store(read, std::memory_order_release);
+        != daw::plugin_host::WorkerSubmissionStatus::kAccepted) {
+        event_scheduler.CommitBlock(false);
+        return;
+      }
+      event_scheduler.CommitBlock(true);
       pending_sequences[slot] = sequence;
+      pending_frames[slot] = render.frame_count;
       next_slot = (slot + 1) % metadata.transport.slot_count;
       return;
     }
@@ -234,7 +653,7 @@ struct NativeVstWorkerAttachment {
 struct WorkerNotificationSink {
   std::mutex mutex;
   std::condition_variable ready;
-  std::deque<WorkerNotification> notifications;
+  WorkerNotificationQueue notifications;
   std::atomic<std::uint32_t>* active_revision = nullptr;
   std::atomic<bool> mute_requested = false;
 };
@@ -251,20 +670,22 @@ void ForwardWorkerDiagnostic(
   else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kRestart) kind = WorkerNotificationKind::kRestart;
   else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kFault) kind = WorkerNotificationKind::kFault;
   else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kMiss) kind = WorkerNotificationKind::kMiss;
+  else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kEditorInteraction) kind = WorkerNotificationKind::kEditorInteraction;
+  else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kParameterEdit) kind = WorkerNotificationKind::kParameterEdit;
   if (!kind) return;
   WorkerNotificationSink& sink = *attachment->notification_sink;
-  if (*kind == WorkerNotificationKind::kBuses || *kind == WorkerNotificationKind::kRestart
-    || *kind == WorkerNotificationKind::kFault || *kind == WorkerNotificationKind::kMiss) {
+  if (*kind == WorkerNotificationKind::kRestart || *kind == WorkerNotificationKind::kFault) {
     sink.mute_requested.store(true, std::memory_order_release);
   }
   const std::lock_guard lock(sink.mutex);
-  if (sink.notifications.size() == kMaximumWorkerNotifications) sink.notifications.pop_front();
-  sink.notifications.push_back(IdentifyWorkerNotification(
+  static_cast<void>(sink.notifications.Push(IdentifyWorkerNotification(
     attachment->metadata,
     sink.active_revision->load(std::memory_order_acquire),
     *kind,
-    diagnostic.value
-  ));
+    diagnostic.value,
+    diagnostic.parameter_id,
+    diagnostic.normalized_value
+  )));
   sink.ready.notify_one();
 }
 
@@ -273,13 +694,107 @@ void DispatchNativeVstGraphHook(const daw::audio_core::NativeGraphNodeRender& re
   if (attachment != nullptr) attachment->Process(render);
 }
 
+struct NativeMeterObserver {
+  static constexpr std::uint32_t kMeterReadyBit = 1U << 2U;
+  struct Event {
+    std::uint32_t graph_revision = 0;
+    std::uint32_t transport_epoch = 0;
+    std::uint64_t node_id = 0;
+    float left_rms = 0.0F;
+    float right_rms = 0.0F;
+  };
+  daw::plugin_host::SpscQueue<Event, kMaximumMeterQueueEntries> queue;
+  std::atomic<std::uint32_t>* bridge_pending = nullptr;
+
+  void Observe(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    if (!queue.HasSpace() || render.frame_count == 0 || render.channel_count == 0 || render.planes[0] == nullptr) return;
+    double left_sum = 0.0;
+    double right_sum = 0.0;
+    const float* const left = render.planes[0];
+    const float* const right = render.channel_count > 1 && render.planes[1] != nullptr ? render.planes[1] : left;
+    for (std::uint32_t frame = 0; frame < render.frame_count; ++frame) {
+      const float left_sample = std::isfinite(left[frame]) ? left[frame] : 0.0F;
+      const float right_sample = std::isfinite(right[frame]) ? right[frame] : 0.0F;
+      left_sum += static_cast<double>(left_sample) * left_sample;
+      right_sum += static_cast<double>(right_sample) * right_sample;
+    }
+    if (!queue.TryPush({
+      .graph_revision = render.graph_revision,
+      .transport_epoch = render.transport_epoch,
+      .node_id = render.node_id,
+      .left_rms = static_cast<float>(std::sqrt(left_sum / render.frame_count)),
+      .right_rms = static_cast<float>(std::sqrt(right_sum / render.frame_count)),
+    })) return;
+    if (bridge_pending != nullptr) bridge_pending->fetch_or(kMeterReadyBit, std::memory_order_release);
+  }
+
+  [[nodiscard]] bool Empty() const noexcept { return queue.Empty(); }
+
+  bool Pop(Event& event) noexcept { return queue.TryPop(event); }
+
+  void Clear() noexcept {
+    Event event{};
+    while (Pop(event)) {}
+  }
+
+  static void Dispatch(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    auto* observer = static_cast<NativeMeterObserver*>(render.attachment);
+    if (observer != nullptr) observer->Observe(render);
+  }
+};
+
 }  // namespace
+
+bool WorkerNotificationQueue::Push(WorkerNotification notification) {
+  for (auto& current : notifications_) {
+    if (IsParameterEdit(current)
+      && IsParameterEdit(notification)
+      && current.instance_id == notification.instance_id
+      && current.parameter_id == notification.parameter_id) {
+      current = std::move(notification);
+      return true;
+    }
+  }
+  if (notifications_.size() < kCapacity) {
+    notifications_.push_back(std::move(notification));
+    return true;
+  }
+  if (IsParameterEdit(notification)) {
+    const auto parameter = std::find_if(
+      notifications_.begin(),
+      notifications_.end(),
+      [](const WorkerNotification& current) { return IsParameterEdit(current); }
+    );
+    if (parameter != notifications_.end()) {
+      notifications_.erase(parameter);
+      notifications_.push_back(std::move(notification));
+      return true;
+    }
+  }
+  const auto informational = std::find_if(
+    notifications_.begin(),
+    notifications_.end(),
+    [](const WorkerNotification& current) { return !IsCritical(current); }
+  );
+  if (informational == notifications_.end()) return false;
+  notifications_.erase(informational);
+  notifications_.push_back(std::move(notification));
+  return true;
+}
+
+WorkerNotification WorkerNotificationQueue::Pop() {
+  WorkerNotification notification = std::move(notifications_.front());
+  notifications_.pop_front();
+  return notification;
+}
 
 WorkerNotification IdentifyWorkerNotification(
   const NativeVstAttachment& attachment,
   const std::uint32_t graph_revision,
   const WorkerNotificationKind kind,
-  const std::uint32_t value
+  const std::uint32_t value,
+  const std::uint32_t parameter_id,
+  const double normalized_value
 ) {
   return {
     .kind = kind,
@@ -287,6 +802,8 @@ WorkerNotification IdentifyWorkerNotification(
     .graph_node_id = attachment.graph_node_id,
     .instance_id = attachment.instance_id,
     .value = value,
+    .parameter_id = parameter_id,
+    .normalized_value = normalized_value,
   };
 }
 
@@ -297,7 +814,7 @@ std::optional<ControlFrame> DecodeControlFrame(std::span<const std::uint8_t> byt
   const std::uint32_t length = ReadU32(bytes.data() + 12);
   if (length > kMaximumControlPayloadBytes || bytes.size() != kControlFrameHeaderBytes + length) return std::nullopt;
   if (type < static_cast<std::uint32_t>(ControlType::kHostHello)
-    || type > static_cast<std::uint32_t>(ControlType::kGraphRevisionStatus)) return std::nullopt;
+    || type > static_cast<std::uint32_t>(ControlType::kScheduleProgress)) return std::nullopt;
   return ControlFrame{
     .type = static_cast<ControlType>(type),
     .payload = {bytes.begin() + static_cast<std::ptrdiff_t>(kControlFrameHeaderBytes), bytes.end()},
@@ -327,14 +844,88 @@ std::optional<std::string> CoreAudioDeviceUid(std::string_view device_id) {
 
 struct AudioHost::Impl {
   enum class RecordingCommand : std::uint32_t { kNone, kStop, kCancel };
-  enum class QueuedControlKind : std::uint8_t { kProcessor, kInstrument, kSource };
+  enum class QueuedControlKind : std::uint8_t { kUrgent, kProcessor, kInstrument, kSource };
   struct QueuedControlEvent {
     QueuedControlKind kind = QueuedControlKind::kProcessor;
+    std::uint64_t window_id = 0;
+    std::uint64_t absolute_frame = 0;
+    bool scheduled = false;
     daw_audio_processor_event processor{};
     daw_audio_instrument_event instrument{};
     daw_audio_sample_source_event source{};
   };
-  static constexpr std::uint32_t kControlQueueCapacity = 256;
+  struct ScheduleStaging {
+    bool active = false;
+    std::uint32_t revision = 0;
+    std::uint32_t epoch = 0;
+    std::uint64_t window_id = 0;
+    std::uint64_t start_frame = 0;
+    std::uint64_t end_frame = 0;
+    std::uint32_t chunk_count = 0;
+    std::array<bool, kMaximumScheduleChunks> received_chunks{};
+    std::array<std::uint64_t, kMaximumScheduleChunks> chunk_digests{};
+    bool ends_schedule = false;
+    std::size_t record_count = 0;
+    std::array<QueuedControlEvent, kMaximumScheduleRecords> events{};
+    NativeScheduleAutomationState automation_state{};
+    std::array<std::size_t, NativeScheduleAutomationState::kMaximumAttachments>
+      rollback_automation_group_counts{};
+
+    void clear() noexcept {
+      for (std::size_t index = 0; index < record_count; ++index) {
+        events[index] = {};
+      }
+      for (std::size_t index = 0; index < automation_state.group_count; ++index) {
+        auto& group = automation_state.groups[index];
+        for (std::size_t segment = 0; segment < group.count; ++segment) {
+          group.segments[segment] = {};
+        }
+        group.attachment = nullptr;
+        group.count = 0;
+      }
+      active = false;
+      revision = 0;
+      epoch = 0;
+      window_id = 0;
+      start_frame = 0;
+      end_frame = 0;
+      chunk_count = 0;
+      received_chunks.fill(false);
+      chunk_digests.fill(0);
+      ends_schedule = false;
+      record_count = 0;
+      automation_state.clear();
+      rollback_automation_group_counts.fill(0);
+    }
+  };
+  static constexpr std::uint32_t kUrgentQueueCapacity = 256;
+  static constexpr std::uint32_t kInstrumentQueueCapacity = 2'048;
+  static constexpr std::uint32_t kSourceQueueCapacity = 1'024;
+  static constexpr std::uint32_t kProcessorQueueCapacity = 2'048;
+  static constexpr std::uint32_t kTransportQueueCapacity = 32;
+  template <std::size_t Capacity>
+  struct ControlLane {
+    std::array<QueuedControlEvent, Capacity> events{};
+    std::atomic<std::uint32_t> read = 0;
+    std::atomic<std::uint32_t> write = 0;
+  };
+  struct TransportCommand {
+    std::uint32_t epoch = 0;
+    bool running = false;
+    std::int64_t frame = 0;
+    std::uint64_t transition_id = 0;
+  };
+  struct TransportLane {
+    std::array<TransportCommand, kTransportQueueCapacity> commands{};
+    std::atomic<std::uint32_t> read = 0;
+    std::atomic<std::uint32_t> write = 0;
+  };
+  struct RealtimeProcessScratch {
+    std::array<const float*, 64> input_slice{};
+    std::array<float*, 64> output_slice{};
+    std::array<daw_audio_processor_event, DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS> processor_events{};
+    std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS> instrument_events{};
+  };
   struct InstalledAsset {
     daw_audio_asset_handle handle = 0;
     std::vector<float> samples;
@@ -349,13 +940,26 @@ struct AudioHost::Impl {
   daw_audio_core_handle retired_core = 0;
   HostConfig config{};
   std::atomic<LifecycleState> state = LifecycleState::kIdle;
+  std::atomic<std::uint64_t> callback_attempts = 0;
   std::atomic<std::uint64_t> callbacks = 0;
   std::atomic<std::uint64_t> split_blocks = 0;
   std::atomic<std::uint64_t> rejected_blocks = 0;
+  std::atomic<RejectedBlockReason> last_rejected_reason = RejectedBlockReason::kNone;
+  std::atomic<std::uint64_t> last_rejected_callback = 0;
+  std::atomic<std::uint64_t> last_rejected_render_epoch = 0;
+  std::atomic<std::uint32_t> last_rejected_transport_epoch = 0;
+  std::atomic<std::uint32_t> last_rejected_core_result = DAW_AUDIO_CORE_OK;
+  std::atomic<std::uint32_t> last_rejected_frame_count = 0;
+  std::atomic<std::uint32_t> last_rejected_channel_count = 0;
+  std::atomic<std::uint32_t> last_rejected_processor_event_count = 0;
+  std::atomic<std::uint32_t> last_rejected_instrument_event_count = 0;
+  std::atomic<std::uint32_t> last_rejected_graph_revision = 0;
   std::atomic<std::uint32_t> active_revision = 0;
   std::atomic<std::uint32_t> prepared_revision = 0;
   std::atomic<std::uint32_t> retired_revision = 0;
   std::atomic<std::uint64_t> completed_render_epoch = 0;
+  NativeMeterObserver meter_observer{};
+  std::uint64_t meter_sequence = 0;
   std::atomic<std::uint64_t> retired_after_epoch = 0;
   std::atomic<std::uint32_t> publish_requested_revision = 0;
   std::atomic<std::uint32_t> publish_acknowledged_revision = 0;
@@ -364,10 +968,31 @@ struct AudioHost::Impl {
   std::atomic<std::uint32_t> transport_epoch = 0;
   std::atomic<std::int64_t> transport_frame = 0;
   std::atomic<bool> transport_running = false;
+  std::atomic<std::uint32_t> applied_transport_epoch = 0;
+  std::atomic<std::int64_t> applied_transport_frame = 0;
+  std::atomic<bool> applied_transport_running = false;
+  std::atomic<std::uint64_t> applied_transport_transition_id = 0;
+  std::atomic<std::uint64_t> last_queued_transport_transition_id = 0;
+  std::atomic<std::uint32_t> last_queued_transport_epoch = 0;
+  TransportLane transport_queue{};
+  std::atomic<std::uint64_t> published_schedule_window_id = 0;
+  std::atomic<std::uint32_t> accepted_schedule_epoch = 0;
+  std::atomic<std::uint64_t> accepted_schedule_through_frame = 0;
+  std::atomic<bool> schedule_complete = false;
+  std::uint64_t last_accepted_schedule_window_id = 0;
+  std::uint32_t last_accepted_schedule_epoch = 0;
+  std::uint64_t last_schedule_start_frame = 0;
+  ScheduleStaging schedule_staging{};
+  std::array<std::uint64_t, 3> schedule_digest_windows{};
+  std::array<std::array<std::uint64_t, kMaximumScheduleChunks>, 3> schedule_chunk_digests{};
+  std::size_t schedule_digest_cursor = 0;
+  std::atomic<std::uint64_t> applied_urgent_sequence = 0;
   std::atomic<std::uint32_t> last_graph_revision = 0;
-  std::array<QueuedControlEvent, kControlQueueCapacity> control_queue{};
-  std::atomic<std::uint32_t> control_queue_read = 0;
-  std::atomic<std::uint32_t> control_queue_write = 0;
+  ControlLane<kUrgentQueueCapacity> urgent_queue{};
+  ControlLane<kInstrumentQueueCapacity> instrument_queue{};
+  ControlLane<kSourceQueueCapacity> source_queue{};
+  ControlLane<kProcessorQueueCapacity> processor_queue{};
+  RealtimeProcessScratch realtime_process_scratch{};
   bool graph_prepared = false;
   bool transport_prepared = false;
   void* device_session = nullptr;
@@ -405,7 +1030,33 @@ struct AudioHost::Impl {
   std::mutex realtime_bridge_wait_mutex;
   std::condition_variable realtime_bridge_wait;
   std::thread realtime_bridge_thread;
+  static constexpr std::uint32_t kRealtimeScheduleProgress = 1U << 3U;
+  std::atomic<std::uint64_t> schedule_progress_sequence = 0;
+  std::atomic<std::uint32_t> schedule_progress_revision = 0;
+  std::atomic<std::uint32_t> schedule_progress_epoch = 0;
+  std::atomic<std::uint64_t> schedule_progress_rendered_frame = 0;
+  std::atomic<std::uint64_t> schedule_progress_accepted_frame = 0;
+  std::atomic<std::uint64_t> schedule_progress_window_id = 0;
+  std::atomic<std::uint64_t> schedule_progress_applied_transition = 0;
+  std::atomic<std::uint64_t> schedule_progress_urgent = 0;
+  std::atomic<bool> schedule_progress_running = false;
+  std::atomic<bool> schedule_progress_complete = false;
+  std::atomic<bool> schedule_progress_ready = false;
+  bool schedule_progress_has_notification = false;
+  std::uint64_t schedule_progress_notified_frame = 0;
+  std::uint32_t schedule_progress_notified_revision = 0;
+  std::uint32_t schedule_progress_notified_epoch = 0;
+  std::uint64_t schedule_progress_notified_accepted_frame = 0;
+  std::uint64_t schedule_progress_notified_window_id = 0;
+  std::uint64_t schedule_progress_notified_transition = 0;
+  std::uint64_t schedule_progress_notified_urgent = 0;
+  bool schedule_progress_notified_running = false;
+  bool schedule_progress_notified_complete = false;
+  mutable std::mutex schedule_progress_mutex;
+  std::condition_variable schedule_progress_wait;
 
+  mutable std::mutex meter_wait_mutex;
+  std::condition_variable meter_wait;
   void NotifyRecordingStatus() {
     recording_status_revision.fetch_add(1, std::memory_order_release);
     recording_wait.notify_all();
@@ -414,6 +1065,28 @@ struct AudioHost::Impl {
   // DAW_REALTIME_CALLBACK_HELPER_BEGIN audio-host
   void SignalRealtimeBridge(const std::uint32_t events) noexcept {
     realtime_bridge_pending.fetch_or(events, std::memory_order_release);
+  }
+
+  void RejectBlock(
+    const RejectedBlockReason reason,
+    const std::uint64_t callback_attempt,
+    const std::uint32_t core_result = DAW_AUDIO_CORE_OK,
+    const std::uint32_t frame_count = 0,
+    const std::uint32_t channel_count = 0,
+    const std::uint32_t processor_event_count = 0,
+    const std::uint32_t instrument_event_count = 0,
+    const std::uint32_t graph_revision = 0) noexcept {
+    rejected_blocks.fetch_add(1, std::memory_order_relaxed);
+    last_rejected_reason.store(reason, std::memory_order_relaxed);
+    last_rejected_callback.store(callback_attempt, std::memory_order_relaxed);
+    last_rejected_render_epoch.store(completed_render_epoch.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    last_rejected_transport_epoch.store(applied_transport_epoch.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    last_rejected_core_result.store(core_result, std::memory_order_relaxed);
+    last_rejected_frame_count.store(frame_count, std::memory_order_relaxed);
+    last_rejected_channel_count.store(channel_count, std::memory_order_relaxed);
+    last_rejected_processor_event_count.store(processor_event_count, std::memory_order_relaxed);
+    last_rejected_instrument_event_count.store(instrument_event_count, std::memory_order_relaxed);
+    last_rejected_graph_revision.store(graph_revision, std::memory_order_relaxed);
   }
   // DAW_REALTIME_CALLBACK_HELPER_END audio-host
 
@@ -424,6 +1097,11 @@ struct AudioHost::Impl {
         const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
         if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
         if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
+        if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
+        if ((pending & kRealtimeScheduleProgress) != 0) {
+          schedule_progress_ready.store(true, std::memory_order_release);
+          schedule_progress_wait.notify_all();
+        }
         if (pending != 0) continue;
         // CoreAudio callbacks cannot wake scheduler primitives. This bounded
         // non-realtime bridge observes callback atomics within 100 microseconds.
@@ -436,12 +1114,18 @@ struct AudioHost::Impl {
       const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
       if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
       if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
+      if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
+      if ((pending & kRealtimeScheduleProgress) != 0) {
+        schedule_progress_ready.store(true, std::memory_order_release);
+        schedule_progress_wait.notify_all();
+      }
     });
   }
 
   void StopRealtimeBridge() {
     if (!realtime_bridge_running.exchange(false, std::memory_order_acq_rel)) return;
     realtime_bridge_wait.notify_all();
+    meter_wait.notify_all();
     if (realtime_bridge_thread.joinable()) realtime_bridge_thread.join();
   }
 
@@ -519,19 +1203,69 @@ struct AudioHost::Impl {
       static_cast<void>(instance_id);
       attachment->worker.Stop();
       attachment->pending_sequences.fill(0);
+      attachment->pending_frames.fill(0);
       attachment->missed_callbacks.fill(0);
+      attachment->completed_output_read = 0;
+      attachment->completed_output_write = 0;
     }
   }
-  bool EnqueueControlEvent(const QueuedControlEvent& event) {
-    const std::uint32_t write = control_queue_write.load(std::memory_order_relaxed);
-    const std::uint32_t read = control_queue_read.load(std::memory_order_acquire);
-    if (write - read >= kControlQueueCapacity) return false;
-    control_queue[write % kControlQueueCapacity] = event;
-    control_queue_write.store(write + 1, std::memory_order_release);
+  template <std::size_t Capacity>
+  static bool EnqueueControlEvent(ControlLane<Capacity>& lane, const QueuedControlEvent& event) {
+    const std::uint32_t write = lane.write.load(std::memory_order_relaxed);
+    const std::uint32_t read = lane.read.load(std::memory_order_acquire);
+    if (write - read >= Capacity) return false;
+    lane.events[write % Capacity] = event;
+    lane.write.store(write + 1, std::memory_order_release);
     return true;
   }
+  static bool EnqueueTransportCommand(TransportLane& lane, const TransportCommand& command) noexcept {
+    const auto write = lane.write.load(std::memory_order_relaxed);
+    const auto read = lane.read.load(std::memory_order_acquire);
+    if (write - read >= kTransportQueueCapacity) return false;
+    lane.commands[write % kTransportQueueCapacity] = command;
+    lane.write.store(write + 1, std::memory_order_release);
+    return true;
+  }
+  void ClearScheduledLanes() noexcept {
+    instrument_queue.read.store(instrument_queue.write.load(std::memory_order_acquire), std::memory_order_release);
+    source_queue.read.store(source_queue.write.load(std::memory_order_acquire), std::memory_order_release);
+    published_schedule_window_id.store(0, std::memory_order_release);
+    accepted_schedule_epoch.store(0, std::memory_order_release);
+    accepted_schedule_through_frame.store(transport_frame.load(std::memory_order_acquire), std::memory_order_release);
+    schedule_complete.store(false, std::memory_order_release);
+    last_accepted_schedule_window_id = 0;
+    last_accepted_schedule_epoch = 0;
+    last_schedule_start_frame = 0;
+    schedule_digest_windows = {};
+    schedule_chunk_digests = {};
+    schedule_digest_cursor = 0;
+    schedule_staging.clear();
+  }
+  [[nodiscard]] bool EnqueueControlEvent(const QueuedControlEvent& event) {
+    if (event.kind == QueuedControlKind::kUrgent) return EnqueueControlEvent(urgent_queue, event);
+    if (event.kind == QueuedControlKind::kInstrument) return EnqueueControlEvent(instrument_queue, event);
+    if (event.kind == QueuedControlKind::kSource) return EnqueueControlEvent(source_queue, event);
+    return EnqueueControlEvent(processor_queue, event);
+  }
+  template <std::size_t Capacity>
+  static bool HasCapacity(const ControlLane<Capacity>& lane, const std::uint32_t count) {
+    const auto write = lane.write.load(std::memory_order_relaxed);
+    const auto read = lane.read.load(std::memory_order_acquire);
+    return count <= Capacity && write - read <= Capacity - count;
+  }
+  [[nodiscard]] bool HasCapacity(const QueuedControlKind kind, const std::uint32_t count) const {
+    if (kind == QueuedControlKind::kUrgent) return HasCapacity(urgent_queue, count);
+    if (kind == QueuedControlKind::kInstrument) return HasCapacity(instrument_queue, count);
+    if (kind == QueuedControlKind::kSource) return HasCapacity(source_queue, count);
+    return HasCapacity(processor_queue, count);
+  }
+  template <std::size_t Capacity>
+  static bool HasQueuedControl(const ControlLane<Capacity>& lane) {
+    return lane.read.load(std::memory_order_acquire) != lane.write.load(std::memory_order_acquire);
+  }
   [[nodiscard]] bool HasQueuedControl() const {
-    return control_queue_read.load(std::memory_order_acquire) != control_queue_write.load(std::memory_order_acquire);
+    return HasQueuedControl(urgent_queue) || HasQueuedControl(instrument_queue)
+      || HasQueuedControl(source_queue) || HasQueuedControl(processor_queue);
   }
   [[nodiscard]] daw_audio_core_handle CreateRevisionCore(const std::uint32_t revision) {
     daw_audio_core_handle core = 0;
@@ -581,6 +1315,7 @@ struct AudioHost::Impl {
 
 AudioHost::AudioHost() : impl_(new Impl) {
   impl_->worker_notifications.active_revision = &impl_->active_revision;
+  impl_->meter_observer.bridge_pending = &impl_->realtime_bridge_pending;
   impl_->StartRealtimeBridge();
 }
 
@@ -625,22 +1360,72 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->prepared_core = 0;
   impl_->retired_core = 0;
   impl_->config = config;
+  impl_->schedule_progress_has_notification = false;
+  impl_->schedule_progress_notified_frame = 0;
+  impl_->schedule_progress_notified_revision = 0;
+  impl_->schedule_progress_notified_epoch = 0;
+  impl_->schedule_progress_notified_accepted_frame = 0;
+  impl_->schedule_progress_notified_window_id = 0;
+  impl_->schedule_progress_notified_transition = 0;
+  impl_->schedule_progress_notified_urgent = 0;
+  impl_->schedule_progress_notified_running = false;
+  impl_->schedule_progress_notified_complete = false;
   impl_->assets.clear();
   impl_->prepared_asset_handles.clear();
   impl_->graph_prepared = false;
   impl_->transport_prepared = false;
   impl_->transport_frame.store(0, std::memory_order_release);
   impl_->transport_running.store(false, std::memory_order_release);
+  impl_->applied_transport_epoch.store(0, std::memory_order_release);
+  impl_->applied_transport_frame.store(0, std::memory_order_release);
+  impl_->applied_transport_running.store(false, std::memory_order_release);
+  impl_->applied_transport_transition_id.store(0, std::memory_order_release);
+  impl_->last_queued_transport_epoch.store(0, std::memory_order_release);
+  impl_->last_queued_transport_transition_id.store(0, std::memory_order_release);
+  impl_->transport_queue.read.store(0, std::memory_order_release);
+  impl_->transport_queue.write.store(0, std::memory_order_release);
+  impl_->accepted_schedule_epoch.store(0, std::memory_order_release);
+  impl_->accepted_schedule_through_frame.store(0, std::memory_order_release);
+  impl_->published_schedule_window_id.store(0, std::memory_order_release);
+  impl_->schedule_complete.store(false, std::memory_order_release);
+  impl_->last_accepted_schedule_window_id = 0;
+  impl_->last_accepted_schedule_epoch = 0;
+  impl_->last_schedule_start_frame = 0;
+  impl_->schedule_digest_windows = {};
+  impl_->schedule_chunk_digests = {};
+  impl_->schedule_digest_cursor = 0;
   impl_->state.store(LifecycleState::kConfigured, std::memory_order_release);
   impl_->active_revision.store(config.revision, std::memory_order_release);
   impl_->prepared_revision.store(0, std::memory_order_release);
   impl_->retired_revision.store(0, std::memory_order_release);
   impl_->publish_requested_revision.store(0, std::memory_order_release);
   impl_->publish_acknowledged_revision.store(0, std::memory_order_release);
+  impl_->callback_attempts.store(0, std::memory_order_release);
+  impl_->callbacks.store(0, std::memory_order_release);
+  impl_->split_blocks.store(0, std::memory_order_release);
+  impl_->rejected_blocks.store(0, std::memory_order_release);
+  impl_->last_rejected_reason.store(RejectedBlockReason::kNone, std::memory_order_release);
+  impl_->last_rejected_callback.store(0, std::memory_order_release);
+  impl_->last_rejected_render_epoch.store(0, std::memory_order_release);
+  impl_->last_rejected_transport_epoch.store(0, std::memory_order_release);
+  impl_->last_rejected_core_result.store(DAW_AUDIO_CORE_OK, std::memory_order_release);
+  impl_->last_rejected_frame_count.store(0, std::memory_order_release);
+  impl_->last_rejected_channel_count.store(0, std::memory_order_release);
+  impl_->last_rejected_processor_event_count.store(0, std::memory_order_release);
+  impl_->last_rejected_instrument_event_count.store(0, std::memory_order_release);
+  impl_->last_rejected_graph_revision.store(0, std::memory_order_release);
   impl_->completed_render_epoch.store(0, std::memory_order_release);
+  impl_->meter_observer.Clear();
+  impl_->meter_sequence = 0;
   impl_->last_graph_revision.store(0, std::memory_order_release);
-  impl_->control_queue_read.store(0, std::memory_order_release);
-  impl_->control_queue_write.store(0, std::memory_order_release);
+  impl_->urgent_queue.read.store(0, std::memory_order_release);
+  impl_->urgent_queue.write.store(0, std::memory_order_release);
+  impl_->instrument_queue.read.store(0, std::memory_order_release);
+  impl_->instrument_queue.write.store(0, std::memory_order_release);
+  impl_->source_queue.read.store(0, std::memory_order_release);
+  impl_->source_queue.write.store(0, std::memory_order_release);
+  impl_->processor_queue.read.store(0, std::memory_order_release);
+  impl_->processor_queue.write.store(0, std::memory_order_release);
   impl_->worker_notifications.mute_requested.store(false, std::memory_order_release);
   return true;
 }
@@ -698,14 +1483,28 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const daw_audio_core_handle prepared_core = impl_->CreateRevisionCore(revision);
   if (prepared_core == 0) return status(GraphRevisionStatusCode::kPrepareFailed);
   const auto payload = snapshot.subspan(kNativeGraphFrameHeaderBytes);
-  if (daw_audio_core_prepare_graph_bytes(prepared_core, payload.data(), static_cast<std::uint32_t>(payload.size()))
-    != DAW_AUDIO_CORE_OK) {
+  const auto prepare_result = daw_audio_core_prepare_graph_bytes(
+    prepared_core,
+    payload.data(),
+    static_cast<std::uint32_t>(payload.size()));
+  if (prepare_result != DAW_AUDIO_CORE_OK) {
+    const auto diagnostic = daw_audio_core_get_graph_validation_diagnostic(prepared_core);
+    std::fprintf(
+      stderr,
+      "[native-graph] prepare rejected {revision:%u,result:%u,diagnostic:%u,index:%u,actual:%u,limit:%u}\n",
+      revision,
+      static_cast<unsigned int>(prepare_result),
+      diagnostic.code,
+      diagnostic.index,
+      diagnostic.actual,
+      diagnostic.limit);
     daw_audio_core_destroy(prepared_core);
     impl_->prepared_asset_handles.clear();
     return status(GraphRevisionStatusCode::kPrepareFailed);
   }
   std::vector<daw::audio_core::NativeGraphHookBinding> bindings;
   bindings.reserve(impl_->native_vst_attachments.size());
+  std::unordered_map<std::uint64_t, std::vector<NativeVstWorkerAttachment*>> chains;
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
     static_cast<void>(instance_id);
     if (!attachment->metadata.playback_enabled) continue;
@@ -714,16 +1513,48 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
       impl_->prepared_asset_handles.clear();
       return status(GraphRevisionStatusCode::kPrepareFailed);
     }
-    bindings.push_back({
-      .node_id = attachment->metadata.graph_node_id,
-      .output_layout = attachment->metadata.output_layout,
-      .pdc_latency_frames = attachment->metadata.declared_latency_frames + attachment->metadata.transport_latency_frames,
-      .attachment = attachment.get(),
-    });
+    chains[attachment->metadata.graph_node_id].push_back(attachment.get());
   }
-  if ((!bindings.empty() && daw::audio_core::RegisterNativeGraphHook(
-    prepared_core, {.graph_revision = revision, .hook = DispatchNativeVstGraphHook, .bindings = bindings}
-  ) != DAW_AUDIO_CORE_OK) || daw_audio_core_publish(prepared_core, revision) != DAW_AUDIO_CORE_OK) {
+  for (auto& [node_id, chain] : chains) {
+    std::sort(chain.begin(), chain.end(), [](const auto* left, const auto* right) {
+      return left->metadata.chain_index < right->metadata.chain_index;
+    });
+    std::uint64_t total_latency = 0;
+    for (std::size_t index = 0; index < chain.size(); ++index) {
+      if (chain[index]->metadata.chain_index != index) {
+        daw_audio_core_destroy(prepared_core);
+        impl_->prepared_asset_handles.clear();
+        return status(GraphRevisionStatusCode::kPrepareFailed);
+      }
+      total_latency += chain[index]->metadata.declared_latency_frames
+        + chain[index]->metadata.transport_latency_frames;
+    }
+    if (total_latency > std::numeric_limits<std::uint32_t>::max()) {
+      daw_audio_core_destroy(prepared_core);
+      impl_->prepared_asset_handles.clear();
+      return status(GraphRevisionStatusCode::kPrepareFailed);
+    }
+    for (auto* attachment : chain) {
+      bindings.push_back({
+        .node_id = node_id,
+        .chain_index = attachment->metadata.chain_index,
+        .output_layout = attachment->metadata.output_layout,
+        .pdc_latency_frames = 0,
+        .external_latency_frames = static_cast<std::uint32_t>(total_latency),
+        .attachment = attachment,
+      });
+    }
+  }
+  if (daw::audio_core::RegisterNativeGraphHook(
+    prepared_core,
+    {
+      .graph_revision = revision,
+      .hook = bindings.empty() ? nullptr : DispatchNativeVstGraphHook,
+      .bindings = bindings,
+      .observer = NativeMeterObserver::Dispatch,
+      .observer_attachment = &impl_->meter_observer,
+    }
+  ) != DAW_AUDIO_CORE_OK || daw_audio_core_publish(prepared_core, revision) != DAW_AUDIO_CORE_OK) {
     daw_audio_core_destroy(prepared_core);
     impl_->prepared_asset_handles.clear();
     return status(GraphRevisionStatusCode::kPrepareFailed);
@@ -855,9 +1686,7 @@ bool AudioHost::QueueParameterEvents(const std::span<const std::uint8_t> payload
   if (impl_->prepared_core != 0 || payload.size() < 4) return false;
   const std::uint32_t count = ReadLeU32(payload.data());
   if (count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 20) return false;
-  const std::uint32_t write = impl_->control_queue_write.load(std::memory_order_relaxed);
-  const std::uint32_t read = impl_->control_queue_read.load(std::memory_order_acquire);
-  if (count > Impl::kControlQueueCapacity - (write - read)) return false;
+  if (!impl_->HasCapacity(Impl::QueuedControlKind::kProcessor, count)) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
     const auto* bytes = payload.data() + 4 + index * 20;
     Impl::QueuedControlEvent event{};
@@ -873,16 +1702,25 @@ bool AudioHost::QueueInstrumentEvents(const std::span<const std::uint8_t> payloa
   if (impl_->prepared_core != 0 || payload.size() < 4) return false;
   const std::uint32_t count = ReadLeU32(payload.data());
   if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 48) return false;
-  const std::uint32_t write = impl_->control_queue_write.load(std::memory_order_relaxed);
-  const std::uint32_t read = impl_->control_queue_read.load(std::memory_order_acquire);
-  if (count > Impl::kControlQueueCapacity - (write - read)) return false;
+  const auto is_urgent = [&](const std::uint32_t index) {
+    const auto type = ReadLeU32(payload.data() + 4 + index * 48 + 32);
+    return type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)
+      || type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff)
+      || type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kTransportRelease)
+      || type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff);
+  };
+  std::uint32_t urgent_count = 0;
+  for (std::uint32_t index = 0; index < count; ++index) if (is_urgent(index)) ++urgent_count;
+  if (!impl_->HasCapacity(Impl::QueuedControlKind::kUrgent, urgent_count)
+    || !impl_->HasCapacity(Impl::QueuedControlKind::kInstrument, count - urgent_count)) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
     const auto* bytes = payload.data() + 4 + index * 48;
     Impl::QueuedControlEvent event{};
-    event.kind = Impl::QueuedControlKind::kInstrument;
+    event.kind = is_urgent(index) ? Impl::QueuedControlKind::kUrgent : Impl::QueuedControlKind::kInstrument;
     event.instrument = {.node_id = ReadLeU64(bytes), .note_id = ReadLeU64(bytes + 8), .sequence = ReadLeU64(bytes + 16),
       .epoch = ReadLeU32(bytes + 24), .frame_offset = ReadLeU32(bytes + 28), .type = ReadLeU32(bytes + 32),
       .channel = ReadLeU32(bytes + 36), .note = ReadLeU32(bytes + 40), .value = ReadLeFloat(bytes + 44)};
+    if (!ValidNativeInstrumentEvent(event.instrument)) return false;
     if (!impl_->EnqueueControlEvent(event)) return false;
   }
   return true;
@@ -892,9 +1730,7 @@ bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
   if (impl_->prepared_core != 0 || payload.size() < 4) return false;
   const std::uint32_t count = ReadLeU32(payload.data());
   if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 92) return false;
-  const std::uint32_t write = impl_->control_queue_write.load(std::memory_order_relaxed);
-  const std::uint32_t read = impl_->control_queue_read.load(std::memory_order_acquire);
-  if (count > Impl::kControlQueueCapacity - (write - read)) return false;
+  if (!impl_->HasCapacity(Impl::QueuedControlKind::kSource, count)) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
     const auto* bytes = payload.data() + 4 + index * 92;
     if (!impl_->assets.contains(ReadLeU32(bytes + 20))) return false;
@@ -911,6 +1747,382 @@ bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
       .fade_in_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 60)), .fade_in_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 68)),
       .fade_out_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 76)), .fade_out_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 84))};
     if (!impl_->EnqueueControlEvent(event)) return false;
+  }
+  return true;
+}
+
+bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload) {
+  if (payload.size() < 56 || impl_->prepared_core != 0) return false;
+  const std::uint32_t revision = ReadLeU32(payload.data());
+  const std::uint32_t epoch = ReadLeU32(payload.data() + 4);
+  const std::uint64_t window_id = ReadLeU64(payload.data() + 8);
+  const std::uint64_t start_frame = ReadLeU64(payload.data() + 16);
+  const std::uint64_t end_frame = ReadLeU64(payload.data() + 24);
+  const std::uint32_t chunk_index = ReadLeU32(payload.data() + 32);
+  const std::uint32_t chunk_count = ReadLeU32(payload.data() + 36);
+  const std::uint32_t ends_schedule = ReadLeU32(payload.data() + 40);
+  const std::uint32_t instrument_count = ReadLeU32(payload.data() + 44);
+  const std::uint32_t source_count = ReadLeU32(payload.data() + 48);
+  const std::uint32_t automation_count = ReadLeU32(payload.data() + 52);
+  if (revision == 0 || revision != impl_->active_revision.load(std::memory_order_acquire)
+    || epoch == 0 || epoch != impl_->transport_epoch.load(std::memory_order_acquire)
+    || window_id == 0 || start_frame >= end_frame || end_frame > std::numeric_limits<std::int64_t>::max()
+    || chunk_count == 0 || chunk_count > kMaximumScheduleChunks || chunk_index >= chunk_count
+    || ends_schedule > 1
+    || (ends_schedule == 1 && chunk_index + 1 != chunk_count)
+    || instrument_count + source_count + automation_count > kMaximumScheduleRecords
+    || instrument_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS
+    || source_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS
+    || automation_count > kMaximumScheduleAutomationSegments) return false;
+  if (impl_->last_accepted_schedule_epoch != epoch) {
+    impl_->last_accepted_schedule_window_id = 0;
+    impl_->last_accepted_schedule_epoch = epoch;
+    impl_->last_schedule_start_frame = 0;
+    impl_->schedule_digest_windows = {};
+    impl_->schedule_chunk_digests = {};
+    impl_->schedule_digest_cursor = 0;
+    impl_->schedule_staging.clear();
+    impl_->schedule_complete.store(false, std::memory_order_release);
+  }
+  const auto digest = [&] {
+    std::uint64_t result = 1469598103934665603ULL;
+    for (const auto byte : payload) {
+      result ^= byte;
+      result *= 1099511628211ULL;
+    }
+    return result;
+  }();
+  for (std::size_t index = 0; index < impl_->schedule_digest_windows.size(); ++index) {
+    if (impl_->schedule_digest_windows[index] != window_id) continue;
+    const auto existing = impl_->schedule_chunk_digests[index][chunk_index];
+    if (existing == digest) return true;
+    return false;
+  }
+  auto& staging = impl_->schedule_staging;
+  if (!staging.active && impl_->schedule_complete.load(std::memory_order_acquire)) return false;
+  const bool staging_was_active = staging.active;
+  const auto staging_revision_before = staging.revision;
+  const auto staging_epoch_before = staging.epoch;
+  const auto staging_window_id_before = staging.window_id;
+  const auto staging_start_frame_before = staging.start_frame;
+  const auto staging_end_frame_before = staging.end_frame;
+  const auto staging_chunk_count_before = staging.chunk_count;
+  const auto record_count_before = staging.record_count;
+  const auto automation_count_before = staging.automation_state.segment_count;
+  const auto automation_group_count_before = staging.automation_state.group_count;
+  for (std::size_t index = 0; index < staging.automation_state.group_count; ++index) {
+    staging.rollback_automation_group_counts[index] = staging.automation_state.groups[index].count;
+  }
+  const auto ends_schedule_before = staging.ends_schedule;
+  const auto received_chunk_before = staging.received_chunks[chunk_index];
+  const auto chunk_digest_before = staging.chunk_digests[chunk_index];
+  bool keep_staging = false;
+  struct StagingRollback {
+    Impl::ScheduleStaging& staging;
+    bool was_active;
+    std::uint32_t revision;
+    std::uint32_t epoch;
+    std::uint64_t window_id;
+    std::uint64_t start_frame;
+    std::uint64_t end_frame;
+    std::uint32_t chunk_count;
+    std::size_t record_count;
+    std::size_t automation_count;
+    std::size_t automation_group_count;
+    bool ends_schedule;
+    std::uint32_t chunk_index;
+    bool received_chunk;
+    std::uint64_t chunk_digest;
+    bool& keep;
+    ~StagingRollback() {
+      if (keep) return;
+      if (!was_active) {
+        staging.clear();
+        return;
+      }
+      staging.active = was_active;
+      staging.revision = revision;
+      staging.epoch = epoch;
+      staging.window_id = window_id;
+      staging.start_frame = start_frame;
+      staging.end_frame = end_frame;
+      staging.chunk_count = chunk_count;
+      for (std::size_t index = record_count; index < staging.record_count; ++index) {
+        staging.events[index] = {};
+      }
+      staging.record_count = record_count;
+      staging.automation_state.segment_count = automation_count;
+      staging.automation_state.group_count = automation_group_count;
+      for (std::size_t index = 0; index < automation_group_count; ++index) {
+        const auto previous_count = staging.rollback_automation_group_counts[index];
+        for (std::size_t segment = previous_count;
+             segment < staging.automation_state.groups[index].count; ++segment) {
+          staging.automation_state.groups[index].segments[segment] = {};
+        }
+        staging.automation_state.groups[index].count = previous_count;
+      }
+      for (std::size_t index = automation_group_count;
+           index < staging.automation_state.groups.size(); ++index) {
+        auto& group = staging.automation_state.groups[index];
+        for (std::size_t segment = 0; segment < group.count; ++segment) {
+          group.segments[segment] = {};
+        }
+        group.attachment = nullptr;
+        group.count = 0;
+      }
+      staging.active = was_active;
+      staging.ends_schedule = ends_schedule;
+      staging.received_chunks[chunk_index] = received_chunk;
+      staging.chunk_digests[chunk_index] = chunk_digest;
+    }
+  } rollback{
+    staging,
+    staging_was_active,
+    staging_revision_before,
+    staging_epoch_before,
+    staging_window_id_before,
+    staging_start_frame_before,
+    staging_end_frame_before,
+    staging_chunk_count_before,
+    record_count_before,
+    automation_count_before,
+    automation_group_count_before,
+    ends_schedule_before,
+    chunk_index,
+    received_chunk_before,
+    chunk_digest_before,
+    keep_staging,
+  };
+  if (!staging.active) {
+    if (window_id <= impl_->last_accepted_schedule_window_id
+      || start_frame != impl_->accepted_schedule_through_frame.load(std::memory_order_acquire)) return false;
+    staging.clear();
+    staging.active = true;
+    staging.revision = revision;
+    staging.epoch = epoch;
+    staging.window_id = window_id;
+    staging.start_frame = start_frame;
+    staging.end_frame = end_frame;
+    staging.chunk_count = chunk_count;
+  }
+  if (!staging.active || staging.revision != revision || staging.epoch != epoch
+    || staging.window_id != window_id || staging.start_frame != start_frame
+    || staging.end_frame != end_frame || staging.chunk_count != chunk_count
+  ) return false;
+  if (staging.received_chunks[chunk_index]) {
+    return staging.chunk_digests[chunk_index] == digest;
+  }
+  std::size_t offset = 56;
+  std::uint64_t previous_frame = 0;
+  std::uint64_t previous_sequence = 0;
+  bool has_previous = false;
+  for (std::uint32_t index = 0; index < instrument_count; ++index) {
+    if (offset + 48 > payload.size()) return false;
+    const auto* bytes = payload.data() + offset;
+    const std::uint64_t frame = ReadLeU32(bytes + 28);
+    const std::uint64_t sequence = ReadLeU64(bytes + 16);
+    if (frame < start_frame || frame >= end_frame || sequence == 0
+      || (has_previous && (frame < previous_frame || (frame == previous_frame && sequence <= previous_sequence)))) {
+      return false;
+    }
+    Impl::QueuedControlEvent event{};
+    event.kind = Impl::QueuedControlKind::kInstrument;
+    event.window_id = window_id;
+    event.absolute_frame = frame;
+    event.scheduled = true;
+    event.instrument = {
+      .node_id = ReadLeU64(bytes),
+      .note_id = ReadLeU64(bytes + 8),
+      .sequence = sequence,
+      .epoch = ReadLeU32(bytes + 24),
+      .frame_offset = static_cast<std::uint32_t>(frame),
+      .type = ReadLeU32(bytes + 32),
+      .channel = ReadLeU32(bytes + 36),
+      .note = ReadLeU32(bytes + 40),
+      .value = ReadLeFloat(bytes + 44),
+    };
+    if (event.instrument.epoch != epoch || !ValidNativeInstrumentEvent(event.instrument)
+      || staging.record_count >= staging.events.size()) return false;
+    staging.events[staging.record_count++] = event;
+    previous_frame = frame;
+    previous_sequence = sequence;
+    has_previous = true;
+    offset += 48;
+  }
+  std::uint64_t previous_source_frame = 0;
+  std::uint64_t previous_source_sequence = 0;
+  bool has_previous_source = false;
+  for (std::uint32_t index = 0; index < source_count; ++index) {
+    if (offset + 92 > payload.size()) return false;
+    const auto* bytes = payload.data() + offset;
+    const auto source_start = ReadLeU64(bytes + 24);
+    const auto source_sequence = ReadLeU64(bytes + 4);
+    const auto source_stop = ReadLeU64(bytes + 32);
+    const auto source_offset = ReadLeU64(bytes + 40);
+    const auto source_frames = ReadLeU64(bytes + 48);
+    const auto fade_in_start = ReadLeU64(bytes + 60);
+    const auto fade_in_end = ReadLeU64(bytes + 68);
+    const auto fade_out_start = ReadLeU64(bytes + 76);
+    const auto fade_out_end = ReadLeU64(bytes + 84);
+    if (source_start < start_frame || source_start >= end_frame || source_sequence == 0
+      || source_stop <= source_start || source_stop > std::numeric_limits<std::int64_t>::max()
+      || source_frames == 0 || source_offset > std::numeric_limits<std::uint64_t>::max() - source_frames
+      || fade_in_start > fade_in_end || fade_out_start > fade_out_end
+      || (has_previous_source && (source_start < previous_source_frame
+        || (source_start == previous_source_frame && source_sequence <= previous_source_sequence)))) return false;
+    const auto asset = impl_->assets.find(ReadLeU32(bytes + 20));
+    if (asset == impl_->assets.end() || source_offset + source_frames > asset->second.frame_count
+      || staging.record_count >= staging.events.size()) return false;
+    Impl::QueuedControlEvent event{};
+    event.kind = Impl::QueuedControlKind::kSource;
+    event.window_id = window_id;
+    event.scheduled = true;
+    event.source = {
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+      .epoch = ReadLeU32(bytes),
+      .sequence = source_sequence,
+      .source_node_id = ReadLeU64(bytes + 12),
+      .asset = asset->second.handle,
+      .start_frame = static_cast<std::int64_t>(source_start),
+      .stop_frame = static_cast<std::int64_t>(source_stop),
+      .source_offset_frame = source_offset,
+      .source_frame_count = source_frames,
+      .gain = ReadLeFloat(bytes + 56),
+      .fade_in_start_frame = static_cast<std::int64_t>(fade_in_start),
+      .fade_in_end_frame = static_cast<std::int64_t>(fade_in_end),
+      .fade_out_start_frame = static_cast<std::int64_t>(fade_out_start),
+      .fade_out_end_frame = static_cast<std::int64_t>(fade_out_end)};
+    if (event.source.epoch != epoch || staging.record_count >= staging.events.size()) return false;
+    staging.events[staging.record_count++] = event;
+    previous_source_frame = source_start;
+    previous_source_sequence = source_sequence;
+    has_previous_source = true;
+    offset += 92;
+  }
+  std::string previous_automation_instance;
+  std::uint32_t previous_automation_parameter = 0;
+  std::uint64_t previous_automation_start = 0;
+  bool has_previous_automation = false;
+  for (std::uint32_t index = 0; index < automation_count; ++index) {
+    if (offset + 4 > payload.size()) return false;
+    const std::uint32_t instance_bytes = ReadLeU32(payload.data() + offset);
+    offset += 4;
+    if (instance_bytes == 0 || instance_bytes > kMaximumScheduleInstanceIdBytes
+      || offset + instance_bytes + 40 > payload.size()) return false;
+    const std::string instance_id(
+      reinterpret_cast<const char*>(payload.data() + offset),
+      instance_bytes
+    );
+    offset += instance_bytes;
+    const auto attachment = impl_->native_vst_attachments.find(instance_id);
+    if (attachment == impl_->native_vst_attachments.end() || !attachment->second->metadata.playback_enabled) return false;
+    NativeVstAutomationSegment segment{
+      .parameter_id = ReadLeU32(payload.data() + offset),
+      .start_frame = ReadLeU64(payload.data() + offset + 4),
+      .end_frame = ReadLeU64(payload.data() + offset + 12),
+      .start_value = ReadLeDouble(payload.data() + offset + 20),
+      .end_value = ReadLeDouble(payload.data() + offset + 28),
+      .linear = ReadLeU32(payload.data() + offset + 36) == 1,
+    };
+    if (has_previous_automation
+      && (instance_id < previous_automation_instance
+        || (instance_id == previous_automation_instance
+          && (segment.parameter_id < previous_automation_parameter
+            || (segment.parameter_id == previous_automation_parameter
+              && segment.start_frame <= previous_automation_start))))) return false;
+    if (ReadLeU32(payload.data() + offset + 36) > 1
+      || segment.start_frame < start_frame || segment.start_frame >= segment.end_frame
+      || segment.end_frame > end_frame || !std::isfinite(segment.start_value)
+      || !std::isfinite(segment.end_value) || segment.start_value < 0.0 || segment.start_value > 1.0
+      || segment.end_value < 0.0 || segment.end_value > 1.0
+      || staging.automation_state.segment_count >= kMaximumScheduleAutomationSegments) return false;
+    auto group = std::find_if(
+      staging.automation_state.groups.begin(),
+      staging.automation_state.groups.begin() + staging.automation_state.group_count,
+      [&attachment](const auto& candidate) { return candidate.attachment == attachment->second.get(); }
+    );
+    if (group == staging.automation_state.groups.begin() + staging.automation_state.group_count) {
+      if (staging.automation_state.group_count >= staging.automation_state.groups.size()) return false;
+      group = staging.automation_state.groups.begin() + staging.automation_state.group_count++;
+      group->attachment = attachment->second.get();
+    }
+    if (group->count >= group->segments.size()) return false;
+    group->segments[group->count++] = segment;
+    ++staging.automation_state.segment_count;
+    previous_automation_instance = instance_id;
+    previous_automation_parameter = segment.parameter_id;
+    previous_automation_start = segment.start_frame;
+    has_previous_automation = true;
+    offset += 40;
+  }
+  if (offset != payload.size()) return false;
+  staging.received_chunks[chunk_index] = true;
+  staging.chunk_digests[chunk_index] = digest;
+  staging.ends_schedule = staging.ends_schedule || ends_schedule == 1;
+  if (std::count(staging.received_chunks.begin(),
+      staging.received_chunks.begin() + staging.chunk_count, true) != staging.chunk_count) {
+    keep_staging = true;
+    return true;
+  }
+  const std::uint32_t instrument_events = static_cast<std::uint32_t>(
+    std::count_if(staging.events.begin(), staging.events.begin() + staging.record_count,
+      [](const auto& event) { return event.kind == Impl::QueuedControlKind::kInstrument; })
+  );
+  const std::uint32_t source_events = static_cast<std::uint32_t>(staging.record_count) - instrument_events;
+  if (!impl_->HasCapacity(Impl::QueuedControlKind::kInstrument, instrument_events)
+    || !impl_->HasCapacity(Impl::QueuedControlKind::kSource, source_events)) {
+    staging.clear();
+    return false;
+  }
+  const auto rendered_epoch = impl_->schedule_progress_epoch.load(std::memory_order_acquire);
+  const auto rendered_through_frame = rendered_epoch == epoch
+    ? impl_->schedule_progress_rendered_frame.load(std::memory_order_acquire)
+    : 0;
+  for (std::size_t index = 0; index < staging.automation_state.group_count; ++index) {
+    const auto& group = staging.automation_state.groups[index];
+    auto* attachment = static_cast<NativeVstWorkerAttachment*>(group.attachment);
+    if (attachment == nullptr || !attachment->PublishAutomation(
+      epoch,
+      rendered_through_frame,
+      std::span<const NativeVstAutomationSegment>(group.segments.data(), group.count)
+    )) {
+      staging.clear();
+      return false;
+    }
+  }
+  for (std::size_t index = 0; index < staging.record_count; ++index) {
+    if (!impl_->EnqueueControlEvent(staging.events[index])) {
+      staging.clear();
+      return false;
+    }
+  }
+  impl_->published_schedule_window_id.store(window_id, std::memory_order_release);
+  impl_->accepted_schedule_epoch.store(epoch, std::memory_order_release);
+  impl_->accepted_schedule_through_frame.store(end_frame, std::memory_order_release);
+  impl_->last_accepted_schedule_window_id = window_id;
+  impl_->last_schedule_start_frame = start_frame;
+  impl_->schedule_complete.store(staging.ends_schedule, std::memory_order_release);
+  const auto cursor = impl_->schedule_digest_cursor++ % impl_->schedule_digest_windows.size();
+  impl_->schedule_digest_windows[cursor] = window_id;
+  impl_->schedule_chunk_digests[cursor] = staging.chunk_digests;
+  staging.clear();
+  keep_staging = true;
+  return true;
+}
+
+bool AudioHost::ReenableVstScheduleAutomation(const std::span<const std::uint8_t> payload) {
+  if (payload.size() < 8) return false;
+  const auto instance_bytes = ReadLeU32(payload.data());
+  if (instance_bytes == 0 || instance_bytes > kMaximumScheduleInstanceIdBytes
+    || payload.size() < 8 + instance_bytes) return false;
+  const std::string instance_id(reinterpret_cast<const char*>(payload.data() + 4), instance_bytes);
+  const auto attachment = impl_->native_vst_attachments.find(instance_id);
+  if (attachment == impl_->native_vst_attachments.end()) return false;
+  const auto count = ReadLeU32(payload.data() + 4 + instance_bytes);
+  if (count > kMaximumScheduleAutomationSegments
+    || payload.size() != 8 + instance_bytes + static_cast<std::size_t>(count) * 4) return false;
+  for (std::uint32_t index = 0; index < count; ++index) {
+    attachment->second->ClearAutomationOverride(ReadLeU32(payload.data() + 8 + instance_bytes + index * 4));
   }
   return true;
 }
@@ -934,7 +2146,10 @@ bool AudioHost::QueueNativeVstParameterEvents(const std::span<const std::uint8_t
     events[index] = {.kind = daw::plugin_host::WorkerEventKind::kParameter, .sampleOffset = ReadLeU32(bytes + 4),
       .parameterId = ReadLeU32(bytes), .parameterValue = value};
   }
-  return attachment->second->QueueEvents(std::span<const daw::plugin_host::WorkerTransportEvent>(events.data(), count));
+  if (!attachment->second->QueueEvents(
+    std::span<const daw::plugin_host::WorkerTransportEvent>(events.data(), count)
+  )) return false;
+  return true;
 }
 
 bool AudioHost::QueueNativeVstMidiEvents(const std::span<const std::uint8_t> payload) {
@@ -1011,7 +2226,10 @@ void AudioHost::ProcessNativeVstControl() {
           impl_->native_graph_revision_required = true;
         }
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kBuses) {
-        impl_->native_graph_revision_required = true;
+        // The worker emits its validated active-bus summary during every
+        // successful startup. Attachment preflight and transport dimensions
+        // already prove the supported stereo bus contract; this notification
+        // is informational and must not mute or tear down the graph.
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kRestart) {
         restart = true;
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kFault) {
@@ -1020,7 +2238,9 @@ void AudioHost::ProcessNativeVstControl() {
     }
   }
   if ((faulted || impl_->native_graph_revision_required)
-    && impl_->state.load(std::memory_order_acquire) == LifecycleState::kRunning) Stop();
+    && impl_->state.load(std::memory_order_acquire) == LifecycleState::kRunning) {
+    Stop();
+  }
   if (restart && impl_->state.load(std::memory_order_acquire) == LifecycleState::kRunning) {
     Stop();
     static_cast<void>(Start());
@@ -1077,11 +2297,31 @@ bool AudioHost::ReleaseAsset(const std::uint32_t asset_id) {
   return true;
 }
 
-bool AudioHost::SetTransport(const std::uint32_t epoch, const bool running, const std::int64_t frame) {
+bool AudioHost::SetTransport(
+  const std::uint32_t epoch,
+  const bool running,
+  const std::int64_t frame,
+  const std::uint64_t transition_id
+) {
   const daw_audio_core_handle active_core = impl_->active_core.load(std::memory_order_acquire);
-  if (active_core == 0 || impl_->prepared_core != 0 || frame < 0) return false;
-  const daw_audio_transport_state state{.epoch = epoch, .running = running ? 1U : 0U, .frame = frame};
-  if (daw_audio_core_set_transport(active_core, &state) != DAW_AUDIO_CORE_OK) return false;
+  if (active_core == 0 || impl_->prepared_core != 0 || frame < 0 || epoch == 0) return false;
+  const auto previous_epoch = impl_->last_queued_transport_epoch.load(std::memory_order_acquire);
+  const auto previous_transition = impl_->last_queued_transport_transition_id.load(std::memory_order_acquire);
+  const auto effective_transition = transition_id == 0 ? previous_transition + 1 : transition_id;
+  if (epoch < previous_epoch || effective_transition < previous_transition) return false;
+  if (effective_transition == previous_transition) {
+    return epoch == previous_epoch
+      && impl_->transport_running.load(std::memory_order_acquire) == running
+      && impl_->transport_frame.load(std::memory_order_acquire) == frame;
+  }
+  if (!Impl::EnqueueTransportCommand(impl_->transport_queue, {
+    .epoch = epoch,
+    .running = running,
+    .frame = frame,
+    .transition_id = effective_transition,
+  })) return false;
+  impl_->last_queued_transport_epoch.store(epoch, std::memory_order_release);
+  impl_->last_queued_transport_transition_id.store(effective_transition, std::memory_order_release);
   impl_->transport_epoch.store(epoch, std::memory_order_release);
   impl_->transport_frame.store(frame, std::memory_order_release);
   impl_->transport_running.store(running, std::memory_order_release);
@@ -1280,21 +2520,116 @@ void AudioHost::WakeRecordingWait() {
 std::optional<WorkerNotification> AudioHost::WaitForWorkerNotification(const std::atomic<bool>* running) {
   std::unique_lock lock(impl_->worker_notifications.mutex);
   impl_->worker_notifications.ready.wait(lock, [this, running] {
-    return !impl_->worker_notifications.notifications.empty()
+    return !impl_->worker_notifications.notifications.Empty()
       || (running != nullptr && !running->load(std::memory_order_acquire));
   });
-  if (impl_->worker_notifications.notifications.empty()) return std::nullopt;
-  WorkerNotification notification = std::move(impl_->worker_notifications.notifications.front());
-  impl_->worker_notifications.notifications.pop_front();
-  return notification;
+  if (impl_->worker_notifications.notifications.Empty()) return std::nullopt;
+  return impl_->worker_notifications.notifications.Pop();
+}
+
+bool AudioHost::WaitForMeterBatch(const std::atomic<bool>* running) {
+  std::unique_lock lock(impl_->meter_wait_mutex);
+  impl_->meter_wait.wait(lock, [this, running] {
+    return !impl_->meter_observer.Empty()
+      || (running != nullptr && !running->load(std::memory_order_acquire));
+  });
+  return !impl_->meter_observer.Empty();
+}
+
+std::optional<MeterBatch> AudioHost::DrainMeterBatch() {
+  MeterBatch batch{};
+  bool has_context = false;
+  NativeMeterObserver::Event event{};
+  while (impl_->meter_observer.Pop(event)) {
+    if (!has_context || event.graph_revision != batch.graph_revision || event.transport_epoch != batch.transport_epoch) {
+      batch = {};
+      batch.graph_revision = event.graph_revision;
+      batch.transport_epoch = event.transport_epoch;
+      has_context = true;
+    }
+    std::size_t entry_index = 0;
+    while (entry_index < batch.entry_count && batch.entries[entry_index].node_id != event.node_id) ++entry_index;
+    if (entry_index == batch.entry_count && batch.entry_count < kMaximumMeterEntries) {
+      batch.entries[entry_index].node_id = event.node_id;
+      ++batch.entry_count;
+    }
+    if (entry_index < batch.entry_count) {
+      batch.entries[entry_index].left_rms = std::isfinite(event.left_rms) ? std::max(0.0F, event.left_rms) : 0.0F;
+      batch.entries[entry_index].right_rms = std::isfinite(event.right_rms) ? std::max(0.0F, event.right_rms) : 0.0F;
+    }
+  }
+  if (!has_context) return std::nullopt;
+  batch.sequence = ++impl_->meter_sequence;
+  return batch;
+}
+
+bool AudioHost::WaitForScheduleProgress(const std::atomic<bool>* running) {
+  std::unique_lock lock(impl_->schedule_progress_mutex);
+  impl_->schedule_progress_wait.wait(lock, [this, running] {
+    return impl_->schedule_progress_ready.load(std::memory_order_acquire)
+      || (running != nullptr && !running->load(std::memory_order_acquire));
+  });
+  return impl_->schedule_progress_ready.load(std::memory_order_acquire);
+}
+
+std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
+  if (!impl_->schedule_progress_ready.exchange(false, std::memory_order_acq_rel)) return std::nullopt;
+  const auto instrument_write = impl_->instrument_queue.write.load(std::memory_order_acquire);
+  const auto instrument_read = impl_->instrument_queue.read.load(std::memory_order_acquire);
+  const auto source_write = impl_->source_queue.write.load(std::memory_order_acquire);
+  const auto source_read = impl_->source_queue.read.load(std::memory_order_acquire);
+  std::uint32_t automation_credits = 0;
+  for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
+    static_cast<void>(instance_id);
+    const auto used = attachment->automation_segment_count.load(std::memory_order_acquire);
+    automation_credits += static_cast<std::uint32_t>(
+      attachment->automation_segments[0].size() - std::min<std::uint32_t>(
+        used,
+        static_cast<std::uint32_t>(attachment->automation_segments[0].size())
+      )
+    );
+  }
+  return ScheduleProgress{
+    .revision = impl_->schedule_progress_revision.load(std::memory_order_acquire),
+    .epoch = impl_->schedule_progress_epoch.load(std::memory_order_acquire),
+    .progress_sequence = impl_->schedule_progress_sequence.load(std::memory_order_acquire),
+    .rendered_through_frame = impl_->schedule_progress_rendered_frame.load(std::memory_order_acquire),
+    .accepted_through_frame = impl_->schedule_progress_accepted_frame.load(std::memory_order_acquire),
+    .last_accepted_window_id = impl_->schedule_progress_window_id.load(std::memory_order_acquire),
+    .applied_transport_transition_id = impl_->schedule_progress_applied_transition.load(std::memory_order_acquire),
+    .applied_urgent_sequence = impl_->schedule_progress_urgent.load(std::memory_order_acquire),
+    .running = impl_->schedule_progress_running.load(std::memory_order_acquire),
+    .schedule_complete = impl_->schedule_progress_complete.load(std::memory_order_acquire),
+    .instrument_credits = Impl::kInstrumentQueueCapacity - std::min<std::uint32_t>(
+      Impl::kInstrumentQueueCapacity,
+      instrument_write - instrument_read
+    ),
+    .source_credits = Impl::kSourceQueueCapacity - std::min<std::uint32_t>(
+      Impl::kSourceQueueCapacity,
+      source_write - source_read
+    ),
+    .automation_credits = automation_credits,
+  };
 }
 
 void AudioHost::WakeWorkerNotificationWait() {
   impl_->worker_notifications.ready.notify_all();
 }
 
+void AudioHost::WakeMeterWait() {
+  impl_->meter_wait.notify_all();
+}
+
+void AudioHost::WakeScheduleProgressWait() {
+  impl_->schedule_progress_wait.notify_all();
+}
+
 std::uint64_t AudioHost::recordingStatusRevision() const {
   return impl_->recording_status_revision.load(std::memory_order_acquire);
+}
+
+std::uint64_t AudioHost::appliedUrgentSequence() const {
+  return impl_->applied_urgent_sequence.load(std::memory_order_acquire);
 }
 
 bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
@@ -1307,6 +2642,55 @@ bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   return true;
 }
 
+std::optional<NativeVstWorkerHealth> AudioHost::NativeVstHealth(const std::string_view instance_id) const {
+  const auto attachment = impl_->native_vst_attachments.find(std::string(instance_id));
+  if (attachment == impl_->native_vst_attachments.end()) return std::nullopt;
+  switch (attachment->second->worker.health()) {
+    case daw::plugin_host::WorkerHealth::kStarting: return NativeVstWorkerHealth::kStarting;
+    case daw::plugin_host::WorkerHealth::kReady: return NativeVstWorkerHealth::kReady;
+    case daw::plugin_host::WorkerHealth::kStopping: return NativeVstWorkerHealth::kStopping;
+    case daw::plugin_host::WorkerHealth::kStopped: return NativeVstWorkerHealth::kStopped;
+    case daw::plugin_host::WorkerHealth::kFaulted: return NativeVstWorkerHealth::kFaulted;
+  }
+  return std::nullopt;
+}
+
+std::optional<NativeVstEditorStatus> AudioHost::ExecuteNativeVstEditorCommand(
+  const std::string_view instance_id,
+  const NativeVstEditorCommand command,
+  const std::uint32_t width,
+  const std::uint32_t height,
+  const std::optional<NativeVstEditorAnchor> anchor
+) {
+  const auto attachment = impl_->native_vst_attachments.find(std::string(instance_id));
+  if (attachment == impl_->native_vst_attachments.end()) return std::nullopt;
+  if (!attachment->second->metadata.playback_enabled
+    || attachment->second->worker.health() != daw::plugin_host::WorkerHealth::kReady) {
+    return NativeVstEditorStatus{.owned = true};
+  }
+  const auto workerCommand = static_cast<daw::plugin_host::WorkerControlCommand>(
+    static_cast<std::uint32_t>(command) + static_cast<std::uint32_t>(daw::plugin_host::WorkerControlCommand::kEditorOpen) - 1U
+  );
+  const auto response = attachment->second->worker.ExecuteEditorCommand(
+    workerCommand,
+    width,
+    height,
+    anchor
+      ? std::optional<daw::plugin_host::WorkerEditorAnchor>(
+        daw::plugin_host::WorkerEditorAnchor{.x = anchor->x, .y = anchor->y})
+      : std::nullopt
+  );
+  if (!response) return std::nullopt;
+  return NativeVstEditorStatus{
+    .success = response->success,
+    .owned = true,
+    .supported = response->status.supported,
+    .open = response->status.open,
+    .width = response->status.width,
+    .height = response->status.height,
+  };
+}
+
 bool AudioHost::DetachVstReference(const std::string_view instance_id) {
   if (impl_->graph_prepared) return false;
   return impl_->native_vst_attachments.erase(std::string(instance_id)) == 1;
@@ -1316,16 +2700,20 @@ bool AudioHost::Start() {
   if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kConfigured || impl_->config.device_uid.empty()
     || !impl_->graph_prepared || !impl_->transport_prepared) return false;
   if (!impl_->StartNativeVstWorkers()) return false;
+  // CoreAudio may invoke the IO callback synchronously while the device is
+  // being started. Publish the running state before opening the device so
+  // that the first callback is processed rather than counted as rejected.
+  impl_->state.store(LifecycleState::kRunning, std::memory_order_release);
   if (!StartCoreAudioDevice(
     impl_->config.device_uid,
     impl_->config.sample_rate_hz,
     impl_->config.channel_count,
     this,
     &impl_->device_session)) {
+    impl_->state.store(LifecycleState::kConfigured, std::memory_order_release);
     impl_->StopNativeVstWorkers();
     return false;
   }
-  impl_->state.store(LifecycleState::kRunning, std::memory_order_release);
   return true;
 }
 
@@ -1381,6 +2769,18 @@ void AudioHost::Teardown() {
   impl_->transport_epoch.store(0, std::memory_order_release);
   impl_->transport_frame.store(0, std::memory_order_release);
   impl_->transport_running.store(false, std::memory_order_release);
+  impl_->accepted_schedule_epoch.store(0, std::memory_order_release);
+  impl_->accepted_schedule_through_frame.store(0, std::memory_order_release);
+  impl_->published_schedule_window_id.store(0, std::memory_order_release);
+  impl_->schedule_complete.store(false, std::memory_order_release);
+  impl_->last_accepted_schedule_window_id = 0;
+  impl_->last_accepted_schedule_epoch = 0;
+  impl_->last_schedule_start_frame = 0;
+  impl_->schedule_digest_windows = {};
+  impl_->schedule_chunk_digests = {};
+  impl_->schedule_digest_cursor = 0;
+  impl_->schedule_staging.clear();
+  impl_->applied_urgent_sequence.store(0, std::memory_order_release);
   impl_->graph_prepared = false;
   impl_->transport_prepared = false;
   impl_->state.store(LifecycleState::kIdle, std::memory_order_release);
@@ -1403,16 +2803,17 @@ bool AudioHost::ProcessPlanar(
   std::span<const float* const> input,
   std::span<float* const> output,
   std::uint32_t frame_count) {
+  const auto callback_attempt = impl_->callback_attempts.fetch_add(1, std::memory_order_relaxed) + 1;
   if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kRunning
     || impl_->active_core.load(std::memory_order_acquire) == 0
     || input.size() < impl_->config.channel_count
     || output.size() < impl_->config.channel_count) {
-    impl_->rejected_blocks.fetch_add(1, std::memory_order_relaxed);
+    impl_->RejectBlock(RejectedBlockReason::kNotRunningOrCoreUnavailable, callback_attempt);
     return false;
   }
   for (std::uint32_t channel = 0; channel < impl_->config.channel_count; ++channel) {
     if (input[channel] == nullptr || output[channel] == nullptr) {
-      impl_->rejected_blocks.fetch_add(1, std::memory_order_relaxed);
+      impl_->RejectBlock(RejectedBlockReason::kNullChannel, callback_attempt);
       return false;
     }
   }
@@ -1427,6 +2828,40 @@ bool AudioHost::ProcessPlanar(
   float* const* outputs = output.data();
   std::uint32_t offset = 0;
   while (offset < frame_count) {
+    {
+      std::uint32_t read = impl_->transport_queue.read.load(std::memory_order_relaxed);
+      const std::uint32_t write = impl_->transport_queue.write.load(std::memory_order_acquire);
+      while (read != write) {
+        const auto command = impl_->transport_queue.commands[read % Impl::kTransportQueueCapacity];
+        const auto current_epoch = impl_->applied_transport_epoch.load(std::memory_order_acquire);
+        const auto current_transition = impl_->applied_transport_transition_id.load(std::memory_order_acquire);
+        if (command.transition_id > current_transition && command.epoch >= current_epoch) {
+          const daw_audio_transport_state state{
+            .epoch = command.epoch,
+            .running = command.running ? 1U : 0U,
+            .frame = command.frame,
+          };
+          const daw_audio_core_handle core = impl_->active_core.load(std::memory_order_acquire);
+          const auto result = core == 0 ? DAW_AUDIO_CORE_INVALID_HANDLE : daw_audio_core_set_transport(core, &state);
+          if (result != DAW_AUDIO_CORE_OK) {
+            impl_->RejectBlock(RejectedBlockReason::kTransport, callback_attempt, result);
+            return false;
+          }
+          if (impl_->accepted_schedule_epoch.load(std::memory_order_acquire) != command.epoch) {
+            impl_->published_schedule_window_id.store(0, std::memory_order_release);
+            impl_->accepted_schedule_through_frame.store(command.frame, std::memory_order_release);
+            impl_->schedule_complete.store(false, std::memory_order_release);
+            impl_->accepted_schedule_epoch.store(command.epoch, std::memory_order_release);
+          }
+          impl_->applied_transport_epoch.store(command.epoch, std::memory_order_release);
+          impl_->applied_transport_frame.store(command.frame, std::memory_order_release);
+          impl_->applied_transport_running.store(command.running, std::memory_order_release);
+          impl_->applied_transport_transition_id.store(command.transition_id, std::memory_order_release);
+        }
+        ++read;
+      }
+      impl_->transport_queue.read.store(read, std::memory_order_release);
+    }
     const std::uint32_t requested_revision = impl_->publish_requested_revision.exchange(0, std::memory_order_acq_rel);
     if (requested_revision != 0
       && impl_->prepared_core != 0
@@ -1452,35 +2887,109 @@ bool AudioHost::ProcessPlanar(
     const std::uint32_t frames = frame_count - offset > maximum_frames
       ? maximum_frames
       : frame_count - offset;
-    std::array<const float*, 64> input_slice{};
-    std::array<float*, 64> output_slice{};
+    auto& input_slice = impl_->realtime_process_scratch.input_slice;
+    auto& output_slice = impl_->realtime_process_scratch.output_slice;
     if (impl_->config.channel_count > input_slice.size()) {
-      impl_->rejected_blocks.fetch_add(1, std::memory_order_relaxed);
+      impl_->RejectBlock(RejectedBlockReason::kScratchCapacity, callback_attempt);
       return false;
     }
     for (std::uint32_t channel = 0; channel < impl_->config.channel_count; ++channel) {
       input_slice[channel] = inputs[channel] + offset;
       output_slice[channel] = outputs[channel] + offset;
     }
-    std::array<daw_audio_processor_event, DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS> processor_events{};
-    std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS> instrument_events{};
+    auto& processor_events = impl_->realtime_process_scratch.processor_events;
+    auto& instrument_events = impl_->realtime_process_scratch.instrument_events;
     std::uint32_t processor_event_count = 0;
     std::uint32_t instrument_event_count = 0;
-    const std::uint32_t write = impl_->control_queue_write.load(std::memory_order_acquire);
-    std::uint32_t read = impl_->control_queue_read.load(std::memory_order_relaxed);
-    while (read != write) {
-      const auto& event = impl_->control_queue[read % Impl::kControlQueueCapacity];
-      if (event.kind == Impl::QueuedControlKind::kProcessor) {
-        processor_events[processor_event_count++] = event.processor;
-      } else if (event.kind == Impl::QueuedControlKind::kInstrument) {
-        instrument_events[instrument_event_count++] = event.instrument;
-      } else if (daw_audio_core_schedule_sample_source(active_core, &event.source) != DAW_AUDIO_CORE_OK) {
-        impl_->rejected_blocks.fetch_add(1, std::memory_order_relaxed);
-        return false;
+    const auto block_start_frame = impl_->applied_transport_frame.load(std::memory_order_acquire);
+    const auto block_end_frame = block_start_frame + static_cast<std::int64_t>(frames);
+    const auto applied_epoch = impl_->applied_transport_epoch.load(std::memory_order_acquire);
+    const auto published_window = impl_->published_schedule_window_id.load(std::memory_order_acquire);
+    const auto drain_processor_lane = [&]<std::size_t Capacity>(Impl::ControlLane<Capacity>& lane) {
+      std::uint32_t read = lane.read.load(std::memory_order_relaxed);
+      const std::uint32_t write = lane.write.load(std::memory_order_acquire);
+      while (read != write) {
+        const auto& event = lane.events[read % Capacity];
+        if (event.processor.frame_offset >= static_cast<std::uint64_t>(block_end_frame)) break;
+        if (processor_event_count >= processor_events.size()) return false;
+        processor_events[processor_event_count] = event.processor;
+        processor_events[processor_event_count].frame_offset = event.processor.frame_offset <= static_cast<std::uint64_t>(block_start_frame)
+          ? 0
+          : static_cast<std::uint32_t>(event.processor.frame_offset - static_cast<std::uint64_t>(block_start_frame));
+        ++processor_event_count;
+        ++read;
       }
-      ++read;
+      lane.read.store(read, std::memory_order_release);
+      return true;
+    };
+    const auto drain_instrument_lane = [&]<std::size_t Capacity>(Impl::ControlLane<Capacity>& lane) {
+      std::uint32_t read = lane.read.load(std::memory_order_relaxed);
+      const std::uint32_t write = lane.write.load(std::memory_order_acquire);
+      while (read != write) {
+        const auto& event = lane.events[read % Capacity];
+        if (event.scheduled && !impl_->applied_transport_running.load(std::memory_order_acquire)) break;
+        if (event.scheduled && event.instrument.epoch != applied_epoch) {
+          ++read;
+          continue;
+        }
+        if (event.scheduled && event.window_id > published_window) break;
+        const auto event_frame = event.scheduled ? event.absolute_frame
+          : static_cast<std::uint64_t>(event.instrument.frame_offset);
+        if (event_frame >= static_cast<std::uint64_t>(block_end_frame)) break;
+        if (instrument_event_count >= instrument_events.size()) return false;
+        if (event.scheduled && event_frame < static_cast<std::uint64_t>(block_start_frame)) {
+          ++read;
+          continue;
+        }
+        instrument_events[instrument_event_count] = event.instrument;
+        instrument_events[instrument_event_count].frame_offset = event_frame <= static_cast<std::uint64_t>(block_start_frame)
+          ? 0
+          : static_cast<std::uint32_t>(event_frame - static_cast<std::uint64_t>(block_start_frame));
+        ++instrument_event_count;
+        ++read;
+      }
+      lane.read.store(read, std::memory_order_release);
+      return true;
+    };
+    const auto drain_source_lane = [&]<std::size_t Capacity>(Impl::ControlLane<Capacity>& lane) {
+      std::uint32_t read = lane.read.load(std::memory_order_relaxed);
+      const std::uint32_t write = lane.write.load(std::memory_order_acquire);
+      while (read != write) {
+        const auto& event = lane.events[read % Capacity];
+        if (event.scheduled && !impl_->applied_transport_running.load(std::memory_order_acquire)) break;
+        if (event.scheduled && event.source.epoch != applied_epoch) {
+          ++read;
+          continue;
+        }
+        if (event.scheduled && event.window_id > published_window) break;
+        if (daw_audio_core_schedule_sample_source(active_core, &event.source) != DAW_AUDIO_CORE_OK) return false;
+        ++read;
+      }
+      lane.read.store(read, std::memory_order_release);
+      return true;
+    };
+    if (!drain_instrument_lane(impl_->urgent_queue)
+      || !drain_instrument_lane(impl_->instrument_queue)
+      || !drain_processor_lane(impl_->processor_queue)
+      || !drain_source_lane(impl_->source_queue)) {
+      const auto reason = instrument_event_count >= instrument_events.size()
+        ? RejectedBlockReason::kInstrumentEventCapacity
+        : processor_event_count >= processor_events.size()
+          ? RejectedBlockReason::kProcessorEventCapacity
+          : RejectedBlockReason::kSourceSchedule;
+      impl_->RejectBlock(reason, callback_attempt);
+      return false;
     }
-    impl_->control_queue_read.store(read, std::memory_order_release);
+    std::sort(processor_events.begin(), processor_events.begin() + processor_event_count,
+      [](const auto& left, const auto& right) {
+        return left.processor_instance_id < right.processor_instance_id
+          || (left.processor_instance_id == right.processor_instance_id && left.frame_offset < right.frame_offset);
+      });
+    std::sort(instrument_events.begin(), instrument_events.begin() + instrument_event_count,
+      [](const auto& left, const auto& right) {
+        return left.frame_offset < right.frame_offset
+          || (left.frame_offset == right.frame_offset && left.sequence < right.sequence);
+      });
     const daw_audio_core_process_block block{
       .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
       .frame_count = frames,
@@ -1493,13 +3002,33 @@ bool AudioHost::ProcessPlanar(
       .parameter_blocks = nullptr,
       .event_count = processor_event_count,
       .events = processor_event_count == 0 ? nullptr : processor_events.data(),
-      .transport_epoch = impl_->transport_epoch.load(std::memory_order_acquire),
+      .transport_epoch = applied_epoch,
       .instrument_event_count = instrument_event_count,
       .instrument_events = instrument_event_count == 0 ? nullptr : instrument_events.data(),
     };
-    if (daw_audio_core_process(active_core, &block) != DAW_AUDIO_CORE_OK) {
-      impl_->rejected_blocks.fetch_add(1, std::memory_order_relaxed);
+    const auto result = daw_audio_core_process(active_core, &block);
+    if (result != DAW_AUDIO_CORE_OK) {
+      impl_->RejectBlock(
+        RejectedBlockReason::kCoreProcess,
+        callback_attempt,
+        result,
+        frames,
+        impl_->config.channel_count,
+        processor_event_count,
+        instrument_event_count,
+        block.graph_revision
+      );
       return false;
+    }
+    for (std::uint32_t index = 0; index < instrument_event_count; ++index) {
+      const auto type = instrument_events[index].type;
+      if (type >= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)
+        && type <= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff)) {
+        auto applied = impl_->applied_urgent_sequence.load(std::memory_order_relaxed);
+        while (instrument_events[index].sequence > applied
+          && !impl_->applied_urgent_sequence.compare_exchange_weak(
+            applied, instrument_events[index].sequence, std::memory_order_release, std::memory_order_relaxed)) {}
+      }
     }
     if (impl_->recording_monitoring.load(std::memory_order_acquire)) {
       const std::uint64_t read = impl_->recording_monitor_read.load(std::memory_order_relaxed);
@@ -1515,7 +3044,86 @@ bool AudioHost::ProcessPlanar(
       }
       impl_->recording_monitor_read.store(read + monitored_frames, std::memory_order_release);
     }
-    impl_->transport_frame.fetch_add(frames, std::memory_order_release);
+    if (impl_->applied_transport_running.load(std::memory_order_acquire)) {
+      impl_->applied_transport_frame.fetch_add(frames, std::memory_order_release);
+      impl_->transport_frame.store(
+        impl_->applied_transport_frame.load(std::memory_order_acquire),
+        std::memory_order_release
+      );
+    }
+    impl_->schedule_progress_revision.store(
+      impl_->active_revision.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_epoch.store(applied_epoch, std::memory_order_release);
+    impl_->schedule_progress_rendered_frame.store(
+      static_cast<std::uint64_t>(std::max<std::int64_t>(
+        0,
+        impl_->applied_transport_frame.load(std::memory_order_acquire)
+      )),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_accepted_frame.store(
+      impl_->accepted_schedule_through_frame.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_window_id.store(
+      impl_->published_schedule_window_id.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_applied_transition.store(
+      impl_->applied_transport_transition_id.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_urgent.store(
+      impl_->applied_urgent_sequence.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_running.store(
+      impl_->applied_transport_running.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    impl_->schedule_progress_complete.store(
+      impl_->schedule_complete.load(std::memory_order_acquire),
+      std::memory_order_release
+    );
+    const auto rendered_frame = impl_->schedule_progress_rendered_frame.load(std::memory_order_relaxed);
+    const auto revision = impl_->schedule_progress_revision.load(std::memory_order_relaxed);
+    const auto epoch = impl_->schedule_progress_epoch.load(std::memory_order_relaxed);
+    const auto accepted_frame = impl_->schedule_progress_accepted_frame.load(std::memory_order_relaxed);
+    const auto window_id = impl_->schedule_progress_window_id.load(std::memory_order_relaxed);
+    const auto transition = impl_->schedule_progress_applied_transition.load(std::memory_order_relaxed);
+    const auto urgent = impl_->schedule_progress_urgent.load(std::memory_order_relaxed);
+    const auto running = impl_->schedule_progress_running.load(std::memory_order_relaxed);
+    const auto complete = impl_->schedule_progress_complete.load(std::memory_order_relaxed);
+    const auto frame_quantum = std::max<std::uint64_t>(
+      static_cast<std::uint64_t>(impl_->config.max_frames_per_block),
+      512
+    );
+    const bool meaningful = !impl_->schedule_progress_has_notification
+      || rendered_frame >= impl_->schedule_progress_notified_frame + frame_quantum
+      || revision != impl_->schedule_progress_notified_revision
+      || epoch != impl_->schedule_progress_notified_epoch
+      || accepted_frame != impl_->schedule_progress_notified_accepted_frame
+      || window_id != impl_->schedule_progress_notified_window_id
+      || transition != impl_->schedule_progress_notified_transition
+      || urgent != impl_->schedule_progress_notified_urgent
+      || running != impl_->schedule_progress_notified_running
+      || complete != impl_->schedule_progress_notified_complete;
+    if (meaningful) {
+      impl_->schedule_progress_has_notification = true;
+      impl_->schedule_progress_notified_frame = rendered_frame;
+      impl_->schedule_progress_notified_revision = revision;
+      impl_->schedule_progress_notified_epoch = epoch;
+      impl_->schedule_progress_notified_accepted_frame = accepted_frame;
+      impl_->schedule_progress_notified_window_id = window_id;
+      impl_->schedule_progress_notified_transition = transition;
+      impl_->schedule_progress_notified_urgent = urgent;
+      impl_->schedule_progress_notified_running = running;
+      impl_->schedule_progress_notified_complete = complete;
+      impl_->schedule_progress_sequence.fetch_add(1, std::memory_order_release);
+      impl_->SignalRealtimeBridge(Impl::kRealtimeScheduleProgress);
+    }
     impl_->completed_render_epoch.fetch_add(1, std::memory_order_release);
     if (offset != 0) impl_->split_blocks.fetch_add(1, std::memory_order_relaxed);
     offset += frames;
@@ -1602,6 +3210,17 @@ Diagnostics AudioHost::diagnostics() const {
     .transport_epoch = impl_->transport_epoch.load(std::memory_order_acquire),
     .render_epoch = impl_->completed_render_epoch.load(std::memory_order_acquire),
     .installed_assets = static_cast<std::uint32_t>(impl_->assets.size()),
+    .transport_frame = impl_->transport_frame.load(std::memory_order_acquire),
+    .last_rejected_reason = impl_->last_rejected_reason.load(std::memory_order_relaxed),
+    .last_rejected_callback = impl_->last_rejected_callback.load(std::memory_order_relaxed),
+    .last_rejected_render_epoch = impl_->last_rejected_render_epoch.load(std::memory_order_relaxed),
+    .last_rejected_transport_epoch = impl_->last_rejected_transport_epoch.load(std::memory_order_relaxed),
+    .last_rejected_core_result = impl_->last_rejected_core_result.load(std::memory_order_relaxed),
+    .last_rejected_frame_count = impl_->last_rejected_frame_count.load(std::memory_order_relaxed),
+    .last_rejected_channel_count = impl_->last_rejected_channel_count.load(std::memory_order_relaxed),
+    .last_rejected_processor_event_count = impl_->last_rejected_processor_event_count.load(std::memory_order_relaxed),
+    .last_rejected_instrument_event_count = impl_->last_rejected_instrument_event_count.load(std::memory_order_relaxed),
+    .last_rejected_graph_revision = impl_->last_rejected_graph_revision.load(std::memory_order_relaxed),
   };
 }
 

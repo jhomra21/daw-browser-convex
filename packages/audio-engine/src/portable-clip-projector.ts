@@ -20,8 +20,10 @@ export type PortableClipProject = {
   sampleRateHz: number
   rangeStartSec: number
   rangeEndSec?: number
+  emitStartFrame?: { start: number; end: number }
   epoch: number
   firstSequence: number
+  allowInstruments?: boolean
 }
 
 export type PortableClipProjection =
@@ -189,11 +191,7 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
   let sequence = input.firstSequence
   for (const track of input.tracks) {
     if (track.kind === 'instrument') {
-      reasons.push(`${track.id}: instrument tracks are not supported.`)
-      continue
-    }
-    if (track.volume !== 1 || track.muted || track.soloed || track.channelRole || track.groupId || track.outputTargetId || (track.sends?.length ?? 0) > 0) {
-      reasons.push(`${track.id}: track gain, mute, solo, or routing is not supported.`)
+      if (!input.allowInstruments) reasons.push(`${track.id}: instrument tracks are not supported.`)
       continue
     }
     for (const clip of track.clips) {
@@ -203,8 +201,31 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
         if (result.diagnostic) diagnostics.push(result.diagnostic)
       }
       else {
-        events.push(result.event)
-        sequence += 1
+        const emitRange = input.emitStartFrame
+        if (emitRange === undefined) {
+          events.push(result.event)
+          sequence += 1
+        } else if (result.event.startFrame >= emitRange.start && result.event.startFrame < emitRange.end) {
+          events.push(result.event)
+          sequence += 1
+        } else if (result.event.startFrame < emitRange.start && result.event.stopFrame > emitRange.start) {
+          const timelineFrames = result.event.stopFrame - result.event.startFrame
+          const elapsedFrames = emitRange.start - result.event.startFrame
+          const sourceOffsetDelta = Math.min(
+            result.event.sourceFrameCount,
+            Math.max(0, Math.round(result.event.sourceFrameCount * elapsedFrames / timelineFrames)),
+          )
+          const sourceFrameCount = result.event.sourceFrameCount - sourceOffsetDelta
+          if (sourceFrameCount > 0) {
+            events.push({
+              ...result.event,
+              startFrame: emitRange.start,
+              sourceOffsetFrame: result.event.sourceOffsetFrame + sourceOffsetDelta,
+              sourceFrameCount,
+            })
+            sequence += 1
+          }
+        }
       }
     }
   }

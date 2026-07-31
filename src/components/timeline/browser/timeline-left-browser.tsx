@@ -316,7 +316,7 @@ const assetItemContextItems = (
 };
 
 const deviceContextActionLabel = (activeTab: TimelineBrowserTab, item: BrowserItem) => {
-  if (item.source === "external-catalog") return "Unavailable — discovery only";
+  if (item.source === "external-catalog") return "Insert VST3 effect";
   if (item.category === "audio-effect-chain") return "Add chain";
   if (item.category === "instrument-preset") return "Add preset";
   return activeTab === "effects" ? "Add effect" : "Add instrument";

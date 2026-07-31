@@ -110,14 +110,22 @@ export function useTimelineDragDrop(
     clearDropTarget()
   }
 
+  const handleGlobalDragEnd = () => {
+    clearDropTarget()
+  }
+
   onMount(() => {
     window.addEventListener('dragover', handleGlobalDragOver, capture)
     window.addEventListener('drop', handleWindowDrop, capture)
+    window.addEventListener('dragend', handleGlobalDragEnd)
+    window.addEventListener('blur', handleGlobalDragEnd)
   })
 
   onCleanup(() => {
     window.removeEventListener('dragover', handleGlobalDragOver, capture)
     window.removeEventListener('drop', handleWindowDrop, capture)
+    window.removeEventListener('dragend', handleGlobalDragEnd)
+    window.removeEventListener('blur', handleGlobalDragEnd)
   })
 
   return {

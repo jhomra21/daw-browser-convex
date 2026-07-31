@@ -56,6 +56,23 @@ const hostTools: HostToolService = {
   exportRun: async () => ({ jobId: "export-1", status: "queued" }),
   exportStatus: async () => ({ status: "idle" }),
   exportCancel: async () => ({ status: "canceled", job: { id: "export-1" } }),
+  vstInstances: async () => ({
+    projectId: "project-1",
+    instances: [{
+      instanceId: "123e4567-e89b-42d3-a456-426614174000",
+      targetId: "track-1",
+      chainIndex: 0,
+      identity: { format: "vst3", classId: "class-1", vendor: "Vendor", name: "Plugin", version: "1", architecture: "arm64" },
+      role: "effect",
+      bypassed: false,
+      health: { state: "ready", updatedAt: 1 },
+      parameterCount: 0,
+      supportsEditor: false,
+      supportsState: true,
+    }],
+    nextCursor: null,
+  }),
+  vstParameters: async () => ({ projectId: "project-1", instanceId: "123e4567-e89b-42d3-a456-426614174000", parameters: [], nextCursor: null }),
 }
 
 const request = async (
@@ -64,6 +81,7 @@ const request = async (
     service?: ControlService
     write?: boolean
     host?: boolean
+    hostTools?: HostToolService
     hostService?: ControlService
     hostFactory?: () => Promise<{ service: ControlService; close: () => void }>
     cloudService?: () => Promise<ControlService>
@@ -71,9 +89,10 @@ const request = async (
   } = {},
 ) => {
   const selectedHostService = options.hostService
+  const selectedHostTools = options.hostTools ?? (options.host ? hostTools : undefined)
   const server = createControlMcpServer(options.service ?? service(), {
     authorize: options.authorize ?? ((scope) => scope === "control:read" || options.write === true),
-    ...(options.host ? { hostTools } : {}),
+    ...(selectedHostTools ? { hostTools: selectedHostTools } : {}),
     ...(options.hostFactory ? { hostService: options.hostFactory } : {}),
     ...(selectedHostService ? { hostService: async () => ({ service: selectedHostService, close: () => undefined }) } : {}),
     ...(options.cloudService ? { cloudService: options.cloudService } : {}),
@@ -118,7 +137,7 @@ describe("control MCP tools", () => {
 
   test("adds local host tools only when explicitly composed", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
-    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-11)).toEqual([
+    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-13)).toEqual([
       "host_status",
       "host_transport_status",
       "host_play",
@@ -130,7 +149,26 @@ describe("control MCP tools", () => {
       "host_export_run",
       "host_export_status",
       "host_export_cancel",
+      "host_vst_instances",
+      "host_vst_parameters",
     ])
+  })
+
+  test("registers VST tools only for advertised host capabilities", async () => {
+    const withoutVst = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, {
+      hostTools: { ...hostTools, operations: new Set(["host.status"] as const) },
+    })
+    expect(withoutVst.result.tools.some((tool: { name: string }) => tool.name === "host_vst_instances")).toBeFalse()
+    expect(withoutVst.result.tools.some((tool: { name: string }) => tool.name === "host_vst_parameters")).toBeFalse()
+
+    const withVst = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, {
+      hostTools: {
+        ...hostTools,
+        operations: new Set(["host.vst.instances", "host.vst.parameters"] as const),
+      },
+    })
+    expect(withVst.result.tools.some((tool: { name: string }) => tool.name === "host_vst_instances")).toBeTrue()
+    expect(withVst.result.tools.some((tool: { name: string }) => tool.name === "host_vst_parameters")).toBeTrue()
   })
 
   test("dispatches legacy local writes without cloud authorization", async () => {
@@ -170,6 +208,74 @@ describe("control MCP tools", () => {
       await server.close()
     }
     expect(plays).toBe(1)
+  })
+
+  test("publishes and executes mounted desktop VST discovery as read-only tools", async () => {
+    const listed = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
+    const instancesTool = listed.result.tools.find((tool: { name: string }) => tool.name === "host_vst_instances")
+    const parametersTool = listed.result.tools.find((tool: { name: string }) => tool.name === "host_vst_parameters")
+    expect(instancesTool.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    })
+    expect(parametersTool.annotations).toEqual(instancesTool.annotations)
+    expect(instancesTool.inputSchema.additionalProperties).toBeFalse()
+    const instances = await request(call("host_vst_instances", { projectId: "project-1" }), { host: true })
+    expect(instances.result.isError).not.toBeTrue()
+    expect(instances.result.structuredContent).toEqual({
+      projectId: "project-1",
+      instances: [{
+        instanceId: "123e4567-e89b-42d3-a456-426614174000",
+        targetId: "track-1",
+        chainIndex: 0,
+        identity: { format: "vst3", classId: "class-1", vendor: "Vendor", name: "Plugin", version: "1", architecture: "arm64" },
+        role: "effect",
+        bypassed: false,
+        health: { state: "ready", updatedAt: 1 },
+        parameterCount: 0,
+        supportsEditor: false,
+        supportsState: true,
+      }],
+      nextCursor: null,
+    })
+    const secretHostTools: HostToolService = {
+      ...hostTools,
+      vstInstances: async () => ({
+        projectId: "project-1",
+        instances: [{
+          instanceId: "123e4567-e89b-42d3-a456-426614174000",
+          targetId: "track-1",
+          chainIndex: 0,
+          identity: {
+            format: "vst3",
+            classId: "class-1",
+            vendor: "Vendor",
+            name: "Plugin",
+            version: "1",
+            architecture: "arm64",
+            discoveredPath: "/private/plugin.vst3",
+            binaryFingerprint: "a".repeat(64),
+          },
+          role: "effect",
+          bypassed: false,
+          health: { state: "ready", updatedAt: 1 },
+          parameterCount: 0,
+          supportsEditor: false,
+          supportsState: true,
+        }],
+        nextCursor: null,
+      }),
+    }
+    const secretResult = await request(call("host_vst_instances", { projectId: "project-1" }), { hostTools: secretHostTools })
+    expect(secretResult.result.isError).toBeTrue()
+    const invalid = await request(call("host_vst_parameters", { projectId: "project-1" }), { host: true })
+    expect(JSON.parse(invalid.result.content[0].text)).toEqual({
+      version: "v1",
+      code: "invalid-request",
+      message: "Invalid local desktop host tool input.",
+    })
   })
 
   test("lists V1 and V2 read tools with accurate annotations", async () => {

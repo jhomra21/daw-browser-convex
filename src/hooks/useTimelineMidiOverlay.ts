@@ -13,9 +13,11 @@ import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibl
 import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 import { useMidiAccess } from '~/context/midi-access'
 import { createLiveMidiRouter } from '~/lib/midi/live-midi-router'
+import { shouldUseNativeLiveMidi } from '~/lib/midi/live-midi-backend'
 import { projectMidiProjectTracks, subscribeMidiProjectProjection } from '~/lib/midi/editor-persistence'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-playback-controller'
 
 type UseTimelineMidiOverlayOptions = {
   audioEngine: AudioEngine
@@ -26,6 +28,12 @@ type UseTimelineMidiOverlayOptions = {
   selection: TimelineSelectionController
   activeRecordingTargetId?: Accessor<string | null>
   canOpenMidiEditorFor?: (clipId: string) => boolean
+  nativeLiveMidi?: {
+    isActive: () => boolean
+    isAvailable: () => boolean
+    start: (note: { trackId: string; pitch: number; velocity: number }) => NativeLiveMidiNoteHandle | undefined
+    stop: (handle: NativeLiveMidiNoteHandle, force?: boolean) => void
+  }
 }
 
 type UseTimelineMidiOverlayReturn = {
@@ -45,9 +53,9 @@ type UseTimelineMidiOverlayReturn = {
   }
 }
 
-type LiveNote = {
-  handle: LiveMidiNoteHandle
-}
+type LiveNote =
+  | { handle: NativeLiveMidiNoteHandle; backend: "native" }
+  | { handle: LiveMidiNoteHandle; backend: "browser" }
 
 function readMidiBounds(value: unknown): TimelineMidiBounds | null {
   if (!value || typeof value !== 'object') return null
@@ -74,6 +82,7 @@ export function useTimelineMidiOverlay(
     clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
   )
   const activeLiveNotes = new Map<number, LiveNote>()
+  const nativeHardwareLiveNotes = new WeakMap<LiveMidiNoteHandle, NativeLiveMidiNoteHandle>()
   const activeMappingTargets = new Map<string, {
     sourceId: string
     trackId: string
@@ -174,7 +183,11 @@ export function useTimelineMidiOverlay(
       const entry = activeLiveNotes.get(pitch)
       if (!entry) return
       activeLiveNotes.delete(pitch)
-      options.audioEngine.releaseLiveMidiNote(entry.handle, options.audioEngine.currentTime)
+      if (entry.backend === "native") {
+        options.nativeLiveMidi?.stop(entry.handle)
+      } else {
+        options.audioEngine.releaseLiveMidiNote(entry.handle, options.audioEngine.currentTime)
+      }
     } catch {}
   }
 
@@ -225,18 +238,23 @@ export function useTimelineMidiOverlay(
 
   const startLiveNote = (pitch: number, velocity = 0.9) => {
     try {
-      options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
       if (activeLiveNotes.has(pitch)) return
       const trackId = resolveTargetTrackId()
       if (!trackId) return
+      if (options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
+        const handle = options.nativeLiveMidi.start({ trackId, pitch, velocity })
+        if (handle) activeLiveNotes.set(pitch, { handle, backend: "native" })
+        return
+      }
+      options.audioEngine.ensureAudio()
+      void options.audioEngine.resume().catch(() => undefined)
       const handle = options.audioEngine.startLiveMidiNote({
         trackId,
         pitch,
         velocity,
         when: options.audioEngine.currentTime,
       })
-      if (handle) activeLiveNotes.set(pitch, { handle })
+      if (handle) activeLiveNotes.set(pitch, { handle, backend: "browser" })
     } catch {}
   }
 
@@ -270,12 +288,6 @@ export function useTimelineMidiOverlay(
   })
 
   createEffect(() => {
-    if (!midiEditorClipId()) {
-      stopAllLiveNotes()
-    }
-  })
-
-  createEffect(() => {
     const key = midiKeyboardStorageKey()
     if (!canUseLocalStorage()) {
       setMidiKeyboardEnabled(false)
@@ -297,7 +309,6 @@ export function useTimelineMidiOverlay(
 
   const midiKeyboard = useMidiKeyboardInput({
     projectId: () => options.projectId(),
-    targetId: resolveTargetTrackId,
     enabled: midiKeyboardEnabled,
     canPlay: midiKeyboardCanPlay,
     onStartLiveNote: startLiveNote,
@@ -314,11 +325,23 @@ export function useTimelineMidiOverlay(
     },
     startNote: (event) => {
       try {
+        const trackId = resolveTargetTrackId()
+        if (!trackId) return undefined
+        if (options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
+          const handle = options.nativeLiveMidi.start({
+            trackId,
+            pitch: event.note,
+            velocity: event.velocity,
+          })
+          if (!handle) return undefined
+          const routerHandle: LiveMidiNoteHandle = { id: handle.noteId }
+          nativeHardwareLiveNotes.set(routerHandle, handle)
+          return routerHandle
+        }
         options.audioEngine.ensureAudio()
         void options.audioEngine.resume().catch(() => undefined)
-        const trackId = resolveTargetTrackId()
         const times = options.audioEngine.midiEventTimes(event.timeStamp)
-        return trackId && times
+        return times
           ? options.audioEngine.startLiveMidiNote({
               trackId,
               pitch: event.note,
@@ -331,6 +354,11 @@ export function useTimelineMidiOverlay(
       }
     },
     releaseNote: (handle, timeStamp, force) => {
+      const nativeHandle = nativeHardwareLiveNotes.get(handle)
+      if (nativeHandle) {
+        options.nativeLiveMidi?.stop(nativeHandle, force)
+        return
+      }
       const times = options.audioEngine.midiEventTimes(timeStamp)
       options.audioEngine.releaseLiveMidiNote(handle, times?.scheduledContextTime ?? 0, force)
     },
@@ -378,7 +406,6 @@ export function useTimelineMidiOverlay(
     options.selection.selectedTrackId()
     options.selection.selectedFXTarget()
     midiEditorClipId()
-    hardwareRouter.panic()
     restoreLiveMappings()
   })
 
@@ -415,7 +442,6 @@ export function useTimelineMidiOverlay(
 
   createEffect(() => {
     activeInputChannel()
-    hardwareRouter.panic()
     restoreLiveMappings()
   })
 

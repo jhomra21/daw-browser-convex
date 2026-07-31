@@ -1,12 +1,14 @@
 #include "vst3-worker.h"
 
 #include "public.sdk/source/vst/hosting/eventlist.h"
+#include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "public.sdk/source/vst/utility/stringconvert.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/gui/iplugview.h"
@@ -28,7 +30,10 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string_view>
+#include <thread>
+#include <vector>
 #include <utility>
 
 namespace daw::plugin_host {
@@ -48,6 +53,7 @@ using Steinberg::Vst::IComponent;
 using Steinberg::Vst::IComponentHandler;
 using Steinberg::Vst::IEditController;
 using Steinberg::Vst::IHostApplication;
+using Steinberg::Vst::IMidiMapping;
 using Steinberg::IPlugView;
 using Steinberg::Vst::ParameterChanges;
 using Steinberg::Vst::ProcessContext;
@@ -132,12 +138,29 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
     name[workerName.size()] = 0;
     return Steinberg::kResultOk;
   }
-  Steinberg::tresult PLUGIN_API createInstance(TUID, TUID, void** object) override {
-    if (object) *object = nullptr;
-    return Steinberg::kNoInterface;
+  Steinberg::tresult PLUGIN_API createInstance(TUID cid, TUID iid, void** object) override {
+    if (!object) return Steinberg::kInvalidArgument;
+    *object = nullptr;
+    if (iidEqual(cid, Steinberg::Vst::IMessage::iid) && iidEqual(iid, Steinberg::Vst::IMessage::iid)) {
+      *object = new Steinberg::Vst::HostMessage;
+      return Steinberg::kResultTrue;
+    }
+    if (iidEqual(cid, Steinberg::Vst::IAttributeList::iid) && iidEqual(iid, Steinberg::Vst::IAttributeList::iid)) {
+      if (auto attributes = Steinberg::Vst::HostAttributeList::make()) {
+        *object = attributes.take();
+        return Steinberg::kResultTrue;
+      }
+      return Steinberg::kOutOfMemory;
+    }
+    return Steinberg::kResultFalse;
   }
   Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
-  Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID, Steinberg::Vst::ParamValue) override { return Steinberg::kResultOk; }
+  Steinberg::tresult PLUGIN_API performEdit(
+    const Steinberg::Vst::ParamID id,
+    const Steinberg::Vst::ParamValue value
+  ) override {
+    return QueueEditorParameterEdit(id, value) ? Steinberg::kResultOk : Steinberg::kResultFalse;
+  }
   Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
   Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
     if (notifications_.size() < notifications_.capacity()) {
@@ -160,10 +183,82 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
   }
   Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
   Steinberg::uint32 PLUGIN_API release() override { return 1; }
+  [[nodiscard]] bool QueueEditorParameterEdit(
+    const Steinberg::Vst::ParamID id,
+    const Steinberg::Vst::ParamValue value
+  ) {
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    return editorParameterState_.Queue(id, value);
+  }
+  std::size_t DrainEditorParameterEdits(std::span<PendingEditorParameterEdit> destination) {
+    return editorParameterState_.DrainProcess(destination);
+  }
+  bool PeekEditorParameterFeedback(PendingEditorParameterEdit& destination) const {
+    return editorParameterState_.PeekFeedback(destination);
+  }
+  bool AckEditorParameterFeedback(
+    const std::uint32_t parameterId,
+    const std::uint64_t generation
+  ) {
+    return editorParameterState_.AckFeedback(parameterId, generation);
+  }
+  void ClearEditorParameterEdits() {
+    editorParameterState_.Clear();
+  }
 
  private:
   std::vector<WorkerNotification>& notifications_;
+  BoundedEditorParameterState<kMaximumWorkerEvents> editorParameterState_;
 };
+
+class Vst3ConnectionProxy final : public Steinberg::Vst::IConnectionPoint {
+ public:
+  explicit Vst3ConnectionProxy(Steinberg::Vst::IConnectionPoint* source)
+    : source_(source), threadId_(std::this_thread::get_id()) {
+    FUNKNOWN_CTOR
+  }
+  ~Vst3ConnectionProxy() {
+    FUNKNOWN_DTOR
+  }
+
+  Steinberg::tresult PLUGIN_API connect(Steinberg::Vst::IConnectionPoint* other) override {
+    if (!other || destination_) return Steinberg::kResultFalse;
+    destination_ = other;
+    const auto result = source_ ? source_->connect(this) : Steinberg::kNoInterface;
+    if (result != Steinberg::kResultOk && result != Steinberg::kResultTrue) destination_ = nullptr;
+    return result;
+  }
+
+  Steinberg::tresult PLUGIN_API disconnect(Steinberg::Vst::IConnectionPoint* other) override {
+    if (!other || other != destination_) return Steinberg::kInvalidArgument;
+    if (source_) static_cast<void>(source_->disconnect(this));
+    destination_ = nullptr;
+    return Steinberg::kResultTrue;
+  }
+
+  Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) override {
+    if (!destination_ || std::this_thread::get_id() != threadId_) return Steinberg::kResultFalse;
+    static thread_local std::vector<const Vst3ConnectionProxy*> forwarding;
+    if (std::find(forwarding.begin(), forwarding.end(), this) != forwarding.end()) return Steinberg::kResultTrue;
+    forwarding.push_back(this);
+    const auto result = destination_->notify(message);
+    forwarding.pop_back();
+    return result;
+  }
+
+  bool Disconnect() {
+    return disconnect(destination_) == Steinberg::kResultTrue;
+  }
+
+  DECLARE_FUNKNOWN_METHODS
+
+ private:
+  Steinberg::IPtr<Steinberg::Vst::IConnectionPoint> source_;
+  Steinberg::IPtr<Steinberg::Vst::IConnectionPoint> destination_;
+  std::thread::id threadId_;
+};
+
+IMPLEMENT_FUNKNOWN_METHODS(Vst3ConnectionProxy, Steinberg::Vst::IConnectionPoint, Steinberg::Vst::IConnectionPoint::iid)
 
 std::optional<std::string> HashFile(const std::filesystem::path& path, CC_SHA256_CTX& hash, std::size_t& bytes) {
   std::error_code error;
@@ -365,12 +460,21 @@ bool IsValidWorkerState(const WorkerState& state) {
 
 class Vst3Worker::Implementation {
  public:
+  struct ActiveNote {
+    bool active = false;
+    Steinberg::int16 channel = 0;
+    Steinberg::int16 pitch = 0;
+    Steinberg::int32 note_id = -1;
+  };
   std::vector<WorkerNotification> notifications;
   WorkerHostContext context{notifications};
   VST3::Hosting::Module::Ptr module;
   IPtr<IComponent> component;
   IPtr<IAudioProcessor> processor;
   IPtr<IEditController> controller;
+  IPtr<Vst3ConnectionProxy> componentConnection;
+  IPtr<Vst3ConnectionProxy> controllerConnection;
+  bool componentsConnected = false;
   IPtr<IPlugView> editorView;
   std::optional<Vst3EditorWindow> editorWindow;
   std::vector<AudioBusBuffers> inputs;
@@ -382,6 +486,11 @@ class Vst3Worker::Implementation {
   ProcessContext processContext{};
   WorkerProcessSetup setup{};
   WorkerPluginRole role = WorkerPluginRole::kEffect;
+  IPtr<IMidiMapping> midiMapping;
+  std::array<std::array<Steinberg::Vst::ParamID, 128>, 16> midiParameters{};
+  std::array<std::array<bool, 128>, 16> hasMidiParameters{};
+  std::array<ActiveNote, kMaximumWorkerEvents> activeNotes{};
+  Steinberg::int32 nextNoteId = 1;
   WorkerTransport* transport = nullptr;
   bool controllerIsComponent = false;
   bool editorUnsupported = false;
@@ -402,20 +511,26 @@ Vst3Worker::~Vst3Worker() {
 
 bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
   Dispose();
+  implementation_->activeNotes = {};
+  implementation_->nextNoteId = 1;
+  implementation_->midiMapping = nullptr;
+  implementation_->hasMidiParameters = {};
   if (!IsTrustedLaunch(request.eligibility) || request.classId.size() != 32 || !ValidSetup(request.setup)) {
     implementation_->notifications.push_back({.kind = WorkerNotificationKind::kFault, .message = "Worker launch record is not trusted.", .value = 0});
     return false;
   }
   const auto classId = VST3::UID::fromString(request.classId);
   if (!classId) return false;
+  static_cast<void>(PrepareVst3EditorRuntime());
   std::string error;
   implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
   if (!implementation_->module) return false;
   const auto factory = implementation_->module->getFactory();
-  const auto classInfo = std::find_if(factory.classInfos().begin(), factory.classInfos().end(), [&](const auto& candidate) {
+  const auto classInfos = factory.classInfos();
+  const auto classInfo = std::find_if(classInfos.begin(), classInfos.end(), [&](const auto& candidate) {
     return candidate.ID() == *classId;
   });
-  if (classInfo == factory.classInfos().end()) {
+  if (classInfo == classInfos.end()) {
     Dispose();
     return false;
   }
@@ -434,18 +549,45 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     Dispose();
     return false;
   }
-  Steinberg::TUID controllerId{};
-  if (implementation_->component->getControllerClassId(controllerId) == Steinberg::kResultOk) {
-    implementation_->controller = implementation_->module->getFactory().createInstance<IEditController>(VST3::UID(controllerId));
-  }
+  implementation_->controller = Steinberg::FUnknownPtr<IEditController>(implementation_->component);
+  implementation_->controllerIsComponent = static_cast<bool>(implementation_->controller);
   if (!implementation_->controller) {
-    implementation_->controller = Steinberg::FUnknownPtr<IEditController>(implementation_->component);
-    implementation_->controllerIsComponent = true;
+    Steinberg::TUID controllerId{};
+    const auto controllerResult = implementation_->component->getControllerClassId(controllerId);
+    if (controllerResult == Steinberg::kResultOk || controllerResult == Steinberg::kResultTrue) {
+      implementation_->controller = implementation_->module->getFactory().createInstance<IEditController>(VST3::UID(controllerId));
+    }
   }
   if (implementation_->controller) {
-    if ((!implementation_->controllerIsComponent
-      && implementation_->controller->initialize(static_cast<IHostApplication*>(&implementation_->context)) != Steinberg::kResultOk)
-      || implementation_->controller->setComponentHandler(&implementation_->context) != Steinberg::kResultOk) {
+    if (!implementation_->controllerIsComponent
+      && implementation_->controller->initialize(static_cast<IHostApplication*>(&implementation_->context)) != Steinberg::kResultOk) {
+      Dispose();
+      return false;
+    }
+    if (!implementation_->controllerIsComponent) {
+      const auto componentPoint = Steinberg::FUnknownPtr<Steinberg::Vst::IConnectionPoint>(implementation_->component);
+      const auto controllerPoint = Steinberg::FUnknownPtr<Steinberg::Vst::IConnectionPoint>(implementation_->controller);
+      if (componentPoint && controllerPoint) {
+        implementation_->componentConnection = Steinberg::IPtr<Vst3ConnectionProxy>(
+          new Vst3ConnectionProxy(componentPoint), false);
+        implementation_->controllerConnection = Steinberg::IPtr<Vst3ConnectionProxy>(
+          new Vst3ConnectionProxy(controllerPoint), false);
+        const auto componentResult = implementation_->componentConnection->connect(controllerPoint);
+        const auto componentConnected = componentResult == Steinberg::kResultOk || componentResult == Steinberg::kResultTrue;
+        const auto controllerResult = componentConnected
+          ? implementation_->controllerConnection->connect(componentPoint)
+          : Steinberg::kResultFalse;
+        const auto controllerConnected = controllerResult == Steinberg::kResultOk || controllerResult == Steinberg::kResultTrue;
+        if (!controllerConnected) {
+          if (componentConnected) static_cast<void>(implementation_->componentConnection->Disconnect());
+          implementation_->componentConnection = nullptr;
+          implementation_->controllerConnection = nullptr;
+        } else {
+          implementation_->componentsConnected = true;
+        }
+      }
+    }
+    if (implementation_->controller->setComponentHandler(&implementation_->context) != Steinberg::kResultOk) {
       Dispose();
       return false;
     }
@@ -455,6 +597,25 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
       if (implementation_->controller->getParameterInfo(index, info) != Steinberg::kResultOk) {
         Dispose();
         return false;
+      }
+    }
+    implementation_->midiMapping = Steinberg::FUnknownPtr<IMidiMapping>(implementation_->controller);
+    implementation_->hasMidiParameters = {};
+    if (implementation_->midiMapping) {
+      for (std::size_t channel = 0; channel < implementation_->hasMidiParameters.size(); ++channel) {
+        for (std::size_t controller = 0; controller < implementation_->hasMidiParameters[channel].size(); ++controller) {
+          Steinberg::Vst::ParamID parameter = 0;
+          const auto result = implementation_->midiMapping->getMidiControllerAssignment(
+            0,
+            static_cast<Steinberg::int16>(channel),
+            static_cast<Steinberg::Vst::CtrlNumber>(controller),
+            parameter
+          );
+          if (result == Steinberg::kResultOk || result == Steinberg::kResultTrue) {
+            implementation_->midiParameters[channel][controller] = parameter;
+            implementation_->hasMidiParameters[channel][controller] = true;
+          }
+        }
       }
     }
   }
@@ -508,6 +669,39 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto latency = implementation_->processor->getLatencySamples();
   const auto tail = implementation_->processor->getTailSamples();
   if (latency > 10'000'000 || (tail != Steinberg::Vst::kInfiniteTail && tail > 100'000'000)) return std::nullopt;
+  std::vector<WorkerParameterDescriptor> parameters;
+  bool supportsBypass = false;
+  if (implementation_->controller) {
+    const auto parameterCount = implementation_->controller->getParameterCount();
+    if (parameterCount < 0 || parameterCount > 16'384) return std::nullopt;
+    parameters.reserve(static_cast<std::size_t>(parameterCount));
+    for (Steinberg::int32 index = 0; index < parameterCount; ++index) {
+      Steinberg::Vst::ParameterInfo info{};
+      if (implementation_->controller->getParameterInfo(index, info) != Steinberg::kResultOk) return std::nullopt;
+      auto title = Steinberg::Vst::StringConvert::convert(info.title, 256);
+      if (title.empty()) title = "Parameter " + std::to_string(index + 1);
+      auto unit = Steinberg::Vst::StringConvert::convert(info.units, 64);
+      parameters.push_back({
+        .id = info.id,
+        .title = std::move(title),
+        .unit = std::move(unit),
+        .minimum = 0.0,
+        .maximum = 1.0,
+        .defaultValue = std::clamp(static_cast<double>(info.defaultNormalizedValue), 0.0, 1.0),
+        .stepCount = info.stepCount < 0 ? 0U : static_cast<std::uint32_t>(std::min<Steinberg::int32>(info.stepCount, 1'000'000)),
+        .readOnly = (info.flags & Steinberg::Vst::ParameterInfo::kIsReadOnly) != 0,
+        .hidden = (info.flags & Steinberg::Vst::ParameterInfo::kIsHidden) != 0,
+      });
+      supportsBypass = supportsBypass || (info.flags & Steinberg::Vst::ParameterInfo::kIsBypass) != 0;
+    }
+  }
+  BoundedStateStream stateProbe;
+  const bool supportsState = implementation_->component->getState(&stateProbe) == Steinberg::kResultOk;
+  auto* editorView = implementation_->controller
+    ? implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor)
+    : nullptr;
+  const bool supportsEditor = editorView != nullptr;
+  if (editorView != nullptr) editorView->release();
   WorkerManifest manifest{
     .version = kWorkerManifestVersion,
     .artifact = {
@@ -525,6 +719,10 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
     .latencyFrames = latency,
     .tailFrames = tail == Steinberg::Vst::kInfiniteTail ? std::nullopt : std::optional<std::uint32_t>(tail),
     .stateRevision = stateRevision,
+    .parameters = std::move(parameters),
+    .supportsBypass = supportsBypass,
+    .supportsEditor = supportsEditor,
+    .supportsState = supportsState,
   };
   return IsValidWorkerManifest(manifest) ? std::optional<WorkerManifest>(std::move(manifest)) : std::nullopt;
 }
@@ -577,27 +775,109 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   if (samples > implementation_->setup.maximumBlockFrames) return false;
   implementation_->parameters.clearQueue();
   implementation_->events.clear();
+  const auto addParameterChange = [&](const Steinberg::Vst::ParamID id, const Steinberg::Vst::ParamValue value, const Steinberg::int32 sampleOffset) {
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    Steinberg::int32 queueIndex = 0;
+    auto* queue = implementation_->parameters.addParameterData(id, queueIndex);
+    Steinberg::int32 point = 0;
+    return queue && queue->addPoint(sampleOffset, value, point) == Steinberg::kResultOk;
+  };
+  std::array<PendingEditorParameterEdit, kMaximumWorkerEvents> editorEdits{};
+  const auto editorEditCount = implementation_->context.DrainEditorParameterEdits(editorEdits);
+  const auto addNoteOff = [&](const Implementation::ActiveNote& note, const std::uint32_t sampleOffset) {
+    Event vstEvent{};
+    vstEvent.busIndex = 0;
+    vstEvent.sampleOffset = static_cast<Steinberg::int32>(sampleOffset);
+    vstEvent.type = Event::kNoteOffEvent;
+    vstEvent.noteOff.channel = note.channel;
+    vstEvent.noteOff.pitch = note.pitch;
+    vstEvent.noteOff.velocity = 0.0F;
+    vstEvent.noteOff.noteId = note.note_id;
+    vstEvent.noteOff.tuning = 0.0F;
+    return implementation_->events.addEvent(vstEvent) == Steinberg::kResultOk;
+  };
+  const auto releaseNotes = [&](const std::int16_t channel, const bool allChannels, const std::uint32_t sampleOffset) {
+    for (auto& note : implementation_->activeNotes) {
+      if (!note.active || (!allChannels && note.channel != channel)) continue;
+      if (!addNoteOff(note, sampleOffset)) return false;
+      note.active = false;
+    }
+    return true;
+  };
   for (const auto& event : implementation_->transport->events(slotIndex)) {
     if (event.sampleOffset >= samples) return false;
     if (event.kind == WorkerEventKind::kParameter) {
-      if (!std::isfinite(event.parameterValue) || event.parameterValue < 0.0 || event.parameterValue > 1.0) return false;
-      Steinberg::int32 index = 0;
-      auto* queue = implementation_->parameters.addParameterData(event.parameterId, index);
-      Steinberg::int32 point = 0;
-      if (!queue || queue->addPoint(static_cast<Steinberg::int32>(event.sampleOffset), event.parameterValue, point) != Steinberg::kResultOk) return false;
+      if (!addParameterChange(
+        event.parameterId,
+        event.parameterValue,
+        static_cast<Steinberg::int32>(event.sampleOffset)
+      )) return false;
       continue;
     }
     const auto status = static_cast<std::uint8_t>(event.midiData[0] & 0xF0U);
+    if (status == 0xB0U) {
+      const auto channel = static_cast<std::uint8_t>(event.midiData[0] & 0x0FU);
+      const auto controller = event.midiData[1];
+      if (controller == 120U && !releaseNotes(0, true, event.sampleOffset)) return false;
+      if (controller == 123U && !releaseNotes(static_cast<Steinberg::int16>(channel), false, event.sampleOffset)) return false;
+      if (controller == 120U || controller == 123U) continue;
+      if (!implementation_->hasMidiParameters[channel][controller]) continue;
+      if (!addParameterChange(
+        implementation_->midiParameters[channel][controller],
+        static_cast<double>(event.midiData[2]) / 127.0,
+        static_cast<Steinberg::int32>(event.sampleOffset)
+      )) return false;
+      continue;
+    }
     if (status != 0x90U && status != 0x80U) continue;
     Event vstEvent{};
     vstEvent.busIndex = 0;
     vstEvent.sampleOffset = static_cast<Steinberg::int32>(event.sampleOffset);
-    vstEvent.type = status == 0x90U && event.midiData[2] != 0 ? Event::kNoteOnEvent : Event::kNoteOffEvent;
-    vstEvent.noteOn.channel = static_cast<Steinberg::int16>(event.midiData[0] & 0x0FU);
-    vstEvent.noteOn.pitch = static_cast<Steinberg::int16>(event.midiData[1]);
-    vstEvent.noteOn.velocity = static_cast<float>(event.midiData[2]) / 127.0F;
-    vstEvent.noteOn.noteId = -1;
+    const bool noteOn = status == 0x90U && event.midiData[2] != 0;
+    vstEvent.type = noteOn ? Event::kNoteOnEvent : Event::kNoteOffEvent;
+    if (noteOn) {
+      auto active = std::find_if(
+        implementation_->activeNotes.begin(),
+        implementation_->activeNotes.end(),
+        [](const Implementation::ActiveNote& note) { return !note.active; }
+      );
+      if (active == implementation_->activeNotes.end()) return false;
+      active->active = true;
+      active->channel = static_cast<Steinberg::int16>(event.midiData[0] & 0x0FU);
+      active->pitch = static_cast<Steinberg::int16>(event.midiData[1]);
+      active->note_id = implementation_->nextNoteId++;
+      if (implementation_->nextNoteId < 1) implementation_->nextNoteId = 1;
+      vstEvent.noteOn.channel = active->channel;
+      vstEvent.noteOn.pitch = active->pitch;
+      vstEvent.noteOn.tuning = 0.0F;
+      vstEvent.noteOn.velocity = static_cast<float>(event.midiData[2]) / 127.0F;
+      vstEvent.noteOn.length = 0;
+      vstEvent.noteOn.noteId = active->note_id;
+    } else {
+      const auto channel = static_cast<Steinberg::int16>(event.midiData[0] & 0x0FU);
+      const auto pitch = static_cast<Steinberg::int16>(event.midiData[1]);
+      const auto active = std::find_if(
+        implementation_->activeNotes.begin(),
+        implementation_->activeNotes.end(),
+        [&](const Implementation::ActiveNote& note) {
+          return note.active && note.channel == channel && note.pitch == pitch;
+        }
+      );
+      if (active == implementation_->activeNotes.end()) continue;
+      vstEvent.noteOff.channel = active->channel;
+      vstEvent.noteOff.pitch = active->pitch;
+      vstEvent.noteOff.velocity = static_cast<float>(event.midiData[2]) / 127.0F;
+      vstEvent.noteOff.noteId = active->note_id;
+      vstEvent.noteOff.tuning = 0.0F;
+      active->active = false;
+    }
     if (implementation_->events.addEvent(vstEvent) != Steinberg::kResultOk) return false;
+  }
+  // UI/editor edits are the latest control source. Add them after transport
+  // events so an equal-offset edit deterministically wins over automation.
+  for (std::size_t index = 0; index < editorEditCount; ++index) {
+    const auto& edit = editorEdits[index];
+    if (!addParameterChange(edit.parameter_id, edit.normalized_value, 0)) return false;
   }
   auto input = implementation_->transport->input(slotIndex);
   auto output = implementation_->transport->output(slotIndex);
@@ -631,6 +911,17 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   return implementation_->transport->Complete(slotIndex, sequence);
 }
 
+bool Vst3Worker::PeekEditorParameterFeedback(PendingEditorParameterEdit& edit) const {
+  return implementation_->context.PeekEditorParameterFeedback(edit);
+}
+
+bool Vst3Worker::AckEditorParameterFeedback(
+  const std::uint32_t parameterId,
+  const std::uint64_t generation
+) {
+  return implementation_->context.AckEditorParameterFeedback(parameterId, generation);
+}
+
 std::optional<WorkerState> Vst3Worker::GetState() {
   if (!ready()) return std::nullopt;
   BoundedStateStream stream;
@@ -658,15 +949,21 @@ WorkerEditorStatus Vst3Worker::EditorStatus() const {
 bool Vst3Worker::ExecuteEditorCommand(
   const WorkerEditorCommand command,
   const std::uint32_t width,
-  const std::uint32_t height
+  const std::uint32_t height,
+  const std::optional<WorkerEditorAnchor> anchor
 ) {
   if (!ready() || !implementation_->controller) return false;
+  const auto resetEditor = [&] {
+    implementation_->editorWindow.reset();
+    implementation_->editorView = nullptr;
+  };
+  if (implementation_->editorWindow && !implementation_->editorWindow->status().open) resetEditor();
   if (command == WorkerEditorCommand::kStatus) return true;
-  if (command == WorkerEditorCommand::kOpen) {
+  const auto openEditor = [&] {
+    if (!PrepareVst3EditorRuntime()) return false;
     if (implementation_->editorWindow) {
-      if (implementation_->editorWindow->Focus()) return true;
-      implementation_->editorWindow.reset();
-      implementation_->editorView = nullptr;
+      if (implementation_->editorWindow->Focus(anchor)) return true;
+      resetEditor();
     }
     implementation_->editorView = implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor);
     if (!implementation_->editorView) {
@@ -674,24 +971,28 @@ bool Vst3Worker::ExecuteEditorCommand(
       return false;
     }
     implementation_->editorWindow.emplace();
-    if (!implementation_->editorWindow->Open(*implementation_->editorView)) {
-      implementation_->editorWindow.reset();
-      implementation_->editorView = nullptr;
+    if (!implementation_->editorWindow->Open(*implementation_->editorView, anchor)) {
+      resetEditor();
       implementation_->editorUnsupported = true;
       return false;
     }
     return true;
+  };
+  if (command == WorkerEditorCommand::kOpen) {
+    return openEditor();
+  }
+  if (command == WorkerEditorCommand::kClose) {
+    if (!implementation_->editorWindow) return true;
+    const bool wasOpen = implementation_->editorWindow->status().open;
+    const bool closed = implementation_->editorWindow->Close();
+    resetEditor();
+    return closed || !wasOpen;
+  }
+  if (command == WorkerEditorCommand::kFocus) {
+    if (implementation_->editorWindow && implementation_->editorWindow->Focus(anchor)) return true;
+    return openEditor();
   }
   if (!implementation_->editorWindow) return false;
-  if (command == WorkerEditorCommand::kClose) {
-    const auto closed = implementation_->editorWindow->Close();
-    if (closed) {
-      implementation_->editorWindow.reset();
-      implementation_->editorView = nullptr;
-    }
-    return closed;
-  }
-  if (command == WorkerEditorCommand::kFocus) return implementation_->editorWindow->Focus();
   return command == WorkerEditorCommand::kResize && implementation_->editorWindow->Resize(width, height);
 }
 
@@ -699,6 +1000,13 @@ void Vst3Worker::Dispose() {
   if (!implementation_) return;
   implementation_->editorWindow.reset();
   implementation_->editorView = nullptr;
+  if (implementation_->componentsConnected) {
+    static_cast<void>(implementation_->componentConnection->Disconnect());
+    static_cast<void>(implementation_->controllerConnection->Disconnect());
+    implementation_->componentsConnected = false;
+  }
+  implementation_->componentConnection = nullptr;
+  implementation_->controllerConnection = nullptr;
   if (implementation_->processing && implementation_->processor) implementation_->processor->setProcessing(false);
   if (implementation_->active && implementation_->component) implementation_->component->setActive(false);
   if (implementation_->controller && !implementation_->controllerIsComponent) implementation_->controller->terminate();
@@ -708,6 +1016,7 @@ void Vst3Worker::Dispose() {
   implementation_->processor = nullptr;
   implementation_->component = nullptr;
   implementation_->module.reset();
+  implementation_->context.ClearEditorParameterEdits();
   implementation_->controllerIsComponent = false;
   implementation_->editorUnsupported = false;
   implementation_->active = false;

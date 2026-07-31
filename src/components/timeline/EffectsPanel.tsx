@@ -9,8 +9,10 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
 } from "solid-js";
-import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams } from "@daw-browser/shared";
+import type { ExternalProcessor } from "@daw-browser/external-plugins";
+import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -62,6 +64,16 @@ import {
 } from "~/lib/device-catalog";
 import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
 import { createSynthAutomationState, overlaySynthAutomationValues } from "~/components/timeline/synth-automation";
+import {
+  deleteLocalExternalProcessor,
+  listLocalExternalProcessors,
+  mergeLocalExternalProcessorParameterOverride,
+  setLocalExternalProcessorBypassed,
+} from "~/lib/external-plugins";
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
+import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
+import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
+import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -95,6 +107,10 @@ type EffectsPanelProps = {
   evaluatedValuesByTargetKey?: ReadonlyMap<string, number>;
   onSelectAutomationParameter?: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => void;
   onManualAutomationOverride?: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => void;
+  autoOpenExternalProcessorId?: string;
+  onExternalProcessorAutoOpenHandled?: (instanceId: string) => void;
+  onExternalProcessorUpdated?: (processor: ExternalProcessor, previous: ExternalProcessor) => void;
+  enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -232,7 +248,10 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 );
 
 type EffectsPanelEffectCardsProps = {
+  projectId?: string;
   audioEffects: EffectsPanelAudioEffects;
+  externalProcessors: ExternalProcessor[];
+  enqueueParameter: NativeVstParameterQueue["enqueue"];
   canWrite: boolean;
   onElementChange?: (element: HTMLElement | undefined) => void;
   spectrum: SpectrumFrame | null;
@@ -244,6 +263,11 @@ type EffectsPanelEffectCardsProps = {
   evaluatedValuesByTargetKey?: ReadonlyMap<string, number>;
   onSelectAutomationParameter?: (parameterId: string, effectInstanceId: string) => void;
   onManualAutomationOverride?: (parameterId: string, effectInstanceId: string) => void;
+  autoOpenExternalProcessorId?: string;
+  onExternalProcessorAutoOpenHandled?: (instanceId: string) => void;
+  onRemoveExternalProcessor: (instanceId: string) => void;
+  onExternalParameterChange: (instanceId: string, parameterId: number, value: number) => void;
+  onExternalBypassChange: (instanceId: string, bypassed: boolean) => void;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -595,6 +619,38 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
             );
           }}
         </For>
+        <For each={props.externalProcessors}>
+          {(processor) => {
+            let element: HTMLDivElement | undefined;
+            return (
+            <div
+              data-external-effect-id={processor.instanceId}
+              class="touch-none transition-opacity"
+              ref={(node) => {
+                element = node;
+              }}
+            >
+              <ExternalPluginCard
+                projectId={props.projectId}
+                processor={processor}
+                enqueueParameter={props.enqueueParameter}
+                editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                targetId={props.targetId}
+                automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
+                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                onSelectAutomationParameter={props.onSelectAutomationParameter}
+                onManualAutomationOverride={props.onManualAutomationOverride}
+                autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
+                onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                canWrite={props.canWrite}
+                onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
+                onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
+                onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
+              />
+            </div>
+            );
+          }}
+        </For>
       </div>
 
       <Show when={reorderPreview()}>
@@ -765,6 +821,64 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
+  const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
+  createEffect(() => {
+    const projectId = props.projectId;
+    if (!projectId || !isLocalId("project", projectId)) {
+      setExternalProcessors([]);
+      return;
+    }
+    const isCurrentProject = () => untrack(() => props.projectId) === projectId;
+    const reload = () => listLocalExternalProcessors(projectId)
+      .then((processors) => {
+        if (isCurrentProject()) setExternalProcessors(processors);
+      })
+      .catch(() => {
+        if (isCurrentProject()) setExternalProcessors([]);
+      });
+    void reload();
+    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
+    onCleanup(unsubscribe);
+  });
+  const externalProcessorsForTarget = createMemo(() => (
+    selectExternalProcessorsForTarget(externalProcessors(), props.selectedFXTarget)
+  ));
+  const removeExternalProcessor = (instanceId: string) => {
+    const projectId = props.projectId;
+    if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
+    const processor = externalProcessors().find((entry) => entry.instanceId === instanceId);
+    if (!processor || processor.targetId !== props.selectedFXTarget) return;
+    void deleteLocalExternalProcessor(projectId, instanceId).catch(() => undefined);
+  };
+  const applyExternalProcessorCommit = (commit: {
+    previous: ExternalProcessor;
+    current: ExternalProcessor;
+  }) => {
+    setExternalProcessors((processors) => processors.map((processor) => (
+      processor.instanceId === commit.current.instanceId ? commit.current : processor
+    )));
+    if (commit.previous.bypassed !== commit.current.bypassed) {
+      untrack(() => props.onExternalProcessorUpdated?.(commit.current, commit.previous));
+    }
+  };
+  const updateExternalProcessorParameter = (instanceId: string, parameterId: number, value: number) => {
+    const projectId = props.projectId;
+    if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
+    void mergeLocalExternalProcessorParameterOverride(projectId, instanceId, parameterId, value)
+      .then((commit) => {
+        if (commit) applyExternalProcessorCommit(commit);
+      })
+      .catch(() => undefined);
+  };
+  const updateExternalProcessorBypass = (instanceId: string, bypassed: boolean) => {
+    const projectId = props.projectId;
+    if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
+    void setLocalExternalProcessorBypassed(projectId, instanceId, bypassed)
+      .then((commit) => {
+        if (commit) applyExternalProcessorCommit(commit);
+      })
+      .catch(() => undefined);
+  };
   const panelContextMenuItems = () => createEffectsPanelContextMenuItems({
     targetId: props.selectedFXTarget,
     targetTrackId: target.isInstrumentTrack() ? props.selectedFXTarget : undefined,
@@ -848,7 +962,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       />
                     </Show>
                     <EffectsPanelEffectCards
+                      projectId={props.projectId}
                       audioEffects={audioEffects}
+                      externalProcessors={externalProcessorsForTarget()}
+                      enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve(false))}
                       canWrite={canWriteCurrentTargetEffects()}
                       onElementChange={props.onEffectChainElementChange}
                       spectrum={spectrum()}
@@ -860,6 +977,11 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
                       onSelectAutomationParameter={(parameterId, effectInstanceId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId, effectInstanceId)}
                       onManualAutomationOverride={(parameterId, effectInstanceId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId, effectInstanceId)}
+                      autoOpenExternalProcessorId={props.autoOpenExternalProcessorId}
+                      onExternalProcessorAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                      onRemoveExternalProcessor={removeExternalProcessor}
+                      onExternalParameterChange={updateExternalProcessorParameter}
+                      onExternalBypassChange={updateExternalProcessorBypass}
                     />
                     <Show when={isCurrentTargetReadOnly()}>
                       <EffectsPanelReadOnlyNotice />
@@ -868,6 +990,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       empty={{
                         visible:
                           audioEffects.orderedEffects().length === 0 &&
+                          externalProcessorsForTarget().length === 0 &&
                           !instrument.arp.params() &&
                           (!instrument.activeInstrument() ||
                             !target.isInstrumentTrack()),

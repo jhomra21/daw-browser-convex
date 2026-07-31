@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 
 const preloadPath = new URL("./preload.ts", import.meta.url)
 const mainPath = new URL("./main.ts", import.meta.url)
-const rendererTypesPath = new URL("../../src/types/desktop-bridge.d.ts", import.meta.url)
+const rendererTypesPath = new URL("../../src/types/desktop-bridge.ts", import.meta.url)
 
 test("exposes only the macOS arm64 typed PCM asset session surface to renderers", async () => {
   const [main, preload, rendererTypes] = await Promise.all([
@@ -32,6 +32,7 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(rendererTypes).toContain("audioHost?:")
   expect(rendererTypes).toContain("resolveOutputDevice")
   expect(rendererTypes).toContain("NativeHostPcmAsset")
+  expect(rendererTypes).toContain("serializedPlan")
   expect(rendererTypes).not.toContain("AudioEngine")
   expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
   expect(main).toContain('catalogViewForRenderer')

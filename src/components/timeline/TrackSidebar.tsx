@@ -98,6 +98,7 @@ export type TrackSidebarProps = {
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
     ) => () => void;
+    subscribeMasterLevels: (listener: (levels: TrackStereoLevels) => void) => () => void;
     onVolumePreview: (
       trackId: Track["id"],
       volume: number,
@@ -128,6 +129,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>(
     {},
   );
+  const [masterLevels, setMasterLevels] = createSignal<TrackStereoLevels>({
+    left: 0,
+    right: 0,
+  });
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
@@ -164,6 +169,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
           }
         }),
       );
+    });
+    onCleanup(unsubscribe);
+  });
+
+  createEffect(() => {
+    const unsubscribe = sidebar().subscribeMasterLevels((levels) => {
+      setMasterLevels({
+        left: clampUnit(levels.left),
+        right: clampUnit(levels.right),
+      });
     });
     onCleanup(unsubscribe);
   });
@@ -864,6 +879,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 <MasterSidebarRow
                   master={sidebar().master}
+                  levels={masterLevels()}
                   automation={{
                     visible: props.automation.lanes.masterVisible,
                     heightPx: props.automation.lanes.masterHeight,

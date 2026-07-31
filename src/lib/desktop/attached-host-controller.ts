@@ -2,6 +2,8 @@ import type { Accessor } from "solid-js"
 import { isLocalId } from "@daw-browser/shared"
 import {
   desktopHostExportRunInputSchemaV1,
+  desktopHostVstInstancesInputSchemaV1,
+  desktopHostVstParametersInputSchemaV1,
   desktopRendererControlCapabilitiesInputSchemaV1,
   desktopRendererControlSnapshotInputSchemaV1,
   desktopRendererExportInputSchemaV1,
@@ -14,31 +16,28 @@ import {
   type DesktopOperationMapV1,
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
+import {
+  controlCommitResultSchemaV1,
+  parseControlCommitRequestV1,
+  projectSnapshotSchemaV2,
+} from "@daw-browser/control"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
 import { getLocalProject } from "~/lib/local-project-db"
+import { listLocalExternalProcessors } from "~/lib/external-plugins"
 import {
   createLocalControlService,
   LocalControlServiceError,
 } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
-import type {
-  NativeHostDeviceConfiguration,
-  NativeHostPcmAsset,
-  NativeHostRecordingBlock,
-  NativeHostRecordingConfiguration,
-  NativeHostRecordingStatus,
-  NativeHostTransport,
-  NativeInputDevice,
-  NativeOutputDevice,
-} from "@daw-browser/audio-engine/native-host-wire"
-import type {
-  NativeVst3InsertionPreflightRequest,
-  NativeVst3InsertionPreflightResult,
-} from "@daw-browser/plugin-host-protocol"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { ImportSummary } from "~/hooks/useTimelineClipImport"
+export type {
+  DesktopPluginCatalog,
+  DesktopPluginCatalogEntry,
+  DesktopPluginCatalogReply,
+} from "~/types/desktop-bridge"
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { collectStemTracks } from "~/lib/export/run-export-job"
@@ -58,97 +57,9 @@ type HostResponse = {
   error?: HostErrorV1 | ControlErrorV1
 }
 
-export type DesktopPluginCatalogEntry = {
-  displayName: string
-  discoveredAtMs: number
-  architecture: "unknown"
-  hostingStatus: "unavailable"
-  unavailableReason: string
-  classes: Array<{
-    classId: string
-    vendor: string
-    name: string
-    version: string
-    role: "effect" | "instrument"
-    source: "moduleinfo" | "factory"
-    sdkVersion?: string
-  }>
-  scanHealth: "filesystem-only" | "scanned" | "scan-failed"
-  scannerVersion?: string
-  sdkVersion?: string
-  binaryFingerprint?: string
-  catalogReference?: Omit<NativeVst3InsertionPreflightRequest["reference"], "classId" | "vendorId">
-}
-
-export type DesktopPluginCatalog = {
-  version: 3
-  directories: string[]
-  entries: DesktopPluginCatalogEntry[]
-  diagnostics: { directory: string; message: string }[]
-  scannedAtMs: number | null
-}
-
-export type DesktopPluginCatalogReply =
-  | { ok: true; catalog: DesktopPluginCatalog }
-  | { ok: true; canceled: true }
-  | { ok: false; error: string }
-
 type TimelineHostController = {
   request: (request: HostRequest) => Promise<HostResponse>
   prepareToClose: () => Promise<boolean>
-}
-
-type DesktopBridge = {
-  setRequestHandler: (handler: ((request: HostRequest) => Promise<HostResponse>) | undefined) => void
-  onPrepareToClose: (handler: (() => Promise<{ flushed: boolean }>) | undefined) => void
-  readChunk: (requestId: string, token: string) => Promise<Uint8Array>
-  beginWrite: (requestId: string, token: string, relativePath?: string) => Promise<{ writerId: string }>
-  writeChunk: (requestId: string, writerId: string, offset: number, chunk: Uint8Array) => Promise<{ nextOffset: number }>
-  commit: (requestId: string, writerId: string) => Promise<{ basename: string; byteLength: number; mime: string }>
-  abort: (requestId: string, writerId: string) => Promise<void>
-  exportTerminal: (jobId: string, status: "success" | "canceled" | "error") => void
-  audioHost?: {
-    diagnostics: () => Promise<{ ok: true } | { ok: false; error: string }>
-    resolveOutputDevice: (preferredDeviceId?: string) => Promise<{ ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }>
-    resolveInputDevice: (preferredDeviceId?: string) => Promise<{ ok: true; device: NativeInputDevice | null } | { ok: false; error: string }>
-    session: {
-      configure: (input: NativeHostDeviceConfiguration) => Promise<{ ok: true } | { ok: false; error: string }>
-      beginTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
-      commitTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
-      rollbackTransaction: () => Promise<{ ok: true } | { ok: false; error: string }>
-      installAsset: (input: NativeHostPcmAsset) => Promise<{ ok: true } | { ok: false; error: string }>
-      releaseAsset: (sessionAssetId: number) => Promise<{ ok: true } | { ok: false; error: string }>
-      publishGraph: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
-      queueParameterEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
-      queueInstrumentEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
-      queueSourceEvents: (bytes: Uint8Array) => Promise<{ ok: true } | { ok: false; error: string }>
-      setTransport: (input: NativeHostTransport) => Promise<{ ok: true } | { ok: false; error: string }>
-      configureRecording: (input: NativeHostRecordingConfiguration) => Promise<{ ok: true } | { ok: false; error: string }>
-      startRecording: () => Promise<{ ok: true } | { ok: false; error: string }>
-      stopRecording: (stopFrame?: number) => Promise<{ ok: true } | { ok: false; error: string }>
-      cancelRecording: () => Promise<{ ok: true } | { ok: false; error: string }>
-      start: () => Promise<{ ok: true } | { ok: false; error: string }>
-      stop: () => Promise<{ ok: true } | { ok: false; error: string }>
-      teardown: () => Promise<{ ok: true } | { ok: false; error: string }>
-      onLoss: (listener: () => void) => () => void
-      onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => () => void
-      onRecordingStatus: (listener: (status: NativeHostRecordingStatus) => void) => () => void
-    }
-  }
-  pluginCatalog?: {
-    read: () => Promise<DesktopPluginCatalogReply>
-    chooseDirectory: () => Promise<DesktopPluginCatalogReply>
-    removeDirectory: (directory: string) => Promise<DesktopPluginCatalogReply>
-    scan: () => Promise<DesktopPluginCatalogReply>
-    preflightInsertion: (input: NativeVst3InsertionPreflightRequest) => Promise<NativeVst3InsertionPreflightResult>
-  }
-}
-
-declare global {
-  // oxlint-disable-next-line typescript/consistent-type-definitions -- Window augmentation requires declaration merging.
-  interface Window {
-    dawDesktop?: DesktopBridge
-  }
 }
 
 const unavailable = (id: string): HostResponse => ({
@@ -181,6 +92,16 @@ const mountedProjectError = (request: HostRequest, mountedProjectId: string) => 
     ? mountedProjectRequired()
     : mountedProjectMismatch()
 )
+const pageValues = <Value>(values: readonly Value[], cursor: string | undefined, limit: number) => {
+  const start = cursor === undefined ? 0 : Number(cursor)
+  const page = values.slice(start, start + limit)
+  return {
+    values: page,
+    nextCursor: start + page.length < values.length ? String(start + page.length) : null,
+  }
+}
+const clampNormalizedValue = (value: number) => Math.min(1, Math.max(0, value))
+const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
 
 class ControlRequestUnavailableError extends Error {}
 
@@ -287,6 +208,7 @@ export const createAttachedHostController = (input: {
   exportQueue: ExportQueue
   importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
+  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
   getMountedLocalProject?: typeof getLocalProject
 }): TimelineHostController => {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
@@ -368,6 +290,41 @@ export const createAttachedHostController = (input: {
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
+      if (request_.operation === "control.commit" && input.enqueueNativeVstParameter) {
+        try {
+          const commitRequest = parseControlCommitRequestV1(request_.input)
+          const commitResult = controlCommitResultSchemaV1.safeParse(result)
+          if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay) {
+            const changedActionIndexes = new Set(commitResult.data.changeSummary.changes
+              .filter((change) => change.kind === "external-plugin.parameters.set")
+              .map((change) => change.actionIndex))
+            if (changedActionIndexes.size > 0) {
+              const postCommitSnapshot = projectSnapshotSchemaV2.parse(await service.snapshotV2({ projectId: mountedProjectId }))
+              const processorsById = new Map(postCommitSnapshot.processors.map((processor) => [processor.id, processor]))
+              if (await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+                const deliveries: Promise<boolean>[] = []
+                for (const [actionIndex, action] of commitRequest.actions.entries()) {
+                  if (action.kind !== "external-plugin.parameters.set" || !changedActionIndexes.has(actionIndex)) continue
+                  const processor = processorsById.get(action.processor.id)
+                  if (processor?.processor.kind !== "external-vst3" || processor.instanceId === undefined) continue
+                  for (const change of action.changes) {
+                    try {
+                      deliveries.push(input.enqueueNativeVstParameter({
+                        instanceId: processor.instanceId,
+                        id: change.parameterId,
+                        value: change.normalizedValue,
+                      }))
+                    } catch (error) {
+                      deliveries.push(Promise.reject(error))
+                    }
+                  }
+                }
+                await Promise.all(deliveries)
+              }
+            }
+          }
+        } catch {}
+      }
       const rendererProtocolVersion = (
         request_.operation === "control.capabilities"
         && desktopRendererControlCapabilitiesInputSchemaV1.parse(request_.input).readVersion === "v2"
@@ -392,6 +349,78 @@ export const createAttachedHostController = (input: {
     if (request_.signal.aborted) return cancelled(request_.id)
     try {
       let result: DesktopOperationMapV1[DesktopOperationV1]["result"]
+      if (request_.operation === "host.vst.instances" || request_.operation === "host.vst.parameters") {
+        const parsedInput = request_.operation === "host.vst.instances"
+          ? desktopHostVstInstancesInputSchemaV1.safeParse(request_.input)
+          : desktopHostVstParametersInputSchemaV1.safeParse(request_.input)
+        if (!parsedInput.success) {
+          return { id: request_.id, error: hostError("invalid-request", "Invalid VST discovery request.") }
+        }
+        const projectId = parsedInput.data.projectId
+        const mountedProjectId = input.projectId()
+        if (!mountedProjectId || !isLocalId("project", mountedProjectId)) {
+          return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
+        }
+        if (projectId !== mountedProjectId) return { id: request_.id, error: mountedProjectMismatch() }
+        const mountedGeneration = input.mountedProjectGeneration()
+        if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+          return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
+        }
+        const processors = await listLocalExternalProcessors(mountedProjectId)
+        if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+          return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
+        }
+        if (request_.operation === "host.vst.instances") {
+          const instances = [...processors]
+            .sort((left, right) => (
+              compareText(left.targetId, right.targetId)
+              || left.chainIndex - right.chainIndex
+              || compareText(left.instanceId, right.instanceId)
+            ))
+            .map((processor) => ({
+              instanceId: processor.instanceId,
+              targetId: processor.targetId,
+              chainIndex: processor.chainIndex,
+              identity: {
+                format: processor.manifest.identity.format,
+                classId: processor.manifest.identity.classId,
+                vendor: processor.manifest.identity.vendor,
+                name: processor.manifest.identity.name,
+                version: processor.manifest.identity.version,
+                architecture: processor.manifest.identity.architecture,
+              },
+              role: processor.manifest.role,
+              bypassed: processor.bypassed,
+              health: processor.health,
+              parameterCount: processor.manifest.parameters.length,
+              supportsEditor: processor.manifest.supportsEditor,
+              supportsState: processor.manifest.supportsState,
+            }))
+          const page = pageValues(instances, parsedInput.data.cursor, parsedInput.data.limit)
+          result = { projectId, instances: page.values, nextCursor: page.nextCursor }
+        } else {
+          const parameterInput = desktopHostVstParametersInputSchemaV1.parse(request_.input)
+          const processor = processors.find((candidate) => candidate.instanceId === parameterInput.instanceId)
+          if (!processor) return { id: request_.id, error: hostError("invalid-request", "The requested VST instance was not found.") }
+          const parameters = [...processor.manifest.parameters]
+            .sort((left, right) => left.id - right.id)
+            .map((parameter) => ({
+              id: parameter.id,
+              title: parameter.title,
+              unit: parameter.unit,
+              minimum: parameter.minimum,
+              maximum: parameter.maximum,
+              defaultValue: parameter.defaultValue,
+              stepCount: parameter.stepCount,
+              readOnly: parameter.readOnly,
+              hidden: parameter.hidden,
+              currentValue: clampNormalizedValue(processor.parameterOverrides[String(parameter.id)] ?? parameter.defaultValue),
+            }))
+          const page = pageValues(parameters, parsedInput.data.cursor, parsedInput.data.limit)
+          result = { projectId, instanceId: processor.instanceId, parameters: page.values, nextCursor: page.nextCursor }
+        }
+        return { id: request_.id, result: parseDesktopResult(request_.operation, result, request_.input) }
+      }
       if (isDesktopControlOperation(request_.operation)) return control(request_)
       if (request_.operation === "host.status") result = status()
       else if (request_.operation === "host.import.audio") {

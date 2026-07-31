@@ -147,8 +147,10 @@ struct GraphRevision {
 struct NativeGraphHooks {
   uint32_t revision = 0;
   daw::audio_core::NativeGraphNodeHook hook = nullptr;
-  std::array<void *, kMaximumGraphNodes> attachments{};
-  std::array<bool, kMaximumGraphNodes> attached{};
+  daw::audio_core::NativeGraphNodeHook observer = nullptr;
+  void* observer_attachment = nullptr;
+  std::array<std::array<void *, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE>, kMaximumGraphNodes> attachments{};
+  std::array<std::uint32_t, kMaximumGraphNodes> attachment_counts{};
 };
 #endif
 
@@ -282,6 +284,7 @@ struct SpectralHistory {
 
 struct Core {
   daw_audio_core_config config{};
+  daw_audio_core_graph_validation_diagnostic graph_validation_diagnostic{};
   uint32_t prepared_revision = 0;
   uint32_t published_revision = 0;
   daw_audio_utility_state utility{};
@@ -316,10 +319,15 @@ struct Core {
   uint32_t active_instrument_event_count = 0;
   std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes> instrument_event_indices{};
   std::array<uint16_t, kMaximumGraphNodes> instrument_event_counts{};
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  std::array<std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes>
+    native_instrument_events{};
+#endif
   std::array<uint16_t, kMaximumSampleSources> active_source_indices{};
   std::array<GraphRevision::Range, kMaximumGraphNodes> active_source_ranges{};
   GraphRevision::Range root_source_range{};
   std::array<InstrumentNodeState, kMaximumGraphNodes> instruments{};
+  std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments{};
 };
 
 Core *to_core(daw_audio_core_handle handle) {
@@ -567,6 +575,7 @@ daw_audio_core_result prepare_graph_revision(
   Core &core,
   const daw_audio_graph_prepare_request &request,
   GraphRevision *out_graph) {
+  core.graph_validation_diagnostic = {};
   if (!valid_abi(request.abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
   if (request.graph_revision == 0 || request.node_count == 0 || request.node_count > kMaximumGraphNodes
     || request.edge_count > kMaximumGraphEdges || request.processor_count > kMaximumGraphProcessors || request.nodes == nullptr
@@ -697,7 +706,15 @@ daw_audio_core_result prepare_graph_revision(
         return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
     }
-    if (edge.pdc_delay_frames > core.config.max_frames_per_block) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    if (edge.pdc_delay_frames > kMaximumFramesPerBlock) {
+      core.graph_validation_diagnostic = {
+        .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_PDC_DELAY_EXCEEDS_RING_CAPACITY,
+        .index = index,
+        .actual = edge.pdc_delay_frames,
+        .limit = kMaximumFramesPerBlock,
+      };
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
     for (uint32_t existing = 0; existing < index; ++existing) {
       if (graph.edges[existing].id == edge.id) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
@@ -746,6 +763,13 @@ daw_audio_core_result prepare_graph_revision(
     if (source_order >= target_order) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   std::array<uint32_t, kMaximumGraphNodes> path_latency{};
+  const auto effective_node_latency = [&graph](const uint32_t node_index) -> uint32_t {
+    const auto &node = graph.nodes[node_index];
+    if (node.external_latency_frames > std::numeric_limits<uint32_t>::max() - node.latency_frames) {
+      return std::numeric_limits<uint32_t>::max();
+    }
+    return node.latency_frames + node.external_latency_frames;
+  };
   for (uint32_t ordered = 0; ordered < graph.node_count; ++ordered) {
     const uint32_t node_index = graph.process_order[ordered];
     uint32_t upstream_latency = 0;
@@ -755,19 +779,23 @@ daw_audio_core_result prepare_graph_revision(
       const uint32_t source_index = graph.edge_source_indices[edge_index];
       uint32_t arrival = path_latency[source_index];
       if (edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX) {
-        const uint32_t source_latency = graph.nodes[source_index].latency_frames;
+        const uint32_t source_latency = effective_node_latency(source_index);
         if (arrival < source_latency) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
         arrival -= source_latency;
       }
       if (arrival > upstream_latency) upstream_latency = arrival;
     }
-    path_latency[node_index] = upstream_latency + graph.nodes[node_index].latency_frames;
+    const uint32_t node_latency = effective_node_latency(node_index);
+    if (node_latency > std::numeric_limits<uint32_t>::max() - upstream_latency) {
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
+    path_latency[node_index] = upstream_latency + node_latency;
     for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
       const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
       if (edge.sidechain != 0 || edge.to_node_id != graph.nodes[node_index].id) continue;
       const uint32_t source_index = graph.edge_source_indices[edge_index];
       uint32_t arrival = path_latency[source_index];
-      if (edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX) arrival -= graph.nodes[source_index].latency_frames;
+      if (edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX) arrival -= effective_node_latency(source_index);
       if (edge.pdc_delay_frames != upstream_latency - arrival) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
   }
@@ -2269,20 +2297,104 @@ float graph_edge_sample(
   return delayed;
 }
 
+void clear_instrument_state(InstrumentNodeState &instrument);
+void release_instrument_state(InstrumentNodeState &instrument);
+
 void clear_instrument_voices(Core &core) {
   for (InstrumentNodeState &instrument : core.instruments) {
-    instrument.voices = {};
-    instrument.sample_voices = {};
-    instrument.grains = {};
-    instrument.granular_note_ids = {};
-    instrument.granular_note_count = 0;
-    instrument.granular_next_frame = 0.0;
-    instrument.granular_frozen_position = -1.0F;
-    instrument.granular_random_state = instrument.granular.seed == 0 ? 1 : instrument.granular.seed;
-    instrument.expression = 1.0F;
-    instrument.sustain = false;
-    instrument.next_age = 1;
+    clear_instrument_state(instrument);
   }
+}
+
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+void release_instrument_voices(Core &core) {
+  for (InstrumentNodeState &instrument : core.instruments) release_instrument_state(instrument);
+}
+#endif
+
+void release_instrument_state(InstrumentNodeState &instrument) {
+  for (InstrumentVoice &voice : instrument.voices) {
+    if (!voice.active) continue;
+    voice.held = false;
+    voice.references = 0;
+    voice.released = true;
+  }
+  for (SampleVoice &voice : instrument.sample_voices) {
+    if (voice.active) voice.released = true;
+  }
+  instrument.sustain = false;
+}
+
+void clear_instrument_state(InstrumentNodeState &instrument) {
+  instrument.voices = {};
+  instrument.sample_voices = {};
+  instrument.grains = {};
+  instrument.granular_note_ids = {};
+  instrument.granular_note_count = 0;
+  instrument.granular_next_frame = 0.0;
+  instrument.granular_frozen_position = -1.0F;
+  instrument.granular_random_state = instrument.granular.seed == 0 ? 1 : instrument.granular.seed;
+  instrument.expression = 1.0F;
+  instrument.sustain = false;
+  instrument.next_age = 1;
+}
+
+bool is_native_instrument_event(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return type >= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)
+    && type <= static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff);
+#else
+  static_cast<void>(type);
+  return false;
+#endif
+}
+
+bool is_native_transport_release(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kTransportRelease);
+#else
+  static_cast<void>(type);
+  return false;
+#endif
+}
+
+bool is_native_all_sound_off(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff);
+#else
+  static_cast<void>(type);
+  return false;
+#endif
+}
+
+bool is_native_live_note_on(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn);
+#else
+  static_cast<void>(type);
+  return false;
+#endif
+}
+
+bool is_native_live_note_off(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff);
+#else
+  static_cast<void>(type);
+  return false;
+#endif
+}
+
+std::uint32_t portable_instrument_event_type(const std::uint32_t type) {
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  if (type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)) {
+    return DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON;
+  }
+  if (type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff)) {
+    return DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF;
+  }
+#endif
+  return type;
 }
 
 float next_granular_random(InstrumentNodeState &instrument) {
@@ -2576,7 +2688,8 @@ void render_granular_instrument_frame(
 bool apply_granular_instrument_event(
   InstrumentNodeState &instrument,
   const daw_audio_instrument_event &event) {
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) {
+  const std::uint32_t type = portable_instrument_event_type(event.type);
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) {
     for (uint64_t &note_id : instrument.granular_note_ids) {
       if (note_id == event.note_id) return true;
       if (note_id == 0) {
@@ -2587,7 +2700,7 @@ bool apply_granular_instrument_event(
     }
     return false;
   }
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
     for (uint64_t &note_id : instrument.granular_note_ids) {
       if (note_id == event.note_id) {
         note_id = 0;
@@ -2598,7 +2711,7 @@ bool apply_granular_instrument_event(
     }
     return true;
   }
-  return event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION;
+  return type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION;
 }
 
 bool apply_sample_instrument_event(
@@ -2606,11 +2719,12 @@ bool apply_sample_instrument_event(
   InstrumentNodeState &instrument,
   const daw_audio_instrument_state_descriptor &descriptor,
   const daw_audio_instrument_event &event) {
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+  const std::uint32_t type = portable_instrument_event_type(event.type);
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
     for (SampleVoice &voice : instrument.sample_voices) if (voice.active && voice.note_id == event.note_id) voice.released = true;
     return true;
   }
-  if (event.type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return event.type != DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER;
+  if (type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return type != DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER;
   const daw_audio_sample_zone *selected = nullptr;
   uint32_t matching_group = 0;
   for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
@@ -2704,11 +2818,12 @@ bool apply_instrument_event(
   const daw_audio_instrument_state_descriptor &descriptor,
   const daw_audio_instrument_event &event) {
   const uint32_t capacity = descriptor.voice_capacity;
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER) {
+  const std::uint32_t type = portable_instrument_event_type(event.type);
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER) {
     return instrument_declares_target(descriptor, event.note)
       && set_synth_parameter(instrument, event.note, event.value);
   }
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) {
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) {
     instrument.sustain = event.value >= 0.5F;
     if (!instrument.sustain) {
       for (InstrumentVoice &voice : instrument.voices) {
@@ -2717,11 +2832,11 @@ bool apply_instrument_event(
     }
     return true;
   }
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION) {
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION) {
     instrument.expression = event.value;
     return true;
   }
-  if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
+  if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
     for (InstrumentVoice &voice : instrument.voices) {
       if (voice.active && voice.note_id == event.note_id) {
         if (voice.references > 1) {
@@ -2736,7 +2851,7 @@ bool apply_instrument_event(
     }
     return true;
   }
-  if (event.type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return false;
+  if (type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return false;
   for (uint32_t index = 0; index < capacity; ++index) {
     InstrumentVoice &voice = instrument.voices[index];
     if (voice.active && voice.note_id == event.note_id) {
@@ -2784,7 +2899,11 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
           const daw_audio_instrument_event &event = core.active_instrument_events[event_index];
           if (event.frame_offset != frame) break;
           ++instrument_event_cursor;
-          if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+          if (is_native_transport_release(event.type)) {
+            release_instrument_state(core.instruments[node_index]);
+          } else if (is_native_all_sound_off(event.type)) {
+            clear_instrument_state(core.instruments[node_index]);
+          } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
             (void)apply_instrument_event(core.instruments[node_index], node.instrument, event);
           } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
             (void)apply_granular_instrument_event(core.instruments[node_index], event);
@@ -2863,8 +2982,8 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
       core.graph_buffers[node_index][1][frame] = std::isfinite(right) ? right : 0.0F;
     }
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (core.published_native_hooks.hook != nullptr && core.published_native_hooks.attached[node_index]) {
-      core.published_native_hooks.hook({
+    if (core.published_native_hooks.hook != nullptr && core.published_native_hooks.attachment_counts[node_index] > 0) {
+      const daw::audio_core::NativeGraphNodeRender render{
         .graph_revision = graph.revision,
         .node_id = node.id,
         .frame_count = block.frame_count,
@@ -2874,7 +2993,33 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         .transport_running = core.transport.running != 0,
         .transport_frame = core.transport.frame,
         .planes = {core.graph_buffers[node_index][0].data(), core.graph_buffers[node_index][1].data()},
-        .attachment = core.published_native_hooks.attachments[node_index],
+        .instrument_events = node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+          ? std::span<const daw_audio_instrument_event>(
+            core.native_instrument_events[node_index].data(),
+            core.instrument_event_counts[node_index])
+          : std::span<const daw_audio_instrument_event>{},
+      };
+      for (std::uint32_t chain_index = 0;
+        chain_index < core.published_native_hooks.attachment_counts[node_index];
+        ++chain_index) {
+        daw::audio_core::NativeGraphNodeRender chained = render;
+        chained.attachment = core.published_native_hooks.attachments[node_index][chain_index];
+        core.published_native_hooks.hook(chained);
+      }
+    }
+    if (core.published_native_hooks.observer != nullptr) {
+      core.published_native_hooks.observer({
+        .graph_revision = graph.revision,
+        .node_id = node.id,
+        .frame_count = block.frame_count,
+        .channel_count = node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1U : 2U,
+        .sample_rate_hz = core.config.sample_rate_hz,
+        .transport_epoch = core.transport.epoch,
+        .transport_running = core.transport.running != 0,
+        .transport_frame = core.transport.frame,
+        .planes = {core.graph_buffers[node_index][0].data(), core.graph_buffers[node_index][1].data()},
+        .instrument_events = {},
+        .attachment = core.published_native_hooks.observer_attachment,
       });
     }
 #endif
@@ -3023,47 +3168,64 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
     find_processor(core.published_graph, previous_processor, &previous_index);
     core.event_ends[previous_index] = block.event_count;
   }
-  auto proposed_instruments = core.instruments;
-  std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes> proposed_instrument_event_indices{};
-  std::array<uint16_t, kMaximumGraphNodes> proposed_instrument_event_counts{};
+  core.proposed_instruments = core.instruments;
+  auto &proposed_instruments = core.proposed_instruments;
+  for (auto &indices : core.instrument_event_indices) indices.fill(0);
+  core.instrument_event_counts.fill(0);
   uint32_t previous_instrument_offset = 0;
   uint64_t previous_instrument_sequence = 0;
   bool has_previous_instrument = false;
   for (uint32_t event_index = 0; event_index < block.instrument_event_count; ++event_index) {
     const daw_audio_instrument_event &event = block.instrument_events[event_index];
+    const bool native_event = is_native_instrument_event(event.type);
+    const std::uint32_t portable_type = portable_instrument_event_type(event.type);
     const int32_t node_index = graph_node_index(core.published_graph, event.node_id);
     if (node_index < 0 || core.published_graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT
       || event.epoch != core.transport.epoch || event.sequence == 0 || event.frame_offset >= block.frame_count
-      || event.type < DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON || event.type > DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
+      || (!native_event && (portable_type < DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON
+        || portable_type > DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER))
       || event.channel > 15 || event.note > 127 || !std::isfinite(event.value)
-      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON && (event.note_id == 0 || event.value < 0.0F || event.value > 1.0F))
-      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF && event.note_id == 0)
-      || ((event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION)
+      || ((portable_type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON || is_native_live_note_on(event.type))
+        && (event.note_id == 0 || event.value < 0.0F || event.value > 1.0F))
+      || ((portable_type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF || is_native_live_note_off(event.type))
+        && event.note_id == 0)
+      || ((portable_type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN || portable_type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION)
         && (event.value < 0.0F || event.value > 1.0F))
-      || (event.type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
+      || (portable_type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
         && !instrument_declares_target(core.published_graph.nodes[static_cast<uint32_t>(node_index)].instrument, event.note))
       || (has_previous_instrument && (event.frame_offset < previous_instrument_offset
         || event.sequence <= previous_instrument_sequence))) return false;
     const uint32_t index = static_cast<uint32_t>(node_index);
-    if (core.published_graph.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+    if (is_native_transport_release(event.type)) {
+      release_instrument_state(proposed_instruments[index]);
+    } else if (is_native_all_sound_off(event.type)) {
+      clear_instrument_state(proposed_instruments[index]);
+    } else if (core.published_graph.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
       if (!apply_instrument_event(proposed_instruments[index], core.published_graph.nodes[index].instrument, event)) return false;
     } else if (core.published_graph.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
       if (!apply_granular_instrument_event(proposed_instruments[index], event)) return false;
     } else if (!apply_sample_instrument_event(core, proposed_instruments[index], core.published_graph.nodes[index].instrument, event)) {
       return false;
     }
-    const uint16_t count = proposed_instrument_event_counts[index];
+    const uint16_t count = core.instrument_event_counts[index];
     if (count >= DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return false;
-    proposed_instrument_event_indices[index][count] = static_cast<uint16_t>(event_index);
-    proposed_instrument_event_counts[index] = static_cast<uint16_t>(count + 1);
+    core.instrument_event_indices[index][count] = static_cast<uint16_t>(event_index);
+    core.instrument_event_counts[index] = static_cast<uint16_t>(count + 1);
     previous_instrument_offset = event.frame_offset;
     previous_instrument_sequence = event.sequence;
     has_previous_instrument = true;
   }
   core.active_instrument_events = block.instrument_events;
   core.active_instrument_event_count = block.instrument_event_count;
-  core.instrument_event_indices = proposed_instrument_event_indices;
-  core.instrument_event_counts = proposed_instrument_event_counts;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  for (uint32_t node_index = 0; node_index < core.published_graph.node_count; ++node_index) {
+    const uint16_t count = core.instrument_event_counts[node_index];
+    for (uint16_t event_index = 0; event_index < count; ++event_index) {
+      core.native_instrument_events[node_index][event_index] =
+        core.active_instrument_events[core.instrument_event_indices[node_index][event_index]];
+    }
+  }
+#endif
   return true;
 }
 
@@ -3129,6 +3291,7 @@ bool wasm_parse_graph(
     || !wasm_read_u32(bytes, byte_count, &offset, &node_count) || !wasm_read_u32(bytes, byte_count, &offset, &edge_count)
     || !wasm_read_u32(bytes, byte_count, &offset, &processor_count) || !wasm_read_u32(bytes, byte_count, &offset, &reserved)
     || (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
+      && version != 4u
       && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY_2
       && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) || reserved != 0
     || revision == 0 || node_count == 0 || node_count > kMaximumGraphNodes || edge_count > kMaximumGraphEdges
@@ -3140,9 +3303,11 @@ bool wasm_parse_graph(
     uint32_t output_layout = 0;
     uint32_t input_bus = 0;
     uint32_t latency = 0;
+    uint32_t external_latency = 0;
     if (!wasm_read_u64(bytes, byte_count, &offset, &id) || !wasm_read_u32(bytes, byte_count, &offset, &kind)
       || !wasm_read_u32(bytes, byte_count, &offset, &input_layout) || !wasm_read_u32(bytes, byte_count, &offset, &output_layout)
       || !wasm_read_u32(bytes, byte_count, &offset, &input_bus) || !wasm_read_u32(bytes, byte_count, &offset, &latency)) return false;
+    if (version == 4u && !wasm_read_u32(bytes, byte_count, &offset, &external_latency)) return false;
     daw_audio_instrument_state_descriptor instrument{};
     if (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) {
       if (!wasm_read_u32(bytes, byte_count, &offset, &instrument.kind)
@@ -3159,7 +3324,7 @@ bool wasm_parse_graph(
       }
     }
     daw_audio_mixer_state mixer{};
-    if (version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION) {
+    if (version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION || version == 4u) {
       if (!wasm_read_u64(bytes, byte_count, &offset, &mixer.instance_id)
         || !wasm_read_f32(bytes, byte_count, &offset, &mixer.gain)
         || !wasm_read_f32(bytes, byte_count, &offset, &mixer.pan)
@@ -3168,7 +3333,8 @@ bool wasm_parse_graph(
     }
     (*nodes)[index] = {
       .id = id, .kind = wasm_graph_kind(kind), .input_layout = input_layout, .output_layout = output_layout,
-      .input_bus = input_bus, .latency_frames = latency, .instrument = instrument, .mixer = mixer,
+      .input_bus = input_bus, .latency_frames = latency, .external_latency_frames = external_latency,
+      .instrument = instrument, .mixer = mixer,
     };
   }
   for (uint32_t index = 0; index < edge_count; ++index) {
@@ -3617,7 +3783,8 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   const NativeGraphHookRegistration& registration
 ) noexcept {
   Core *core = to_core(core_handle);
-  if (core == nullptr || registration.graph_revision == 0 || registration.hook == nullptr
+  if (core == nullptr || registration.graph_revision == 0
+    || (registration.hook == nullptr && registration.observer == nullptr)
     || registration.bindings.size() > kMaximumGraphNodes
     || core->prepared_revision != registration.graph_revision
     || core->prepared_graph.revision != registration.graph_revision) {
@@ -3626,15 +3793,35 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   NativeGraphHooks next{};
   next.revision = registration.graph_revision;
   next.hook = registration.hook;
+  next.observer = registration.observer;
+  next.observer_attachment = registration.observer_attachment;
+  if (next.observer != nullptr && next.observer_attachment == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   for (const NativeGraphHookBinding& binding : registration.bindings) {
     const int32_t node_index = graph_node_index(core->prepared_graph, binding.node_id);
-    if (node_index < 0 || binding.attachment == nullptr || next.attached[static_cast<uint32_t>(node_index)]
+    if (node_index < 0 || binding.attachment == nullptr
+      || binding.chain_index >= DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE
+      || next.attachments[static_cast<uint32_t>(node_index)][binding.chain_index] != nullptr
       || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].output_layout != binding.output_layout
-      || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].latency_frames != binding.pdc_latency_frames) {
+      || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].external_latency_frames
+        != binding.external_latency_frames
+      || (binding.pdc_latency_frames != 0
+        && (core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].latency_frames
+          > std::numeric_limits<uint32_t>::max() - binding.external_latency_frames
+          || core->prepared_graph.nodes[static_cast<uint32_t>(node_index)].latency_frames
+            + binding.external_latency_frames != binding.pdc_latency_frames))) {
       return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
-    next.attached[static_cast<uint32_t>(node_index)] = true;
-    next.attachments[static_cast<uint32_t>(node_index)] = binding.attachment;
+    next.attachments[static_cast<uint32_t>(node_index)][binding.chain_index] = binding.attachment;
+    next.attachment_counts[static_cast<uint32_t>(node_index)] = std::max(
+      next.attachment_counts[static_cast<uint32_t>(node_index)],
+      binding.chain_index + 1);
+  }
+  for (std::uint32_t node_index = 0; node_index < core->prepared_graph.node_count; ++node_index) {
+    for (std::uint32_t chain_index = 0;
+      chain_index < next.attachment_counts[node_index];
+      ++chain_index) {
+      if (next.attachments[node_index][chain_index] == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
   }
   core->prepared_native_hooks = next;
   return DAW_AUDIO_CORE_OK;
@@ -3645,6 +3832,9 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
   daw_audio_core_handle core_handle,
   const uint8_t *graph_bytes,
   const uint32_t graph_byte_count) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  core->graph_validation_diagnostic = {};
   std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
   std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
   std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> processors{};
@@ -3662,6 +3852,12 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
     &states
   )) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   return daw_audio_core_prepare_graph(core_handle, &request);
+}
+
+extern "C" daw_audio_core_graph_validation_diagnostic daw_audio_core_get_graph_validation_diagnostic(
+  const daw_audio_core_handle core_handle) {
+  const Core *core = to_core(core_handle);
+  return core == nullptr ? daw_audio_core_graph_validation_diagnostic{} : core->graph_validation_diagnostic;
 }
 
 extern "C" daw_audio_core_result daw_audio_core_publish(
@@ -3803,7 +3999,11 @@ extern "C" daw_audio_core_result daw_audio_core_set_transport(
   if (state->epoch < core->transport.epoch) return DAW_AUDIO_CORE_STALE_REVISION;
   if (state->epoch != core->transport.epoch) {
     clear_sample_sources(*core);
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+    release_instrument_voices(*core);
+#else
     clear_instrument_voices(*core);
+#endif
     core->last_event_sequence = 0;
   }
   core->transport = *state;

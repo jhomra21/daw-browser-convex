@@ -9,6 +9,8 @@ import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import {
   createNativeAudioHostSupervisor,
   encodeNativeAudioHostControlFrame,
+  NativeAudioHostCommandError,
+  nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
   runAudioHostDiagnostic,
   type ResolvedVst3Attachment,
@@ -22,7 +24,7 @@ const u32 = (value) => {
   return bytes
 }
 const frame = (type, payload = Buffer.alloc(0)) => Buffer.concat([
-  u32(0x44415748), u32(7), u32(type), u32(payload.length), payload,
+  u32(0x44415748), u32(12), u32(type), u32(payload.length), payload,
 ])
 const string = (value) => Buffer.concat([u32(Buffer.byteLength(value)), Buffer.from(value)])
 const u64 = (value) => {
@@ -36,7 +38,7 @@ const f32 = (value) => {
   return bytes
 }
 const hello = () => frame(2, Buffer.concat([
-  u32(7), u32(0x1ff), u32(${audioCoreWasmAbiVersion}),
+  u32(12), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
   string("${portableGraphContractHash}"), string("daw-audio-host-macos/v3"), u32(0), u32(1),
 ]))
@@ -46,13 +48,33 @@ const device = () => frame(19, Buffer.concat([
 const inputDevice = () => frame(35, Buffer.concat([
   u32(1), string("coreaudio:fixture-input"), string("Fixture Input"), u32(48000), u32(2), u32(512), u32(1),
 ]))
-const ack = (type) => frame(13, Buffer.concat([u32(type), u32(1)]))
+const ack = (type, success = 1) => frame(13, Buffer.concat([u32(type), u32(success)]))
 const graphStatus = (code, requested, active, prepared, retired) => frame(40, Buffer.concat([
   u32(code), u32(requested), u32(active), u32(prepared), u32(retired), u64(4),
 ]))
 const workerNotification = () => frame(14, Buffer.concat([
   u32(1), u32(9), u64(17), u32(128), string("instance-1"),
 ]))
+const meterBatch = () => frame(44, Buffer.concat([
+  u32(9), u32(1), u64(5), u32(2),
+  u64(17), f32(0.25), f32(0.5),
+  u64(23), f32(0.75), f32(1),
+]))
+const scheduleProgress = () => frame(46, Buffer.concat([
+  u32(9), u32(1), u64(1), u64(180), u64(240), u64(7), u64(3), u64(0),
+  u32(1), u32(128), u32(64), u32(32),
+]))
+const editorInteractionNotification = () => frame(14, Buffer.concat([
+  u32(6), u32(9), u64(17), u32(0), string("instance-1"),
+]))
+const parameterEditNotification = () => {
+  const value = Buffer.alloc(8)
+  value.writeDoubleBE(0.625)
+  return frame(14, Buffer.concat([
+    u32(7), u32(9), u64(17), u32(42), value,
+    string("11111111-1111-4111-8111-111111111111"),
+  ]))
+}
 const recordingBlock = () => {
   const samples = Buffer.alloc(8)
   samples.writeFloatLE(0.25, 0)
@@ -65,6 +87,9 @@ const recordingStatus = () => frame(33, Buffer.concat([
   u32(1), u64(1), u64(120), u64(2), u64(0), u32(0), u32(63), u32(0),
   f32(0.4), f32(0.5), u32(7),
 ]))
+const editorStatus = () => frame(42, Buffer.concat([
+  u32(1), u32(1), u32(1), u32(1), u32(640), u32(480),
+]))
 const vstPlaybackFlag = (payload) => {
   let offset = 0
   for (let index = 0; index < 5; index += 1) {
@@ -73,10 +98,11 @@ const vstPlaybackFlag = (payload) => {
     offset += 4 + length
     if (offset > payload.length) return undefined
   }
-  const flagOffset = offset + 8 + 1 + 32 + 32 + 4 + 3
+  const flagOffset = offset + 4 + 8 + 1 + 32 + 32 + 4 + 3
   return flagOffset < payload.length ? payload[flagOffset] : undefined
 }
 let bytes = Buffer.alloc(0)
+let rejectedAck = false
 process.stdin.on("data", (chunk) => {
   bytes = Buffer.concat([bytes, chunk])
   while (bytes.length >= 16 && bytes.length >= 16 + bytes.readUInt32BE(12)) {
@@ -87,10 +113,16 @@ process.stdin.on("data", (chunk) => {
     if (type === 1) {
       if (process.env.MODE !== "silent") process.stdout.write(hello())
       if (process.env.MODE === "notification") process.stdout.write(workerNotification())
+      if (process.env.MODE === "meter") process.stdout.write(meterBatch())
+      if (process.env.MODE === "schedule") process.stdout.write(scheduleProgress())
+      if (process.env.MODE === "editor-interaction") process.stdout.write(editorInteractionNotification())
+      if (process.env.MODE === "parameter-edit") process.stdout.write(parameterEditNotification())
       if (process.env.MODE === "loss") setTimeout(() => process.exit(1), 10)
     } else if (type === 12) {
       process.stdout.write(frame(12, Buffer.concat([
         u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u64(0),
+        u32(0), u64(0), u64(0), u32(0), u32(0),
+        u32(0), u32(0), u32(0), u32(0), u32(0),
       ])))
     } else if (type === 36) {
       process.stdout.write(graphStatus(1, 2, 1, 2, 0))
@@ -108,10 +140,22 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(ack(type))
       process.stdout.write(recordingBlock())
       process.stdout.write(recordingStatus())
+    } else if (type === 41) {
+      if (process.env.MODE === "editor-anchor"
+        && (payload.length < 28
+          || payload.readUInt32BE(12) !== 1
+          || payload.readInt32BE(16) !== -320
+          || payload.readInt32BE(20) !== -240)) process.exit(2)
+      process.stdout.write(editorStatus())
+    } else if (type === 43) {
+      process.stdout.write(ack(type))
     } else if (type === 10 && vstPlaybackFlag(payload) !== 0) {
       process.exit(2)
     } else {
-      process.stdout.write(ack(process.env.MODE === "wrong-ack" ? 99 : type))
+      const requestType = process.env.MODE === "wrong-ack" ? 99 : type
+      const success = process.env.MODE === "rejected-ack" && !rejectedAck ? 0 : 1
+      rejectedAck = true
+      process.stdout.write(ack(requestType, success))
       if (type === 17) process.exit(0)
     }
   }
@@ -123,7 +167,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x07,
+        0x00, 0x00, 0x00, 0x0c,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -132,7 +176,7 @@ describe("native audio host protocol", () => {
 })
 
 const fixtureSupervisor = async (
-  mode?: "incompatible" | "loss" | "wrong-ack" | "notification" | "silent",
+  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor",
   onSpawn?: () => void,
 ) => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-audio-host-"))
@@ -153,6 +197,7 @@ const fixtureSupervisor = async (
 
 const vstAttachment = (instanceId: string): ResolvedVst3Attachment => ({
   graphNodeId: 17n,
+  chainIndex: 0,
   instanceId,
   classId: "0123456789abcdef0123456789abcdef",
   vendorId: "Example Vendor",
@@ -292,6 +337,84 @@ test("correlates acknowledgements to the requested native session operation", as
   }
 })
 
+test("keeps the host alive after a recoverable negative acknowledgement", async () => {
+  const fixture = await fixtureSupervisor("rejected-ack")
+  try {
+    const losses: string[] = []
+    fixture.supervisor.onLoss((error) => losses.push(error.message))
+    await fixture.supervisor.start()
+    await expect(fixture.supervisor.configure({
+      deviceId: "coreaudio:fixture",
+      sampleRateHz: 48_000,
+      maxFramesPerBlock: 512,
+      channelCount: 2,
+      revision: 1,
+    })).rejects.toBeInstanceOf(NativeAudioHostCommandError)
+    expect(fixture.supervisor.status().running).toBeTrue()
+    expect(losses).toEqual([])
+    await expect(fixture.supervisor.configure({
+      deviceId: "coreaudio:fixture",
+      sampleRateHz: 48_000,
+      maxFramesPerBlock: 512,
+      channelCount: 2,
+      revision: 1,
+    })).resolves.toBeUndefined()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("round-trips a bounded native VST editor command and signed anchor", async () => {
+  expect(nativeVstEditorOwnershipProbe("11111111-1111-4111-8111-111111111111")).toEqual({
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    command: "status",
+  })
+  const fixture = await fixtureSupervisor("editor-anchor")
+  try {
+    await fixture.supervisor.start()
+    await expect(fixture.supervisor.executeVstEditorCommand({
+      instanceId: "11111111-1111-4111-8111-111111111111",
+      command: "open",
+      width: 640,
+      height: 480,
+      anchor: { x: -320, y: -240 },
+    })).resolves.toEqual({
+      success: true,
+      owned: true,
+      supported: true,
+      open: true,
+      width: 640,
+      height: 480,
+    })
+    await expect(fixture.supervisor.executeVstEditorCommand({
+      instanceId: "11111111-1111-4111-8111-111111111111",
+      command: "focus",
+      anchor: { x: -320, y: -240 },
+    })).resolves.toEqual({
+      success: true,
+      owned: true,
+      supported: true,
+      open: true,
+      width: 640,
+      height: 480,
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("starts diagnostic workers without using the playback start request", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    await expect(fixture.supervisor.startDiagnosticAudio()).resolves.toBeUndefined()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
 test("notifies subscribers when the native host is lost", async () => {
   const fixture = await fixtureSupervisor("loss")
   try {
@@ -322,6 +445,16 @@ test("acknowledges diagnostics and tears down without reporting host loss", asyn
       installedAssets: 0,
       callbacks: 0,
       rejectedBlocks: 0,
+      lastRejectedReason: 0,
+      lastRejectedCallback: 0n,
+      lastRejectedRenderEpoch: 0n,
+      lastRejectedTransportEpoch: 0,
+      lastRejectedCoreResult: 0,
+      lastRejectedFrameCount: 0,
+      lastRejectedChannelCount: 0,
+      lastRejectedProcessorEventCount: 0,
+      lastRejectedInstrumentEventCount: 0,
+      lastRejectedGraphRevision: 0,
     })
     await fixture.supervisor.teardown()
     expect(fixture.supervisor.status().running).toBeFalse()
@@ -357,6 +490,89 @@ test("decodes revision statuses and event-driven worker notification identity", 
     await expect(fixture.supervisor.retireGraphRevision(1)).resolves.toMatchObject({
       status: "retired",
       retiredRevision: 0,
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("decodes bounded native meter batches", async () => {
+  const fixture = await fixtureSupervisor("meter")
+  try {
+    const batch = new Promise((resolve) => fixture.supervisor.onMeterBatch(resolve))
+    await fixture.supervisor.start()
+    await expect(batch).resolves.toEqual({
+      graphRevision: 9,
+      transportEpoch: 1,
+      sequence: 5n,
+      entries: [
+        { nodeId: 17n, leftRms: 0.25, rightRms: 0.5 },
+        { nodeId: 23n, leftRms: 0.75, rightRms: 1 },
+      ],
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("decodes schedule progress notifications", async () => {
+  const fixture = await fixtureSupervisor("schedule")
+  try {
+    const progress = new Promise((resolve) => fixture.supervisor.onScheduleProgress(resolve))
+    await fixture.supervisor.start()
+    await expect(progress).resolves.toEqual({
+      revision: 9,
+      epoch: 1,
+      progressSequence: 1n,
+      renderedThroughFrame: 180n,
+      acceptedThroughFrame: 240n,
+      lastAcceptedWindowId: 7n,
+      appliedTransportTransitionId: 3n,
+      appliedUrgentSequence: 0n,
+      running: true,
+      scheduleComplete: false,
+      instrumentCredits: 128,
+      sourceCredits: 64,
+      automationCredits: 32,
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("decodes editor interaction notifications without treating them as faults", async () => {
+  const fixture = await fixtureSupervisor("editor-interaction")
+  try {
+    const notification = new Promise((resolve) => fixture.supervisor.onWorkerNotification(resolve))
+    await fixture.supervisor.start()
+    await expect(notification).resolves.toEqual({
+      kind: "editor-interaction",
+      graphRevision: 9,
+      graphNodeId: 17n,
+      instanceId: "instance-1",
+      value: 0,
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("decodes bounded native VST parameter edit notifications", async () => {
+  const fixture = await fixtureSupervisor("parameter-edit")
+  try {
+    const notification = new Promise((resolve) => fixture.supervisor.onWorkerNotification(resolve))
+    await fixture.supervisor.start()
+    await expect(notification).resolves.toEqual({
+      kind: "parameter-edit",
+      graphRevision: 9,
+      graphNodeId: 17n,
+      instanceId: "11111111-1111-4111-8111-111111111111",
+      parameterId: 42,
+      normalizedValue: 0.625,
     })
   } finally {
     await fixture.supervisor.teardown()
@@ -495,9 +711,10 @@ test("resolves the host default recording input and sends bounded recording cont
 test("keeps deterministic host lifecycle attachments control-only", async () => {
   const fixture = await fixtureSupervisor()
   try {
-    await fixture.supervisor.beginTransaction()
+    const transactionToken = await fixture.supervisor.beginTransaction()
     const attachment: ResolvedVst3Attachment & { playbackEnabled: true } = {
       graphNodeId: 17n,
+      chainIndex: 0,
       instanceId: "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1",
       classId: "0123456789abcdef0123456789abcdef",
       vendorId: "Example Vendor",
@@ -520,8 +737,12 @@ test("keeps deterministic host lifecycle attachments control-only", async () => 
         maximumEventsPerBlock: 128,
       },
     }
-    await fixture.supervisor.attachVst(attachment)
-    await fixture.supervisor.commitTransaction()
+    await expect(fixture.supervisor.startAudio()).rejects.toThrow("transaction")
+    await expect(fixture.supervisor.attachVst(attachment, "wrong-token")).rejects.toThrow("transaction")
+    await fixture.supervisor.attachVst(attachment, transactionToken)
+    await fixture.supervisor.commitTransaction(transactionToken)
+    await expect(fixture.supervisor.commitTransaction(transactionToken)).rejects.toThrow("transaction")
+    await expect(fixture.supervisor.attachVst(attachment, transactionToken)).rejects.toThrow("transaction")
     await expect(fixture.supervisor.attachVst({
       ...attachment,
       instanceId: "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1",
@@ -530,10 +751,11 @@ test("keeps deterministic host lifecycle attachments control-only", async () => 
         maximumEventsPerBlock: maxVst3WorkerEventsPerBlock + 1,
       },
     })).rejects.toThrow("native VST attachment is invalid")
-    await fixture.supervisor.beginTransaction()
-    await fixture.supervisor.rollbackTransaction()
+    const rollbackToken = await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.rollbackTransaction(rollbackToken)
     await expect(fixture.supervisor.attachVst({
       graphNodeId: 17n,
+      chainIndex: 0,
       instanceId: "",
       classId: "class",
       vendorId: "vendor",

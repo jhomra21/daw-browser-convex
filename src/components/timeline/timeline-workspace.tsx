@@ -184,6 +184,7 @@ type Props = {
     currentUserId: string;
     master: MasterSidebarModel;
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
+    subscribeMasterLevels: AudioEngine["subscribeMasterStereoLevels"];
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;
     onTrackSendsChange: (trackId: Track["id"], sends: TrackSend[]) => void;
@@ -633,6 +634,7 @@ export default function TimelineWorkspace(props: Props) {
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,
                 subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
+                subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
                 onTrackClick: props.sidebar.onTrackClick,
                 canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
                 onTrackSendsChange: props.sidebar.onTrackSendsChange,

@@ -1,7 +1,7 @@
 import { DELAY_MAX_DELAY_TIME_SEC, evaluateSaturatorCurvePoint, normalizeReverbParams, normalizeSaturatorParams, normalizeDelayParams, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX, REVERB_DIFFUSION_LOW_CUT_HZ_MIN, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type ReverbParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 import { formatReverbImpulseSignature, getReverbImpulseSignatureParts, type ReverbImpulseSignatureParts } from './reverb-signature'
 
-type MidiNote = { beat: number; length: number; pitch: number; velocity?: number }
+type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
 
 type ReverbImpulseInfo = ReverbImpulseSignatureParts & {
   length: number
@@ -301,12 +301,13 @@ export function applyArpeggiatorToNotes(
   const stepBeats = rateMap[params.rate] ?? 0.25
   const chordThreshold = 0.02
   const sorted = notes.slice().sort((left, right) => left.beat - right.beat)
-  const chords: Array<{ beat: number; endBeat: number; pitches: number[]; velocity: number }> = []
+  const chords: Array<{ beat: number; endBeat: number; pitches: number[]; ids: string[]; velocity: number }> = []
 
   for (const note of sorted) {
     const lastChord = chords[chords.length - 1]
     if (lastChord && Math.abs(note.beat - lastChord.beat) < chordThreshold) {
       lastChord.pitches.push(note.pitch)
+      if (note.id !== undefined) lastChord.ids.push(note.id)
       lastChord.endBeat = Math.max(lastChord.endBeat, note.beat + note.length)
       continue
     }
@@ -314,6 +315,7 @@ export function applyArpeggiatorToNotes(
       beat: note.beat,
       endBeat: note.beat + note.length,
       pitches: [note.pitch],
+      ids: note.id === undefined ? [] : [note.id],
       velocity: note.velocity ?? 0.9,
     })
   }
@@ -368,6 +370,7 @@ export function applyArpeggiatorToNotes(
     let sequenceIndex = 0
     while (currentBeat < endBeat && currentBeat < clipDurationBeats) {
       arpeggiated.push({
+        id: `${chord.ids.join(',')}:${currentBeat}:${sequenceIndex}`,
         beat: currentBeat,
         length: noteLength,
         pitch: sequence[sequenceIndex % sequence.length],

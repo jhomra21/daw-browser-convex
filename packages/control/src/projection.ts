@@ -77,6 +77,22 @@ export type ControlProjectSnapshotInput = {
     instanceId?: string;
     params: unknown;
   }>;
+  externalProcessors?: Array<{
+    instanceId: string;
+    targetId: string;
+    chainIndex: number;
+    manifest: {
+      identity: {
+        name: string;
+        vendor: string;
+        classId: string;
+      };
+      role: "effect" | "instrument";
+      parameters: Array<{ id: number; readOnly: boolean }>;
+    };
+    bypassed: boolean;
+    parameterOverrides: Record<string, number>;
+  }>;
   automationEnvelopes: Array<{
     _id: unknown;
     targetKind: "track" | "master";
@@ -230,6 +246,49 @@ const projectControlSnapshotCore = <Snapshot>(
     || compareControlSnapshotText(left.instanceId ?? "", right.instanceId ?? "")
     || compareControlSnapshotText(String(left.id), String(right.id))
   ));
+  const externalProcessors = (input.externalProcessors ?? []).map((external) => {
+    const parameterIds = new Map(external.manifest.parameters.map((parameter) => [parameter.id, String(parameter.id)]));
+    const parameterOverrides = new Map<string, number>();
+    for (const [key, value] of Object.entries(external.parameterOverrides)) {
+      const parameterId = Number(key);
+      const canonicalKey = parameterIds.get(parameterId);
+      if (canonicalKey === undefined || !Number.isFinite(value)) continue;
+      parameterOverrides.set(canonicalKey, Math.min(1, Math.max(0, value)));
+    }
+    return {
+      id: `external-plugin:${external.instanceId}`,
+      target: external.targetId === "master"
+        ? { master: true }
+        : { trackId: external.targetId },
+      instanceId: external.instanceId,
+      index: external.chainIndex,
+      processor: {
+        kind: "external-vst3",
+        params: {
+          identity: {
+            name: external.manifest.identity.name,
+            vendor: external.manifest.identity.vendor,
+            classId: external.manifest.identity.classId,
+            role: external.manifest.role,
+          },
+          bypassed: external.bypassed,
+          parameterOverrides: Object.fromEntries(parameterOverrides),
+          parameters: external.manifest.parameters.map((parameter) => ({
+            id: parameter.id,
+            readOnly: parameter.readOnly,
+          })),
+        },
+      },
+    };
+  }).sort((left, right) => (
+    compareControlSnapshotText(
+      "master" in left.target ? "master" : `track:${left.target.trackId}`,
+      "master" in right.target ? "master" : `track:${right.target.trackId}`,
+    )
+    || left.index - right.index
+    || compareControlSnapshotText(left.instanceId, right.instanceId)
+    || compareControlSnapshotText(left.id, right.id)
+  ));
   const automation = input.automationEnvelopes.flatMap((envelope) => {
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId);
     const target = envelope.targetKind === "master"
@@ -288,7 +347,16 @@ const projectControlSnapshotCore = <Snapshot>(
     },
     tracks,
     clips,
-    processors,
+    processors: [...processors, ...externalProcessors].sort((left, right) => (
+      compareControlSnapshotText(
+        "master" in left.target ? "master" : `track:${left.target.trackId}`,
+        "master" in right.target ? "master" : `track:${right.target.trackId}`,
+      )
+      || left.index - right.index
+      || compareControlSnapshotText(left.processor.kind, right.processor.kind)
+      || compareControlSnapshotText(left.instanceId ?? "", right.instanceId ?? "")
+      || compareControlSnapshotText(String(left.id), String(right.id))
+    )),
     automation,
     sidechains,
     assets,

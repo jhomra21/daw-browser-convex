@@ -11,11 +11,11 @@ export const maxVst3WorkerChannels = 64
 export const maxVst3WorkerFrames = 8_192
 export const maxVst3WorkerEventsPerBlock = 2_048
 export const nativeVst3WorkerArtifactId = 'daw-vst3-worker'
-export const nativeVst3WorkerArtifactVersion = '1'
+export const nativeVst3WorkerArtifactVersion = '2'
 export const nativeVst3WorkerManifestVersion = 1
 export const nativeVst3WorkerStartupProtocolVersion = 1
 export const nativeVst3WorkerControlProtocolVersion = vst3WorkerProtocolVersion
-export const nativeVst3WorkerTransportAbiVersion = 1
+export const nativeVst3WorkerTransportAbiVersion = 2
 
 const requestIdSchema = z.string().min(1).max(96).regex(/^[A-Za-z0-9._-]+$/)
 const uuidSchema = z.string().uuid()
@@ -51,7 +51,7 @@ const busSchema = z.object({
 }).strict()
 
 export const pluginParameterDescriptorSchema = z.object({
-  id: z.number().int().nonnegative().max(0x7fffffff),
+  id: z.number().int().nonnegative().max(0xffff_ffff),
   title: z.string().min(1).max(256),
   unit: z.string().max(64),
   minimum: finiteNumber,
@@ -173,7 +173,7 @@ export const pluginHostRequestSchema = z.discriminatedUnion('type', [
   controlEnvelopeSchema.extend({ type: z.literal('scan'), paths: z.array(z.string().min(1).max(4096)).max(16) }).strict(),
   controlEnvelopeSchema.extend({ type: z.literal('instantiate'), instance: instanceReferenceSchema }).strict(),
   controlEnvelopeSchema.extend({ type: z.literal('dispose'), instanceId: uuidSchema }).strict(),
-  controlEnvelopeSchema.extend({ type: z.literal('set-parameters'), instanceId: uuidSchema, values: z.array(z.object({ id: z.number().int().nonnegative().max(0x7fffffff), value: finiteNumber }).strict()).min(1).max(512) }).strict(),
+  controlEnvelopeSchema.extend({ type: z.literal('set-parameters'), instanceId: uuidSchema, values: z.array(z.object({ id: z.number().int().nonnegative().max(0xffff_ffff), value: finiteNumber }).strict()).min(1).max(512) }).strict(),
   controlEnvelopeSchema.extend({ type: z.literal('editor'), instanceId: uuidSchema, action: z.enum(['open', 'close', 'focus']) }).strict(),
   controlEnvelopeSchema.extend({ type: z.literal('state'), instanceId: uuidSchema, action: z.enum(['save', 'load']), metadata: opaquePluginStateMetadataSchema.optional() }).strict().superRefine((value, context) => {
     if (value.action === 'load' && !value.metadata) context.addIssue({ code: 'custom', message: 'Loading state requires metadata, not state bytes.' })
@@ -251,7 +251,7 @@ export type Vst3WorkerTransportDescriptor = z.infer<typeof vst3WorkerTransportDe
 const nativeExternalWorkerTransportDimensionsSchema = z.object({
   slotCount: z.number().int().min(2).max(maxVst3WorkerTransportSlots),
   maximumFrames: z.number().int().positive().max(maxVst3WorkerFrames),
-  inputChannels: z.number().int().positive().max(maxVst3WorkerChannels),
+  inputChannels: z.number().int().min(0).max(maxVst3WorkerChannels),
   outputChannels: z.number().int().positive().max(maxVst3WorkerChannels),
   maximumEventsPerBlock: z.number().int().nonnegative().max(maxVst3WorkerEventsPerBlock),
 }).strict()
@@ -280,6 +280,10 @@ export const nativeVst3WorkerManifestSchema = z.object({
   latencyFrames: z.number().int().nonnegative().max(10_000_000),
   tailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
   stateRevision: z.number().int().nonnegative().max(0x7fffffff),
+  parameters: z.array(pluginParameterDescriptorSchema).max(16_384).optional(),
+  supportsBypass: z.boolean().optional(),
+  supportsEditor: z.boolean().optional(),
+  supportsState: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
   const inputChannels = value.inputBuses
     .filter((bus) => bus.enabled)
@@ -292,6 +296,12 @@ export const nativeVst3WorkerManifestSchema = z.object({
   }
   if (outputChannels !== value.transport.outputChannels) {
     context.addIssue({ code: 'custom', path: ['transport', 'outputChannels'], message: 'Worker transport output channels do not match enabled output buses.' })
+  }
+  if (value.role === 'instrument' && inputChannels !== 0) {
+    context.addIssue({ code: 'custom', path: ['inputBuses'], message: 'Instrument workers must not expose enabled audio input buses.' })
+  }
+  if (value.role === 'effect' && inputChannels === 0) {
+    context.addIssue({ code: 'custom', path: ['inputBuses'], message: 'Effect workers must expose an enabled audio input bus.' })
   }
 })
 export type NativeVst3WorkerManifest = z.infer<typeof nativeVst3WorkerManifestSchema>
@@ -408,11 +418,15 @@ export const nativeVst3InsertionFailureCodeSchema = z.enum([
 export type NativeVst3InsertionFailureCode = z.infer<typeof nativeVst3InsertionFailureCodeSchema>
 
 const nativeVst3InsertionManifestSchema = z.object({
-  role: z.literal('effect'),
+  role: z.enum(['effect', 'instrument']),
   inputBuses: z.array(busSchema).max(32),
   outputBuses: z.array(busSchema).min(1).max(32),
   latencyFrames: z.number().int().nonnegative().max(10_000_000),
   tailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
+  parameters: z.array(pluginParameterDescriptorSchema).max(16_384),
+  supportsBypass: z.boolean(),
+  supportsEditor: z.boolean(),
+  supportsState: z.boolean(),
 }).strict()
 
 export const nativeVst3InsertionPreflightResultSchema = z.discriminatedUnion('ok', [
@@ -460,6 +474,11 @@ const nativeExternalAttachmentSchema = z.object({
   declaredTailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
   bypassed: z.boolean(),
   stateRevision: z.number().int().nonnegative().max(0x7fffffff),
+  parameters: z.array(pluginParameterDescriptorSchema).max(16_384).optional(),
+  parameterOverrides: z.record(
+    z.string().regex(/^\d+$/),
+    finiteNumber.refine((value) => value >= 0 && value <= 1),
+  ).optional(),
 }).strict()
 
 export const nativeExternalAttachmentPlanSchema = z.object({
@@ -467,9 +486,43 @@ export const nativeExternalAttachmentPlanSchema = z.object({
   attachments: z.array(nativeExternalAttachmentSchema).max(maxNativeExternalAttachments),
 }).strict().superRefine((value, context) => {
   const instanceIds = new Set<string>()
-  const projectNodeIds = new Set<string>()
-  const nativeNodeIds = new Set<string>()
+  const chains = new Map<string, Array<{ index: number; nativeGraphNodeId: string }>>()
+  const graphNodeByNativeId = new Map<string, string>()
   for (const [index, attachment] of value.attachments.entries()) {
+    const inputChannels = attachment.inputBuses
+      .filter((bus) => bus.enabled)
+      .reduce((channels, bus) => channels + bus.channels, 0)
+    const outputChannels = attachment.outputBuses
+      .filter((bus) => bus.enabled)
+      .reduce((channels, bus) => channels + bus.channels, 0)
+    if (inputChannels !== attachment.workerTransport.inputChannels) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'workerTransport', 'inputChannels'],
+        message: 'External attachment transport input channels do not match enabled input buses.',
+      })
+    }
+    if (outputChannels !== attachment.workerTransport.outputChannels) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'workerTransport', 'outputChannels'],
+        message: 'External attachment transport output channels do not match enabled output buses.',
+      })
+    }
+    if (attachment.role === 'instrument' && inputChannels !== 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'inputBuses'],
+        message: 'Instrument attachments must not expose enabled audio input buses.',
+      })
+    }
+    if (attachment.role === 'effect' && inputChannels === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'inputBuses'],
+        message: 'Effect attachments must expose an enabled audio input bus.',
+      })
+    }
     if (instanceIds.has(attachment.instanceId)) {
       context.addIssue({
         code: 'custom',
@@ -478,22 +531,49 @@ export const nativeExternalAttachmentPlanSchema = z.object({
       })
     }
     instanceIds.add(attachment.instanceId)
-    if (projectNodeIds.has(attachment.graphNodeId)) {
+    const chain = chains.get(attachment.graphNodeId) ?? []
+    if (chain.some((candidate) => candidate.index === attachment.chainIndex)) {
       context.addIssue({
         code: 'custom',
-        path: ['attachments', index, 'graphNodeId'],
-        message: 'The native graph protocol supports one external attachment per graph node.',
+        path: ['attachments', index, 'chainIndex'],
+        message: 'External attachment chain indexes must be unique per graph node.',
       })
     }
-    projectNodeIds.add(attachment.graphNodeId)
-    if (nativeNodeIds.has(attachment.nativeGraphNodeId)) {
+    if (chain.some((candidate) => candidate.nativeGraphNodeId !== attachment.nativeGraphNodeId)) {
       context.addIssue({
         code: 'custom',
         path: ['attachments', index, 'nativeGraphNodeId'],
-        message: 'Native graph node IDs must be unique.',
+        message: 'External attachments on one graph node must share its native graph node ID.',
       })
     }
-    nativeNodeIds.add(attachment.nativeGraphNodeId)
+    const existingGraphNode = graphNodeByNativeId.get(attachment.nativeGraphNodeId)
+    if (existingGraphNode !== undefined && existingGraphNode !== attachment.graphNodeId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'nativeGraphNodeId'],
+        message: 'Native graph node IDs must identify only one graph node.',
+      })
+    }
+    graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
+    chain.push({ index: attachment.chainIndex, nativeGraphNodeId: attachment.nativeGraphNodeId })
+    chains.set(attachment.graphNodeId, chain)
+  }
+  for (const [graphNodeId, chain] of chains) {
+    const indexes = chain.map((candidate) => candidate.index).sort((left, right) => left - right)
+    indexes.forEach((chainIndex, index) => {
+      if (chainIndex !== index) {
+        const attachmentIndex = value.attachments.findIndex((attachment) => (
+          attachment.graphNodeId === graphNodeId && attachment.chainIndex === chainIndex
+        ))
+        if (attachmentIndex >= 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['attachments', attachmentIndex, 'chainIndex'],
+            message: 'External attachment chain indexes must be contiguous from zero.',
+          })
+        }
+      }
+    })
   }
 })
 export type NativeExternalAttachmentPlan = z.infer<typeof nativeExternalAttachmentPlanSchema>
@@ -521,7 +601,7 @@ const workerStateTransferSchema = z.object({
 })
 
 const workerEventSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('parameter'), id: z.number().int().nonnegative().max(0x7fffffff), value: finiteNumber, sampleOffset: z.number().int().nonnegative().max(maxVst3WorkerFrames - 1) }).strict(),
+  z.object({ kind: z.literal('parameter'), id: z.number().int().nonnegative().max(0xffff_ffff), value: finiteNumber, sampleOffset: z.number().int().nonnegative().max(maxVst3WorkerFrames - 1) }).strict(),
   z.object({ kind: z.literal('midi'), data: z.tuple([z.number().int().min(0).max(255), z.number().int().min(0).max(255), z.number().int().min(0).max(255)]), sampleOffset: z.number().int().nonnegative().max(maxVst3WorkerFrames - 1) }).strict(),
 ])
 

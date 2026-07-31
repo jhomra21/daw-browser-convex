@@ -32,7 +32,6 @@ const blackKeySemitones: Record<string, number> = {
 
 type UseMidiKeyboardInputOptions = {
   projectId: () => string | undefined
-  targetId: () => string | null | undefined
   enabled: () => boolean
   canPlay: () => boolean
   onStartLiveNote?: (pitch: number, velocity?: number) => void
@@ -155,12 +154,6 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     { defer: true },
   ))
 
-  createEffect(on(
-    () => options.targetId(),
-    () => stopPressedNotes(),
-    { defer: true },
-  ))
-
   createEffect(() => {
     if (!canUseLocalStorage()) return
     try {
@@ -176,7 +169,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   })
 
   createEffect(() => {
-    if (!options.enabled() || !options.canPlay()) {
+    if (!options.enabled()) {
       stopPressedNotes()
     }
   })
@@ -184,13 +177,17 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   createEffect(() => {
     if (!options.enabled()) return
     const listenerOptions: AddEventListenerOptions = { capture: true }
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopPressedNotes()
+    }
+    // Window blur also fires when focus moves to the native editor window.
     window.addEventListener('keydown', handleKeyDown, listenerOptions)
     window.addEventListener('keyup', handleKeyUp, listenerOptions)
-    window.addEventListener('blur', stopPressedNotes)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     onCleanup(() => {
       window.removeEventListener('keydown', handleKeyDown, listenerOptions)
       window.removeEventListener('keyup', handleKeyUp, listenerOptions)
-      window.removeEventListener('blur', stopPressedNotes)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       stopPressedNotes()
     })
   })

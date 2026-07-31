@@ -13,6 +13,7 @@ import type {
   ExternalSidechainRoute,
   Track,
 } from "@daw-browser/timeline-core/types";
+import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { clipFadesEqual, type ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
@@ -80,7 +81,8 @@ import {
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
-import { listLocalExternalProcessors } from "~/lib/external-plugins";
+import { listLocalExternalProcessors, setLocalExternalProcessor } from "~/lib/external-plugins";
+import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -102,7 +104,10 @@ import {
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
+import { applyCreatedTrackInsertion } from "~/lib/timeline-track-creation-rollback";
 import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
+import { createNativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
+import { createVstParameterFeedbackController } from "~/lib/desktop/vst-parameter-feedback-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
@@ -118,6 +123,14 @@ type TimelineProps = {
 const Timeline: Component<TimelineProps> = (props) => {
   const exportQueue = createExportQueue();
   onCleanup(exportQueue.dispose);
+  const nativeVstParameterQueue = window.dawDesktop
+    ? createNativeVstParameterQueue(async (bytes) => {
+        const queue = window.dawDesktop?.audioHost?.session.queueVstParameterEvents;
+        if (!queue) return { ok: false, error: "Native VST parameter delivery is unavailable." };
+        return queue(bytes);
+      })
+    : undefined;
+  onCleanup(() => nativeVstParameterQueue?.dispose());
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [appMessage, setAppMessage] =
     createSignal<AppMessageDialogState | null>(null);
@@ -136,6 +149,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
+  const [pendingExternalProcessorEditorId, setPendingExternalProcessorEditorId] = createSignal<string>();
   // Audio engine
   const audioEngine = getAudioEngine();
   const appPreferences = useAppPreferences();
@@ -296,10 +310,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
   let nativePlaybackRevision = 0;
+  const markLiveExternalProcessorsDegraded = async (message: string) => {
+    const currentProjectId = projectId();
+    if (!isLocalId("project", currentProjectId)) return;
+    const updatedAt = Date.now();
+    const reason = `Native VST3 playback failed; the plug-in was bypassed to prevent browser processing. ${message}`.slice(0, 512);
+    const processors = await listLocalExternalProcessors(currentProjectId);
+    await Promise.all(processors
+      .filter((processor) => !processor.bypassed)
+      .map((processor) => setLocalExternalProcessor(currentProjectId, {
+        ...processor,
+        health: { state: "degraded", reason, updatedAt },
+        updatedAt,
+      })));
+  };
   const compilePlaybackSnapshot = async (transport: LivePlaybackTransport) => {
     const effects = effectsExportSnapshot();
     await effects?.flushPending();
-    return compileLivePlaybackSnapshot({
+    const result = compileLivePlaybackSnapshot({
       revision: ++nativePlaybackRevision,
       bpm: bpm(),
       transport,
@@ -308,6 +336,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         projectId: projectId(),
         userId: userId(),
         masterVolume: masterVolume.volume(),
+        externalPluginPolicy: "native-playback",
         cloudRows: fullView.data
           ? {
               effects: fullView.data.effects,
@@ -319,6 +348,36 @@ const Timeline: Component<TimelineProps> = (props) => {
       }),
       sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     });
+    if (!result.supported || !isLocalId("project", projectId())) return result;
+    const processors = (await listLocalExternalProcessors(projectId())).filter((processor) => !processor.bypassed);
+    if (processors.length === 0) return result;
+    const attachmentPlan = compileNativeExternalAttachmentPlan({
+      target: "native",
+      graph: result.snapshot.mixer.graph,
+      processors,
+      workerTransport: {
+        slotCount: 2,
+        maximumFrames: 8_192,
+        maximumEventsPerBlock: 128,
+      },
+    });
+    if (!attachmentPlan.supported) {
+      return {
+        supported: true as const,
+        snapshot: {
+          ...result.snapshot,
+          requiresNativePlayback: true,
+        },
+      };
+    }
+    return {
+      supported: true as const,
+      snapshot: {
+        ...result.snapshot,
+        nativeExternalAttachmentPlan: attachmentPlan.plan,
+        requiresNativePlayback: true,
+      },
+    };
   };
   const exportService = createTimelineExportService({
     queue: exportQueue,
@@ -382,6 +441,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     restartTimelineSchedule,
     portableRecording,
     nativeRecording,
+    nativeLiveMidi,
+    subscribeTrackLevels,
+    subscribeMasterLevels,
   } = usePlayheadControls({
     audioEngine,
     tracks: renderTracks,
@@ -396,17 +458,22 @@ const Timeline: Component<TimelineProps> = (props) => {
       const liveProcessor = (await listLocalExternalProcessors(currentProjectId))
         .find((processor) => !processor.bypassed);
       if (!liveProcessor) return true;
+      if (appPreferences.audio.preferences().nativePlaybackEnabled) return true;
       notify(
-        "External plug-in playback is gated",
-        liveProcessor.health.reason ?? "Freeze or bypass the external plug-in before playback.",
+        "Native plug-in playback is disabled",
+        liveProcessor.health.reason ?? "Enable native playback to use the external plug-in.",
       );
       return false;
     },
     nativePlayback: {
       enabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+      projectId,
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
-      reportFault: (message) => notify("Native playback stopped", message),
+      reportFault: (message) => {
+        notify("Native playback stopped", message);
+        void markLiveExternalProcessorsDegraded(message).catch(() => undefined);
+      },
     },
     portableBrowserPlayback: {
       enabled: () => appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
@@ -467,6 +534,16 @@ const Timeline: Component<TimelineProps> = (props) => {
     selectedTrackId: selection.selectedTrackId,
     pushHistory,
   });
+  const vstParameterFeedback = createVstParameterFeedbackController({
+    projectId,
+    mountedProjectGeneration,
+    overrideTarget: automation.overrideTarget,
+    nativeVstParameterQueue: nativeVstParameterQueue
+      ? { enqueue: nativeVstParameterQueue.enqueue }
+      : undefined,
+    reportFault: (message) => notify("Native VST feedback failed", message),
+  });
+  onCleanup(() => vstParameterFeedback?.dispose());
   getAutomationPatches = () => automation.snapshotExportPatches();
   const {
     pendingSharedTrackVolumes,
@@ -678,6 +755,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     playheadSec,
     selection,
     activeRecordingTargetId: activeMidiRecordingTargetId,
+    nativeLiveMidi,
     canOpenMidiEditorFor: (clipId) => clipId !== provisionalMidiClipId(),
   });
   const removeCreatedCloudTrack = (track: Track | undefined) =>
@@ -1341,6 +1419,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   ) => {
     const actions = deviceInsertActions();
     if (!actions) return;
+    const insertionProjectId = projectId();
     if (payload.kind === "audio-effect" && target.kind === "effect-chain") {
       if (
         !(await actions.addAudioEffectToTarget(
@@ -1364,8 +1443,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (payload.kind === "audio-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
-      if (!(await actions.addAudioEffectToTarget(track.id, payload.effect)))
-        return;
+      const applied = await applyCreatedTrackInsertion({
+        projectId: insertionProjectId,
+        track,
+        apply: () => actions.addAudioEffectToTarget(track.id, payload.effect),
+        removeLocalTrack: projection.removeLocalTrack,
+        removeCloudTrack: removeCreatedCloudTrack,
+      });
+      if (!applied) return;
       openEffectsForTarget(track.id);
       return;
     }
@@ -1398,8 +1483,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (payload.kind === "audio-effect-chain" && target.kind === "new-track") {
       const track = await createTimelineTrack();
       if (!track) return;
-      if (!(await actions.addAudioEffectChainToTarget(track.id, payload.chain)))
-        return;
+      const applied = await applyCreatedTrackInsertion({
+        projectId: insertionProjectId,
+        track,
+        apply: () => actions.addAudioEffectChainToTarget(track.id, payload.chain),
+        removeLocalTrack: projection.removeLocalTrack,
+        removeCloudTrack: removeCreatedCloudTrack,
+      });
+      if (!applied) return;
       openEffectsForTarget(track.id);
       return;
     }
@@ -1411,7 +1502,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (payload.kind === "midi-effect" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!(await actions.addArpeggiatorToTarget(track.id))) return;
+      const applied = await applyCreatedTrackInsertion({
+        projectId: insertionProjectId,
+        track,
+        apply: () => actions.addArpeggiatorToTarget(track.id),
+        removeLocalTrack: projection.removeLocalTrack,
+        removeCloudTrack: removeCreatedCloudTrack,
+      });
+      if (!applied) return;
       openEffectsForTarget(track.id);
       return;
     }
@@ -1427,9 +1525,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (payload.kind === "midi-instrument" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (!actions.switchInstrumentForTarget(track.id, payload.instrument))
-        return;
-      if (!(await actions.addMidiClipToTarget(track.id))) return;
+      const applied = await applyCreatedTrackInsertion({
+        projectId: insertionProjectId,
+        track,
+        apply: async () => {
+          if (!actions.switchInstrumentForTarget(track.id, payload.instrument))
+            return false;
+          return actions.addMidiClipToTarget(track.id);
+        },
+        removeLocalTrack: projection.removeLocalTrack,
+        removeCloudTrack: removeCreatedCloudTrack,
+      });
+      if (!applied) return;
       openEffectsForTarget(track.id, { preserveClipSelection: true });
     }
     if (payload.kind === "instrument-preset" && target.kind === "track") {
@@ -1447,14 +1554,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (payload.kind === "instrument-preset" && target.kind === "new-track") {
       const track = await createTimelineTrack({ kind: "instrument" });
       if (!track) return;
-      if (
-        !(await applyInstrumentPresetToTarget(
-          actions,
-          track.id,
-          payload.preset,
-        ))
-      )
-        return;
+      const applied = await applyCreatedTrackInsertion({
+        projectId: insertionProjectId,
+        track,
+        apply: () => applyInstrumentPresetToTarget(actions, track.id, payload.preset),
+        removeLocalTrack: projection.removeLocalTrack,
+        removeCloudTrack: removeCreatedCloudTrack,
+      });
+      if (!applied) return;
       openEffectsForTarget(track.id);
     }
   };
@@ -1474,9 +1581,49 @@ const Timeline: Component<TimelineProps> = (props) => {
     scrollElement: () => scrollRef,
     effectsChainElement: () => effectsChainElement,
     currentEffectsTargetId: () => selection.selectedFXTarget(),
+    enableNativePlayback: () => appPreferences.audio.setNativePlaybackEnabled(true),
     handleInsertSample,
     onDeviceDrop: handleBrowserDeviceDrop,
     onExternalPluginInsertionResult: (title, message) => notify(title, message),
+    onExternalPluginInserted: async (processor) => {
+      openEffectsForTarget(processor.targetId);
+      const playing = isPlaying();
+      const nativePlaybackEnabled =
+        appPreferences.audio.preferences().nativePlaybackEnabled;
+      console.info("[native-vst3] external plugin inserted", {
+        instanceId: processor.instanceId,
+        targetId: processor.targetId,
+        isPlaying: playing,
+        nativePlaybackEnabled,
+      });
+      if (!playing) {
+        await restartTimelineSchedule(renderTracks(), { rebuildBackend: true });
+        setPendingExternalProcessorEditorId(processor.instanceId);
+        return;
+      }
+      try {
+        await restartTimelineSchedule(renderTracks(), { rebuildBackend: true });
+        console.info("[native-vst3] active rebuild succeeded", {
+          instanceId: processor.instanceId,
+          targetId: processor.targetId,
+          isPlaying: playing,
+          nativePlaybackEnabled,
+        });
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : "The active native playback graph could not be rebuilt.";
+        console.error("[native-vst3] active rebuild failed", { error: message });
+        notify(
+          "Native playback rebuild failed",
+          message,
+        );
+        return;
+      }
+      // When playback is active, wait until the new graph owns this attachment
+      // before routing the editor command to the active host.
+      setPendingExternalProcessorEditorId(processor.instanceId);
+    },
   });
   const browserDropTargetLane = createMemo(() => {
     const target = timelineBrowser().devices.dragSession()?.target;
@@ -1517,6 +1664,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       exportQueue,
       exportService,
       importFiles,
+      enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
     onCleanup(unregisterHostController);
@@ -1677,12 +1825,28 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: pushEffectParamsHistory,
+      enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       onEffectInstanceParamsReplayChange: (
         replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,
       ) => setReplayEffectInstanceParams(() => replay),
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       onExportSnapshotChange: setEffectsExportSnapshot,
+      autoOpenExternalProcessorId: pendingExternalProcessorEditorId(),
+      onExternalProcessorAutoOpenHandled: (instanceId: string) => {
+        if (pendingExternalProcessorEditorId() === instanceId) {
+          setPendingExternalProcessorEditorId();
+        }
+      },
+      onExternalProcessorUpdated: (processor: ExternalProcessor, previous: ExternalProcessor) => {
+        if (processor.bypassed === previous.bypassed || !isPlaying()) return;
+        void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+          notify(
+            "Native playback rebuild failed",
+            error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",
+          );
+        });
+      },
       automationEnvelopes: automation.envelopes(),
       onSelectAutomationParameter: (
         targetKey: Track["id"] | "master",
@@ -1943,7 +2107,9 @@ const Timeline: Component<TimelineProps> = (props) => {
             },
           },
           subscribeTrackLevels: (listener) =>
-            audioEngine.subscribeTrackStereoLevels(listener),
+            subscribeTrackLevels(listener),
+          subscribeMasterLevels: (listener) =>
+            subscribeMasterLevels(listener),
           onTrackClick: (id) => {
             bottomPanel.setMode("effects");
             bottomPanel.setOpen(true);

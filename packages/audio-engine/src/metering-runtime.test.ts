@@ -138,6 +138,55 @@ describe('meter worklet lifecycle', () => {
     expect(nodes).toHaveLength(2)
   })
 
+  test('publishes master levels and resets them when the runtime closes', async () => {
+    let flush = () => {}
+    const nodes: FakeAudioWorkletNode[] = []
+    class FakeAudioWorkletNode {
+      port = {
+        onmessage: null as ((event: { data: unknown }) => void) | null,
+        postMessage: () => {},
+        close: () => {},
+      }
+      onprocessorerror: (() => void) | null = null
+      disconnect = () => {}
+
+      constructor() {
+        nodes.push(this)
+      }
+    }
+    Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: () => void) => {
+        flush = callback
+        return 1
+      },
+    })
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value: () => {} })
+    const context = Object.assign(Object.create(null), {
+      audioWorklet: { addModule: () => Promise.resolve() },
+    })
+    const input = Object.assign(Object.create(null), { connect: () => {} })
+    const levels: Array<{ left: number; right: number }> = []
+    const runtime = createMeteringRuntime()
+    runtime.subscribeMasterStereoLevels((next) => levels.push(next))
+    runtime.reconnectMasterMeter(context, input, () => true)
+    await Bun.sleep(0)
+    nodes[0]?.port.onmessage?.({ data: {
+      type: 'meter-frame',
+      frameCount: 2048,
+      channels: [
+        { samplePeak: 0.8, rms: 0.64, clipping: false, dcMean: 0, truePeak: null },
+        { samplePeak: 0.6, rms: 0.36, clipping: false, dcMean: 0, truePeak: null },
+      ],
+      correlation: 0,
+    } })
+    flush()
+    expect(levels.at(-1)).toEqual({ left: 0.64, right: 0.36 })
+    runtime.close()
+    expect(levels.at(-1)).toEqual({ left: 0, right: 0 })
+  })
+
   test('invalidates a fault retry when the connected output is no longer current', async () => {
     const nodes: Array<{ onprocessorerror: (() => void) | null }> = []
     let current = true

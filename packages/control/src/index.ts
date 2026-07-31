@@ -467,6 +467,20 @@ const effectRemoveActionSchema = z.object({
   effectKind: audioEffectKindSchema,
   effect: z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
 }).strict()
+const externalPluginParametersSetActionSchema = z.object({
+  kind: z.literal('external-plugin.parameters.set'),
+  target: processorTargetSchemaV1,
+  processor: z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
+  changes: z.array(z.object({
+    parameterId: z.number().int().min(0).max(0xffff_ffff),
+    normalizedValue: finiteNumberSchema.min(0).max(1),
+  }).strict()).min(1).max(256),
+}).strict().superRefine((action, context) => {
+  const parameterIds = action.changes.map((change) => change.parameterId)
+  if (new Set(parameterIds).size !== parameterIds.length) {
+    context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unique.', path: ['changes'] })
+  }
+})
 const effectReorderActionSchema = z.object({
   kind: z.literal('effect.reorder'),
   target: processorTargetSchemaV1,
@@ -547,6 +561,7 @@ export const controlActionSchemaV1 = z.union([
   clipFadesSetActionSchema, clipAudioWarpSetActionSchema, clipColorSetActionSchema, clipMoveActionSchema, clipTimingActionSchema,
   clipNameActionSchema, clipDeleteActionSchema, timelineRangeDeleteActionSchema, masterVolumeActionSchema,
   effectUpsertActionSchema, effectRemoveActionSchema, effectReorderActionSchema,
+  externalPluginParametersSetActionSchema,
   instrumentSetActionSchema, instrumentRemoveActionSchema, arpeggiatorSetActionSchema, arpeggiatorRemoveActionSchema,
   automationSetActionSchema, automationDeleteActionSchema, sidechainSetActionSchema, sidechainRemoveActionSchema,
   assetDeleteActionSchema, recoveryRestoreActionSchema,
@@ -828,6 +843,45 @@ const persistedProcessorTargetSchema = z.union([
   z.object({ trackId: stableIdSchema }).strict(),
   z.object({ master: z.literal(true) }).strict(),
 ])
+const externalProcessorSnapshotSchema = z.object({
+  kind: z.literal('external-vst3'),
+  params: z.object({
+    identity: z.object({
+      name: z.string().min(1).max(256),
+      vendor: z.string().min(1).max(256),
+      classId: z.string().min(1).max(256),
+      role: z.enum(['effect', 'instrument']),
+    }).strict(),
+    bypassed: z.boolean(),
+    parameterOverrides: z.record(
+      z.string().regex(/^(0|[1-9]\d*)$/),
+      finiteNumberSchema.min(0).max(1),
+    ).superRefine((overrides, context) => {
+      if (Object.keys(overrides).length > 16_384) {
+        context.addIssue({ code: 'custom', message: 'External plugin parameter override limit exceeded.' })
+      }
+      for (const key of Object.keys(overrides)) {
+        const id = Number(key)
+        if (!Number.isSafeInteger(id) || id > 0xffff_ffff) {
+          context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unsigned 32-bit integers.' })
+        }
+      }
+    }),
+    parameters: z.array(z.object({
+      id: z.number().int().min(0).max(0xffff_ffff),
+      readOnly: z.boolean(),
+    }).strict()).max(16_384).superRefine((parameters, context) => {
+      const ids = parameters.map((parameter) => parameter.id)
+      if (new Set(ids).size !== ids.length) {
+        context.addIssue({ code: 'custom', message: 'External plugin parameter IDs must be unique.' })
+      }
+    }),
+  }).strict(),
+}).strict()
+const controlProcessorSnapshotSchema = z.union([
+  persistedProcessorSnapshotSchema,
+  externalProcessorSnapshotSchema,
+])
 const snapshotTrackSchema = z.object({
   id: stableIdSchema,
   name: nameSchema,
@@ -929,7 +983,7 @@ export const projectSnapshotSchemaV1 = z.object({
     target: persistedProcessorTargetSchema,
     instanceId: stableIdSchema.optional(),
     index: z.number().int().nonnegative(),
-    processor: persistedProcessorSnapshotSchema,
+    processor: controlProcessorSnapshotSchema,
   }).strict()),
   automation: z.array(z.object({
     target: persistedProcessorTargetSchema,
@@ -991,6 +1045,8 @@ export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>
 export type AssetFolderV1 = z.infer<typeof assetFolderSchemaV1>
 export type AssetUploadResultV1 = z.infer<typeof assetUploadResultSchemaV1>
 
+const localOnlyControlActionKindsV1 = ['external-plugin.parameters.set']
+
 export const controlCapabilitiesV1 = {
   version: CONTROL_API_VERSION_V1,
   executionTarget: 'cloud-project',
@@ -1027,6 +1083,7 @@ export const controlCapabilitiesV1 = {
 export const localControlCapabilitiesV1 = {
   ...controlCapabilitiesV1,
   executionTarget: 'local-project',
+  actionKinds: [...controlCapabilitiesV1.actionKinds, ...localOnlyControlActionKindsV1],
 } satisfies z.input<typeof controlCapabilitiesSchemaV1>
 export const controlCapabilitiesV2 = {
   ...controlCapabilitiesV1,
@@ -1034,7 +1091,9 @@ export const controlCapabilitiesV2 = {
   limits: controlLimitsV2,
 } satisfies z.input<typeof controlCapabilitiesSchemaV2>
 export const localControlCapabilitiesV2 = {
-  ...controlCapabilitiesV2,
+  ...localControlCapabilitiesV1,
+  version: CONTROL_API_VERSION_V2,
+  limits: controlLimitsV2,
   executionTarget: 'local-project',
 } satisfies z.input<typeof controlCapabilitiesSchemaV2>
 

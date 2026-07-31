@@ -5,6 +5,7 @@ endif()
 add_library(daw-audio-host-macos-runtime STATIC
   src/audio-host.cpp
   src/coreaudio-hal.mm
+  src/native-schedule-state.cpp
 )
 target_compile_features(daw-audio-host-macos-runtime PUBLIC cxx_std_20)
 target_include_directories(daw-audio-host-macos-runtime PUBLIC include)
@@ -29,6 +30,10 @@ if(BUILD_TESTING)
   target_link_libraries(daw-audio-host-macos-test PRIVATE daw-audio-host-macos-runtime)
   target_compile_options(daw-audio-host-macos-test PRIVATE -Wall -Wextra -Werror)
   add_test(NAME daw-audio-host-macos-test COMMAND daw-audio-host-macos-test)
+  add_executable(daw-audio-host-macos-graph-integration-test tests/native_graph_integration_test.cpp)
+  target_link_libraries(daw-audio-host-macos-graph-integration-test PRIVATE daw-audio-host-macos-runtime)
+  target_compile_options(daw-audio-host-macos-graph-integration-test PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME daw-audio-host-macos-graph-integration-test COMMAND daw-audio-host-macos-graph-integration-test)
   add_executable(daw-audio-host-macos-transaction-test tests/audio_host_transaction_test.cpp)
   target_link_libraries(daw-audio-host-macos-transaction-test PRIVATE daw-audio-host-macos-runtime)
   target_compile_options(daw-audio-host-macos-transaction-test PRIVATE -Wall -Wextra -Werror)

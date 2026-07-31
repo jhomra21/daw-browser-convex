@@ -128,7 +128,8 @@ export const nativeVst3RevisionHost = (
 
 export const nativeVst3WorkerRevisionNotification = (
   notification: NativeWorkerNotification,
-): NativeVst3WorkerRevisionNotification => {
+): NativeVst3WorkerRevisionNotification | undefined => {
+  if (notification.kind === "editor-interaction" || notification.kind === "parameter-edit") return undefined
   const identity = {
     instanceId: notification.instanceId,
     revision: notification.graphRevision,
@@ -137,14 +138,18 @@ export const nativeVst3WorkerRevisionNotification = (
   if (notification.kind === "buses") return { kind: "buses", ...identity }
   if (notification.kind === "restart") return { kind: "restart", ...identity }
   if (notification.kind === "miss") return { kind: "miss", ...identity }
-  return { kind: "fault", ...identity }
+  if (notification.kind === "fault") return { kind: "fault", ...identity }
+  return undefined
 }
 
 export const connectNativeVst3RevisionCoordinator = (
   supervisor: Pick<NativeAudioHostSupervisor, "onWorkerNotification">,
   coordinator: NativeVst3RevisionCoordinator,
 ) => supervisor.onWorkerNotification((notification) => {
-  void coordinator.handleNotification(nativeVst3WorkerRevisionNotification(notification))
+  if (notification.kind === "editor-interaction") return
+  const revisionNotification = nativeVst3WorkerRevisionNotification(notification)
+  if (!revisionNotification) return
+  void coordinator.handleNotification(revisionNotification)
 })
 
 const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachments].sort((left, right) => (
@@ -165,7 +170,27 @@ const sameBuses = (left: Attachment["inputBuses"], right: Attachment["inputBuses
   })
 )
 
-const layoutFor = (buses: Attachment["inputBuses"]): "mono" | "stereo" | undefined => {
+const sameParameters = (
+  left: NonNullable<Attachment["parameters"]>,
+  right: NonNullable<Extract<NativeVst3PreflightResult, { status: "available" }>["hello"]["manifest"]["parameters"]>,
+) => (
+  left.length === right.length
+  && left.every((parameter, index) => {
+    const candidate = right[index]
+    return candidate !== undefined
+      && parameter.id === candidate.id
+      && parameter.title === candidate.title
+      && parameter.unit === candidate.unit
+      && parameter.minimum === candidate.minimum
+      && parameter.maximum === candidate.maximum
+      && parameter.defaultValue === candidate.defaultValue
+      && parameter.stepCount === candidate.stepCount
+      && parameter.readOnly === candidate.readOnly
+      && parameter.hidden === candidate.hidden
+  })
+)
+
+const layoutFor = (buses: readonly { enabled: boolean; channels: number }[]): "mono" | "stereo" | undefined => {
   const enabled = buses.filter((bus) => bus.enabled)
   if (enabled.length !== 1) return undefined
   return enabled[0].channels === 1 ? "mono" : enabled[0].channels === 2 ? "stereo" : undefined
@@ -185,6 +210,7 @@ const matchesManifest = (attachment: Attachment, result: Extract<NativeVst3Prefl
     && manifest.latencyFrames === attachment.declaredLatencyFrames
     && manifest.tailFrames === attachment.declaredTailFrames
     && manifest.stateRevision === attachment.stateRevision
+    && sameParameters(attachment.parameters ?? [], manifest.parameters ?? [])
 }
 
 const resolveAttachment = (
@@ -200,11 +226,21 @@ const resolveAttachment = (
     binaryFingerprint: attachment.binaryFingerprint,
     scannerCatalogVersion: attachment.catalogIdentity.scannerCatalogVersion,
   })
-  const inputLayout = layoutFor(attachment.inputBuses)
+  const inputLayout = attachment.role === "instrument"
+    ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
+    : layoutFor(attachment.inputBuses)
   const outputLayout = layoutFor(attachment.outputBuses)
-  if (!eligibility || eligibility.role !== attachment.role || !inputLayout || !outputLayout) return undefined
+  const expectedInputChannels = inputLayout === "none"
+    ? 0
+    : inputLayout === "mono" ? 1 : inputLayout === "stereo" ? 2 : undefined
+  const expectedOutputChannels = outputLayout === "mono" ? 1 : outputLayout === "stereo" ? 2 : undefined
+  if (!eligibility || eligibility.role !== attachment.role
+    || !inputLayout || !outputLayout
+    || expectedInputChannels !== attachment.workerTransport.inputChannels
+    || expectedOutputChannels !== attachment.workerTransport.outputChannels) return undefined
   return {
     graphNodeId: BigInt(attachment.nativeGraphNodeId),
+    chainIndex: attachment.chainIndex,
     instanceId: attachment.instanceId,
     classId: eligibility.classId,
     vendorId: eligibility.vendorId,
@@ -220,6 +256,7 @@ const resolveAttachment = (
     transportLatencyFrames: attachment.workerTransport.maximumFrames,
     workerTransport: attachment.workerTransport,
     stateRevision: attachment.stateRevision,
+    renderEnabled: true,
   }
 }
 
@@ -235,30 +272,77 @@ const attachmentSubsetIsProven = (
 ) => {
   if (attachments.length === 0) return false
   const instanceIds = new Set(attachments.map((attachment) => attachment.instanceId))
-  const graphNodeIds = new Set(attachments.map((attachment) => attachment.graphNodeId))
-  const nativeGraphNodeIds = new Set(attachments.map((attachment) => attachment.nativeGraphNodeId))
-  if (
-    instanceIds.size !== attachments.length
-    || graphNodeIds.size !== attachments.length
-    || nativeGraphNodeIds.size !== attachments.length
-  ) return false
+  if (instanceIds.size !== attachments.length) return false
   const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]))
-  return attachments.every((attachment) => {
+  const chains = new Map<string, Attachment[]>()
+  const graphNodeByNativeId = new Map<string, string>()
+  for (const attachment of attachments) {
+    const existingGraphNode = graphNodeByNativeId.get(attachment.nativeGraphNodeId)
+    if (existingGraphNode !== undefined && existingGraphNode !== attachment.graphNodeId) return false
+    graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
+    const chain = chains.get(attachment.graphNodeId) ?? []
+    if (chain.some((candidate) => candidate.chainIndex === attachment.chainIndex)) return false
+    chain.push(attachment)
+    chains.set(attachment.graphNodeId, chain)
+  }
+  for (const [graphNodeId, chain] of chains) {
+    const node = nodes.get(graphNodeId)
+    if (!node) return false
+    const ordered = [...chain].sort((left, right) => left.chainIndex - right.chainIndex)
+    if (!ordered.every((attachment, index) => attachment.chainIndex === index)) return false
+    let totalLatency = 0
+    for (const [index, attachment] of ordered.entries()) {
+      if (attachment.bypassed || attachment.nativeGraphNodeId !== ordered[0]?.nativeGraphNodeId) return false
+      const previous = ordered[index - 1]
+      const expectedInput = index === 0
+        ? node.inputLayout
+        : previous?.outputBuses
+          ? layoutFor(previous.outputBuses)
+          : undefined
+      const inputLayout = attachment.role === "instrument"
+        ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
+        : layoutFor(attachment.inputBuses)
+      const outputLayout = layoutFor(attachment.outputBuses)
+      if (outputLayout !== node.outputLayout
+        || (index === 0 && attachment.role === "instrument"
+          ? inputLayout !== "none" || node.kind !== "instrument"
+          : inputLayout !== expectedInput)
+        || (index > 0 && attachment.role !== "effect")
+        || attachment.workerTransport.inputChannels !== (inputLayout === "mono" ? 1 : inputLayout === "stereo" ? 2 : 0)
+        || attachment.workerTransport.outputChannels !== (outputLayout === "mono" ? 1 : 2)) return false
+      totalLatency += attachmentLatency(attachment)
+      if (!Number.isSafeInteger(totalLatency)) return false
+    }
+    if ((node.externalLatencyFrames ?? 0) !== totalLatency) return false
+  }
+  return [...chains.values()].every((chain) => chain.every((attachment) => {
     const node = nodes.get(attachment.graphNodeId)
-    const inputLayout = layoutFor(attachment.inputBuses)
+    const inputLayout = attachment.role === "instrument"
+      ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
+      : layoutFor(attachment.inputBuses)
     const outputLayout = layoutFor(attachment.outputBuses)
-    return attachment.role === "effect"
-      && !attachment.bypassed
+    const inputChannels = attachment.workerTransport.inputChannels
+    const outputChannels = attachment.workerTransport.outputChannels
+    return !attachment.bypassed
       && node !== undefined
-      && inputLayout !== undefined
       && outputLayout !== undefined
-      && node.inputLayout === inputLayout
+      && outputChannels === (outputLayout === "mono" ? 1 : 2)
+      && (attachment.role === "instrument"
+        ? inputLayout === "none" && inputChannels === 0 && node.kind === "instrument"
+        : inputLayout !== undefined
+          && inputChannels === (inputLayout === "mono" ? 1 : 2)
+          && node.inputLayout === inputLayout)
       && node.outputLayout === outputLayout
-      && node.latencyFrames === attachmentLatency(attachment)
-  })
+  }))
 }
 
-const reviseGraphLatency = (
+const chainLatency = (attachments: readonly Attachment[], graphNodeId: string) => (
+  attachments
+    .filter((attachment) => !attachment.bypassed && attachment.graphNodeId === graphNodeId)
+    .reduce((total, attachment) => total + attachmentLatency(attachment), 0)
+)
+
+const reviseGraphExternalLatency = (
   snapshot: AudioCoreGraphSnapshot,
   graphNodeId: string,
   latencyFrames: number,
@@ -272,7 +356,7 @@ const reviseGraphLatency = (
   const nodes = snapshot.nodes.map((node) => {
     if (node.id !== graphNodeId) return node
     targetFound = true
-    return { ...node, latencyFrames }
+    return { ...node, externalLatencyFrames: latencyFrames }
   })
   if (!targetFound) return undefined
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
@@ -304,6 +388,9 @@ const reviseGraphLatency = (
   if (processOrder.length !== nodes.length) return undefined
   const pathLatency = new Map<string, number>()
   const pdcDelay = new Map<string, number>()
+  const effectiveLatency = (node: AudioCoreGraphSnapshot["nodes"][number]) => (
+    node.latencyFrames + (node.externalLatencyFrames ?? 0)
+  )
   for (const nodeId of processOrder) {
     const node = nodeById.get(nodeId)
     if (!node) return undefined
@@ -315,14 +402,15 @@ const reviseGraphLatency = (
       const sourcePathLatency = pathLatency.get(edge.fromNodeId)
       if (!source || sourcePathLatency === undefined) return undefined
       const arrival = edge.tap === "pre-fx"
-        ? sourcePathLatency - source.latencyFrames
+        ? sourcePathLatency - effectiveLatency(source)
         : sourcePathLatency
       if (arrival < 0) return undefined
       arrivals.set(edge.id, arrival)
       upstreamLatency = Math.max(upstreamLatency, arrival)
     }
-    if (upstreamLatency > maximumRevision - node.latencyFrames) return undefined
-    pathLatency.set(nodeId, upstreamLatency + node.latencyFrames)
+    const nodeLatency = effectiveLatency(node)
+    if (upstreamLatency > maximumRevision - nodeLatency) return undefined
+    pathLatency.set(nodeId, upstreamLatency + nodeLatency)
     for (const edge of incomingEdges) {
       const arrival = arrivals.get(edge.id)
       if (arrival === undefined) return undefined
@@ -347,7 +435,7 @@ export const nativeVst3PlaybackDefaultStatus = (
   reason: "deterministic-vst3-fixture-unavailable",
 })
 
-export const createNativeVst3RevisionCoordinatorLifecycleTestDouble = (
+const createNativeVst3RevisionCoordinatorImplementation = (
   input: NativeVst3RevisionCoordinatorInput,
 ): NativeVst3RevisionCoordinatorCreation => {
   const rejected = (reason: NativeVst3PlaybackGateReason): NativeVst3RevisionCoordinatorCreation => ({
@@ -421,10 +509,10 @@ export const createNativeVst3RevisionCoordinatorLifecycleTestDouble = (
     if (nextRevision > maximumRevision) return stopSafely("revision-prepare-failed", notification.instanceId)
     const nextAttachment = { ...attachment, declaredLatencyFrames: notification.frames }
     const nextAttachments = attachments.map((candidate, index) => index === attachmentIndex ? nextAttachment : candidate)
-    const nextSnapshot = reviseGraphLatency(
+    const nextSnapshot = reviseGraphExternalLatency(
       snapshot,
       attachment.graphNodeId,
-      attachmentLatency(nextAttachment),
+      chainLatency(nextAttachments, attachment.graphNodeId),
       nextRevision,
     )
     if (!nextSnapshot || !attachmentSubsetIsProven(nextSnapshot, nextAttachments)) {
@@ -482,25 +570,17 @@ export const createNativeVst3RevisionCoordinatorLifecycleTestDouble = (
   return { ok: true, coordinator }
 }
 
-/**
- * Production native VST3 playback remains disabled until a deterministic
- * in-repo VST3 fixture proves real worker PCM processing through the host
- * graph. Host lifecycle doubles may exercise revision coordination, but they
- * cannot opt production attachments into playback.
- */
 export const createNativeVst3RevisionCoordinator = (
   input: NativeVst3RevisionCoordinatorInput,
-): NativeVst3RevisionCoordinatorCreation => ({
-  ok: false,
-  status: nativeVst3PlaybackDefaultStatus(input.snapshot.revision),
-})
+): NativeVst3RevisionCoordinatorCreation => createNativeVst3RevisionCoordinatorImplementation(input)
 
 export const coordinateNativeVst3Attachments = async (input: {
   serializedPlan: string
   sampleRateHz: number
   workerPath: string
   catalogStore: { reload(): Promise<PluginCatalogData> }
-  audioHost: Pick<NativeAudioHostSupervisor, "runTransaction">
+  audioHost: Pick<NativeAudioHostSupervisor, "attachVst">
+  transactionToken?: string
   preflight?: typeof preflightNativeVst3Worker
 }): Promise<NativeVst3CoordinatorResult> => {
   let plan: NativeExternalAttachmentPlan
@@ -553,12 +633,13 @@ export const coordinateNativeVst3Attachments = async (input: {
     }
   }
   try {
-    await input.audioHost.runTransaction(async (transaction) => {
-      for (const candidate of resolved) {
-        const { stateRevision: _stateRevision, ...attachment } = candidate.native
-        await transaction.attachVst(attachment)
-      }
-    })
+    // The playback controller owns the encompassing graph transaction. Attach
+    // only after preflight so graph publication and VST attachment commit
+    // atomically as one native session.
+    for (const candidate of resolved) {
+      const { stateRevision: _stateRevision, ...attachment } = candidate.native
+      await input.audioHost.attachVst(attachment, input.transactionToken)
+    }
     return { ok: true, attached: resolved.length }
   } catch {
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }

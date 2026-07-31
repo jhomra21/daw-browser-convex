@@ -17,7 +17,6 @@ import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3RevisionCoordinator,
-  createNativeVst3RevisionCoordinatorLifecycleTestDouble,
   nativeVst3PlaybackDefaultStatus,
   type NativeVst3RevisionHost,
   type NativeVst3WorkerRevisionNotification,
@@ -166,26 +165,12 @@ const plan = (attachments: NativeExternalAttachmentPlan["attachments"]): string 
 })
 
 const host = (calls: string[]) => ({
-  runTransaction: async <T>(operation: (transaction: {
-    attachVst(input: { instanceId: string }): Promise<void>
-  }) => Promise<T>) => {
-    calls.push("begin")
-    try {
-      const result = await operation({
-        attachVst: async (input) => {
-          calls.push(`attach:${input.instanceId}`)
-        },
-      })
-      calls.push("commit")
-      return result
-    } catch (error) {
-      calls.push("rollback")
-      throw error
-    }
+  attachVst: async (input: { instanceId: string }) => {
+    calls.push(`attach:${input.instanceId}`)
   },
 })
 
-test("preflights every attachment before a deterministic native transaction", async () => {
+test("preflights every attachment before attaching to the active native transaction", async () => {
   const calls: string[] = []
   const attachments = new Map([[first.instanceId, first], [second.instanceId, second]])
   const result = await coordinateNativeVst3Attachments({
@@ -205,10 +190,8 @@ test("preflights every attachment before a deterministic native transaction", as
   expect(calls).toEqual([
     `preflight:${first.instanceId}`,
     `preflight:${second.instanceId}`,
-    "begin",
     `attach:${first.instanceId}`,
     `attach:${second.instanceId}`,
-    "commit",
   ])
 })
 
@@ -236,7 +219,7 @@ test("fails before native transaction for stale, unsigned, and quarantined catal
   }
 })
 
-test("rolls back a partially applied native attachment transaction", async () => {
+test("reports a failure when an active native transaction rejects an attachment", async () => {
   const calls: string[] = []
   const result = await coordinateNativeVst3Attachments({
     serializedPlan: plan([first]),
@@ -244,21 +227,9 @@ test("rolls back a partially applied native attachment transaction", async () =>
     workerPath: "/Resources/daw-vst3-worker",
     catalogStore: { reload: async () => catalog() },
     audioHost: {
-      runTransaction: async (operation) => {
-        calls.push("begin")
-        try {
-          const result = await operation({
-            attachVst: async () => {
-              calls.push("attach")
-              throw new Error("fixture attach failure")
-            },
-          })
-          calls.push("commit")
-          return result
-        } catch (error) {
-          calls.push("rollback")
-          throw error
-        }
+      attachVst: async () => {
+        calls.push("attach")
+        throw new Error("fixture attach failure")
       },
     },
     preflight: async () => available(first),
@@ -268,7 +239,7 @@ test("rolls back a partially applied native attachment transaction", async () =>
     code: "native-transaction-failed",
     message: "The native VST3 attachment transaction failed.",
   })
-  expect(calls).toEqual(["begin", "attach", "rollback"])
+  expect(calls).toEqual(["attach"])
 })
 
 test("rejects worker role and bus manifest drift before attachment", async () => {
@@ -334,7 +305,8 @@ const nativeGraph = (): AudioCoreGraphSnapshot => ({
       inputLayout: "stereo",
       outputLayout: "stereo",
       processorOrder: [],
-      latencyFrames: 544,
+      externalLatencyFrames: 544,
+      latencyFrames: 0,
     },
     {
       id: second.graphNodeId,
@@ -342,7 +314,8 @@ const nativeGraph = (): AudioCoreGraphSnapshot => ({
       inputLayout: "stereo",
       outputLayout: "stereo",
       processorOrder: [],
-      latencyFrames: 544,
+      externalLatencyFrames: 544,
+      latencyFrames: 0,
     },
     {
       id: "master",
@@ -412,7 +385,7 @@ const revisionCoordinator = (input: {
   calls: string[]
   prepared: Array<Parameters<NativeVst3RevisionHost["prepareRevision"]>[0]>
   fail?: "prepare" | "publish" | "retire" | "stop"
-}) => createNativeVst3RevisionCoordinatorLifecycleTestDouble({
+}) => createNativeVst3RevisionCoordinator({
   snapshot: nativeGraph(),
   attachments: [first, second],
   attachmentHandshakeAcknowledged: true,
@@ -421,7 +394,7 @@ const revisionCoordinator = (input: {
   host: revisionHost(input),
 })
 
-test("keeps production native VST playback gated without a deterministic VST3 fixture", () => {
+test("activates production native VST playback after graph and attachment acknowledgement", () => {
   expect(nativeVst3PlaybackDefaultStatus(10)).toEqual({
     active: false,
     revision: 10,
@@ -434,18 +407,40 @@ test("keeps production native VST playback gated without a deterministic VST3 fi
     graphRevisionAcknowledged: true,
     browserPlaybackActive: false,
     host: revisionHost({ calls: [], prepared: [] }),
-  })).toEqual({
-    ok: false,
-    status: {
-      active: false,
-      revision: 10,
-      reason: "deterministic-vst3-fixture-unavailable",
-    },
-  })
+  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
 })
 
-test("host lifecycle double validates exact subset and acknowledgement gates", () => {
-  const browserActive = createNativeVst3RevisionCoordinatorLifecycleTestDouble({
+test("accepts serial attachments that share one native graph node", () => {
+  const chained = {
+    ...second,
+    instanceId: "33333333-3333-4333-8333-333333333333",
+    graphNodeId: first.graphNodeId,
+    nativeGraphNodeId: first.nativeGraphNodeId,
+    chainIndex: 1,
+  }
+  const snapshot = nativeGraph()
+  const chainedSnapshot = {
+    ...snapshot,
+    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
+      ? {
+        ...node,
+        externalLatencyFrames: first.declaredLatencyFrames + first.workerTransport.maximumFrames
+          + chained.declaredLatencyFrames + chained.workerTransport.maximumFrames,
+      }
+      : node),
+  }
+  expect(createNativeVst3RevisionCoordinator({
+    snapshot: chainedSnapshot,
+    attachments: [first, chained, second],
+    attachmentHandshakeAcknowledged: true,
+    graphRevisionAcknowledged: true,
+    browserPlaybackActive: false,
+    host: revisionHost({ calls: [], prepared: [] }),
+  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
+})
+
+test("production coordinator validates exact subset and acknowledgement gates", () => {
+  const browserActive = createNativeVst3RevisionCoordinator({
     snapshot: nativeGraph(),
     attachments: [first, second],
     attachmentHandshakeAcknowledged: true,
@@ -457,7 +452,7 @@ test("host lifecycle double validates exact subset and acknowledgement gates", (
     ok: false,
     status: { active: false, revision: 10, reason: "browser-playback-active" },
   })
-  const unacknowledged = createNativeVst3RevisionCoordinatorLifecycleTestDouble({
+  const unacknowledged = createNativeVst3RevisionCoordinator({
     snapshot: nativeGraph(),
     attachments: [first, second],
     attachmentHandshakeAcknowledged: true,
@@ -469,7 +464,7 @@ test("host lifecycle double validates exact subset and acknowledgement gates", (
     ok: false,
     status: { active: false, revision: 10, reason: "graph-revision-unacknowledged" },
   })
-  const invalidRevision = createNativeVst3RevisionCoordinatorLifecycleTestDouble({
+  const invalidRevision = createNativeVst3RevisionCoordinator({
     snapshot: { ...nativeGraph(), revision: 0 },
     attachments: [first, second],
     attachmentHandshakeAcknowledged: true,
@@ -481,7 +476,7 @@ test("host lifecycle double validates exact subset and acknowledgement gates", (
     ok: false,
     status: { active: false, revision: 0, reason: "graph-revision-invalid" },
   })
-  const duplicateSubset = createNativeVst3RevisionCoordinatorLifecycleTestDouble({
+  const duplicateSubset = createNativeVst3RevisionCoordinator({
     snapshot: nativeGraph(),
     attachments: [first, { ...second, graphNodeId: first.graphNodeId }],
     attachmentHandshakeAcknowledged: true,
@@ -508,7 +503,8 @@ test("publishes latency changes as revision plus one with recomputed PDC metadat
   })).resolves.toEqual({ ok: true, status: "published", revision: 11 })
   expect(calls).toEqual(["prepare:11", "publish:11", "retire:10"])
   expect(prepared).toHaveLength(1)
-  expect(prepared[0]?.snapshot.nodes.find((node) => node.id === first.graphNodeId)?.latencyFrames).toBe(576)
+  expect(prepared[0]?.snapshot.nodes.find((node) => node.id === first.graphNodeId)?.externalLatencyFrames).toBe(576)
+  expect(prepared[0]?.snapshot.nodes.find((node) => node.id === first.graphNodeId)?.latencyFrames).toBe(0)
   expect(prepared[0]?.snapshot.edges).toEqual([
     expect.objectContaining({ id: "track-a:master", pdcDelayFrames: 0 }),
     expect.objectContaining({ id: "track-b:master", pdcDelayFrames: 32 }),

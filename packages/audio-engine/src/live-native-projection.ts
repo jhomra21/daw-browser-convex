@@ -1,7 +1,11 @@
-import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
+import { normalizeDelayParams, normalizeReverbParams, normalizeTrackInstrumentParams } from '@daw-browser/shared'
 import { compilePortableExportSnapshot } from './portable-export-snapshot'
-import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
+import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
+import type { ExportFx } from './export-types'
+import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
 
 export type LiveNativePcmAsset = {
   asset: { assetId: string; frameCount: number; sampleRateHz: number; channelCount: number }
@@ -24,14 +28,16 @@ export type LiveNativeProjectionInput = {
   revision: number
   epoch: number
   firstSequence: number
+  fx?: ExportFx
+  externalLatencyFrames?: ExternalNodeLatencyFrames
 }
 
 export type LiveNativeCapabilityMatrix = {
   version: 1
   decodedRawSources: true
-  routing: false
-  midi: false
-  instruments: false
+  routing: true
+  midi: true
+  instruments: true
   effects: false
   automation: false
   externalPlugins: false
@@ -40,36 +46,82 @@ export type LiveNativeCapabilityMatrix = {
 export const liveNativeCapabilityMatrix = {
   version: 1,
   decodedRawSources: true,
-  routing: false,
-  midi: false,
-  instruments: false,
+  routing: true,
+  midi: true,
+  instruments: true,
   effects: false,
   automation: false,
   externalPlugins: false,
 } satisfies LiveNativeCapabilityMatrix
 
+const nativeProcessorIsEnabled = (instance: AudioEffectRuntimeInstance) => {
+  if (instance.kind === 'delay') return normalizeDelayParams(instance.params).enabled
+  if (instance.kind === 'reverb') return normalizeReverbParams(instance.params).enabled
+  if (instance.kind === 'compressor' || instance.kind === 'eq' || instance.kind === 'saturator') {
+    return instance.params.enabled
+  }
+  return instance.params.state.enabled
+}
+
+const normalizeNativeFx = (fx: ExportFx | undefined): ExportFx | undefined => {
+  if (!fx) return fx
+  let changed = false
+  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([trackId, entry]) => {
+    let nextEntry = entry
+    if (entry.instrument === undefined && entry.synth !== undefined) {
+      const instrument = normalizeTrackInstrumentParams({
+        kind: 'synth',
+        instanceId: `legacy-synth:${trackId}`,
+        params: entry.synth,
+      })
+      if (instrument) {
+        changed = true
+        nextEntry = { ...nextEntry, instrument }
+      }
+    }
+    const instances = nextEntry.instances.filter((instance) => (
+      nativeAudioCoreProcessorKinds.has(instance.kind)
+      || nativeProcessorIsEnabled(instance)
+    ))
+    if (instances.length !== nextEntry.instances.length) {
+      changed = true
+      nextEntry = { ...nextEntry, instances }
+    }
+    return [trackId, nextEntry]
+  }))
+  const masterFxInstances = fx.masterFxInstances.filter((instance) => (
+    nativeAudioCoreProcessorKinds.has(instance.kind)
+    || nativeProcessorIsEnabled(instance)
+  ))
+  if (masterFxInstances.length !== fx.masterFxInstances.length) changed = true
+  return changed ? { ...fx, masterFxInstances, trackFx } : fx
+}
+
 /**
- * The live-native boundary currently proves only decoded, raw audio sources:
- * no Web Audio object leaves this projection, and all routing, MIDI,
- * instruments, processors, automation, and external plug-ins are rejected.
+ * The live-native boundary keeps decoded audio, mixer topology, and instrument
+ * state portable; active unsupported processors and external plug-ins remain
+ * rejected. Native admission is evaluated against the native audio-core
+ * contract rather than browser/Wasm fixture coverage.
  */
 export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): LiveNativeProjection => {
-  if (!portableWasmCapabilityMatrix.sampleRatesHz.includes(input.sampleRateHz)) {
-    return { supported: false, reasons: [`The native source session does not support ${input.sampleRateHz} Hz.`] }
-  }
-  const sourceOnlyReasons = input.tracks.flatMap((track) => [
-    ...(track.kind === 'instrument' ? [`${track.id}: instrument tracks are not supported.`] : []),
-    ...(track.volume !== 1 || track.muted || track.soloed || track.channelRole || track.groupId || track.outputTargetId || (track.sends?.length ?? 0) > 0
-      ? [`${track.id}: routing and mix state are not supported.`]
-      : []),
-  ])
-  if (sourceOnlyReasons.length > 0) return { supported: false, reasons: sourceOnlyReasons }
+  const fx = normalizeNativeFx(input.fx)
+  const tracks = input.tracks
+  const instrumentReasons = tracks.flatMap((track) => (
+    track.kind === 'instrument' && !fx?.trackFx?.[track.id]?.instrument
+      ? [`${track.id}: native instrument state is unavailable.`]
+      : []
+  ))
+  if (instrumentReasons.length > 0) return { supported: false, reasons: instrumentReasons }
   const compiled = compilePortableExportSnapshot({
     ...input,
+    tracks,
     range: { mode: 'whole' },
-    fx: undefined,
+    fx,
     sidechainRoutes: undefined,
     hasExternalPlugins: false,
+    allowInstruments: true,
+    capabilityTarget: 'native',
+    externalLatencyFrames: input.externalLatencyFrames,
   })
   if (!compiled.supported) return compiled
   return {

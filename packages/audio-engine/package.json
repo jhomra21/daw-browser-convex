@@ -39,6 +39,7 @@
   "dependencies": {
     "@daw-browser/audio-core-contract": "workspace:*",
     "@daw-browser/audio-core-wasm": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
     "@daw-browser/shared": "workspace:*",
     "@daw-browser/timeline-core": "workspace:*",
     "mediabunny": "^1.35.1"

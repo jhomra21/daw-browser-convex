@@ -52,6 +52,9 @@ struct CommandFrame {
   std::uint32_t command = 0;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
+  std::uint32_t hasAnchor = 0;
+  std::int32_t anchorX = 0;
+  std::int32_t anchorY = 0;
 };
 
 struct EditorResponseFrame {
@@ -312,9 +315,17 @@ bool WriteWorkerControlCommand(
   const int fileDescriptor,
   const WorkerControlCommand command,
   const std::uint32_t width,
-  const std::uint32_t height
+  const std::uint32_t height,
+  const std::optional<WorkerEditorAnchor> anchor
 ) {
-  const CommandFrame frame{.command = static_cast<std::uint32_t>(command), .width = width, .height = height};
+  const CommandFrame frame{
+    .command = static_cast<std::uint32_t>(command),
+    .width = width,
+    .height = height,
+    .hasAnchor = anchor ? 1U : 0U,
+    .anchorX = anchor ? anchor->x : 0,
+    .anchorY = anchor ? anchor->y : 0,
+  };
   return fileDescriptor >= 0 && WriteExactly(fileDescriptor, &frame, sizeof(frame));
 }
 
@@ -322,8 +333,16 @@ std::optional<WorkerControlRequest> ReadWorkerControlCommand(const int fileDescr
   CommandFrame frame{};
   if (fileDescriptor < 0 || !ReadExactly(fileDescriptor, &frame, sizeof(frame))) return std::nullopt;
   if (frame.command >= static_cast<std::uint32_t>(WorkerControlCommand::kProcess)
-    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kStateGet)) {
-    return WorkerControlRequest{.command = static_cast<WorkerControlCommand>(frame.command), .width = frame.width, .height = frame.height};
+    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kStateGet)
+    && frame.hasAnchor <= 1) {
+    return WorkerControlRequest{
+      .command = static_cast<WorkerControlCommand>(frame.command),
+      .width = frame.width,
+      .height = frame.height,
+      .anchor = frame.hasAnchor == 1
+        ? std::optional<WorkerEditorAnchor>(WorkerEditorAnchor{.x = frame.anchorX, .y = frame.anchorY})
+        : std::nullopt,
+    };
   }
   return std::nullopt;
 }

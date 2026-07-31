@@ -6,15 +6,97 @@
 #import <Cocoa/Cocoa.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <limits>
+
+@interface DawEditorWindow : NSWindow
+@end
+
+@implementation DawEditorWindow
+
+- (void)close {
+  [super close];
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:@"NSWindowDidCloseNotification"
+                  object:self];
+}
+
+@end
 
 namespace daw::plugin_host {
 namespace {
 
 constexpr std::uint32_t kMaximumEditorDimension = 8'192;
+constexpr std::size_t kMaximumEditorEventsPerPump = 64;
+constexpr CGFloat kEditorAnchorGap = 12.0;
+NSWindow* gEditorWindow = nil;
+bool gEditorInteractionPending = false;
 
 bool ValidDimension(const std::uint32_t value) {
   return value > 0 && value <= kMaximumEditorDimension;
+}
+
+void ActivateAndOrderFront(NSWindow* window) {
+  if (!window || !NSApp) return;
+  [window setLevel:NSFloatingWindowLevel];
+  [window setHidesOnDeactivate:NO];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  const NSApplicationActivationOptions activationOptions =
+    NSApplicationActivateIgnoringOtherApps | NSApplicationActivateAllWindows;
+#pragma clang diagnostic pop
+  [[NSRunningApplication currentApplication]
+    activateWithOptions:activationOptions];
+  [NSApp activateIgnoringOtherApps:YES];
+  [window orderFrontRegardless];
+  [window makeKeyWindow];
+  [window makeKeyAndOrderFront:nil];
+}
+
+NSScreen* ScreenForAnchor(const WorkerEditorAnchor& anchor, CGFloat& appKitY) {
+  NSScreen* selected = nil;
+  CGFloat desktopTop = -CGFLOAT_MAX;
+  for (NSScreen* screen in NSScreen.screens) {
+    desktopTop = std::max(desktopTop, NSMaxY(screen.frame));
+  }
+  appKitY = desktopTop - static_cast<CGFloat>(anchor.y);
+  for (NSScreen* screen in NSScreen.screens) {
+    const NSRect frame = screen.frame;
+    const CGFloat topOriginY = desktopTop - NSMaxY(frame);
+    if (anchor.x >= NSMinX(frame) && anchor.x <= NSMaxX(frame)
+      && anchor.y >= topOriginY && anchor.y <= topOriginY + NSHeight(frame)) {
+      selected = screen;
+      break;
+    }
+  }
+  return selected ?: NSScreen.mainScreen ?: NSScreen.screens.firstObject;
+}
+
+void PositionWindow(NSWindow* window, const std::optional<WorkerEditorAnchor>& anchor) {
+  if (!window) return;
+  NSScreen* screen = nil;
+  CGFloat centerX = 0.0;
+  CGFloat bottomY = 0.0;
+  if (anchor) {
+    screen = ScreenForAnchor(*anchor, bottomY);
+    centerX = static_cast<CGFloat>(anchor->x);
+  } else {
+    screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
+  }
+  if (!screen) return;
+  const NSRect visibleFrame = screen.visibleFrame;
+  const NSSize windowSize = window.frame.size;
+  const CGFloat minimumX = NSMinX(visibleFrame);
+  const CGFloat maximumX = NSMaxX(visibleFrame) - windowSize.width;
+  const CGFloat minimumY = NSMinY(visibleFrame);
+  const CGFloat maximumY = NSMaxY(visibleFrame) - windowSize.height;
+  const CGFloat desiredX = anchor ? centerX - windowSize.width / 2.0 : NSMidX(visibleFrame) - windowSize.width / 2.0;
+  const CGFloat desiredY = anchor
+    ? bottomY + kEditorAnchorGap
+    : NSMidY(visibleFrame) - windowSize.height / 2.0;
+  const CGFloat originX = maximumX >= minimumX ? std::clamp(desiredX, minimumX, maximumX) : NSMidX(visibleFrame) - windowSize.width / 2.0;
+  const CGFloat originY = maximumY >= minimumY ? std::clamp(desiredY, minimumY, maximumY) : NSMidY(visibleFrame) - windowSize.height / 2.0;
+  [window setFrameOrigin:NSMakePoint(originX, originY)];
 }
 
 class EditorFrame final : public Steinberg::IPlugFrame {
@@ -42,6 +124,13 @@ class EditorFrame final : public Steinberg::IPlugFrame {
 
 }  // namespace
 
+bool PrepareVst3EditorRuntime() {
+  if (!NSApplicationLoad()) return false;
+  [NSApplication sharedApplication];
+  [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+  return NSApp != nil;
+}
+
 class Vst3EditorWindow::Implementation {
  public:
   NSWindow* window = nil;
@@ -50,18 +139,34 @@ class Vst3EditorWindow::Implementation {
   Steinberg::IPlugView* view = nullptr;
   EditorFrame frame{*this};
   bool attached = false;
+  std::optional<WorkerEditorAnchor> anchor;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
 
-  void WindowDidClose() {
-    if (attached && view) {
-      view->removed();
-      attached = false;
+  void InvalidateWindowState(const bool clearView) {
+    NSWindow* closedWindow = window;
+    id observer = closeObserver;
+    closeObserver = nil;
+    if (observer) {
+      [[NSNotificationCenter defaultCenter] removeObserver:observer];
     }
+    const bool wasAttached = attached;
+    attached = false;
     window = nil;
+    if (gEditorWindow == closedWindow) {
+      gEditorWindow = nil;
+      gEditorInteractionPending = false;
+    }
     hostView = nil;
+    anchor.reset();
     width = 0;
     height = 0;
+    if (wasAttached && view) view->removed();
+    if (clearView) view = nullptr;
+  }
+
+  void WindowDidClose() {
+    InvalidateWindowState(false);
   }
 
   bool Resize(const std::uint32_t nextWidth, const std::uint32_t nextHeight) {
@@ -83,20 +188,9 @@ class Vst3EditorWindow::Implementation {
   }
 
   void Close() {
-    if (closeObserver) {
-      [[NSNotificationCenter defaultCenter] removeObserver:closeObserver];
-      closeObserver = nil;
-    }
-    if (attached && view) {
-      view->removed();
-      attached = false;
-    }
-    if (window) [window close];
-    window = nil;
-    hostView = nil;
-    view = nullptr;
-    width = 0;
-    height = 0;
+    NSWindow* closingWindow = window;
+    InvalidateWindowState(true);
+    if (closingWindow) [closingWindow close];
   }
 };
 
@@ -114,9 +208,8 @@ Vst3EditorWindow::~Vst3EditorWindow() {
   delete implementation_;
 }
 
-bool Vst3EditorWindow::Open(Steinberg::IPlugView& view) {
-  if (!NSThread.isMainThread || implementation_->window) return false;
-  [NSApplication sharedApplication];
+bool Vst3EditorWindow::Open(Steinberg::IPlugView& view, const std::optional<WorkerEditorAnchor> anchor) {
+  if (!NSThread.isMainThread || implementation_->window || !PrepareVst3EditorRuntime()) return false;
   Steinberg::ViewRect size{};
   if (view.isPlatformTypeSupported(Steinberg::kPlatformTypeNSView) != Steinberg::kResultTrue
     || view.getSize(&size) != Steinberg::kResultOk || size.right <= size.left || size.bottom <= size.top) {
@@ -125,7 +218,7 @@ bool Vst3EditorWindow::Open(Steinberg::IPlugView& view) {
   const auto width = static_cast<std::uint32_t>(size.right - size.left);
   const auto height = static_cast<std::uint32_t>(size.bottom - size.top);
   if (!ValidDimension(width) || !ValidDimension(height) || view.setFrame(&implementation_->frame) != Steinberg::kResultOk) return false;
-  implementation_->window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
+  implementation_->window = [[DawEditorWindow alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
     styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable)
     backing:NSBackingStoreBuffered defer:NO];
   implementation_->hostView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
@@ -133,17 +226,20 @@ bool Vst3EditorWindow::Open(Steinberg::IPlugView& view) {
   implementation_->view = &view;
   auto* owner = implementation_;
   implementation_->closeObserver = [[NSNotificationCenter defaultCenter]
-    addObserverForName:NSWindowWillCloseNotification object:implementation_->window queue:nil
+    addObserverForName:@"NSWindowDidCloseNotification" object:implementation_->window queue:nil
     usingBlock:^(NSNotification*) { owner->WindowDidClose(); }];
   if (view.attached((__bridge void*)implementation_->hostView, Steinberg::kPlatformTypeNSView) != Steinberg::kResultOk) {
     implementation_->Close();
     return false;
   }
   implementation_->attached = true;
+  implementation_->anchor = anchor;
   implementation_->width = width;
   implementation_->height = height;
-  [implementation_->window makeKeyAndOrderFront:nil];
-  [NSApp activateIgnoringOtherApps:YES];
+  [implementation_->window setCollectionBehavior:(NSWindowCollectionBehaviorMoveToActiveSpace | NSWindowCollectionBehaviorFullScreenAuxiliary)];
+  PositionWindow(implementation_->window, implementation_->anchor);
+  gEditorWindow = implementation_->window;
+  ActivateAndOrderFront(implementation_->window);
   return true;
 }
 
@@ -154,10 +250,11 @@ bool Vst3EditorWindow::Close() {
   return wasOpen;
 }
 
-bool Vst3EditorWindow::Focus() {
+bool Vst3EditorWindow::Focus(const std::optional<WorkerEditorAnchor> anchor) {
   if (!NSThread.isMainThread || !implementation_->window) return false;
-  [implementation_->window makeKeyAndOrderFront:nil];
-  [NSApp activateIgnoringOtherApps:YES];
+  if (anchor) implementation_->anchor = anchor;
+  PositionWindow(implementation_->window, implementation_->anchor);
+  ActivateAndOrderFront(implementation_->window);
   return true;
 }
 
@@ -176,10 +273,26 @@ Vst3EditorWindowStatus Vst3EditorWindow::status() const {
 
 void PumpVst3EditorEvents() {
   if (!NSThread.isMainThread || NSApp == nil) return;
-  NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-    untilDate:[NSDate dateWithTimeIntervalSinceNow:0]
-    inMode:NSDefaultRunLoopMode dequeue:YES];
-  if (event) [NSApp sendEvent:event];
+  for (std::size_t count = 0; count < kMaximumEditorEventsPerPump; ++count) {
+    NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+      untilDate:[NSDate dateWithTimeIntervalSinceNow:0]
+      inMode:NSDefaultRunLoopMode dequeue:YES];
+    if (!event) return;
+    [NSApp sendEvent:event];
+    if (event.type == NSEventTypeLeftMouseUp && event.window == gEditorWindow) {
+      NSResponder* firstResponder = event.window.firstResponder;
+      if (![firstResponder isKindOfClass:[NSTextView class]]
+        && ![firstResponder isKindOfClass:[NSTextField class]]) {
+        gEditorInteractionPending = true;
+      }
+    }
+  }
+}
+
+bool ConsumeVst3EditorInteraction() {
+  const bool pending = gEditorInteractionPending;
+  gEditorInteractionPending = false;
+  return pending && gEditorWindow != nil && gEditorWindow.isVisible;
 }
 
 }  // namespace daw::plugin_host

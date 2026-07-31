@@ -9,6 +9,10 @@ import {
   desktopHostImportInputSchemaV1,
   desktopHostExportRunInputSchemaV1,
   desktopHostExportCancelInputSchemaV1,
+  desktopHostVstInstancesInputSchemaV1,
+  desktopHostVstInstancesResultSchemaV1,
+  desktopHostVstParametersInputSchemaV1,
+  desktopHostVstParametersResultSchemaV1,
   desktopSeekInputSchemaV1,
   desktopTransportStatusSchemaV1,
   type DesktopOperationV1,
@@ -26,6 +30,8 @@ export type HostToolService = {
   exportRun: (input: unknown) => Promise<unknown>
   exportStatus: () => Promise<unknown>
   exportCancel: (input: { jobId: string }) => Promise<unknown>
+  vstInstances: (input: unknown) => Promise<unknown>
+  vstParameters: (input: unknown) => Promise<unknown>
   operations?: ReadonlySet<DesktopOperationV1>
 }
 
@@ -54,7 +60,9 @@ export const executeHostTool = (name: string, input: unknown, service: HostToolS
                 : name === "host_import_audio" ? "host.import.audio"
                   : name === "host_export_run" ? "host.export.run"
                     : name === "host_export_status" ? "host.export.status"
-                      : name === "host_export_cancel" ? "host.export.cancel" : undefined
+                      : name === "host_export_cancel" ? "host.export.cancel"
+                        : name === "host_vst_instances" ? "host.vst.instances"
+                          : name === "host_vst_parameters" ? "host.vst.parameters" : undefined
   if (!operation || (service.operations && !service.operations.has(operation))) return failure()
   if (name === "host_status") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.status, desktopHostStatusSchemaV1) : invalid()
   if (name === "host_transport_status") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.transportStatus, desktopTransportStatusSchemaV1) : invalid()
@@ -71,6 +79,10 @@ export const executeHostTool = (name: string, input: unknown, service: HostToolS
   if (name === "host_export_status") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.exportStatus, desktopHostExportStatusSchemaV1) : invalid()
   const exportCancel = desktopHostExportCancelInputSchemaV1.safeParse(input)
   if (name === "host_export_cancel") return exportCancel.success ? invoke(() => service.exportCancel(exportCancel.data), desktopHostExportStatusSchemaV1) : invalid()
+  const vstInstances = desktopHostVstInstancesInputSchemaV1.safeParse(input)
+  if (name === "host_vst_instances") return vstInstances.success ? invoke(() => service.vstInstances(vstInstances.data), desktopHostVstInstancesResultSchemaV1) : invalid()
+  const vstParameters = desktopHostVstParametersInputSchemaV1.safeParse(input)
+  if (name === "host_vst_parameters") return vstParameters.success ? invoke(() => service.vstParameters(vstParameters.data), desktopHostVstParametersResultSchemaV1) : invalid()
   return failure()
 }
 
@@ -87,4 +99,6 @@ export const registerHostTools = (server: McpServer, service: HostToolService) =
   if (enabled("host.export.run")) server.registerTool("host_export_run", { description: "Queue a local desktop audio export.", inputSchema: desktopHostExportRunInputSchemaV1, outputSchema: desktopHostExportRunResultSchemaV1, annotations: local }, (input) => executeHostTool("host_export_run", input, service))
   if (enabled("host.export.status")) server.registerTool("host_export_status", { description: "Return the active local desktop export status.", inputSchema: desktopEmptyInputSchemaV1, outputSchema: desktopHostExportStatusSchemaV1, annotations: read }, (input) => executeHostTool("host_export_status", input, service))
   if (enabled("host.export.cancel")) server.registerTool("host_export_cancel", { description: "Cancel a local desktop export by job ID.", inputSchema: desktopHostExportCancelInputSchemaV1, outputSchema: desktopHostExportStatusSchemaV1, annotations: local }, (input) => executeHostTool("host_export_cancel", input, service))
+  if (enabled("host.vst.instances")) server.registerTool("host_vst_instances", { description: "Discover VST3 instances in the mounted desktop project.", inputSchema: desktopHostVstInstancesInputSchemaV1, outputSchema: desktopHostVstInstancesResultSchemaV1, annotations: read }, (input) => executeHostTool("host_vst_instances", input, service))
+  if (enabled("host.vst.parameters")) server.registerTool("host_vst_parameters", { description: "Discover VST3 parameter descriptors and values in the mounted desktop project.", inputSchema: desktopHostVstParametersInputSchemaV1, outputSchema: desktopHostVstParametersResultSchemaV1, annotations: read }, (input) => executeHostTool("host_vst_parameters", input, service))
 }

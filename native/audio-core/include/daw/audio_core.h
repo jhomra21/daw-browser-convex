@@ -55,6 +55,18 @@ typedef enum daw_audio_core_result {
   DAW_AUDIO_CORE_NO_DATA = 12
 } daw_audio_core_result;
 
+typedef enum daw_audio_core_graph_validation_code {
+  DAW_AUDIO_CORE_GRAPH_VALIDATION_NONE = 0,
+  DAW_AUDIO_CORE_GRAPH_VALIDATION_PDC_DELAY_EXCEEDS_RING_CAPACITY = 1
+} daw_audio_core_graph_validation_code;
+
+typedef struct daw_audio_core_graph_validation_diagnostic {
+  uint32_t code;
+  uint32_t index;
+  uint32_t actual;
+  uint32_t limit;
+} daw_audio_core_graph_validation_diagnostic;
+
 #define DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES 2048u
 #define DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS 2u
 #define DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS 32u
@@ -352,6 +364,7 @@ typedef struct daw_audio_graph_node_descriptor {
   uint32_t output_layout;
   uint32_t input_bus;
   uint32_t latency_frames;
+  uint32_t external_latency_frames;
   daw_audio_instrument_state_descriptor instrument;
   daw_audio_mixer_state mixer;
 } daw_audio_graph_node_descriptor;
@@ -738,6 +751,8 @@ daw_audio_core_result daw_audio_core_prepare_graph_bytes(
   daw_audio_core_handle core,
   const uint8_t *graph_bytes,
   uint32_t graph_byte_count);
+daw_audio_core_graph_validation_diagnostic daw_audio_core_get_graph_validation_diagnostic(
+  daw_audio_core_handle core);
 daw_audio_core_result daw_audio_core_publish(
   daw_audio_core_handle core,
   uint32_t expected_revision);

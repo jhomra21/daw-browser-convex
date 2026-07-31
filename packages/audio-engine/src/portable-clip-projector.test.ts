@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { audioCoreContractVersion, type AudioAssetRef } from '../../audio-core-contract/src/index'
-import type { Clip } from '@daw-browser/timeline-core/types'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { projectPortableClipEvents } from './portable-clip-projector'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
@@ -30,12 +30,16 @@ const clip = (overrides: Partial<Clip> = {}): Clip => ({
   ...overrides,
 })
 
-const project = (clips: readonly Clip[]) => projectPortableClipEvents({
+const project = (
+  clips: readonly Clip[],
+  trackOverrides: Partial<Track> = {},
+) => projectPortableClipEvents({
   tracks: [{
     id: 'track-1',
     name: 'track-1',
     volume: 1,
     clips: [...clips],
+    ...trackOverrides,
   }],
   assets: new Map([['source-1', asset]]),
   bpm: 120,
@@ -91,6 +95,21 @@ test('projects raw audio clips with source offsets and linear fades', () => {
   })
 })
 
+test('keeps source events invariant under mixer and routing changes', () => {
+  const baseline = project([clip()])
+  const mixed = project([clip()], {
+    volume: 0.5,
+    muted: true,
+    soloed: true,
+    channelRole: 'track',
+    groupId: 'group-1',
+    outputTargetId: 'group-1',
+    sends: [{ targetId: 'return-1', amount: 0.25, tap: 'pre-fader' }],
+  })
+
+  expect(mixed).toEqual(baseline)
+})
+
 test('uses the existing timeline time map for a scheduling range', () => {
   expect(projectPortableClipEvents({
     tracks: [{
@@ -113,6 +132,33 @@ test('uses the existing timeline time map for a scheduling range', () => {
       stopFrame: 192_000,
       sourceOffsetFrame: 96_000,
       sourceFrameCount: 48_000,
+    }],
+  })
+})
+
+test('projects a spanning clip from the requested window boundary', () => {
+  expect(projectPortableClipEvents({
+    tracks: [{
+      id: 'track-1',
+      name: 'track-1',
+      volume: 1,
+      clips: [clip()],
+    }],
+    assets: new Map([['source-1', asset]]),
+    bpm: 120,
+    sampleRateHz: 48_000,
+    rangeStartSec: 0,
+    rangeEndSec: 10,
+    emitStartFrame: { start: 144_000, end: 192_000 },
+    epoch: 1,
+    firstSequence: 1,
+  })).toMatchObject({
+    supported: true,
+    events: [{
+      startFrame: 144_000,
+      stopFrame: 288_000,
+      sourceOffsetFrame: 96_000,
+      sourceFrameCount: 144_000,
     }],
   })
 })

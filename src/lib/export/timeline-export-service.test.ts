@@ -168,6 +168,36 @@ test('blocks export for a restored cloud project with a persisted live external 
   })).rejects.toThrow('must be frozen or bypassed')
 })
 
+test('allows native playback snapshots to retain live external plugins', async () => {
+  const projectId = `native-project-${crypto.randomUUID()}`
+  await importLocalProject({
+    id: projectId,
+    name: 'Native playback project',
+    schemaVersion: LOCAL_PROJECT_SCHEMA_VERSION,
+    mode: 'backup',
+    storageKind: 'opfs',
+    createdAt: 1,
+    updatedAt: 1,
+    lastOpenedAt: 1,
+  }, {
+    entities: [],
+    assets: [],
+    projectState: [],
+    syncState: [],
+  })
+  await setLocalExternalProcessor(projectId, createExternalProcessor())
+
+  const snapshot = await createExportRenderStateSnapshot({
+    projectId,
+    userId: 'user-1',
+    masterVolume: 1,
+    cloudRows: undefined,
+    externalPluginPolicy: 'native-playback',
+  })
+
+  expect(snapshot.fx.masterVolume).toBe(1)
+})
+
 test("persisted devices and automation survive absent and intentionally empty audio projections", async () => {
   const projectId = "project:export-projection-merge"
   const ownedTrackId = "track:owned"

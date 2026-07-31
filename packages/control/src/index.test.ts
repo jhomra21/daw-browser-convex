@@ -26,6 +26,7 @@ import {
   parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
+  projectControlSnapshotV1,
   projectSnapshotSchemaV1,
   hashRecoveryPayloadSyncV1,
   hashRecoveryPayloadV1,
@@ -38,6 +39,8 @@ import {
   recoveryPayloadSchemaV2,
   recoveryCapturedPayloadSchemaV2,
   resolveControlMidiActionV1,
+  localControlCapabilitiesV1,
+  localControlCapabilitiesV2,
   type ContextualRefV1,
   type ProcessorTargetV1,
   type RecoveryPayloadV2,
@@ -849,6 +852,72 @@ test('projects historical finite MIDI values through the narrow V1 snapshot sche
   }]))).toThrow()
 })
 
+test('projects only canonical, bounded external parameter overrides', () => {
+  const projected = projectControlSnapshotV1({
+    project: {
+      projectId: 'project-1',
+      name: 'Project',
+      revision: 1,
+      tempoBpm: 120,
+      timeSignatureNumerator: 4,
+      timeSignatureDenominator: 4,
+      loopEnabled: false,
+      loopStartSec: 0,
+      loopEndSec: 8,
+      updatedAt: 1,
+    },
+    tracks: [],
+    clips: [],
+    masterVolume: 1,
+    effects: [],
+    externalProcessors: [{
+      instanceId: 'instance-1',
+      targetId: 'master',
+      chainIndex: 0,
+      manifest: {
+        identity: { name: 'Fixture', vendor: 'Vendor', classId: 'class-1' },
+        role: 'effect',
+        parameters: [{ id: 1, readOnly: false }, { id: 2, readOnly: false }],
+      },
+      bypassed: false,
+      parameterOverrides: { '01': -0.5, '2.0': 1.5, '999': 0.5 },
+    }],
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    assets: [],
+    assetFolders: [],
+  })
+  const external = projected.processors.find((processor) => processor.id === 'external-plugin:instance-1')
+  expect(external?.processor).toMatchObject({
+    kind: 'external-vst3',
+    params: { parameterOverrides: { '1': 0, '2': 1 } },
+  })
+})
+
+test('rejects external snapshots with oversized parameter override records', () => {
+  const parameterOverrides = Object.fromEntries(
+    Array.from({ length: 16_385 }, (_, index) => [String(index), 0]),
+  )
+  expect(() => projectSnapshotSchemaV1.parse({
+    ...snapshot,
+    processors: [{
+      id: 'external-plugin:instance-1',
+      target: { master: true },
+      instanceId: 'instance-1',
+      index: 0,
+      processor: {
+        kind: 'external-vst3',
+        params: {
+          identity: { name: 'Fixture', vendor: 'Vendor', classId: 'class-1', role: 'effect' },
+          bypassed: false,
+          parameterOverrides,
+          parameters: [],
+        },
+      },
+    }],
+  })).toThrow()
+})
+
 test('enforces MIDI and automation aggregates at exact boundaries for preview and commit', () => {
   const boundaryActions = [
     {
@@ -989,6 +1058,7 @@ test('rejects oversized raw requests before trim normalization for preview and c
 
 test('preserves the truthful v1 action list and snapshot contract', () => {
   expect(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1)).toEqual(controlCapabilitiesV1)
+  expect(controlCapabilitiesSchemaV1.parse(localControlCapabilitiesV1)).toEqual(localControlCapabilitiesV1)
   expect(controlCapabilitiesV1.limits.maxAutomationPointsPerCommit).toBe(1000)
   expect(controlCapabilitiesV1.limits.maxErrorDetails).toBe(16)
   expect(controlCapabilitiesV1.limits).not.toHaveProperty('maxMidiPerformanceEventsPerClip')
@@ -1007,6 +1077,15 @@ test('preserves the truthful v1 action list and snapshot contract', () => {
     'track.color.cascade', 'track.ungroup', 'instrument.remove', 'arpeggiator.remove',
     'asset.delete', 'recovery.restore',
   ])
+  expect(localControlCapabilitiesV1.actionKinds).toHaveLength(40)
+  expect(localControlCapabilitiesV1.actionKinds).toEqual([
+    ...controlCapabilitiesV1.actionKinds,
+    'external-plugin.parameters.set',
+  ])
+  expect(controlCapabilitiesV1.actionKinds).not.toContain('external-plugin.parameters.set')
+  expect(localControlCapabilitiesV1.actionKinds).toContain('external-plugin.parameters.set')
+  expect(controlCapabilitiesV2.actionKinds).not.toContain('external-plugin.parameters.set')
+  expect(localControlCapabilitiesV2.actionKinds).toContain('external-plugin.parameters.set')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('clip.create')
   expect(controlCapabilitiesV1.actionKinds).not.toContain('effect.add')
   expect(projectSnapshotSchemaV1.parse(snapshot).project.masterVolume).toBe(0.8)
@@ -1044,6 +1123,12 @@ test('parses every Phase 5B action strictly', () => {
     { kind: 'track.color.set', track, color: null },
     { kind: 'track.color.cascade', root: track, color: '#22c55e', cascadeClipColors: true },
     { kind: 'track.ungroup', group: track },
+    {
+      kind: 'external-plugin.parameters.set',
+      target,
+      processor: persisted('external-plugin:instance-1'),
+      changes: [{ parameterId: 1, normalizedValue: 0.5 }],
+    },
     { kind: 'instrument.remove', target },
     { kind: 'arpeggiator.remove', target },
     { kind: 'asset.delete', asset },
@@ -1053,6 +1138,35 @@ test('parses every Phase 5B action strictly', () => {
   expect(() => parseControlCommitRequestV1(commit([{
     kind: 'clip.audio.create', track, asset: { source: 'persisted', id: 'asset-1', key: 'raw-key' },
   }]))).toThrow()
+  expect(controlActionSchemaV1.safeParse({
+    kind: 'external-plugin.parameters.set',
+    target,
+    processor: persisted('external-plugin:instance-1'),
+    changes: [
+      { parameterId: 1, normalizedValue: 0.5 },
+      { parameterId: 1, normalizedValue: 0.75 },
+    ],
+  }).success).toBe(false)
+  expect(controlActionSchemaV1.safeParse({
+    kind: 'external-plugin.parameters.set',
+    target,
+    processor: persisted('external-plugin:instance-1'),
+    changes: [{ parameterId: 1, normalizedValue: Number.NaN }],
+  }).success).toBe(false)
+  for (const parameterId of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
+    expect(controlActionSchemaV1.safeParse({
+      kind: 'external-plugin.parameters.set',
+      target,
+      processor: persisted('external-plugin:instance-1'),
+      changes: [{ parameterId, normalizedValue: 0.5 }],
+    }).success).toBe(true)
+  }
+  expect(controlActionSchemaV1.safeParse({
+    kind: 'external-plugin.parameters.set',
+    target,
+    processor: persisted('external-plugin:instance-1'),
+    changes: [{ parameterId: 0x1_0000_0000, normalizedValue: 0.5 }],
+  }).success).toBe(false)
 })
 
 test('accepts every canonical effect payload and rejects unknown nested fields', () => {

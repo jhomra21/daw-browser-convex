@@ -11,6 +11,7 @@ type EffectShellProps = {
   class?: string
   titleActions?: JSX.Element
   actionsBeforeReset?: JSX.Element
+  onPointerDown?: (event: PointerEvent) => void
   children: JSX.Element
 }
 
@@ -23,6 +24,7 @@ export default function EffectShell(props: EffectShellProps) {
         'effect-shell flex h-full self-stretch flex-col border border-border bg-app-surface text-foreground',
         props.class,
       )}
+      onPointerDown={(event) => props.onPointerDown?.(event)}
     >
       <div data-effect-shell-header="true" class="flex items-stretch justify-between border-b border-border px-2 py-1">
         <div class="flex min-w-0 items-center gap-2">

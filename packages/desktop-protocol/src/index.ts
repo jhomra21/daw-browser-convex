@@ -6,9 +6,11 @@ import {
   controlErrorSchemaV1, controlHistoryQuerySchemaV1, controlHistoryResultSchemaV1,
   controlPreviewRequestSchemaV1, controlPreviewResultSchemaV1, controlRecoveriesQuerySchemaV1,
   controlRecoveriesResultSchemaV1, controlSnapshotQuerySchemaV1,
-  projectSnapshotSchemaV1, projectSnapshotSchemaV2,
+  projectIdSchemaV1, projectSnapshotSchemaV1, projectSnapshotSchemaV2,
   type ControlErrorV1,
 } from "@daw-browser/control"
+export { projectIdSchemaV1 } from "@daw-browser/control"
+import { pluginHealthSchema } from "@daw-browser/plugin-host-protocol"
 export type { ControlErrorV1 } from "@daw-browser/control"
 
 export const desktopProtocolVersion = "v1" as const
@@ -24,15 +26,28 @@ export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktop
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 
+export const desktopVstParameterEditPayloadSchema = z.object({
+  projectId: projectIdSchemaV1,
+  source: z.enum(["active-playback", "editor-session"]),
+  instanceId: z.string().uuid(),
+  parameterId: z.number().int().min(0).max(0xffff_ffff),
+  normalizedValue: z.number().finite().min(0).max(1),
+}).strict()
+export type DesktopVstParameterEditPayload = z.infer<typeof desktopVstParameterEditPayloadSchema>
+
 const correlationId = z.string().min(1).max(maxCorrelationIdLength).regex(/^[A-Za-z0-9._-]+$/)
 const version = z.literal(desktopProtocolVersion)
 const versionV2 = z.literal(desktopProtocolVersionV2)
 export const desktopEmptyInputSchemaV1 = z.object({}).strict()
 const finiteSeconds = z.number().finite().min(0).max(86_400)
 export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).strict()
+export const desktopHostVstCursorSchemaV1 = z.string().min(1).max(String(0xffff_ffff).length).regex(/^(0|[1-9][0-9]*)$/)
+  .refine((value) => Number(value) <= 0xffff_ffff)
 
 export const desktopOperationSchemaV1 = z.enum([
   "host.status",
+  "host.vst.instances",
+  "host.vst.parameters",
   "host.import.audio",
   "host.export.run",
   "host.export.status",
@@ -70,6 +85,17 @@ export const desktopControlSnapshotInputSchemaV2 = controlSnapshotQuerySchemaV1.
 
 const requestInputs = {
   "host.status": desktopEmptyInputSchemaV1,
+  "host.vst.instances": z.object({
+    projectId: projectIdSchemaV1,
+    cursor: desktopHostVstCursorSchemaV1.optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+  }).strict(),
+  "host.vst.parameters": z.object({
+    projectId: projectIdSchemaV1,
+    instanceId: z.string().uuid(),
+    cursor: desktopHostVstCursorSchemaV1.optional(),
+    limit: z.number().int().min(1).max(256).default(100),
+  }).strict(),
   "host.import.audio": z.object({
     source: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("path"), path: z.string().min(1).max(4096) }).strict(),
@@ -187,6 +213,10 @@ export const desktopHostExportRunInputSchemaV1 = requestInputs["host.export.run"
   }
 })
 export const desktopHostExportCancelInputSchemaV1 = requestInputs["host.export.cancel"]
+export const desktopHostVstInstancesInputSchemaV1 = requestInputs["host.vst.instances"]
+export const desktopHostVstParametersInputSchemaV1 = requestInputs["host.vst.parameters"]
+export type DesktopHostVstInstancesInputV1 = z.infer<typeof desktopHostVstInstancesInputSchemaV1>
+export type DesktopHostVstParametersInputV1 = z.infer<typeof desktopHostVstParametersInputSchemaV1>
 
 const capabilityToken = z.string().regex(/^[a-f0-9]{64}$/)
 const capabilityFile = z.object({
@@ -288,9 +318,60 @@ export const desktopHostExportStatusSchemaV1 = z.object({
     outputs: z.array(safeExportOutputSchema).max(1024).optional(),
   }).strict().optional(),
 }).strict()
+export const desktopHostVstIdentitySchemaV1 = z.object({
+  format: z.literal("vst3"),
+  classId: z.string().min(1).max(128),
+  vendor: z.string().min(1).max(256),
+  name: z.string().min(1).max(256),
+  version: z.string().min(1).max(128),
+  architecture: z.literal("arm64"),
+}).strict()
+export const desktopHostVstParameterSchemaV1 = z.object({
+  id: z.number().int().nonnegative().max(0xffff_ffff),
+  title: z.string().min(1).max(256),
+  unit: z.string().max(64),
+  minimum: z.number().finite(),
+  maximum: z.number().finite(),
+  defaultValue: z.number().finite(),
+  stepCount: z.number().int().nonnegative().max(1_000_000),
+  readOnly: z.boolean(),
+  hidden: z.boolean(),
+  currentValue: z.number().finite().min(0).max(1),
+}).strict().superRefine((value, context) => {
+  if (value.minimum > value.maximum) context.addIssue({ code: "custom", message: "Parameter minimum exceeds maximum." })
+  if (value.defaultValue < value.minimum || value.defaultValue > value.maximum) context.addIssue({ code: "custom", message: "Parameter default is outside its range." })
+})
+export const desktopHostVstInstancesResultSchemaV1 = z.object({
+  projectId: projectIdSchemaV1,
+  instances: z.array(z.object({
+    instanceId: z.string().uuid(),
+    targetId: z.string().min(1).max(256),
+    chainIndex: z.number().int().nonnegative(),
+    identity: desktopHostVstIdentitySchemaV1,
+    role: z.enum(["effect", "instrument"]),
+    bypassed: z.boolean(),
+    health: pluginHealthSchema,
+    parameterCount: z.number().int().min(0).max(16_384),
+    supportsEditor: z.boolean(),
+    supportsState: z.boolean(),
+  }).strict()).max(100),
+  nextCursor: desktopHostVstCursorSchemaV1.nullable(),
+}).strict()
+export const desktopHostVstParametersResultSchemaV1 = z.object({
+  projectId: projectIdSchemaV1,
+  instanceId: z.string().uuid(),
+  parameters: z.array(desktopHostVstParameterSchemaV1).max(256),
+  nextCursor: desktopHostVstCursorSchemaV1.nullable(),
+}).strict()
+export type DesktopHostVstInstancesResultV1 = z.infer<typeof desktopHostVstInstancesResultSchemaV1>
+export type DesktopHostVstParametersResultV1 = z.infer<typeof desktopHostVstParametersResultSchemaV1>
+export type DesktopHostVstIdentityV1 = z.infer<typeof desktopHostVstIdentitySchemaV1>
+export type DesktopHostVstParameterV1 = z.infer<typeof desktopHostVstParameterSchemaV1>
 
 export type DesktopOperationMapV1 = {
   "host.status": { input: Record<string, never>; result: z.infer<typeof desktopHostStatusSchemaV1> }
+  "host.vst.instances": { input: z.infer<typeof desktopHostVstInstancesInputSchemaV1>; result: z.infer<typeof desktopHostVstInstancesResultSchemaV1> }
+  "host.vst.parameters": { input: z.infer<typeof desktopHostVstParametersInputSchemaV1>; result: z.infer<typeof desktopHostVstParametersResultSchemaV1> }
   "host.import.audio": { input: z.infer<typeof requestInputs["host.import.audio"]>; result: z.infer<typeof desktopHostImportResultSchemaV1> }
   "host.export.run": { input: z.infer<typeof requestInputs["host.export.run"]>; result: z.infer<typeof desktopHostExportRunResultSchemaV1> }
   "host.export.status": { input: Record<string, never>; result: z.infer<typeof desktopHostExportStatusSchemaV1> }
@@ -492,6 +573,8 @@ export type DesktopRegistrationV1 = z.infer<typeof desktopRegistrationSchemaV1>
 
 const nonControlResultSchemas = {
   "host.status": desktopHostStatusSchemaV1,
+  "host.vst.instances": desktopHostVstInstancesResultSchemaV1,
+  "host.vst.parameters": desktopHostVstParametersResultSchemaV1,
   "host.import.audio": desktopHostImportResultSchemaV1,
   "host.export.run": desktopHostExportRunResultSchemaV1,
   "host.export.status": desktopHostExportStatusSchemaV1,

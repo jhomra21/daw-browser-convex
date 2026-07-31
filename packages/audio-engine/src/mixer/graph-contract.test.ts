@@ -13,6 +13,7 @@ import {
   createDefaultReverbParams,
   createDefaultSaturatorParams,
   createDefaultSpectralParams,
+  createDefaultSynthParams,
   createDefaultTremoloParams,
 } from '@daw-browser/shared'
 import { createMixerRoutingPlan, createPortableGraphSnapshot } from './graph-contract'
@@ -45,6 +46,33 @@ describe('mixer routing plan', () => {
       ],
       masterVolume: 0.8,
     })
+  })
+
+  test('leaves instrument attachment to the portable session compiler', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        { id: 'synth', kind: 'instrument', name: 'Synth', clips: [], volume: 1 },
+      ]),
+      trackFx: {
+        synth: {
+          instances: [],
+          instrument: {
+            kind: 'synth',
+            instanceId: 'synth:1',
+            params: createDefaultSynthParams(),
+          },
+        },
+      },
+    })
+
+    const node = createPortableGraphSnapshot({
+      graph,
+      revision: 1,
+      sampleRate: 48_000,
+    }).nodes.find((entry) => entry.id === 'synth')
+
+    expect(node?.kind).toBe('source')
+    expect(node?.instrument).toBeUndefined()
   })
 
   test('projects normalized project topology and PDC declarations without becoming a routing authority', () => {

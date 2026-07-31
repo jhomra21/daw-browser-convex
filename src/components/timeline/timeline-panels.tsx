@@ -11,6 +11,7 @@ import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import type { ExternalProcessor } from '@daw-browser/external-plugins'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
@@ -57,6 +58,9 @@ export type TimelinePanelsProps = {
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
+    autoOpenExternalProcessorId?: string
+    onExternalProcessorAutoOpenHandled?: (instanceId: string) => void
+    onExternalProcessorUpdated?: (processor: ExternalProcessor, previous: ExternalProcessor) => void
     automationEnvelopes?: AutomationEnvelope[]
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
@@ -155,6 +159,9 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
         onExportSnapshotChange={props.effectsPanel.onExportSnapshotChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
+        autoOpenExternalProcessorId={props.effectsPanel.autoOpenExternalProcessorId}
+        onExternalProcessorAutoOpenHandled={props.effectsPanel.onExternalProcessorAutoOpenHandled}
+        onExternalProcessorUpdated={props.effectsPanel.onExternalProcessorUpdated}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
         evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}
         onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}

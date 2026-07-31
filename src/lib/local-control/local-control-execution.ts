@@ -269,10 +269,14 @@ const materializedSnapshot = (
     target: 'master' in processor.target
       ? processor.target
       : { trackId: replace(processor.target.trackId, ids) ?? processor.target.trackId },
-    instanceId: replace(processor.instanceId, instanceIds) ?? processor.instanceId,
+    instanceId: processor.processor.kind === 'external-vst3'
+      ? processor.instanceId
+      : replace(processor.instanceId, instanceIds) ?? processor.instanceId,
     processor: {
       ...processor.processor,
-      params: rewriteInstanceIds(processor.processor.params, instanceIds),
+      params: processor.processor.kind === 'external-vst3'
+        ? processor.processor.params
+        : rewriteInstanceIds(processor.processor.params, instanceIds),
     },
     })),
     automation: snapshot.automation.map((entry) => ({
@@ -314,7 +318,11 @@ const materializedSnapshot = (
 const canonicalEntityKeys = (snapshot: ControlPlanV1['snapshot']) => new Set([
   ...snapshot.tracks.map((item) => `track:${item.id}`),
   ...snapshot.clips.map((item) => `clip:${item.id}`),
-  ...snapshot.processors.map((item) => `effect:${item.id}`),
+  ...snapshot.processors.map((item) => (
+    item.processor.kind === 'external-vst3'
+      ? `external-plugin:${item.id}`
+      : `effect:${item.id}`
+  )),
   ...snapshot.automation.map((item) => `automation-envelope:${automationTargetKey(
     'master' in item.target
       ? { kind: 'master', effectInstanceId: item.effectInstanceId }

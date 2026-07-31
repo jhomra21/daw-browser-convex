@@ -121,12 +121,13 @@ const entitlementsDirectory = path.join(import.meta.dirname, "entitlements")
 const appEntitlements = path.join(entitlementsDirectory, "app.plist")
 const helperEntitlements = path.join(entitlementsDirectory, "helper.plist")
 const nativeEntitlements = path.join(entitlementsDirectory, "native.plist")
+const vstScannerEntitlements = path.join(entitlementsDirectory, "vst3-scanner.plist")
 const vstWorkerEntitlements = path.join(entitlementsDirectory, "vst3-worker.plist")
 
 export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = process.env) => {
   const identity = environment.APPLE_SIGNING_IDENTITY
   const notarize = notaryCredentials(environment)
-  if (!identity || !notarize) return undefined
+  if (!identity || (!notarize && environment.DAW_SKIP_NOTARIZATION !== "1")) return undefined
   return {
     sign: {
       identity,
@@ -143,7 +144,10 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
         if (basename === nativeVst3WorkerArtifactId) {
           return { entitlements: vstWorkerEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
         }
-        if (basename === nativeVst3ScannerArtifactName || basename === nativeAudioHostArtifactName) {
+        if (basename === nativeVst3ScannerArtifactName) {
+          return { entitlements: vstScannerEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
+        }
+        if (basename === nativeAudioHostArtifactName) {
           return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
         }
         if (filePath.endsWith(".app")) {
@@ -156,7 +160,7 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
         return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
       },
     },
-    notarize,
+    ...(notarize ? { notarize } : {}),
   }
 }
 
@@ -171,7 +175,20 @@ export const requireMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = 
   return configuration
 }
 
-const macReleaseConfiguration = getMacReleaseConfiguration()
+export const isExplicitLocalUnsignedPackage = (
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean => environment.DAW_LOCAL_UNSIGNED_PACKAGE === "1"
+
+export const shouldRequireMacReleaseConfiguration = (
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean => !isExplicitLocalUnsignedPackage(environment)
+
+export const shouldVerifySignedMacPackage = (
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean => shouldRequireMacReleaseConfiguration(environment)
+
+const localUnsignedPackage = isExplicitLocalUnsignedPackage()
+const macReleaseConfiguration = localUnsignedPackage ? undefined : getMacReleaseConfiguration()
 
 const machOMagic = new Set([
   "cefaedfe",
@@ -211,11 +228,20 @@ const signedCodeCandidates = async (root: string): Promise<string[]> => {
   return candidates
 }
 
+export const getPackagedMacResourcesPath = async (buildPath: string) => {
+  const appBundles = (await readdir(buildPath, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(".app"))
+  if (appBundles.length !== 1) {
+    throw new Error(`Expected exactly one packaged macOS app bundle in ${buildPath}.`)
+  }
+  return path.join(buildPath, appBundles[0].name, "Contents", "Resources")
+}
+
 const signPackagedNativeReleaseArtifacts = async (
-  buildPath: string,
+  resourcesPath: string,
   configuration: NonNullable<ReturnType<typeof getMacReleaseConfiguration>>,
 ): Promise<void> => {
-  const artifacts = getPackagedNativeReleaseArtifacts(path.join(buildPath, "Contents", "Resources"))
+  const artifacts = getPackagedNativeReleaseArtifacts(resourcesPath)
   for (const artifact of artifacts) {
     const options = configuration.sign.optionsForFile(artifact.sourcePath)
     const arguments_ = [
@@ -232,7 +258,7 @@ const signPackagedNativeReleaseArtifacts = async (
     await run("codesign", arguments_)
     await run("codesign", ["--verify", "--strict", "--verbose=2", artifact.sourcePath])
   }
-  await writePackagedNativeReleaseArtifactManifest(path.join(buildPath, "Contents", "Resources"))
+  await writePackagedNativeReleaseArtifactManifest(resourcesPath)
 }
 
 const verifySignedPackage = async (appPath: string) => {
@@ -268,6 +294,19 @@ const config: ForgeConfig = {
             : []),
         ]
       : [],
+    afterCopyExtraResources: pluginHostReleaseArtifacts.length > 0 && macReleaseConfiguration
+      ? [(buildPath, _electronVersion, platform, _arch, callback) => {
+          if (platform !== "darwin") {
+            callback()
+            return
+          }
+          void getPackagedMacResourcesPath(buildPath)
+            .then((resourcesPath) => signPackagedNativeReleaseArtifacts(resourcesPath, requireMacReleaseConfiguration()))
+            .then(() => callback(), (error: unknown) => callback(
+              error instanceof Error ? error : new Error(String(error)),
+            ))
+        }]
+      : undefined,
     osxSign: macReleaseConfiguration?.sign,
     osxNotarize: macReleaseConfiguration?.notarize,
   },
@@ -276,17 +315,13 @@ const config: ForgeConfig = {
       await compileNativeFileCapabilityHelper()
     },
     prePackage: async (_config, platform) => {
-      if (platform === "darwin") requireMacReleaseConfiguration()
+      if (platform === "darwin" && shouldRequireMacReleaseConfiguration()) requireMacReleaseConfiguration()
       await validatePluginHostReleaseArtifactPlan(pluginHostReleaseArtifacts)
       await validatePortableWasmReleaseAssets()
       await compileNativeFileCapabilityHelper()
     },
-    packageAfterCopy: async (_config, buildPath, _electronVersion, platform) => {
-      if (platform !== "darwin" || pluginHostReleaseArtifacts.length === 0) return
-      await signPackagedNativeReleaseArtifacts(buildPath, requireMacReleaseConfiguration())
-    },
     postPackage: async (_config, packageResult) => {
-      if (packageResult.platform !== "darwin") return
+      if (packageResult.platform !== "darwin" || !shouldVerifySignedMacPackage()) return
       const packageApps = (await Promise.all(packageResult.outputPaths.map(async (outputPath) =>
         (await readdir(outputPath)).filter((entry) => entry.endsWith(".app")).map((entry) => path.join(outputPath, entry)),
       ))).flat()

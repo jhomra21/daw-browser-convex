@@ -4,6 +4,7 @@ import {
   canonicalCapturedRecoveryPayloadV2,
   controlCapabilitiesV1,
   hashRecoveryPayloadSyncV1,
+  localControlCapabilitiesV1,
   parseCapturedRecoveryPayload,
   parseRecoveryPayload,
   type ControlActionV1,
@@ -14,6 +15,7 @@ import {
   createLocalProjectEntityRow,
   openLocalProjectDb,
 } from '~/lib/local-project-db'
+import { setLocalExternalProcessor } from '~/lib/external-plugins'
 import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
 import { executeLocalControlRequestV1 } from './local-control-execution'
 import { withLocalControlTransaction } from './local-control-state'
@@ -532,7 +534,7 @@ type ActionFixture = {
   assert: (current: Awaited<ReturnType<typeof snapshot>>, ids: Record<string, string>) => void
 }
 
-const seedActionFixture = async () => {
+const seedActionFixture = async (includeExternal = true) => {
   const project = await createLocalProject(`Action fixture ${crypto.randomUUID()}`)
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
@@ -569,6 +571,50 @@ const seedActionFixture = async () => {
   const compressor = ids.compressor
   if (!gate || !compressor) throw new Error('Expected fixture effect IDs.')
   const db = await openLocalProjectDb(project.id)
+  const externalInstanceId = crypto.randomUUID()
+  if (includeExternal) await setLocalExternalProcessor(project.id, {
+    instanceId: externalInstanceId,
+    targetId: target,
+    chainIndex: 0,
+    manifest: {
+      identity: {
+        format: 'vst3',
+        classId: 'fixture-class',
+        vendor: 'Fixture Vendor',
+        name: 'Fixture VST3',
+        version: '1',
+        architecture: 'arm64',
+        binaryFingerprint: 'a'.repeat(64),
+      },
+      role: 'effect',
+      audioInputs: [{ name: 'Input', channels: 2, enabled: true }],
+      audioOutputs: [{ name: 'Output', channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [{
+        id: 1,
+        title: 'Gain',
+        unit: '',
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: { '1': 0.25 },
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    health: { state: 'ready', updatedAt: 1 },
+    updatedAt: 1,
+  })
+  if (includeExternal) ids.external = `external-plugin:${externalInstanceId}`
   await db.put('assets', {
     id: 'fixture-asset',
     name: 'Fixture.wav',
@@ -646,6 +692,7 @@ const actionFixtures: Record<ControlActionV1['kind'], ActionFixture> = {
   'effect.upsert': { action: (ids) => ({ kind: 'effect.upsert', clientRef: 'new-eq', target: trackTarget(ids.target!), effectKind: 'eq' }), assert: (current) => expect(current.processors.some((processor) => processor.processor.kind === 'eq')).toBe(true) },
   'effect.remove': { action: (ids) => ({ kind: 'effect.remove', target: trackTarget(ids.target!), effectKind: 'utility', effect: persisted(ids.utility!) }), assert: (current, ids) => expect(current.processors.some((processor) => processor.id === ids.utility)).toBe(false) },
   'effect.reorder': { action: (ids) => ({ kind: 'effect.reorder', target: trackTarget(ids.target!), order: [{ effect: persisted(ids.compressor!), kind: 'compressor' }, { effect: persisted(ids.gate!), kind: 'gate' }, { effect: persisted(ids.utility!), kind: 'utility' }] }), assert: (current, ids) => expect(current.processors.find((processor) => processor.id === ids.compressor)?.index).toBe(0) },
+  'external-plugin.parameters.set': { action: (ids) => ({ kind: 'external-plugin.parameters.set', target: trackTarget(ids.target!), processor: persisted(ids.external!), changes: [{ parameterId: 1, normalizedValue: 0.75 }] }), assert: (current, ids) => expect(current.processors.find((processor) => processor.id === ids.external)?.processor).toMatchObject({ kind: 'external-vst3', params: { parameterOverrides: { '1': 0.75 } } }) },
   'instrument.set': { action: (ids) => ({ kind: 'instrument.set', target: trackTarget(ids.instrument!), instrumentKind: 'sampler' }), assert: (current, ids) => expect(current.processors.find((processor) => 'trackId' in processor.target && processor.target.trackId === ids.instrument && processor.processor.kind === 'instrument')?.processor.params).toMatchObject({ kind: 'sampler' }) },
   'instrument.remove': { action: (ids) => ({ kind: 'instrument.remove', target: trackTarget(ids.instrument!) }), assert: (current, ids) => expect(current.processors.some((processor) => 'trackId' in processor.target && processor.target.trackId === ids.instrument && processor.processor.kind === 'instrument')).toBe(false) },
   'arpeggiator.set': { action: (ids) => ({ kind: 'arpeggiator.set', target: trackTarget(ids.instrument!), params: { enabled: true, pattern: 'down', rate: '1/8', octaves: 1, gate: 0.8, hold: false } }), assert: (current, ids) => expect(current.processors.find((processor) => 'trackId' in processor.target && processor.target.trackId === ids.instrument && processor.processor.kind === 'arpeggiator')?.processor.params).toMatchObject({ pattern: 'down' }) },
@@ -664,9 +711,9 @@ const actionFixtures: Record<ControlActionV1['kind'], ActionFixture> = {
   'recovery.restore': { action: (ids) => ({ kind: 'recovery.restore', recovery: { id: ids.recovery! } }), assert: (current) => expect(current.clips.some((clip) => clip.midi !== undefined)).toBe(true) },
 }
 
-test('exhaustively executes all 39 advertised local control action fixtures', async () => {
-  expect(Object.keys(actionFixtures).sort()).toEqual([...controlCapabilitiesV1.actionKinds].sort())
-  expect(Object.keys(actionFixtures)).toHaveLength(39)
+test('exhaustively executes all advertised local control action fixtures', async () => {
+  expect(Object.keys(actionFixtures).sort()).toEqual([...localControlCapabilitiesV1.actionKinds].sort())
+  expect(Object.keys(actionFixtures)).toHaveLength(40)
   for (const [kind, fixture] of Object.entries(actionFixtures)) {
     const { projectId, ids } = await seedActionFixture()
     if (kind === 'recovery.restore') {
@@ -789,7 +836,7 @@ test('exhaustively restores all 10 local recovery kinds with canonical payloads 
   expect(Object.keys(recoveryFixtures).sort()).toEqual([...controlCapabilitiesV1.recovery.supportedKinds].sort())
   expect(Object.keys(recoveryFixtures)).toHaveLength(10)
   for (const [kind, fixture] of Object.entries(recoveryFixtures) as Array<[RecoveryKind, typeof recoveryFixtures[RecoveryKind]]>) {
-    const { projectId, ids } = await seedActionFixture()
+    const { projectId, ids } = await seedActionFixture(false)
     const before = await snapshot(projectId)
     const deleted = await executeLocalControlRequestV1({ projectId, actions: [fixture.action(ids)] })
     const recovery = deleted.recoveries[0]

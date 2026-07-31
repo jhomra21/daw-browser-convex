@@ -19,12 +19,18 @@ import {
   type AudioCoreGraphProcessorDto,
   type AudioCoreGraphSnapshot,
   type AudioCoreMixerState,
+  type AudioCoreInstrumentState,
 } from '../../../audio-core-contract/src/index'
 import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
-import { normalizeDelayParams, normalizeReverbParams } from '@daw-browser/shared'
+import { normalizeDelayParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
 import { getEffectTiming } from '../effects/timing'
 import { getMixerChannelRole } from './channels'
-import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
+import {
+  MASTER_ROUTE_TARGET,
+  mixerRouteKey,
+  resolveMixerTiming,
+  type ExternalNodeLatencyFrames,
+} from './resolve-timing'
 import type { ResolvedMixerGraph } from './types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 
@@ -61,9 +67,18 @@ type CreatePortableGraphSnapshotOptions = {
   bpm?: number
   assets?: readonly AudioAssetRef[]
   sidechainRoutes?: readonly ExternalSidechainRoute[]
+  includeInstruments?: boolean
+  externalLatencyFrames?: ExternalNodeLatencyFrames
 }
 
-const toPortableNodeKind = (role: ReturnType<typeof getMixerChannelRole>) => {
+const toPortableNodeKind = (
+  channel: Pick<ResolvedMixerGraph['channels'][number]['channel'], 'kind' | 'role'>,
+  includeInstruments: boolean,
+) => {
+  if (includeInstruments && channel.kind === 'instrument' && getMixerChannelRole(channel) === 'track') {
+    return 'instrument' as const
+  }
+  const role = getMixerChannelRole(channel)
   if (role === 'group' || role === 'return') return role
   return 'source' as const
 }
@@ -92,6 +107,34 @@ const toPortableMixerState = (
     { id: 'mixer.solo', target: 29, minValue: 0, maxValue: 1 },
   ],
 })
+
+const toPortableInstrument = (
+  instrument: NonNullable<NonNullable<ResolvedMixerGraph['channels'][number]['fx']>['instrument']>,
+): AudioCoreInstrumentState => {
+  if (instrument.kind !== 'synth') {
+    throw new Error(`Native instrument "${instrument.kind}" is not supported by the portable graph.`)
+  }
+  const params = normalizeSynthParams(instrument.params)
+  if (params.filter.mode !== 'lowpass' && params.filter.mode !== 'highpass') {
+    throw new Error(`Native synth filter mode "${params.filter.mode}" is not supported by the portable graph.`)
+  }
+  return {
+    version: audioCoreContractVersion,
+    kind: 'synth',
+    voiceCapacity: Math.min(32, Math.max(1, params.polyphony)),
+    outputLayout: 'stereo',
+    parameterTargets: [
+      { id: 'synth.outputGain', target: 1 },
+      { id: 'synth.outputPan', target: 2 },
+      { id: 'synth.filterCutoffHz', target: 3 },
+      { id: 'synth.filterResonance', target: 4 },
+      { id: 'synth.ampAttackMs', target: 5 },
+      { id: 'synth.ampDecayMs', target: 6 },
+      { id: 'synth.ampSustain', target: 7 },
+      { id: 'synth.ampReleaseMs', target: 8 },
+    ],
+  }
+}
 
 const resolvePortableDelayMs = (
   params: ReturnType<typeof normalizeDelayParams>,
@@ -292,17 +335,25 @@ export const createPortableGraphSnapshot = ({
   bpm = 120,
   assets = [],
   sidechainRoutes = [],
+  includeInstruments = false,
+  externalLatencyFrames = new Map(),
 }: CreatePortableGraphSnapshotOptions): AudioCoreGraphSnapshot => {
   if (!Number.isSafeInteger(revision) || revision <= 0) throw new Error('Portable graph revisions must be positive safe integers.')
-  const timing = resolveMixerTiming(graph, sampleRate, bpm)
+  const timing = resolveMixerTiming(graph, sampleRate, bpm, externalLatencyFrames)
   const nodes = graph.channels.map((entry) => ({
     id: entry.channel.id,
-    kind: toPortableNodeKind(getMixerChannelRole(entry.channel)),
+    kind: toPortableNodeKind(entry.channel, includeInstruments),
     inputLayout: entry.inputLayout,
     outputLayout: entry.outputLayout,
     processorOrder: (entry.fx?.instances ?? []).map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
+    ...(externalLatencyFrames.has(entry.channel.id)
+      ? { externalLatencyFrames: externalLatencyFrames.get(entry.channel.id) ?? 0 }
+      : {}),
     latencyFrames: (entry.fx?.instances ?? [])
       .reduce((frames, instance) => frames + getEffectTiming(instance, sampleRate, bpm).latencyFrames, 0),
+    ...(includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument
+      ? { instrument: toPortableInstrument(entry.fx.instrument) }
+      : {}),
     mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted, !!entry.channel.soloed),
   }))
   const edges: AudioCoreGraphSnapshot['edges'][number][] = []

@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -15,7 +16,7 @@
 
 namespace {
 
-constexpr std::uint32_t kCapabilities = 0x000001ffU;
+constexpr std::uint32_t kCapabilities = 0x000003ffU;
 
 bool ReadExact(std::istream& input, std::uint8_t* bytes, const std::size_t size) {
   input.read(reinterpret_cast<char*>(bytes), static_cast<std::streamsize>(size));
@@ -31,6 +32,10 @@ std::int64_t ReadI64(const std::uint8_t* bytes) {
   std::uint64_t value = 0;
   for (std::size_t index = 0; index < 8; ++index) value = (value << 8U) | bytes[index];
   return static_cast<std::int64_t>(value);
+}
+
+std::int32_t ReadI32(const std::uint8_t* bytes) {
+  return static_cast<std::int32_t>(ReadU32(bytes));
 }
 
 std::uint64_t ReadU64(const std::uint8_t* bytes) {
@@ -55,6 +60,26 @@ void WriteU64(std::vector<std::uint8_t>& payload, const std::uint64_t value) {
   for (int index = 7; index >= 0; --index) {
     payload.push_back(static_cast<std::uint8_t>(value >> (index * 8)));
   }
+}
+
+bool WriteFrame(const daw::audio_host_macos::ControlType type, std::span<const std::uint8_t> payload);
+
+bool WriteScheduleProgress(const daw::audio_host_macos::ScheduleProgress& progress) {
+  std::vector<std::uint8_t> payload;
+  payload.reserve(72);
+  WriteU32(payload, progress.revision);
+  WriteU32(payload, progress.epoch);
+  WriteU64(payload, progress.progress_sequence);
+  WriteU64(payload, progress.rendered_through_frame);
+  WriteU64(payload, progress.accepted_through_frame);
+  WriteU64(payload, progress.last_accepted_window_id);
+  WriteU64(payload, progress.applied_transport_transition_id);
+  WriteU64(payload, progress.applied_urgent_sequence);
+  WriteU32(payload, (progress.running ? 1U : 0U) | (progress.schedule_complete ? 2U : 0U));
+  WriteU32(payload, progress.instrument_credits);
+  WriteU32(payload, progress.source_credits);
+  WriteU32(payload, progress.automation_credits);
+  return WriteFrame(daw::audio_host_macos::ControlType::kScheduleProgress, payload);
 }
 
 bool WriteFrame(const daw::audio_host_macos::ControlType type, const std::span<const std::uint8_t> payload) {
@@ -87,9 +112,36 @@ bool WriteGraphRevisionStatus(const daw::audio_host_macos::GraphRevisionStatus& 
   return WriteFrame(daw::audio_host_macos::ControlType::kGraphRevisionStatus, payload);
 }
 
+bool WriteVstEditorStatus(const daw::audio_host_macos::NativeVstEditorStatus& status) {
+  std::vector<std::uint8_t> payload;
+  payload.reserve(24);
+  WriteU32(payload, status.success ? 1U : 0U);
+  WriteU32(payload, status.owned ? 1U : 0U);
+  WriteU32(payload, status.supported ? 1U : 0U);
+  WriteU32(payload, status.open ? 1U : 0U);
+  WriteU32(payload, status.width);
+  WriteU32(payload, status.height);
+  return WriteFrame(daw::audio_host_macos::ControlType::kVstEditorStatus, payload);
+}
+
 bool WriteWorkerNotification(const daw::audio_host_macos::WorkerNotification& notification) {
   if (notification.instance_id.empty() || notification.instance_id.size() > 256) return false;
   std::vector<std::uint8_t> payload;
+  if (notification.kind == daw::audio_host_macos::WorkerNotificationKind::kParameterEdit) {
+    if (!std::isfinite(notification.normalized_value)
+      || notification.normalized_value < 0.0
+      || notification.normalized_value > 1.0) return false;
+    payload.reserve(32 + notification.instance_id.size());
+    WriteU32(payload, static_cast<std::uint32_t>(notification.kind));
+    WriteU32(payload, notification.graph_revision);
+    WriteU64(payload, notification.graph_node_id);
+    WriteU32(payload, notification.parameter_id);
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &notification.normalized_value, sizeof(bits));
+    WriteU64(payload, bits);
+    WriteString(payload, notification.instance_id);
+    return WriteFrame(daw::audio_host_macos::ControlType::kNotification, payload);
+  }
   payload.reserve(24 + notification.instance_id.size());
   WriteU32(payload, static_cast<std::uint32_t>(notification.kind));
   WriteU32(payload, notification.graph_revision);
@@ -97,6 +149,25 @@ bool WriteWorkerNotification(const daw::audio_host_macos::WorkerNotification& no
   WriteU32(payload, notification.value);
   WriteString(payload, notification.instance_id);
   return WriteFrame(daw::audio_host_macos::ControlType::kNotification, payload);
+}
+
+void WriteFloat(std::vector<std::uint8_t>& payload, float value);
+
+bool WriteMeterBatch(const daw::audio_host_macos::MeterBatch& batch) {
+  if (batch.entry_count > daw::audio_host_macos::kMaximumMeterEntries) return false;
+  std::vector<std::uint8_t> payload;
+  payload.reserve(20 + static_cast<std::size_t>(batch.entry_count) * 16);
+  WriteU32(payload, batch.graph_revision);
+  WriteU32(payload, batch.transport_epoch);
+  WriteU64(payload, batch.sequence);
+  WriteU32(payload, batch.entry_count);
+  for (std::uint32_t index = 0; index < batch.entry_count; ++index) {
+    const auto& entry = batch.entries[index];
+    WriteU64(payload, entry.node_id);
+    WriteFloat(payload, entry.left_rms);
+    WriteFloat(payload, entry.right_rms);
+  }
+  return WriteFrame(daw::audio_host_macos::ControlType::kMeterBatch, payload);
 }
 
 void WriteFloat(std::vector<std::uint8_t>& payload, const float value) {
@@ -283,9 +354,11 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   daw::audio_host_macos::NativeVstAttachment attachment{};
   if (!ReadString(payload, offset, attachment.instance_id) || !ReadString(payload, offset, attachment.class_id)
     || !ReadString(payload, offset, attachment.vendor_id) || !ReadPath(payload, offset, attachment.canonical_bundle_path)
-    || !ReadPath(payload, offset, attachment.canonical_executable_path) || offset + 8 + 1 + 32 + 32 + 4 + 4 + 4 + 4 + 5 * 4 != payload.size()) {
+    || !ReadPath(payload, offset, attachment.canonical_executable_path) || offset + 4 + 8 + 1 + 32 + 32 + 4 + 4 + 4 + 4 + 5 * 4 != payload.size()) {
     return false;
   }
+  attachment.chain_index = ReadU32(payload.data() + offset);
+  offset += 4;
   attachment.graph_node_id = ReadU64(payload.data() + offset);
   offset += 8;
   attachment.architecture = payload[offset++];
@@ -327,8 +400,12 @@ int main() {
   std::unique_ptr<daw::audio_host_macos::AudioHost> staged_host;
   std::atomic<bool> recording_thread_running = false;
   std::atomic<bool> notification_thread_running = false;
+  std::atomic<bool> meter_thread_running = false;
+  std::atomic<bool> schedule_thread_running = false;
   std::thread recording_thread;
   std::thread notification_thread;
+  std::thread meter_thread;
+  std::thread schedule_thread;
   struct RecordingThreadGuard {
     std::atomic<bool>& running;
     std::thread& thread;
@@ -349,6 +426,26 @@ int main() {
       if (thread.joinable()) thread.join();
     }
   } notification_thread_guard{notification_thread_running, notification_thread, host};
+  struct MeterThreadGuard {
+    std::atomic<bool>& running;
+    std::thread& thread;
+    std::unique_ptr<daw::audio_host_macos::AudioHost>& host;
+    ~MeterThreadGuard() {
+      running.store(false, std::memory_order_release);
+      host->WakeMeterWait();
+      if (thread.joinable()) thread.join();
+    }
+  } meter_thread_guard{meter_thread_running, meter_thread, host};
+  struct ScheduleThreadGuard {
+    std::atomic<bool>& running;
+    std::thread& thread;
+    std::unique_ptr<daw::audio_host_macos::AudioHost>& host;
+    ~ScheduleThreadGuard() {
+      running.store(false, std::memory_order_release);
+      host->WakeScheduleProgressWait();
+      if (thread.joinable()) thread.join();
+    }
+  } schedule_thread_guard{schedule_thread_running, schedule_thread, host};
   auto stop_recording_thread = [&] {
     recording_thread_running.store(false, std::memory_order_release);
     host->WakeRecordingWait();
@@ -388,8 +485,47 @@ int main() {
       notification_thread_running.store(false, std::memory_order_release);
     });
   };
+  auto stop_meter_thread = [&] {
+    meter_thread_running.store(false, std::memory_order_release);
+    host->WakeMeterWait();
+    if (meter_thread.joinable()) meter_thread.join();
+  };
+  auto start_meter_thread = [&] {
+    stop_meter_thread();
+    meter_thread_running.store(true, std::memory_order_release);
+    auto* meter_host = host.get();
+    meter_thread = std::thread([&meter_thread_running, meter_host] {
+      while (meter_thread_running.load(std::memory_order_acquire)) {
+        if (!meter_host->WaitForMeterBatch(&meter_thread_running)) break;
+        const auto batch = meter_host->DrainMeterBatch();
+        if (batch && !WriteMeterBatch(*batch)) break;
+      }
+      meter_thread_running.store(false, std::memory_order_release);
+    });
+  };
+  auto stop_schedule_thread = [&] {
+    schedule_thread_running.store(false, std::memory_order_release);
+    host->WakeScheduleProgressWait();
+    if (schedule_thread.joinable()) schedule_thread.join();
+  };
+  auto start_schedule_thread = [&] {
+    stop_schedule_thread();
+    schedule_thread_running.store(true, std::memory_order_release);
+    auto* schedule_host = host.get();
+    schedule_thread = std::thread([&schedule_thread_running, schedule_host] {
+      while (schedule_thread_running.load(std::memory_order_acquire)) {
+        if (!schedule_host->WaitForScheduleProgress(&schedule_thread_running)) break;
+        const auto progress = schedule_host->DrainScheduleProgress();
+        if (progress && !WriteScheduleProgress(*progress)) break;
+      }
+      schedule_thread_running.store(false, std::memory_order_release);
+    });
+  };
   start_notification_thread();
+  start_meter_thread();
+  start_schedule_thread();
   for (;;) {
+    if (host) host->ProcessNativeVstControl();
     std::array<std::uint8_t, daw::audio_host_macos::kControlFrameHeaderBytes> header{};
     if (!ReadExact(std::cin, header.data(), header.size())) return std::cin.eof() ? EXIT_SUCCESS : EXIT_FAILURE;
     const std::uint32_t length = ReadU32(header.data() + 12);
@@ -418,7 +554,7 @@ int main() {
       if (!payload.empty()) return EXIT_FAILURE;
       const auto diagnostics = host->diagnostics();
       std::vector<std::uint8_t> response;
-      response.reserve(40);
+      response.reserve(88);
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.state));
       WriteU32(response, diagnostics.active_revision);
       WriteU32(response, diagnostics.prepared_revision);
@@ -428,6 +564,16 @@ int main() {
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.callbacks));
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.rejected_blocks));
       WriteU64(response, diagnostics.render_epoch);
+      WriteU32(response, static_cast<std::uint32_t>(diagnostics.last_rejected_reason));
+      WriteU64(response, diagnostics.last_rejected_callback);
+      WriteU64(response, diagnostics.last_rejected_render_epoch);
+      WriteU32(response, diagnostics.last_rejected_transport_epoch);
+      WriteU32(response, diagnostics.last_rejected_core_result);
+      WriteU32(response, diagnostics.last_rejected_frame_count);
+      WriteU32(response, diagnostics.last_rejected_channel_count);
+      WriteU32(response, diagnostics.last_rejected_processor_event_count);
+      WriteU32(response, diagnostics.last_rejected_instrument_event_count);
+      WriteU32(response, diagnostics.last_rejected_graph_revision);
       if (!WriteFrame(daw::audio_host_macos::ControlType::kDiagnostics, response)) return EXIT_FAILURE;
       continue;
     }
@@ -445,9 +591,13 @@ int main() {
       if (!payload.empty() || !staged_host) return EXIT_FAILURE;
       stop_recording_thread();
       stop_notification_thread();
+      stop_meter_thread();
+      stop_schedule_thread();
       host.swap(staged_host);
       staged_host.reset();
       start_notification_thread();
+      start_meter_thread();
+      start_schedule_thread();
       if (!WriteAck(request->type, true)) return EXIT_FAILURE;
       continue;
     }
@@ -459,6 +609,7 @@ int main() {
     }
     auto* session = staged_host.get();
     auto* active_session = host.get();
+    auto* control_session = session != nullptr ? session : active_session;
     bool accepted = false;
     switch (request->type) {
       case daw::audio_host_macos::ControlType::kDeviceConfigure: accepted = session && Configure(*session, payload); break;
@@ -492,23 +643,39 @@ int main() {
         accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));
         break;
       case daw::audio_host_macos::ControlType::kTransport:
-        accepted = session && payload.size() == 16 && (payload[4] == 0 || payload[4] == 1)
+        accepted = control_session && payload.size() == 24 && (payload[4] == 0 || payload[4] == 1)
           && payload[5] == 0 && payload[6] == 0 && payload[7] == 0
-          && session->SetTransport(ReadU32(payload.data()), payload[4] == 1, ReadI64(payload.data() + 8));
+          && control_session->SetTransport(
+            ReadU32(payload.data()),
+            payload[4] == 1,
+            ReadI64(payload.data() + 8),
+            ReadU64(payload.data() + 16)
+          );
         break;
       case daw::audio_host_macos::ControlType::kParameterEvents:
-        accepted = session && session->QueueParameterEvents(payload);
+        accepted = control_session && control_session->QueueParameterEvents(payload);
         break;
-      case daw::audio_host_macos::ControlType::kMidiEvents: accepted = session && session->QueueInstrumentEvents(payload); break;
-      case daw::audio_host_macos::ControlType::kSourceEvents: accepted = session && session->QueueSourceEvents(payload); break;
+      case daw::audio_host_macos::ControlType::kMidiEvents:
+        accepted = control_session && control_session->QueueInstrumentEvents(payload);
+        break;
+      case daw::audio_host_macos::ControlType::kScheduleWindow: {
+        accepted = control_session && control_session->QueueScheduleWindow(payload);
+        break;
+      }
+      case daw::audio_host_macos::ControlType::kVstScheduleAutomationEnable:
+        accepted = control_session && control_session->ReenableVstScheduleAutomation(payload);
+        break;
+      case daw::audio_host_macos::ControlType::kSourceEvents:
+        accepted = control_session && control_session->QueueSourceEvents(payload);
+        break;
       case daw::audio_host_macos::ControlType::kVstParameterEvents:
-        accepted = active_session && active_session->QueueNativeVstParameterEvents(payload);
+        accepted = control_session && control_session->QueueNativeVstParameterEvents(payload);
         break;
       case daw::audio_host_macos::ControlType::kVstMidiEvents:
-        accepted = active_session && active_session->QueueNativeVstMidiEvents(payload);
+        accepted = control_session && control_session->QueueNativeVstMidiEvents(payload);
         break;
       case daw::audio_host_macos::ControlType::kVstStateSet:
-        accepted = active_session && active_session->SetNativeVstState(payload);
+        accepted = control_session && control_session->SetNativeVstState(payload);
         break;
       case daw::audio_host_macos::ControlType::kVstStateGet: {
         const auto state = active_session ? active_session->GetNativeVstState(payload) : std::nullopt;
@@ -541,11 +708,54 @@ int main() {
         accepted = session && ReadString(payload, offset, instanceId) && offset == payload.size() && session->DetachVstReference(instanceId);
         break;
       }
+      case daw::audio_host_macos::ControlType::kVstEditor: {
+        if (!active_session || payload.size() < 28) return EXIT_FAILURE;
+        const auto command = ReadU32(payload.data());
+        if (command < 1 || command > 5
+          || ReadU32(payload.data() + 4) > 8192
+          || ReadU32(payload.data() + 8) > 8192
+          || ReadU32(payload.data() + 12) > 1
+          || (ReadU32(payload.data() + 12) == 1 && command != 1 && command != 3)) return EXIT_FAILURE;
+        std::size_t offset = 24;
+        std::string instanceId;
+        if (!ReadString(payload, offset, instanceId) || offset != payload.size()) return EXIT_FAILURE;
+        const auto anchor = ReadU32(payload.data() + 12) == 1
+          ? std::optional<daw::audio_host_macos::NativeVstEditorAnchor>(
+            daw::audio_host_macos::NativeVstEditorAnchor{
+              .x = ReadI32(payload.data() + 16),
+              .y = ReadI32(payload.data() + 20),
+            })
+          : std::nullopt;
+        const auto status = active_session->ExecuteNativeVstEditorCommand(
+          instanceId,
+          static_cast<daw::audio_host_macos::NativeVstEditorCommand>(command),
+          ReadU32(payload.data() + 4),
+          ReadU32(payload.data() + 8),
+          anchor
+        );
+        if (!status) {
+          if (!WriteVstEditorStatus({
+            .success = false,
+            .owned = false,
+            .supported = false,
+            .open = false,
+            .width = 0,
+            .height = 0,
+          })) return EXIT_FAILURE;
+          continue;
+        }
+        if (!WriteVstEditorStatus(*status)) return EXIT_FAILURE;
+        continue;
+      }
       case daw::audio_host_macos::ControlType::kStart: {
         if (!payload.empty()) return EXIT_FAILURE;
         accepted = active_session && active_session->Start();
         break;
       }
+      case daw::audio_host_macos::ControlType::kDiagnosticStart:
+        if (!payload.empty()) return EXIT_FAILURE;
+        accepted = active_session && active_session->StartDiagnosticMode();
+        break;
       case daw::audio_host_macos::ControlType::kStop:
         if (!payload.empty()) return EXIT_FAILURE;
         stop_recording_thread();

@@ -41,7 +41,7 @@ export function DashboardPluginsView() {
 
   return (
     <DashboardScrollView>
-      <DashboardSection title="VST3 Plug-ins" description="Discovery and preflight are machine-local. Eligible effects can be inserted as bypassed project metadata while native graph activation remains gated.">
+      <DashboardSection title="VST3 Plug-ins" description="Discovery and preflight are machine-local. Eligible effects can be activated on compatible stereo audio tracks through the native graph; browser playback remains unsupported.">
         <DashboardRow
           label="Plug-in directories"
           value={`${catalog().directories.length} configured`}

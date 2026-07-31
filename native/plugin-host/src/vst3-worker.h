@@ -1,5 +1,6 @@
 #pragma once
 
+#include "editor-parameter-state.h"
 #include "worker-supervisor.h"
 #include "vst3-editor-window.h"
 
@@ -17,12 +18,16 @@ enum class WorkerNotificationKind {
   kLatency,
   kBuses,
   kFault,
+  kEditorInteraction,
+  kParameterEdit,
 };
 
 struct WorkerNotification {
   WorkerNotificationKind kind = WorkerNotificationKind::kFault;
   std::string message;
   std::uint32_t value = 0;
+  std::uint32_t parameter_id = 0;
+  double normalized_value = 0.0;
 };
 
 struct WorkerInstanceRequest {
@@ -44,11 +49,21 @@ class Vst3Worker {
   [[nodiscard]] std::optional<WorkerManifest> PreflightManifest(const WorkerTransportRequest& transport, std::uint32_t stateRevision);
   [[nodiscard]] bool ConfigureTransport(WorkerTransport& transport);
   [[nodiscard]] bool ProcessSubmittedSlot(std::size_t slotIndex);
+  [[nodiscard]] bool PeekEditorParameterFeedback(PendingEditorParameterEdit& edit) const;
+  [[nodiscard]] bool AckEditorParameterFeedback(
+    std::uint32_t parameterId,
+    std::uint64_t generation
+  );
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool SetState(const WorkerState& state);
   [[nodiscard]] bool EditorCommandSupported() const;
   [[nodiscard]] WorkerEditorStatus EditorStatus() const;
-  [[nodiscard]] bool ExecuteEditorCommand(WorkerEditorCommand command, std::uint32_t width = 0, std::uint32_t height = 0);
+  [[nodiscard]] bool ExecuteEditorCommand(
+    WorkerEditorCommand command,
+    std::uint32_t width = 0,
+    std::uint32_t height = 0,
+    std::optional<WorkerEditorAnchor> anchor = std::nullopt
+  );
   void Dispose();
 
   [[nodiscard]] bool ready() const;

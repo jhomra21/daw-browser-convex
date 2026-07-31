@@ -1,6 +1,7 @@
 #include "worker-control-service.h"
 #include "worker-supervisor.h"
 #include "worker-control-protocol.h"
+#include "editor-parameter-state.h"
 
 #include <array>
 #include <chrono>
@@ -38,6 +39,8 @@ using daw::plugin_host::WorkerManifest;
 using daw::plugin_host::WorkerPluginRole;
 using daw::plugin_host::WorkerPreflightResult;
 using daw::plugin_host::WorkerPreflightStatus;
+using daw::plugin_host::BoundedEditorParameterState;
+using daw::plugin_host::PendingEditorParameterEdit;
 
 bool Check(const bool condition, const char* message) {
   if (condition) return true;
@@ -147,6 +150,50 @@ WorkerPreflightResult AvailablePreflight() {
 
 int main(int argc, char* argv[]) {
   if (argc != 2) return EXIT_FAILURE;
+  {
+    BoundedEditorParameterState<3> state;
+    if (!Check(!state.Queue(1, 2.0), "invalid editor parameter value was accepted")) return EXIT_FAILURE;
+    if (!Check(state.Queue(0x7fff'ffffU, 0.125), "signed-limit desktop parameter id was rejected")) return EXIT_FAILURE;
+    if (!Check(state.Queue(0x8000'0000U, 0.25) && state.Queue(0xffff'ffffU, 0.375),
+      "high-bit desktop parameter ids were rejected")) return EXIT_FAILURE;
+    std::array<PendingEditorParameterEdit, 3> process{};
+    if (!Check(state.DrainProcess(process) == 3, "editor process edits were not drained")) return EXIT_FAILURE;
+    PendingEditorParameterEdit feedback{};
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 0x7fff'ffffU, "editor feedback was not retained")) return EXIT_FAILURE;
+    if (!Check(state.AckFeedback(0x7fff'ffffU, feedback.generation), "signed-limit editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 0xffff'ffffU, "maximum editor feedback order changed")) return EXIT_FAILURE;
+    if (!Check(state.AckFeedback(0xffff'ffffU, feedback.generation), "maximum editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 0x8000'0000U, "high-bit editor feedback order changed")) return EXIT_FAILURE;
+    if (!Check(state.AckFeedback(0x8000'0000U, feedback.generation), "high-bit editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    if (!Check(state.Queue(1, 0.25) && state.Queue(2, 0.5), "editor parameter edits were not queued")) return EXIT_FAILURE;
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 1, "editor feedback order changed")) return EXIT_FAILURE;
+    const auto generation = feedback.generation;
+    if (!Check(state.AckFeedback(1, feedback.generation), "first editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 2, "editor feedback order changed")) return EXIT_FAILURE;
+    if (!Check(state.AckFeedback(2, feedback.generation), "second editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    if (!Check(state.Queue(1, 0.75), "editor parameter coalescing failed")) return EXIT_FAILURE;
+    if (!Check(!state.AckFeedback(1, generation), "stale editor feedback acknowledgement succeeded")) return EXIT_FAILURE;
+    if (!Check(state.PeekFeedback(feedback) && feedback.parameter_id == 1 && feedback.normalized_value == 0.75
+      && state.AckFeedback(1, feedback.generation), "current editor feedback acknowledgement failed")) return EXIT_FAILURE;
+    state.Clear();
+    if (!Check(!state.PeekFeedback(feedback), "editor parameter disposal did not clear feedback")) return EXIT_FAILURE;
+  }
+  {
+    BoundedEditorParameterState<1> state;
+    if (!Check(state.Queue(1, 0.25), "capacity fixture edit was not queued")) return EXIT_FAILURE;
+    PendingEditorParameterEdit before{};
+    if (!Check(state.PeekFeedback(before), "capacity fixture feedback was not retained")) return EXIT_FAILURE;
+    if (!Check(!state.Queue(2, 0.5), "full editor parameter state accepted an edit")) return EXIT_FAILURE;
+    PendingEditorParameterEdit after{};
+    if (!Check(state.PeekFeedback(after)
+      && after.parameter_id == before.parameter_id
+      && after.normalized_value == before.normalized_value
+      && after.generation == before.generation, "capacity failure mutated feedback state")) return EXIT_FAILURE;
+    std::array<PendingEditorParameterEdit, 1> process{};
+    if (!Check(state.DrainProcess(process) == 1
+      && process[0].parameter_id == before.parameter_id
+      && process[0].generation == before.generation, "capacity failure mutated process state")) return EXIT_FAILURE;
+  }
   auto eligibility = Eligible();
   if (!Check(IsWorkerLaunchEligible(eligibility), "eligible worker record was rejected")) return EXIT_FAILURE;
   eligibility.quarantinePresent = true;
@@ -158,9 +205,18 @@ int main(int argc, char* argv[]) {
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";
   if (!Check(!daw::plugin_host::IsValidWorkerStartupRequest(invalidStartup), "no-plugin startup accepted plugin data")) return EXIT_FAILURE;
+  auto instrumentHello = Hello();
+  instrumentHello.manifest.role = WorkerPluginRole::kInstrument;
+  instrumentHello.manifest.inputBuses.clear();
+  instrumentHello.manifest.transport.inputChannels = 0;
+  if (!Check(daw::plugin_host::IsValidWorkerHello(instrumentHello), "zero-input instrument hello was rejected")) return EXIT_FAILURE;
+  auto invalidInstrumentHello = instrumentHello;
+  invalidInstrumentHello.manifest.inputBuses = {WorkerBusDescriptor{.name = "Main Input", .channels = 2, .enabled = true}};
+  invalidInstrumentHello.manifest.transport.inputChannels = 2;
+  if (!Check(!daw::plugin_host::IsValidWorkerHello(invalidInstrumentHello), "instrument with audio input was accepted")) return EXIT_FAILURE;
   if (!Check(daw::plugin_host::IsValidWorkerHostConfiguration(Configuration(argv[1])), "valid worker configuration was rejected")) return EXIT_FAILURE;
   auto invalidConfiguration = Configuration(argv[1]);
-  invalidConfiguration.artifact.version = "2";
+  invalidConfiguration.artifact.version = "3";
   if (!Check(!daw::plugin_host::IsValidWorkerHostConfiguration(invalidConfiguration), "unknown worker artifact was accepted")) return EXIT_FAILURE;
 
   const auto layout = CreateWorkerTransportLayout(Request());
@@ -215,14 +271,17 @@ int main(int argc, char* argv[]) {
       editorProtocol[1],
       daw::plugin_host::WorkerControlCommand::kEditorResize,
       640,
-      480),
+      480,
+      daw::plugin_host::WorkerEditorAnchor{.x = -320, .y = -240}),
     "editor command write failed"
   )) return EXIT_FAILURE;
   close(editorProtocol[1]);
   const auto editorCommand = daw::plugin_host::ReadWorkerControlCommand(editorProtocol[0]);
   close(editorProtocol[0]);
   if (!Check(editorCommand && editorCommand->command == daw::plugin_host::WorkerControlCommand::kEditorResize
-    && editorCommand->width == 640 && editorCommand->height == 480, "editor command validation failed")) return EXIT_FAILURE;
+    && editorCommand->width == 640 && editorCommand->height == 480
+    && editorCommand->anchor && editorCommand->anchor->x == -320 && editorCommand->anchor->y == -240,
+    "editor command validation failed")) return EXIT_FAILURE;
   int editorResponseProtocol[2]{};
   if (!Check(pipe(editorResponseProtocol) == 0, "editor response pipe creation failed")) return EXIT_FAILURE;
   if (!Check(
@@ -293,8 +352,14 @@ int main(int argc, char* argv[]) {
   }
   if (!Check(callback.ReadCompleted(0, 7), "worker did not complete callback submission")) return EXIT_FAILURE;
   if (!Check(callback.health() == WorkerHealth::kReady, "worker health was not available from the callback port")) return EXIT_FAILURE;
+  std::array<float, 1> mismatchedOutput{};
+  if (!Check(!callback.CopyCompletedOutput(0, 7, mismatchedOutput), "mismatched output dimensions were accepted")) return EXIT_FAILURE;
+  if (!Check(
+    callback.Submit({.slotIndex = 0, .sequence = 9, .numSamples = 64, .events = events}) == WorkerSubmissionStatus::kAccepted,
+    "completed slot was not released after a frame-size mismatch"
+  )) return EXIT_FAILURE;
   std::array<float, 128> worker_input{};
-  std::array<float, 128> worker_output{};
+  std::array<float, 256> worker_output{};
   worker_input[0] = 0.25F;
   worker_input[64] = -0.5F;
   if (!Check(callback.CopyInput(1, worker_input), "callback-safe input mapping failed")) return EXIT_FAILURE;

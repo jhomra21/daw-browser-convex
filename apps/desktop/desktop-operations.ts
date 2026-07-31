@@ -11,6 +11,6 @@ export const desktopOperations = (nativeMediaAvailable: boolean): DesktopOperati
     ...desktopControlOperationsV1,
   ]
   return nativeMediaAvailable
-    ? ["host.import.audio", "host.export.run", "host.export.status", "host.export.cancel", ...base]
+    ? ["host.vst.instances", "host.vst.parameters", "host.import.audio", "host.export.run", "host.export.status", "host.export.cancel", ...base]
     : base
 }

@@ -17,6 +17,7 @@ type Options = {
   preflightPlayback?: () => Promise<boolean>
   nativePlayback?: {
     enabled: Accessor<boolean>
+    projectId?: Accessor<string>
     projectGeneration?: Accessor<number>
     compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
     reportFault?: (message: string) => void

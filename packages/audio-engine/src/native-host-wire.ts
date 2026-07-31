@@ -4,10 +4,18 @@ import type {
   AudioCoreSampleSourceEventDto,
 } from "../../audio-core-contract/src/index"
 import type { PortableWasmInstrumentEvent, PortableWasmProcessorEvent } from "./portable-wasm-protocol"
+import {
+  nativeAudioHostMaximumScheduleAutomationSegments,
+  nativeAudioHostMaximumScheduleChunks,
+  nativeAudioHostMaximumScheduleInstanceIdBytes,
+  nativeAudioHostMaximumScheduleRecords,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 
 const graphEnvelopeVersion = 3
+const graphEnvelopeVersionWithExternalLatency = 4
 const nativeGraphFrameHeaderBytes = 12
 const maximumNativeAssetId = 0xffff_ffff
+const nativeTextEncoder = new TextEncoder()
 
 /**
  * The desktop bridge accepts only these portable, path-free session DTOs.
@@ -25,6 +33,7 @@ export type NativeHostTransport = {
   epoch: number
   running: boolean
   frame: number
+  transitionId?: bigint
 }
 
 export type NativeHostRecordingConfiguration = {
@@ -67,6 +76,19 @@ export type NativeHostRecordingStatus = {
   configured: boolean
 }
 
+export type NativeHostMeterEntry = {
+  nodeId: bigint
+  leftRms: number
+  rightRms: number
+}
+
+export type NativeHostMeterBatch = {
+  graphRevision: number
+  transportEpoch: number
+  sequence: bigint
+  entries: readonly NativeHostMeterEntry[]
+}
+
 /**
  * Session-local, planar float32 PCM transferred as raw bytes. No persistent
  * identity, path, handle, or Web Audio object crosses the native boundary.
@@ -90,6 +112,16 @@ export type NativeHostDiagnostics = {
   installedAssets: number
   callbacks: number
   rejectedBlocks: number
+  lastRejectedReason: number
+  lastRejectedCallback: bigint
+  lastRejectedRenderEpoch: bigint
+  lastRejectedTransportEpoch: number
+  lastRejectedCoreResult: number
+  lastRejectedFrameCount: number
+  lastRejectedChannelCount: number
+  lastRejectedProcessorEventCount: number
+  lastRejectedInstrumentEventCount: number
+  lastRejectedGraphRevision: number
 }
 
 export type NativeOutputDevice = {
@@ -127,9 +159,27 @@ const tap = (value: AudioCoreGraphSnapshot["edges"][number]["tap"]) => (
   value === "pre-fx" ? 1 : value === "pre-fader" ? 2 : 3
 )
 
-const eventKind = (value: PortableWasmInstrumentEvent["type"]) => (
-  value === "note-on" ? 1 : value === "note-off" ? 2 : value === "sustain" ? 3 : 4
-)
+export type NativeInstrumentEvent = Omit<PortableWasmInstrumentEvent, "type"> & {
+  type: PortableWasmInstrumentEvent["type"] | "live-note-on" | "live-note-off" | "transport-release" | "all-sound-off"
+}
+
+const eventKind = (value: NativeInstrumentEvent["type"]) => {
+  switch (value) {
+    case "note-on": return 1
+    case "note-off": return 2
+    case "sustain": return 3
+    case "expression": return 4
+    case "parameter": return 5
+    case "live-note-on": return 101
+    case "live-note-off": return 102
+    case "transport-release": return 103
+    case "all-sound-off": return 104
+    default: {
+      const exhaustive: never = value
+      return exhaustive
+    }
+  }
+}
 
 const writeId = (view: DataView, offset: number, id: string) => view.setBigUint64(offset, nativeGraphNodeId(id), true)
 
@@ -140,11 +190,16 @@ const writeId = (view: DataView, offset: number, id: string) => view.setBigUint6
  */
 export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) => {
   const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
-  let byteLength = 24 + snapshot.nodes.length * 132 + snapshot.edges.length * 48
+  const hasExternalLatency = snapshot.nodes.some((node) => (
+    (node.externalLatencyFrames ?? 0) > 0
+  ))
+  const version = hasExternalLatency ? graphEnvelopeVersionWithExternalLatency : graphEnvelopeVersion
+  const nodeBytes = hasExternalLatency ? 136 : 132
+  let byteLength = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
   for (const { processor } of processors) byteLength += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
   const output = new Uint8Array(byteLength)
   const view = new DataView(output.buffer)
-  view.setUint32(0, graphEnvelopeVersion, true)
+  view.setUint32(0, version, true)
   view.setUint32(4, snapshot.revision, true)
   view.setUint32(8, snapshot.nodes.length, true)
   view.setUint32(12, snapshot.edges.length, true)
@@ -158,19 +213,24 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
     view.setUint32(offset + 16, node.outputLayout === "mono" ? 1 : 2, true)
     view.setUint32(offset + 20, node.kind === "source" ? sourceBus++ : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
+    const instrumentOffset = hasExternalLatency ? offset + 32 : offset + 28
+    if (hasExternalLatency) {
+      view.setUint32(offset + 28, node.externalLatencyFrames ?? 0, true)
+    }
     const instrument = node.kind === "instrument" ? node.instrument : undefined
-    view.setUint32(offset + 28, instrument?.kind === 'synth' ? 1 : instrument?.kind === 'sampler' ? 2 : instrument?.kind === 'drum-rack' ? 3 : instrument?.kind === 'granular' ? 4 : 0, true)
-    view.setUint32(offset + 32, instrument?.version ?? 0, true)
-    view.setUint32(offset + 36, instrument?.voiceCapacity ?? 0, true)
-    view.setUint32(offset + 40, instrument?.kind === 'synth' ? instrument.parameterTargets.length : 0, true)
-    for (let index = 0; index < 16; index += 1) view.setUint32(offset + 44 + index * 4, instrument?.kind === 'synth' ? instrument.parameterTargets[index]?.target ?? 0 : 0, true)
+    view.setUint32(instrumentOffset, instrument?.kind === 'synth' ? 1 : instrument?.kind === 'sampler' ? 2 : instrument?.kind === 'drum-rack' ? 3 : instrument?.kind === 'granular' ? 4 : 0, true)
+    view.setUint32(instrumentOffset + 4, instrument?.version ?? 0, true)
+    view.setUint32(instrumentOffset + 8, instrument?.voiceCapacity ?? 0, true)
+    view.setUint32(instrumentOffset + 12, instrument?.kind === 'synth' ? instrument.parameterTargets.length : 0, true)
+    for (let index = 0; index < 16; index++) view.setUint32(instrumentOffset + 16 + index * 4, instrument?.kind === 'synth' ? instrument.parameterTargets[index]?.target ?? 0 : 0, true)
     const mixer = node.mixer
-    view.setBigUint64(offset + 108, BigInt(mixer?.instanceId ?? 0), true)
-    view.setFloat32(offset + 116, mixer?.gain ?? 0, true)
-    view.setFloat32(offset + 120, mixer?.pan ?? 0, true)
-    view.setUint32(offset + 124, mixer?.muted ? 1 : 0, true)
-    view.setUint32(offset + 128, mixer?.soloed ? 1 : 0, true)
-    offset += 132
+    const mixerOffset = instrumentOffset + 80
+    view.setBigUint64(mixerOffset, BigInt(mixer?.instanceId ?? 0), true)
+    view.setFloat32(mixerOffset + 8, mixer?.gain ?? 0, true)
+    view.setFloat32(mixerOffset + 12, mixer?.pan ?? 0, true)
+    view.setUint32(mixerOffset + 16, mixer?.muted ? 1 : 0, true)
+    view.setUint32(mixerOffset + 20, mixer?.soloed ? 1 : 0, true)
+    offset += nodeBytes
   }
   for (const edge of snapshot.edges) {
     writeId(view, offset, edge.id)
@@ -230,12 +290,63 @@ export const serializeNativeProcessorEvents = (events: readonly PortableWasmProc
   return output
 }
 
-export const serializeNativeInstrumentEvents = (epoch: number, events: readonly PortableWasmInstrumentEvent[]) => {
+export type NativeVstParameterEvent = {
+  id: number
+  value: number
+  sampleOffset: number
+}
+
+export const serializeNativeVstParameterEvents = (
+  instanceId: string,
+  events: readonly NativeVstParameterEvent[],
+) => {
+  const instanceBytes = nativeTextEncoder.encode(instanceId)
+  if (instanceBytes.byteLength === 0 || instanceBytes.byteLength > 256 || events.length > 2_048) {
+    throw new Error("Native VST3 parameter event payload exceeds its bounds.")
+  }
+  const output = new Uint8Array(4 + instanceBytes.byteLength + 4 + events.length * 16)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, instanceBytes.byteLength, true)
+  output.set(instanceBytes, 4)
+  let offset = 4 + instanceBytes.byteLength
+  view.setUint32(offset, events.length, true)
+  offset += 4
+  for (const event of events) {
+    if (!Number.isInteger(event.id) || event.id < 0 || event.id > 0xffff_ffff
+      || !Number.isInteger(event.sampleOffset) || event.sampleOffset < 0 || event.sampleOffset >= 8_192
+      || !Number.isFinite(event.value) || event.value < 0 || event.value > 1) {
+      throw new Error("Native VST3 parameter event is invalid.")
+    }
+    view.setUint32(offset, event.id, true)
+    view.setUint32(offset + 4, event.sampleOffset, true)
+    view.setFloat64(offset + 8, event.value, true)
+    offset += 16
+  }
+  return output
+}
+
+export const serializeNativeInstrumentEvents = (epoch: number, events: readonly NativeInstrumentEvent[]) => {
+  // Immediate native live events use a block-relative frameOffset. Scheduled
+  // events carry their absolute frame in the schedule-window envelope.
+  if (!Number.isInteger(epoch) || epoch <= 0 || epoch > 0xffff_ffff || events.length > 2_048) {
+    throw new Error("Native instrument event payload exceeds its bounds.")
+  }
   const output = new Uint8Array(4 + events.length * 48)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
   for (const event of events) {
+    const noteEvent = event.type === "note-on" || event.type === "note-off"
+      || event.type === "live-note-on" || event.type === "live-note-off"
+    if (!Number.isSafeInteger(event.noteId) || event.noteId <= 0
+      || !Number.isSafeInteger(event.sequence) || event.sequence <= 0
+      || !Number.isSafeInteger(event.frameOffset) || event.frameOffset < 0 || event.frameOffset > 0xffff_ffff
+      || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
+      || (noteEvent && (!Number.isInteger(event.note) || event.note < 0 || event.note > 127
+        || !Number.isFinite(event.value) || event.value < 0 || event.value > 1))
+      || !Number.isFinite(event.value)) {
+      throw new Error("Native instrument event is invalid.")
+    }
     writeId(view, offset, event.nodeId)
     view.setBigUint64(offset + 8, BigInt(event.noteId), true)
     view.setBigUint64(offset + 16, BigInt(event.sequence), true)
@@ -247,6 +358,148 @@ export const serializeNativeInstrumentEvents = (epoch: number, events: readonly 
     view.setFloat32(offset + 44, event.value, true)
     offset += 48
   }
+  return output
+}
+
+export type NativeScheduleWindow = {
+  revision: number
+  epoch: number
+  windowId?: number
+  startFrame: number
+  endFrame: number
+  chunkIndex?: number
+  chunkCount?: number
+  endsSchedule?: boolean
+  instrumentEvents?: readonly NativeInstrumentEvent[]
+  sampleSourceEvents?: readonly NativeSourceEvent[]
+  vstAutomationSegments?: readonly NativeVstAutomationSegment[]
+  assets?: readonly NativeSessionAsset[]
+}
+
+export type NativeVstAutomationSegment = {
+  instanceId: string
+  parameterId: number
+  startFrame: number
+  endFrame: number
+  startValue: number
+  endValue: number
+  interpolation: "linear" | "hold"
+}
+
+export type NativeScheduleProgress = {
+  revision: number
+  epoch: number
+  progressSequence: bigint
+  renderedThroughFrame: bigint
+  acceptedThroughFrame: bigint
+  lastAcceptedWindowId: bigint
+  appliedTransportTransitionId: bigint
+  appliedUrgentSequence: bigint
+  running: boolean
+  scheduleComplete: boolean
+  instrumentCredits: number
+  sourceCredits: number
+  automationCredits: number
+}
+
+export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
+  const instrumentEvents = window.instrumentEvents ?? []
+  const sampleSourceEvents = window.sampleSourceEvents ?? []
+  const vstAutomationSegments = window.vstAutomationSegments ?? []
+  const encodedInstanceIds = vstAutomationSegments.map((segment) => nativeTextEncoder.encode(segment.instanceId))
+  const windowId = window.windowId ?? 1
+  const chunkIndex = window.chunkIndex ?? 0
+  const chunkCount = window.chunkCount ?? 1
+  const endsSchedule = window.endsSchedule ?? true
+  if (
+    !Number.isSafeInteger(window.revision) || window.revision <= 0 || window.revision > 0xffff_ffff
+    || !Number.isSafeInteger(window.epoch) || window.epoch <= 0 || window.epoch > 0xffff_ffff
+    || !Number.isSafeInteger(window.startFrame) || window.startFrame < 0
+    || !Number.isSafeInteger(window.endFrame) || window.endFrame <= window.startFrame
+    || !Number.isSafeInteger(windowId) || windowId <= 0
+    || !Number.isSafeInteger(chunkIndex) || chunkIndex < 0
+    || !Number.isSafeInteger(chunkCount) || chunkCount <= 0
+    || chunkCount > nativeAudioHostMaximumScheduleChunks
+    || chunkIndex >= chunkCount
+    || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length
+      > nativeAudioHostMaximumScheduleRecords
+    || instrumentEvents.length > 256
+    || sampleSourceEvents.length > 256
+    || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments
+    || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame)
+    || sampleSourceEvents.some((event) => event.startFrame < window.startFrame || event.startFrame >= window.endFrame)
+    || vstAutomationSegments.some((segment, index) => (
+      !Number.isInteger(segment.parameterId) || segment.parameterId < 0 || segment.parameterId > 0xffff_ffff
+      || !Number.isSafeInteger(segment.startFrame) || segment.startFrame < window.startFrame
+      || !Number.isSafeInteger(segment.endFrame) || segment.endFrame <= segment.startFrame
+      || segment.endFrame > window.endFrame
+      || !Number.isFinite(segment.startValue) || segment.startValue < 0 || segment.startValue > 1
+      || !Number.isFinite(segment.endValue) || segment.endValue < 0 || segment.endValue > 1
+      || (segment.interpolation !== "linear" && segment.interpolation !== "hold")
+      || encodedInstanceIds[index]?.byteLength === 0
+      || (encodedInstanceIds[index]?.byteLength ?? 0) > nativeAudioHostMaximumScheduleInstanceIdBytes
+    ))
+  ) throw new Error("Native schedule window is invalid.")
+  const instrumentBytes = serializeNativeInstrumentEvents(window.epoch, instrumentEvents)
+  const sourceBytes = serializeNativeSourceEvents(sampleSourceEvents, window.assets ?? [])
+  const automationBytes = encodedInstanceIds.reduce((total, instanceBytes) => total + 44 + instanceBytes.byteLength, 0)
+  const output = new Uint8Array(56 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, window.revision, true)
+  view.setUint32(4, window.epoch, true)
+  view.setBigUint64(8, BigInt(windowId), true)
+  view.setBigUint64(16, BigInt(window.startFrame), true)
+  view.setBigUint64(24, BigInt(window.endFrame), true)
+  view.setUint32(32, chunkIndex, true)
+  view.setUint32(36, chunkCount, true)
+  view.setUint32(40, endsSchedule ? 1 : 0, true)
+  view.setUint32(44, instrumentEvents.length, true)
+  view.setUint32(48, sampleSourceEvents.length, true)
+  view.setUint32(52, vstAutomationSegments.length, true)
+  let offset = 56
+  output.set(instrumentBytes.subarray(4), offset)
+  offset += instrumentBytes.byteLength - 4
+  output.set(sourceBytes.subarray(4), offset)
+  offset += sourceBytes.byteLength - 4
+  for (const [index, segment] of vstAutomationSegments.entries()) {
+    const encodedInstance = encodedInstanceIds[index]
+    view.setUint32(offset, encodedInstance.byteLength, true)
+    offset += 4
+    output.set(encodedInstance, offset)
+    offset += encodedInstance.byteLength
+    view.setUint32(offset, segment.parameterId, true)
+    offset += 4
+    view.setBigUint64(offset, BigInt(segment.startFrame), true)
+    offset += 8
+    view.setBigUint64(offset, BigInt(segment.endFrame), true)
+    offset += 8
+    view.setFloat64(offset, segment.startValue, true)
+    offset += 8
+    view.setFloat64(offset, segment.endValue, true)
+    offset += 8
+    view.setUint32(offset, segment.interpolation === "linear" ? 1 : 0, true)
+    offset += 4
+  }
+  return output
+}
+
+export const serializeNativeVstScheduleAutomationEnable = (
+  instanceId: string,
+  parameterIds: readonly number[],
+) => {
+  const instanceBytes = nativeTextEncoder.encode(instanceId)
+  if (
+    instanceBytes.byteLength === 0
+    || instanceBytes.byteLength > nativeAudioHostMaximumScheduleInstanceIdBytes
+    || parameterIds.length > nativeAudioHostMaximumScheduleAutomationSegments
+    || parameterIds.some((id) => !Number.isInteger(id) || id < 0 || id > 0xffff_ffff)
+  ) throw new Error("Native VST schedule automation enable payload is invalid.")
+  const output = new Uint8Array(8 + instanceBytes.byteLength + parameterIds.length * 4)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, instanceBytes.byteLength, true)
+  output.set(instanceBytes, 4)
+  view.setUint32(4 + instanceBytes.byteLength, parameterIds.length, true)
+  parameterIds.forEach((id, index) => view.setUint32(8 + instanceBytes.byteLength + index * 4, id, true))
   return output
 }
 

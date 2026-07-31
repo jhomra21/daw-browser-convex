@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace daw::plugin_host {
@@ -20,12 +21,12 @@ constexpr std::size_t kMaximumWorkerFrames = 8'192;
 constexpr std::size_t kMaximumWorkerEvents = 2'048;
 constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
-constexpr std::uint32_t kWorkerTransportAbiVersion = 1;
+constexpr std::uint32_t kWorkerTransportAbiVersion = 2;
 constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
 constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
-constexpr std::string_view kWorkerArtifactVersion = "1";
+constexpr std::string_view kWorkerArtifactVersion = "2";
 
 struct WorkerArtifactIdentity {
   std::string id;
@@ -56,6 +57,11 @@ struct WorkerEditorStatus {
   bool open = false;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
+};
+
+struct WorkerEditorAnchor {
+  std::int32_t x = 0;
+  std::int32_t y = 0;
 };
 
 struct WorkerEditorResponse {
@@ -114,6 +120,18 @@ enum class WorkerPluginRole : std::uint32_t {
   kInstrument = 2,
 };
 
+struct WorkerParameterDescriptor {
+  std::uint32_t id = 0;
+  std::string title;
+  std::string unit;
+  double minimum = 0.0;
+  double maximum = 1.0;
+  double defaultValue = 0.0;
+  std::uint32_t stepCount = 0;
+  bool readOnly = false;
+  bool hidden = false;
+};
+
 struct WorkerManifest {
   std::uint32_t version = 0;
   WorkerArtifactIdentity artifact;
@@ -128,6 +146,10 @@ struct WorkerManifest {
   std::uint32_t latencyFrames = 0;
   std::optional<std::uint32_t> tailFrames;
   std::uint32_t stateRevision = 0;
+  std::vector<WorkerParameterDescriptor> parameters;
+  bool supportsBypass = false;
+  bool supportsEditor = false;
+  bool supportsState = false;
 };
 
 struct WorkerHello {
@@ -223,13 +245,18 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kFault,
   kStopped,
   kMiss,
+  kEditorInteraction,
+  kParameterEdit,
 };
 
 struct WorkerDiagnostic {
   WorkerDiagnosticKind kind = WorkerDiagnosticKind::kFault;
   std::uint32_t value = 0;
   std::uint64_t sequence = 0;
+  std::uint32_t parameter_id = 0;
+  double normalized_value = 0.0;
 };
+static_assert(std::is_trivially_copyable_v<WorkerDiagnostic>);
 
 enum class WorkerEventKind : std::uint8_t {
   kParameter,
@@ -324,7 +351,8 @@ class WorkerRuntime {
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(
     WorkerControlCommand command,
     std::uint32_t width = 0,
-    std::uint32_t height = 0
+    std::uint32_t height = 0,
+    std::optional<WorkerEditorAnchor> anchor = std::nullopt
   );
   [[nodiscard]] bool ReadCompleted(std::size_t slotIndex, std::uint64_t expectedSequence) const;
   [[nodiscard]] bool CopyCompletedOutput(

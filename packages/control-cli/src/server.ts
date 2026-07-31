@@ -13,7 +13,13 @@ import {
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { createControlMcpServer } from "@daw-browser/control-mcp"
 import { ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
-import { hostError } from "@daw-browser/desktop-protocol"
+import {
+  desktopHostVstInstancesInputSchemaV1,
+  desktopHostVstInstancesResultSchemaV1,
+  desktopHostVstParametersInputSchemaV1,
+  desktopHostVstParametersResultSchemaV1,
+  hostError,
+} from "@daw-browser/desktop-protocol"
 import { createAccessTokenProvider } from "./auth"
 import { credentialIdentity, createCredentialStore, sameCredentialIdentity, type ControlCredentialIdentity, type ControlCredentials } from "./credentials"
 import { createHostClient } from "./host"
@@ -157,6 +163,24 @@ export const startControlMcp = async () => {
     exportCancel: async (input: { jobId: string }) => {
       const client = await createHostClient()
       try { return await client.request("host.export.cancel", input) } finally { client.close() }
+    },
+    vstInstances: async (input: unknown) => {
+      const client = await createHostClient()
+      try {
+        return desktopHostVstInstancesResultSchemaV1.parse(await client.request(
+          "host.vst.instances",
+          desktopHostVstInstancesInputSchemaV1.parse(input),
+        ))
+      } finally { client.close() }
+    },
+    vstParameters: async (input: unknown) => {
+      const client = await createHostClient()
+      try {
+        return desktopHostVstParametersResultSchemaV1.parse(await client.request(
+          "host.vst.parameters",
+          desktopHostVstParametersInputSchemaV1.parse(input),
+        ))
+      } finally { client.close() }
     },
   }
   const server = createControlMcpServer(undefined, {

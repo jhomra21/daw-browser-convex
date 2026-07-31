@@ -29,7 +29,7 @@ import {
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { ControlMidiResolutionError, resolveControlMidiActionV1 } from './midi'
-import { collectDeletedTrackIdsV1 } from './trackDeletion'
+import { collectDeletedTrackIdsV1, collectTrackDeletionAffectedIdsV1 } from './trackDeletion'
 import { recoveryLimitsV1 } from './recovery-limits'
 import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
@@ -245,6 +245,24 @@ const validateRecoveryLimits = (
 }
 
 const tracksById = (tracks: ProjectSnapshotV1['tracks']) => new Map(tracks.map((track) => [track.id, track]))
+
+const validateExternalVstRecovery = (
+  actionIndex: number,
+  snapshot: ProjectSnapshotV1,
+  affectedTrackIds: ReadonlySet<string>,
+) => {
+  if (snapshot.processors.some((processor) => (
+    processor.processor.kind === 'external-vst3'
+    && 'trackId' in processor.target
+    && affectedTrackIds.has(processor.target.trackId)
+  ))) {
+    planError(
+      actionIndex,
+      'validation',
+      'External VST processors are not currently recoverable through canonical control.',
+    )
+  }
+}
 
 const removedBaseEntries = (base: unknown[], before: unknown[], after: unknown[]) => {
   const baseEntries = new Set(base.map(canonical))
@@ -744,29 +762,35 @@ export const planControlRequestV1 = (
       }
       case 'track.delete': {
         const track = requireTrack(action.track, tracks, trackRefs, actionIndex)
-        const removeTrackIds = collectDeletedTrackIdsV1(Array.from(tracks.values()), track.id)
+        const affectedTrackIds = collectTrackDeletionAffectedIdsV1(
+          Array.from(tracks.values()),
+          snapshot.sidechains,
+          track.id,
+        )
+        validateExternalVstRecovery(actionIndex, snapshot, affectedTrackIds)
+        const deletedTrackIds = collectDeletedTrackIdsV1(Array.from(tracks.values()), track.id)
         const survivors = Array.from(tracks.values())
-          .filter((entry) => !removeTrackIds.has(entry.id))
+          .filter((entry) => !deletedTrackIds.has(entry.id))
           .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
           .filter((entry, index) => (
             entry.index !== index
-            || entry.groupId !== undefined && removeTrackIds.has(entry.groupId)
-            || entry.outputTargetId !== undefined && removeTrackIds.has(entry.outputTargetId)
-            || entry.sends.some((send: any) => removeTrackIds.has(send.targetTrackId))
+            || entry.groupId !== undefined && deletedTrackIds.has(entry.groupId)
+            || entry.outputTargetId !== undefined && deletedTrackIds.has(entry.outputTargetId)
+            || entry.sends.some((send: any) => deletedTrackIds.has(send.targetTrackId))
           ))
-        validateRecoveryLimits(actionIndex, snapshot, removeTrackIds, survivors)
-        for (const id of removeTrackIds) tracks.delete(id)
-        snapshot.tracks = snapshot.tracks.filter((entry) => !removeTrackIds.has(entry.id))
-        snapshot.clips = snapshot.clips.filter((entry) => !removeTrackIds.has(entry.trackId))
-        for (const clip of clips.values()) if (removeTrackIds.has(clip.trackId)) clips.delete(clip.id)
-        snapshot.processors = snapshot.processors.filter((entry) => !('trackId' in entry.target && removeTrackIds.has(entry.target.trackId)))
-        for (const processor of processors.values()) if ('trackId' in processor.target && removeTrackIds.has(processor.target.trackId)) processors.delete(processor.id)
-        snapshot.automation = snapshot.automation.filter((entry) => !('trackId' in entry.target && removeTrackIds.has(entry.target.trackId)))
-        snapshot.sidechains = snapshot.sidechains.filter((entry) => !removeTrackIds.has(entry.sourceTrackId) && !removeTrackIds.has(entry.targetTrackId))
+        validateRecoveryLimits(actionIndex, snapshot, deletedTrackIds, survivors)
+        for (const id of deletedTrackIds) tracks.delete(id)
+        snapshot.tracks = snapshot.tracks.filter((entry) => !deletedTrackIds.has(entry.id))
+        snapshot.clips = snapshot.clips.filter((entry) => !deletedTrackIds.has(entry.trackId))
+        for (const clip of clips.values()) if (deletedTrackIds.has(clip.trackId)) clips.delete(clip.id)
+        snapshot.processors = snapshot.processors.filter((entry) => !('trackId' in entry.target && deletedTrackIds.has(entry.target.trackId)))
+        for (const processor of processors.values()) if ('trackId' in processor.target && deletedTrackIds.has(processor.target.trackId)) processors.delete(processor.id)
+        snapshot.automation = snapshot.automation.filter((entry) => !('trackId' in entry.target && deletedTrackIds.has(entry.target.trackId)))
+        snapshot.sidechains = snapshot.sidechains.filter((entry) => !deletedTrackIds.has(entry.sourceTrackId) && !deletedTrackIds.has(entry.targetTrackId))
         for (const current of tracks.values()) {
-          if (current.groupId && removeTrackIds.has(current.groupId)) current.groupId = undefined
-          if (current.outputTargetId && removeTrackIds.has(current.outputTargetId)) current.outputTargetId = undefined
-          current.sends = current.sends.filter((send: any) => !removeTrackIds.has(send.targetTrackId))
+          if (current.groupId && deletedTrackIds.has(current.groupId)) current.groupId = undefined
+          if (current.outputTargetId && deletedTrackIds.has(current.outputTargetId)) current.outputTargetId = undefined
+          current.sends = current.sends.filter((send: any) => !deletedTrackIds.has(send.targetTrackId))
         }
         snapshot.tracks.sort((left, right) => left.index - right.index).forEach((entry, index) => { entry.index = index })
         changed = true
@@ -822,6 +846,7 @@ export const planControlRequestV1 = (
         const group = requireTrack(action.group, tracks, trackRefs, actionIndex)
         if (group.channelRole !== 'group') planError(actionIndex, 'validation', 'Only group tracks can be ungrouped.')
         const children = Array.from(tracks.values()).filter((track) => track.groupId === group.id)
+        validateExternalVstRecovery(actionIndex, snapshot, new Set([group.id]))
         validateRecoveryLimits(actionIndex, snapshot, new Set([group.id]), children)
         if (Array.from(clips.values()).some((clip) => clip.trackId === group.id)) planError(actionIndex, 'validation', 'Cannot ungroup a group with clips.')
         const childIds = new Set(children.map((child) => child.id))
@@ -1140,6 +1165,35 @@ export const planControlRequestV1 = (
           .sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
         remaining.forEach((entry, index) => { entry.index = index })
         changed = true
+        break
+      }
+      case 'external-plugin.parameters.set': {
+        const target = resolveTarget(action.target, actionIndex)
+        const processor = requireEffect(action.processor, processors, effectRefs, actionIndex)
+        if (processor.processor.kind !== 'external-vst3') {
+          planError(actionIndex, 'validation', 'Processor is not an external VST3 processor.')
+        }
+        if (processor.instanceId === undefined) {
+          planError(actionIndex, 'validation', 'External VST3 processor requires an instance ID.')
+        }
+        if (!same(processor.target, target)) {
+          planError(actionIndex, 'validation', 'External VST3 processor does not match the supplied target.')
+        }
+        const parameters = new Map<number, { id: number; readOnly: boolean }>(
+          processor.processor.params.parameters.map((parameter: { id: number; readOnly: boolean }) => [parameter.id, parameter]),
+        )
+        const overrides = { ...processor.processor.params.parameterOverrides }
+        for (const change of action.changes) {
+          const parameter = parameters.get(change.parameterId)
+            ?? planError(actionIndex, 'not-found', `External VST3 parameter "${change.parameterId}" was not found.`)
+          if (parameter.readOnly) {
+            planError(actionIndex, 'validation', `External VST3 parameter "${change.parameterId}" is read-only.`)
+          }
+          const key = String(change.parameterId)
+          changed = changed || overrides[key] !== change.normalizedValue
+          overrides[key] = change.normalizedValue
+        }
+        processor.processor.params.parameterOverrides = overrides
         break
       }
       case 'effect.reorder': {

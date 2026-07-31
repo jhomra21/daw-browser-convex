@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto"
 import { expect, test } from "bun:test"
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
+import { setLocalExternalProcessor } from "~/lib/external-plugins"
 
 import { createExportQueue } from "~/lib/export/export-queue"
 import { withLocalProjectAssetLock } from "~/lib/local-project-asset-lock"
@@ -112,6 +113,7 @@ const createController = (
   projectId: () => string,
   getMountedLocalProject?: typeof getLocalProject,
   mountedProjectGeneration: () => number = () => 0,
+  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>,
 ) => {
   const queue = createExportQueue()
   return {
@@ -153,6 +155,7 @@ const createController = (
       },
       importFiles: async () => ({ outcomes: [] }),
       setPlayhead: () => undefined,
+      ...(enqueueNativeVstParameter === undefined ? {} : { enqueueNativeVstParameter }),
       ...(getMountedLocalProject === undefined ? {} : { getMountedLocalProject }),
     }),
     dispose: () => queue.dispose(),
@@ -394,6 +397,197 @@ test("runs the complete local control flow with the trusted actor", async () => 
   expect(history.result).toMatchObject({ entries: [expect.objectContaining({ actorSubject: controlActor })] })
   const recoveries = await requestControl(controller, "control.recoveries", { projectId: project.id, limit: 10 }, undefined, controlActor)
   expect(recoveries.result).toMatchObject({ entries: [expect.objectContaining({ kind: "track.delete" })] })
+
+  unregister()
+  dispose()
+})
+
+test("delivers committed external VST3 parameters after durable local commit", async () => {
+  installBridge([])
+  const project = await createLocalProject(`External control ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected default track.")
+  const instanceId = "00000000-0000-4000-8000-000000000011"
+  await setLocalExternalProcessor(project.id, {
+    instanceId,
+    targetId: track.id,
+    chainIndex: 0,
+    manifest: {
+      identity: {
+        format: "vst3",
+        classId: "class-1",
+        vendor: "Vendor",
+        name: "Fixture",
+        version: "1",
+        architecture: "arm64",
+        binaryFingerprint: "a".repeat(64),
+      },
+      role: "effect",
+      audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+      audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [{
+        id: 1,
+        title: "Gain",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }, {
+        id: 2,
+        title: "Mix",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: { "1": 0.25, "2": 0.5 },
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    health: { state: "ready", updatedAt: 1 },
+    updatedAt: 1,
+  })
+  const events: Array<{ instanceId: string; id: number; value: number }> = []
+  let releaseFirstDelivery: (() => void) | undefined
+  let signalFirstDeliveryStarted: (() => void) | undefined
+  const firstDeliveryStarted = new Promise<void>((resolve) => {
+    signalFirstDeliveryStarted = resolve
+  })
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => 0,
+    async (event) => {
+      events.push(event)
+      if (event.id === 1) {
+        signalFirstDeliveryStarted?.()
+        await new Promise<void>((resolve) => {
+          releaseFirstDelivery = resolve
+        })
+      }
+      return true
+    },
+  )
+  const unregister = registerAttachedHostController(controller)
+  const input = {
+    version: "v1" as const,
+    projectId: project.id,
+    idempotencyKey: "external-parameters-commit",
+    actions: [{
+      kind: "external-plugin.parameters.set" as const,
+      target: { kind: "track" as const, track: { source: "persisted" as const, id: track.id } },
+      processor: { source: "persisted" as const, id: `external-plugin:${instanceId}` },
+      changes: [
+        { parameterId: 1, normalizedValue: 0.75 },
+        { parameterId: 2, normalizedValue: 0.25 },
+      ],
+    }],
+  }
+  const { idempotencyKey: _idempotencyKey, ...previewInput } = input
+  const preview = await requestControl(controller, "control.preview", previewInput, undefined, controlActor)
+  expect(preview.result).toMatchObject({ applied: true })
+  const pendingCommit = requestControl(controller, "control.commit", input, undefined, controlActor)
+  await firstDeliveryStarted
+  expect(events).toEqual([
+    { instanceId, id: 1, value: 0.75 },
+    { instanceId, id: 2, value: 0.25 },
+  ])
+  releaseFirstDelivery?.()
+  expect((await pendingCommit).result).toMatchObject({ applied: true })
+  expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({ idempotencyReplay: true })
+  expect(events).toHaveLength(2)
+
+  unregister()
+  dispose()
+})
+
+test("does not fail a durable external parameter commit when native delivery fails", async () => {
+  installBridge([])
+  const project = await createLocalProject(`External control failure ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected default track.")
+  const instanceId = "00000000-0000-4000-8000-000000000012"
+  await setLocalExternalProcessor(project.id, {
+    instanceId,
+    targetId: track.id,
+    chainIndex: 0,
+    manifest: {
+      identity: {
+        format: "vst3",
+        classId: "class-1",
+        vendor: "Vendor",
+        name: "Fixture",
+        version: "1",
+        architecture: "arm64",
+        binaryFingerprint: "a".repeat(64),
+      },
+      role: "effect",
+      audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+      audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [{
+        id: 1,
+        title: "Gain",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: { "1": 0.25 },
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    health: { state: "ready", updatedAt: 1 },
+    updatedAt: 1,
+  })
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => 0,
+    async () => {
+      throw new Error("native host unavailable")
+    },
+  )
+  const unregister = registerAttachedHostController(controller)
+  const result = await requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: "external-parameters-failure",
+    actions: [{
+      kind: "external-plugin.parameters.set" as const,
+      target: { kind: "track" as const, track: { source: "persisted" as const, id: track.id } },
+      processor: { source: "persisted" as const, id: `external-plugin:${instanceId}` },
+      changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+    }],
+  }, undefined, controlActor)
+  expect(result.result).toMatchObject({ applied: true })
+  expect((await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)).result).toMatchObject({
+    processors: [expect.objectContaining({ processor: expect.objectContaining({ params: expect.objectContaining({ parameterOverrides: { "1": 0.75 } }) }) })],
+  })
 
   unregister()
   dispose()
@@ -690,4 +884,143 @@ test("renderer cancellation immediately deletes prepared export state before fin
   expect(submissions).toBe(0)
   unregister()
   queue.dispose()
+})
+
+test("discovers only mounted VST instances and paginates safe parameter values", async () => {
+  installBridge([])
+  const project = await createLocalProject(`VST discovery ${crypto.randomUUID()}`)
+  const other = await createLocalProject(`Other VST discovery ${crypto.randomUUID()}`)
+  const processor = (instanceId: string, targetId: string, chainIndex: number) => ({
+    instanceId,
+    targetId,
+    chainIndex,
+    manifest: {
+      identity: {
+        format: "vst3" as const,
+        classId: `class-${instanceId}`,
+        vendor: "Vendor",
+        name: "Fixture",
+        version: "1",
+        architecture: "arm64" as const,
+        binaryFingerprint: "a".repeat(64),
+      },
+      role: "effect" as const,
+      audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+      audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [{
+        id: 2,
+        title: "Mix",
+        unit: "%",
+        minimum: 0,
+        maximum: 2,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: true,
+      }, {
+        id: 1,
+        title: "Gain",
+        unit: "dB",
+        minimum: 0,
+        maximum: 2,
+        defaultValue: 1.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: { "2": 1.5 },
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    health: { state: "ready" as const, updatedAt: 1 },
+    updatedAt: 1,
+  })
+  const firstInstance = "00000000-0000-4000-8000-000000000021"
+  const secondInstance = "00000000-0000-4000-8000-000000000022"
+  await setLocalExternalProcessor(project.id, processor(secondInstance, "master", 1))
+  await setLocalExternalProcessor(project.id, processor(firstInstance, "track-1", 0))
+  const { controller, dispose } = createController(() => project.id)
+  const unregister = registerAttachedHostController(controller)
+  const request = (operation: "host.vst.instances" | "host.vst.parameters", input: unknown) => controller.request({
+    id: crypto.randomUUID(),
+    operation,
+    input,
+    signal: new AbortController().signal,
+  })
+
+  const instances = await request("host.vst.instances", { projectId: project.id, limit: 1 })
+  expect(instances.error).toBeUndefined()
+  expect(instances.result).toEqual({
+    projectId: project.id,
+    instances: [{
+      instanceId: secondInstance,
+      targetId: "master",
+      chainIndex: 1,
+      identity: { format: "vst3", classId: `class-${secondInstance}`, vendor: "Vendor", name: "Fixture", version: "1", architecture: "arm64" },
+      role: "effect",
+      bypassed: false,
+      health: { state: "ready", updatedAt: 1 },
+      parameterCount: 2,
+      supportsEditor: false,
+      supportsState: true,
+    }],
+    nextCursor: "1",
+  })
+  expect(JSON.stringify(instances.result)).not.toContain("binaryFingerprint")
+  expect((await request("host.vst.instances", { projectId: project.id, cursor: "4294967296" })).error?.code).toBe("invalid-request")
+  expect((await request("host.vst.parameters", { projectId: project.id, instanceId: secondInstance, cursor: "99999999999" })).error?.code).toBe("invalid-request")
+  expect((await request("host.vst.instances", { projectId: project.id, cursor: "1", limit: 1 })).result).toMatchObject({
+    instances: [{
+      instanceId: firstInstance,
+      role: "effect",
+      bypassed: false,
+      health: { state: "ready", updatedAt: 1 },
+      parameterCount: 2,
+      supportsEditor: false,
+      supportsState: true,
+    }],
+    nextCursor: null,
+  })
+  expect((await request("host.vst.instances", { projectId: other.id })).error).toEqual({
+    version: "v1",
+    code: "invalid-request",
+    message: "The requested project is not mounted.",
+  })
+  const parameters = await request("host.vst.parameters", { projectId: project.id, instanceId: secondInstance, limit: 1 })
+  expect(parameters.result).toEqual({
+    projectId: project.id,
+    instanceId: secondInstance,
+    parameters: [{
+      id: 1,
+      title: "Gain",
+      unit: "dB",
+      minimum: 0,
+      maximum: 2,
+      defaultValue: 1.5,
+      stepCount: 100,
+      readOnly: false,
+      hidden: false,
+      currentValue: 1,
+    }],
+    nextCursor: "1",
+  })
+  expect((await request("host.vst.parameters", { projectId: project.id, instanceId: secondInstance, cursor: "1", limit: 1 })).result).toMatchObject({
+    parameters: [{ id: 2, currentValue: 1, hidden: true }],
+    nextCursor: null,
+  })
+  expect((await request("host.vst.parameters", { projectId: project.id, instanceId: "00000000-0000-4000-8000-000000000099" })).error).toEqual({
+    version: "v1",
+    code: "invalid-request",
+    message: "The requested VST instance was not found.",
+  })
+
+  unregister()
+  dispose()
 })

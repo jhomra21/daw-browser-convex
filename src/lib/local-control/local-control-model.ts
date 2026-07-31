@@ -16,6 +16,11 @@ import {
   type LocalProjectStateRow,
 } from '~/lib/local-project-db'
 import {
+  externalPluginEntityKind,
+  externalProcessorSchema,
+  type ExternalProcessor,
+} from '@daw-browser/external-plugins'
+import {
   localAssetFolderKey,
   parseLocalAssetFolderRow,
 } from '~/lib/local-asset-folders'
@@ -82,6 +87,7 @@ export const materializeLocalControlSnapshot = (
   const tracks = rowsByKind(model.entities, 'track')
   const clips = rowsByKind(model.entities, 'clip')
   const effects = rowsByKind(model.entities, 'effect')
+  const externalProcessors = rowsByKind(model.entities, externalPluginEntityKind)
   const automation = rowsByKind(model.entities, 'automation-envelope')
   const sidechains = rowsByKind(model.entities, 'sidechain-route')
   const canonicalIds = new Map<string, Set<string>>([
@@ -100,6 +106,9 @@ export const materializeLocalControlSnapshot = (
         item.processor.kind === 'instrument' || kind === 'arp' ? undefined : instanceId,
       )]
     }))],
+    [externalPluginEntityKind, new Set(snapshot.processors.flatMap((item) => (
+      item.processor.kind === 'external-vst3' ? [item.id] : []
+    )))],
     ['automation-envelope', new Set(snapshot.automation.map((item) => automationTargetKey(
       'master' in item.target
         ? { kind: 'master', effectInstanceId: item.effectInstanceId }
@@ -176,6 +185,25 @@ export const materializeLocalControlSnapshot = (
     entities.push(createLocalProjectEntityRow('clip', row.id, row, timestamp))
   }
   for (const item of snapshot.processors) {
+    if (item.processor.kind === 'external-vst3') {
+      const existingValue = externalProcessors.get(item.id)?.value
+      const existing = externalProcessorSchema.safeParse(existingValue)
+      if (!existing.success) {
+        throw new Error(`External plugin row "${item.id}" is missing or corrupt.`)
+      }
+      const next: ExternalProcessor = externalProcessorSchema.parse({
+        ...existing.data,
+        parameterOverrides: item.processor.params.parameterOverrides,
+        updatedAt: timestamp,
+      })
+      entities.push(createLocalProjectEntityRow(
+        externalPluginEntityKind,
+        item.id,
+        next,
+        timestamp,
+      ))
+      continue
+    }
     const legacy = effects.get(item.id)
     if (
       item.processor.kind === 'instrument'

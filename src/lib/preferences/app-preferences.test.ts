@@ -103,7 +103,7 @@ describe("normalizeAppPreferences", () => {
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: true,
-      nativePlaybackEnabled: false,
+      nativePlaybackEnabled: true,
       portableBrowserPlaybackEnabled: false
     })
   })
@@ -119,7 +119,7 @@ describe("normalizeAppPreferences", () => {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        nativePlaybackEnabled: false,
+        nativePlaybackEnabled: true,
         portableBrowserPlaybackEnabled: false
       }
     })).toEqual({
@@ -132,10 +132,18 @@ describe("normalizeAppPreferences", () => {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        nativePlaybackEnabled: false,
+        nativePlaybackEnabled: true,
         portableBrowserPlaybackEnabled: false
       }
     })
+  })
+  test("preserves portable browser playback through version 7 migration", () => {
+    expect(normalizeAppPreferences({
+      version: 7,
+      audio: {
+        portableBrowserPlaybackEnabled: true
+      }
+    }).audio.portableBrowserPlaybackEnabled).toBeTrue()
   })
 
   test("migrates every prior version to empty local MIDI input selections", () => {

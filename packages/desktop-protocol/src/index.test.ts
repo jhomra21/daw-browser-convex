@@ -7,9 +7,14 @@ import {
   desktopHelloSchemaV1,
   desktopHelloAckSchemaV1,
   desktopOperationSchemaV1,
+  desktopHostVstInstancesInputSchemaV1,
+  desktopHostVstParametersInputSchemaV1,
+  desktopHostVstInstancesResultSchemaV1,
+  desktopHostVstParametersResultSchemaV1,
   desktopRendererRequestSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopTrustedRendererRequestSchemaV1,
+  desktopVstParameterEditPayloadSchema,
   desktopRequestSchemaV1,
   desktopRequestSchemaV2,
   maxDesktopFrameBytes,
@@ -19,6 +24,13 @@ import {
 import { createDesktopFrameDecoder as createDecoder, encodeDesktopFrame as encodeFrame } from "./socket"
 
 const actorSubject = "local:123e4567-e89b-42d3-a456-426614174000"
+const vstParameterEditPayload = {
+  projectId: "project-1",
+  source: "editor-session",
+  instanceId: "11111111-1111-4111-8111-111111111111",
+  parameterId: 42,
+  normalizedValue: 0.625,
+}
 const controlAction = { kind: "project.rename", name: "Project" }
 const controlRequestInputs = [
   ["control.capabilities", {}],
@@ -176,7 +188,7 @@ describe("desktop protocol v1", () => {
   })
 
   test("keeps the V1 hello acknowledgment operation set exact", () => {
-    expect(desktopOperationSchemaV1.options).toHaveLength(18)
+    expect(desktopOperationSchemaV1.options).toHaveLength(20)
     expect(desktopHelloAckSchemaV1.safeParse({
       version: "v1",
       type: "helloAck",
@@ -188,6 +200,111 @@ describe("desktop protocol v1", () => {
       type: "helloAck",
       sessionId: "session-12345678",
       capabilities: [...desktopOperationSchemaV1.options, "host.status"],
+    }).success).toBe(false)
+  })
+
+  test("validates paginated VST discovery without leaking catalog fields", () => {
+    const instanceInput = { projectId: "project-1", cursor: "0", limit: 50 }
+    const parameterInput = { projectId: "project-1", instanceId: "123e4567-e89b-42d3-a456-426614174000", cursor: "10", limit: 100 }
+    expect(desktopHostVstInstancesInputSchemaV1.parse(instanceInput)).toEqual(instanceInput)
+    expect(desktopHostVstParametersInputSchemaV1.parse(parameterInput)).toEqual(parameterInput)
+    expect(desktopHostVstInstancesInputSchemaV1.safeParse({ ...instanceInput, cursor: "00" }).success).toBe(false)
+    expect(desktopHostVstInstancesInputSchemaV1.safeParse({ ...instanceInput, cursor: "99999999999" }).success).toBe(false)
+    expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, cursor: "4294967295" }).success).toBe(true)
+    expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, cursor: "4294967296" }).success).toBe(false)
+    expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, cursor: "99999999999" }).success).toBe(false)
+    expect(desktopHostVstInstancesInputSchemaV1.safeParse({ ...instanceInput, unexpected: true }).success).toBe(false)
+    expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, unexpected: true }).success).toBe(false)
+    const instanceResult = {
+      projectId: "project-1",
+      instances: [{
+        instanceId: "123e4567-e89b-42d3-a456-426614174000",
+        targetId: "track-1",
+        chainIndex: 0,
+        identity: {
+          format: "vst3",
+          classId: "class-1",
+          vendor: "Vendor",
+          name: "Plugin",
+          version: "1",
+          architecture: "arm64",
+          discoveredPath: "/private/plugin.vst3",
+          binaryFingerprint: "a".repeat(64),
+        },
+        role: "effect",
+        bypassed: false,
+        health: { state: "ready", updatedAt: 1 },
+        parameterCount: 1,
+        supportsEditor: false,
+        supportsState: true,
+      }],
+      nextCursor: null,
+    }
+    expect(desktopHostVstInstancesResultSchemaV1.safeParse(instanceResult).success).toBe(false)
+    const safeInstances = {
+      projectId: "project-1",
+      instances: [{
+        instanceId: "123e4567-e89b-42d3-a456-426614174000",
+        targetId: "track-1",
+        chainIndex: 0,
+        identity: {
+          format: "vst3",
+          classId: "class-1",
+          vendor: "Vendor",
+          name: "Plugin",
+          version: "1",
+          architecture: "arm64",
+        },
+        role: "effect",
+        bypassed: false,
+        health: { state: "ready", updatedAt: 1 },
+        parameterCount: 1,
+        supportsEditor: false,
+        supportsState: true,
+      }],
+      nextCursor: null,
+    }
+    expect(desktopHostVstInstancesResultSchemaV1.safeParse(safeInstances).success).toBe(true)
+    expect(parseDesktopResult("host.vst.instances", safeInstances)).toEqual(safeInstances)
+    expect(desktopHostVstParametersResultSchemaV1.safeParse({
+      projectId: "project-1",
+      instanceId: "123e4567-e89b-42d3-a456-426614174000",
+      parameters: [{
+        id: 1,
+        title: "Gain",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: true,
+        currentValue: 0.25,
+      }],
+      nextCursor: "1",
+    }).success).toBe(true)
+    expect(desktopHostVstParametersResultSchemaV1.safeParse({
+      projectId: "project-1",
+      instanceId: "123e4567-e89b-42d3-a456-426614174000",
+      parameters: [{
+        id: 1,
+        title: "Gain",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: true,
+        currentValue: 1.1,
+      }],
+      nextCursor: null,
+    }).success).toBe(false)
+    expect(desktopHostVstParametersResultSchemaV1.safeParse({
+      projectId: "project-1",
+      instanceId: "123e4567-e89b-42d3-a456-426614174000",
+      parameters: [],
+      nextCursor: "01",
     }).success).toBe(false)
   })
 
@@ -352,4 +469,16 @@ describe("desktop protocol v1", () => {
     frame[4] = 0xff
     expect(() => decode(frame)).toThrow("not JSON")
   })
+})
+
+test("strictly validates VST parameter edit payloads", () => {
+  expect(desktopVstParameterEditPayloadSchema.safeParse(vstParameterEditPayload).success).toBe(true)
+  expect(desktopVstParameterEditPayloadSchema.safeParse({
+    ...vstParameterEditPayload,
+    normalizedValue: 2,
+  }).success).toBe(false)
+  expect(desktopVstParameterEditPayloadSchema.safeParse({
+    ...vstParameterEditPayload,
+    instanceId: "instance-1",
+  }).success).toBe(false)
 })

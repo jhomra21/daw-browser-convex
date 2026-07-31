@@ -8,7 +8,7 @@ import { assert, automationTargetKey, getAutomationParameterDescriptor, normaliz
 import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
-import { createMeteringRuntime, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackMeterFrameListener, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
+import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackMeterFrameListener, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
 import type { CompressorMeterFrame, CompressorMeterListener } from './effects/compressor-worklet'
 import type { GateMeterFrame, GateMeterListener } from './effects/static-worklet-chain'
 import { createMetronomeRuntime } from './metronome-runtime'
@@ -39,7 +39,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
-export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, GateMeterFrame, SpectrumFrame, TrackMeterFrame, TrackMeterFrameBatch, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, GateMeterFrame, MasterStereoLevelsListener, SpectrumFrame, TrackMeterFrame, TrackMeterFrameBatch, TrackStereoLevels, TrackStereoLevelsBatch }
 export type { RecordingEpoch, RecordingMonitorMode, RecordingRuntimeStatus, StartRecordingCaptureOptions } from './recording/recording-runtime'
 export type AudioRuntimeSnapshot = {
   state: AudioContextState | 'uninitialized'
@@ -299,6 +299,10 @@ export class AudioEngine {
 
   subscribeTrackStereoLevels(listener: TrackStereoLevelsListener) {
     return this.metering.subscribeTrackStereoLevels(listener)
+  }
+
+  subscribeMasterStereoLevels(listener: MasterStereoLevelsListener) {
+    return this.metering.subscribeMasterStereoLevels(listener)
   }
 
   subscribeTrackMeterFrames(listener: TrackMeterFrameListener) {
@@ -596,6 +600,7 @@ export class AudioEngine {
       this.masterGain = this.runtime.masterGain
       this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
+      this.metering.reconnectMasterMeter(this.audioCtx, this.masterGain, () => this.masterGain === this.runtime?.masterGain)
       this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (params) => this.createImpulseResponse(params))
       if (opts?.applyCachedTrackGains !== false) {
         this.updateTrackGains(this.tracksSnapshot)

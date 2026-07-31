@@ -112,19 +112,19 @@ test('reset all controllers releases only sustain-deferred notes', () => {
   expect(released).toEqual([1, 2])
 })
 
-test('releases an admitted note after its channel is no longer admitted', () => {
-  const released: number[] = []
+test('selection changes preserve an admitted note until ordinary note-off', () => {
+  const released: Array<{ id: number; force: boolean | undefined }> = []
   let admitted = true
   const router = createLiveMidiRouter({
     acceptsChannel: () => admitted,
     startNote: () => ({ id: 1 }),
-    releaseNote: (handle) => released.push(handle.id),
+    releaseNote: (handle, _timeStamp, force) => released.push({ id: handle.id, force }),
     applyExpression: () => undefined,
   })
   router.receive(noteOn('one', 1, 60, 1))
   admitted = false
   router.receive(noteOff('one', 1, 60, 2))
-  expect(released).toEqual([1])
+  expect(released).toEqual([{ id: 1, force: false }])
 })
 
 test('panic clears filtered sustain state before a newly admitted note arrives', () => {

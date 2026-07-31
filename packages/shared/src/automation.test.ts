@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { synthAutomationKey } from './synth-automation'
-import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
+import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('builds stable target keys', () => {
@@ -214,6 +214,38 @@ describe('automation helpers', () => {
     expect(options.some((option) => option.parameterId === 'instrument:track-1:sampler:one:filter.frequency')).toBe(true)
     expect(options.some((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')).toBe(true)
     expect(options.find((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')?.effectInstanceId).toBeUndefined()
+  })
+
+  test('publishes normalized VST3 parameters with stable instance identities', () => {
+    const parameterId = externalAutomationParameterId('vst-instance', 42)
+    const options = getAutomationParameterOptionsForTarget([{
+      id: 'vst-instance',
+      kind: 'external',
+      name: 'Example VST',
+      parameters: [{ id: 42, title: 'Mix', unit: '%', readOnly: false, hidden: false }],
+    }], 'track-1')
+    expect(options).toContainEqual({
+      id: parameterId,
+      parameterId,
+      label: 'Mix',
+      group: 'VST3',
+      device: 'Example VST',
+      effectInstanceId: 'vst-instance',
+    })
+    expect(getAutomationParameterDescriptor(parameterId)).toMatchObject({
+      owner: 'external',
+      min: 0,
+      max: 1,
+      targetKinds: ['track', 'master'],
+    })
+  })
+
+  test('round trips unsigned VST3 automation IDs and rejects overflow', () => {
+    for (const parameterId of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
+      const encoded = externalAutomationParameterId('vst-instance', parameterId)
+      expect(parseExternalAutomationParameterId(encoded)).toEqual({ instanceId: 'vst-instance', parameterId })
+    }
+    expect(parseExternalAutomationParameterId('vst3:vst-instance:4294967296')).toBeNull()
   })
 
   test('exposes only effect parameters with supported automation bindings and UI controls', () => {

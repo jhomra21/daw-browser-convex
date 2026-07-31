@@ -22,25 +22,52 @@ export type NativeVst3InsertionResult =
   | { ok: true; processor: ExternalProcessor }
   | Extract<NativeVst3InsertionPreflightResult, { ok: false }>
 
+type NativeVst3TargetTrack = Pick<
+  Track,
+  "id" | "kind" | "channelRole" | "groupId" | "outputTargetId" | "sends"
+>
+type NativeVst3InsertionUnavailable = Extract<NativeVst3InsertionAvailability, { enabled: false }>
+
 const unavailable = (
   code: NativeVst3InsertionFailureCode,
   message: string,
-): NativeVst3InsertionAvailability => ({ enabled: false, code, message })
+): NativeVst3InsertionUnavailable => ({ enabled: false, code, message })
+
+const validateTargetTrack = (
+  targetId: Track["id"] | "master",
+  targetTrack: NativeVst3TargetTrack | undefined,
+): NativeVst3InsertionUnavailable | undefined => {
+  if (targetId === "master") return unavailable("unsupported-bus", "Native VST3 insertion currently requires a directly routed stereo track target.")
+  if (!targetTrack || targetTrack.id !== targetId) return unavailable("project-unavailable", "The selected track is no longer available.")
+  if (
+    (targetTrack.channelRole !== undefined && targetTrack.channelRole !== "track")
+    || targetTrack.groupId !== undefined
+    || targetTrack.outputTargetId !== undefined
+    || (targetTrack.sends?.length ?? 0) > 0
+  ) {
+    return unavailable("unsupported-bus", "Native VST3 plug-ins require a directly routed stereo track.")
+  }
+  return undefined
+}
 
 export const nativeVst3InsertionAvailability = (input: {
   selection: NativeVst3CatalogSelection
   projectId: string
   targetId: Track["id"] | "master"
+  targetTrack: NativeVst3TargetTrack | undefined
   canWrite: boolean
   bridgeAvailable: boolean
   busy: boolean
 }): NativeVst3InsertionAvailability => {
   if (!input.bridgeAvailable) return unavailable("browser", "Native VST3 insertion is available only in the macOS desktop app.")
   if (!isLocalId("project", input.projectId)) return unavailable("project-unavailable", "Native VST3 insertion requires a local desktop project.")
-  if (input.targetId === "master") return unavailable("unsupported-bus", "Native VST3 insertion currently requires a stereo track target.")
+  const targetError = validateTargetTrack(input.targetId, input.targetTrack)
+  if (targetError) return targetError
+  if (input.selection.pluginClass.role === "instrument" && input.targetTrack?.kind !== "instrument") {
+    return unavailable("unsupported-role", "Native VST3 instruments require a directly routed instrument track.")
+  }
   if (!input.canWrite) return unavailable("project-unavailable", "The selected track is read-only.")
   if (input.busy) return unavailable("host-unavailable", "Native VST3 preflight is already running.")
-  if (input.selection.pluginClass.role !== "effect") return unavailable("unsupported-role", "Native VST3 instruments are not supported.")
   if (input.selection.entry.scanHealth === "scan-failed") return unavailable("stale-catalog", "The VST3 scan failed and must be refreshed.")
   if (
     input.selection.entry.scanHealth !== "scanned"
@@ -48,13 +75,16 @@ export const nativeVst3InsertionAvailability = (input: {
   ) return unavailable("untrusted-catalog", "The VST3 plug-in has not passed trusted native scanning.")
   return {
     enabled: true,
-    message: "Preflight and insert this VST3 effect as bypassed metadata.",
+    message: input.selection.pluginClass.role === "instrument"
+      ? "Preflight and activate this VST3 instrument on the native graph."
+      : "Preflight and activate this VST3 effect on the native graph.",
   }
 }
 
 export const insertNativeVst3Effect = async (input: {
   projectId: string
   targetId: Track["id"]
+  targetTrack: NativeVst3TargetTrack | undefined
   selection: NativeVst3CatalogSelection
   bridge: {
     preflightInsertion: (request: NativeVst3InsertionPreflightRequest) => Promise<NativeVst3InsertionPreflightResult>
@@ -64,6 +94,11 @@ export const insertNativeVst3Effect = async (input: {
   validateBeforePersist?: () => boolean
   persist?: typeof appendLocalExternalProcessor
 }): Promise<NativeVst3InsertionResult> => {
+  const targetError = validateTargetTrack(input.targetId, input.targetTrack)
+  if (targetError) return { ok: false, code: targetError.code, message: targetError.message }
+  if (input.selection.pluginClass.role === "instrument" && input.targetTrack?.kind !== "instrument") {
+    return { ok: false, code: "unsupported-role", message: "Native VST3 instruments require a directly routed instrument track." }
+  }
   const catalogReference = input.selection.entry.catalogReference
   if (!catalogReference) {
     return { ok: false, code: "untrusted-catalog", message: "The VST3 plug-in has no trusted native catalog reference." }
@@ -78,6 +113,9 @@ export const insertNativeVst3Effect = async (input: {
     },
   })
   if (!preflight.ok) return preflight
+  if (preflight.manifest.role !== input.selection.pluginClass.role) {
+    return { ok: false, code: "unsupported-role", message: "The native VST3 worker role does not match the selected plug-in." }
+  }
   if (input.validateBeforePersist && !input.validateBeforePersist()) {
     return { ok: false, code: "project-unavailable", message: "The selected project or track changed during VST3 preflight." }
   }
@@ -95,29 +133,29 @@ export const insertNativeVst3Effect = async (input: {
         architecture: catalogReference.architecture,
         binaryFingerprint: catalogReference.binaryFingerprint,
       },
-      role: "effect",
+      role: preflight.manifest.role,
       audioInputs: preflight.manifest.inputBuses,
       audioOutputs: preflight.manifest.outputBuses,
       sidechainInputs: [],
-      parameters: [],
+      parameters: preflight.manifest.parameters,
       latencyFrames: preflight.manifest.latencyFrames,
       tailFrames: preflight.manifest.tailFrames,
-      supportsBypass: false,
-      supportsEditor: false,
-      supportsState: false,
+      supportsBypass: preflight.manifest.supportsBypass,
+      supportsEditor: preflight.manifest.supportsEditor,
+      supportsState: preflight.manifest.supportsState,
     },
     parameterOverrides: {},
     latencyFrames: preflight.manifest.latencyFrames,
     tailFrames: preflight.manifest.tailFrames,
-    bypassed: true,
+    bypassed: false,
     launchReference: {
       ...catalogReference,
       classId: input.selection.pluginClass.classId,
       vendorId: input.selection.pluginClass.vendor,
     },
     health: {
-      state: "degraded",
-      reason: "Native graph activation is gated pending end-to-end VST3 playback validation.",
+      state: "ready",
+      reason: "Native VST3 preflight passed; playback uses the native graph on compatible directly routed stereo tracks, including synth MIDI tracks.",
       updatedAt,
     },
     updatedAt,

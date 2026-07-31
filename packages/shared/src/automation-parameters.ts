@@ -41,7 +41,7 @@ export type AutomationParameterDescriptor = {
   label: string
   group: string
   device: string
-  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | AudioEffectKind | 'spectral'
+  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | 'external' | AudioEffectKind | 'spectral'
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
@@ -72,11 +72,39 @@ export type AutomationInstrumentInstance = {
   kind: 'sampler' | 'granular' | 'synth'
 }
 
-export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance
+export type AutomationExternalParameter = {
+  id: number
+  title: string
+  unit: string
+  readOnly: boolean
+  hidden: boolean
+}
+
+export type AutomationExternalInstance = {
+  id: string
+  kind: 'external'
+  name: string
+  parameters: readonly AutomationExternalParameter[]
+}
+
+export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance | AutomationExternalInstance
 
 export type AutomationTargetParameterOption = AutomationParameterOption & AutomationParameterSelection
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+export const externalAutomationParameterId = (instanceId: string, parameterId: number) => (
+  `vst3:${instanceId}:${parameterId}`
+)
+
+export const parseExternalAutomationParameterId = (parameterId: string) => {
+  const match = /^vst3:([^:]+):([0-9]+)$/.exec(parameterId)
+  if (!match || !match[1] || !match[2]) return null
+  const id = Number(match[2])
+  return Number.isSafeInteger(id) && id >= 0 && id <= 0xffff_ffff
+    ? { instanceId: match[1], parameterId: id }
+    : null
+}
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
@@ -249,6 +277,21 @@ export const getAutomationParameterOptionsForTarget = (
           device: 'Synth',
         }))
       }
+      if (effect.kind === 'external') {
+        return effect.parameters
+          .filter((parameter) => !parameter.hidden)
+          .map((parameter) => {
+            const parameterId = externalAutomationParameterId(effect.id, parameter.id)
+            return {
+              id: parameterId,
+              parameterId,
+              label: parameter.title,
+              group: 'VST3',
+              device: effect.name,
+              effectInstanceId: effect.id,
+            }
+          })
+      }
       const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
       kindCounts.set(effect.kind, ordinal)
       const options = effect.kind === 'eq'
@@ -336,6 +379,21 @@ export const getAutomationParameterDescriptor = (
     }
   }
   const eq = parseEqBandParameterId(parameterId)
+  const external = parseExternalAutomationParameterId(parameterId)
+  if (!eq && external) {
+    return {
+      id: parameterId,
+      label: `VST3 Parameter ${external.parameterId}`,
+      group: 'VST3',
+      device: 'VST3',
+      owner: 'external',
+      targetKinds: ['track', 'master'],
+      min: 0,
+      max: 1,
+      defaultValue: 0,
+      scale: 'linear',
+    }
+  }
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
     return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }

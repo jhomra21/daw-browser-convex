@@ -5,10 +5,12 @@
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
+    "package": "bun scripts/run-local.ts package",
+    "make": "bun scripts/run-release.ts make",
     "check": "bun --bun tsc --noEmit -p tsconfig.json",
     "native:manifest": "bun generate-native-release-manifest.ts",
+    "release:mac:package": "bun scripts/run-release.ts package",
+    "release:mac:make": "bun scripts/run-release.ts make",
     "test:portable-wasm-worklet": "bun test portable-wasm-worklet.integration.test.ts"
   },
   "devDependencies": {

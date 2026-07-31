@@ -797,6 +797,8 @@ export type AudioCoreGraphTopologyNodeDto = {
   inputLayout: AudioCoreGraphLayout
   outputLayout: AudioCoreGraphLayout
   processorOrder: readonly AudioCoreGraphProcessorDto[]
+  /** Native-only external hook latency; built-in processor latency stays separate. */
+  externalLatencyFrames?: number
   latencyFrames: number
   assetId?: string
   instrument?: AudioCoreInstrumentState

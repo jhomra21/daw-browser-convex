@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_set>
 
 namespace daw::plugin_host {
 namespace {
@@ -242,13 +243,26 @@ bool IsValidWorkerManifest(const WorkerManifest& manifest) {
     || manifest.transport.inputChannels > kMaximumWorkerChannels
     || manifest.transport.outputChannels == 0 || manifest.transport.outputChannels > kMaximumWorkerChannels
     || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > 10'000'000
-    || (manifest.tailFrames && *manifest.tailFrames > 100'000'000) || manifest.stateRevision > 0x7fff'ffffU) {
+    || (manifest.tailFrames && *manifest.tailFrames > 100'000'000) || manifest.stateRevision > 0x7fff'ffffU
+    || manifest.parameters.size() > 16'384) {
     return false;
+  }
+  std::unordered_set<std::uint32_t> parameterIds;
+  for (const auto& parameter : manifest.parameters) {
+    if (parameter.title.empty() || parameter.title.size() > 256
+      || parameter.unit.size() > 64 || !std::isfinite(parameter.minimum) || !std::isfinite(parameter.maximum)
+      || !std::isfinite(parameter.defaultValue) || parameter.minimum > parameter.maximum
+      || parameter.defaultValue < parameter.minimum || parameter.defaultValue > parameter.maximum
+      || parameter.stepCount > 1'000'000 || !parameterIds.insert(parameter.id).second) return false;
   }
   const auto inputChannels = EnabledChannels(manifest.inputBuses);
   const auto outputChannels = EnabledChannels(manifest.outputBuses);
-  return inputChannels && outputChannels && *inputChannels == manifest.transport.inputChannels
-    && *outputChannels == manifest.transport.outputChannels;
+  return inputChannels.has_value() && outputChannels.has_value()
+    && *inputChannels == manifest.transport.inputChannels
+    && *outputChannels == manifest.transport.outputChannels
+    && (manifest.role == WorkerPluginRole::kInstrument
+      ? manifest.transport.inputChannels == 0
+      : manifest.transport.inputChannels > 0);
 }
 
 bool IsValidWorkerHello(const WorkerHello& hello) {
@@ -803,11 +817,13 @@ bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, con
 std::optional<WorkerEditorResponse> WorkerRuntime::ExecuteEditorCommand(
   const WorkerControlCommand command,
   const std::uint32_t width,
-  const std::uint32_t height
+  const std::uint32_t height,
+  const std::optional<WorkerEditorAnchor> anchor
 ) {
   if (!transport_ || responseReadDescriptor_ < 0
     || command < WorkerControlCommand::kEditorOpen || command > WorkerControlCommand::kEditorStatus
-    || !WriteWorkerControlCommand(controlWriteDescriptor_, command, width, height)) {
+    || (anchor && command != WorkerControlCommand::kEditorOpen && command != WorkerControlCommand::kEditorFocus)
+    || !WriteWorkerControlCommand(controlWriteDescriptor_, command, width, height, anchor)) {
     return std::nullopt;
   }
   return ReadWorkerEditorResponse(responseReadDescriptor_);
@@ -826,7 +842,10 @@ bool WorkerRuntime::CopyCompletedOutput(
   const auto source = transport_->output(slotIndex);
   const std::size_t samples = transport_->numSamples(slotIndex);
   const std::size_t channels = transport_->outputChannels();
-  if (output.size() != samples * channels) return false;
+  if (output.size() < samples * channels) {
+    static_cast<void>(transport_->ReleaseCompleted(slotIndex, expectedSequence));
+    return false;
+  }
   for (std::size_t channel = 0; channel < channels; ++channel) {
     std::memcpy(
       output.data() + channel * samples,

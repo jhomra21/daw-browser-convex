@@ -28,7 +28,7 @@ type NativeExternalAttachmentProjection = {
   }
   bundleFingerprint: string
   binaryFingerprint: string
-  role: "effect"
+  role: "effect" | "instrument"
   inputBuses: ExternalProcessor["manifest"]["audioInputs"]
   outputBuses: ExternalProcessor["manifest"]["audioOutputs"]
   workerTransport: NativeExternalWorkerTransport & {
@@ -39,6 +39,13 @@ type NativeExternalAttachmentProjection = {
   declaredTailFrames: number | null
   bypassed: boolean
   stateRevision: number
+  parameters: ExternalProcessor["manifest"]["parameters"]
+  parameterOverrides: ExternalProcessor["parameterOverrides"]
+}
+
+type NativeExternalEditorPlanInput = {
+  processor: ExternalProcessor
+  targetId: string
 }
 
 export type NativeExternalAttachmentSnapshotInput = {
@@ -56,33 +63,47 @@ export type NativeExternalAttachmentPlanCompilation =
   | { supported: true; plan: NativeExternalAttachmentPlan }
   | { supported: false; reasons: readonly string[] }
 
+export type NativeExternalEditorPlanCompilation = NativeExternalAttachmentPlanCompilation
+
 const stateRevision = (updatedAt: number) => updatedAt % 0x8000_0000
 
 const layoutChannels = (layout: "mono" | "stereo") => layout === "mono" ? 1 : 2
+const layoutForChannels = (channels: number): "mono" | "stereo" | undefined => (
+  channels === 1 ? "mono" : channels === 2 ? "stereo" : undefined
+)
 
 const compileProcessor = (
   processor: ExternalProcessor,
-  node: ResolvedMixerGraph["channels"][number],
+  node: {
+    channel: {
+      id: string
+      kind?: ResolvedMixerGraph["channels"][number]["channel"]["kind"]
+    }
+    inputLayout: "mono" | "stereo"
+    outputLayout: "mono" | "stereo"
+  },
   workerTransport: NativeExternalWorkerTransport,
 ): NativeExternalAttachmentProjection | string => {
-  if (processor.manifest.role !== "effect") {
-    return `External processor "${processor.instanceId}" has unsupported role "${processor.manifest.role}".`
-  }
   if (processor.manifest.sidechainInputs.length > 0) {
     return `External processor "${processor.instanceId}" has unsupported sidechain buses.`
   }
   const inputs = processor.manifest.audioInputs.filter((bus) => bus.enabled)
   const outputs = processor.manifest.audioOutputs.filter((bus) => bus.enabled)
-  if (inputs.length !== 1 || outputs.length !== 1) {
-    return `External processor "${processor.instanceId}" must have exactly one enabled input and output bus.`
+  const instrument = processor.manifest.role === "instrument"
+  if ((!instrument && inputs.length !== 1)
+    || (instrument && (inputs.length !== 0 || node.channel.kind !== "instrument"))
+    || outputs.length !== 1) {
+    return instrument
+      ? `External instrument "${processor.instanceId}" requires an instrument mixer node and exactly one enabled output bus.`
+      : `External processor "${processor.instanceId}" must have exactly one enabled input and output bus.`
   }
   const input = inputs[0]
   const output = outputs[0]
-  if (!input || !output) {
+  if (!output || (!instrument && !input)) {
     return `External processor "${processor.instanceId}" has incomplete enabled bus metadata.`
   }
   if (
-    input.channels !== layoutChannels(node.inputLayout)
+    (!instrument && input?.channels !== layoutChannels(node.inputLayout))
     || output.channels !== layoutChannels(node.outputLayout)
   ) {
     return `External processor "${processor.instanceId}" has buses incompatible with mixer node "${node.channel.id}".`
@@ -113,17 +134,19 @@ const compileProcessor = (
     },
     bundleFingerprint: reference.bundleFingerprint,
     binaryFingerprint: reference.binaryFingerprint,
-    role: "effect",
+    role: processor.manifest.role,
     inputBuses: processor.manifest.audioInputs,
     outputBuses: processor.manifest.audioOutputs,
     workerTransport: {
       ...workerTransport,
-      inputChannels: input.channels,
+      inputChannels: instrument ? 0 : input?.channels ?? 0,
       outputChannels: output.channels,
     },
     declaredLatencyFrames: processor.latencyFrames,
     declaredTailFrames: processor.tailFrames,
     bypassed: processor.bypassed,
+    parameters: processor.manifest.parameters,
+    parameterOverrides: processor.parameterOverrides,
     // External processors persist no standalone state revision. updatedAt is
     // their canonical mutation version, reduced to the protocol's uint31 span.
     stateRevision: stateRevision(processor.updatedAt),
@@ -147,22 +170,50 @@ export const compileNativeExternalAttachmentSnapshot = (
 
   const reasons: string[] = []
   const nodes = new Map(input.graph.channels.map((node) => [node.channel.id, node]))
-  const attachedNodeIds = new Set<string>()
   const attachments: NativeExternalAttachmentProjection[] = []
+  const processorsByNode = new Map<string, ExternalProcessor[]>()
   for (const processor of input.processors) {
-    const node = nodes.get(processor.targetId)
+    if (processor.bypassed) continue
+    const processors = processorsByNode.get(processor.targetId) ?? []
+    processors.push(processor)
+    processorsByNode.set(processor.targetId, processors)
+  }
+  for (const [targetId, processors] of processorsByNode) {
+    const node = nodes.get(targetId)
     if (!node) {
-      reasons.push(`External processor "${processor.instanceId}" targets missing mixer node "${processor.targetId}".`)
+      for (const processor of processors) {
+        reasons.push(`External processor "${processor.instanceId}" targets missing mixer node "${targetId}".`)
+      }
       continue
     }
-    if (attachedNodeIds.has(node.channel.id)) {
-      reasons.push(`Mixer node "${node.channel.id}" has multiple external processors, but the native graph protocol supports one attachment per node.`)
-      continue
+    const ordered = [...processors].sort((left, right) => (
+      left.chainIndex - right.chainIndex || left.instanceId.localeCompare(right.instanceId)
+    ))
+    let inputLayout = node.inputLayout
+    for (const [index, processor] of ordered.entries()) {
+      if (index > 0 && processor.manifest.role === "instrument") {
+        reasons.push(`External instrument "${processor.instanceId}" must be the first processor in mixer node "${targetId}".`)
+      }
+      const outputBuses = processor.manifest.audioOutputs.filter((bus) => bus.enabled)
+      const outputLayout = outputBuses.length === 1 ? layoutForChannels(outputBuses[0].channels) : undefined
+      if (outputLayout !== undefined && outputLayout !== node.outputLayout) {
+        reasons.push(`External processor "${processor.instanceId}" must preserve mixer node "${targetId}" output layout.`)
+      }
+      const attachment = compileProcessor(processor, {
+        channel: node.channel,
+        inputLayout,
+        outputLayout: outputLayout ?? node.outputLayout,
+      }, input.workerTransport)
+      if (typeof attachment === "string") {
+        reasons.push(attachment)
+      } else {
+        attachments.push({ ...attachment, chainIndex: index })
+        inputLayout = outputLayout ?? inputLayout
+      }
     }
-    attachedNodeIds.add(node.channel.id)
-    const attachment = compileProcessor(processor, node, input.workerTransport)
-    if (typeof attachment === "string") reasons.push(attachment)
-    else attachments.push(attachment)
+    if (inputLayout !== node.outputLayout) {
+      reasons.push(`External processor chain on mixer node "${targetId}" does not produce the node output layout.`)
+    }
   }
   if (reasons.length > 0) return { supported: false, reasons }
   return {
@@ -181,18 +232,65 @@ export const compileNativeExternalAttachmentPlan = (
 ): NativeExternalAttachmentPlanCompilation => {
   const snapshot = compileNativeExternalAttachmentSnapshot(input)
   if (!snapshot.supported) return { supported: false, reasons: snapshot.reasons }
+  return compileAttachmentPlan(snapshot.attachments, "External attachment plan is invalid.")
+}
+
+const compileAttachmentPlan = (
+  attachments: readonly NativeExternalAttachmentProjection[],
+  fallbackMessage: string,
+): NativeExternalAttachmentPlanCompilation => {
   try {
     return {
       supported: true,
       plan: nativeExternalAttachmentPlanSchema.parse({
         version: 1,
-        attachments: snapshot.attachments,
+        attachments,
       }),
     }
   } catch (error) {
     return {
       supported: false,
-      reasons: [error instanceof Error ? error.message : "External attachment plan is invalid."],
+      reasons: [error instanceof Error ? error.message : fallbackMessage],
     }
   }
+}
+
+export const compileNativeExternalEditorPlan = (
+  input: NativeExternalEditorPlanInput,
+): NativeExternalEditorPlanCompilation => {
+  const instrument = input.processor.manifest.role === "instrument"
+  const inputs = input.processor.manifest.audioInputs.filter((bus) => bus.enabled)
+  const outputs = input.processor.manifest.audioOutputs.filter((bus) => bus.enabled)
+  const inputLayout = instrument
+    ? "stereo"
+    : inputs[0] ? layoutForChannels(inputs[0].channels) : undefined
+  const outputLayout = outputs[0] ? layoutForChannels(outputs[0].channels) : undefined
+  if (input.processor.targetId !== input.targetId) {
+    return { supported: false, reasons: [`External processor "${input.processor.instanceId}" targets an invalid editor node.`] }
+  }
+  if (
+    (!instrument && inputs.length !== 1)
+    || (instrument && inputs.length !== 0)
+    || outputs.length !== 1
+    || !inputLayout
+    || !outputLayout
+  ) {
+    return {
+      supported: false,
+      reasons: [instrument
+        ? `External instrument "${input.processor.instanceId}" must have zero enabled input buses and exactly one enabled mono or stereo output bus.`
+        : `External processor "${input.processor.instanceId}" must have exactly one enabled mono or stereo input and output bus.`],
+    }
+  }
+  const attachment = compileProcessor(input.processor, {
+    channel: { id: input.targetId, kind: instrument ? "instrument" : "audio" },
+    inputLayout,
+    outputLayout,
+  }, {
+    slotCount: 2,
+    maximumFrames: 8_192,
+    maximumEventsPerBlock: 128,
+  })
+  if (typeof attachment === "string") return { supported: false, reasons: [attachment] }
+  return compileAttachmentPlan([{ ...attachment, chainIndex: 0 }], "External editor attachment plan is invalid.")
 }

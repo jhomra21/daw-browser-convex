@@ -5,6 +5,7 @@ import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
+import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 
 type ScheduleCall = {
   playheadSec: number
@@ -35,6 +36,81 @@ const withFakeRaf = async (run: (flushRaf: () => void) => Promise<void>) => {
   } finally {
     globalThis.requestAnimationFrame = previousRequest
     globalThis.cancelAnimationFrame = previousCancel
+  }
+}
+
+const createNativeHookBridge = () => {
+  const calls: string[] = []
+  const reply = (name: string) => async () => {
+    calls.push(name)
+    return { ok: true as const }
+  }
+  let progressListener = (_progress: NativeScheduleProgress) => {}
+  let progressSequence = 0n
+  const deviceId: `coreaudio:${string}` = 'coreaudio:default'
+  return {
+    calls,
+    audioHost: {
+      resolveOutputDevice: async () => ({
+        ok: true as const,
+        device: {
+          deviceId,
+          name: 'Default',
+          nominalSampleRateHz: 48_000,
+          outputChannelCount: 2,
+          maximumFramesPerBlock: 512,
+          available: true,
+        },
+      }),
+      resolveInputDevice: async () => ({ ok: true as const, device: null }),
+      session: {
+        configure: reply('configure'),
+        beginTransaction: reply('begin'),
+        commitTransaction: reply('commit'),
+        rollbackTransaction: reply('rollback'),
+        installAsset: reply('install'),
+        releaseAsset: reply('release'),
+        publishGraph: reply('graph'),
+        queueParameterEvents: reply('parameter'),
+        queueInstrumentEvents: reply('instrument'),
+        queueSourceEvents: reply('source'),
+        queueScheduleWindow: reply('schedule'),
+        setTransport: async (transport: { epoch: number; frame: number; running: boolean; transitionId?: bigint }) => {
+          calls.push('transport')
+          progressSequence += 1n
+          queueMicrotask(() => progressListener({
+            revision: 1,
+            epoch: transport.epoch,
+            progressSequence,
+            renderedThroughFrame: BigInt(transport.frame),
+            acceptedThroughFrame: BigInt(transport.frame + 1),
+            lastAcceptedWindowId: 1n,
+            appliedTransportTransitionId: transport.transitionId ?? progressSequence,
+            appliedUrgentSequence: 0n,
+            running: transport.running,
+            scheduleComplete: true,
+            instrumentCredits: 256,
+            sourceCredits: 256,
+            automationCredits: 256,
+          }))
+          return { ok: true as const }
+        },
+        configureRecording: reply('recording-configure'),
+        startRecording: reply('recording-start'),
+        stopRecording: reply('recording-stop'),
+        cancelRecording: reply('recording-cancel'),
+        start: reply('start'),
+        stop: reply('stop'),
+        teardown: reply('teardown'),
+        onLoss: () => () => {},
+        onRecordingBlock: () => () => {},
+        onRecordingStatus: () => () => {},
+        onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
+          progressListener = listener
+          return () => { progressListener = () => {} }
+        },
+      },
+    },
   }
 }
 
@@ -374,6 +450,48 @@ describe('useTimelinePlayback deferred stretch retries', () => {
   })
 })
 
+test('does not prepare native audio when disabled and keeps browser playback available', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      let webEnsures = 0
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        ensureAudio: () => { webEnsures += 1 },
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => false,
+          projectGeneration: () => 1,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        })
+
+        expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(0)
+        expect(playback.nativeLiveMidi.isAvailable()).toBeFalse()
+        await playback.handlePlay([track])
+        expect(webEnsures).toBe(1)
+        expect(playback.isPlaying()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
 test('uses the committed native backend without scheduling Web Audio', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []
@@ -381,6 +499,8 @@ test('uses the committed native backend without scheduling Web Audio', async () 
     calls.push(name)
     return { ok: true as const }
   }
+  let progressListener = (_progress: NativeScheduleProgress) => {}
+  let progressSequence = 0n
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -388,7 +508,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
       dawDesktop: {
         audioHost: {
           resolveOutputDevice: async () => ({
-            ok: true as const,
+            ok: true,
             device: {
               deviceId,
               name: 'Default',
@@ -409,11 +529,36 @@ test('uses the committed native backend without scheduling Web Audio', async () 
             queueParameterEvents: reply('parameter'),
             queueInstrumentEvents: reply('instrument'),
             queueSourceEvents: reply('source'),
-            setTransport: reply('transport'),
+            queueScheduleWindow: reply('schedule'),
+            reenableVstScheduleAutomation: reply('automation-enable'),
+            setTransport: async (transport: { epoch: number; frame: number; running: boolean; transitionId?: bigint }) => {
+              calls.push('transport')
+              progressSequence += 1n
+              queueMicrotask(() => progressListener({
+                revision: 1,
+                epoch: transport.epoch,
+                progressSequence,
+                renderedThroughFrame: BigInt(transport.frame),
+                acceptedThroughFrame: BigInt(transport.frame + 1),
+                lastAcceptedWindowId: 1n,
+                appliedTransportTransitionId: transport.transitionId ?? progressSequence,
+                appliedUrgentSequence: 0n,
+                running: transport.running,
+                scheduleComplete: true,
+                instrumentCredits: 256,
+                sourceCredits: 256,
+                automationCredits: 256,
+              }))
+              return { ok: true as const }
+            },
             start: reply('start'),
             stop: reply('stop'),
             teardown: reply('teardown'),
             onLoss: () => () => {},
+            onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
+              progressListener = listener
+              return () => { progressListener = () => {} }
+            },
           },
         },
       },
@@ -447,7 +592,13 @@ test('uses the committed native backend without scheduling Web Audio', async () 
         await playback.handlePlay([track])
         expect(webEnsures).toBe(0)
         expect(webSchedules).toBe(0)
-        expect(calls).toEqual(['begin', 'configure', 'graph', 'source', 'transport', 'commit', 'start'])
+        expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
+        const initialCalls = [...calls]
+        await playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        expect(playback.backendDiagnostics().activeBackend).toBe('native')
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
+        expect(calls.filter((call) => call === 'graph')).toHaveLength(2)
+        expect(calls.slice(0, initialCalls.length)).toEqual(initialCalls)
         expect(playback.backendDiagnostics()).toEqual({
           version: 1,
           defaultBackend: 'legacy',
@@ -460,15 +611,128 @@ test('uses the committed native backend without scheduling Web Audio', async () 
           requestedPortableBrowser: false,
         })
         await playback.handlePlay([track])
-        expect(calls).toEqual(['begin', 'configure', 'graph', 'source', 'transport', 'commit', 'start'])
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
         await playback.handlePause()
         expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        expect(playback.nativeLiveMidi.isActive()).toBeTrue()
         nativeEnabled = false
+        expect(playback.nativeLiveMidi.isAvailable()).toBeFalse()
         await playback.handlePlay([track])
         expect(playback.backendDiagnostics().activeBackend).toBe('native')
-        expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
         expect(calls.filter((call) => call === 'start')).toHaveLength(2)
         expect(calls).not.toContain('release')
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('rebuilds a prepared native backend before the next play', async () => {
+  const previousWindow = globalThis.window
+  const calls: string[] = []
+  const reply = (name: string): (() => Promise<{ ok: true }>) => async () => {
+    calls.push(name)
+    return { ok: true }
+  }
+  let progressListener = (_progress: NativeScheduleProgress) => {}
+  let progressSequence = 0n
+  const deviceId: `coreaudio:${string}` = 'coreaudio:default'
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      dawDesktop: {
+        audioHost: {
+          resolveOutputDevice: async () => ({
+            ok: true,
+            device: {
+              deviceId,
+              name: 'Default',
+              nominalSampleRateHz: 48_000,
+              outputChannelCount: 2,
+              maximumFramesPerBlock: 512,
+              available: true,
+            },
+          }),
+          session: {
+            configure: reply('configure'),
+            beginTransaction: reply('begin'),
+            commitTransaction: reply('commit'),
+            rollbackTransaction: reply('rollback'),
+            installAsset: reply('install'),
+            releaseAsset: reply('release'),
+            publishGraph: reply('graph'),
+            queueParameterEvents: reply('parameter'),
+            queueInstrumentEvents: reply('instrument'),
+            queueSourceEvents: reply('source'),
+            queueScheduleWindow: reply('schedule'),
+            reenableVstScheduleAutomation: reply('automation-enable'),
+            setTransport: async (transport: { epoch: number; frame: number; running: boolean; transitionId?: bigint }) => {
+              calls.push('transport')
+              progressSequence += 1n
+              queueMicrotask(() => progressListener({
+                revision: 1,
+                epoch: transport.epoch,
+                progressSequence,
+                renderedThroughFrame: BigInt(transport.frame),
+                acceptedThroughFrame: BigInt(transport.frame + 1),
+                lastAcceptedWindowId: 1n,
+                appliedTransportTransitionId: transport.transitionId ?? progressSequence,
+                appliedUrgentSequence: 0n,
+                running: transport.running,
+                scheduleComplete: true,
+                instrumentCredits: 256,
+                sourceCredits: 256,
+                automationCredits: 256,
+              }))
+              return { ok: true as const }
+            },
+            start: reply('start'),
+            stop: reply('stop'),
+            teardown: reply('teardown'),
+            onLoss: () => () => {},
+            onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
+              progressListener = listener
+              return () => { progressListener = () => {} }
+            },
+          },
+        },
+      },
+    },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => true,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        })
+
+        await playback.handlePlay([track])
+        await playback.handlePause()
+        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
+
+        await playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
+        expect(calls).toContain('teardown')
+
+        await playback.handlePlay([track])
+        expect(playback.backendDiagnostics().activeBackend).toBe('native')
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
+        expect(calls.filter((call) => call === 'graph')).toHaveLength(2)
         dispose()
       })
     })

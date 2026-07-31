@@ -12,6 +12,7 @@ import {
   type AutomationParameterSelection,
   type AutomationTargetDeviceInstance,normalizeMasterVolume
 } from "@daw-browser/shared";
+import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
@@ -44,6 +45,7 @@ export const masterAreaHeight = (
 
 type MasterSidebarRowProps = {
   master: MasterSidebarModel;
+  levels: TrackStereoLevels;
   automation: {
     visible: boolean;
     heightPx: number;
@@ -333,8 +335,32 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
             )}
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">
-              <div class="relative h-full w-1 overflow-hidden bg-border/60" />
-              <div class="relative h-full w-1 overflow-hidden bg-border/60" />
+              {(() => {
+                const left = Math.max(0, Math.min(1, props.levels.left));
+                const right = Math.max(0, Math.min(1, props.levels.right));
+                return (
+                  <>
+                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                      <div
+                        class={cn(
+                          "absolute bottom-0 w-full transition-all duration-75",
+                          left >= 0.98 ? "bg-red-500" : "bg-green-500",
+                        )}
+                        style={{ height: `${left * 100}%` }}
+                      />
+                    </div>
+                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                      <div
+                        class={cn(
+                          "absolute bottom-0 w-full transition-all duration-75",
+                          right >= 0.98 ? "bg-red-500" : "bg-green-500",
+                        )}
+                        style={{ height: `${right * 100}%` }}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

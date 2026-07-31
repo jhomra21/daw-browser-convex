@@ -89,7 +89,7 @@ export type PortableWasmInstrumentEvent = {
   noteId: number
   sequence: number
   frameOffset: number
-  type: 'note-on' | 'note-off' | 'sustain' | 'expression'
+  type: 'note-on' | 'note-off' | 'sustain' | 'expression' | 'parameter'
   channel: number
   note: number
   value: number
@@ -136,10 +136,11 @@ const isInstrumentEvent = (value: unknown): value is PortableWasmInstrumentEvent
   && isPositiveInteger(value.noteId)
   && isPositiveInteger(value.sequence)
   && typeof value.frameOffset === 'number' && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
-  && (value.type === 'note-on' || value.type === 'note-off' || value.type === 'sustain' || value.type === 'expression')
+  && (value.type === 'note-on' || value.type === 'note-off' || value.type === 'sustain' || value.type === 'expression' || value.type === 'parameter')
   && typeof value.channel === 'number' && Number.isInteger(value.channel) && value.channel >= 0 && value.channel <= 15
   && typeof value.note === 'number' && Number.isInteger(value.note) && value.note >= 0 && value.note <= 127
-  && typeof value.value === 'number' && Number.isFinite(value.value) && value.value >= 0 && value.value <= 1
+  && typeof value.value === 'number' && Number.isFinite(value.value)
+  && (value.type === 'parameter' || value.value >= 0 && value.value <= 1)
 
 const isSampleSourceEvent = (value: unknown): value is AudioCoreSampleSourceEventDto =>
   isRecord(value)

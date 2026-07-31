@@ -35,6 +35,8 @@ add_library(daw-vst3-sdk-hosting STATIC
   src/vst3-editor-window.mm
   "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module_mac.mm"
+  "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/hostclasses.cpp"
+  "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/eventlist.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/parameterchanges.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/vst/utility/stringconvert.cpp"
@@ -53,7 +55,11 @@ set_source_files_properties(
   src/vst3-worker.cpp
   "${VST3_SDK_PATH}/public.sdk/source/vst/utility/stringconvert.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/common/commonstringconvert.cpp"
-  PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations"
+  PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations -Wno-unnecessary-virtual-specifier"
+)
+set_source_files_properties(
+  "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/hostclasses.cpp"
+  PROPERTIES COMPILE_FLAGS "-Wno-unnecessary-virtual-specifier"
 )
 find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
 find_library(SECURITY_FRAMEWORK Security REQUIRED)

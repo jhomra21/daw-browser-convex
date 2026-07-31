@@ -1,4 +1,6 @@
 #include "daw/audio_host_macos.h"
+#include "daw/audio_host_event_scheduler.h"
+#include "daw/audio_host_macos.h"
 
 #include <array>
 #include <cassert>
@@ -12,11 +14,32 @@
 
 namespace {
 
+std::array<std::uint8_t, 32> Fingerprint(const std::string_view value) {
+  std::array<std::uint8_t, 32> result{};
+  for (std::size_t index = 0; index < result.size(); ++index) {
+    result[index] = static_cast<std::uint8_t>(
+      std::stoul(std::string(value.substr(index * 2, 2)), nullptr, 16)
+    );
+  }
+  return result;
+}
+
 void AppendLeU32(std::vector<std::uint8_t>& bytes, const std::uint32_t value) {
   bytes.push_back(static_cast<std::uint8_t>(value));
   bytes.push_back(static_cast<std::uint8_t>(value >> 8U));
   bytes.push_back(static_cast<std::uint8_t>(value >> 16U));
   bytes.push_back(static_cast<std::uint8_t>(value >> 24U));
+}
+
+void WriteLeU32(
+  std::vector<std::uint8_t>& bytes,
+  const std::size_t offset,
+  const std::uint32_t value
+) {
+  bytes[offset] = static_cast<std::uint8_t>(value);
+  bytes[offset + 1] = static_cast<std::uint8_t>(value >> 8U);
+  bytes[offset + 2] = static_cast<std::uint8_t>(value >> 16U);
+  bytes[offset + 3] = static_cast<std::uint8_t>(value >> 24U);
 }
 
 void AppendLeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
@@ -44,21 +67,26 @@ void AppendBeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
   }
 }
 
-std::vector<std::uint8_t> GraphSnapshot(const std::uint32_t revision, const float gain) {
+std::vector<std::uint8_t> GraphSnapshot(
+  const std::uint32_t revision,
+  const float gain,
+  const std::uint32_t native_node_latency = 0
+) {
   std::vector<std::uint8_t> payload;
-  AppendLeU32(payload, DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
+  AppendLeU32(payload, native_node_latency > 0 ? 4u : DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
   AppendLeU32(payload, revision);
   AppendLeU32(payload, 2);
   AppendLeU32(payload, 1);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
-  const auto append_node = [&payload](const std::uint64_t id, const std::uint32_t kind) {
+  const auto append_node = [&payload, native_node_latency](const std::uint64_t id, const std::uint32_t kind) {
     AppendLeU64(payload, id);
     AppendLeU32(payload, kind);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
     AppendLeU32(payload, 0);
-    AppendLeU32(payload, 0);
+    AppendLeU32(payload, native_node_latency > 0 ? 0 : id == 2 ? native_node_latency : 0);
+    if (native_node_latency > 0) AppendLeU32(payload, id == 2 ? native_node_latency : 0);
     for (std::size_t field = 0; field < 20; ++field) AppendLeU32(payload, 0);
     AppendLeU64(payload, 0);
     AppendLeFloat(payload, 0.0F);
@@ -94,6 +122,212 @@ void AppendLeDouble(std::vector<std::uint8_t>& bytes, const double value) {
   for (std::size_t index = 0; index < sizeof(encoded); ++index) bytes.push_back(static_cast<std::uint8_t>(encoded >> (index * 8U)));
 }
 
+std::vector<std::uint8_t> ScheduleWindow(
+  const std::uint32_t revision,
+  const std::uint32_t epoch,
+  const std::uint64_t window_id,
+  const std::uint64_t start_frame,
+  const std::uint64_t end_frame,
+  const std::uint32_t chunk_index,
+  const std::uint32_t chunk_count,
+  const bool ends_schedule
+) {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, revision);
+  AppendLeU32(payload, epoch);
+  AppendLeU64(payload, window_id);
+  AppendLeU64(payload, start_frame);
+  AppendLeU64(payload, end_frame);
+  AppendLeU32(payload, chunk_index);
+  AppendLeU32(payload, chunk_count);
+  AppendLeU32(payload, ends_schedule ? 1 : 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  return payload;
+}
+
+std::vector<std::uint8_t> ScheduleAutomationWindow(
+  const std::uint32_t revision,
+  const std::uint32_t epoch,
+  const std::uint64_t window_id,
+  const std::uint64_t start_frame,
+  const std::uint64_t end_frame,
+  const std::string_view instance_id
+) {
+  auto payload = ScheduleWindow(revision, epoch, window_id, start_frame, end_frame, 0, 1, false);
+  payload[52] = 1;
+  AppendInstanceId(payload, instance_id);
+  AppendLeU32(payload, 7);
+  AppendLeU64(payload, start_frame);
+  AppendLeU64(payload, end_frame);
+  AppendLeDouble(payload, 0.25);
+  AppendLeDouble(payload, 0.75);
+  AppendLeU32(payload, 1);
+  return payload;
+}
+
+std::vector<std::uint8_t> ScheduleInstrumentWindow(
+  const std::uint32_t revision,
+  const std::uint32_t epoch,
+  const std::uint64_t window_id,
+  const std::uint64_t start_frame,
+  const std::uint64_t end_frame,
+  const std::uint32_t chunk_index,
+  const std::uint32_t chunk_count,
+  const bool ends_schedule,
+  const std::uint32_t count
+) {
+  auto payload = ScheduleWindow(
+    revision,
+    epoch,
+    window_id,
+    start_frame,
+    end_frame,
+    chunk_index,
+    chunk_count,
+    ends_schedule
+  );
+  WriteLeU32(payload, 44, count);
+  for (std::uint32_t index = 0; index < count; ++index) {
+    AppendLeU64(payload, 2);
+    AppendLeU64(payload, index + 1);
+    AppendLeU64(payload, index + 1);
+    AppendLeU32(payload, epoch);
+    AppendLeU32(payload, static_cast<std::uint32_t>(start_frame + index));
+    AppendLeU32(payload, DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, index % 128);
+    AppendLeFloat(payload, 0.5F);
+  }
+  return payload;
+}
+
+using daw::audio_host_macos::NativeVstEventScheduler;
+using daw::audio_host_macos::WorkerNotification;
+using daw::audio_host_macos::WorkerNotificationKind;
+using daw::audio_host_macos::WorkerNotificationQueue;
+using daw::plugin_host::WorkerEventKind;
+using daw::plugin_host::WorkerTransportEvent;
+
+WorkerTransportEvent ParameterEvent(const std::uint32_t sample_offset, const std::uint32_t parameter_id) {
+  return {
+    .kind = WorkerEventKind::kParameter,
+    .sampleOffset = sample_offset,
+    .parameterId = parameter_id,
+    .parameterValue = 0.5,
+  };
+}
+
+std::size_t PrepareSchedulerBlock(
+  NativeVstEventScheduler& scheduler,
+  const std::uint32_t frame_count,
+  std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity>& block_events
+) {
+  std::size_t event_count = 0;
+  assert(scheduler.PrepareBlock(frame_count, block_events, event_count, block_events.size()));
+  return event_count;
+}
+
+void CommitSchedulerBlock(
+  NativeVstEventScheduler& scheduler,
+  std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity>& block_events,
+  const std::size_t event_count
+) {
+  for (std::size_t index = 1; index < event_count; ++index) {
+    const auto event = block_events[index];
+    std::size_t position = index;
+    while (position > 0 && block_events[position - 1].sampleOffset > event.sampleOffset) {
+      block_events[position] = block_events[position - 1];
+      --position;
+    }
+    block_events[position] = event;
+  }
+  scheduler.CommitBlock(true);
+}
+
+void TestNativeVstEventScheduler() {
+  {
+    NativeVstEventScheduler scheduler;
+    const auto event = ParameterEvent(1'000, 1);
+    assert(scheduler.QueueEvents({&event, 1}));
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> block_events{};
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+    const auto second_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(second_count == 1 && block_events[0].sampleOffset == 488);
+    scheduler.CommitBlock(true);
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+  }
+  {
+    NativeVstEventScheduler scheduler;
+    const std::array events{
+      ParameterEvent(1'000, 1),
+      ParameterEvent(0, 2),
+    };
+    assert(scheduler.QueueEvents(events));
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> block_events{};
+    const auto first_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(first_count == 1 && block_events[0].parameterId == 2);
+    scheduler.CommitBlock(true);
+    const auto second_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(second_count == 1 && block_events[0].parameterId == 1 && block_events[0].sampleOffset == 488);
+    scheduler.CommitBlock(true);
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+  }
+  {
+    NativeVstEventScheduler scheduler;
+    const auto event = ParameterEvent(1'500, 1);
+    assert(scheduler.QueueEvents({&event, 1}));
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> block_events{};
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+    const auto third_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(third_count == 1 && block_events[0].sampleOffset == 476);
+    scheduler.CommitBlock(true);
+  }
+  {
+    NativeVstEventScheduler scheduler;
+    const auto future = ParameterEvent(1'000, 1);
+    assert(scheduler.QueueEvents({&future, 1}));
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> block_events{};
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+    const auto immediate = ParameterEvent(0, 2);
+    assert(scheduler.QueueEvents({&immediate, 1}));
+    const auto second_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(second_count == 2);
+    assert(block_events[0].parameterId == 1 && block_events[0].sampleOffset == 488);
+    assert(block_events[1].parameterId == 2 && block_events[1].sampleOffset == 0);
+    CommitSchedulerBlock(scheduler, block_events, second_count);
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+  }
+  {
+    NativeVstEventScheduler scheduler;
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> events{};
+    for (std::size_t index = 0; index < events.size(); ++index) {
+      events[index] = ParameterEvent(0, static_cast<std::uint32_t>(index));
+    }
+    assert(scheduler.QueueEvents(events));
+    const auto rejected = ParameterEvent(0, 2'048);
+    assert(!scheduler.QueueEvents({&rejected, 1}));
+    std::array<WorkerTransportEvent, NativeVstEventScheduler::kCapacity> block_events{};
+    const auto event_count = PrepareSchedulerBlock(scheduler, 512, block_events);
+    assert(event_count == events.size());
+    for (std::size_t index = 0; index < event_count; ++index) {
+      assert(block_events[index].parameterId == index);
+    }
+    scheduler.CommitBlock(true);
+    assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
+    scheduler.CommitBlock(true);
+  }
+}
+
 void TestDeviceNamespace() {
   assert(daw::audio_host_macos::CoreAudioDeviceId("BuiltInOutput") == "coreaudio:BuiltInOutput");
   const auto uid = daw::audio_host_macos::CoreAudioDeviceUid("coreaudio:BuiltInOutput");
@@ -118,7 +352,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x07,
+    0x00, 0x00, 0x00, 0x0c,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -129,6 +363,15 @@ void TestControlFrames() {
   const auto decoded_recording_device_query = daw::audio_host_macos::DecodeControlFrame(recording_device_query);
   assert(decoded_recording_device_query
     && decoded_recording_device_query->type == daw::audio_host_macos::ControlType::kRecordingDeviceQuery);
+  for (const auto type : std::array{
+    daw::audio_host_macos::ControlType::kVstEditor,
+    daw::audio_host_macos::ControlType::kVstEditorStatus,
+    daw::audio_host_macos::ControlType::kDiagnosticStart,
+  }) {
+    const auto frame = daw::audio_host_macos::EncodeControlFrame(type, {});
+    const auto decodedFrame = daw::audio_host_macos::DecodeControlFrame(frame);
+    assert(decodedFrame && decodedFrame->type == type);
+  }
   auto malformed = encoded;
   malformed[4] = 2;
   assert(!daw::audio_host_macos::DecodeControlFrame(malformed));
@@ -186,6 +429,59 @@ void TestCallbackPlanarBuffersAndSplitting() {
   assert(host.Retire(2));
   host.Teardown();
   assert(host.diagnostics().state == daw::audio_host_macos::LifecycleState::kIdle);
+}
+
+void TestPausedProcessDoesNotAdvanceTransportFrame() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 100));
+  assert(host.StartDiagnosticMode());
+  std::array<float, 4> left{1.0F, 1.0F, 1.0F, 1.0F};
+  std::array<float, 4> right{0.5F, 0.5F, 0.5F, 0.5F};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{left.data(), right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+
+  assert(host.ProcessPlanar(input, output, 4));
+  assert(host.diagnostics().transport_frame == 100);
+  host.Stop();
+}
+
+void TestNativeMeterQueueAggregatesPostGraphOutput() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F)).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(2).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  assert(host.SetTransport(1, true, 0));
+  assert(host.StartDiagnosticMode());
+  std::array<float, 4> left{1.0F, 1.0F, 1.0F, 1.0F};
+  std::array<float, 4> right{0.5F, 0.5F, 0.5F, 0.5F};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{left.data(), right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  const auto batch = host.DrainMeterBatch();
+  assert(batch && batch->graph_revision == 2 && batch->transport_epoch == 1 && batch->entry_count == 2);
+  assert(batch->entries[0].node_id == 1 && batch->entries[0].left_rms == 1.0F && batch->entries[0].right_rms == 0.5F);
+  assert(batch->entries[1].node_id == 2 && batch->entries[1].left_rms == 1.0F && batch->entries[1].right_rms == 0.5F);
+  assert(!host.DrainMeterBatch());
 }
 
 void TestNativeVstAttachmentBoundsAndLatencyContract() {
@@ -271,6 +567,15 @@ void TestNativeVstRuntimeControlBounds() {
   attachment.bundle_fingerprint.fill(1);
   attachment.binary_fingerprint.fill(2);
   assert(host.AttachNativeVst(attachment));
+  const auto ownedButNotReady = host.ExecuteNativeVstEditorCommand(
+    instance_id,
+    daw::audio_host_macos::NativeVstEditorCommand::kStatus
+  );
+  assert(ownedButNotReady && ownedButNotReady->owned && !ownedButNotReady->success);
+  assert(!host.ExecuteNativeVstEditorCommand(
+    "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2",
+    daw::audio_host_macos::NativeVstEditorCommand::kStatus
+  ));
   std::vector<std::uint8_t> parameters;
   AppendInstanceId(parameters, instance_id);
   AppendLeU32(parameters, 2);
@@ -330,6 +635,149 @@ void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
   assert(!host.QueueParameterEvents(malformed_events));
 }
 
+void TestScheduleWindowCompletionSemantics() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+
+  assert(host.QueueScheduleWindow(ScheduleWindow(2, 1, 1, 0, 4, 0, 2, false)));
+  assert(host.QueueScheduleWindow(ScheduleWindow(2, 1, 1, 0, 4, 1, 2, false)));
+  assert(host.QueueScheduleWindow(ScheduleWindow(2, 1, 2, 4, 8, 0, 1, false)));
+  assert(host.QueueScheduleWindow(ScheduleWindow(2, 1, 3, 8, 12, 0, 1, true)));
+  assert(host.QueueScheduleWindow(ScheduleWindow(2, 1, 3, 8, 12, 0, 1, true)));
+  assert(!host.QueueScheduleWindow(ScheduleWindow(2, 1, 4, 12, 16, 0, 1, false)));
+  host.Stop();
+
+  daw::audio_host_macos::AudioHost invalid;
+  assert(invalid.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(invalid.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(invalid.SetTransport(1, false, 0));
+  assert(!invalid.QueueScheduleWindow(ScheduleWindow(2, 1, 1, 0, 4, 0, 2, true)));
+  assert(invalid.QueueScheduleWindow(ScheduleWindow(2, 1, 1, 0, 4, 0, 2, false)));
+  assert(invalid.QueueScheduleWindow(ScheduleWindow(2, 1, 1, 0, 4, 1, 2, false)));
+  invalid.Stop();
+}
+
+void TestScheduleWindowRollback() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+
+  assert(host.QueueScheduleWindow(
+    ScheduleInstrumentWindow(2, 1, 1, 0, 4, 0, 2, false, 1)
+  ));
+  auto malformed = ScheduleInstrumentWindow(2, 1, 1, 0, 4, 1, 2, true, 2);
+  malformed.pop_back();
+  assert(!host.QueueScheduleWindow(malformed));
+  assert(host.QueueScheduleWindow(
+    ScheduleInstrumentWindow(2, 1, 1, 0, 4, 1, 2, true, 1)
+  ));
+  host.Stop();
+}
+
+void TestLargeFinalScheduleWindowUsesPersistentStaging() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 512,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.QueueScheduleWindow(
+    ScheduleInstrumentWindow(2, 1, 1, 0, 512, 0, 1, true, 256)
+  ));
+  host.Stop();
+}
+
+void TestVstAutomationSegmentsReclaimWithinEpoch() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 2,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  constexpr std::string_view instance_id = "automation-instance";
+  daw::audio_host_macos::NativeVstAttachment attachment{
+    .graph_node_id = 2,
+    .instance_id = std::string(instance_id),
+    .class_id = "565354734D617376616C68616C6C6173",
+    .vendor_id = "Valhalla DSP, LLC",
+    .canonical_bundle_path = "/Library/Audio/Plug-Ins/VST3/ValhallaSupermassive.vst3",
+    .canonical_executable_path = "/Library/Audio/Plug-Ins/VST3/ValhallaSupermassive.vst3/Contents/MacOS/ValhallaSupermassive",
+    .architecture = 1,
+    .scanner_catalog_version = 2,
+    .role = daw::audio_host_macos::NativeVstRole::kEffect,
+    .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .transport_latency_frames = 2,
+    .playback_enabled = true,
+    .transport = {.slot_count = 2, .maximum_frames = 2, .input_channels = 2, .output_channels = 2, .maximum_events_per_block = 32},
+  };
+  attachment.bundle_fingerprint = Fingerprint("0db70288522e217dd5a3c3690e3d9da2416a0019aa2def7e956e938af35a0a16");
+  attachment.binary_fingerprint = Fingerprint("6e45a98e5da42ad8bcbfb7096debc5dddda111a710f28efb439fa8048c139b7d");
+  assert(host.AttachNativeVst(attachment));
+  const auto graph_status = host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F, 2));
+  assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  assert(host.SetTransport(1, true, 0));
+  assert(host.StartDiagnosticMode());
+  for (std::size_t attempt = 0; attempt < 500; ++attempt) {
+    const auto health = host.NativeVstHealth(instance_id);
+    if (health && *health == daw::audio_host_macos::NativeVstWorkerHealth::kReady) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  std::array<float, 2> left{};
+  std::array<float, 2> right{};
+  std::array<float, 2> output_left{};
+  std::array<float, 2> output_right{};
+  const std::array<const float*, 2> input{left.data(), right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 2));
+  for (std::uint64_t index = 0; index < 2'050; ++index) {
+    const auto start = index * 2;
+    bool queued = false;
+    for (std::size_t attempt = 0; attempt < 100 && !queued; ++attempt) {
+      queued = host.QueueScheduleWindow(ScheduleAutomationWindow(
+        2, 1, index + 1, start, start + 2, instance_id
+      ));
+      if (!queued) {
+        assert(host.ProcessPlanar(input, output, 2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    }
+    assert(queued);
+    assert(host.ProcessPlanar(input, output, 2));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  host.Stop();
+}
+
 void TestNoActiveDeviceFailsGracefully() {
   daw::audio_host_macos::AudioHost host;
   assert(host.readinessReason() == daw::audio_host_macos::DeviceReadinessReason::kDeviceNotConfigured);
@@ -341,6 +789,32 @@ void TestNoActiveDeviceFailsGracefully() {
     .channel_count = 2,
     .revision = 1,
   }));
+}
+
+void TestRejectedBlockDiagnosticsIdentifyLifecycleRejection() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  std::array<float, 2> left{};
+  std::array<float, 2> right{};
+  std::array<float, 2> output_left{};
+  std::array<float, 2> output_right{};
+  const std::array<const float*, 2> input{left.data(), right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(!host.ProcessPlanar(input, output, 2));
+  const auto diagnostics = host.diagnostics();
+  assert(diagnostics.rejected_blocks == 1);
+  assert(diagnostics.last_rejected_reason
+    == daw::audio_host_macos::RejectedBlockReason::kNotRunningOrCoreUnavailable);
+  assert(diagnostics.last_rejected_callback == 1);
+  assert(diagnostics.last_rejected_render_epoch == 0);
+  assert(diagnostics.last_rejected_transport_epoch == 0);
+  assert(diagnostics.last_rejected_core_result == DAW_AUDIO_CORE_OK);
 }
 
 void TestCoreAudioDeviceLossRoutesBySessionRole() {
@@ -460,18 +934,92 @@ void TestWorkerNotificationCarriesRevisionIdentity() {
   assert(notification.value == 128);
 }
 
+WorkerNotification Notification(
+  const WorkerNotificationKind kind,
+  const std::uint32_t value = 0,
+  const std::string_view instance_id = {},
+  const std::uint32_t parameter_id = 0,
+  const double normalized_value = 0.0
+) {
+  return {
+    .kind = kind,
+    .instance_id = std::string(instance_id),
+    .value = value,
+    .parameter_id = parameter_id,
+    .normalized_value = normalized_value,
+  };
+}
+
+void TestWorkerNotificationQueuePolicy() {
+  {
+    WorkerNotificationQueue queue;
+    assert(queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", 7, 0.25)));
+    assert(queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", 7, 0.75)));
+    const auto latest = queue.Pop();
+    assert(latest.parameter_id == 7 && latest.normalized_value == 0.75 && queue.Empty());
+  }
+  {
+    WorkerNotificationQueue queue;
+    for (std::size_t index = 0; index < WorkerNotificationQueue::kCapacity; ++index) {
+      assert(queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", static_cast<std::uint32_t>(index), 0.5)));
+    }
+    assert(queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", 999, 0.75)));
+    assert(queue.Pop().parameter_id == 1);
+  }
+  {
+    WorkerNotificationQueue queue;
+    for (std::size_t index = 0; index < WorkerNotificationQueue::kCapacity; ++index) {
+      assert(queue.Push(Notification(WorkerNotificationKind::kLatency, static_cast<std::uint32_t>(index))));
+    }
+    assert(queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", 11, 0.25)));
+    assert(queue.Pop().value == 1);
+  }
+  {
+    WorkerNotificationQueue queue;
+    for (std::size_t index = 0; index < WorkerNotificationQueue::kCapacity; ++index) {
+      assert(queue.Push(Notification(
+        index % 2 == 0 ? WorkerNotificationKind::kRestart : WorkerNotificationKind::kFault,
+        static_cast<std::uint32_t>(index)
+      )));
+    }
+    assert(!queue.Push(Notification(WorkerNotificationKind::kParameterEdit, 0, "instance", 1, 0.5)));
+  }
+  {
+    WorkerNotificationQueue queue;
+    for (std::size_t index = 0; index + 1 < WorkerNotificationQueue::kCapacity; ++index) {
+      assert(queue.Push(Notification(
+        index % 2 == 0 ? WorkerNotificationKind::kRestart : WorkerNotificationKind::kFault,
+        static_cast<std::uint32_t>(index)
+      )));
+    }
+    assert(queue.Push(Notification(WorkerNotificationKind::kLatency, 999)));
+    assert(queue.Push(Notification(WorkerNotificationKind::kRestart, 1000)));
+    assert(!queue.Push(Notification(WorkerNotificationKind::kFault, 1001)));
+    assert(queue.Pop().value == 0);
+  }
+}
+
 }  // namespace
 
 int main() {
   TestDeviceNamespace();
   TestControlFrames();
+  TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
+  TestPausedProcessDoesNotAdvanceTransportFrame();
+  TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();
   TestNativeVstRuntimeControlBounds();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
+  TestScheduleWindowCompletionSemantics();
+  TestScheduleWindowRollback();
+  TestLargeFinalScheduleWindowUsesPersistentStaging();
+  TestVstAutomationSegmentsReclaimWithinEpoch();
   TestNoActiveDeviceFailsGracefully();
+  TestRejectedBlockDiagnosticsIdentifyLifecycleRejection();
   TestCoreAudioDeviceLossRoutesBySessionRole();
   TestRollbackSafeGraphRevisionLifecycle();
   TestWorkerNotificationCarriesRevisionIdentity();
+  TestWorkerNotificationQueuePolicy();
   return 0;
 }

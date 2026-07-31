@@ -371,6 +371,8 @@ const createExportFx = (masterVolume: number): ExportFx => ({
   masterVolume,
 })
 
+export type ExportExternalPluginPolicy = 'browser-export' | 'native-playback'
+
 export const createExportRenderStateSnapshot = async (input: {
   projectId: string | undefined
   userId: string | undefined
@@ -378,14 +380,25 @@ export const createExportRenderStateSnapshot = async (input: {
   cloudRows: ExportCloudRenderRowsSnapshot | undefined
   effectsProjection?: ExportEffectsProjection
   automationPatches?: readonly ExportAutomationPatch[]
+  externalPluginPolicy?: ExportExternalPluginPolicy
 }): Promise<ExportRenderStateSnapshot> => {
-  const { projectId, userId, masterVolume, cloudRows, effectsProjection, automationPatches } = input
+  const {
+    projectId,
+    userId,
+    masterVolume,
+    cloudRows,
+    effectsProjection,
+    automationPatches,
+    externalPluginPolicy = 'browser-export',
+  } = input
   const fx = createExportFx(masterVolume)
   const localProject = projectId ? await getLocalProject(projectId) : undefined
   const localOnly = projectId ? isLocalId('project', projectId) || localProject !== undefined : false
   if (localOnly && projectId) {
     const rows = await captureLocalExportRenderRowsSnapshot(projectId)
-    assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
+    if (externalPluginPolicy === 'browser-export') {
+      assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
+    }
     applyLocalEffectRowsToFx(fx, rows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
     return {

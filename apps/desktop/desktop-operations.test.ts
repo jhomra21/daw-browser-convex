@@ -3,7 +3,7 @@ import { desktopOperations } from "./desktop-operations"
 
 test("advertises static local control operations independently of native media", () => {
   expect(desktopOperations(false)).toHaveLength(14)
-  expect(desktopOperations(true)).toHaveLength(18)
+  expect(desktopOperations(true)).toHaveLength(20)
   expect(desktopOperations(false)).toEqual([
     "host.status",
     "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek",

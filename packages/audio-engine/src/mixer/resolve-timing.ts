@@ -6,6 +6,8 @@ type MixerTimingPlan = {
   graphLatencyFrames: number
 }
 
+export type ExternalNodeLatencyFrames = ReadonlyMap<string, number>
+
 type MixerEdgeKind = 'output' | 'send'
 type MixerSendTap = 'pre-fx' | 'pre-fader' | 'post-fader'
 
@@ -31,8 +33,13 @@ export const resolveMixerTiming = (
   graph: ResolvedMixerGraph,
   sampleRate: number,
   bpm = 120,
+  externalLatencyFrames: ExternalNodeLatencyFrames = new Map(),
 ): MixerTimingPlan => {
   const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))
+  const getExternalLatency = (channelId: string) => externalLatencyFrames.get(channelId) ?? 0
+  const getNodeLatency = (channel: ResolvedMixerGraph['channels'][number]) => (
+    getChannelLatency(channel, sampleRate, bpm) + getExternalLatency(channel.channel.id)
+  )
   const incoming = new Map<string, Array<{ sourceId: string; kind: MixerEdgeKind; tap?: MixerSendTap }>>()
   for (const entry of graph.channels) {
     const edges = [
@@ -66,9 +73,9 @@ export const resolveMixerTiming = (
       if (edge.kind !== 'send' || edge.tap !== 'pre-fx') return sourceOutputLatency
       const source = channelById.get(edge.sourceId)
       if (!source) throw new Error(`Missing mixer channel ${edge.sourceId}`)
-      return sourceOutputLatency - getChannelLatency(source, sampleRate, bpm)
+      return sourceOutputLatency - getNodeLatency(source)
     }))
-    const latency = upstreamLatency + getChannelLatency(entry, sampleRate, bpm)
+    const latency = upstreamLatency + getNodeLatency(entry)
     pathLatency.set(channelId, latency)
     visiting.delete(channelId)
     return latency
@@ -81,7 +88,7 @@ export const resolveMixerTiming = (
     const edgeLatency = (edge: (typeof edges)[number]) => {
       const channelLatency = pathLatency.get(edge.sourceId) ?? 0
       return edge.kind === 'send' && edge.tap === 'pre-fx'
-        ? channelLatency - getChannelLatency(channelById.get(edge.sourceId)!, sampleRate, bpm)
+        ? channelLatency - getNodeLatency(channelById.get(edge.sourceId)!)
         : channelLatency
     }
     const convergenceLatency = Math.max(0, ...edges.map(edgeLatency))

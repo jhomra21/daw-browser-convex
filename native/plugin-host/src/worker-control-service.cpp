@@ -14,7 +14,9 @@ void DrainDiagnostics(
   void* const context
 ) {
   while (const auto diagnostic = runtime.ReadDiagnostic()) {
-    static_cast<void>(diagnostics.TryPush(*diagnostic));
+    if (diagnostic->kind != WorkerDiagnosticKind::kParameterEdit) {
+      static_cast<void>(diagnostics.TryPush(*diagnostic));
+    }
     if (listener != nullptr) listener(*diagnostic, context);
   }
 }
@@ -140,11 +142,12 @@ void WorkerControlService::SetDiagnosticListener(
 std::optional<WorkerEditorResponse> WorkerControlService::ExecuteEditorCommand(
   const WorkerControlCommand command,
   const std::uint32_t width,
-  const std::uint32_t height
+  const std::uint32_t height,
+  const std::optional<WorkerEditorAnchor> anchor
 ) {
   std::lock_guard lock(control_mutex_);
   if (!running_.load(std::memory_order_acquire)) return std::nullopt;
-  return runtime_.ExecuteEditorCommand(command, width, height);
+  return runtime_.ExecuteEditorCommand(command, width, height, anchor);
 }
 
 WorkerCallbackPort WorkerControlService::callbackPort() noexcept {
@@ -249,7 +252,9 @@ void WorkerControlService::Run() {
     );
     WorkerDiagnostic callbackDiagnostic{};
     while (callbackDiagnostics_.TryPop(callbackDiagnostic)) {
-      static_cast<void>(diagnostics_.TryPush(callbackDiagnostic));
+      if (callbackDiagnostic.kind != WorkerDiagnosticKind::kParameterEdit) {
+        static_cast<void>(diagnostics_.TryPush(callbackDiagnostic));
+      }
       const auto listener = diagnosticListener_.load(std::memory_order_acquire);
       if (listener != nullptr) {
         listener(callbackDiagnostic, diagnosticContext_.load(std::memory_order_relaxed));

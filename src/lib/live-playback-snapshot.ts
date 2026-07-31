@@ -3,6 +3,7 @@ import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { AutomationEnvelope } from "@daw-browser/shared"
+import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 
 export type LivePlaybackTransport = {
   state: "playing" | "paused" | "stopped"
@@ -29,6 +30,8 @@ export type LivePlaybackSnapshot = {
     automationEnvelopes: readonly AutomationEnvelope[]
     sidechainRoutes: readonly ExternalSidechainRoute[]
   }
+  nativeExternalAttachmentPlan?: NativeExternalAttachmentPlan
+  requiresNativePlayback?: boolean
 }
 
 export type LivePlaybackSnapshotInput = {

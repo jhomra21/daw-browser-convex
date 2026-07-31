@@ -7,6 +7,11 @@ import {
   type ProjectSnapshotV2,
 } from '@daw-browser/control'
 import type { AutomationEnvelope } from '@daw-browser/shared'
+import {
+  externalPluginEntityKind,
+  externalProcessorSchema,
+  type ExternalProcessor,
+} from '@daw-browser/external-plugins'
 import type { LocalEffectRow } from '~/lib/local-effects'
 import {
   LOCAL_CONTROL_PROJECT_METADATA_KEY,
@@ -108,6 +113,9 @@ const isEffect = (value: unknown): value is LocalEffectRow => (
   && typeof value.effect === 'string'
   && 'params' in value
 )
+const isExternalProcessor = (value: unknown): value is ExternalProcessor => (
+  externalProcessorSchema.safeParse(value).success
+)
 
 const isAutomation = (value: unknown): value is AutomationEnvelope => (
   isRecord(value)
@@ -180,6 +188,7 @@ const projectLocalControlSnapshot = <Snapshot>(
   const loop = input.projectState.find((row) => row.key === 'loop')?.value
   const projectMix = input.projectState.find((row) => row.key === 'projectMix')?.value
   const effects = valueOfKind(input.entities, 'effect', isEffect)
+  const externalProcessors = valueOfKind(input.entities, externalPluginEntityKind, isExternalProcessor)
   return projectSnapshot({
     omitUnavailableClipSources: true,
     project: {
@@ -218,6 +227,25 @@ const projectLocalControlSnapshot = <Snapshot>(
         params: effect.params,
       }
     }),
+    externalProcessors: externalProcessors.map((processor) => ({
+      instanceId: processor.instanceId,
+      targetId: processor.targetId,
+      chainIndex: processor.chainIndex,
+      manifest: {
+        identity: {
+          name: processor.manifest.identity.name,
+          vendor: processor.manifest.identity.vendor,
+          classId: processor.manifest.identity.classId,
+        },
+        role: processor.manifest.role,
+        parameters: processor.manifest.parameters.map((parameter) => ({
+          id: parameter.id,
+          readOnly: parameter.readOnly,
+        })),
+      },
+      bypassed: processor.bypassed,
+      parameterOverrides: processor.parameterOverrides,
+    })),
     automationEnvelopes: normalizeLocalAutomationEnvelopes(
       valueOfKind(input.entities, 'automation-envelope', isAutomation),
     ).map((envelope) => ({

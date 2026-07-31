@@ -42,6 +42,14 @@ class SpscQueue {
     return true;
   }
 
+  [[nodiscard]] bool Empty() const noexcept {
+    return read_.load(std::memory_order_acquire) == write_.load(std::memory_order_acquire);
+  }
+
+  [[nodiscard]] bool HasSpace() const noexcept {
+    return write_.load(std::memory_order_acquire) - read_.load(std::memory_order_acquire) < Capacity;
+  }
+
  private:
   alignas(64) std::array<Value, Capacity> values_{};
   alignas(64) std::atomic<std::size_t> write_{0};
@@ -110,7 +118,8 @@ class WorkerControlService {
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(
     WorkerControlCommand command,
     std::uint32_t width = 0,
-    std::uint32_t height = 0
+    std::uint32_t height = 0,
+    std::optional<WorkerEditorAnchor> anchor = std::nullopt
   );
   [[nodiscard]] WorkerCallbackPort callbackPort() noexcept;
 

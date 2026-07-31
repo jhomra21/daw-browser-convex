@@ -15,6 +15,8 @@
 
 namespace {
 
+constexpr int kEditorPollTimeoutMilliseconds = 8;
+
 template <typename Number>
 bool Parse(const std::string_view text, Number& result) {
   const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);
@@ -58,6 +60,23 @@ std::string WorkerHelloJson(const daw::plugin_host::WorkerHello& hello) {
     }
     return result + "]";
   };
+  const auto parameters = [](const std::vector<daw::plugin_host::WorkerParameterDescriptor>& values) {
+    std::string result{"["};
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      const auto& parameter = values[index];
+      if (index != 0) result += ',';
+      result += "{\"id\":" + std::to_string(parameter.id)
+        + ",\"title\":\"" + EscapeJson(parameter.title)
+        + "\",\"unit\":\"" + EscapeJson(parameter.unit)
+        + "\",\"minimum\":" + std::to_string(parameter.minimum)
+        + ",\"maximum\":" + std::to_string(parameter.maximum)
+        + ",\"defaultValue\":" + std::to_string(parameter.defaultValue)
+        + ",\"stepCount\":" + std::to_string(parameter.stepCount)
+        + ",\"readOnly\":" + (parameter.readOnly ? "true" : "false")
+        + ",\"hidden\":" + (parameter.hidden ? "true" : "false") + "}";
+    }
+    return result + "]";
+  };
   const auto& manifest = hello.manifest;
   return "{\"version\":1,\"type\":\"hello\",\"instanceId\":\"" + EscapeJson(hello.instanceId)
     + "\",\"manifest\":{\"version\":" + std::to_string(manifest.version)
@@ -75,7 +94,11 @@ std::string WorkerHelloJson(const daw::plugin_host::WorkerHello& hello) {
     + ",\"maximumEventsPerBlock\":" + std::to_string(manifest.transport.maximumEventsPerBlock)
     + "},\"latencyFrames\":" + std::to_string(manifest.latencyFrames) + ",\"tailFrames\":"
     + (manifest.tailFrames ? std::to_string(*manifest.tailFrames) : "null")
-    + ",\"stateRevision\":" + std::to_string(manifest.stateRevision) + "}}";
+    + ",\"stateRevision\":" + std::to_string(manifest.stateRevision)
+    + ",\"parameters\":" + parameters(manifest.parameters)
+    + ",\"supportsBypass\":" + (manifest.supportsBypass ? "true" : "false")
+    + ",\"supportsEditor\":" + (manifest.supportsEditor ? "true" : "false")
+    + ",\"supportsState\":" + (manifest.supportsState ? "true" : "false") + "}}";
 }
 
 bool WritePreflightHello(const daw::plugin_host::WorkerHello& hello) {
@@ -189,7 +212,6 @@ int main(const int argc, char* argv[]) {
       return EXIT_FAILURE;
     }
   }
-
   std::size_t notificationCount = 0;
   const auto publishNotifications = [&] {
     if (startup->noPluginTestMode) return;
@@ -202,18 +224,50 @@ int main(const int argc, char* argv[]) {
           ? daw::plugin_host::WorkerDiagnosticKind::kBuses
         : notification.kind == daw::plugin_host::WorkerNotificationKind::kRestart
           ? daw::plugin_host::WorkerDiagnosticKind::kRestart
+        : notification.kind == daw::plugin_host::WorkerNotificationKind::kEditorInteraction
+          ? daw::plugin_host::WorkerDiagnosticKind::kEditorInteraction
+        : notification.kind == daw::plugin_host::WorkerNotificationKind::kParameterEdit
+          ? daw::plugin_host::WorkerDiagnosticKind::kParameterEdit
           : daw::plugin_host::WorkerDiagnosticKind::kFault;
-      static_cast<void>(transport->PublishDiagnostic({.kind = kind, .value = notification.value}));
+      static_cast<void>(transport->PublishDiagnostic({
+        .kind = kind,
+        .value = notification.value,
+        .parameter_id = notification.parameter_id,
+        .normalized_value = notification.normalized_value,
+      }));
+    }
+  };
+  const auto publishEditorFeedback = [&] {
+    if (startup->noPluginTestMode) return;
+    daw::plugin_host::PendingEditorParameterEdit edit{};
+    while (plugin.PeekEditorParameterFeedback(edit)) {
+      const bool published = transport->PublishDiagnostic({
+        .kind = daw::plugin_host::WorkerDiagnosticKind::kParameterEdit,
+        .parameter_id = edit.parameter_id,
+        .normalized_value = edit.normalized_value,
+      });
+      if (!published) break;
+      static_cast<void>(plugin.AckEditorParameterFeedback(edit.parameter_id, edit.generation));
     }
   };
   publishNotifications();
+  publishEditorFeedback();
   transport->PublishHealth(daw::plugin_host::WorkerHealth::kReady);
   static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kReady}));
   bool editorOpen = false;
   for (;;) {
-    if (editorOpen) daw::plugin_host::PumpVst3EditorEvents();
+    if (editorOpen) {
+      daw::plugin_host::PumpVst3EditorEvents();
+      editorOpen = !startup->noPluginTestMode && plugin.EditorStatus().open;
+      if (daw::plugin_host::ConsumeVst3EditorInteraction()) {
+        static_cast<void>(transport->PublishDiagnostic({
+          .kind = daw::plugin_host::WorkerDiagnosticKind::kEditorInteraction,
+        }));
+      }
+      publishEditorFeedback();
+    }
     struct pollfd readyControl{.fd = controlFileDescriptor, .events = POLLIN, .revents = 0};
-    const auto pollResult = poll(&readyControl, 1, editorOpen ? 16 : -1);
+    const auto pollResult = poll(&readyControl, 1, editorOpen ? kEditorPollTimeoutMilliseconds : -1);
     if (pollResult < 0 && errno == EINTR) continue;
     if (pollResult <= 0) continue;
     const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
@@ -245,7 +299,8 @@ int main(const int argc, char* argv[]) {
       }
     }();
     if (editorCommand) {
-      const auto success = !startup->noPluginTestMode && plugin.ExecuteEditorCommand(*editorCommand, command->width, command->height);
+      const auto success = !startup->noPluginTestMode
+        && plugin.ExecuteEditorCommand(*editorCommand, command->width, command->height, command->anchor);
       const auto status = startup->noPluginTestMode ? daw::plugin_host::WorkerEditorStatus{} : plugin.EditorStatus();
       editorOpen = status.open;
       if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success, .status = status})) return EXIT_FAILURE;
@@ -291,5 +346,6 @@ int main(const int argc, char* argv[]) {
       }
     }
     publishNotifications();
+    publishEditorFeedback();
   }
 }

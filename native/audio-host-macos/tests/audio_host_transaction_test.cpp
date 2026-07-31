@@ -24,6 +24,36 @@ void AppendU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
   for (int index = 7; index >= 0; --index) bytes.push_back(static_cast<std::uint8_t>(value >> (index * 8)));
 }
 
+void AppendLeU32(std::vector<std::uint8_t>& bytes, const std::uint32_t value) {
+  bytes.push_back(static_cast<std::uint8_t>(value));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 8U));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 16U));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 24U));
+}
+
+void AppendLeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
+  for (std::size_t index = 0; index < 8; ++index) {
+    bytes.push_back(static_cast<std::uint8_t>(value >> (index * 8U)));
+  }
+}
+
+void AppendLeDouble(std::vector<std::uint8_t>& bytes, const double value) {
+  std::uint64_t encoded = 0;
+  std::memcpy(&encoded, &value, sizeof(encoded));
+  AppendLeU64(bytes, encoded);
+}
+
+void AppendLeFloat(std::vector<std::uint8_t>& bytes, const float value) {
+  std::uint32_t encoded = 0;
+  std::memcpy(&encoded, &value, sizeof(encoded));
+  AppendLeU32(bytes, encoded);
+}
+
+void AppendLeString(std::vector<std::uint8_t>& bytes, const std::string_view value) {
+  AppendLeU32(bytes, static_cast<std::uint32_t>(value.size()));
+  bytes.insert(bytes.end(), value.begin(), value.end());
+}
+
 void AppendString(std::vector<std::uint8_t>& bytes, const std::string_view value) {
   AppendU32(bytes, static_cast<std::uint32_t>(value.size()));
   bytes.insert(bytes.end(), value.begin(), value.end());
@@ -89,12 +119,13 @@ std::vector<std::uint8_t> Attachment() {
   AppendString(payload, "Example Vendor");
   AppendString(payload, "/private/catalog/Example.vst3");
   AppendString(payload, "/private/catalog/Example.vst3/Contents/MacOS/Example");
+  AppendU32(payload, 0);
   AppendU64(payload, 17);
   payload.push_back(1);
   payload.insert(payload.end(), 32, 1);
   payload.insert(payload.end(), 32, 2);
   AppendU32(payload, 2);
-  payload.insert(payload.end(), {1, 2, 2, 0});
+  payload.insert(payload.end(), {1, 2, 2, 1});
   AppendU32(payload, 32);
   AppendU32(payload, 4);
   AppendU32(payload, 2);
@@ -102,6 +133,60 @@ std::vector<std::uint8_t> Attachment() {
   AppendU32(payload, 2);
   AppendU32(payload, 2);
   AppendU32(payload, 128);
+  return payload;
+}
+
+std::vector<std::uint8_t> Configure() {
+  std::vector<std::uint8_t> payload;
+  AppendU32(payload, 48'000);
+  AppendU32(payload, 512);
+  AppendU32(payload, 2);
+  AppendU32(payload, 1);
+  AppendString(payload, "coreaudio:diagnostic");
+  return payload;
+}
+
+std::vector<std::uint8_t> Transport(const std::uint32_t epoch, const bool running, const std::int64_t frame) {
+  std::vector<std::uint8_t> payload;
+  AppendU32(payload, epoch);
+  payload.push_back(running ? 1 : 0);
+  payload.insert(payload.end(), {0, 0, 0});
+  AppendU64(payload, static_cast<std::uint64_t>(frame));
+  AppendU64(payload, epoch);
+  return payload;
+}
+
+std::vector<std::uint8_t> VstParameterEvents() {
+  std::vector<std::uint8_t> payload;
+  AppendLeString(payload, "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1");
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 7);
+  AppendLeU32(payload, 0);
+  AppendLeDouble(payload, 0.5);
+  return payload;
+}
+
+std::vector<std::uint8_t> VstMidiEvents() {
+  std::vector<std::uint8_t> payload;
+  AppendLeString(payload, "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1");
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 0);
+  payload.insert(payload.end(), {0x90, 60, 127, 0});
+  return payload;
+}
+
+std::vector<std::uint8_t> InstrumentEvents() {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 17);
+  AppendLeU64(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 60);
+  AppendLeFloat(payload, 1.0F);
   return payload;
 }
 
@@ -131,6 +216,10 @@ int main(int argc, char* argv[]) {
   const auto attachment = Attachment();
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstAttach, attachment),
     daw::audio_host_macos::ControlType::kVstAttach, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstParameterEvents, VstParameterEvents()),
+    daw::audio_host_macos::ControlType::kVstParameterEvents, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstMidiEvents, VstMidiEvents()),
+    daw::audio_host_macos::ControlType::kVstMidiEvents, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionRollback),
     daw::audio_host_macos::ControlType::kTransactionRollback, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionBegin),
@@ -141,6 +230,19 @@ int main(int argc, char* argv[]) {
     daw::audio_host_macos::ControlType::kVstDetach, false));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionRollback),
     daw::audio_host_macos::ControlType::kTransactionRollback, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionBegin),
+    daw::audio_host_macos::ControlType::kTransactionBegin, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kDeviceConfigure, Configure()),
+    daw::audio_host_macos::ControlType::kDeviceConfigure, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionCommit),
+    daw::audio_host_macos::ControlType::kTransactionCommit, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(1, false, 0)),
+    daw::audio_host_macos::ControlType::kTransport, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(2, true, 0)),
+    daw::audio_host_macos::ControlType::kTransport, true));
+  const auto instrument_events = InstrumentEvents();
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kMidiEvents, instrument_events),
+    daw::audio_host_macos::ControlType::kMidiEvents, true));
   close(to_host[1]);
   close(from_host[0]);
   int status = 0;

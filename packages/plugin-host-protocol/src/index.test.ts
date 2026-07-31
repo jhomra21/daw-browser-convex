@@ -26,10 +26,38 @@ import {
   parseVst3WorkerControlRequestV2,
   parseVst3ScannerResponseV2,
   pluginHostProtocolCompatibility,
+  pluginParameterDescriptorSchema,
   vst3WorkerProtocolVersion,
 } from './index'
 
 describe('plugin host control protocol', () => {
+  test('accepts the complete unsigned VST3 ParamID range and rejects overflow', () => {
+    for (const id of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
+      expect(pluginParameterDescriptorSchema.safeParse({
+        id,
+        title: 'Parameter',
+        unit: '',
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 1,
+        readOnly: false,
+        hidden: false,
+      }).success).toBe(true)
+    }
+    expect(pluginParameterDescriptorSchema.safeParse({
+      id: 0x1_0000_0000,
+      title: 'Parameter',
+      unit: '',
+      minimum: 0,
+      maximum: 1,
+      defaultValue: 0.5,
+      stepCount: 1,
+      readOnly: false,
+      hidden: false,
+    }).success).toBe(false)
+  })
+
   test('rejects oversized control frames before parsing them', () => {
     expect(() => parsePluginHostControlFrame('x'.repeat(maxPluginHostControlFrameBytes + 1))).toThrow(
       'Plugin host control frame exceeds the maximum size.',
@@ -175,10 +203,10 @@ test('round trips the bounded native worker artifact and runtime hello contract'
   expect(decodeNativeVst3WorkerHello(encoded)).toEqual(workerHello())
   expect(JSON.parse(encoded)).toMatchObject({
     manifest: {
-      artifact: { id: 'daw-vst3-worker', version: '1' },
+      artifact: { id: 'daw-vst3-worker', version: '2' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
-      transportAbiVersion: 1,
+      transportAbiVersion: 2,
       architecture: 'arm64',
       role: 'effect',
       latencyFrames: 32,
@@ -387,7 +415,7 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
     ...plan,
     attachments: [{ ...attachment, nativeGraphNodeId: '18446744073709551616' }],
   }))).toThrow('exceeds uint64')
-  expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
+  const serial = decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [
       attachment,
@@ -397,7 +425,19 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
         chainIndex: 1,
       },
     ],
-  }))).toThrow('one external attachment per graph node')
+  }))
+  expect(serial.attachments).toHaveLength(2)
+  expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
+    ...plan,
+    attachments: [
+      attachment,
+      {
+        ...attachment,
+        instanceId: 'b7a0b9ac-7884-492c-8b68-80f15802442c',
+        chainIndex: 2,
+      },
+    ],
+  }))).toThrow('contiguous')
   expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [
@@ -408,7 +448,7 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
         graphNodeId: 'track-2',
       },
     ],
-  }))).toThrow('Native graph node IDs must be unique')
+  }))).toThrow('only one graph node')
   expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: Array.from({ length: maxNativeExternalAttachments + 1 }, (_, index) => ({

@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <array>
+#include <deque>
 #include <atomic>
 #include <vector>
 
@@ -14,13 +15,18 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 7;
+constexpr std::uint32_t kControlProtocolVersion = 12;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
 constexpr std::uint32_t kMaximumAssetChannels = 64;
 constexpr std::uint32_t kMaximumAssetFrames = 262'144;
 constexpr std::size_t kMaximumInstalledAssets = 64;
+constexpr std::size_t kMaximumMeterEntries = 64;
+constexpr std::size_t kMaximumScheduleChunks = 16;
+constexpr std::size_t kMaximumScheduleRecords = 2'048;
+constexpr std::size_t kMaximumScheduleAutomationSegments = 2'048;
+constexpr std::size_t kMaximumScheduleInstanceIdBytes = 256;
 
 enum class ControlType : std::uint32_t {
   kHostHello = 1,
@@ -63,6 +69,13 @@ enum class ControlType : std::uint32_t {
   kGraphRetire = 38,
   kGraphRollback = 39,
   kGraphRevisionStatus = 40,
+  kVstEditor = 41,
+  kVstEditorStatus = 42,
+  kDiagnosticStart = 43,
+  kMeterBatch = 44,
+  kScheduleWindow = 45,
+  kScheduleProgress = 46,
+  kVstScheduleAutomationEnable = 47,
 };
 
 struct ControlFrame {
@@ -95,6 +108,19 @@ enum class DeviceReadinessReason : std::uint32_t {
   kTransportNotPrepared = 3,
 };
 
+enum class RejectedBlockReason : std::uint32_t {
+  kNone = 0,
+  kNotRunningOrCoreUnavailable = 1,
+  kInsufficientChannels = 2,
+  kNullChannel = 3,
+  kTransport = 4,
+  kScratchCapacity = 5,
+  kProcessorEventCapacity = 6,
+  kInstrumentEventCapacity = 7,
+  kSourceSchedule = 8,
+  kCoreProcess = 9,
+};
+
 struct HostConfig {
   std::string device_uid;
   std::uint32_t sample_rate_hz;
@@ -116,10 +142,33 @@ struct NativeVstWorkerTransportConfig {
   std::uint32_t maximum_events_per_block = 0;
 };
 
+enum class NativeVstEditorCommand : std::uint32_t {
+  kOpen = 1,
+  kClose = 2,
+  kFocus = 3,
+  kResize = 4,
+  kStatus = 5,
+};
+
+struct NativeVstEditorStatus {
+  bool success = false;
+  bool owned = false;
+  bool supported = false;
+  bool open = false;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+};
+
+struct NativeVstEditorAnchor {
+  std::int32_t x = 0;
+  std::int32_t y = 0;
+};
+
 /* Native-control-only attachment data. It intentionally contains resolved
  * paths and never crosses project, Wasm, preload, or renderer boundaries. */
 struct NativeVstAttachment {
   std::uint64_t graph_node_id = 0;
+  std::uint32_t chain_index = 0;
   std::string instance_id;
   std::string class_id;
   std::string vendor_id;
@@ -149,6 +198,17 @@ struct Diagnostics {
   std::uint32_t transport_epoch;
   std::uint64_t render_epoch;
   std::uint32_t installed_assets;
+  std::int64_t transport_frame;
+  RejectedBlockReason last_rejected_reason;
+  std::uint64_t last_rejected_callback;
+  std::uint64_t last_rejected_render_epoch;
+  std::uint32_t last_rejected_transport_epoch;
+  std::uint32_t last_rejected_core_result;
+  std::uint32_t last_rejected_frame_count;
+  std::uint32_t last_rejected_channel_count;
+  std::uint32_t last_rejected_processor_event_count;
+  std::uint32_t last_rejected_instrument_event_count;
+  std::uint32_t last_rejected_graph_revision;
 };
 
 enum class GraphRevisionStatusCode : std::uint32_t {
@@ -178,6 +238,16 @@ enum class WorkerNotificationKind : std::uint32_t {
   kRestart = 3,
   kFault = 4,
   kMiss = 5,
+  kEditorInteraction = 6,
+  kParameterEdit = 7,
+};
+
+enum class NativeVstWorkerHealth : std::uint32_t {
+  kStarting = 0,
+  kReady = 1,
+  kStopping = 2,
+  kStopped = 3,
+  kFaulted = 4,
 };
 
 struct WorkerNotification {
@@ -186,13 +256,37 @@ struct WorkerNotification {
   std::uint64_t graph_node_id = 0;
   std::string instance_id;
   std::uint32_t value = 0;
+  std::uint32_t parameter_id = 0;
+  double normalized_value = 0.0;
+};
+
+class WorkerNotificationQueue final {
+ public:
+  static constexpr std::size_t kCapacity = 64;
+
+  bool Push(WorkerNotification notification);
+  [[nodiscard]] bool Empty() const noexcept { return notifications_.empty(); }
+  WorkerNotification Pop();
+
+ private:
+  static bool IsParameterEdit(const WorkerNotification& notification) noexcept {
+    return notification.kind == WorkerNotificationKind::kParameterEdit;
+  }
+  static bool IsCritical(const WorkerNotification& notification) noexcept {
+    return notification.kind == WorkerNotificationKind::kRestart
+      || notification.kind == WorkerNotificationKind::kFault;
+  }
+
+  std::deque<WorkerNotification> notifications_;
 };
 
 WorkerNotification IdentifyWorkerNotification(
   const NativeVstAttachment& attachment,
   std::uint32_t graph_revision,
   WorkerNotificationKind kind,
-  std::uint32_t value);
+  std::uint32_t value,
+  std::uint32_t parameter_id = 0,
+  double normalized_value = 0.0);
 
 struct RecordingConfig {
   std::string device_uid;
@@ -239,6 +333,36 @@ struct RecordingMessage {
   RecordingStatus status;
 };
 
+struct MeterEntry {
+  std::uint64_t node_id = 0;
+  float left_rms = 0.0F;
+  float right_rms = 0.0F;
+};
+
+struct MeterBatch {
+  std::uint32_t graph_revision = 0;
+  std::uint32_t transport_epoch = 0;
+  std::uint64_t sequence = 0;
+  std::uint32_t entry_count = 0;
+  std::array<MeterEntry, kMaximumMeterEntries> entries{};
+};
+
+struct ScheduleProgress {
+  std::uint32_t revision = 0;
+  std::uint32_t epoch = 0;
+  std::uint64_t progress_sequence = 0;
+  std::uint64_t rendered_through_frame = 0;
+  std::uint64_t accepted_through_frame = 0;
+  std::uint64_t last_accepted_window_id = 0;
+  std::uint64_t applied_transport_transition_id = 0;
+  std::uint64_t applied_urgent_sequence = 0;
+  bool running = false;
+  bool schedule_complete = false;
+  std::uint32_t instrument_credits = 0;
+  std::uint32_t source_credits = 0;
+  std::uint32_t automation_credits = 0;
+};
+
 class AudioHost {
  public:
   AudioHost();
@@ -268,7 +392,14 @@ class AudioHost {
     std::uint64_t content_hash_prefix,
     std::span<const float> samples);
   bool ReleaseAsset(std::uint32_t asset_id);
-  bool SetTransport(std::uint32_t epoch, bool running, std::int64_t frame);
+  bool SetTransport(
+    std::uint32_t epoch,
+    bool running,
+    std::int64_t frame,
+    std::uint64_t transition_id = 0
+  );
+  bool QueueScheduleWindow(std::span<const std::uint8_t> payload);
+  bool ReenableVstScheduleAutomation(std::span<const std::uint8_t> payload);
   bool ConfigureRecording(const RecordingConfig& config);
   bool StartRecording();
   bool StopRecording(std::optional<std::int64_t> stop_frame);
@@ -280,9 +411,23 @@ class AudioHost {
     const std::atomic<bool>* running);
   void WakeRecordingWait();
   std::optional<WorkerNotification> WaitForWorkerNotification(const std::atomic<bool>* running);
+  bool WaitForMeterBatch(const std::atomic<bool>* running);
+  std::optional<MeterBatch> DrainMeterBatch();
+  bool WaitForScheduleProgress(const std::atomic<bool>* running);
+  std::optional<ScheduleProgress> DrainScheduleProgress();
   void WakeWorkerNotificationWait();
+  void WakeMeterWait();
+  void WakeScheduleProgressWait();
   std::uint64_t recordingStatusRevision() const;
+  std::uint64_t appliedUrgentSequence() const;
   bool AttachNativeVst(const NativeVstAttachment& attachment);
+  std::optional<NativeVstWorkerHealth> NativeVstHealth(std::string_view instance_id) const;
+  std::optional<NativeVstEditorStatus> ExecuteNativeVstEditorCommand(
+    std::string_view instance_id,
+    NativeVstEditorCommand command,
+    std::uint32_t width = 0,
+    std::uint32_t height = 0,
+    std::optional<NativeVstEditorAnchor> anchor = std::nullopt);
   bool DetachVstReference(std::string_view instance_id);
   bool Start();
   bool StartDiagnosticMode();

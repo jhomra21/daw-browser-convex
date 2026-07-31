@@ -11,6 +11,7 @@ const instanceId = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1"
 
 const attachment = (): ResolvedVst3Attachment & { stateRevision: number } => ({
   graphNodeId: 17n,
+  chainIndex: 0,
   instanceId,
   classId: "0123456789abcdef0123456789abcdef",
   vendorId: "Example Vendor",
@@ -40,10 +41,10 @@ const hello: NativeVst3WorkerHello = {
   instanceId,
   manifest: {
     version: 1,
-    artifact: { id: "daw-vst3-worker", version: "1" },
+    artifact: { id: "daw-vst3-worker", version: "2" },
     startupProtocolVersion: 1,
     controlProtocolVersion: 2,
-    transportAbiVersion: 1,
+    transportAbiVersion: 2,
     architecture: "arm64",
     role: "effect",
     inputBuses: [{ name: "Main Input", channels: 2, enabled: true }],

@@ -24,6 +24,10 @@ export type PortableFrameScheduleAdapterInput = {
   tracks: readonly RuntimeTrack[]
   automationEnvelopes: readonly AutomationEnvelope[]
   arpeggiators: ReadonlyMap<string, ArpParams | undefined>
+  stableNoteIds?: boolean
+  eventRangeStartSec?: number
+  noteScheduleStartSec?: number
+  clipSpanningNoteOn?: boolean
 }
 
 type PendingEventPayload =
@@ -57,6 +61,15 @@ type PendingEvent = {
   timelineSec: number
   ordinal: number
   event: PendingEventPayload
+}
+
+const stableNoteId = (trackId: string, clipId: string, identity: string) => {
+  let hash = 0x811c9dc5
+  for (const character of `${trackId}:${clipId}:${identity}`) {
+    hash ^= character.charCodeAt(0)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0) || 1
 }
 
 const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget => (
@@ -128,7 +141,7 @@ export const compilePortableFrameSchedule = (
   }
   const window = {
     playheadSec: input.timeOrigin.timelineSec,
-    startLimitSec: input.timeOrigin.timelineSec,
+    startLimitSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
     endLimitSec: input.rangeEndSec,
   }
 
@@ -164,7 +177,7 @@ export const compilePortableFrameSchedule = (
       trackVolume: track.volume,
       automationEnvelopes: input.automationEnvelopes,
       bpm: input.bpm,
-      rangeStartSec: input.timeOrigin.timelineSec,
+      rangeStartSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
       rangeEndSec: input.rangeEndSec,
     })) {
       append(expression.timeSec, {
@@ -179,23 +192,42 @@ export const compilePortableFrameSchedule = (
         clip,
         bpm: input.bpm,
         notes: clip.midi.notes,
-        rangeStartSec: input.timeOrigin.timelineSec,
+        rangeStartSec: input.noteScheduleStartSec ?? input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
         rangeEndSec: input.rangeEndSec,
         arp: input.arpeggiators.get(track.id),
       })) {
+        if (
+          input.clipSpanningNoteOn === true
+          && note.startSec < input.timeOrigin.timelineSec
+          && note.endSec > input.timeOrigin.timelineSec
+        ) {
+          append(input.timeOrigin.timelineSec, {
+            type: 'note-on',
+            target: { kind: 'instrument', trackId: track.id },
+            noteId: input.stableNoteIds
+              ? stableNoteId(track.id, clip.id, note.identity)
+              : nextNoteId,
+            pitch: note.pitch,
+            velocity: note.velocity ?? 1,
+          })
+        }
         const noteId = nextNoteId
         nextNoteId += 1
         append(note.startSec, {
           type: 'note-on',
           target: { kind: 'instrument', trackId: track.id },
-          noteId,
+          noteId: input.stableNoteIds
+            ? stableNoteId(track.id, clip.id, note.identity)
+            : noteId,
           pitch: note.pitch,
           velocity: note.velocity ?? 1,
         })
         append(note.endSec, {
           type: 'note-off',
           target: { kind: 'instrument', trackId: track.id },
-          noteId,
+          noteId: input.stableNoteIds
+            ? stableNoteId(track.id, clip.id, note.identity)
+            : noteId,
           pitch: note.pitch,
         })
       }
@@ -214,7 +246,34 @@ export const compilePortableFrameSchedule = (
       event: eventWithFrame(pendingEvent.event, pendingEvent.timelineSec, identity),
       ordinal: pendingEvent.ordinal,
     }))
+    .filter(({ event }) => input.eventRangeStartSec === undefined
+      || event.frame >= input.timeOrigin.frame
+      && event.frame < portableFrameAtTimelineTime(identity, input.rangeEndSec))
     .sort((left, right) => left.event.frame - right.event.frame || left.ordinal - right.ordinal)
     .map(({ event }, index) => ({ ...event, sequence: index + 1 }))
   return assertPortableFrameSchedule({ ...identity, events })
+}
+
+export const compilePortableFrameScheduleWindow = (
+  input: PortableFrameScheduleAdapterInput & {
+    rangeStartFrame: number
+    rangeEndFrame: number
+  },
+): PortableFrameSchedule => {
+  if (!Number.isSafeInteger(input.rangeStartFrame) || input.rangeStartFrame < 0
+    || !Number.isSafeInteger(input.rangeEndFrame) || input.rangeEndFrame <= input.rangeStartFrame) {
+    throw new Error('Portable frame schedule window bounds are invalid.')
+  }
+  const startSec = input.timeOrigin.timelineSec
+    + (input.rangeStartFrame - input.timeOrigin.frame) / input.sampleRateHz
+  const endSec = startSec + (input.rangeEndFrame - input.rangeStartFrame) / input.sampleRateHz
+  return compilePortableFrameSchedule({
+    ...input,
+    timeOrigin: {
+      timelineSec: startSec,
+      frame: input.rangeStartFrame,
+    },
+    eventRangeStartSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
+    rangeEndSec: endSec,
+  })
 }

@@ -16,6 +16,7 @@ export type TrackStereoLevels = {
 export type TrackStereoLevelsBatch = ReadonlyMap<string, TrackStereoLevels>
 
 export type TrackStereoLevelsListener = (levels: TrackStereoLevelsBatch) => void
+export type MasterStereoLevelsListener = (levels: TrackStereoLevels) => void
 
 export type TrackMeterChannelFrame = {
   samplePeak: number
@@ -88,14 +89,22 @@ export function createMeteringRuntime(options: {
   const retriedWorkletGenerations = new Map<string, number>()
   const workletLevels = new Map<string, TrackStereoLevels>()
   const pendingLevels = new Map<string, TrackStereoLevels>()
+  let masterWorkletNode: AudioWorkletNode | undefined
+  let masterWorkletGeneration = 0
+  let masterWorkletRetryGeneration: number | undefined
+  let masterLevels: TrackStereoLevels | undefined
+  let pendingMasterLevels: TrackStereoLevels | undefined
   const workletFrames = new Map<string, TrackMeterFrame>()
   const pendingFrames = new Map<string, TrackMeterFrame>()
   const listeners = new Set<TrackStereoLevelsListener>()
+  const masterListeners = new Set<MasterStereoLevelsListener>()
   const frameListeners = new Set<TrackMeterFrameListener>()
   const levelListenerReleases = new Map<TrackStereoLevelsListener, Set<() => void>>()
+  const masterListenerReleases = new Map<MasterStereoLevelsListener, Set<() => void>>()
   const frameListenerReleases = new Map<TrackMeterFrameListener, Set<() => void>>()
   const workletReleases = new Map<string, () => void>()
   const workletGains = new Map<string, GainNode>()
+  let releaseMasterWorkletResource: () => void = () => undefined
   const zeroTrackStereoLevels: TrackStereoLevels = { left: 0, right: 0 }
   let flushHandle: number | null = null
   let releaseFlush: () => void = () => undefined
@@ -105,17 +114,22 @@ export function createMeteringRuntime(options: {
     for (const listener of listeners) listener(levels)
   }
 
-  const queueLevels = (trackId: string, levels: TrackStereoLevels) => {
-    pendingLevels.set(trackId, levels)
+  const scheduleFlush = () => {
     if (flushHandle !== null) return
     flushHandle = requestAnimationFrame(() => {
       flushHandle = null
       releaseFlush()
       releaseFlush = () => undefined
-      if (pendingLevels.size === 0) return
-      const batch = new Map(pendingLevels)
-      pendingLevels.clear()
-      emit(batch)
+      if (pendingLevels.size > 0) {
+        const batch = new Map(pendingLevels)
+        pendingLevels.clear()
+        emit(batch)
+      }
+      if (pendingMasterLevels) {
+        const next = pendingMasterLevels
+        pendingMasterLevels = undefined
+        for (const listener of masterListeners) listener(next)
+      }
       if (pendingFrames.size > 0) {
         const frames = new Map(pendingFrames)
         pendingFrames.clear()
@@ -125,15 +139,30 @@ export function createMeteringRuntime(options: {
     releaseFlush = observeResource(options.resourceObserver, 'animation-frames', `track-meter-flush`)
   }
 
+  const queueLevels = (trackId: string, levels: TrackStereoLevels) => {
+    pendingLevels.set(trackId, levels)
+    scheduleFlush()
+  }
+
+  const queueMasterLevels = (levels: TrackStereoLevels) => {
+    pendingMasterLevels = levels
+    scheduleFlush()
+  }
+
   const updateWorkletSubscriptionState = () => {
-    const active = listeners.size > 0 || frameListeners.size > 0
+    const active = listeners.size > 0 || masterListeners.size > 0 || frameListeners.size > 0
     for (const node of workletNodes.values()) node.port.postMessage({ active, truePeak: frameListeners.size > 0 })
+    masterWorkletNode?.port.postMessage({ active, truePeak: false })
   }
 
   const ensureWorkletModule = (ctx: AudioContext) => {
-    return loadWorkletModule(ctx, resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
-      .then(() => true)
-      .catch(() => false)
+    try {
+      return loadWorkletModule(ctx, resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
+        .then(() => true)
+        .catch(() => false)
+    } catch {
+      return Promise.resolve(false)
+    }
   }
 
   const releaseTrackMeterWorklet = (trackId: string, expected?: AudioWorkletNode) => {
@@ -215,6 +244,72 @@ export function createMeteringRuntime(options: {
     constructTrackMeterWorklet(ctx, trackId, gain, isCurrentOutput, generation)
   }
 
+  const releaseMasterMeterWorklet = (expected?: AudioWorkletNode) => {
+    const node = masterWorkletNode
+    if (!node || (expected && node !== expected)) return
+    try { node.port.close() } catch {}
+    node.port.onmessage = null
+    node.onprocessorerror = null
+    disconnectAudioNodes([node])
+    masterWorkletNode = undefined
+    releaseMasterWorkletResource()
+    releaseMasterWorkletResource = () => undefined
+  }
+
+  const ensureMasterMeterWorklet = (
+    ctx: AudioContext,
+    input: GainNode,
+    isCurrentOutput: () => boolean,
+    retryGeneration?: number,
+  ) => {
+    if (masterWorkletNode) {
+      input.connect(masterWorkletNode)
+      return
+    }
+    const generation = retryGeneration ?? masterWorkletGeneration + 1
+    if (retryGeneration === undefined) masterWorkletGeneration = generation
+    void ensureWorkletModule(ctx).then((ready) => {
+      if (!ready || closed || masterWorkletGeneration !== generation || masterWorkletNode || !isCurrentOutput()) return
+      let node: AudioWorkletNode
+      try {
+        node = new AudioWorkletNode(ctx, trackMeterWorklet.processorName, {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: 2,
+          channelCountMode: 'explicit',
+          channelInterpretation: 'speakers',
+        })
+      } catch {
+        return
+      }
+      node.port.postMessage({ active: masterListeners.size > 0, truePeak: false })
+      const faultGeneration = options.getFaultGeneration?.() ?? 0
+      node.port.onmessage = (event) => {
+        const frame = readTrackMeterFrame(event.data)
+        if (!frame) return
+        const next = {
+          left: Math.min(1, Math.max(0, frame.channels[0].rms)),
+          right: Math.min(1, Math.max(0, frame.channels[1].rms)),
+        }
+        masterLevels = next
+        queueMasterLevels(next)
+      }
+      node.onprocessorerror = () => {
+        if (masterWorkletNode !== node || masterWorkletGeneration !== generation) return
+        releaseMasterMeterWorklet(node)
+        masterLevels = undefined
+        queueMasterLevels(zeroTrackStereoLevels)
+        options.onWorkletFault?.(faultGeneration, 'master')
+        if (masterWorkletRetryGeneration === generation || closed || !isCurrentOutput()) return
+        masterWorkletRetryGeneration = generation
+        ensureMasterMeterWorklet(ctx, input, isCurrentOutput, generation)
+      }
+      input.connect(node)
+      masterWorkletNode = node
+      releaseMasterWorkletResource = observeResource(options.resourceObserver, 'audio-worklet-nodes', node)
+    })
+  }
+
   const ensureTrackAnalyser = (ctx: AudioContext, trackId: string, gain: GainNode) => {
     let analyser = analysers.get(trackId)
     if (!analyser) {
@@ -249,6 +344,27 @@ export function createMeteringRuntime(options: {
         updateWorkletSubscriptionState()
       }
     },
+    subscribeMasterStereoLevels: (listener: MasterStereoLevelsListener) => {
+      masterListeners.add(listener)
+      const release = observeResource(options.resourceObserver, 'event-listeners', listener)
+      const releases = masterListenerReleases.get(listener) ?? new Set<() => void>()
+      releases.add(release)
+      masterListenerReleases.set(listener, releases)
+      listener(masterLevels ?? zeroTrackStereoLevels)
+      updateWorkletSubscriptionState()
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        release()
+        releases.delete(release)
+        if (releases.size === 0) {
+          masterListenerReleases.delete(listener)
+          masterListeners.delete(listener)
+        }
+        updateWorkletSubscriptionState()
+      }
+    },
     subscribeTrackMeterFrames: (listener: TrackMeterFrameListener) => {
       frameListeners.add(listener)
       const release = observeResource(options.resourceObserver, 'event-listeners', listener)
@@ -272,9 +388,13 @@ export function createMeteringRuntime(options: {
     },
     resetTrackMeters: () => {
       for (const node of workletNodes.values()) node.port.postMessage({ type: 'reset' })
+      masterWorkletNode?.port.postMessage({ type: 'reset' })
     },
     reconnectTrackMeters: (ctx: AudioContext, trackId: string, output: GainNode, isCurrentOutput: () => boolean) => {
       ensureTrackMeterWorklet(ctx, trackId, output, isCurrentOutput)
+    },
+    reconnectMasterMeter: (ctx: AudioContext, input: GainNode, isCurrentOutput: () => boolean) => {
+      ensureMasterMeterWorklet(ctx, input, isCurrentOutput)
     },
     getTrackLevel: (trackId: string) => {
       const analyser = analysers.get(trackId)
@@ -336,14 +456,19 @@ export function createMeteringRuntime(options: {
     close: () => {
       closed = true
       for (const trackId of Array.from(workletNodes.keys())) releaseTrackMeterWorklet(trackId)
+      releaseMasterMeterWorklet()
       disconnectAudioNodes(Array.from(analysers.values()))
       workletGenerations.clear()
       retriedWorkletGenerations.clear()
       workletLevels.clear()
+      masterLevels = undefined
       workletFrames.clear()
       pendingLevels.clear()
+      pendingMasterLevels = undefined
       pendingFrames.clear()
+      for (const listener of masterListeners) listener(zeroTrackStereoLevels)
       listeners.clear()
+      masterListeners.clear()
       frameListeners.clear()
       for (const releases of levelListenerReleases.values()) {
         for (const release of releases) release()
@@ -352,6 +477,10 @@ export function createMeteringRuntime(options: {
         for (const release of releases) release()
       }
       levelListenerReleases.clear()
+      for (const releases of masterListenerReleases.values()) {
+        for (const release of releases) release()
+      }
+      masterListenerReleases.clear()
       frameListenerReleases.clear()
       if (flushHandle !== null) {
         cancelAnimationFrame(flushHandle)

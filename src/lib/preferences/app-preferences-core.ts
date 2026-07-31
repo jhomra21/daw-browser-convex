@@ -7,7 +7,7 @@ import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 7
+export const APP_PREFERENCES_VERSION = 8
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -77,7 +77,7 @@ export const defaultAppPreferences: AppPreferences = {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
-    nativePlaybackEnabled: false,
+    nativePlaybackEnabled: true,
     portableBrowserPlaybackEnabled: false
   },
   recording: {
@@ -208,7 +208,7 @@ export const updateRecordingCalibrations = (
 
 export const normalizeAppPreferences = (value: unknown): AppPreferences => {
   if (!isRecord(value)) return defaultAppPreferences
-  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
   const appearance = isRecord(value.appearance) ? value.appearance : {}
   const sidebar = isRecord(value.sidebar) ? value.sidebar : {}
@@ -246,10 +246,12 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
       autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl),
-      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION)
-        ? parseBoolean(audio.nativePlaybackEnabled, defaultAppPreferences.audio.nativePlaybackEnabled)
+      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === 7 || value.version === APP_PREFERENCES_VERSION)
+        ? parseBoolean(audio.nativePlaybackEnabled, value.version === APP_PREFERENCES_VERSION
+          ? defaultAppPreferences.audio.nativePlaybackEnabled
+          : false)
         : defaultAppPreferences.audio.nativePlaybackEnabled,
-      portableBrowserPlaybackEnabled: (value.version === 6 || value.version === APP_PREFERENCES_VERSION)
+      portableBrowserPlaybackEnabled: (value.version === 6 || value.version === 7 || value.version === APP_PREFERENCES_VERSION)
         ? parseBoolean(audio.portableBrowserPlaybackEnabled, defaultAppPreferences.audio.portableBrowserPlaybackEnabled)
         : defaultAppPreferences.audio.portableBrowserPlaybackEnabled
     },

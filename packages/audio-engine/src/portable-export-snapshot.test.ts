@@ -411,10 +411,13 @@ test('reports portable support rejections without emitting a partial snapshot', 
     supported: false,
     reasons: [
       'Live external plugins must be frozen or bypassed before portable export.',
-      'track-1: track gain, mute, solo, or routing is not supported.',
+      'warped: repitch warp is not supported by portable export.',
       'instrument: instrument tracks are not supported.',
-      'routed-track: track gain, mute, solo, or routing is not supported.',
     ],
-    diagnostics: [],
+    diagnostics: [{
+      code: 'warp-mode-unsupported',
+      clipId: 'warped',
+      message: 'warped: repitch warp is not supported by portable export.',
+    }],
   })
 })

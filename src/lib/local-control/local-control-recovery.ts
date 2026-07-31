@@ -396,7 +396,11 @@ export const captureLocalRecoveryPayload = (input: {
         ownership: ownership(input.projectId, input.actorSubject),
       })),
       effects: snapshot.processors
-        .filter((effect) => 'trackId' in effect.target && selected.has(effect.target.trackId))
+        .filter((effect) => (
+          effect.processor.kind !== 'external-vst3'
+          && 'trackId' in effect.target
+          && selected.has(effect.target.trackId)
+        ))
         .map((effect) => effectPayload(input.projectId, effect)),
       automation: snapshot.automation
         .flatMap((entry) => 'trackId' in entry.target && selected.has(entry.target.trackId)

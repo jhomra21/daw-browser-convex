@@ -32,12 +32,14 @@ enum class WorkerControlCommand : std::uint32_t {
   int fileDescriptor,
   WorkerControlCommand command,
   std::uint32_t width = 0,
-  std::uint32_t height = 0
+  std::uint32_t height = 0,
+  std::optional<WorkerEditorAnchor> anchor = std::nullopt
 );
 struct WorkerControlRequest {
   WorkerControlCommand command;
   std::uint32_t width = 0;
   std::uint32_t height = 0;
+  std::optional<WorkerEditorAnchor> anchor;
 };
 [[nodiscard]] std::optional<WorkerControlRequest> ReadWorkerControlCommand(int fileDescriptor);
 [[nodiscard]] bool WriteWorkerEditorResponse(int fileDescriptor, const WorkerEditorResponse& response);

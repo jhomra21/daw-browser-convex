@@ -918,3 +918,110 @@ test("compacts remaining device indices before a later reorder", () => {
   });
   expect(plan.snapshot.processors.find((entry) => entry.id === "effect-1")?.index).toBe(0);
 });
+
+const externalSnapshotProcessor = {
+  id: "external-plugin:instance-1",
+  target: { trackId: "track-1" },
+  instanceId: "instance-1",
+  index: 1,
+  processor: {
+    kind: "external-vst3",
+    params: {
+      identity: { name: "Fixture", vendor: "Vendor", classId: "class-1", role: "effect" },
+      bypassed: false,
+      parameterOverrides: { "1": 0.25, "2": 0.5 },
+      parameters: [{ id: 1, readOnly: false }, { id: 2, readOnly: true }],
+    },
+  },
+};
+
+test("rejects direct track deletion when the track has an external VST processor", () => {
+  const base = snapshot();
+  base.processors.push(externalSnapshotProcessor);
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.delete", track: persisted("track-1") }],
+  })).toThrow("External VST processors are not currently recoverable through canonical control.");
+});
+
+test("rejects recursive group deletion when a descendant has an external VST processor", () => {
+  const base = snapshot();
+  base.tracks = [
+    { ...base.tracks[0], id: "group", channelRole: "group", index: 0 },
+    { ...base.tracks[0], id: "child", groupId: "group", index: 1 },
+  ];
+  base.processors = [{
+    ...externalSnapshotProcessor,
+    id: "external-plugin:child",
+    target: { trackId: "child" },
+    instanceId: "child",
+  }];
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.delete", track: persisted("group") }],
+  })).toThrow("External VST processors are not currently recoverable through canonical control.");
+});
+
+test("rejects ungrouping when the group has an external VST processor", () => {
+  const base = snapshot();
+  base.tracks = [
+    { ...base.tracks[0], id: "group", channelRole: "group", index: 0 },
+    { ...base.tracks[0], id: "child", groupId: "group", index: 1 },
+  ];
+  base.processors = [{
+    ...externalSnapshotProcessor,
+    id: "external-plugin:group",
+    target: { trackId: "group" },
+    instanceId: "group",
+  }];
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ kind: "track.ungroup", group: persisted("group") }],
+  })).toThrow("External VST processors are not currently recoverable through canonical control.");
+});
+
+test("merges external VST3 parameter overrides and preserves untouched values", () => {
+  const base = snapshot();
+  base.processors.push(externalSnapshotProcessor);
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "external-plugin.parameters.set",
+      target: { kind: "track", track: persisted("track-1") },
+      processor: persisted("external-plugin:instance-1"),
+      changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+    }],
+  });
+  expect(plan.actions[0]?.changed).toBe(true);
+  expect(plan.snapshot.processors.find((entry) => entry.id === "external-plugin:instance-1")?.processor).toMatchObject({
+    kind: "external-vst3",
+    params: { parameterOverrides: { "1": 0.75, "2": 0.5 } },
+  });
+});
+
+test("validates external VST3 target, kind, and writable parameter requirements", () => {
+  const externalAction = {
+    kind: "external-plugin.parameters.set" as const,
+    target: { kind: "track" as const, track: persisted("track-1") },
+    processor: persisted("external-plugin:instance-1"),
+    changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+  };
+  const base = snapshot();
+  base.processors.push(externalSnapshotProcessor);
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ ...externalAction, changes: [{ parameterId: 99, normalizedValue: 0.5 }] }],
+  })).toThrow(expect.objectContaining({ code: "not-found", actionIndex: 0 }));
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ ...externalAction, changes: [{ parameterId: 2, normalizedValue: 0.5 }] }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }));
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ ...externalAction, target: { kind: "master" as const } }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }));
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{ ...externalAction, processor: persisted("effect-1") }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }));
+});

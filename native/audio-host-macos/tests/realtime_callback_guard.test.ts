@@ -40,3 +40,12 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
     }
   }
 })
+
+test('AudioHost publishes running state before opening CoreAudio', async () => {
+  const source = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
+  const start = source.slice(source.indexOf('bool AudioHost::Start()'))
+  const runningPublication = start.indexOf('impl_->state.store(LifecycleState::kRunning')
+  const deviceOpen = start.indexOf('StartCoreAudioDevice(')
+  expect(runningPublication).toBeGreaterThanOrEqual(0)
+  expect(deviceOpen).toBeGreaterThan(runningPublication)
+})

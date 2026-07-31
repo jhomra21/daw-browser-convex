@@ -6,8 +6,12 @@ import path from "node:path"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
 import forgeConfig, {
   getMacReleaseConfiguration,
+  getPackagedMacResourcesPath,
   getPluginHostReleaseArtifactPlan,
+  isExplicitLocalUnsignedPackage,
   requireMacReleaseConfiguration,
+  shouldRequireMacReleaseConfiguration,
+  shouldVerifySignedMacPackage,
   validatePluginHostReleaseArtifactPlan,
   validatePortableWasmReleaseAssets,
 } from './forge.config'
@@ -139,22 +143,53 @@ test("fails closed without macOS release identity and notarization credentials",
   })).toThrow("notarytool credentials")
 })
 
-test("routes only the VST worker through the library-validation entitlement", () => {
+test("allows unsigned packaging only with the explicit local mode flag", () => {
+  expect(isExplicitLocalUnsignedPackage({})).toBeFalse()
+  expect(shouldRequireMacReleaseConfiguration({})).toBeTrue()
+  expect(shouldVerifySignedMacPackage({})).toBeTrue()
+  expect(isExplicitLocalUnsignedPackage({ DAW_LOCAL_UNSIGNED_PACKAGE: "1" })).toBeTrue()
+  expect(shouldRequireMacReleaseConfiguration({ DAW_LOCAL_UNSIGNED_PACKAGE: "1" })).toBeFalse()
+  expect(shouldVerifySignedMacPackage({ DAW_LOCAL_UNSIGNED_PACKAGE: "1" })).toBeFalse()
+})
+
+test("allows explicit signed packaging without notarization", () => {
+  const configuration = getMacReleaseConfiguration({
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: Example",
+    DAW_SKIP_NOTARIZATION: "1",
+  })
+  expect(configuration?.sign.identity).toBe("Developer ID Application: Example")
+  expect(configuration?.notarize).toBeUndefined()
+})
+
+test("maps Electron Packager extra-resource hook paths to the app resources directory", async () => {
+  const buildPath = await mkdtemp(path.join(tmpdir(), "daw-mac-package-"))
+  const resourcesPath = path.join(buildPath, "daw-browser.app", "Contents", "Resources")
+  try {
+    await mkdir(resourcesPath, { recursive: true })
+    await expect(getPackagedMacResourcesPath(buildPath)).resolves.toBe(resourcesPath)
+  } finally {
+    await rm(buildPath, { recursive: true, force: true })
+  }
+})
+
+test("routes only isolated VST processes through the library-validation entitlement", () => {
   const configuration = getMacReleaseConfiguration({
     APPLE_SIGNING_IDENTITY: "Developer ID Application: Example",
     APPLE_NOTARY_KEYCHAIN_PROFILE: "release-notary",
   })
   expect(configuration?.sign.hardenedRuntime).toBeTrue()
+  expect(configuration?.sign.optionsForFile(`/Resources/${nativeVst3ScannerArtifactName}`).entitlements).toEndWith("vst3-scanner.plist")
   expect(configuration?.sign.optionsForFile(`/Resources/${nativeVst3WorkerArtifactId}`).entitlements).toEndWith("vst3-worker.plist")
-  expect(configuration?.sign.optionsForFile(`/Resources/${nativeVst3ScannerArtifactName}`).entitlements).toEndWith("native.plist")
   expect(configuration?.sign.optionsForFile(`/Resources/${nativeAudioHostArtifactName}`).entitlements).toEndWith("native.plist")
   expect(configuration?.sign.optionsForFile("/Applications/daw-browser.app").entitlements).toEndWith("app.plist")
   expect(configuration?.sign.optionsForFile("/Applications/daw-browser.app/Contents/Frameworks/daw-browser Helper.app").entitlements).toEndWith("helper.plist")
 })
 
-test("limits dynamic-load entitlement exceptions to the VST worker", async () => {
+test("limits dynamic-load entitlement exceptions to isolated VST processes", async () => {
   const entitlements = path.join(import.meta.dirname, "entitlements")
-  expect(await readFile(path.join(entitlements, "vst3-worker.plist"), "utf8")).toContain("com.apple.security.cs.disable-library-validation")
+  for (const name of ["vst3-scanner.plist", "vst3-worker.plist"]) {
+    expect(await readFile(path.join(entitlements, name), "utf8")).toContain("com.apple.security.cs.disable-library-validation")
+  }
   for (const name of ["app.plist", "helper.plist", "native.plist"]) {
     expect(await readFile(path.join(entitlements, name), "utf8")).not.toContain("com.apple.security.cs.disable-library-validation")
   }

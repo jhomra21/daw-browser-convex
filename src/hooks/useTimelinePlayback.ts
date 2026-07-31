@@ -15,6 +15,7 @@ type LoopOptions = {
 
 type NativePlaybackOptions = {
   enabled?: Accessor<boolean>
+  projectId?: Accessor<string>
   projectGeneration?: Accessor<number>
   compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
   reportFault?: (message: string) => void
@@ -60,6 +61,8 @@ type TimelinePlaybackAudioEngine = Pick<
   | 'subscribeStretchRenderState'
 > & {
   getAudioContext?: () => AudioContext | null
+  subscribeTrackStereoLevels?: AudioEngine['subscribeTrackStereoLevels']
+  subscribeMasterStereoLevels?: AudioEngine['subscribeMasterStereoLevels']
 }
 
 const readNowMs = () =>
@@ -106,6 +109,7 @@ export function useTimelinePlayback(
 
   const nativePlayback = createNativePlaybackController({
     bridge: typeof window === 'undefined' ? undefined : window.dawDesktop?.audioHost,
+    getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
     compileSnapshot: nativeOptions?.compileSnapshot ?? (async () => ({
       supported: false,
@@ -113,7 +117,10 @@ export function useTimelinePlayback(
     })),
     reportFault: (message) => {
       setActiveBackend('idle')
-      if (!isPlaying()) return
+      if (!isPlaying()) {
+        nativeOptions?.reportFault?.(message)
+        return
+      }
       setIsPlaying(false)
       cancelRaf()
       nativeOptions?.reportFault?.(message)
@@ -134,6 +141,32 @@ export function useTimelinePlayback(
       portableBrowserOptions?.reportFault?.(message)
     },
   })
+
+  const subscribeTrackLevels = (listener: Parameters<AudioEngine["subscribeTrackStereoLevels"]>[0]) => {
+    const unsubscribeNative = nativePlayback.subscribeTrackMeters((levels) => {
+      if (nativePlayback.isPrepared()) listener(levels)
+    })
+    const unsubscribeBrowser = audioEngine.subscribeTrackStereoLevels?.((levels) => {
+      if (!nativePlayback.isPrepared()) listener(levels)
+    }) ?? (() => undefined)
+    return () => {
+      unsubscribeNative()
+      unsubscribeBrowser()
+    }
+  }
+
+  const subscribeMasterLevels = (listener: Parameters<AudioEngine["subscribeMasterStereoLevels"]>[0]) => {
+    const unsubscribeNative = nativePlayback.subscribeMasterMeter((levels) => {
+      if (nativePlayback.isPrepared()) listener(levels)
+    })
+    const unsubscribeBrowser = audioEngine.subscribeMasterStereoLevels?.((levels) => {
+      if (!nativePlayback.isPrepared()) listener(levels)
+    }) ?? (() => undefined)
+    return () => {
+      unsubscribeNative()
+      unsubscribeBrowser()
+    }
+  }
 
   const resolveTracks = () => {
     const fromAccessor = loopOptions?.getTracks?.()
@@ -341,6 +374,7 @@ export function useTimelinePlayback(
         commitPortableStart('native')
         return
       }
+      if (nativeStart === 'blocked') return
       if (resumeNative) return
     }
     const resumePortableBrowser = portableBrowserPlayback.isPrepared()
@@ -441,7 +475,32 @@ export function useTimelinePlayback(
       audioEngine.applyAutomationAtTimelineSec(sec)
     }
   }
-  const restartTimelineSchedule = (tracks: Track[]) => {
+  const disposePreparedBackends = async () => {
+    await Promise.allSettled([
+      nativePlayback.dispose(),
+      Promise.resolve(portableBrowserPlayback.dispose()),
+    ])
+    setActiveBackend('idle')
+  }
+  const restartTimelineSchedule = async (
+    tracks: Track[],
+    options?: { rebuildBackend?: boolean },
+  ) => {
+    if (options?.rebuildBackend) {
+      if (!isPlaying()) {
+        await disposePreparedBackends()
+        return
+      }
+      const sec = nativePlayback.isActive() || portableBrowserPlayback.isActive()
+        ? nativeStartedAtSec + (readNowMs() - nativeStartedAtMs) / 1000
+        : audioEngine.currentTimelineSec
+      publishPlayhead(sec)
+      setIsPlaying(false)
+      cancelRaf()
+      await disposePreparedBackends()
+      await handlePlay(tracks)
+      return
+    }
     if (!isPlaying()) return
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
       setIsPlaying(false)
@@ -474,6 +533,15 @@ export function useTimelinePlayback(
   let mountedProjectGeneration = nativeOptions?.projectGeneration?.()
     ?? portableBrowserOptions?.projectGeneration?.()
     ?? 0
+  let nativeLifecycleToken = 0
+  let pendingNativeDispose: Promise<void> = Promise.resolve()
+  let nativePreviewRequested = false
+  const disposeNativePreview = () => {
+    nativeLifecycleToken += 1
+    const request = pendingNativeDispose.then(() => nativePlayback.dispose())
+    pendingNativeDispose = request.catch(() => undefined)
+    return request
+  }
   createEffect(() => {
     const nextGeneration = nativeOptions?.projectGeneration?.()
       ?? portableBrowserOptions?.projectGeneration?.()
@@ -482,15 +550,41 @@ export function useTimelinePlayback(
     mountedProjectGeneration = nextGeneration
     setIsPlaying(false)
     cancelRaf()
-    void nativePlayback.dispose()
+    nativePreviewRequested = false
+    void disposeNativePreview()
     portableBrowserPlayback.dispose()
     setActiveBackend('idle')
+  })
+
+  createEffect(() => {
+    const enabled = nativeOptions?.enabled?.() ?? false
+    const projectGeneration = nativeOptions?.projectGeneration?.() ?? 0
+    if (!enabled) {
+      if (nativePreviewRequested) {
+        nativePreviewRequested = false
+        void disposeNativePreview()
+      }
+      return
+    }
+    nativePreviewRequested = true
+    const token = nativeLifecycleToken
+    const playhead = untrack(playheadSec)
+    void pendingNativeDispose
+      .then(() => {
+        if (
+          token !== nativeLifecycleToken
+          || !nativeOptions?.enabled?.()
+          || projectGeneration !== (nativeOptions?.projectGeneration?.() ?? 0)
+        ) return
+        return nativePlayback.ensureLivePreview(playhead)
+      })
+      .catch(() => undefined)
   })
 
   onCleanup(() => {
     unsubscribeStretchRenderState()
     cancelRaf()
-    void nativePlayback.dispose()
+    void disposeNativePreview()
     portableBrowserPlayback.dispose()
     setActiveBackend('idle')
   })
@@ -518,6 +612,19 @@ export function useTimelinePlayback(
       isActive: nativePlayback.isRecording,
       sampleRate: nativePlayback.sampleRate,
     },
+    nativeLiveMidi: {
+      isActive: nativePlayback.canProcessLiveMidi,
+      isAvailable: () => (nativeOptions?.enabled?.() ?? false) && nativePlayback.isAvailable(),
+      start: (note: Parameters<typeof nativePlayback.startLiveMidiNote>[0]) => (
+        nativePlayback.startLiveMidiNote({
+          ...note,
+          playheadSec: playheadSec(),
+        })
+      ),
+      stop: nativePlayback.releaseLiveMidiNote,
+    },
+    subscribeTrackLevels,
+    subscribeMasterLevels,
     playheadSec,
     handlePlay,
     handlePause,

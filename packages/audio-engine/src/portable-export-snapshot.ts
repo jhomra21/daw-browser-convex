@@ -10,8 +10,10 @@ import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { ExportRange } from './export-range'
 import { getExportRangeBounds } from './export-range'
 import { createPortableGraphSnapshot } from './mixer/graph-contract'
+import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
 import { projectPortableClipEvents } from './portable-clip-projector'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
+import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import {
   validatePortablePreparedStretchAsset,
@@ -51,6 +53,9 @@ export type PortableExportSnapshotInput = {
   hasExternalPlugins?: boolean
   projectGeneration?: number
   preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  allowInstruments?: boolean
+  externalLatencyFrames?: ExternalNodeLatencyFrames
+  capabilityTarget?: 'portable-wasm' | 'native'
 }
 
 const unsupported = (
@@ -121,20 +126,28 @@ const collectAssets = (
   return { assets, bySourceAssetKey, reasons }
 }
 
-const unsupportedProcessorReasons = (fx: ExportFx | undefined): readonly string[] => {
+const unsupportedProcessorReasons = (
+  fx: ExportFx | undefined,
+  allowInstruments: boolean,
+  capabilityTarget: NonNullable<PortableExportSnapshotInput['capabilityTarget']>,
+): readonly string[] => {
   const instances = [
     ...(fx?.masterFxInstances ?? []),
     ...Object.values(fx?.trackFx ?? {}).flatMap((entry) => entry.instances),
   ]
+  const supportedProcessor = capabilityTarget === 'native'
+    ? (kind: string) => nativeAudioCoreProcessorKinds.has(kind)
+    : (kind: string) => portableWasmCapabilityMatrix.processorKinds.includes(kind)
+  const targetLabel = capabilityTarget === 'native' ? 'native audio core' : 'portable core'
   return [
     ...(fx?.masterVolume !== undefined && fx.masterVolume !== 1
-      ? ['Master gain is not supported by the portable core.']
+      ? [`Master gain is not supported by the ${targetLabel}.`]
       : []),
     ...instances
-    .filter((instance) => !portableWasmCapabilityMatrix.processorKinds.includes(instance.kind))
-    .map((instance) => `${instance.id}: processor "${instance.kind}" is not supported by the portable core.`),
+    .filter((instance) => !supportedProcessor(instance.kind))
+    .map((instance) => `${instance.id}: processor "${instance.kind}" is not supported by the ${targetLabel}.`),
     ...Object.entries(fx?.trackFx ?? {})
-      .filter(([, entry]) => entry.arp || entry.synth || entry.instrument)
+      .filter(([, entry]) => !allowInstruments && (entry.arp || entry.synth || entry.instrument))
       .map(([trackId]) => `${trackId}: instrument state is not supported by the portable core.`),
   ]
 }
@@ -148,12 +161,13 @@ const unsupportedProcessorReasons = (fx: ExportFx | undefined): readonly string[
 export const compilePortableExportSnapshot = (
   input: PortableExportSnapshotInput,
 ): PortableExportSnapshot => {
+  const capabilityTarget = input.capabilityTarget ?? 'portable-wasm'
   const reasons = [
     ...(input.hasExternalPlugins ? ['Live external plugins must be frozen or bypassed before portable export.'] : []),
-    ...(portableWasmCapabilityMatrix.sampleRatesHz.includes(input.sampleRateHz)
+    ...(capabilityTarget === 'native' || portableWasmCapabilityMatrix.sampleRatesHz.includes(input.sampleRateHz)
       ? []
       : [`The portable core does not support ${input.sampleRateHz} Hz.`]),
-    ...unsupportedProcessorReasons(input.fx),
+    ...unsupportedProcessorReasons(input.fx, input.allowInstruments === true, capabilityTarget),
   ]
   const diagnostics: PortableStretchDiagnostic[] = []
   const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset>()
@@ -222,6 +236,7 @@ export const compilePortableExportSnapshot = (
     rangeEndSec: range.endSec,
     epoch: input.epoch,
     firstSequence: input.firstSequence,
+    allowInstruments: input.allowInstruments,
   })
   if (!clips.supported) {
     return unsupported(
@@ -260,6 +275,8 @@ export const compilePortableExportSnapshot = (
         bpm: input.bpm,
         assets: assets.map((entry) => entry.asset),
         sidechainRoutes: input.sidechainRoutes,
+        includeInstruments: input.allowInstruments === true,
+        externalLatencyFrames: input.externalLatencyFrames,
       }),
       assets,
       events,

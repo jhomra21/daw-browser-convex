@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import {
@@ -13,6 +13,7 @@ import {
   isLocalId,
   normalizeTrackInstrumentParams,
   type AutomationTargetDeviceInstance,
+  type AutomationExternalParameter,
   type AutomationParameterSelection,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
@@ -25,6 +26,7 @@ import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
 import type { HistoryEntry } from "~/lib/undo/types";
 import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
 import { listLocalEffects } from "~/lib/local-effects";
+import { listLocalExternalProcessors } from "~/lib/external-plugins";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 
 type RemoteAutomationRow = {
@@ -292,6 +294,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     if (options.isPlaying()) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: reEnabledTargetKeys });
     else options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
   };
+  onMount(() => {
+    const releasePointerAutomation = () => reEnableAutomation();
+    window.addEventListener("pointerup", releasePointerAutomation);
+    window.addEventListener("pointercancel", releasePointerAutomation);
+    onCleanup(() => {
+      window.removeEventListener("pointerup", releasePointerAutomation);
+      window.removeEventListener("pointercancel", releasePointerAutomation);
+    });
+  });
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,
@@ -396,9 +407,28 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       setEffectInstancesByOwnerKey({});
       return;
     }
-    const collect = (rows: Array<{ targetId: string; kind: string; instanceId?: string; index?: number; params?: unknown }>) => {
+    const collect = (rows: Array<{
+      targetId: string
+      kind: string
+      instanceId?: string
+      index?: number
+      params?: unknown
+      external?: { name: string; parameters: readonly AutomationExternalParameter[] }
+    }>) => {
       const grouped = new Map<string, Array<AutomationTargetDeviceInstance & { index: number }>>();
       for (const row of rows) {
+        if (row.external) {
+          const entries = grouped.get(row.targetId) ?? [];
+          entries.push({
+            id: row.instanceId ?? "external",
+            kind: "external",
+            name: row.external.name,
+            parameters: row.external.parameters,
+            index: row.index ?? entries.length,
+          });
+          grouped.set(row.targetId, entries);
+          continue;
+        }
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
         if (normalizedKind === "instrument") {
           const instrument = normalizeTrackInstrumentParams(row.params);
@@ -417,32 +447,54 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       for (const [targetId, entries] of grouped) {
         next[targetId] = entries
           .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
-          .map(({ id, kind }) => ({ id, kind }));
+          .map((entry) => entry.kind === "external"
+            ? {
+              id: entry.id,
+              kind: "external" as const,
+              name: entry.name,
+              parameters: entry.parameters,
+            }
+            : { id: entry.id, kind: entry.kind });
       }
       setEffectInstancesByOwnerKey(next);
     };
     if (isLocalId("project", rid)) {
-      const reload = () => void listLocalEffects(rid).then((rows) => {
+      const reload = () => void Promise.all([listLocalEffects(rid), listLocalExternalProcessors(rid)]).then(([rows, processors]) => {
         if (options.projectId() !== rid) return;
-        collect(rows.map((row) => ({
-          targetId: row.targetId,
-          kind: row.effect,
-          instanceId: row.instanceId,
-          index: row.index,
-          params: row.params,
-        })));
+        collect([
+          ...rows.map((row) => ({
+            targetId: row.targetId,
+            kind: row.effect,
+            instanceId: row.instanceId,
+            index: row.index,
+            params: row.params,
+          })),
+          ...processors.map((processor) => ({
+            targetId: processor.targetId,
+            kind: "external",
+            instanceId: processor.instanceId,
+            index: processor.chainIndex,
+            external: {
+              name: processor.manifest.identity.name,
+              parameters: processor.manifest.parameters
+                .map(({ id, title, unit, readOnly, hidden }) => ({ id, title, unit, readOnly, hidden })),
+            },
+          })),
+        ]);
       });
       reload();
       const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
       onCleanup(unsubscribe);
     }
-    collect((options.remoteEffects() ?? []).map((row) => ({
-      targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
-      kind: row.type,
-      instanceId: row.instanceId,
-      index: row.index,
-      params: row.params,
-    })).filter((row) => row.targetId.length > 0));
+    if (!isLocalId("project", rid)) {
+      collect((options.remoteEffects() ?? []).map((row) => ({
+        targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
+        kind: row.type,
+        instanceId: row.instanceId,
+        index: row.index,
+        params: row.params,
+      })).filter((row) => row.targetId.length > 0));
+    }
   });
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))

@@ -5,6 +5,7 @@ import { normalizeClipFades, normalizedFadeGainAtClipTime, type ClipFades, type 
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type MidiNote = {
+  id?: string
   beat: number
   length: number
   pitch: number
@@ -12,6 +13,7 @@ type MidiNote = {
 }
 
 type ScheduledMidiEvent = {
+  identity: string
   startSec: number
   endSec: number
   pitch: number
@@ -93,7 +95,7 @@ export function getScheduledMidiEvents(input: {
   }
 
   const events: ScheduledMidiEvent[] = []
-  for (const note of notesToSchedule) {
+  for (const [index, note] of notesToSchedule.entries()) {
     const noteBeatRaw = note.beat || 0
     const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeatRaw)
     const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
@@ -107,6 +109,7 @@ export function getScheduledMidiEvents(input: {
     if (endSec <= startSec) continue
 
     events.push({
+      identity: note.id ?? `${note.beat}:${note.length}:${note.pitch}:${note.velocity ?? 1}:${index}`,
       startSec,
       endSec,
       pitch: note.pitch,

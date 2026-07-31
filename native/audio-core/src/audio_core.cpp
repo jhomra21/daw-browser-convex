@@ -305,6 +305,7 @@ struct Core {
   NativeGraphHooks published_native_hooks{};
 #endif
   std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphNodes> graph_buffers{};
+  std::unique_ptr<float[]> graph_stage_buffers{};
   std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphEdges> graph_delay_lines{};
   std::array<uint32_t, kMaximumGraphEdges> graph_delay_cursors{};
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
@@ -577,6 +578,8 @@ int32_t graph_node_index(const GraphRevision &graph, uint64_t id) {
   return graph.nodes[node_index].id == id ? static_cast<int32_t>(node_index) : -1;
 }
 
+bool allocate_graph_stage_buffers(Core &core, uint32_t node_count);
+
 daw_audio_core_result prepare_graph_revision(
   Core &core,
   const daw_audio_graph_prepare_request &request,
@@ -837,6 +840,7 @@ daw_audio_core_result prepare_graph_revision(
       }
     }
   }
+  if (!allocate_graph_stage_buffers(core, graph.node_count)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   *out_graph = graph;
   return DAW_AUDIO_CORE_OK;
 }
@@ -2285,6 +2289,29 @@ void render_sample_source_range(
   }
 }
 
+constexpr uint32_t kGraphPreFxStage = 0;
+constexpr uint32_t kGraphPreFaderStage = 1;
+
+bool allocate_graph_stage_buffers(Core &core, uint32_t node_count) {
+  const std::size_t graph_stage_samples = static_cast<std::size_t>(2u) * node_count * 2u
+    * core.config.max_frames_per_block;
+  std::unique_ptr<float[]> buffers(new (std::nothrow) float[graph_stage_samples]);
+  if (!buffers) return false;
+  core.graph_stage_buffers = std::move(buffers);
+  return true;
+}
+
+float *graph_stage_sample(
+  Core &core,
+  uint32_t stage,
+  uint32_t node_index,
+  uint32_t channel,
+  uint32_t frame) {
+  const std::size_t offset = (((static_cast<std::size_t>(stage) * kMaximumGraphNodes + node_index) * 2u + channel)
+    * core.config.max_frames_per_block) + frame;
+  return core.graph_stage_buffers.get() + offset;
+}
+
 float graph_edge_sample(
   Core &core,
   const GraphRevision &graph,
@@ -2294,7 +2321,11 @@ float graph_edge_sample(
   const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
   const uint32_t source_index = graph.edge_source_indices[edge_index];
   const uint32_t delay = edge.pdc_delay_frames;
-  const float source = core.graph_buffers[source_index][channel][frame] * edge.gain;
+  const float source = edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX
+    ? *graph_stage_sample(core, kGraphPreFxStage, source_index, channel, frame) * edge.gain
+    : edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER
+      ? *graph_stage_sample(core, kGraphPreFaderStage, source_index, channel, frame) * edge.gain
+      : core.graph_buffers[source_index][channel][frame] * edge.gain;
   if (delay == 0) return source;
   const uint32_t cursor = (core.graph_delay_cursors[edge_index] + frame) % delay;
   float &stored = core.graph_delay_lines[edge_index][channel][cursor];
@@ -2946,6 +2977,8 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         }
       }
       if (node.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
+      *graph_stage_sample(core, kGraphPreFxStage, node_index, 0, frame) = std::isfinite(left) ? left : 0.0F;
+      *graph_stage_sample(core, kGraphPreFxStage, node_index, 1, frame) = std::isfinite(right) ? right : 0.0F;
       bool processed_chain = false;
       const GraphRevision::Range processor_range = graph.processor_ranges[node_index];
       const uint32_t processor_end = static_cast<uint32_t>(processor_range.start) + processor_range.count;
@@ -2982,6 +3015,8 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         left = utility_left;
         right = utility_right;
       }
+      *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame) = std::isfinite(left) ? left : 0.0F;
+      *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame) = std::isfinite(right) ? right : 0.0F;
       apply_mixer_frame(core, node.mixer, frame, &left, &right);
       if (node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
       core.graph_buffers[node_index][0][frame] = std::isfinite(left) ? left : 0.0F;

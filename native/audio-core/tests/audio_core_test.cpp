@@ -138,6 +138,40 @@ void test_portable_graph_topology_pdc_and_revision_safety() {
   daw_audio_core_destroy(core);
 }
 
+void test_graph_edges_read_declared_stage_taps() {
+  daw_audio_core_handle core = create_core(4, 2, 1);
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0,
+      .mixer = {.instance_id = 101, .gain = 2.0F}},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 3> edges{{
+    {.id = 11, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_PRE_FX,
+      .sidechain = 0, .pdc_delay_frames = 0},
+    {.id = 12, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_PRE_FADER,
+      .sidechain = 0, .pdc_delay_frames = 0},
+    {.id = 13, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER,
+      .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  prepare_graph(core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
+  std::array<float, 4> input_left{1.0F};
+  std::array<float, 4> input_right{1.0F};
+  const float *inputs[]{input_left.data(), input_right.data()};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  float *outputs[]{output_left.data(), output_right.data()};
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 4, .channel_count = 2,
+    .input_bus_count = 1, .inputs = inputs, .outputs = outputs,
+  };
+  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  assert(output_left[0] == 4.0F);
+  assert(output_right[0] == 4.0F);
+  daw_audio_core_destroy(core);
+}
+
 void test_native_graph_hook_binds_prepared_nodes_before_publish() {
   daw_audio_core_handle core = create_core(4, 2, 1);
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
@@ -1886,6 +1920,7 @@ void operator delete(void *memory) noexcept {
 
 int main() {
   test_portable_graph_topology_pdc_and_revision_safety();
+  test_graph_edges_read_declared_stage_taps();
   test_native_graph_hook_binds_prepared_nodes_before_publish();
   test_portable_graph_rejects_invalid_topology_and_capacity();
   test_portable_graph_utility_node();

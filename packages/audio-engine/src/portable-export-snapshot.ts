@@ -145,9 +145,6 @@ const unsupportedProcessorReasons = (
     : (kind: string) => portableWasmCapabilityMatrix.processorKinds.includes(kind)
   const targetLabel = capabilityTarget === 'native' ? 'native audio core' : 'portable core'
   return [
-    ...(fx?.masterVolume !== undefined && fx.masterVolume !== 1
-      ? [`Master gain is not supported by the ${targetLabel}.`]
-      : []),
     ...instances
     .filter((instance) => !supportedProcessor(instance.kind))
     .map((instance) => `${instance.id}: processor "${instance.kind}" is not supported by the ${targetLabel}.`),

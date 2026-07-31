@@ -401,7 +401,7 @@ export const getAutomationParameterDescriptor = (
   if (eq.property === 'gainDb') {
     return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
   }
-  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
+  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.2, max: 18, defaultValue: 1, scale: 'linear' }
 }
 
 export const isAutomationParameterSupportedForTarget = (

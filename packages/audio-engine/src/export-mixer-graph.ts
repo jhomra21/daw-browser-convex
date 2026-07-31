@@ -15,6 +15,7 @@ export const resolveExportMixerGraph = (input: {
       track.id,
       track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
     ])),
+    masterVolume: fx?.masterVolume,
     masterFxInstances: fx?.masterFxInstances ?? [],
     trackFx: fx?.trackFx,
   })

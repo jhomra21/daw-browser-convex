@@ -71,7 +71,7 @@ test('projects mixer state and routing topology into the native graph', () => {
   })
   expect(result.graph.nodes.find((node) => node.id === 'group')).toMatchObject({
     kind: 'group',
-    mixer: { gain: 0.75, muted: false, soloed: true },
+    mixer: { gain: 0.75, muted: false, soloed: false },
   })
   expect(result.graph.nodes.find((node) => node.id === 'return')).toMatchObject({
     kind: 'return',

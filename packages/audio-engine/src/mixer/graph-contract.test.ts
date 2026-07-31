@@ -48,6 +48,44 @@ describe('mixer routing plan', () => {
     })
   })
 
+  test('projects resolved solo topology and master gain without duplicating solo resolution', () => {
+    const graph = resolveMixerGraph({
+      masterVolume: 0.6,
+      channels: createMixerChannels([
+        { id: 'solo', kind: 'audio', name: 'Solo', clips: [], volume: 1, soloed: true },
+        { id: 'other', kind: 'audio', name: 'Other', clips: [], volume: 1 },
+      ]),
+    })
+    const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
+    const solo = snapshot.nodes.find((node) => node.id === 'solo')
+    const other = snapshot.nodes.find((node) => node.id === 'other')
+
+    expect(snapshot.edges.find((edge) => edge.fromNodeId === 'solo' && edge.kind === 'output')?.gain).toBe(1)
+    expect(snapshot.edges.find((edge) => edge.fromNodeId === 'other' && edge.kind === 'output')?.gain).toBe(0)
+    expect(solo?.mixer?.soloed).toBe(false)
+    expect(other?.mixer?.soloed).toBe(false)
+    expect(snapshot.nodes.find((node) => node.id === MASTER_ROUTE_TARGET)?.mixer?.gain).toBe(0.6)
+  })
+
+  test('uses shared delay automation IDs in the portable processor target list', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([{ id: 'delay-track', kind: 'audio', name: 'Delay', clips: [], volume: 1 }]),
+      trackFx: {
+        'delay-track': {
+          instances: [{
+            id: 'delay-1',
+            kind: 'delay',
+            params: createDefaultDelayParams(),
+          }],
+        },
+      },
+    })
+    const node = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
+      .nodes.find((entry) => entry.id === 'delay-track')
+    expect(node?.processorOrder[0]?.parameterTargets.map((target) => target.id)).toContain('delay.timeMs')
+    expect(node?.processorOrder[0]?.parameterTargets.map((target) => target.id)).not.toContain('delay.delayMs')
+  })
+
   test('leaves instrument attachment to the portable session compiler', () => {
     const graph = resolveMixerGraph({
       channels: createMixerChannels([

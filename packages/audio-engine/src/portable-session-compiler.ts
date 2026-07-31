@@ -424,12 +424,12 @@ const compileSampledInstrument = (
   }
 }
 
-const mixerState = (id: string, gain: number, muted: boolean, soloed: boolean): AudioCoreMixerState => ({
+const mixerState = (id: string, gain: number, muted: boolean): AudioCoreMixerState => ({
   instanceId: id.split('').reduce((hash, character) => (Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0), 2166136261) || 1,
   gain,
   pan: 0,
   muted,
-  soloed,
+  soloed: false,
   parameterTargets: [
     { id: 'mixer.gain', target: 26, minValue: 0, maxValue: 4 },
     { id: 'mixer.pan', target: 27, minValue: -1, maxValue: 1 },
@@ -454,7 +454,7 @@ export const compilePortableSessionInput = (input: PortableSessionCompilerInput)
   return {
     portableAssets: [...assets.assets.values()],
     mixers: input.mixer.channels.map((entry) => mixerState(
-      `mixer:${entry.channel.id}`, entry.gain, entry.channel.muted, entry.channel.soloed,
+      `mixer:${entry.channel.id}`, entry.gain, entry.channel.muted,
     )),
     synths: Object.entries(input.fx.trackFx ?? {}).flatMap(([trackId, fx]) => {
       const instrument = fx.instrument

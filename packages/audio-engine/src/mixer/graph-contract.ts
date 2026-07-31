@@ -93,13 +93,14 @@ const toPortableMixerState = (
   id: string,
   gain: number,
   muted: boolean,
-  soloed: boolean,
 ): AudioCoreMixerState => ({
   instanceId: processorInstanceId(`mixer:${id}`),
   gain,
   pan: 0,
   muted,
-  soloed,
+  // Static solo topology is already resolved by resolveMixerGraph.outputGain
+  // and active sends. Only explicit mixer.solo automation may affect playback.
+  soloed: false,
   parameterTargets: [
     { id: 'mixer.gain', target: 26, minValue: 0, maxValue: 4 },
     { id: 'mixer.pan', target: 27, minValue: -1, maxValue: 1 },
@@ -277,7 +278,7 @@ const toPortableProcessor = (
         highCutHz: params.highCutHz,
       }),
       parameterTargets: [
-        { id: 'delay.delayMs', target: 5 },
+        { id: 'delay.timeMs', target: 5 },
         { id: 'delay.feedback', target: 6 },
         { id: 'delay.dryWet', target: 7 },
         { id: 'delay.lowCutHz', target: 8 },
@@ -354,7 +355,7 @@ export const createPortableGraphSnapshot = ({
     ...(includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument
       ? { instrument: toPortableInstrument(entry.fx.instrument) }
       : {}),
-    mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted, !!entry.channel.soloed),
+    mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted),
   }))
   const edges: AudioCoreGraphSnapshot['edges'][number][] = []
   for (const entry of graph.channels) {
@@ -425,7 +426,7 @@ export const createPortableGraphSnapshot = ({
         processorOrder: graph.master.instances.map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
         latencyFrames: graph.master.instances
           .reduce((frames, instance) => frames + getEffectTiming(instance, sampleRate, bpm).latencyFrames, 0),
-        mixer: toPortableMixerState(MASTER_ROUTE_TARGET, graph.master.volume, false, false),
+        mixer: toPortableMixerState(MASTER_ROUTE_TARGET, graph.master.volume, false),
       },
     ],
     edges,

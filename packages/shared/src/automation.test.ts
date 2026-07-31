@@ -5,6 +5,10 @@ import { synthAutomationKey } from './synth-automation'
 import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
+  test('keeps EQ Q automation within the shared processor contract bounds', () => {
+    expect(getAutomationParameterDescriptor('eq.band-1.q')?.min).toBe(0.2)
+  })
+
   test('builds stable target keys', () => {
     expect(automationTargetKey({ kind: 'master' }, 'volume')).toBe('automation:v2:["master",null,null,"volume"]')
     expect(automationTargetKey({ kind: 'track', trackId: 'track-1' }, 'volume')).toBe('automation:v2:["track","track-1",null,"volume"]')

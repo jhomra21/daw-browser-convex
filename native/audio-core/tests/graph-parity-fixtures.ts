@@ -667,6 +667,61 @@ const stereo = (left: readonly number[], right = left) => new Float32Array([...l
 const sine = (frames: number, frequency: number, sampleRateHz: number, amplitude = 0.5) =>
   Array.from({ length: frames }, (_, frame) => Math.sin(2 * Math.PI * frequency * frame / sampleRateHz) * amplitude)
 
+const sineWithPhase = (
+  frames: number,
+  frequency: number,
+  sampleRateHz: number,
+  amplitude: number,
+  phase: number,
+) => Array.from({ length: frames }, (_, frame) =>
+  Math.sin(2 * Math.PI * frequency * frame / sampleRateHz + phase) * amplitude)
+
+const limiterTruePeakCoefficients = (() => {
+  const taps = 48
+  const cutoff = 0.125
+  const center = (taps - 1) / 2
+  const coefficients = new Float64Array(taps)
+  let sum = 0
+  for (let index = 0; index < taps; index += 1) {
+    const x = index - center
+    const sinc = x === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x)
+    const window = 0.42
+      - 0.5 * Math.cos(2 * Math.PI * index / (taps - 1))
+      + 0.08 * Math.cos(4 * Math.PI * index / (taps - 1))
+    coefficients[index] = sinc * window
+    sum += coefficients[index]
+  }
+  for (let index = 0; index < taps; index += 1) coefficients[index] *= 4 / sum
+  return coefficients
+})()
+
+const limiterTruePeak = (output: readonly Float32Array[]) => {
+  const histories = output.map(() => new Float64Array(12))
+  let historyWrite = 0
+  let peak = 0
+  for (let frame = 0; frame < (output[0]?.length ?? 0); frame += 1) {
+    histories.forEach((history, channel) => {
+      history[historyWrite] = output[channel]?.[frame] ?? 0
+      for (let phase = 0; phase < 4; phase += 1) {
+        let value = 0
+        for (let tap = 0; tap < 12; tap += 1) {
+          const historyIndex = (historyWrite + 11 - tap) % 12
+          value += history[historyIndex] * limiterTruePeakCoefficients[tap * 4 + phase]
+        }
+        peak = Math.max(peak, Math.abs(value))
+      }
+    })
+    historyWrite = (historyWrite + 1) % 12
+  }
+  return peak
+}
+
+const maximumSamplePeak = (planes: readonly Float32Array[] | Float32Array) => {
+  let peak = 0
+  for (const sample of planes) peak = Math.max(peak, Math.abs(sample))
+  return peak
+}
+
 const sweep = (frames: number, startHz: number, endHz: number, sampleRateHz: number, amplitude = 0.5) => {
   const duration = frames / sampleRateHz
   const slope = (endHz - startHz) / duration
@@ -1002,7 +1057,7 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
     kind: 'limiter',
     kindId: 12,
     latencyMs: 5,
-    portableEligible: false,
+    portableEligible: true,
     legacy: {
       kind: 'limiter',
       state: {
@@ -1114,7 +1169,6 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
         ? [1, 7, 64, 256, 512, 512, impulseFrames - 1_352]
         : [1, 7, 64, 256, 512, impulseFrames - 840],
       assertReset: true,
-      legacyDifferenceMinimum: definition.kind === 'limiter' ? 1e-3 : undefined,
     },
   )
   const latency = impulse.expectedLatencyFrames ?? 0
@@ -1156,25 +1210,83 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
   nonfinite.legacyDynamics = undefined
   nonfinite.legacyTolerance = undefined
 
+  const truePeakFixtures = definition.kind !== 'limiter' ? [] : [44_100, 48_000, 96_000].flatMap((sampleRateHz) => {
+    const frames = Math.round(sampleRateHz * 0.05)
+    const frequency = sampleRateHz * 0.45
+    const left = sineWithPhase(frames, frequency, sampleRateHz, 0.8, 1.727875959)
+    const linkedInput = stereo(left, sineWithPhase(frames, frequency, sampleRateHz, 0.2, 1.727875959))
+    const unlinkedInput = stereo(left, sineWithPhase(frames, frequency, sampleRateHz, 0.2, 1.727875959))
+    const blockPartitions = (maximum: number, first: number) => {
+      const partitions = [first, 7, 64, 128, 256]
+      let remaining = frames - partitions.reduce((total, partition) => total + partition, 0)
+      while (remaining > maximum) {
+        partitions.push(maximum)
+        remaining -= maximum
+      }
+      if (remaining > 0) partitions.push(remaining)
+      return partitions
+    }
+    const createTruePeakFixture = (
+      name: string,
+      input: Float32Array,
+      link: number,
+      blockPartitions: readonly number[],
+    ) => {
+      const fixture = dynamicsFixture(definition, `${name}-${sampleRateHz}`, 'sampleRates', sampleRateHz, input, {
+        legacy: { kind: 'limiter', state: { ...definition.legacy.state, ceilingDbtp: -6, link } },
+        maxFramesPerBlock: Math.max(...blockPartitions),
+        blockPartitions,
+      })
+      if (name === 'true-peak-unlinked') {
+        fixture.characterizationPairKey = `limiter-true-peak-link-${sampleRateHz}`
+        fixture.characterizationPairDifferenceMinimum = 0.01
+      }
+      fixture.assertOutput = (output) => {
+        const inputSamplePeak = maximumSamplePeak(input)
+        const inputTruePeak = limiterTruePeak([input.subarray(0, frames), input.subarray(frames)])
+        const outputTruePeak = limiterTruePeak(output)
+        return finite(output)
+          && inputTruePeak > inputSamplePeak + 0.01
+          // The shipped browser detector's finite 48-tap window leaves a
+          // bounded residual above the nominal ceiling on this adversarial
+          // intersample waveform; native must preserve that contract.
+          && outputTruePeak <= 10 ** (-6 / 20) + 0.04
+      }
+      return fixture
+    }
+    return [
+      createTruePeakFixture(
+        'true-peak-linked',
+        linkedInput,
+        1,
+        blockPartitions(441, 1),
+      ),
+      createTruePeakFixture(
+        'true-peak-unlinked',
+        unlinkedInput,
+        0,
+        blockPartitions(sampleRateHz === 44_100 ? 441 : sampleRateHz === 48_000 ? 480 : 960, 5),
+      ),
+    ]
+  })
+
   return [
     impulse,
     dynamicsFixture(definition, 'step-44100', 'sampleRates', 44_100, stepInput, {
       maxFramesPerBlock: 441,
       blockPartitions: [3, 5, 17, 64, 128, 224, 441],
-      legacyDifferenceMinimum: definition.kind === 'limiter' ? 1e-3 : undefined,
     }),
     dynamicsFixture(definition, 'sine-48000', 'sampleRates', 48_000, sineInput, {
       maxFramesPerBlock: 480,
       blockPartitions: [31, 89, 120, 240, 480, 480],
-      legacyDifferenceMinimum: definition.kind === 'limiter' ? 1e-3 : undefined,
     }),
     dynamicsFixture(definition, 'sweep-96000', 'sampleRates', 96_000, sweepInput, {
       maxFramesPerBlock: 960,
       blockPartitions: [1, 63, 128, 288, 480, 960, 960],
-      legacyDifferenceMinimum: definition.kind === 'limiter' ? 1e-3 : undefined,
     }),
     bypass,
     nonfinite,
+    ...truePeakFixtures,
     {
       name: `${definition.kind}-rejects-undeclared-automation`,
       capability: 'fullBlockAutomation',

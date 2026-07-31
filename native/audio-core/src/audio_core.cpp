@@ -32,6 +32,22 @@ constexpr uint32_t kMaximumSpectralFftSize = 4096;
 constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
 constexpr uint32_t kSpectralHpssFrames = 31;
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
+// Port of public/audio-worklets/daw-limiter-processor-v1.js createFir():
+// 48 taps, 0.125 cutoff, Blackman-Harris window, normalized for four phases.
+constexpr std::array<double, 48> kLimiterTruePeakFir = {
+  2.8770393804939532e-19, -8.462079214010202e-05, -0.00036092137667317133, -0.0003633790261733186,
+  0.00070568670835497859, 0.0029338012271598784, 0.0046865622501385462, 0.0029440137922481392,
+  -0.0042954750165350233, -0.014678888263847801, -0.020272630731593962, -0.011363293681758927,
+  0.015119076534081342, 0.047897022892599735, 0.062173748295054919, 0.033175379004903263,
+  -0.042571243043840495, -0.13200353510096746, -0.17082947420323963, -0.093211746888245808,
+  0.12718490344202485, 0.44935166807937821, 0.77127787554504057, 0.97258547035403053,
+  0.97258547035403053, 0.77127787554504068, 0.44935166807937821, 0.12718490344202488,
+  -0.09321174688824585, -0.17082947420323963, -0.13200353510096749, -0.042571243043840502,
+  0.03317537900490327, 0.062173748295054933, 0.047897022892599735, 0.015119076534081344,
+  -0.011363293681758931, -0.020272630731593962, -0.014678888263847821, -0.0042954750165350294,
+  0.0029440137922481444, 0.0046865622501385549, 0.0029338012271598744, 0.00070568670835497989,
+  -0.00036337902617331893, -0.00036092137667317285, -8.4620792140104189e-05, 2.8770393804939532e-19,
+};
 // One extra frame lets a 48 kHz processor read the full 3,000 ms contract maximum.
 constexpr uint32_t kMaximumTimeEffectDelayFrames = 144001;
 // Reverb only needs its bounded pre-delay and decorrelation window; its tail is
@@ -153,6 +169,9 @@ struct DynamicsHistory {
   std::array<float, kMaximumDynamicsDelayFrames> delay_right{};
   std::array<float, kMaximumDynamicsDelayFrames> detector_left{};
   std::array<float, kMaximumDynamicsDelayFrames> detector_right{};
+  std::array<double, 12> limiter_true_peak_left{};
+  std::array<double, 12> limiter_true_peak_right{};
+  uint32_t limiter_true_peak_write = 0;
   uint32_t write = 0;
   std::array<float, 2> gain{1.0F, 1.0F};
   std::array<float, 2> rms{};
@@ -1958,6 +1977,19 @@ uint32_t dynamics_delay_frames(float milliseconds, uint32_t sample_rate) {
   return std::min(kMaximumDynamicsDelayFrames - 1, static_cast<uint32_t>(std::ceil(milliseconds * static_cast<float>(sample_rate) / 1000.0F)));
 }
 
+double limiter_true_peak(const std::array<double, 12> &history, uint32_t history_write) {
+  double peak = 0.0;
+  for (uint32_t phase = 0; phase < 4; ++phase) {
+    double value = 0.0;
+    for (uint32_t tap = 0; tap < 12; ++tap) {
+      const uint32_t history_index = (history_write + 11 - tap) % 12;
+      value += history[history_index] * kLimiterTruePeakFir[tap * 4 + phase];
+    }
+    peak = std::max(peak, std::abs(value));
+  }
+  return peak;
+}
+
 float compressor_curve_db(float input_db, const daw_audio_compressor_state &state) {
   if (state.dynamics_mode != 0) {
     if (input_db >= state.threshold_db) return input_db;
@@ -1990,6 +2022,8 @@ void render_dynamics_processor(
   const uint32_t read = (write + kMaximumDynamicsDelayFrames - fixed_delay) % kMaximumDynamicsDelayFrames;
   history.delay_left[write] = dry_left;
   history.delay_right[write] = dry_right;
+  history.detector_left[write] = dry_left;
+  history.detector_right[write] = dry_right;
   float left = history.delay_left[read];
   float right = history.delay_right[read];
   if (gate) {
@@ -2065,11 +2099,15 @@ void render_dynamics_processor(
   } else {
     const daw_audio_limiter_state &state = processor.limiter;
     const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
-    const float detector_left = std::abs(history.delay_left[detector_read]);
-    const float detector_right = std::abs(history.delay_right[detector_read]);
+    const uint32_t true_peak_write = history.limiter_true_peak_write;
+    history.limiter_true_peak_left[true_peak_write] = history.detector_left[detector_read];
+    history.limiter_true_peak_right[true_peak_write] = history.detector_right[detector_read];
+    const double detector_left = limiter_true_peak(history.limiter_true_peak_left, true_peak_write);
+    const double detector_right = limiter_true_peak(history.limiter_true_peak_right, true_peak_write);
+    history.limiter_true_peak_write = (true_peak_write + 1) % 12;
     const float ceiling = dynamics_db_to_gain(state.ceiling_dbtp);
-    const float target_left = std::fmin(1.0F, ceiling / std::fmax(detector_left, 1e-12F));
-    const float target_right = std::fmin(1.0F, ceiling / std::fmax(detector_right, 1e-12F));
+    const float target_left = static_cast<float>(std::fmin(1.0, static_cast<double>(ceiling) / std::fmax(detector_left, 1e-12)));
+    const float target_right = static_cast<float>(std::fmin(1.0, static_cast<double>(ceiling) / std::fmax(detector_right, 1e-12)));
     const float linked = std::fmin(target_left, target_right);
     const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
     const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));

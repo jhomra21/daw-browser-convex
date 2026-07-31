@@ -6,7 +6,6 @@ import {
   createDefaultDrumRackParams,
   createDefaultEqParams,
   createDefaultGranularParams,
-  createDefaultLimiterParams,
   createDefaultReverbParams,
   createDefaultSamplerParams,
   createDefaultSaturatorParams,
@@ -622,11 +621,6 @@ test('rejects unsupported graph features and unresolved schedule targets without
         return: {
           instances: [
             {
-              id: 'unsupported',
-              kind: 'limiter',
-              params: { version: 1, state: createDefaultLimiterParams() },
-            },
-            {
               id: 'unsupported-delay',
               kind: 'delay',
               params: createDefaultDelayParams(),
@@ -648,11 +642,6 @@ test('rejects unsupported graph features and unresolved schedule targets without
           ...returnFx,
           instances: [
             {
-              id: 'unsupported',
-              kind: 'limiter',
-              params: { version: 1, state: createDefaultLimiterParams() },
-            },
-            {
               id: 'unsupported-delay',
               kind: 'delay',
               params: createDefaultDelayParams(),
@@ -669,7 +658,6 @@ test('rejects unsupported graph features and unresolved schedule targets without
   })
   expect(unsupportedEffect).toMatchObject({ supported: false })
   if (unsupportedEffect.supported) throw new Error('Expected unsupported portable session.')
-  expect(unsupportedEffect.reasons).toContain('unsupported: processor "limiter" is not fixture-proven for portable sessions.')
   expect(unsupportedEffect.reasons).toContain('unsupported-delay: processor "delay" is not fixture-proven for portable sessions.')
   expect(unsupportedEffect.reasons).toContain('unsupported-reverb: processor "reverb" is not fixture-proven for portable sessions.')
 

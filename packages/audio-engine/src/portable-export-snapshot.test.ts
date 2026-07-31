@@ -322,6 +322,11 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
               kind: 'compressor',
               params: createDefaultCompressorParams(),
             },
+            {
+              id: 'portable-limiter',
+              kind: 'limiter',
+              params: { version: 1, state: createDefaultLimiterParams() },
+            },
           ],
         },
       },
@@ -345,6 +350,7 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
     ['ensemble', 0, 1_152, []],
     ['gate', 96, 0, []],
     ['compressor', 480, 0, []],
+    ['limiter', 240, 0, []],
   ])
 
   const unsupported = compilePortableExportSnapshot({
@@ -360,11 +366,6 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
       trackFx: {
         'track-1': {
           instances: [
-            {
-              id: 'unsupported-limiter',
-              kind: 'limiter',
-              params: { version: 1, state: createDefaultLimiterParams() },
-            },
             {
               id: 'unsupported-delay',
               kind: 'delay',
@@ -383,7 +384,6 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
   expect(unsupported).toEqual({
     supported: false,
     reasons: [
-      'unsupported-limiter: processor "limiter" is not supported by the portable core.',
       'unsupported-delay: processor "delay" is not supported by the portable core.',
       'unsupported-reverb: processor "reverb" is not supported by the portable core.',
     ],

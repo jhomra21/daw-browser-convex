@@ -19,7 +19,7 @@ type PortableWasmCapabilityMatrix = {
  * runtime matrix is derived from it rather than maintained independently. */
 const portableWasmParityFixtureCoverage = {
   version: 1,
-  processorKinds: ['utility', 'saturator', 'eq', 'autofilter', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'gate', 'compressor', 'limiter'],
+  processorKinds: ['utility', 'saturator', 'eq', 'autofilter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'gate', 'compressor', 'limiter'],
   sidechains: true,
   synthMidi: true,
   mixerAutomation: true,

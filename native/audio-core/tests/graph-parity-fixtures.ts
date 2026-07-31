@@ -10,6 +10,7 @@ import {
   encodeFlangerProcessorState,
   encodeGateProcessorState,
   encodeLimiterProcessorState,
+  encodeLoFiProcessorState,
   encodePhaserProcessorState,
   encodeReverbProcessorState,
   encodeSaturatorProcessorState,
@@ -29,6 +30,7 @@ import {
   type EqProcessorState,
   type GateProcessorState,
   type LimiterProcessorState,
+  type LoFiProcessorState,
   type PhaserProcessorState,
   type ReverbProcessorState,
   type SaturatorProcessorState,
@@ -66,7 +68,7 @@ export type PortableLegacySpectralFixture = {
 export type PortableGraphParityFixture = {
   name: string
   capability: 'chains' | 'fullBlockAutomation' | 'sidechains' | 'synthMidi' | 'mixerAutomation' | 'variableBlocks' | 'sampleRates' | 'nonfinite' | 'sampledInstruments' | 'topology' | 'invalidTopology'
-  processorKind?: 'utility' | 'saturator' | 'eq' | 'autofilter' | PortableModulationKind | PortableDynamicsKind | PortableTimeEffectKind | PortableSpectralKind
+  processorKind?: 'utility' | 'saturator' | 'eq' | 'autofilter' | 'lofi' | PortableModulationKind | PortableDynamicsKind | PortableTimeEffectKind | PortableSpectralKind
   sampleRateHz: number
   maxFramesPerBlock: number
   inputBusCount: number
@@ -260,10 +262,23 @@ const autoFilterState = (overrides: Partial<AutoFilterProcessorState> = {}): Aut
   ...overrides,
 })
 
+const loFiState = (overrides: Partial<LoFiProcessorState> = {}): LoFiProcessorState => ({
+  enabled: true,
+  bitDepth: 8,
+  sampleRateRatio: 0.5,
+  jitter: 0.35,
+  noiseDb: -60,
+  quantization: 'round',
+  dither: 'triangular',
+  mix: 1,
+  seed: 123,
+  ...overrides,
+})
+
 type FixtureProcessor = {
   nodeId: bigint
   instanceId: number
-  kindId?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
+  kindId?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
   state?: Uint8Array
   parameterTargets?: readonly number[]
   latencyFrames?: number
@@ -1985,6 +2000,35 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
   })(),
 ]
 
+const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_000].map((sampleRateHz) => ({
+  name: `lofi-deterministic-stereo-${sampleRateHz}`,
+  capability: 'sampleRates' as const,
+  processorKind: 'lofi' as const,
+  sampleRateHz,
+  maxFramesPerBlock: 23,
+  inputBusCount: 1,
+  channelCount: 2,
+  graph: processorSourceMaster({
+    nodeId: 2n,
+    instanceId: 11,
+    kindId: 17,
+    state: encodeLoFiProcessorState(loFiState()),
+    parameterTargets: [41, 42, 43, 44],
+  }),
+  frames: 64,
+  blockPartitions: [1, 7, 3, 17, 2, 11, 23],
+  input: stereo(
+    sine(64, 440, sampleRateHz, 0.7),
+    sineWithPhase(64, 880, sampleRateHz, 0.4, 0.3),
+  ),
+  nativeWasmTolerance: 2e-5,
+  assertOutput: (output: readonly Float32Array[]) => finite(output)
+    && output[0] !== undefined
+    && output[1] !== undefined
+    && output[0].some((sample) => Math.abs(sample) > 1e-4)
+    && output[1].some((sample) => Math.abs(sample) > 1e-4),
+}))
+
 const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
   {
     name: 'autofilter-lowpass-impulse-partitions-reset',
@@ -2378,6 +2422,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
   ...dynamicsSidechainFixtures,
   ...timeEffectFixtures,
   ...spectralFixtures,
+  ...loFiFixtures,
   ...autoFilterFixtures,
   {
     name: 'mixer-automation',

@@ -7,6 +7,7 @@ export const portableWasmCapabilityMatrix = Object.freeze({
     'saturator',
     'eq',
     'autofilter',
+    'lofi',
     'chorus',
     'flanger',
     'phaser',

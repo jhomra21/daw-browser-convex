@@ -128,6 +128,7 @@ struct GraphRevision {
     daw_audio_reverb_state reverb{};
     daw_audio_spectral_state spectral{};
     daw_audio_autofilter_state autofilter{};
+    daw_audio_lofi_state lofi{};
     uint32_t history_slot = 0;
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
@@ -345,6 +346,18 @@ struct AutoFilterHistory {
   float bypass = 0.0F;
 };
 
+struct LoFiChannelHistory {
+  float phase = 1.0F;
+  float held = 0.0F;
+  float interval = 1.0F;
+  uint32_t random_state = 0;
+};
+
+struct LoFiHistory {
+  std::array<LoFiChannelHistory, 2> channels{};
+  float bypass = 0.0F;
+};
+
 struct ProcessorHistorySlot {
   uint64_t instance_id = 0;
   uint32_t kind = 0;
@@ -386,6 +399,7 @@ struct Core {
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
   std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
+  std::array<LoFiHistory, kMaximumGraphProcessors> lofi_histories{};
   std::array<const daw_audio_processor_parameter_block *, kMaximumGraphProcessors> active_parameter_blocks{};
   std::array<uint32_t, kMaximumGraphProcessors> event_starts{};
   std::array<uint32_t, kMaximumGraphProcessors> event_ends{};
@@ -604,6 +618,7 @@ constexpr std::array<ProcessorContract, DAW_AUDIO_CORE_PROCESSOR_REGISTRY_COUNT>
   {DAW_AUDIO_PROCESSOR_KIND_REVERB, DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_REVERB_STATE_BYTES, true},
   {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_SPECTRAL_STATE_BYTES, true},
   {DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER, DAW_AUDIO_CORE_PROCESSOR_AUTOFILTER_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_AUTOFILTER_STATE_BYTES, true},
+  {DAW_AUDIO_PROCESSOR_KIND_LOFI, DAW_AUDIO_CORE_PROCESSOR_LOFI_SCHEMA_VERSION, DAW_AUDIO_CORE_PROCESSOR_LOFI_STATE_BYTES, true},
 }};
 
 const ProcessorContract *find_processor_contract(uint32_t kind) {
@@ -843,7 +858,7 @@ daw_audio_core_result prepare_graph_revision(
     processor.parameter_count = descriptor.parameter_count;
     for (uint32_t parameter = 0; parameter < descriptor.parameter_count; ++parameter) {
       const uint32_t target = descriptor.parameter_targets[parameter];
-      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       for (uint32_t previous = 0; previous < parameter; ++previous) {
         if (processor.parameter_targets[previous] == target) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
@@ -1229,6 +1244,18 @@ bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
     && std::isfinite(state.lfo_stereo_phase) && state.lfo_stereo_phase >= -0.5F && state.lfo_stereo_phase <= 0.5F;
 }
 
+bool valid_lofi_state(const daw_audio_lofi_state &state) {
+  return state.enabled <= 1
+    && state.bit_depth >= 2 && state.bit_depth <= 24
+    && std::isfinite(state.sample_rate_ratio) && state.sample_rate_ratio >= 0.01F && state.sample_rate_ratio <= 1.0F
+    && std::isfinite(state.jitter) && state.jitter >= 0.0F && state.jitter <= 1.0F
+    && std::isfinite(state.noise_db) && state.noise_db >= -120.0F && state.noise_db <= -24.0F
+    && state.quantization <= DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE
+    && state.dither <= DAW_AUDIO_LOFI_DITHER_TRIANGULAR
+    && std::isfinite(state.mix) && state.mix >= 0.0F && state.mix <= 1.0F
+    && state.seed != 0;
+}
+
 bool decode_processor_state(
   const daw_audio_processor_descriptor &descriptor,
   GraphRevision::Processor *out_processor) {
@@ -1400,6 +1427,23 @@ bool decode_processor_state(
         || target > DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return false;
     }
     out_processor->autofilter = state;
+    return true;
+  }
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI && descriptor.state_size == 36) {
+    const daw_audio_lofi_state state{
+      .enabled = read_u32_le(descriptor.state), .bit_depth = read_u32_le(descriptor.state + 4),
+      .sample_rate_ratio = read_f32_le(descriptor.state + 8), .jitter = read_f32_le(descriptor.state + 12),
+      .noise_db = read_f32_le(descriptor.state + 16), .quantization = read_u32_le(descriptor.state + 20),
+      .dither = read_u32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
+      .seed = read_u32_le(descriptor.state + 32),
+    };
+    if (!valid_lofi_state(state) || descriptor.latency_frames != 0 || descriptor.tail_frames != 0 || descriptor.parameter_count > 4) return false;
+    for (uint32_t index = 0; index < descriptor.parameter_count; ++index) {
+      const uint32_t target = descriptor.parameter_targets[index];
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO
+        || target > DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return false;
+    }
+    out_processor->lofi = state;
     return true;
   }
   if (descriptor.kind != DAW_AUDIO_PROCESSOR_KIND_EQ || descriptor.state_size != 200) return false;
@@ -1869,6 +1913,88 @@ void render_autofilter_processor(
   history.delay[0][history.delay_index] = mixed_left;
   history.delay[1][history.delay_index] = mixed_right;
   history.delay_index = (history.delay_index + 1) % kAutoFilterLatencyFrames;
+}
+
+uint32_t lofi_next_random(uint32_t *state) {
+  uint32_t value = *state;
+  value ^= value << 13u;
+  value ^= value >> 17u;
+  value ^= value << 5u;
+  *state = value == 0 ? 1u : value;
+  return *state;
+}
+
+float lofi_random(uint32_t *state) {
+  return static_cast<float>(lofi_next_random(state)) / 4294967296.0F;
+}
+
+float lofi_quantize(float scaled, uint32_t mode) {
+  if (mode == DAW_AUDIO_LOFI_QUANTIZATION_FLOOR) return std::floor(scaled);
+  if (mode == DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE) return std::trunc(scaled);
+  // JavaScript Math.round rounds ties toward positive infinity.
+  return std::floor(scaled + 0.5F);
+}
+
+void render_lofi_processor(
+  Core &core,
+  GraphRevision::Processor &processor,
+  uint32_t frame,
+  float input_left,
+  float input_right,
+  float,
+  float,
+  float *output_left,
+  float *output_right) {
+  LoFiHistory &history = core.lofi_histories[processor.history_slot];
+  const daw_audio_lofi_state &state = processor.lofi;
+  const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
+  const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
+  const float bit_depth = static_cast<float>(state.bit_depth);
+  const float levels = std::pow(2.0F, bit_depth - 1.0F) - 1.0F;
+  const float lsb = 1.0F / levels;
+  const float ratio = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO, frame, state.sample_rate_ratio);
+  const float jitter = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER, frame, state.jitter);
+  const float noise_db = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB, frame, state.noise_db);
+  const float mix = processor_parameter_value(
+    core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX, frame, state.mix);
+  for (uint32_t channel_index = 0; channel_index < 2; ++channel_index) {
+    LoFiChannelHistory &channel = history.channels[channel_index];
+    if (channel.random_state == 0) {
+      channel.random_state = state.seed ^ (channel_index == 0 ? 0u : 0x9e3779b9u);
+      if (channel.random_state == 0) channel.random_state = 1u;
+    }
+    const float dry = channel_index == 0 ? dry_left : dry_right;
+    channel.phase += ratio;
+    if (channel.phase >= channel.interval) {
+      channel.phase -= channel.interval;
+      channel.interval = 1.0F + (lofi_random(&channel.random_state) - 0.5F) * jitter;
+      const float noise = (lofi_random(&channel.random_state) * 2.0F - 1.0F) * std::pow(10.0F, noise_db / 20.0F);
+      float sample = dry + noise;
+      if (state.dither == DAW_AUDIO_LOFI_DITHER_RECTANGULAR) {
+        sample += (lofi_random(&channel.random_state) - 0.5F) * lsb;
+      } else if (state.dither == DAW_AUDIO_LOFI_DITHER_TRIANGULAR) {
+        sample += (lofi_random(&channel.random_state) - lofi_random(&channel.random_state)) * lsb;
+      }
+      const float quantized = lofi_quantize(sample * levels, state.quantization);
+      channel.held = std::fmax(-1.0F, std::fmin(1.0F, quantized / levels));
+    }
+    const float processed = dry + (channel.held - dry) * mix;
+    if (channel_index == 0) *output_left = processed;
+    else *output_right = processed;
+  }
+  const uint32_t bypass_frames = (core.config.sample_rate_hz + 50u) / 100u;
+  const float bypass_step = 1.0F / static_cast<float>(bypass_frames == 0 ? 1u : bypass_frames);
+  history.bypass = clamp_bypass_step(
+    history.bypass,
+    processor.bypassed != 0 || state.enabled == 0 ? 1.0F : 0.0F,
+    bypass_step);
+  *output_left = std::isfinite(*output_left)
+    ? *output_left + (dry_left - *output_left) * history.bypass : dry_left;
+  *output_right = std::isfinite(*output_right)
+    ? *output_right + (dry_right - *output_right) * history.bypass : dry_right;
 }
 
 float modulation_lfo(uint32_t waveform, float phase) {
@@ -2522,7 +2648,7 @@ struct ProcessorImplementation {
   ProcessorRenderer render;
 };
 
-constexpr std::array<ProcessorImplementation, 16> kProcessorImplementations{{
+constexpr std::array<ProcessorImplementation, 17> kProcessorImplementations{{
   {DAW_AUDIO_PROCESSOR_KIND_UTILITY, render_utility_processor},
   {DAW_AUDIO_PROCESSOR_KIND_SATURATOR, render_saturator_processor},
   {DAW_AUDIO_PROCESSOR_KIND_EQ, render_eq_processor},
@@ -2539,6 +2665,7 @@ constexpr std::array<ProcessorImplementation, 16> kProcessorImplementations{{
   {DAW_AUDIO_PROCESSOR_KIND_REVERB, render_time_effect_processor},
   {DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, render_spectral_processor},
   {DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER, render_autofilter_processor},
+  {DAW_AUDIO_PROCESSOR_KIND_LOFI, render_lofi_processor},
 }};
 
 ProcessorRenderer find_processor_renderer(uint32_t kind) {
@@ -3508,6 +3635,10 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES) return value >= 0.0F && value <= 6.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return value >= -0.5F && value <= 0.5F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO) return value >= 0.01F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER) return value >= 0.0F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB) return value >= -120.0F && value <= -24.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return value >= 0.0F && value <= 1.0F;
   return target == 22 && value >= -1.0F && value <= 1.0F;
 }
 
@@ -4380,6 +4511,12 @@ bool compatible_processor_history(
       return current.autofilter.enabled == next.autofilter.enabled
         && current.autofilter.mode == next.autofilter.mode
         && current.autofilter.quality == next.autofilter.quality;
+    case DAW_AUDIO_PROCESSOR_KIND_LOFI:
+      return current.lofi.enabled == next.lofi.enabled
+        && current.lofi.bit_depth == next.lofi.bit_depth
+        && current.lofi.quantization == next.lofi.quantization
+        && current.lofi.dither == next.lofi.dither
+        && current.lofi.seed == next.lofi.seed;
     default:
       return current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
         || current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
@@ -4460,6 +4597,7 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
         core->dynamics_histories[slot] = {};
         core->modulation_histories[slot] = {};
         core->autofilter_histories[slot] = {};
+        core->lofi_histories[slot] = {};
       }
     }
     for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { createDefaultLoFiParams, createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import { createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import { compileLiveNativeProjection } from './live-native-projection'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -188,14 +188,14 @@ test('projects native-owned reverb state instead of applying portable fixture ga
   expect(reverb?.state.byteLength).toBe(72)
 })
 
-test('rejects active processors outside the native audio-core contract', () => {
+test('rejects instrument tracks without native instrument state', () => {
   const result = compileLiveNativeProjection({
-    tracks: [track()],
+    tracks: [track({ id: 'instrument', kind: 'instrument' })],
     fx: {
       masterFxInstances: [{
-        id: 'active-lofi',
-        kind: 'lofi',
-        params: { version: 1, state: createDefaultLoFiParams() },
+        id: 'native-reverb',
+        kind: 'reverb',
+        params: createDefaultReverbParams(),
       }],
     },
     bpm: 120,
@@ -207,7 +207,7 @@ test('rejects active processors outside the native audio-core contract', () => {
 
   expect(result).toMatchObject({
     supported: false,
-    reasons: ['active-lofi: processor "lofi" is not supported by the native audio core.'],
+    reasons: ['instrument: native instrument state is unavailable.'],
   })
 })
 

@@ -334,7 +334,8 @@ typedef enum daw_audio_processor_kind {
   DAW_AUDIO_PROCESSOR_KIND_DELAY = 13,
   DAW_AUDIO_PROCESSOR_KIND_REVERB = 14,
   DAW_AUDIO_PROCESSOR_KIND_SPECTRAL = 15,
-  DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER = 16
+  DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER = 16,
+  DAW_AUDIO_PROCESSOR_KIND_LOFI = 17
 } daw_audio_processor_kind;
 
 typedef enum daw_audio_processor_parameter {
@@ -363,7 +364,11 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_RATE_HZ = 37,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES = 38,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET = 39,
-  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE = 40
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE = 40,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO = 41,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER = 42,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB = 43,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX = 44
 } daw_audio_processor_parameter;
 
 /* Graph descriptors are copied into an immutable prepared revision. Node and
@@ -710,6 +715,30 @@ typedef struct daw_audio_autofilter_state {
   float lfo_phase_offset;
   float lfo_stereo_phase;
 } daw_audio_autofilter_state;
+
+typedef enum daw_audio_lofi_quantization {
+  DAW_AUDIO_LOFI_QUANTIZATION_ROUND = 0,
+  DAW_AUDIO_LOFI_QUANTIZATION_FLOOR = 1,
+  DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE = 2
+} daw_audio_lofi_quantization;
+
+typedef enum daw_audio_lofi_dither {
+  DAW_AUDIO_LOFI_DITHER_OFF = 0,
+  DAW_AUDIO_LOFI_DITHER_RECTANGULAR = 1,
+  DAW_AUDIO_LOFI_DITHER_TRIANGULAR = 2
+} daw_audio_lofi_dither;
+
+typedef struct daw_audio_lofi_state {
+  uint32_t enabled;
+  uint32_t bit_depth;
+  float sample_rate_ratio;
+  float jitter;
+  float noise_db;
+  uint32_t quantization;
+  uint32_t dither;
+  float mix;
+  uint32_t seed;
+} daw_audio_lofi_state;
 
 typedef struct daw_audio_asset_descriptor {
   uint32_t abi_version;

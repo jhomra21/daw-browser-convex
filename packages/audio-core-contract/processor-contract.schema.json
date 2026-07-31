@@ -10,7 +10,7 @@
     "processors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["utility", "autofilter", "saturator", "eq", "chorus", "flanger", "phaser", "tremolo", "autopan", "ensemble", "gate", "compressor", "limiter", "delay", "reverb", "spectral"],
+      "required": ["utility", "autofilter", "saturator", "eq", "chorus", "flanger", "phaser", "tremolo", "autopan", "ensemble", "gate", "compressor", "limiter", "lofi", "delay", "reverb", "spectral"],
       "properties": {
         "utility": {
           "type": "object",
@@ -312,6 +312,24 @@
             "id": { "const": 12 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
             "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "ceilingDbtp", "releaseMs", "lookaheadMs", "link", "detectorOversampling"], "properties": {
               "enabled": { "type": "boolean" }, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0 }, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000 }, "lookaheadMs": { "type": "number", "default": 5, "minimum": 1, "maximum": 5 }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 }, "detectorOversampling": { "const": 4 }
+            }}
+          }
+        },
+        "lofi": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 17 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 36 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "bitDepth", "sampleRateRatio", "jitter", "noiseDb", "quantization", "dither", "mix", "seed"], "properties": {
+              "enabled": { "type": "boolean" },
+              "bitDepth": { "type": "number", "default": 12, "minimum": 2, "maximum": 24 },
+              "sampleRateRatio": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 1, "portableParameter": true },
+              "jitter": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "noiseDb": { "type": "number", "default": -80, "minimum": -120, "maximum": -24, "portableParameter": true },
+              "quantization": { "enum": ["round", "floor", "truncate"] },
+              "dither": { "enum": ["off", "rectangular", "triangular"] },
+              "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "seed": { "type": "number", "minimum": 1, "maximum": 4294967295 }
             }}
           }
         },

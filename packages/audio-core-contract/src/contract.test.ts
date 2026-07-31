@@ -14,6 +14,7 @@ import {
   encodeEnsembleProcessorState,
   encodeGateProcessorState,
   encodeLimiterProcessorState,
+  encodeLoFiProcessorState,
   encodePhaserProcessorState,
   encodeReverbProcessorState,
   encodeSaturatorProcessorState,
@@ -176,6 +177,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'reverb', id: 14, stateBytes: 72 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 60, tombstone: false }),
+    expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 36, schemaVersion: 1, tombstone: false }),
   ])
 })
 
@@ -225,6 +227,19 @@ test('delay and reverb codecs preserve portable state without claiming browser c
   })
   expect(reverb.byteLength).toBe(72)
   expect(new DataView(reverb.buffer).getFloat32(8, true)).toBeCloseTo(2.2)
+})
+
+test('LoFi codec preserves deterministic state and portable controls', () => {
+  const lofi = encodeLoFiProcessorState({
+    enabled: true, bitDepth: 12, sampleRateRatio: 0.5, jitter: 0.25, noiseDb: -80,
+    quantization: 'truncate', dither: 'triangular', mix: 0.75, seed: 123,
+  })
+  expect(lofi.byteLength).toBe(36)
+  const view = new DataView(lofi.buffer)
+  expect(view.getUint32(4, true)).toBe(12)
+  expect(view.getUint32(20, true)).toBe(2)
+  expect(view.getUint32(24, true)).toBe(2)
+  expect(view.getUint32(32, true)).toBe(123)
 })
 
 test('spectral codec preserves bounded STFT state and generic automation metadata', () => {

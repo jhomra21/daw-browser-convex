@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { automationTargetKey, createDefaultLoFiParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -775,7 +775,7 @@ test("primes arranged playback only after the committed native session starts", 
   await controller.dispose()
 })
 
-test("blocks native-required playback with an active unsupported processor", async () => {
+test("blocks native-required playback when native instrument state is unavailable", async () => {
   const fixture = createBridge()
   const faults: string[] = []
   const controller = createNativePlaybackController({
@@ -783,15 +783,11 @@ test("blocks native-required playback with an active unsupported processor", asy
     reportFault: (message) => faults.push(message),
     compileSnapshot: async () => {
       const result = compileLivePlaybackSnapshot({
-        ...input(),
+        ...input(instrumentTrack),
         renderState: {
           fx: {
             masterVolume: 1,
-            masterFxInstances: [{
-              id: "lofi:1",
-              kind: "lofi",
-              params: { version: 1, state: createDefaultLoFiParams() },
-            }],
+            masterFxInstances: [],
             trackFx: {},
           },
           automationEnvelopes: [],
@@ -810,7 +806,7 @@ test("blocks native-required playback with an active unsupported processor", asy
   })
 
   expect(await controller.start(input().transport)).toBe("blocked")
-  expect(faults).toEqual(['lofi:1: processor "lofi" is not supported by the native audio core.'])
+  expect(faults).toEqual(["instrument: native instrument state is unavailable."])
   expect(fixture.calls).toEqual([])
 })
 

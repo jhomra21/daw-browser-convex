@@ -10,6 +10,7 @@ import {
   encodeFlangerProcessorState,
   encodeGateProcessorState,
   encodeLimiterProcessorState,
+  encodeLoFiProcessorState,
   encodePhaserProcessorState,
   encodeReverbProcessorState,
   encodeSaturatorProcessorState,
@@ -23,7 +24,7 @@ import {
   type AudioCoreInstrumentState,
 } from '../../../audio-core-contract/src/index'
 import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
-import { normalizeDelayParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
+import { normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
 import { getEffectTiming } from '../effects/timing'
 import { getMixerChannelRole } from './channels'
 import {
@@ -285,6 +286,19 @@ const toPortableProcessor = (
       parameterTargets: [], bypassed: !instance.params.state.enabled,
     }
   }
+  if (instance.kind === 'lofi') {
+    const params = normalizeLoFiParamsEnvelope(instance.params).state
+    return {
+      ...common, kind: 'lofi', kindId: 17, state: encodeLoFiProcessorState(params),
+      parameterTargets: [
+        { id: 'lofi.sampleRateRatio', target: 41 },
+        { id: 'lofi.jitter', target: 42 },
+        { id: 'lofi.noiseDb', target: 43 },
+        { id: 'lofi.mix', target: 44 },
+      ],
+      bypassed: !params.enabled,
+    }
+  }
   if (instance.kind === 'delay') {
     const params = normalizeDelayParams(instance.params)
     return {
@@ -342,7 +356,7 @@ const toPortableProcessor = (
       bypassed: !params.enabled,
     }
   }
-  throw new Error(`Portable processor "${instance.kind}" is not implemented.`)
+  throw new Error('Portable processor is not implemented.')
 }
 
 /**

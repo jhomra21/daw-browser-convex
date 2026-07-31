@@ -3,6 +3,11 @@ export const compressorWorklet = {
   modulePath: 'audio-worklets/daw-compressor-processor-v1.js',
 }
 
+export const reverbWorklet = {
+  processorName: 'daw-reverb-processor',
+  modulePath: 'audio-worklets/daw-reverb-processor-v1.js',
+}
+
 export const trackMeterWorklet = {
   processorName: 'track-meter-processor-v2',
   modulePath: 'audio-worklets/track-meter-processor-v2.js',

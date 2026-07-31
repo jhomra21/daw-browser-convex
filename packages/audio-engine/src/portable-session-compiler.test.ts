@@ -658,7 +658,7 @@ test('rejects unsupported graph features and unresolved schedule targets without
   })
   expect(unsupportedEffect).toMatchObject({ supported: false })
   if (unsupportedEffect.supported) throw new Error('Expected unsupported portable session.')
-  expect(unsupportedEffect.reasons).toContain('unsupported-reverb: processor "reverb" is not fixture-proven for portable sessions.')
+  expect(unsupportedEffect.reasons).toContain('return-utility: scheduled parameter "utility.gainDb" is not portable.')
 
   const targetInput = portableSessionInput()
   const unresolvedTarget = compilePreparedPortableSession({

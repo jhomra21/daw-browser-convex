@@ -1,28 +1,17 @@
 import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
-import { getReverbImpulseSignature } from './reverb-signature'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
-import { compressorWorklet } from '../worklet-manifest'
+import { compressorWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import type { StaticWorkletNodeChain } from './static-worklet-chain'
-
-export type CreateReverbImpulseResponse = (params: ReverbParamsLite) => AudioBuffer
+import { loadWorkletModule } from '../worklet-loader'
 
 export type ReverbNodeChain = {
   enabled: boolean
   internalsConnected: boolean
-  impulseSignature: string | null
-  dryGain: GainNode
-  wetGain: GainNode
-  preDelay: DelayNode
-  lowCut: BiquadFilterNode
-  highCut: BiquadFilterNode
-  convolver: ConvolverNode
-  widthSplitter: ChannelSplitterNode
-  widthMerger: ChannelMergerNode
-  leftToLeft: GainNode
-  rightToLeft: GainNode
-  leftToRight: GainNode
-  rightToRight: GainNode
+  input: GainNode
+  output: GainNode
+  workletNode: AudioWorkletNode
+  revision: number
 }
 
 export type CompressorNodeChain = {
@@ -201,79 +190,58 @@ export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>)
 export function createReverbNodeChain(
   ctx: BaseAudioContext,
   params: ReverbParamsLite,
-  createImpulseResponse: CreateReverbImpulseResponse,
-): ReverbNodeChain {
-  const chain: ReverbNodeChain = {
-    enabled: !!params.enabled,
-    internalsConnected: false,
-    impulseSignature: null,
-    dryGain: ctx.createGain(),
-    wetGain: ctx.createGain(),
-    preDelay: ctx.createDelay(2.0),
-    lowCut: ctx.createBiquadFilter(),
-    highCut: ctx.createBiquadFilter(),
-    convolver: ctx.createConvolver(),
-    widthSplitter: ctx.createChannelSplitter(2),
-    widthMerger: ctx.createChannelMerger(2),
-    leftToLeft: ctx.createGain(),
-    rightToLeft: ctx.createGain(),
-    leftToRight: ctx.createGain(),
-    rightToRight: ctx.createGain(),
-  }
-  applyReverbNodeChainParams(chain, params, createImpulseResponse)
-  return chain
+): Promise<ReverbNodeChain> {
+  return loadWorkletModule(ctx, resolveWorkletModuleUrl(reverbWorklet.modulePath)).then(() => {
+    const workletNode = new AudioWorkletNode(ctx, reverbWorklet.processorName, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers',
+    })
+    const chain: ReverbNodeChain = {
+      enabled: !!params.enabled,
+      internalsConnected: false,
+      input: ctx.createGain(),
+      output: ctx.createGain(),
+      workletNode,
+      revision: 0,
+    }
+    applyReverbNodeChainParams(chain, params)
+    return chain
+  })
 }
 
 export function applyReverbNodeChainParams(
   chain: ReverbNodeChain,
   params: ReverbParamsLite,
-  createImpulseResponse: CreateReverbImpulseResponse,
 ) {
   const normalized = normalizeReverbParams(params)
   chain.enabled = normalized.enabled
-  chain.dryGain.gain.value = 1 - normalized.wet
-  chain.wetGain.gain.value = normalized.wet
-  chain.preDelay.delayTime.value = normalized.preDelayMs / 1000
-  chain.lowCut.type = 'highpass'
-  chain.lowCut.frequency.value = normalized.lowCutHz
-  chain.lowCut.Q.value = 0.707
-  chain.highCut.type = 'lowpass'
-  chain.highCut.frequency.value = normalized.highCutHz
-  chain.highCut.Q.value = 0.707
-  const width = normalized.stereoWidth
-  chain.leftToLeft.gain.value = (1 + width) / 2
-  chain.rightToLeft.gain.value = (1 - width) / 2
-  chain.leftToRight.gain.value = (1 - width) / 2
-  chain.rightToRight.gain.value = (1 + width) / 2
-  if (!chain.enabled) {
-    chain.convolver.buffer = null
-    chain.impulseSignature = null
-    return
+  chain.revision += 1
+  chain.workletNode.port.postMessage({ type: 'configure', version: 1, revision: chain.revision, state: normalized })
+  for (const [parameterId, value] of [
+    ['reverb.wet', normalized.wet],
+    ['reverb.preDelayMs', normalized.preDelayMs],
+    ['reverb.lowCutHz', normalized.lowCutHz],
+    ['reverb.highCutHz', normalized.highCutHz],
+    ['reverb.stereoWidth', normalized.stereoWidth],
+  ] as const) {
+    const parameter = chain.workletNode.parameters.get(parameterId)
+    if (parameter) parameter.value = value
   }
-  const impulseSignature = getReverbImpulseSignature(normalized)
-  if (chain.impulseSignature === impulseSignature) return
-  const impulse = createImpulseResponse(normalized)
-  chain.convolver.buffer = impulse
-  chain.impulseSignature = impulseSignature
 }
 
 export function disconnectReverbChain(chain: ReverbNodeChain) {
   disconnectAudioNodes([
-    chain.dryGain,
-    chain.wetGain,
-    chain.preDelay,
-    chain.lowCut,
-    chain.highCut,
-    chain.convolver,
-    chain.widthSplitter,
-    chain.widthMerger,
-    chain.leftToLeft,
-    chain.rightToLeft,
-    chain.leftToRight,
-    chain.rightToRight,
+    chain.input,
+    chain.output,
+    chain.workletNode,
   ])
+  try { chain.workletNode.port.postMessage({ type: 'release', version: 1 }) } catch {}
+  try { chain.workletNode.port.close() } catch {}
   chain.internalsConnected = false
-  chain.impulseSignature = null
 }
 
 export async function createCompressorNodeChain(
@@ -455,19 +423,8 @@ function connectDelayInternals(chain: DelayNodeChain) {
 
 function connectReverbInternals(chain: ReverbNodeChain) {
   if (chain.internalsConnected) return
-  chain.preDelay.connect(chain.lowCut)
-  chain.lowCut.connect(chain.highCut)
-  chain.highCut.connect(chain.convolver)
-  chain.convolver.connect(chain.wetGain)
-  chain.wetGain.connect(chain.widthSplitter)
-  chain.widthSplitter.connect(chain.leftToLeft, 0)
-  chain.widthSplitter.connect(chain.leftToRight, 0)
-  chain.widthSplitter.connect(chain.rightToLeft, 1)
-  chain.widthSplitter.connect(chain.rightToRight, 1)
-  chain.leftToLeft.connect(chain.widthMerger, 0, 0)
-  chain.rightToLeft.connect(chain.widthMerger, 0, 0)
-  chain.leftToRight.connect(chain.widthMerger, 0, 1)
-  chain.rightToRight.connect(chain.widthMerger, 0, 1)
+  chain.input.connect(chain.workletNode)
+  chain.workletNode.connect(chain.output)
   chain.internalsConnected = true
 }
 
@@ -560,13 +517,10 @@ export function connectFxChain(
 
     if (stageConfig.kind === 'reverb') {
       if (!reverb) return null
-      disconnectAudioNodes([reverb.dryGain, reverb.widthMerger])
+      disconnectAudioNodes([reverb.input, reverb.output])
       return {
-        connectInput: (source) => {
-          source.connect(reverb.dryGain)
-          source.connect(reverb.preDelay)
-        },
-        outputs: [reverb.dryGain, reverb.widthMerger],
+        connectInput: (source) => source.connect(reverb.input),
+        outputs: [reverb.output],
       }
     }
 

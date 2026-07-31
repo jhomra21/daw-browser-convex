@@ -673,7 +673,7 @@ int32_t graph_node_index(const GraphRevision &graph, uint64_t id) {
   return graph.nodes[node_index].id == id ? static_cast<int32_t>(node_index) : -1;
 }
 
-bool allocate_graph_stage_buffers(Core &core, uint32_t node_count);
+bool allocate_graph_stage_buffers(Core &core);
 
 daw_audio_core_result prepare_graph_revision(
   Core &core,
@@ -1041,7 +1041,7 @@ daw_audio_core_result prepare_graph_revision(
       }
     }
   }
-  if (!allocate_graph_stage_buffers(core, graph.node_count)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (!allocate_graph_stage_buffers(core)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   *out_graph = graph;
   return DAW_AUDIO_CORE_OK;
 }
@@ -2892,8 +2892,8 @@ void render_sample_source_range(
 constexpr uint32_t kGraphPreFxStage = 0;
 constexpr uint32_t kGraphPreFaderStage = 1;
 
-bool allocate_graph_stage_buffers(Core &core, uint32_t node_count) {
-  const std::size_t graph_stage_samples = static_cast<std::size_t>(2u) * node_count * 2u
+bool allocate_graph_stage_buffers(Core &core) {
+  const std::size_t graph_stage_samples = static_cast<std::size_t>(2u) * kMaximumGraphNodes * 2u
     * core.config.max_frames_per_block;
   std::unique_ptr<float[]> buffers(new (std::nothrow) float[graph_stage_samples]);
   if (!buffers) return false;

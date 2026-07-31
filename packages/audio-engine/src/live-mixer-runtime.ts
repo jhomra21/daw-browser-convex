@@ -1,5 +1,5 @@
 import { assert, normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams } from '@daw-browser/shared'
-import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
@@ -70,7 +70,6 @@ type LiveMixerRuntimeOptions = {
   getAudioContext: () => AudioContext | null
   getMasterInput: () => GainNode | null
   getDestination: () => AudioDestinationNode | null
-  createImpulseResponse: CreateReverbImpulseResponse
   reconnectTrackMeters: (trackId: string, output: GainNode, isCurrentOutput: () => boolean) => void
   disposeTrackMeters: (trackId: string) => void
   disposeSynthTrack: (trackId: string) => void
@@ -603,7 +602,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       }
       if (instance.kind !== 'reverb') throw new Error('Unsupported audio effect kind.')
       const state = createReverbChainState()
-      state.set(ctx, instance.params, options.createImpulseResponse)
+      await state.set(ctx, instance.params)
       candidate.resources.reverbs.set(instance.id, state)
       candidate.requiresRoutingRebuild = true
       }

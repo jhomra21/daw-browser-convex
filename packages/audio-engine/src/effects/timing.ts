@@ -10,7 +10,6 @@ import {
 } from '@daw-browser/shared'
 import { resolveDelayTimeSec } from './dsp'
 import type { AudioEffectRuntimeInstance } from './runtime-instance'
-import { getReverbImpulseSignatureParts } from './reverb-signature'
 
 type EffectTiming = {
   latencyFrames: number
@@ -76,7 +75,7 @@ export const getEffectTiming = (
     return {
       latencyFrames: 0,
       tail: finite(normalized.enabled
-        ? (normalized.preDelayMs / 1000 + getReverbImpulseSignatureParts(normalized).bucketSec) * rate
+        ? (normalized.preDelayMs / 1000 + normalized.decaySec) * rate
         : 0),
     }
   }

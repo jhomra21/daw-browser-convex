@@ -12,6 +12,7 @@ import {
   type PortableDynamicsKind,
   type PortableModulationKind,
 } from './graph-parity-fixtures'
+import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
 
 const artifactUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
@@ -21,6 +22,7 @@ const publicArtifactUrl = new URL('../../../public/audio-core/daw-audio-core.was
 const publicManifestUrl = new URL('../../../public/audio-core/daw-audio-core.manifest.json', import.meta.url)
 const nativeFixtureRunnerUrl = new URL('../../build/audio-core-debug/audio-core/daw-audio-core-graph-fixture', import.meta.url)
 const legacyModulationWorkletUrl = new URL('../../../public/audio-worklets/daw-modulation-processor-v1.js', import.meta.url)
+const legacyReverbWorkletUrl = new URL('../../../public/audio-worklets/daw-reverb-processor-v1.js', import.meta.url)
 const legacySpectralWorkletUrl = new URL('../../../public/audio-worklets/daw-spectral-processor-v1.js', import.meta.url)
 const legacyDynamicsWorkletUrls = {
   gate: new URL('../../../public/audio-worklets/daw-gate-processor-v1.js', import.meta.url),
@@ -69,6 +71,87 @@ type LegacyModulationProcessor = {
 type LegacyModulationProcessorConstructor = new (
   options: { processorOptions: { processorKind: PortableModulationKind } },
 ) => LegacyModulationProcessor
+
+type LegacyReverbProcessor = {
+  port: LegacyModulationPort
+  process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters?: Record<string, Float32Array>) => boolean
+}
+
+type LegacyReverbProcessorConstructor = new (
+  options?: { processorOptions?: unknown },
+) => LegacyReverbProcessor
+
+const renderLegacyReverbFixture = async (
+  fixture: PortableGraphParityFixture,
+  reverb: { state: ReverbProcessorState },
+  reset = false,
+) => {
+  const source = await Bun.file(legacyReverbWorkletUrl).text()
+  const registered = new Map<string, LegacyReverbProcessorConstructor>()
+  class FakeAudioWorkletProcessor {
+    port: LegacyModulationPort = {
+      onmessage: null,
+      postMessage: () => {},
+      close: () => {},
+    }
+  }
+  new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
+    FakeAudioWorkletProcessor,
+    (name: string, processor: LegacyReverbProcessorConstructor) => registered.set(name, processor),
+    fixture.sampleRateHz,
+  )
+  const Processor = registered.get('daw-reverb-processor')
+  if (!Processor) throw new Error('Reverb worklet did not register.')
+  const processor = new Processor()
+  processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: reverb.state } })
+  if (reset) processor.port.onmessage?.({ data: { type: 'reset', version: 1 } })
+  const output = [
+    new Float32Array(fixture.frames),
+    new Float32Array(fixture.frames),
+  ]
+  const mono = new DataView(
+    fixture.graph.buffer,
+    fixture.graph.byteOffset,
+    fixture.graph.byteLength,
+  ).getUint32(24 + 12, true) === 1
+  const input = mono
+    ? [fixture.input.subarray(0, fixture.frames)]
+    : [
+        fixture.input.subarray(0, fixture.frames),
+        fixture.input.subarray(fixture.frames, fixture.frames * 2),
+      ]
+  const blockPartitions = fixture.blockPartitions ?? [fixture.frames]
+  const parameterBlock = (target: number, fallback: number, offset: number, frames: number) => {
+    const values = delayParameterValues(fixture, target)
+    if (!values) return new Float32Array(frames).fill(fallback)
+    return values.length === 1
+      ? new Float32Array(values)
+      : Float32Array.from(values.slice(offset, offset + frames))
+  }
+  let offset = 0
+  for (const blockFrames of blockPartitions) {
+    const blockInput = mono
+      ? [input[0].subarray(offset, offset + blockFrames)]
+      : [
+          input[0].subarray(offset, offset + blockFrames),
+          input[1].subarray(offset, offset + blockFrames),
+        ]
+    const blockOutput = [
+      output[0].subarray(offset, offset + blockFrames),
+      output[1].subarray(offset, offset + blockFrames),
+    ]
+    processor.process([blockInput], [blockOutput], {
+      // The graph fixture ABI defaults an unbound wet target to 0.5.
+      'reverb.wet': parameterBlock(10, 0.5, offset, blockFrames),
+      'reverb.preDelayMs': parameterBlock(11, reverb.state.preDelayMs, offset, blockFrames),
+      'reverb.lowCutHz': parameterBlock(12, reverb.state.lowCutHz, offset, blockFrames),
+      'reverb.highCutHz': parameterBlock(13, reverb.state.highCutHz, offset, blockFrames),
+      'reverb.stereoWidth': parameterBlock(14, reverb.state.stereoWidth, offset, blockFrames),
+    })
+    offset += blockFrames
+  }
+  return output
+}
 
 const renderLegacyModulationFixture = async (
   fixture: PortableGraphParityFixture,
@@ -978,6 +1061,17 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
           expect(renderLegacyDelayFixture(fixture, fixture.legacyDelay)).toEqual(legacyOutput)
         }
       }
+      if (fixture.legacyReverb) {
+        const legacyOutput = await renderLegacyReverbFixture(fixture, fixture.legacyReverb)
+        const legacyDifference = maximumDifference(output, legacyOutput)
+        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        if (legacyDifference > legacyTolerance) {
+          throw new Error(`${fixture.name} portable/browser-worklet difference ${legacyDifference} exceeded ${legacyTolerance}.`)
+        }
+        if (fixture.assertReset) {
+          expect(await renderLegacyReverbFixture(fixture, fixture.legacyReverb, true)).toEqual(legacyOutput)
+        }
+      }
       if (fixture.legacySpectral) {
         const legacyOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral)
         const legacyDifference = maximumDifference(output, legacyOutput)
@@ -1103,7 +1197,8 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   expect(portableWasmCapabilityMatrix.processorKinds.every((kind) => processorKinds.has(kind))).toBe(true)
   expect(portableGraphParityFixtures
     .filter((fixture) => fixture.processorKind === 'reverb')
-    .every((fixture) => fixture.portableUnsupportedReason !== undefined)).toBe(true)
+    .every((fixture) => fixture.portableEligible !== false
+      && fixture.portableUnsupportedReason === undefined)).toBe(true)
   const reverbFixtures = portableGraphParityFixtures.filter((fixture) => fixture.processorKind === 'reverb')
   expect(reverbFixtures.length).toBeGreaterThan(0)
   expect(reverbFixtures.every((fixture) =>
@@ -1113,6 +1208,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   )].sort())
   expect(portableWasmCapabilityMatrix.maxInputBuses).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.inputBusCount)))
   expect(portableWasmCapabilityMatrix.maxChannels).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.channelCount)))
+  expect(portableWasmCapabilityMatrix.maxReverbProcessors).toBe(8)
 })
 
 test('the reverb impulse characterization inspects each planar channel', () => {

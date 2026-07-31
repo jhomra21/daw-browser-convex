@@ -12,6 +12,7 @@ import {
   createDefaultPhaserParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
+  createDefaultSynthParams,
   createDefaultTremoloParams,
 } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
@@ -257,7 +258,7 @@ test('returns typed diagnostics when offline Stretch assets are absent or stale'
   })
 })
 
-test('projects fixture-proven static, modulation, and dynamics processors for offline export while rejecting unsupported processors', () => {
+test('projects fixture-proven processors for offline export while rejecting unsupported instrument state', () => {
   const source = track([clip()])
   const result = compilePortableExportSnapshot({
     tracks: [source],
@@ -377,6 +378,7 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
               params: createDefaultReverbParams(),
             },
           ],
+          synth: createDefaultSynthParams(),
         },
       },
     },
@@ -384,7 +386,7 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
   expect(unsupported).toEqual({
     supported: false,
     reasons: [
-      'unsupported-reverb: processor "reverb" is not supported by the portable core.',
+      'track-1: instrument state is not supported by the portable core.',
     ],
     diagnostics: [],
   })

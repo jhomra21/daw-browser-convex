@@ -54,9 +54,6 @@ const createRuntime = () => {
     getAudioContext: () => audio.context,
     getMasterInput: () => audio.masterInput,
     getDestination: () => null,
-    createImpulseResponse: () => {
-      throw new Error('Effects are not used by this test.')
-    },
     reconnectTrackMeters: () => {},
     disposeTrackMeters: () => {},
     disposeSynthTrack: () => {},
@@ -119,9 +116,6 @@ describe('live mixer sidechain identity', () => {
       getAudioContext: () => null,
       getMasterInput: () => null,
       getDestination: () => null,
-      createImpulseResponse: () => {
-        throw new Error('No audio context is available.')
-      },
       reconnectTrackMeters: () => {},
       disposeTrackMeters: () => {},
       disposeSynthTrack: () => {},

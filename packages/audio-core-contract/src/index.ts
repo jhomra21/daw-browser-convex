@@ -170,8 +170,8 @@ export type DelayProcessorState = {
 }
 
 /**
- * Portable reverb is a deterministic feedback-delay approximation. It carries
- * the legacy control state but does not claim AudioBuffer/ConvolverNode parity.
+ * Reverb uses the deterministic bounded feedback-delay profile shared by
+ * native, Wasm, and browser AudioWorklet processing.
  */
 export type ReverbProcessorState = {
   enabled: boolean

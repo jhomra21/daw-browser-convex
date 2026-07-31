@@ -632,6 +632,10 @@ const capabilityReasons = (
   if (graph.nodes.length > portableWasmMaxGraphNodes) reasons.push('The portable graph exceeds the node capacity.')
   if (graph.edges.length > portableWasmMaxGraphEdges) reasons.push('The portable graph exceeds the edge capacity.')
   if (graph.assets.length > portableWasmMaxAssets) reasons.push('The portable graph exceeds the asset capacity.')
+  const reverbCount = graph.nodes.reduce((count, node) => count + node.processorOrder.filter((processor) => processor.kind === 'reverb').length, 0)
+  if (reverbCount > portableWasmCapabilityMatrix.maxReverbProcessors) {
+    reasons.push(`The portable graph exceeds the ${portableWasmCapabilityMatrix.maxReverbProcessors}-Reverb processor capacity.`)
+  }
   for (const node of graph.nodes) {
     for (const processor of node.processorOrder) {
       if (!portableWasmCapabilityMatrix.processorKinds.includes(processor.kind)) {

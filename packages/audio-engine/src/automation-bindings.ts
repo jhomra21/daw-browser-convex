@@ -70,18 +70,7 @@ export const resolveReverbAutomationBindings = (
 ): AutomationAudioBinding[] => {
   const reverb = chain && 'chain' in chain ? chain.chain() : chain
   if (!reverb) return []
-  if (parameterId === 'reverb.wet') return [
-    { param: reverb.dryGain.gain, valueToAudioValue: (value) => 1 - value },
-    { param: reverb.wetGain.gain, valueToAudioValue: (value) => value },
-  ]
-  if (parameterId === 'reverb.preDelayMs') return [{ param: reverb.preDelay.delayTime, valueToAudioValue: (value) => value / 1000 }]
-  if (parameterId === 'reverb.lowCutHz') return [{ param: reverb.lowCut.frequency, valueToAudioValue: (value) => value }]
-  if (parameterId === 'reverb.highCutHz') return [{ param: reverb.highCut.frequency, valueToAudioValue: (value) => value }]
-  if (parameterId === 'reverb.stereoWidth') return [
-    { param: reverb.leftToLeft.gain, valueToAudioValue: (value) => (1 + value) / 2 },
-    { param: reverb.rightToLeft.gain, valueToAudioValue: (value) => (1 - value) / 2 },
-    { param: reverb.leftToRight.gain, valueToAudioValue: (value) => (1 - value) / 2 },
-    { param: reverb.rightToRight.gain, valueToAudioValue: (value) => (1 + value) / 2 },
-  ]
+  const param = reverb.workletNode.parameters.get(parameterId)
+  if (param) return [{ param, valueToAudioValue: (value) => value }]
   return []
 }

@@ -1,5 +1,5 @@
 import { normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams } from '@daw-browser/shared'
-import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type CreateReverbImpulseResponse, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
+import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
@@ -299,7 +299,6 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     ctx: AudioContext,
     masterGain: GainNode,
     destination: AudioDestinationNode,
-    createImpulseResponse: CreateReverbImpulseResponse,
     instances: AudioEffectRuntimeInstance[],
   ) => {
     const revision = ++fxInstanceRevision
@@ -414,7 +413,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       }
       if (instance.kind !== 'reverb') throw new Error('Unsupported audio effect kind.')
       const state = createReverbChainState()
-      state.set(ctx, instance.params, createImpulseResponse)
+      await state.set(ctx, instance.params)
       candidate.resources.reverbs.set(instance.id, state)
       candidate.requiresRoutingRebuild = true
       }
@@ -456,11 +455,11 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   }
 
   return {
-    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode, createImpulseResponse: CreateReverbImpulseResponse) => {
+    applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
       if (pendingFxInstances) {
         const instances = pendingFxInstances
         pendingFxInstances = null
-        void applyFxInstances(ctx, masterGain, destination, createImpulseResponse, instances).catch((error) => {
+        void applyFxInstances(ctx, masterGain, destination, instances).catch((error) => {
           options.onWorkletFault?.(
             options.getFaultGeneration(),
             'owned-processor',
@@ -511,7 +510,6 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       masterGain: GainNode | null,
       destination: AudioDestinationNode | null,
       instances: AudioEffectRuntimeInstance[],
-      createImpulseResponse: CreateReverbImpulseResponse,
     ) => {
       const normalized = normalizeAudioEffectRuntimeInstances(instances)
       if (!ctx || !masterGain) {
@@ -520,7 +518,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         return
       }
       try {
-        await applyFxInstances(ctx, masterGain, destination ?? ctx.destination, createImpulseResponse, normalized)
+        await applyFxInstances(ctx, masterGain, destination ?? ctx.destination, normalized)
       } catch (error) {
         options.onWorkletFault?.(
           options.getFaultGeneration(),

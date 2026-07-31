@@ -640,8 +640,8 @@ typedef struct daw_audio_delay_state {
   float high_cut_hz;
 } daw_audio_delay_state;
 
-/* This deterministic feedback-delay profile intentionally does not claim
- * browser AudioBuffer/ConvolverNode impulse-response parity. */
+/* Deterministic bounded feedback-delay profile shared by native, Wasm, and
+ * browser AudioWorklet processing. */
 typedef struct daw_audio_reverb_state {
   uint32_t enabled;
   float wet;

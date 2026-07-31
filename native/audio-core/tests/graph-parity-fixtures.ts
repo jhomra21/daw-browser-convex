@@ -36,7 +36,6 @@ import {
   type SaturatorProcessorState,
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
-import { getReverbImpulseSignatureParts } from '../../../packages/audio-engine/src/effects/reverb-signature'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 export type PortableDynamicsKind = 'gate' | 'compressor' | 'limiter'
@@ -88,6 +87,7 @@ export type PortableGraphParityFixture = {
   expectedTailFrames?: number
   nativeWasmTolerance?: number
   legacyModulation?: PortableLegacyModulationFixture
+  legacyReverb?: { state: ReverbProcessorState }
   legacyDynamics?: PortableLegacyDynamicsFixture
   legacyDelay?: PortableLegacyDelayFixture
   legacySpectral?: PortableLegacySpectralFixture
@@ -101,13 +101,10 @@ export type PortableGraphParityFixture = {
   portableEligible?: boolean
   portableUnsupportedReason?:
     | 'legacy-delay-filter-response-mismatch'
-    | 'legacy-convolver-response-mismatch'
   assertOutput: (output: readonly Float32Array[]) => boolean
 }
 
-export const REVERB_KNOWN_GAP_IDS = [
-  'reverb.native-time-effect-capacity-nine',
-] as const
+export const REVERB_KNOWN_GAP_IDS = [] as const
 
 type PortableFixtureAsset = {
   identity: number
@@ -1446,7 +1443,7 @@ const timeEffectTailFrames = (
   }
   if (kind === 'reverb' && 'decaySec' in state) {
     return Math.ceil(state.enabled
-      ? (state.preDelayMs / 1_000 + getReverbImpulseSignatureParts(state).bucketSec) * sampleRateHz
+      ? (state.preDelayMs / 1_000 + state.decaySec) * sampleRateHz
       : 0)
   }
   return 0
@@ -1498,10 +1495,15 @@ const timeEffectFixture = (
     expectedTailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
     nativeWasmTolerance: kind === 'reverb' ? 2e-4 : 5e-5,
     legacyDelay: kind === 'delay' ? { kind, state } : undefined,
+    legacyReverb: kind === 'reverb'
+      && state.wet === 0.5
+      && state.enabled
+      && name !== 'nonfinite'
+      ? { state }
+      : undefined,
     legacyTolerance: kind === 'delay' ? 1e-3 : undefined,
     knownGapIds: kind === 'reverb' ? REVERB_KNOWN_GAP_IDS : undefined,
-    portableEligible: kind === 'delay',
-    portableUnsupportedReason: kind === 'reverb' ? 'legacy-convolver-response-mismatch' : undefined,
+    portableEligible: true,
     assertOutput: (output) => kind === 'reverb'
       && state.wet === 1
       && isPlanarImpulseFixtureInput(input)
@@ -1578,9 +1580,8 @@ const reverbCapacityFixture = (processorCount: number): PortableGraphParityFixtu
   frames: 4,
   input: new Float32Array(8).fill(0.25),
   expectedResult: processorCount === 9 ? 'reject' : undefined,
-  knownGapIds: REVERB_KNOWN_GAP_IDS,
-  portableEligible: false,
-  portableUnsupportedReason: 'legacy-convolver-response-mismatch',
+  knownGapIds: [],
+  portableEligible: true,
   assertOutput: processorCount === 9 ? () => false : finite,
 })
 

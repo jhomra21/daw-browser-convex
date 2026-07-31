@@ -4,8 +4,7 @@ import type { AudioAssetRef, PlanarPcm } from '../../audio-core-contract/src/ind
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { assert, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AutomationEnvelope, type MidiMappingTarget, type ReverbParamsLite, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
-import { createReverbImpulseCache } from './effects/reverb-impulse-cache'
+import { automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AutomationEnvelope, type MidiMappingTarget, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackMeterFrameListener, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
@@ -111,7 +110,6 @@ export class AudioEngine {
     getAudioContext: () => this.audioCtx,
     getMasterInput: () => this.masterGain,
     getDestination: () => this.destination,
-    createImpulseResponse: (params) => this.createImpulseResponse(params),
     reconnectTrackMeters: (trackId, output, isCurrentOutput) => {
       if (!this.audioCtx) return
       this.metering.reconnectTrackMeters(this.audioCtx, trackId, output, isCurrentOutput)
@@ -153,7 +151,6 @@ export class AudioEngine {
       if (this.runtimeFaultCounter.report(generation, { kind, code, context })) this.publishRuntimeSnapshot()
     },
   })
-  private impulseCache = createReverbImpulseCache({ bucketSize: 0.1, limit: 48 })
   private clock = createTransportClock()
   private metronome = createMetronomeRuntime(this.clock)
   private runtimeFaultCounter = createRuntimeFaultCounter()
@@ -601,7 +598,7 @@ export class AudioEngine {
       this.masterGain.gain.value = this.masterVolume
       this.destination = this.runtime.destination
       this.metering.reconnectMasterMeter(this.audioCtx, this.masterGain, () => this.masterGain === this.runtime?.masterGain)
-      this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination, (params) => this.createImpulseResponse(params))
+      this.masterFx.applyPending(this.audioCtx, this.masterGain, this.destination)
       if (opts?.applyCachedTrackGains !== false) {
         this.updateTrackGains(this.tracksSnapshot)
       }
@@ -721,13 +718,6 @@ export class AudioEngine {
     this.metronome.onTransportSeek(this.audioCtx, opts?.resetMetronome !== false)
   }
 
-  // --- Reverb helpers ---
-  private createImpulseResponse(params: ReverbParamsLite) {
-    const ctx = this.audioCtx
-    assert(ctx, 'Audio runtime was not initialized')
-    return this.impulseCache.get(ctx, params)
-  }
-
   subscribeTrackCompressorMeter(trackId: string, effectInstanceId: string, listener: CompressorMeterListener) {
     return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, effectInstanceId, listener)
   }
@@ -766,7 +756,6 @@ export class AudioEngine {
       this.masterGain,
       this.destination,
       instances,
-      (nextParams) => this.createImpulseResponse(nextParams),
     )
     this.mixerRuntime.publishGraphLatency()
   }
@@ -1123,7 +1112,6 @@ export class AudioEngine {
     this.cancelAutomationSchedules()
     this.stopAllSources()
     this.metronome.close()
-    this.impulseCache.clear()
     this.mixerRuntime.clear()
     this.metering.close()
     this.instrumentRuntime.clear()

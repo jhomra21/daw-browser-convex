@@ -14,9 +14,7 @@ describe('master FX pending swaps', () => {
       id: 'pending-master-eq',
       kind: 'eq',
       params: AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams(),
-    }], () => {
-      throw new Error('No audio context is available.')
-    })
+    }])
 
     expect(runtime.getMixerFx().masterFxInstances).toEqual([])
   })

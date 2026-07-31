@@ -13,4 +13,5 @@ export declare const portableWasmCapabilityMatrix: {
   readonly sampleRatesHz: readonly number[]
   readonly maxInputBuses: number
   readonly maxChannels: number
+  readonly maxReverbProcessors: number
 }

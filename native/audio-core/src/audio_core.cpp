@@ -110,42 +110,60 @@ struct GraphRevision {
     daw_audio_delay_state delay{};
     daw_audio_reverb_state reverb{};
     daw_audio_spectral_state spectral{};
-    uint32_t modulation_slot = 0;
+    uint32_t history_slot = 0;
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
-    struct BiquadHistory {
-      float x1 = 0.0F;
-      float x2 = 0.0F;
-      float y1 = 0.0F;
-      float y2 = 0.0F;
-    };
-    std::array<std::array<BiquadHistory, 2>, 8> eq_history{};
-    BiquadHistory saturator_color_history_left{};
-    BiquadHistory saturator_color_history_right{};
-    float saturator_previous_left = 0.0F;
-    float saturator_previous_right = 0.0F;
-    std::array<float, kMaximumDynamicsDelayFrames> dynamics_delay_left{};
-    std::array<float, kMaximumDynamicsDelayFrames> dynamics_delay_right{};
-    std::array<float, kMaximumDynamicsDelayFrames> dynamics_detector_left{};
-    std::array<float, kMaximumDynamicsDelayFrames> dynamics_detector_right{};
-    uint32_t dynamics_write = 0;
-    std::array<float, 2> dynamics_gain{1.0F, 1.0F};
-    std::array<float, 2> dynamics_rms{};
-    std::array<uint32_t, 2> dynamics_hold{};
-    std::array<uint32_t, 2> dynamics_open{1, 1};
-    std::array<uint32_t, 2> dynamics_started{};
-    std::array<BiquadHistory, 2> dynamics_sidechain_history{};
-    float compressor_envelope_db = 0.0F;
-    float compressor_rms = 0.0F;
-    float compressor_sc_low = 0.0F;
-    float compressor_sc_band = 0.0F;
   };
   uint32_t processor_count = 0;
   std::array<Processor, kMaximumGraphProcessors> processors{};
   std::array<uint16_t, kMaximumGraphProcessors> processor_indices{};
   std::array<Range, kMaximumGraphNodes> processor_ranges{};
   std::array<Range, kMaximumGraphProcessors> sidechain_edge_ranges{};
+};
+
+struct BiquadHistory {
+  float x1 = 0.0F;
+  float x2 = 0.0F;
+  float y1 = 0.0F;
+  float y2 = 0.0F;
+};
+
+struct UtilityHistory {
+  float dc_x1_left = 0.0F;
+  float dc_x1_right = 0.0F;
+  float dc_y1_left = 0.0F;
+  float dc_y1_right = 0.0F;
+  float bypass = 0.0F;
+};
+
+struct SaturatorHistory {
+  BiquadHistory color_left{};
+  BiquadHistory color_right{};
+  float previous_left = 0.0F;
+  float previous_right = 0.0F;
+};
+
+struct EqHistory {
+  std::array<std::array<BiquadHistory, 2>, 8> bands{};
+};
+
+struct DynamicsHistory {
+  std::array<float, kMaximumDynamicsDelayFrames> delay_left{};
+  std::array<float, kMaximumDynamicsDelayFrames> delay_right{};
+  std::array<float, kMaximumDynamicsDelayFrames> detector_left{};
+  std::array<float, kMaximumDynamicsDelayFrames> detector_right{};
+  uint32_t write = 0;
+  std::array<float, 2> gain{1.0F, 1.0F};
+  std::array<float, 2> rms{};
+  std::array<uint32_t, 2> hold{};
+  std::array<uint32_t, 2> open{1, 1};
+  std::array<uint32_t, 2> started{};
+  std::array<BiquadHistory, 2> sidechain{};
+  float compressor_envelope_db = 0.0F;
+  float compressor_rms = 0.0F;
+  float compressor_sc_low = 0.0F;
+  float compressor_sc_band = 0.0F;
 };
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -291,17 +309,22 @@ struct SpectralHistory {
   float bypass = 0.0F;
 };
 
+struct ProcessorHistorySlot {
+  uint64_t instance_id = 0;
+  uint32_t kind = 0;
+  uint64_t node_id = 0;
+  uint32_t input_layout = 0;
+  uint32_t output_layout = 0;
+  bool occupied = false;
+};
+
 struct Core {
   daw_audio_core_config config{};
   daw_audio_core_graph_validation_diagnostic graph_validation_diagnostic{};
   uint32_t prepared_revision = 0;
   uint32_t published_revision = 0;
   daw_audio_utility_state utility{};
-  float dc_x1_left = 0.0F;
-  float dc_x1_right = 0.0F;
-  float dc_y1_left = 0.0F;
-  float dc_y1_right = 0.0F;
-  float bypass = 0.0F;
+  UtilityHistory utility_history{};
   bool utility_configured = false;
   std::array<AssetSlot, kMaximumAssets> assets{};
   daw_audio_transport_state transport{};
@@ -317,6 +340,11 @@ struct Core {
   std::unique_ptr<float[]> graph_stage_buffers{};
   std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphEdges> graph_delay_lines{};
   std::array<uint32_t, kMaximumGraphEdges> graph_delay_cursors{};
+  std::array<ProcessorHistorySlot, kMaximumGraphProcessors> processor_history_slots{};
+  std::array<UtilityHistory, kMaximumGraphProcessors> utility_histories{};
+  std::array<SaturatorHistory, kMaximumGraphProcessors> saturator_histories{};
+  std::array<EqHistory, kMaximumGraphProcessors> eq_histories{};
+  std::array<DynamicsHistory, kMaximumGraphProcessors> dynamics_histories{};
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
@@ -597,8 +625,9 @@ daw_audio_core_result prepare_graph_revision(
   core.graph_validation_diagnostic = {};
   if (!valid_abi(request.abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
   if (request.graph_revision == 0 || request.node_count == 0 || request.node_count > kMaximumGraphNodes
-    || request.edge_count > kMaximumGraphEdges || request.processor_count > kMaximumGraphProcessors || request.nodes == nullptr
+    || request.edge_count > kMaximumGraphEdges || request.nodes == nullptr
     || (request.edge_count > 0 && request.edges == nullptr)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (request.processor_count > kMaximumGraphProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   if (request.processor_count > 0 && request.processors == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   const auto next_graph = std::unique_ptr<GraphRevision>(new (std::nothrow) GraphRevision{});
   if (!next_graph) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
@@ -626,9 +655,47 @@ daw_audio_core_result prepare_graph_revision(
     return graph.nodes[left].id < graph.nodes[right].id;
   });
   std::array<uint32_t, kMaximumGraphNodes> processor_counts{};
-  uint32_t delay_count = 0;
-  uint32_t reverb_count = 0;
-  uint32_t spectral_count = 0;
+  std::array<bool, kMaximumGraphProcessors> history_slots_available{};
+  history_slots_available.fill(true);
+  std::array<bool, kMaximumDelayProcessors> delay_slots_available{};
+  std::array<bool, kMaximumReverbProcessors> reverb_slots_available{};
+  std::array<bool, kMaximumSpectralProcessors> spectral_slots_available{};
+  delay_slots_available.fill(true);
+  reverb_slots_available.fill(true);
+  spectral_slots_available.fill(true);
+  for (uint32_t current_index = 0; current_index < core.published_graph.processor_count; ++current_index) {
+    const GraphRevision::Processor &current = core.published_graph.processors[current_index];
+    bool retained = false;
+    for (uint32_t next_index = 0; next_index < request.processor_count; ++next_index) {
+      const daw_audio_processor_descriptor &next = request.processors[next_index];
+      if (next.instance_id == current.instance_id && next.kind == current.kind) {
+        retained = true;
+        break;
+      }
+    }
+    if (!retained) {
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && current.delay_slot < kMaximumDelayProcessors) {
+        delay_slots_available[current.delay_slot] = true;
+      }
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && current.reverb_slot < kMaximumReverbProcessors) {
+        reverb_slots_available[current.reverb_slot] = true;
+      }
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && current.spectral_slot < kMaximumSpectralProcessors) {
+        spectral_slots_available[current.spectral_slot] = true;
+      }
+    } else {
+      history_slots_available[current.history_slot] = false;
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && current.delay_slot < kMaximumDelayProcessors) {
+        delay_slots_available[current.delay_slot] = false;
+      }
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && current.reverb_slot < kMaximumReverbProcessors) {
+        reverb_slots_available[current.reverb_slot] = false;
+      }
+      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && current.spectral_slot < kMaximumSpectralProcessors) {
+        spectral_slots_available[current.spectral_slot] = false;
+      }
+    }
+  }
   for (uint32_t index = 0; index < request.processor_count; ++index) {
     const daw_audio_processor_descriptor &descriptor = request.processors[index];
     const int32_t node_index = graph_node_index(graph, descriptor.node_id);
@@ -652,18 +719,80 @@ daw_audio_core_result prepare_graph_revision(
     }
     GraphRevision::Processor &processor = graph.processors[index];
     processor.node_index = static_cast<uint16_t>(node_index);
-    processor.modulation_slot = index;
+    bool history_slot_assigned = false;
+    bool delay_slot_assigned = false;
+    bool reverb_slot_assigned = false;
+    bool spectral_slot_assigned = false;
+    for (uint32_t current_index = 0; current_index < core.published_graph.processor_count; ++current_index) {
+      const GraphRevision::Processor &current = core.published_graph.processors[current_index];
+      if (current.instance_id != descriptor.instance_id || current.kind != descriptor.kind) continue;
+      processor.history_slot = current.history_slot;
+      history_slots_available[processor.history_slot] = false;
+      history_slot_assigned = true;
+      if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
+        processor.delay_slot = current.delay_slot;
+        delay_slots_available[processor.delay_slot] = false;
+        delay_slot_assigned = true;
+      } else if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
+        processor.reverb_slot = current.reverb_slot;
+        reverb_slots_available[processor.reverb_slot] = false;
+        reverb_slot_assigned = true;
+      } else if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
+        processor.spectral_slot = current.spectral_slot;
+        spectral_slots_available[processor.spectral_slot] = false;
+        spectral_slot_assigned = true;
+      }
+      break;
+    }
+    if (!history_slot_assigned) {
+      for (uint32_t slot = 0; slot < kMaximumGraphProcessors; ++slot) {
+        if (history_slots_available[slot]) {
+          processor.history_slot = slot;
+          history_slots_available[slot] = false;
+          history_slot_assigned = true;
+          break;
+        }
+      }
+    }
+    if (!history_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-      if (delay_count >= kMaximumDelayProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-      processor.delay_slot = delay_count++;
+      if (!delay_slot_assigned) {
+        for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
+          if (delay_slots_available[slot]) {
+            processor.delay_slot = slot;
+            delay_slots_available[slot] = false;
+            delay_slot_assigned = true;
+            break;
+          }
+        }
+      }
+      if (!delay_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
     if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
-      if (reverb_count >= kMaximumReverbProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-      processor.reverb_slot = reverb_count++;
+      if (!reverb_slot_assigned) {
+        for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
+          if (reverb_slots_available[slot]) {
+            processor.reverb_slot = slot;
+            reverb_slots_available[slot] = false;
+            reverb_slot_assigned = true;
+            break;
+          }
+        }
+      }
+      if (!reverb_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
     if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
-      if (spectral_count >= kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-      processor.spectral_slot = spectral_count++;
+      if (!spectral_slot_assigned) {
+        for (uint32_t slot = 0; slot < kMaximumSpectralProcessors; ++slot) {
+          if (spectral_slots_available[slot]) {
+            processor.spectral_slot = slot;
+            spectral_slots_available[slot] = false;
+            spectral_slot_assigned = true;
+            break;
+          }
+        }
+      }
+      if (!spectral_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
     processor.node_id = descriptor.node_id;
     processor.instance_id = descriptor.instance_id;
@@ -1253,7 +1382,7 @@ float processor_parameter_value(
   uint32_t target,
   uint32_t frame,
   float fallback) {
-  const uint32_t slot = processor.modulation_slot;
+  const uint32_t slot = processor.history_slot;
   float value = fallback;
   const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[slot];
   if (parameters != nullptr) {
@@ -1326,6 +1455,7 @@ float clamp_bypass_step(float current, float target, float step) {
 void process_utility_frame(
   Core &core,
   const GraphRevision::Processor *processor,
+  UtilityHistory &history,
   uint32_t frame,
   float dry_left,
   float dry_right,
@@ -1382,26 +1512,26 @@ void process_utility_frame(
 
   if (state.dc_block != 0) {
     const float dc_coefficient = std::exp(-6.2831853071795864769F * 10.0F / static_cast<float>(core.config.sample_rate_hz));
-    const float next_left = left - core.dc_x1_left + dc_coefficient * core.dc_y1_left;
-    const float next_right = right - core.dc_x1_right + dc_coefficient * core.dc_y1_right;
-    core.dc_x1_left = left;
-    core.dc_x1_right = right;
-    core.dc_y1_left = next_left;
-    core.dc_y1_right = next_right;
+    const float next_left = left - history.dc_x1_left + dc_coefficient * history.dc_y1_left;
+    const float next_right = right - history.dc_x1_right + dc_coefficient * history.dc_y1_right;
+    history.dc_x1_left = left;
+    history.dc_x1_right = right;
+    history.dc_y1_left = next_left;
+    history.dc_y1_right = next_right;
     left = next_left;
     right = next_right;
   }
 
   if (!std::isfinite(left) || !std::isfinite(right)) {
     left = right = 0.0F;
-    core.dc_x1_left = core.dc_x1_right = core.dc_y1_left = core.dc_y1_right = 0.0F;
+    history.dc_x1_left = history.dc_x1_right = history.dc_y1_left = history.dc_y1_right = 0.0F;
   }
 
   const uint32_t bypass_frames = (core.config.sample_rate_hz + 50u) / 100u;
   const float bypass_step = 1.0F / static_cast<float>(bypass_frames == 0 ? 1u : bypass_frames);
-  core.bypass = clamp_bypass_step(core.bypass, state.enabled != 0 ? 0.0F : 1.0F, bypass_step);
-  *left_output = left + (sanitized_dry_left - left) * core.bypass;
-  *right_output = right + (sanitized_dry_right - right) * core.bypass;
+  history.bypass = clamp_bypass_step(history.bypass, state.enabled != 0 ? 0.0F : 1.0F, bypass_step);
+  *left_output = left + (sanitized_dry_left - left) * history.bypass;
+  *right_output = right + (sanitized_dry_right - right) * history.bypass;
 }
 
 using ProcessorRenderer = void (*)(
@@ -1431,7 +1561,9 @@ void render_utility_processor(
   const bool previous_configured = core.utility_configured;
   core.utility = state;
   core.utility_configured = true;
-  process_utility_frame(core, processor.parameter_count == 0 ? nullptr : &processor, frame, input_left, input_right, output_left, output_right);
+  process_utility_frame(
+    core, processor.parameter_count == 0 ? nullptr : &processor,
+    core.utility_histories[processor.history_slot], frame, input_left, input_right, output_left, output_right);
   core.utility = previous_state;
   core.utility_configured = previous_configured;
 }
@@ -1492,7 +1624,7 @@ BiquadCoefficients rbj_coefficients(uint32_t type, float frequency_hz, float q, 
   return {.b0 = b0 / a0, .b1 = b1 / a0, .b2 = b2 / a0, .a1 = a1 / a0, .a2 = a2 / a0};
 }
 
-float process_biquad(float input, const BiquadCoefficients &coefficients, GraphRevision::Processor::BiquadHistory &history) {
+float process_biquad(float input, const BiquadCoefficients &coefficients, BiquadHistory &history) {
   const float output = coefficients.b0 * input + coefficients.b1 * history.x1 + coefficients.b2 * history.x2
     - coefficients.a1 * history.y1 - coefficients.a2 * history.y2;
   history.x2 = history.x1; history.x1 = input; history.y2 = history.y1; history.y1 = output;
@@ -1508,7 +1640,7 @@ float saturator_curve(uint32_t curve, float input) {
 
 float render_saturator_channel(
   Core &core, GraphRevision::Processor &processor, float input, float *previous,
-  GraphRevision::Processor::BiquadHistory &color_history) {
+  BiquadHistory &color_history) {
   const daw_audio_saturator_state &state = processor.saturator;
   const float dry = std::isfinite(input) ? input : 0.0F;
   if (processor.bypassed != 0 || state.enabled == 0) return dry;
@@ -1528,13 +1660,15 @@ float render_saturator_channel(
 void render_saturator_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t,
   float input_left, float input_right, float, float, float *output_left, float *output_right) {
-  *output_left = render_saturator_channel(core, processor, input_left, &processor.saturator_previous_left, processor.saturator_color_history_left);
-  *output_right = render_saturator_channel(core, processor, input_right, &processor.saturator_previous_right, processor.saturator_color_history_right);
+  SaturatorHistory &history = core.saturator_histories[processor.history_slot];
+  *output_left = render_saturator_channel(core, processor, input_left, &history.previous_left, history.color_left);
+  *output_right = render_saturator_channel(core, processor, input_right, &history.previous_right, history.color_right);
 }
 
 void render_eq_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t,
   float input_left, float input_right, float, float, float *output_left, float *output_right) {
+  EqHistory &history = core.eq_histories[processor.history_slot];
   float left = std::isfinite(input_left) ? input_left : 0.0F;
   float right = std::isfinite(input_right) ? input_right : 0.0F;
   if (processor.bypassed != 0 || processor.eq.enabled == 0) {
@@ -1545,8 +1679,8 @@ void render_eq_processor(
     const daw_audio_eq_band_state &band = processor.eq.bands[index];
     if (band.enabled == 0) continue;
     const BiquadCoefficients coefficients = rbj_coefficients(band.type, band.frequency_hz, band.q, band.gain_db, core.config.sample_rate_hz);
-    left = process_biquad(left, coefficients, processor.eq_history[index][0]);
-    right = process_biquad(right, coefficients, processor.eq_history[index][1]);
+    left = process_biquad(left, coefficients, history.bands[index][0]);
+    right = process_biquad(right, coefficients, history.bands[index][1]);
   }
   *output_left = std::isfinite(left) ? left : 0.0F;
   *output_right = std::isfinite(right) ? right : 0.0F;
@@ -1598,7 +1732,7 @@ float phaser_sample(
 void render_modulation_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t,
   float input_left, float input_right, float, float, float *output_left, float *output_right) {
-  ModulationHistory &history = core.modulation_histories[processor.modulation_slot];
+  ModulationHistory &history = core.modulation_histories[processor.history_slot];
   const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
   const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
   float left = dry_left;
@@ -1845,109 +1979,110 @@ float compressor_curve_db(float input_db, const daw_audio_compressor_state &stat
 void render_dynamics_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t,
   float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right) {
+  DynamicsHistory &history = core.dynamics_histories[processor.history_slot];
   const float dry_left = std::isfinite(input_left) ? input_left : 0.0F;
   const float dry_right = std::isfinite(input_right) ? input_right : 0.0F;
   const bool gate = processor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE;
   const bool compressor = processor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR;
   const uint32_t fixed_delay = dynamics_delay_frames(
     gate ? 2.0F : compressor ? 10.0F : 5.0F, core.config.sample_rate_hz);
-  const uint32_t write = processor.dynamics_write;
+  const uint32_t write = history.write;
   const uint32_t read = (write + kMaximumDynamicsDelayFrames - fixed_delay) % kMaximumDynamicsDelayFrames;
-  processor.dynamics_delay_left[write] = dry_left;
-  processor.dynamics_delay_right[write] = dry_right;
-  float left = processor.dynamics_delay_left[read];
-  float right = processor.dynamics_delay_right[read];
+  history.delay_left[write] = dry_left;
+  history.delay_right[write] = dry_right;
+  float left = history.delay_left[read];
+  float right = history.delay_right[read];
   if (gate) {
     const daw_audio_gate_state &state = processor.gate;
     float detector_left = sidechain_left;
     float detector_right = sidechain_right;
     if (state.sidechain_enabled != 0) {
       const BiquadCoefficients filter = rbj_coefficients(DAW_AUDIO_EQ_BAND_HIGHPASS, state.sidechain_frequency_hz, state.sidechain_q, 0.0F, core.config.sample_rate_hz);
-      detector_left = process_biquad(detector_left, filter, processor.dynamics_sidechain_history[0]);
-      detector_right = process_biquad(detector_right, filter, processor.dynamics_sidechain_history[1]);
+      detector_left = process_biquad(detector_left, filter, history.sidechain[0]);
+      detector_right = process_biquad(detector_right, filter, history.sidechain[1]);
     }
-    processor.dynamics_detector_left[write] = detector_left;
-    processor.dynamics_detector_right[write] = detector_right;
+    history.detector_left[write] = detector_left;
+    history.detector_right[write] = detector_right;
     const uint32_t detector_delay = fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz));
     const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - detector_delay) % kMaximumDynamicsDelayFrames;
-    const std::array<float, 2> detector{processor.dynamics_detector_left[detector_read], processor.dynamics_detector_right[detector_read]};
+    const std::array<float, 2> detector{history.detector_left[detector_read], history.detector_right[detector_read]};
     std::array<float, 2> levels{std::abs(detector[0]), std::abs(detector[1])};
     if (state.detector != 0) {
       const float alpha = std::exp(-1.0F / (0.01F * static_cast<float>(core.config.sample_rate_hz)));
       for (uint32_t channel = 0; channel < 2; ++channel) {
-        processor.dynamics_rms[channel] = alpha * processor.dynamics_rms[channel] + (1.0F - alpha) * detector[channel] * detector[channel];
-        levels[channel] = std::sqrt(processor.dynamics_rms[channel]);
+        history.rms[channel] = alpha * history.rms[channel] + (1.0F - alpha) * detector[channel] * detector[channel];
+        levels[channel] = std::sqrt(history.rms[channel]);
       }
     }
     const float linked = std::fmax(levels[0], levels[1]);
     for (uint32_t channel = 0; channel < 2; ++channel) {
       const float level = levels[channel] + (linked - levels[channel]) * state.link;
       const float db = dynamics_gain_to_db(std::fmax(level, 1e-8F));
-      if (level > 1e-8F) processor.dynamics_started[channel] = 1;
+      if (level > 1e-8F) history.started[channel] = 1;
       const uint32_t hold = static_cast<uint32_t>(std::round(state.hold_ms * static_cast<float>(core.config.sample_rate_hz) / 1000.0F));
-      if (processor.dynamics_open[channel] == 0 && db >= state.threshold_db) {
-        processor.dynamics_open[channel] = 1; processor.dynamics_hold[channel] = hold;
-      } else if (processor.dynamics_open[channel] != 0 && processor.dynamics_started[channel] != 0) {
-        if (db >= state.threshold_db - state.hysteresis_db) processor.dynamics_hold[channel] = hold;
-        else if (processor.dynamics_hold[channel] > 0) --processor.dynamics_hold[channel];
-        else processor.dynamics_open[channel] = 0;
+      if (history.open[channel] == 0 && db >= state.threshold_db) {
+        history.open[channel] = 1; history.hold[channel] = hold;
+      } else if (history.open[channel] != 0 && history.started[channel] != 0) {
+        if (db >= state.threshold_db - state.hysteresis_db) history.hold[channel] = hold;
+        else if (history.hold[channel] > 0) --history.hold[channel];
+        else history.open[channel] = 0;
       }
-      const float target_db = processor.dynamics_open[channel] != 0 ? 0.0F
+      const float target_db = history.open[channel] != 0 ? 0.0F
         : state.mode != 0 ? std::fmax(state.range_db, (db - state.threshold_db) * (state.ratio - 1.0F)) : state.range_db;
       const float target = state.enabled != 0 && processor.bypassed == 0 ? dynamics_db_to_gain(target_db) : 1.0F;
-      const float milliseconds = target > processor.dynamics_gain[channel] ? state.attack_ms : state.release_ms;
+      const float milliseconds = target > history.gain[channel] ? state.attack_ms : state.release_ms;
       const float coefficient = std::exp(-1.0F / (std::fmax(0.1F, milliseconds) * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
-      processor.dynamics_gain[channel] = target + coefficient * (processor.dynamics_gain[channel] - target);
+      history.gain[channel] = target + coefficient * (history.gain[channel] - target);
     }
   } else if (compressor) {
     const daw_audio_compressor_state &state = processor.compressor;
     const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
-    processor.dynamics_detector_left[write] = 0.5F * (sidechain_left + sidechain_right);
-    float detector = processor.dynamics_detector_left[detector_read];
+    history.detector_left[write] = 0.5F * (sidechain_left + sidechain_right);
+    float detector = history.detector_left[detector_read];
     if (state.sidechain_enabled != 0) {
       const float coefficient = 1.0F - std::exp(-6.2831853071795864769F * std::fmin(state.sidechain_frequency_hz, static_cast<float>(core.config.sample_rate_hz) * 0.45F) / static_cast<float>(core.config.sample_rate_hz));
-      processor.compressor_sc_low += coefficient * (detector - processor.compressor_sc_low);
-      processor.compressor_sc_band += coefficient * (detector - processor.compressor_sc_low - processor.compressor_sc_band / state.sidechain_q);
-      detector = state.sidechain_filter_type == 1 ? processor.compressor_sc_low : state.sidechain_filter_type == 2 ? processor.compressor_sc_band : detector - processor.compressor_sc_low;
+      history.compressor_sc_low += coefficient * (detector - history.compressor_sc_low);
+      history.compressor_sc_band += coefficient * (detector - history.compressor_sc_low - history.compressor_sc_band / state.sidechain_q);
+      detector = state.sidechain_filter_type == 1 ? history.compressor_sc_low : state.sidechain_filter_type == 2 ? history.compressor_sc_band : detector - history.compressor_sc_low;
     }
     const float level = state.detector_mode != 0
-      ? std::sqrt(processor.compressor_rms = processor.compressor_rms * 0.99F + detector * detector * 0.01F)
+      ? std::sqrt(history.compressor_rms = history.compressor_rms * 0.99F + detector * detector * 0.01F)
       : std::abs(detector);
     const float target_db = state.enabled != 0 && processor.bypassed == 0 ? compressor_curve_db(dynamics_gain_to_db(level), state) - dynamics_gain_to_db(level) : 0.0F;
-    const float release_ms = state.auto_release != 0 ? std::fmax(state.release_ms, state.release_ms * (1.0F + std::fmin(1.0F, -processor.compressor_envelope_db / 24.0F))) : state.release_ms;
+    const float release_ms = state.auto_release != 0 ? std::fmax(state.release_ms, state.release_ms * (1.0F + std::fmin(1.0F, -history.compressor_envelope_db / 24.0F))) : state.release_ms;
     if (state.envelope_curve != 0) {
-      const float milliseconds = target_db < processor.compressor_envelope_db ? state.attack_ms : release_ms;
+      const float milliseconds = target_db < history.compressor_envelope_db ? state.attack_ms : release_ms;
       const float step_db = 60.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * milliseconds / 1000.0F);
-      processor.compressor_envelope_db += std::fmax(-step_db, std::fmin(step_db, target_db - processor.compressor_envelope_db));
+      history.compressor_envelope_db += std::fmax(-step_db, std::fmin(step_db, target_db - history.compressor_envelope_db));
     } else {
-      const float milliseconds = target_db < processor.compressor_envelope_db ? state.attack_ms : release_ms;
+      const float milliseconds = target_db < history.compressor_envelope_db ? state.attack_ms : release_ms;
       const float coefficient = std::exp(-1.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * milliseconds / 1000.0F));
-      processor.compressor_envelope_db = target_db + coefficient * (processor.compressor_envelope_db - target_db);
+      history.compressor_envelope_db = target_db + coefficient * (history.compressor_envelope_db - target_db);
     }
-    const float gain = dynamics_db_to_gain(processor.compressor_envelope_db + state.makeup_db + state.output_db);
+    const float gain = dynamics_db_to_gain(history.compressor_envelope_db + state.makeup_db + state.output_db);
     left = left * (1.0F - state.dry_wet) + left * gain * state.dry_wet;
     right = right * (1.0F - state.dry_wet) + right * gain * state.dry_wet;
   } else {
     const daw_audio_limiter_state &state = processor.limiter;
     const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
-    const float detector_left = std::abs(processor.dynamics_delay_left[detector_read]);
-    const float detector_right = std::abs(processor.dynamics_delay_right[detector_read]);
+    const float detector_left = std::abs(history.delay_left[detector_read]);
+    const float detector_right = std::abs(history.delay_right[detector_read]);
     const float ceiling = dynamics_db_to_gain(state.ceiling_dbtp);
     const float target_left = std::fmin(1.0F, ceiling / std::fmax(detector_left, 1e-12F));
     const float target_right = std::fmin(1.0F, ceiling / std::fmax(detector_right, 1e-12F));
     const float linked = std::fmin(target_left, target_right);
     const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
     const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
-    for (uint32_t channel = 0; channel < 2; ++channel) processor.dynamics_gain[channel] = targets[channel] < processor.dynamics_gain[channel] ? targets[channel] : 1.0F + release * (processor.dynamics_gain[channel] - 1.0F);
-    if (state.enabled == 0 || processor.bypassed != 0) processor.dynamics_gain = {1.0F, 1.0F};
+    for (uint32_t channel = 0; channel < 2; ++channel) history.gain[channel] = targets[channel] < history.gain[channel] ? targets[channel] : 1.0F + release * (history.gain[channel] - 1.0F);
+    if (state.enabled == 0 || processor.bypassed != 0) history.gain = {1.0F, 1.0F};
   }
-  processor.dynamics_write = (write + 1) % kMaximumDynamicsDelayFrames;
+  history.write = (write + 1) % kMaximumDynamicsDelayFrames;
   if (gate) {
-    left *= processor.dynamics_gain[0];
-    right *= processor.dynamics_gain[1];
+    left *= history.gain[0];
+    right *= history.gain[1];
   } else if (!compressor) {
-    left *= processor.dynamics_gain[0];
-    right *= processor.dynamics_gain[1];
+    left *= history.gain[0];
+    right *= history.gain[1];
   }
   *output_left = std::isfinite(left) ? left : 0.0F;
   *output_right = std::isfinite(right) ? right : 0.0F;
@@ -3070,7 +3205,8 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
       if (!processed_chain && node.kind == DAW_AUDIO_GRAPH_NODE_UTILITY && core.utility_configured) {
         float utility_left = 0.0F;
         float utility_right = 0.0F;
-        process_utility_frame(core, nullptr, frame, left, right, &utility_left, &utility_right);
+        process_utility_frame(
+          core, nullptr, core.utility_history, frame, left, right, &utility_left, &utility_right);
         left = utility_left;
         right = utility_right;
       }
@@ -3965,6 +4101,77 @@ extern "C" daw_audio_core_graph_validation_diagnostic daw_audio_core_get_graph_v
   return core == nullptr ? daw_audio_core_graph_validation_diagnostic{} : core->graph_validation_diagnostic;
 }
 
+bool same_float(float left, float right) {
+  return left == right;
+}
+
+bool compatible_processor_history(
+  const GraphRevision::Processor &current,
+  const GraphRevision::Processor &next) {
+  if (current.instance_id != next.instance_id
+    || current.kind != next.kind
+    || current.input_layout != next.input_layout
+    || current.output_layout != next.output_layout
+    || current.bypassed != next.bypassed) return false;
+  switch (next.kind) {
+    case DAW_AUDIO_PROCESSOR_KIND_UTILITY:
+      return current.utility.enabled == next.utility.enabled
+        && current.utility.dc_block == next.utility.dc_block
+        && current.utility.input_mode == next.utility.input_mode
+        && current.utility.matrix == next.utility.matrix
+        && current.utility.swap == next.utility.swap;
+    case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
+      return current.saturator.enabled == next.saturator.enabled
+        && current.saturator.curve == next.saturator.curve
+        && current.saturator.color == next.saturator.color
+        && same_float(current.saturator.color_frequency_hz, next.saturator.color_frequency_hz);
+    case DAW_AUDIO_PROCESSOR_KIND_EQ:
+      if (current.eq.enabled != next.eq.enabled || current.eq.mono != next.eq.mono) return false;
+      for (uint32_t band = 0; band < 8; ++band) {
+        if (current.eq.bands[band].enabled != next.eq.bands[band].enabled
+          || current.eq.bands[band].type != next.eq.bands[band].type) return false;
+      }
+      return true;
+    case DAW_AUDIO_PROCESSOR_KIND_GATE:
+      return current.gate.enabled == next.gate.enabled
+        && current.gate.mode == next.gate.mode
+        && current.gate.detector == next.gate.detector
+        && current.gate.sidechain_enabled == next.gate.sidechain_enabled
+        && same_float(current.gate.lookahead_ms, next.gate.lookahead_ms)
+        && same_float(current.gate.sidechain_frequency_hz, next.gate.sidechain_frequency_hz)
+        && same_float(current.gate.sidechain_q, next.gate.sidechain_q);
+    case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
+      return current.compressor.enabled == next.compressor.enabled
+        && current.compressor.auto_release == next.compressor.auto_release
+        && current.compressor.detector_mode == next.compressor.detector_mode
+        && current.compressor.dynamics_mode == next.compressor.dynamics_mode
+        && current.compressor.envelope_curve == next.compressor.envelope_curve
+        && current.compressor.sidechain_enabled == next.compressor.sidechain_enabled
+        && current.compressor.sidechain_filter_type == next.compressor.sidechain_filter_type
+        && same_float(current.compressor.lookahead_ms, next.compressor.lookahead_ms)
+        && same_float(current.compressor.sidechain_frequency_hz, next.compressor.sidechain_frequency_hz)
+        && same_float(current.compressor.sidechain_q, next.compressor.sidechain_q);
+    case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
+      return current.limiter.enabled == next.limiter.enabled
+        && current.limiter.detector_oversampling == next.limiter.detector_oversampling
+        && same_float(current.limiter.lookahead_ms, next.limiter.lookahead_ms);
+    case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
+      return current.spectral.enabled == next.spectral.enabled
+        && current.spectral.fft_size == next.spectral.fft_size
+        && current.spectral.overlap == next.spectral.overlap
+        && current.spectral.mode == next.spectral.mode;
+    default:
+      return current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN
+        || current.kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE;
+  }
+}
+
 extern "C" daw_audio_core_result daw_audio_core_publish(
   daw_audio_core_handle core_handle,
   uint32_t expected_revision) {
@@ -3973,34 +4180,36 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
   if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (core->prepared_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
   if (core->prepared_graph.revision == expected_revision) {
-    const auto next_modulation_histories = std::unique_ptr<std::array<ModulationHistory, kMaximumGraphProcessors>>(
-      new (std::nothrow) std::array<ModulationHistory, kMaximumGraphProcessors>{});
-    if (!next_modulation_histories) {
-      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    }
     const auto previous_instruments = std::unique_ptr<std::array<InstrumentNodeState, kMaximumGraphNodes>>(
       new (std::nothrow) std::array<InstrumentNodeState, kMaximumGraphNodes>{});
     const auto previous_graph_nodes = std::unique_ptr<std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>>(
       new (std::nothrow) std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>{});
     if (!previous_instruments || !previous_graph_nodes) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     const uint32_t previous_graph_node_count = core->published_graph.node_count;
+    std::array<bool, kMaximumGraphProcessors> preserve_history{};
     std::array<bool, kMaximumDelayProcessors> preserve_delay{};
     std::array<bool, kMaximumReverbProcessors> preserve_reverb{};
+    std::array<bool, kMaximumSpectralProcessors> preserve_spectral{};
     std::copy(core->instruments.begin(), core->instruments.end(), previous_instruments->begin());
     std::copy(
       core->published_graph.nodes.begin(),
       core->published_graph.nodes.end(),
       previous_graph_nodes->begin());
+    core->processor_history_slots.fill({});
     for (uint32_t next_index = 0; next_index < core->prepared_graph.processor_count; ++next_index) {
       const GraphRevision::Processor &next_processor = core->prepared_graph.processors[next_index];
+      core->processor_history_slots[next_processor.history_slot] = {
+        .instance_id = next_processor.instance_id,
+        .kind = next_processor.kind,
+        .node_id = next_processor.node_id,
+        .input_layout = next_processor.input_layout,
+        .output_layout = next_processor.output_layout,
+        .occupied = true,
+      };
       for (uint32_t current_index = 0; current_index < core->published_graph.processor_count; ++current_index) {
         const GraphRevision::Processor &current_processor = core->published_graph.processors[current_index];
-        if (next_processor.instance_id == current_processor.instance_id
-          && next_processor.kind == current_processor.kind
-          && next_processor.node_id == current_processor.node_id
-          && next_processor.input_layout == current_processor.input_layout
-          && next_processor.output_layout == current_processor.output_layout) {
-          (*next_modulation_histories)[next_processor.modulation_slot] = core->modulation_histories[current_processor.modulation_slot];
+        if (compatible_processor_history(current_processor, next_processor)) {
+          preserve_history[next_processor.history_slot] = true;
           if (next_processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
             && next_processor.delay_slot < kMaximumDelayProcessors
             && current_processor.delay_slot == next_processor.delay_slot
@@ -4013,15 +4222,33 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
             && current_processor.reverb_slot < kMaximumReverbProcessors) {
             preserve_reverb[next_processor.reverb_slot] = true;
           }
+          if (next_processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
+            && next_processor.spectral_slot < kMaximumSpectralProcessors
+            && current_processor.spectral_slot == next_processor.spectral_slot
+            && current_processor.spectral_slot < kMaximumSpectralProcessors) {
+            preserve_spectral[next_processor.spectral_slot] = true;
+          }
           break;
         }
       }
     }
+    for (uint32_t slot = 0; slot < kMaximumGraphProcessors; ++slot) {
+      if (!preserve_history[slot]) {
+        core->utility_histories[slot] = {};
+        core->saturator_histories[slot] = {};
+        core->eq_histories[slot] = {};
+        core->dynamics_histories[slot] = {};
+        core->modulation_histories[slot] = {};
+      }
+    }
     for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
-      if (!preserve_delay[slot]) core->delay_histories[slot] = DelayHistory{};
+      if (!preserve_delay[slot]) core->delay_histories[slot] = {};
     }
     for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
-      if (!preserve_reverb[slot]) core->reverb_histories[slot] = ReverbHistory{};
+      if (!preserve_reverb[slot]) core->reverb_histories[slot] = {};
+    }
+    for (uint32_t slot = 0; slot < kMaximumSpectralProcessors; ++slot) {
+      if (!preserve_spectral[slot]) core->spectral_histories[slot] = {};
     }
     core->published_graph = core->prepared_graph;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -4047,7 +4274,6 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       for (auto &plane : edge_delay) plane.fill(0.0F);
     }
     core->graph_delay_cursors.fill(0);
-    core->modulation_histories = *next_modulation_histories;
   }
   core->published_revision = expected_revision;
   return DAW_AUDIO_CORE_OK;
@@ -4126,7 +4352,8 @@ extern "C" daw_audio_core_result daw_audio_core_process(
       const float dry_right = right_output == nullptr ? dry_left : right_output[frame];
       float left = 0.0F;
       float right = 0.0F;
-      process_utility_frame(*core, nullptr, frame, dry_left, dry_right, &left, &right);
+      process_utility_frame(
+        *core, nullptr, core->utility_history, frame, dry_left, dry_right, &left, &right);
       left_output[frame] = left;
       if (right_output != nullptr) right_output[frame] = right;
     }

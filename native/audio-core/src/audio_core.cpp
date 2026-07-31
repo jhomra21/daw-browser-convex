@@ -327,7 +327,9 @@ struct Core {
   std::array<GraphRevision::Range, kMaximumGraphNodes> active_source_ranges{};
   GraphRevision::Range root_source_range{};
   std::array<InstrumentNodeState, kMaximumGraphNodes> instruments{};
+#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)
   std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments{};
+#endif
 };
 
 Core *to_core(daw_audio_core_handle handle) {
@@ -3168,8 +3170,12 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
     find_processor(core.published_graph, previous_processor, &previous_index);
     core.event_ends[previous_index] = block.event_count;
   }
-  core.proposed_instruments = core.instruments;
+#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)
+  std::copy(core.instruments.begin(), core.instruments.end(), core.proposed_instruments.begin());
   auto &proposed_instruments = core.proposed_instruments;
+#else
+  auto proposed_instruments = core.instruments;
+#endif
   for (auto &indices : core.instrument_event_indices) indices.fill(0);
   core.instrument_event_counts.fill(0);
   uint32_t previous_instrument_offset = 0;

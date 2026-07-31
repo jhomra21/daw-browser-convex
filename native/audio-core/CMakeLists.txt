@@ -9,7 +9,12 @@ add_library(daw-audio-core STATIC src/audio_core.cpp)
 target_compile_features(daw-audio-core PUBLIC cxx_std_20)
 target_include_directories(daw-audio-core PUBLIC include generated)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-  target_compile_definitions(daw-audio-core PUBLIC DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS=1)
+  target_compile_definitions(
+    daw-audio-core
+    PUBLIC
+      DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS=1
+      DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH=1
+  )
 endif()
 
 if(MSVC)

@@ -744,17 +744,28 @@ export class DawPortableAudioCoreHost {
       return result
     }
     if (!this.samplerConfigure || !Array.isArray(state.zones) || state.zones.length === 0 || state.zones.length > 32) return false
-    const allocation = this.malloc(44 + state.zones.length * 72)
+    const allocation = this.malloc(88 + state.zones.length * 80)
     if (!allocation) return false
-    const view = new DataView(this.memory.buffer, allocation, 44 + state.zones.length * 72)
+    const view = new DataView(this.memory.buffer, allocation, 88 + state.zones.length * 80)
     view.setUint32(0, 1, true)
     view.setUint32(4, state.zones.length, true)
     ;[state.ampAttackMs, state.ampDecayMs, state.ampSustain, state.ampReleaseMs].forEach((value, index) => view.setFloat32(8 + index * 4, value, true))
     view.setUint32(24, state.filterEnabled ? 1 : 0, true)
-    view.setUint32(28, state.filterMode === 'lowpass' ? 0 : 1, true)
+    view.setUint32(28, state.filterMode === 'lowpass' ? 0 : state.filterMode === 'highpass' ? 1 : state.filterMode === 'bandpass' ? 2 : 3, true)
     view.setFloat32(32, state.filterCutoffHz, true)
     view.setFloat32(36, state.filterResonance, true)
-    view.setUint32(40, state.retrigger ? 1 : 0, true)
+    view.setFloat32(40, state.filterEnvelopeAmount, true)
+    view.setFloat32(44, state.filterAttackMs, true)
+    view.setFloat32(48, state.filterDecayMs, true)
+    view.setFloat32(52, state.filterSustain, true)
+    view.setFloat32(56, state.filterReleaseMs, true)
+    view.setUint32(60, state.lfoEnabled ? 1 : 0, true)
+    view.setFloat32(64, state.lfoRateHz, true)
+    view.setFloat32(68, state.lfoPitchCents, true)
+    view.setFloat32(72, state.lfoFilterHz, true)
+    view.setFloat32(76, state.lfoAmplitude, true)
+    view.setFloat32(80, state.lfoPan, true)
+    view.setUint32(84, state.retrigger ? 1 : 0, true)
     for (let index = 0; index < state.zones.length; index += 1) {
       const zone = state.zones[index]
       const asset = this.assets.get(zone.assetId)
@@ -762,16 +773,16 @@ export class DawPortableAudioCoreHost {
         this.free(allocation)
         return false
       }
-      const offset = allocation + 44 + index * 72
+      const offset = allocation + 88 + index * 80
       view.setBigUint64(offset - allocation, asset.handle.value, true)
       ;[zone.keyLow, zone.keyHigh, zone.velocityLow, zone.velocityHigh, zone.rootNote].forEach((value, integerIndex) => view.setUint32(offset - allocation + 8 + integerIndex * 4, value, true))
       view.setFloat32(offset - allocation + 28, zone.tuneCents, true)
       view.setFloat32(offset - allocation + 32, zone.gain, true)
       view.setFloat32(offset - allocation + 36, zone.pan, true)
-      ;[zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : 1, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.chokeGroup]
+      ;[zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : zone.playbackMode === 'forward-loop' ? 1 : 2, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.crossfadeFrameCount, zone.chokeGroup]
         .forEach((value, integerIndex) => view.setUint32(offset - allocation + 40 + integerIndex * 4, value, true))
     }
-    const result = this.samplerConfigure(node, allocation, allocation + 44) === 0
+    const result = this.samplerConfigure(node, allocation, allocation + 88) === 0
     this.free(allocation)
     return result
   }

@@ -37,7 +37,7 @@ export const SAMPLER_AUTOMATION_DESCRIPTORS: Readonly<Record<SamplerAutomationPa
   'amp.sustain': { defaultValue: defaults.ampEnvelope.sustain, min: 0, max: 1, unit: 'ratio', rate: 'note' },
   'amp.release': { defaultValue: defaults.ampEnvelope.releaseSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
   'filter.frequency': { defaultValue: defaults.filterFrequencyHz, min: 20, max: 20_000, unit: 'hz', rate: 'a-rate' },
-  'filter.q': { defaultValue: defaults.filterQ, min: 0.0001, max: 30, unit: 'ratio', rate: 'a-rate' },
+  'filter.q': { defaultValue: defaults.filterQ, min: 0.05, max: 30, unit: 'ratio', rate: 'a-rate' },
   'filter.envAmount': { defaultValue: defaults.filterEnvelope.amount, min: -1, max: 1, unit: 'ratio', rate: 'note' },
   'lfo.rate': { defaultValue: defaults.lfo.frequencyHz, min: 0.01, max: 100, unit: 'hz', rate: 'a-rate' },
   'lfo.pitchDepth': { defaultValue: defaults.lfo.pitchCents, min: -2400, max: 2400, unit: 'cents', rate: 'a-rate' },

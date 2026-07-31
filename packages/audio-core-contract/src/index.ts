@@ -341,11 +341,12 @@ export type AudioCoreSampleZone = {
   pan: number
   roundRobinGroup: number
   roundRobinIndex: number
-  playbackMode: 'one-shot' | 'forward-loop'
+  playbackMode: 'one-shot' | 'forward-loop' | 'crossfade-loop'
   startFrame: number
   endFrame: number
   loopStartFrame: number
   loopEndFrame: number
+  crossfadeFrameCount: number
   chokeGroup: number
 }
 
@@ -359,9 +360,20 @@ export type AudioCoreSamplerState = {
   ampSustain: number
   ampReleaseMs: number
   filterEnabled: boolean
-  filterMode: 'lowpass' | 'highpass'
+  filterMode: 'lowpass' | 'highpass' | 'bandpass' | 'notch'
   filterCutoffHz: number
   filterResonance: number
+  filterEnvelopeAmount: number
+  filterAttackMs: number
+  filterDecayMs: number
+  filterSustain: number
+  filterReleaseMs: number
+  lfoEnabled: boolean
+  lfoRateHz: number
+  lfoPitchCents: number
+  lfoFilterHz: number
+  lfoAmplitude: number
+  lfoPan: number
   retrigger: boolean
   zones: readonly AudioCoreSampleZone[]
 }
@@ -378,7 +390,7 @@ const isNonnegativeSafeInteger = (value: unknown): value is number =>
 
 const isAudioCoreSampleZone = (value: unknown, drumRack: boolean): value is AudioCoreSampleZone =>
   isRecord(value)
-  && hasOnlyKeys(value, ['assetId', 'keyLow', 'keyHigh', 'velocityLow', 'velocityHigh', 'rootNote', 'tuneCents', 'gain', 'pan', 'roundRobinGroup', 'roundRobinIndex', 'playbackMode', 'startFrame', 'endFrame', 'loopStartFrame', 'loopEndFrame', 'chokeGroup'])
+  && hasOnlyKeys(value, ['assetId', 'keyLow', 'keyHigh', 'velocityLow', 'velocityHigh', 'rootNote', 'tuneCents', 'gain', 'pan', 'roundRobinGroup', 'roundRobinIndex', 'playbackMode', 'startFrame', 'endFrame', 'loopStartFrame', 'loopEndFrame', 'crossfadeFrameCount', 'chokeGroup'])
   && typeof value.assetId === 'string' && value.assetId.length > 0
   && isFiniteNumber(value.keyLow) && Number.isInteger(value.keyLow) && value.keyLow >= 0 && value.keyLow <= 127
   && isFiniteNumber(value.keyHigh) && Number.isInteger(value.keyHigh) && value.keyHigh >= value.keyLow && value.keyHigh <= 127
@@ -388,24 +400,37 @@ const isAudioCoreSampleZone = (value: unknown, drumRack: boolean): value is Audi
   && isBoundedFloat(value.tuneCents, -4800, 4800) && isBoundedFloat(value.gain, 0, 4) && isBoundedFloat(value.pan, -1, 1)
   && isNonnegativeSafeInteger(value.roundRobinGroup)
   && isNonnegativeSafeInteger(value.roundRobinIndex)
-  && (value.playbackMode === 'one-shot' || value.playbackMode === 'forward-loop')
+  && (value.playbackMode === 'one-shot' || value.playbackMode === 'forward-loop' || value.playbackMode === 'crossfade-loop')
   && isNonnegativeSafeInteger(value.startFrame)
   && isNonnegativeSafeInteger(value.endFrame) && value.endFrame > value.startFrame
   && isNonnegativeSafeInteger(value.loopStartFrame) && value.loopStartFrame >= value.startFrame
   && isNonnegativeSafeInteger(value.loopEndFrame) && value.loopEndFrame >= value.loopStartFrame && value.loopEndFrame <= value.endFrame
+  && isNonnegativeSafeInteger(value.crossfadeFrameCount)
+  && value.crossfadeFrameCount <= Math.floor((value.loopEndFrame - value.loopStartFrame) / 2)
   && isNonnegativeSafeInteger(value.chokeGroup)
   && (!drumRack || (value.keyLow === value.keyHigh && value.roundRobinGroup === 0))
 
 const isAudioCoreSamplerState = (value: unknown, kind: 'sampler' | 'drum-rack'): value is AudioCoreSamplerState | AudioCoreDrumRackState =>
   isRecord(value)
-  && hasOnlyKeys(value, ['version', 'kind', 'voiceCapacity', 'outputLayout', 'ampAttackMs', 'ampDecayMs', 'ampSustain', 'ampReleaseMs', 'filterEnabled', 'filterMode', 'filterCutoffHz', 'filterResonance', 'retrigger', 'zones'])
+  && hasOnlyKeys(value, ['version', 'kind', 'voiceCapacity', 'outputLayout', 'ampAttackMs', 'ampDecayMs', 'ampSustain', 'ampReleaseMs', 'filterEnabled', 'filterMode', 'filterCutoffHz', 'filterResonance', 'filterEnvelopeAmount', 'filterAttackMs', 'filterDecayMs', 'filterSustain', 'filterReleaseMs', 'lfoEnabled', 'lfoRateHz', 'lfoPitchCents', 'lfoFilterHz', 'lfoAmplitude', 'lfoPan', 'retrigger', 'zones'])
   && value.version === audioCoreContractVersion && value.kind === kind
   && isPositiveSafeInteger(value.voiceCapacity) && value.voiceCapacity <= audioCoreMaxInstrumentVoices
   && value.outputLayout === 'stereo'
   && isBoundedFloat(value.ampAttackMs, 0, 10000) && isBoundedFloat(value.ampDecayMs, 0, 10000)
   && isBoundedFloat(value.ampSustain, 0, 1) && isBoundedFloat(value.ampReleaseMs, 0, 10000)
-  && typeof value.filterEnabled === 'boolean' && (value.filterMode === 'lowpass' || value.filterMode === 'highpass')
+  && typeof value.filterEnabled === 'boolean' && (value.filterMode === 'lowpass' || value.filterMode === 'highpass' || value.filterMode === 'bandpass' || value.filterMode === 'notch')
   && isBoundedFloat(value.filterCutoffHz, 20, 20000) && isBoundedFloat(value.filterResonance, 0.05, 30)
+  && isBoundedFloat(value.filterEnvelopeAmount, -1, 1)
+  && isBoundedFloat(value.filterAttackMs, 0, 60000)
+  && isBoundedFloat(value.filterDecayMs, 0, 60000)
+  && isBoundedFloat(value.filterSustain, 0, 1)
+  && isBoundedFloat(value.filterReleaseMs, 0, 60000)
+  && typeof value.lfoEnabled === 'boolean'
+  && isBoundedFloat(value.lfoRateHz, 0.01, 100)
+  && isBoundedFloat(value.lfoPitchCents, -2400, 2400)
+  && isBoundedFloat(value.lfoFilterHz, -20000, 20000)
+  && isBoundedFloat(value.lfoAmplitude, 0, 1)
+  && isBoundedFloat(value.lfoPan, 0, 1)
   && typeof value.retrigger === 'boolean' && Array.isArray(value.zones) && value.zones.length > 0
   && value.zones.length <= audioCoreMaxSampleZones && value.zones.every((zone) => isAudioCoreSampleZone(zone, kind === 'drum-rack'))
 
@@ -497,27 +522,38 @@ export const encodeAudioCoreInstrumentState = (
     values.forEach((value, index) => view.setFloat32(28 + index * 4, value, true))
     return { state: output }
   }
-  const binaryState = new Uint8Array(44)
+  const binaryState = new Uint8Array(88)
   const stateView = new DataView(binaryState.buffer)
   stateView.setUint32(0, state.version, true)
   stateView.setUint32(4, state.zones.length, true)
   ;[state.ampAttackMs, state.ampDecayMs, state.ampSustain, state.ampReleaseMs].forEach((value, index) => stateView.setFloat32(8 + index * 4, value, true))
   stateView.setUint32(24, state.filterEnabled ? 1 : 0, true)
-  stateView.setUint32(28, state.filterMode === 'lowpass' ? 0 : 1, true)
+  stateView.setUint32(28, state.filterMode === 'lowpass' ? 0 : state.filterMode === 'highpass' ? 1 : state.filterMode === 'bandpass' ? 2 : 3, true)
   stateView.setFloat32(32, state.filterCutoffHz, true)
   stateView.setFloat32(36, state.filterResonance, true)
-  stateView.setUint32(40, state.retrigger ? 1 : 0, true)
-  const zones = new Uint8Array(state.zones.length * 72)
+  stateView.setFloat32(40, state.filterEnvelopeAmount, true)
+  stateView.setFloat32(44, state.filterAttackMs, true)
+  stateView.setFloat32(48, state.filterDecayMs, true)
+  stateView.setFloat32(52, state.filterSustain, true)
+  stateView.setFloat32(56, state.filterReleaseMs, true)
+  stateView.setUint32(60, state.lfoEnabled ? 1 : 0, true)
+  stateView.setFloat32(64, state.lfoRateHz, true)
+  stateView.setFloat32(68, state.lfoPitchCents, true)
+  stateView.setFloat32(72, state.lfoFilterHz, true)
+  stateView.setFloat32(76, state.lfoAmplitude, true)
+  stateView.setFloat32(80, state.lfoPan, true)
+  stateView.setUint32(84, state.retrigger ? 1 : 0, true)
+  const zones = new Uint8Array(state.zones.length * 80)
   const zoneView = new DataView(zones.buffer)
   state.zones.forEach((zone, index) => {
-    const offset = index * 72
+    const offset = index * 80
     zoneView.setBigUint64(offset, resolveAssetHandle(zone.assetId), true)
     const integers = [zone.keyLow, zone.keyHigh, zone.velocityLow, zone.velocityHigh, zone.rootNote]
     integers.forEach((value, integerIndex) => zoneView.setUint32(offset + 8 + integerIndex * 4, value, true))
     zoneView.setFloat32(offset + 28, zone.tuneCents, true)
     zoneView.setFloat32(offset + 32, zone.gain, true)
     zoneView.setFloat32(offset + 36, zone.pan, true)
-    const tail = [zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : 1, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.chokeGroup]
+    const tail = [zone.roundRobinGroup, zone.roundRobinIndex, zone.playbackMode === 'one-shot' ? 0 : zone.playbackMode === 'forward-loop' ? 1 : 2, zone.startFrame, zone.endFrame, zone.loopStartFrame, zone.loopEndFrame, zone.crossfadeFrameCount, zone.chokeGroup]
     tail.forEach((value, integerIndex) => zoneView.setUint32(offset + 40 + integerIndex * 4, value, true))
   })
   return { state: binaryState, zones }

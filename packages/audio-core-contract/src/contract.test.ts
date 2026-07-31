@@ -118,19 +118,30 @@ test('sample instrument codecs resolve asset identities only at the ABI boundary
     filterMode: 'lowpass' as const,
     filterCutoffHz: 20_000,
     filterResonance: 0.707,
+    filterEnvelopeAmount: 0,
+    filterAttackMs: 1,
+    filterDecayMs: 10,
+    filterSustain: 0,
+    filterReleaseMs: 20,
+    lfoEnabled: false,
+    lfoRateHz: 5,
+    lfoPitchCents: 0,
+    lfoFilterHz: 0,
+    lfoAmplitude: 0,
+    lfoPan: 0,
     retrigger: true,
     zones: [{
       assetId: 'asset:1', keyLow: 36, keyHigh: 60, velocityLow: 1, velocityHigh: 127, rootNote: 48,
       tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 1, roundRobinIndex: 0, playbackMode: 'forward-loop' as const,
-      startFrame: 0, endFrame: 128, loopStartFrame: 8, loopEndFrame: 120, chokeGroup: 2,
+      startFrame: 0, endFrame: 128, loopStartFrame: 8, loopEndFrame: 120, crossfadeFrameCount: 0, chokeGroup: 2,
     }],
   }
   expect(isAudioCoreSamplerInstrumentState(state)).toBe(true)
   expect(isAudioCoreDrumRackState({ ...state, kind: 'drum-rack', zones: [{ ...state.zones[0], keyHigh: 36, roundRobinGroup: 0 }] })).toBe(true)
   expect(isAudioCoreDrumRackState({ ...state, kind: 'drum-rack' })).toBe(false)
   const binary = encodeAudioCoreInstrumentState(state, (assetId) => assetId === 'asset:1' ? 0x100000001n : 0n)
-  expect(binary.state.byteLength).toBe(44)
-  expect(binary.zones?.byteLength).toBe(72)
+  expect(binary.state.byteLength).toBe(88)
+  expect(binary.zones?.byteLength).toBe(80)
   if (!binary.zones) throw new Error('Sampler state did not encode zones.')
   expect(new DataView(binary.zones.buffer).getBigUint64(0, true)).toBe(0x100000001n)
 })

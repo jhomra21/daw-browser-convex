@@ -154,7 +154,8 @@ typedef enum daw_audio_instrument_kind {
 
 typedef enum daw_audio_sample_playback_mode {
   DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT = 0,
-  DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP = 1
+  DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP = 1,
+  DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP = 2
 } daw_audio_sample_playback_mode;
 
 /* Sample zones are copied at configuration time. Their asset handles must
@@ -176,6 +177,7 @@ typedef struct daw_audio_sample_zone {
   uint32_t end_frame;
   uint32_t loop_start_frame;
   uint32_t loop_end_frame;
+  uint32_t crossfade_frame_count;
   uint32_t choke_group;
 } daw_audio_sample_zone;
 
@@ -190,6 +192,17 @@ typedef struct daw_audio_sampler_state {
   uint32_t filter_mode;
   float filter_cutoff_hz;
   float filter_resonance;
+  float filter_envelope_amount;
+  float filter_attack_ms;
+  float filter_decay_ms;
+  float filter_sustain;
+  float filter_release_ms;
+  uint32_t lfo_enabled;
+  float lfo_rate_hz;
+  float lfo_pitch_cents;
+  float lfo_filter_hz;
+  float lfo_amplitude;
+  float lfo_pan;
   uint32_t retrigger;
 } daw_audio_sampler_state;
 

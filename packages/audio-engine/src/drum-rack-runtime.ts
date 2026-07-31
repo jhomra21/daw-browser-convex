@@ -1,7 +1,7 @@
 import { getScheduledMidiEvents } from './audio-scheduling'
 import { disconnectAudioNodes } from './effects/chain'
 import { stopAndDisconnectSource, type SourceRegistry } from './source-registry'
-import { normalizeDrumRackParams, type ArpParams, type DrumRackPadParams, type DrumRackParams } from '@daw-browser/shared'
+import { MAX_SAMPLED_INSTRUMENT_VOICES, normalizeDrumRackParams, type ArpParams, type DrumRackPadParams, type DrumRackParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
@@ -17,6 +17,7 @@ type TrackDrumRackConfig = {
 }
 
 type ActiveHit = {
+  id: number
   clipId?: string
   source: AudioBufferSourceNode
   gain: GainNode
@@ -78,6 +79,7 @@ export function scheduleDrumRackHit(input: {
 export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
   const configs = new Map<string, TrackDrumRackConfig>()
   const activeHitsByTrack = new Map<string, Set<ActiveHit>>()
+  let nextHitId = 1
 
   const buildPadIndex = (params: DrumRackParams) => {
     const padIndexByNote = new Map<number, number>()
@@ -129,6 +131,14 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
     const ctx = options.getAudioContext()
     if (!ctx) return undefined
     chokeGroup(trackId, pad.chokeGroup, when)
+    const activeHits = activeHitsByTrack.get(trackId)
+    if (activeHits && activeHits.size >= MAX_SAMPLED_INSTRUMENT_VOICES) {
+      let oldest: ActiveHit | undefined
+      for (const candidate of activeHits) {
+        if (!oldest || candidate.id < oldest.id) oldest = candidate
+      }
+      if (oldest) stopHit(trackId, oldest, when)
+    }
     const scheduled = scheduleDrumRackHit({
       ctx,
       destination: options.ensureTrackInput(trackId),
@@ -138,7 +148,7 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       velocity,
     })
     if (!scheduled) return undefined
-    const hit: ActiveHit = { ...scheduled, clipId, chokeGroup: pad.chokeGroup }
+    const hit: ActiveHit = { ...scheduled, id: nextHitId++, clipId, chokeGroup: pad.chokeGroup }
     let hits = activeHitsByTrack.get(trackId)
     if (!hits) {
       hits = new Set()

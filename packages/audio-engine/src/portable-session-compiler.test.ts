@@ -107,7 +107,7 @@ test('encodes every portable synth filter mode', () => {
       ...defaults,
       filter: { ...defaults.filter, mode },
     })
-    expect(compiled.values.filterMode).toBe(index)
+    expect(Number(compiled.values.filterMode)).toBe(index)
   }
 })
 
@@ -130,6 +130,7 @@ test('compiles browser sampler controls and exact registered asset metadata into
     filterEnabled: true,
     filterMode: 'highpass',
     filterResonance: 0.7,
+    filterEnvelopeAmount: 0,
     zones: [{
       assetId: 'asset:kick:7',
       startFrame: 4_800,
@@ -219,12 +220,12 @@ test('compiles fixture-proven granular controls and rejects absent or stale asse
     { ...createDefaultSamplerParams(), zones: [{ ...samplerZone, sample: { ...sample, source: { ...sample.source, durationSec: 2 } } }] },
     assets,
   )).toThrow('metadata does not match')
-  expect(() => compilePortableSamplerConfiguration(
+  expect(compilePortableSamplerConfiguration(
     'track-a',
     'sampler:a',
     { ...createDefaultSamplerParams(), zones: [samplerZone], lfo: { ...createDefaultSamplerParams().lfo, enabled: true } },
     assets,
-  )).toThrow('LFO')
+  ).state.lfoEnabled).toBe(true)
 })
 
 test('reports only unsupported browser fields or rejected asset state in portable sessions', () => {
@@ -254,11 +255,9 @@ test('reports only unsupported browser fields or rejected asset state in portabl
     automationEnvelopes: [],
     assetRegistry: assets,
   })
-  expect(compilation.samplers).toEqual([])
+  expect(compilation.samplers).toHaveLength(1)
   expect(compilation.portableAssets).toEqual([...assets.assets])
-  expect(compilation.unsupportedInstruments).toEqual([
-    'sampler: kick-zone: crossfade-loop playback is not supported by the portable ABI.',
-  ])
+  expect(compilation.unsupportedInstruments).toEqual([])
 })
 
 const portableSessionInput = (): PreparedPortableSessionInput => {

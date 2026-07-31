@@ -15,6 +15,7 @@ import {
   normalizeGranularParams,
   normalizeSynthParams,
   normalizeSamplerParams,
+  MAX_SAMPLED_INSTRUMENT_VOICES,
   parseSynthAutomationKey,
   type AutomationEnvelope,
   type DrumRackParams,
@@ -166,9 +167,6 @@ const samplerZone = (
   zone: SamplerParams['zones'][number],
   registry: PortableAssetRegistry,
 ): AudioCoreSampleZone => {
-  if (zone.playbackMode === 'crossfade-loop') {
-    throw new Error(`${zone.id}: crossfade-loop playback is not supported by the portable ABI.`)
-  }
   const asset = assetForSample(registry, zone.sample)
   const startFrame = frameAt(zone.startSec, asset.decoded.sampleRateHz)
   const endFrame = Math.min(
@@ -201,6 +199,12 @@ const samplerZone = (
     endFrame,
     loopStartFrame,
     loopEndFrame,
+    crossfadeFrameCount: zone.playbackMode === 'crossfade-loop'
+      ? Math.min(
+        frameAt(zone.crossfadeSec, asset.decoded.sampleRateHz),
+        Math.floor((loopEndFrame - loopStartFrame) / 2),
+      )
+      : 0,
     chokeGroup: zone.chokeGroup,
   }
 }
@@ -216,25 +220,13 @@ export const compilePortableSamplerConfiguration = (
   const params = normalizeSamplerParams(input)
   if (params.zones.length === 0) throw new Error('Sampler has no portable zones.')
   if (params.zones.length > 32) throw new Error('Sampler exceeds the portable zone limit.')
-  if (params.filterMode !== 'lowpass' && params.filterMode !== 'highpass') {
-    throw new Error(`Sampler filter mode "${params.filterMode}" is not supported by the portable ABI.`)
-  }
-  if (params.filterEnvelope.amount !== 0) {
-    throw new Error('Sampler filter envelopes are not supported by the portable ABI.')
-  }
-  if (params.lfo.enabled || params.lfo.pitchCents !== 0 || params.lfo.filterHz !== 0 || params.lfo.amp !== 0 || params.lfo.pan !== 0) {
-    throw new Error('Sampler LFO modulation is not supported by the portable ABI.')
-  }
-  if (params.filterQ < 0.05) {
-    throw new Error('Sampler filter resonance is below the portable ABI minimum.')
-  }
   return {
     nodeId,
     instanceId,
     state: {
       version: audioCoreContractVersion,
       kind: 'sampler',
-      voiceCapacity: Math.min(32, params.polyphony),
+      voiceCapacity: Math.min(MAX_SAMPLED_INSTRUMENT_VOICES, params.polyphony),
       outputLayout: 'stereo',
       ampAttackMs: params.ampEnvelope.attackSec * 1000,
       ampDecayMs: params.ampEnvelope.decaySec * 1000,
@@ -244,6 +236,17 @@ export const compilePortableSamplerConfiguration = (
       filterMode: params.filterMode,
       filterCutoffHz: params.filterFrequencyHz,
       filterResonance: params.filterQ,
+      filterEnvelopeAmount: params.filterEnvelope.amount,
+      filterAttackMs: params.filterEnvelope.attackSec * 1000,
+      filterDecayMs: params.filterEnvelope.decaySec * 1000,
+      filterSustain: params.filterEnvelope.sustain,
+      filterReleaseMs: params.filterEnvelope.releaseSec * 1000,
+      lfoEnabled: params.lfo.enabled,
+      lfoRateHz: params.lfo.frequencyHz,
+      lfoPitchCents: params.lfo.pitchCents,
+      lfoFilterHz: params.lfo.filterHz,
+      lfoAmplitude: params.lfo.amp,
+      lfoPan: params.lfo.pan,
       retrigger: params.retrigger,
       zones: params.zones.map((zone) => samplerZone(zone, registry)),
     },
@@ -282,6 +285,7 @@ export const compilePortableDrumRackConfiguration = (
       endFrame,
       loopStartFrame: 0,
       loopEndFrame: 0,
+      crossfadeFrameCount: 0,
       chokeGroup: pad.chokeGroup,
     }]
   })
@@ -293,7 +297,7 @@ export const compilePortableDrumRackConfiguration = (
     state: {
       version: audioCoreContractVersion,
       kind: 'drum-rack',
-      voiceCapacity: Math.min(32, zones.length),
+      voiceCapacity: MAX_SAMPLED_INSTRUMENT_VOICES,
       outputLayout: 'stereo',
       ampAttackMs: 0,
       ampDecayMs: 0,
@@ -303,6 +307,17 @@ export const compilePortableDrumRackConfiguration = (
       filterMode: 'lowpass',
       filterCutoffHz: 20_000,
       filterResonance: 0.7,
+      filterEnvelopeAmount: 0,
+      filterAttackMs: 0,
+      filterDecayMs: 0,
+      filterSustain: 0,
+      filterReleaseMs: 0,
+      lfoEnabled: false,
+      lfoRateHz: 1,
+      lfoPitchCents: 0,
+      lfoFilterHz: 0,
+      lfoAmplitude: 0,
+      lfoPan: 0,
       retrigger: false,
       zones,
     },

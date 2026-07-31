@@ -229,13 +229,16 @@ struct SampleVoice {
   uint32_t end_frame = 0;
   uint32_t loop_start_frame = 0;
   uint32_t loop_end_frame = 0;
+  uint32_t crossfade_frame_count = 0;
   uint32_t playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
   uint32_t choke_group = 0;
   float gain = 0.0F;
   float pan = 0.0F;
   float amp_level = 0.0F;
-  float filter_left = 0.0F;
-  float filter_right = 0.0F;
+  float filter_level = 0.0F;
+  uint32_t filter_stage = 0;
+  float lfo_phase = 0.0F;
+  BiquadHistory filter_history[2]{};
   float forced_release_ms = 0.0F;
   uint32_t amp_stage = 0;
   uint64_t age = 0;
@@ -521,9 +524,20 @@ bool valid_sampler_state(const daw_audio_sampler_state &state) {
     && std::isfinite(state.amp_decay_ms) && state.amp_decay_ms >= 0.0F && state.amp_decay_ms <= 10000.0F
     && std::isfinite(state.amp_sustain) && state.amp_sustain >= 0.0F && state.amp_sustain <= 1.0F
     && std::isfinite(state.amp_release_ms) && state.amp_release_ms >= 0.0F && state.amp_release_ms <= 10000.0F
-    && state.filter_enabled <= 1 && state.filter_mode <= DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
+    && state.filter_enabled <= 1 && state.filter_mode <= DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH
     && std::isfinite(state.filter_cutoff_hz) && state.filter_cutoff_hz >= 20.0F && state.filter_cutoff_hz <= 20000.0F
     && std::isfinite(state.filter_resonance) && state.filter_resonance >= 0.05F && state.filter_resonance <= 30.0F
+    && std::isfinite(state.filter_envelope_amount) && state.filter_envelope_amount >= -1.0F && state.filter_envelope_amount <= 1.0F
+    && std::isfinite(state.filter_attack_ms) && state.filter_attack_ms >= 0.0F && state.filter_attack_ms <= 60000.0F
+    && std::isfinite(state.filter_decay_ms) && state.filter_decay_ms >= 0.0F && state.filter_decay_ms <= 60000.0F
+    && std::isfinite(state.filter_sustain) && state.filter_sustain >= 0.0F && state.filter_sustain <= 1.0F
+    && std::isfinite(state.filter_release_ms) && state.filter_release_ms >= 0.0F && state.filter_release_ms <= 60000.0F
+    && state.lfo_enabled <= 1
+    && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.0F && state.lfo_rate_hz <= 100.0F
+    && std::isfinite(state.lfo_pitch_cents) && state.lfo_pitch_cents >= -2400.0F && state.lfo_pitch_cents <= 2400.0F
+    && std::isfinite(state.lfo_filter_hz) && state.lfo_filter_hz >= -20000.0F && state.lfo_filter_hz <= 20000.0F
+    && std::isfinite(state.lfo_amplitude) && state.lfo_amplitude >= 0.0F && state.lfo_amplitude <= 1.0F
+    && std::isfinite(state.lfo_pan) && state.lfo_pan >= 0.0F && state.lfo_pan <= 1.0F
     && state.retrigger <= 1;
 }
 
@@ -547,10 +561,11 @@ bool valid_sample_zone(Core &core, const daw_audio_sample_zone &zone) {
     && zone.root_note <= 127 && std::isfinite(zone.tune_cents) && zone.tune_cents >= -4800.0F && zone.tune_cents <= 4800.0F
     && std::isfinite(zone.gain) && zone.gain >= 0.0F && zone.gain <= 4.0F
     && std::isfinite(zone.pan) && zone.pan >= -1.0F && zone.pan <= 1.0F
-    && zone.playback_mode <= DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP
+    && zone.playback_mode <= DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
     && zone.start_frame < zone.end_frame && zone.end_frame <= asset->frame_count
     && (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT
-      || (zone.loop_start_frame >= zone.start_frame && zone.loop_start_frame < zone.loop_end_frame && zone.loop_end_frame <= zone.end_frame));
+      || (zone.loop_start_frame >= zone.start_frame && zone.loop_start_frame < zone.loop_end_frame && zone.loop_end_frame <= zone.end_frame
+        && zone.crossfade_frame_count <= (zone.loop_end_frame - zone.loop_start_frame) / 2));
 }
 
 bool valid_instrument_descriptor(const daw_audio_graph_node_descriptor &node) {
@@ -3225,19 +3240,23 @@ void render_sample_instrument_frame(
   const daw_audio_sampler_state &state = instrument.sampler;
   const float attack = 1.0F / std::fmax(1.0F, state.amp_attack_ms * core.config.sample_rate_hz / 1000.0F);
   const float decay = 1.0F / std::fmax(1.0F, state.amp_decay_ms * core.config.sample_rate_hz / 1000.0F);
+  const float filter_attack = 1.0F / std::fmax(1.0F, state.filter_attack_ms * core.config.sample_rate_hz / 1000.0F);
+  const float filter_decay = 1.0F / std::fmax(1.0F, state.filter_decay_ms * core.config.sample_rate_hz / 1000.0F);
   for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
     SampleVoice &voice = instrument.sample_voices[index];
     if (!voice.active) continue;
     const float release_ms = voice.forced_release_ms > 0.0F ? voice.forced_release_ms : state.amp_release_ms;
     const float release = 1.0F / std::fmax(1.0F, release_ms * core.config.sample_rate_hz / 1000.0F);
     voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
+    const float filter_release = 1.0F / std::fmax(1.0F, state.filter_release_ms * core.config.sample_rate_hz / 1000.0F);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, state.filter_sustain, filter_release);
     AssetSlot *asset = find_asset(&core, voice.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
       voice = {};
       continue;
     }
     if (voice.position >= static_cast<double>(voice.end_frame)) {
-      if (voice.playback_mode != DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP) {
+      if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
         voice = {};
         continue;
       }
@@ -3245,33 +3264,52 @@ void render_sample_instrument_frame(
       voice.position = static_cast<double>(voice.loop_start_frame) + std::fmod(
         voice.position - static_cast<double>(voice.loop_start_frame), loop_length);
     }
-    const uint32_t frame = static_cast<uint32_t>(voice.position);
-    const uint32_t next = frame + 1 < asset->frame_count ? frame + 1 : frame;
-    const float fraction = static_cast<float>(voice.position - static_cast<double>(frame));
-    const float sample_left = asset->planes[0][frame] + (asset->planes[0][next] - asset->planes[0][frame]) * fraction;
+    auto sample_at = [asset](double position, uint32_t channel) {
+      const double bounded = std::fmax(0.0, std::fmin(position, static_cast<double>(asset->frame_count - 1)));
+      const uint32_t frame = static_cast<uint32_t>(bounded);
+      const uint32_t next = frame + 1 < asset->frame_count ? frame + 1 : frame;
+      const float fraction = static_cast<float>(bounded - static_cast<double>(frame));
+      return asset->planes[channel][frame]
+        + (asset->planes[channel][next] - asset->planes[channel][frame]) * fraction;
+    };
     const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
-    const float sample_right = asset->planes[right_channel][frame]
-      + (asset->planes[right_channel][next] - asset->planes[right_channel][frame]) * fraction;
+    float sample_left = sample_at(voice.position, 0);
+    float sample_right = sample_at(voice.position, right_channel);
+    if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
+      && voice.crossfade_frame_count > 0
+      && voice.position >= static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count)) {
+      const double fade = (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count))
+        / static_cast<double>(voice.crossfade_frame_count);
+      const double loop_position = static_cast<double>(voice.loop_start_frame)
+        + (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count));
+      sample_left = sample_left * static_cast<float>(1.0 - fade) + sample_at(loop_position, 0) * static_cast<float>(fade);
+      sample_right = sample_right * static_cast<float>(1.0 - fade) + sample_at(loop_position, right_channel) * static_cast<float>(fade);
+    }
+    voice.lfo_phase += state.lfo_rate_hz / static_cast<float>(core.config.sample_rate_hz);
+    voice.lfo_phase -= std::floor(voice.lfo_phase);
+    const float lfo = state.lfo_enabled == 0 ? 0.0F : std::sin(6.2831853071795864769F * voice.lfo_phase);
     float filtered_left = sample_left;
     float filtered_right = sample_right;
     if (state.filter_enabled != 0) {
-      const float cutoff = std::fmin(state.filter_cutoff_hz, static_cast<float>(core.config.sample_rate_hz) * 0.45F);
-      const float coefficient = std::exp(-6.2831853071795864769F * cutoff / static_cast<float>(core.config.sample_rate_hz));
-      voice.filter_left = (1.0F - coefficient) * sample_left + coefficient * voice.filter_left;
-      voice.filter_right = (1.0F - coefficient) * sample_right + coefficient * voice.filter_right;
-      if (state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS) {
-        filtered_left = voice.filter_left;
-        filtered_right = voice.filter_right;
-      } else {
-        filtered_left -= voice.filter_left;
-        filtered_right -= voice.filter_right;
-      }
+      const float cutoff = std::fmax(20.0F, std::fmin(
+        state.filter_cutoff_hz + state.filter_envelope_amount * 20000.0F * voice.filter_level + lfo * state.lfo_filter_hz,
+        static_cast<float>(core.config.sample_rate_hz) * 0.45F));
+      const uint32_t filter_type = state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
+        ? DAW_AUDIO_EQ_BAND_HIGHPASS
+        : state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS
+          ? DAW_AUDIO_EQ_BAND_BANDPASS
+          : state.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH
+            ? DAW_AUDIO_EQ_BAND_NOTCH
+            : DAW_AUDIO_EQ_BAND_LOWPASS;
+      const BiquadCoefficients coefficients = rbj_coefficients(filter_type, cutoff, state.filter_resonance, 0.0F, core.config.sample_rate_hz);
+      filtered_left = process_biquad(sample_left, coefficients, voice.filter_history[0]);
+      filtered_right = process_biquad(sample_right, coefficients, voice.filter_history[1]);
     }
-    const float gain = voice.gain * voice.amp_level;
-    const float pan_angle = (voice.pan + 1.0F) * 0.7853981633974483096F;
+    const float gain = voice.gain * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
+    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, voice.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
     left += filtered_left * gain * std::cos(pan_angle) * 1.4142135623730950488F;
     right += filtered_right * gain * std::sin(pan_angle) * 1.4142135623730950488F;
-    voice.position += voice.increment;
+    voice.position += voice.increment * std::pow(2.0, static_cast<double>(lfo * state.lfo_pitch_cents) / 1200.0);
   }
   *left_output = std::isfinite(left) ? left : 0.0F;
   *right_output = std::isfinite(right) ? right : 0.0F;
@@ -3468,6 +3506,7 @@ bool apply_sample_instrument_event(
   *voice = {.note_id = event.note_id, .note = event.note, .asset = selected->asset, .position = static_cast<double>(selected->start_frame),
     .increment = std::pow(2.0, cents / 1200.0) * static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz,
     .end_frame = selected->end_frame, .loop_start_frame = selected->loop_start_frame, .loop_end_frame = selected->loop_end_frame,
+    .crossfade_frame_count = selected->crossfade_frame_count,
     .playback_mode = selected->playback_mode, .choke_group = selected->choke_group,
     .gain = selected->gain * event.value, .pan = selected->pan, .age = instrument.next_age++, .active = true};
   return true;

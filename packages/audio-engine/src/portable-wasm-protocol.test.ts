@@ -525,7 +525,7 @@ test('accepts bounded epoch-scoped synth state and ordered MIDI events', () => {
   expect(portableWasmMaxInstrumentEvents).toBe(256)
 })
 
-test('rejects unsupported sampler and drum-rack zone DTOs before the worklet', () => {
+test('accepts bounded sampler and drum-rack state DTOs before the worklet', () => {
   const sampler = {
     version: 1,
     kind: 'sampler' as const,
@@ -539,11 +539,22 @@ test('rejects unsupported sampler and drum-rack zone DTOs before the worklet', (
     filterMode: 'lowpass' as const,
     filterCutoffHz: 20_000,
     filterResonance: 0.707,
+    filterEnvelopeAmount: 0,
+    filterAttackMs: 0,
+    filterDecayMs: 0,
+    filterSustain: 0,
+    filterReleaseMs: 0,
+    lfoEnabled: false,
+    lfoRateHz: 5,
+    lfoPitchCents: 0,
+    lfoFilterHz: 0,
+    lfoAmplitude: 0,
+    lfoPan: 0,
     retrigger: true,
     zones: [{
       assetId: 'asset:1', keyLow: 36, keyHigh: 60, velocityLow: 1, velocityHigh: 127, rootNote: 48,
       tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 1, roundRobinIndex: 0, playbackMode: 'one-shot' as const,
-      startFrame: 0, endFrame: 32, loopStartFrame: 0, loopEndFrame: 0, chokeGroup: 0,
+      startFrame: 0, endFrame: 32, loopStartFrame: 0, loopEndFrame: 0, crossfadeFrameCount: 0, chokeGroup: 0,
     }],
   }
   expect(parsePortableWasmControlMessage({

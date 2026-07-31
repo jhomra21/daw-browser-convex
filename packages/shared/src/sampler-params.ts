@@ -1,6 +1,7 @@
 import type { DrumRackPadSample } from './drum-rack-params'
 
 export const SAMPLER_STATE_VERSION = 1
+export const MAX_SAMPLED_INSTRUMENT_VOICES = 32
 
 export type SamplerPlaybackMode = 'one-shot' | 'forward-loop' | 'crossfade-loop'
 export type SamplerFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch'
@@ -153,7 +154,7 @@ export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams
     filterEnvelope: normalizeEnvelope(input.filterEnvelope, defaults.filterEnvelope),
     filterMode,
     filterFrequencyHz: clamp(finite(input.filterFrequencyHz, defaults.filterFrequencyHz), 20, 20_000),
-    filterQ: clamp(finite(input.filterQ, defaults.filterQ), 0.0001, 30),
+    filterQ: clamp(finite(input.filterQ, defaults.filterQ), 0.05, 30),
     lfo: {
       enabled: typeof lfo.enabled === 'boolean' ? lfo.enabled : defaults.lfo.enabled,
       frequencyHz: clamp(finite(lfo.frequencyHz, defaults.lfo.frequencyHz), 0.01, 100),
@@ -162,7 +163,7 @@ export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams
       amp: clamp(finite(lfo.amp, defaults.lfo.amp), 0, 1),
       pan: clamp(finite(lfo.pan, defaults.lfo.pan), 0, 1),
     },
-    polyphony: Math.round(clamp(finite(input.polyphony, defaults.polyphony), 1, 128)),
+    polyphony: Math.round(clamp(finite(input.polyphony, defaults.polyphony), 1, MAX_SAMPLED_INSTRUMENT_VOICES)),
     retrigger: typeof input.retrigger === 'boolean' ? input.retrigger : defaults.retrigger,
     cachePolicy: input.cachePolicy === 'lazy' ? 'lazy' : 'preload',
     maxDecodedBytes: Math.round(clamp(finite(input.maxDecodedBytes, defaults.maxDecodedBytes), 1024 * 1024, 2 * 1024 * 1024 * 1024)),

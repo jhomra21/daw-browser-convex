@@ -335,4 +335,31 @@ describe('Drum Rack runtime', () => {
     expect(audio.gains[1]?.gain.linearRamps).toEqual([[0, 0.006]])
     expect(audio.sources[0]?.stops).toEqual([0.006])
   })
+
+  test('steals the oldest hit at the canonical sampled-instrument cap', () => {
+    const audio = createTestAudio()
+    const params = createDefaultDrumRackParams()
+    const pad = params.pads[0]
+    if (!pad) throw new Error('Missing default drum rack pad')
+    const runtime = createDrumRackRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => audio.ctx,
+      getBpm: () => 120,
+      timelineToCtxTime: (timelineSec) => timelineSec,
+      ensureTrackInput: () => audio.ctx.createGain(),
+      sources: {
+        add: () => {},
+        remove: () => {},
+        snapshot: () => [],
+        clear: () => {},
+        stopClip: () => {},
+      },
+      getArpeggiator: () => undefined,
+    })
+    runtime.setTrackDrumRack('track-1', params, new Map([[pad.id, createBuffer(10)]]))
+    for (let index = 0; index < 33; index += 1) runtime.startLiveNote('track-1', pad.note, 1)
+    expect(audio.sources).toHaveLength(33)
+    expect(audio.sources[0]?.stops).toEqual([0])
+    expect(audio.sources[1]?.stops).toEqual([])
+  })
 })

@@ -580,7 +580,12 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       let out = spectrumLast?.data
       if (!out || out.length !== spectrumTmp.length) out = new Float32Array(spectrumTmp.length)
       for (let i = 0; i < out.length; i++) out[i] = spectrumTmp[i] / 255
-      spectrumLast = { data: out, sampleRate: ctx?.sampleRate ?? 44100 }
+      spectrumLast = {
+        data: out,
+        sampleRate: ctx?.sampleRate ?? 44100,
+        fftSize: analyser.fftSize,
+        binCount: analyser.frequencyBinCount,
+      }
       return spectrumLast
     },
     close: () => {

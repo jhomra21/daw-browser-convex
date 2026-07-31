@@ -32,6 +32,8 @@ constexpr std::uint32_t kMaximumNativeVstChannels = 64;
 constexpr std::uint32_t kMaximumNativeVstSlots = 8;
 constexpr std::uint32_t kNativeVstMissLimit = 3;
 constexpr std::size_t kMaximumMeterQueueEntries = 1024;
+constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
+constexpr std::uint32_t kSpectrumFftSize = 2048;
 
 std::optional<std::string> WorkerExecutablePath() {
   std::uint32_t size = 0;
@@ -743,6 +745,60 @@ struct NativeMeterObserver {
   }
 };
 
+struct NativeSpectrumObserver {
+  struct Event {
+    std::uint32_t graph_revision = 0;
+    std::uint32_t transport_epoch = 0;
+    std::uint64_t node_id = 0;
+    std::uint32_t frame_count = 0;
+    std::uint32_t sample_rate_hz = 0;
+    std::array<float, kSpectrumFftSize> left{};
+    std::array<float, kSpectrumFftSize> right{};
+  };
+  daw::plugin_host::SpscQueue<Event, kMaximumSpectrumQueueEntries> queue;
+  std::atomic<std::uint32_t>* selected_index = nullptr;
+  std::atomic<bool>* enabled = nullptr;
+  std::atomic<std::uint32_t>* bridge_pending = nullptr;
+  void Observe(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    if (enabled == nullptr || !enabled->load(std::memory_order_acquire)
+      || selected_index == nullptr || render.node_index != selected_index->load(std::memory_order_acquire)
+      || render.frame_count == 0 || render.frame_count > kSpectrumFftSize
+      || render.planes[0] == nullptr) return;
+    Event event{};
+    event.graph_revision = render.graph_revision;
+    event.transport_epoch = render.transport_epoch;
+    event.node_id = render.node_id;
+    event.frame_count = render.frame_count;
+    event.sample_rate_hz = render.sample_rate_hz;
+    for (std::uint32_t frame = 0; frame < render.frame_count; ++frame) {
+      event.left[frame] = std::isfinite(render.planes[0][frame]) ? render.planes[0][frame] : 0.0F;
+      event.right[frame] = render.channel_count > 1 && render.planes[1] != nullptr && std::isfinite(render.planes[1][frame])
+        ? render.planes[1][frame] : event.left[frame];
+    }
+    if (queue.TryPush(event) && bridge_pending != nullptr) {
+      bridge_pending->fetch_or(1U << 4U, std::memory_order_release);
+    }
+  }
+  [[nodiscard]] bool Empty() const noexcept { return queue.Empty(); }
+  bool Pop(Event& event) noexcept { return queue.TryPop(event); }
+  void Clear() noexcept { Event event{}; while (Pop(event)) {} }
+  static void Dispatch(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    auto* observer = static_cast<NativeSpectrumObserver*>(render.attachment);
+    if (observer != nullptr) observer->Observe(render);
+  }
+};
+
+struct NativeTelemetryObserver {
+  NativeMeterObserver* meter = nullptr;
+  NativeSpectrumObserver* spectrum = nullptr;
+  static void Dispatch(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    auto* observer = static_cast<NativeTelemetryObserver*>(render.attachment);
+    if (observer == nullptr) return;
+    if (observer->meter != nullptr) observer->meter->Observe(render);
+    if (observer->spectrum != nullptr) observer->spectrum->Observe(render);
+  }
+};
+
 }  // namespace
 
 bool WorkerNotificationQueue::Push(WorkerNotification notification) {
@@ -960,6 +1016,18 @@ struct AudioHost::Impl {
   std::atomic<std::uint64_t> completed_render_epoch = 0;
   NativeMeterObserver meter_observer{};
   std::uint64_t meter_sequence = 0;
+  NativeSpectrumObserver spectrum_observer{};
+  NativeTelemetryObserver telemetry_observer{};
+  std::atomic<std::uint32_t> spectrum_selected_index{0};
+  std::atomic<bool> spectrum_enabled{false};
+  std::uint64_t spectrum_sequence = 0;
+  std::array<float, kMaximumSpectrumBins> spectrum_smoothed{};
+  bool spectrum_has_previous = false;
+  std::array<float, kSpectrumFftSize> spectrum_history_left{};
+  std::array<float, kSpectrumFftSize> spectrum_history_right{};
+  std::uint32_t spectrum_history_count = 0;
+  std::array<std::uint64_t, 64> spectrum_node_ids{};
+  std::uint32_t spectrum_node_count = 0;
   std::atomic<std::uint64_t> retired_after_epoch = 0;
   std::atomic<std::uint32_t> publish_requested_revision = 0;
   std::atomic<std::uint32_t> publish_acknowledged_revision = 0;
@@ -1057,6 +1125,8 @@ struct AudioHost::Impl {
 
   mutable std::mutex meter_wait_mutex;
   std::condition_variable meter_wait;
+  mutable std::mutex spectrum_wait_mutex;
+  std::condition_variable spectrum_wait;
   void NotifyRecordingStatus() {
     recording_status_revision.fetch_add(1, std::memory_order_release);
     recording_wait.notify_all();
@@ -1098,6 +1168,7 @@ struct AudioHost::Impl {
         if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
         if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
         if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
+        if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
         if ((pending & kRealtimeScheduleProgress) != 0) {
           schedule_progress_ready.store(true, std::memory_order_release);
           schedule_progress_wait.notify_all();
@@ -1115,6 +1186,7 @@ struct AudioHost::Impl {
       if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
       if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
       if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
+      if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
       if ((pending & kRealtimeScheduleProgress) != 0) {
         schedule_progress_ready.store(true, std::memory_order_release);
         schedule_progress_wait.notify_all();
@@ -1326,6 +1398,11 @@ struct AudioHost::Impl {
 AudioHost::AudioHost() : impl_(new Impl) {
   impl_->worker_notifications.active_revision = &impl_->active_revision;
   impl_->meter_observer.bridge_pending = &impl_->realtime_bridge_pending;
+  impl_->spectrum_observer.selected_index = &impl_->spectrum_selected_index;
+  impl_->spectrum_observer.enabled = &impl_->spectrum_enabled;
+  impl_->spectrum_observer.bridge_pending = &impl_->realtime_bridge_pending;
+  impl_->telemetry_observer.meter = &impl_->meter_observer;
+  impl_->telemetry_observer.spectrum = &impl_->spectrum_observer;
   impl_->StartRealtimeBridge();
 }
 
@@ -1426,7 +1503,16 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->last_rejected_graph_revision.store(0, std::memory_order_release);
   impl_->completed_render_epoch.store(0, std::memory_order_release);
   impl_->meter_observer.Clear();
+  impl_->spectrum_observer.Clear();
+  impl_->spectrum_enabled.store(false, std::memory_order_release);
+  impl_->spectrum_selected_index.store(0, std::memory_order_release);
+  impl_->spectrum_smoothed.fill(0.0F);
+  impl_->spectrum_has_previous = false;
+    impl_->spectrum_history_left.fill(0.0F);
+    impl_->spectrum_history_right.fill(0.0F);
+    impl_->spectrum_history_count = 0;
   impl_->meter_sequence = 0;
+  impl_->spectrum_sequence = 0;
   impl_->last_graph_revision.store(0, std::memory_order_release);
   impl_->urgent_queue.read.store(0, std::memory_order_release);
   impl_->urgent_queue.write.store(0, std::memory_order_release);
@@ -1493,6 +1579,8 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const daw_audio_core_handle prepared_core = impl_->CreateRevisionCore(revision);
   if (prepared_core == 0) return status(GraphRevisionStatusCode::kPrepareFailed);
   const auto payload = snapshot.subspan(kNativeGraphFrameHeaderBytes);
+  impl_->spectrum_node_count = 0;
+  impl_->spectrum_node_ids.fill(0);
   const auto prepare_result = daw_audio_core_prepare_graph_bytes(
     prepared_core,
     payload.data(),
@@ -1511,6 +1599,18 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     daw_audio_core_destroy(prepared_core);
     impl_->prepared_asset_handles.clear();
     return status(GraphRevisionStatusCode::kPrepareFailed);
+  }
+  if (payload.size() >= 24) {
+    const auto envelope_version = ReadLeU32(payload.data());
+    const auto node_count = ReadLeU32(payload.data() + 8);
+    const auto node_bytes = envelope_version >= 4 ? 136U : 132U;
+    if ((envelope_version == 3 || envelope_version == 4) && node_count <= 64
+      && payload.size() >= 24 + static_cast<std::size_t>(node_count) * node_bytes) {
+      impl_->spectrum_node_count = node_count;
+      for (std::uint32_t index = 0; index < node_count; ++index) {
+        impl_->spectrum_node_ids[index] = ReadLeU64(payload.data() + 24 + static_cast<std::size_t>(index) * node_bytes);
+      }
+    }
   }
   std::vector<daw::audio_core::NativeGraphHookBinding> bindings;
   bindings.reserve(impl_->native_vst_attachments.size());
@@ -1561,8 +1661,8 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
       .graph_revision = revision,
       .hook = bindings.empty() ? nullptr : DispatchNativeVstGraphHook,
       .bindings = bindings,
-      .observer = NativeMeterObserver::Dispatch,
-      .observer_attachment = &impl_->meter_observer,
+      .observer = NativeTelemetryObserver::Dispatch,
+      .observer_attachment = &impl_->telemetry_observer,
     }
   ) != DAW_AUDIO_CORE_OK || daw_audio_core_publish(prepared_core, revision) != DAW_AUDIO_CORE_OK) {
     daw_audio_core_destroy(prepared_core);
@@ -2618,6 +2718,131 @@ std::optional<MeterBatch> AudioHost::DrainMeterBatch() {
   return batch;
 }
 
+bool AudioHost::SetSpectrumNode(const std::uint64_t node_id) {
+  if (node_id == 0) {
+    impl_->spectrum_enabled.store(false, std::memory_order_release);
+    impl_->spectrum_selected_index.store(0, std::memory_order_release);
+    impl_->spectrum_observer.Clear();
+    impl_->spectrum_has_previous = false;
+    impl_->spectrum_history_count = 0;
+    return true;
+  }
+  std::uint32_t index = 0;
+  for (; index < impl_->spectrum_node_count; ++index) {
+    if (impl_->spectrum_node_ids[index] == node_id) break;
+  }
+  if (index >= impl_->spectrum_node_count) return false;
+  impl_->spectrum_observer.Clear();
+  impl_->spectrum_has_previous = false;
+  impl_->spectrum_history_count = 0;
+  impl_->spectrum_selected_index.store(index, std::memory_order_release);
+  impl_->spectrum_enabled.store(true, std::memory_order_release);
+  return true;
+}
+
+bool AudioHost::WaitForSpectrumFrame(const std::atomic<bool>* running) {
+  std::unique_lock lock(impl_->spectrum_wait_mutex);
+  impl_->spectrum_wait.wait(lock, [this, running] {
+    return !impl_->spectrum_observer.Empty()
+      || (running != nullptr && !running->load(std::memory_order_acquire));
+  });
+  return !impl_->spectrum_observer.Empty();
+}
+
+std::optional<SpectrumFrame> AudioHost::DrainSpectrumFrame() {
+  NativeSpectrumObserver::Event event{};
+  NativeSpectrumObserver::Event latest{};
+  bool has_event = false;
+  while (impl_->spectrum_observer.Pop(event)) {
+    latest = event;
+    has_event = true;
+    const auto count = std::min<std::uint32_t>(event.frame_count, kSpectrumFftSize);
+    const auto retained = std::min<std::uint32_t>(impl_->spectrum_history_count, kSpectrumFftSize - count);
+    if (retained > 0) {
+      std::copy(
+        impl_->spectrum_history_left.begin() + (impl_->spectrum_history_count - retained),
+        impl_->spectrum_history_left.begin() + impl_->spectrum_history_count,
+        impl_->spectrum_history_left.begin());
+      std::copy(
+        impl_->spectrum_history_right.begin() + (impl_->spectrum_history_count - retained),
+        impl_->spectrum_history_right.begin() + impl_->spectrum_history_count,
+        impl_->spectrum_history_right.begin());
+    }
+    for (std::uint32_t frame = 0; frame < count; ++frame) {
+      impl_->spectrum_history_left[retained + frame] = event.left[frame];
+      impl_->spectrum_history_right[retained + frame] = event.right[frame];
+    }
+    impl_->spectrum_history_count = retained + count;
+  }
+  if (!has_event) return std::nullopt;
+  std::array<double, kSpectrumFftSize> real{};
+  std::array<double, kSpectrumFftSize> imaginary{};
+  for (std::uint32_t frame = 0; frame < kSpectrumFftSize; ++frame) {
+    const double progress = static_cast<double>(frame) / static_cast<double>(kSpectrumFftSize - 1);
+    const double window = 0.42 - 0.5 * std::cos(6.2831853071795864769 * progress) + 0.08 * std::cos(12.566370614359172954 * progress);
+    const auto history_index = frame >= kSpectrumFftSize - impl_->spectrum_history_count
+      ? frame - (kSpectrumFftSize - impl_->spectrum_history_count)
+      : kSpectrumFftSize;
+    const double sample = history_index < impl_->spectrum_history_count
+      ? (static_cast<double>(impl_->spectrum_history_left[history_index]) + static_cast<double>(impl_->spectrum_history_right[history_index])) * 0.5
+      : 0.0;
+    real[frame] = sample * window;
+  }
+  for (std::uint32_t index = 1, reversed = 0; index < kSpectrumFftSize; ++index) {
+    std::uint32_t bit = kSpectrumFftSize >> 1U;
+    for (; reversed & bit; bit >>= 1U) reversed ^= bit;
+    reversed ^= bit;
+    if (index < reversed) {
+      std::swap(real[index], real[reversed]);
+      std::swap(imaginary[index], imaginary[reversed]);
+    }
+  }
+  for (std::uint32_t length = 2; length <= kSpectrumFftSize; length <<= 1U) {
+    const double angle = -6.2831853071795864769 / static_cast<double>(length);
+    const double step_real = std::cos(angle);
+    const double step_imaginary = std::sin(angle);
+    for (std::uint32_t start = 0; start < kSpectrumFftSize; start += length) {
+      double twiddle_real = 1.0;
+      double twiddle_imaginary = 0.0;
+      const auto half = length / 2U;
+      for (std::uint32_t offset = 0; offset < half; ++offset) {
+        const auto even = start + offset;
+        const auto odd = even + half;
+        const double product_real = twiddle_real * real[odd] - twiddle_imaginary * imaginary[odd];
+        const double product_imaginary = twiddle_real * imaginary[odd] + twiddle_imaginary * real[odd];
+        real[odd] = real[even] - product_real;
+        imaginary[odd] = imaginary[even] - product_imaginary;
+        real[even] += product_real;
+        imaginary[even] += product_imaginary;
+        const double next_twiddle_real = twiddle_real * step_real - twiddle_imaginary * step_imaginary;
+        twiddle_imaginary = twiddle_real * step_imaginary + twiddle_imaginary * step_real;
+        twiddle_real = next_twiddle_real;
+      }
+    }
+  }
+  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) {
+    const double scale = bin == 0 ? 1.0 / kSpectrumFftSize : 2.0 / kSpectrumFftSize;
+    const double current = std::hypot(real[bin], imaginary[bin]) * scale;
+    const double smoothed = impl_->spectrum_has_previous
+      ? 0.7 * impl_->spectrum_smoothed[bin] + 0.3 * current : current;
+    impl_->spectrum_smoothed[bin] = std::isfinite(smoothed) ? static_cast<float>(smoothed) : 0.0F;
+  }
+  impl_->spectrum_has_previous = true;
+  SpectrumFrame output{};
+  output.graph_revision = latest.graph_revision;
+  output.transport_epoch = latest.transport_epoch;
+  output.sequence = ++impl_->spectrum_sequence;
+  output.node_id = latest.node_id;
+  output.sample_rate_hz = latest.sample_rate_hz;
+  output.fft_size = kSpectrumFftSize;
+  output.bin_count = kMaximumSpectrumBins;
+  for (std::uint32_t bin = 0; bin < kMaximumSpectrumBins; ++bin) {
+    const double db = std::clamp(20.0 * std::log10(std::max<double>(impl_->spectrum_smoothed[bin], std::numeric_limits<double>::min())), -100.0, -30.0);
+    output.data[bin] = static_cast<float>((db + 100.0) / 70.0);
+  }
+  return output;
+}
+
 bool AudioHost::WaitForScheduleProgress(const std::atomic<bool>* running) {
   std::unique_lock lock(impl_->schedule_progress_mutex);
   impl_->schedule_progress_wait.wait(lock, [this, running] {
@@ -2673,6 +2898,9 @@ void AudioHost::WakeWorkerNotificationWait() {
 
 void AudioHost::WakeMeterWait() {
   impl_->meter_wait.notify_all();
+}
+void AudioHost::WakeSpectrumWait() {
+  impl_->spectrum_wait.notify_all();
 }
 
 void AudioHost::WakeScheduleProgressWait() {

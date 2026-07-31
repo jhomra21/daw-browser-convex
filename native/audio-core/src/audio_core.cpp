@@ -3051,6 +3051,7 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
     if (core.published_native_hooks.observer != nullptr) {
       core.published_native_hooks.observer({
         .graph_revision = graph.revision,
+        .node_index = node_index,
         .node_id = node.id,
         .frame_count = block.frame_count,
         .channel_count = node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1U : 2U,

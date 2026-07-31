@@ -111,6 +111,7 @@ type EffectsPanelProps = {
   onExternalProcessorAutoOpenHandled?: (instanceId: string) => void;
   onExternalProcessorUpdated?: (processor: ExternalProcessor, previous: ExternalProcessor) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
+  spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -818,6 +819,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onLocalSaveFailed: (message) => props.onLocalSaveFailed?.(message),
     onDeviceInsertActionsChange: (actions) => props.onDeviceInsertActionsChange?.(actions),
     onExportSnapshotChange: (snapshot) => props.onExportSnapshotChange?.(snapshot),
+    spectrumProvider: () => props.spectrumProvider,
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;

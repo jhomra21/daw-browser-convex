@@ -2,6 +2,7 @@ import type {
   NativeHostDeviceConfiguration,
   NativeInputDevice,
   NativeHostMeterBatch,
+  NativeHostSpectrumFrame,
   NativeHostPcmAsset,
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
@@ -93,6 +94,8 @@ type NativeSessionBridge = {
   onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
+  setSpectrumNode(nodeId: bigint | null): Promise<NativeSessionReply>
+  onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onVstParameterEdit(listener: (payload: DesktopVstParameterEditPayload) => void): () => void
 }

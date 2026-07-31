@@ -17,6 +17,7 @@ import {
   nativeAudioHostMaximumAssetFrames as maximumAssetFrames,
   nativeAudioHostMaximumDeviceIdBytes as maximumDeviceIdBytes,
   nativeAudioHostMaximumMeterEntries as maximumMeterEntries,
+  nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
   nativeAudioHostMaximumPayloadBytes as maximumPayloadBytes,
   nativeAudioHostMaximumVstPathBytes as maximumVstPathBytes,
   nativeAudioHostMaximumVstStringBytes as maximumVstStringBytes,
@@ -30,12 +31,14 @@ import type {
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
   NativeHostMeterBatch,
+  NativeHostSpectrumFrame,
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeHostPcmAsset,
   NativeHostTransport,
   NativeInputDevice,
 } from "@daw-browser/audio-engine/native-host-wire"
+import { serializeNativeSpectrumSelection } from "@daw-browser/audio-engine/native-host-wire"
 
 const {
   hostHello: hostHelloType,
@@ -82,6 +85,8 @@ const {
   vstEditorStatus: vstEditorStatusType,
   diagnosticStart: diagnosticStartType,
   meterBatch: meterBatchType,
+  spectrumSelection: spectrumSelectionType,
+  spectrumFrame: spectrumFrameType,
   scheduleWindow: scheduleWindowType,
   scheduleProgress: scheduleProgressType,
   vstScheduleAutomationEnable: vstScheduleAutomationEnableType,
@@ -448,6 +453,7 @@ type NativeHostRequestType =
   | typeof scheduleWindowType
   | typeof vstScheduleAutomationEnableType
   | typeof instrumentStatesType
+  | typeof spectrumSelectionType
 
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
@@ -606,6 +612,8 @@ export type NativeAudioHostSupervisor = {
   onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
+  setSpectrumNode(nodeId: bigint | null): Promise<void>
+  onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   queueScheduleWindow(bytes: Uint8Array, transactionToken?: string): Promise<void>
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<void>
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
@@ -632,6 +640,7 @@ export const createNativeAudioHostSupervisor = (
   const recordingBlockListeners = new Set<(block: NativeHostRecordingBlock) => void>()
   const recordingStatusListeners = new Set<(status: NativeHostRecordingStatus) => void>()
   const meterBatchListeners = new Set<(batch: NativeHostMeterBatch) => void>()
+  const spectrumFrameListeners = new Set<(frame: NativeHostSpectrumFrame) => void>()
   const scheduleProgressListeners = new Set<(progress: NativeScheduleProgress) => void>()
   const workerNotificationListeners = new Set<(notification: NativeWorkerNotification) => void>()
   type QueuedSend = {
@@ -898,6 +907,31 @@ export const createNativeAudioHostSupervisor = (
       entries,
     }
   }
+  const decodeSpectrumFrame = (frame: Buffer): NativeHostSpectrumFrame | undefined => {
+    const payload = frame.subarray(headerBytes)
+    if (payload.byteLength < 48) return undefined
+    const graphRevision = payload.readUInt32BE(0)
+    const transportEpoch = payload.readUInt32BE(4)
+    const sequence = payload.readBigUInt64BE(8)
+    const nodeId = payload.readBigUInt64BE(16)
+    const sampleRateHz = payload.readUInt32BE(24)
+    const fftSize = payload.readUInt32BE(28)
+    const binCount = payload.readUInt32BE(32)
+    const payloadBytes = payload.readUInt32BE(36)
+    if (
+      graphRevision === 0 || transportEpoch === 0 || sequence === 0n || nodeId === 0n
+      || sampleRateHz === 0 || fftSize === 0 || fftSize > 16_384
+      || binCount === 0 || binCount > maximumSpectrumBins || binCount !== fftSize / 2
+      || payloadBytes !== binCount * 4 || payload.byteLength !== 40 + payloadBytes
+    ) return undefined
+    const data = new Float32Array(binCount)
+    for (let index = 0; index < binCount; index += 1) {
+      const value = payload.readFloatBE(40 + index * 4)
+      if (!Number.isFinite(value) || value < 0 || value > 1) return undefined
+      data[index] = value
+    }
+    return { graphRevision, transportEpoch, sequence, nodeId, sampleRateHz, fftSize, binCount, data }
+  }
   const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | undefined => {
     const payload = frame.subarray(headerBytes)
     if (payload.byteLength !== 72) return undefined
@@ -943,6 +977,10 @@ export const createNativeAudioHostSupervisor = (
         const batch = decodeMeterBatch(frame)
         if (!batch) return lost("The native audio host returned an invalid meter batch.")
         for (const listener of meterBatchListeners) listener(batch)
+      } else if (frame.readUInt32BE(8) === spectrumFrameType) {
+        const spectrum = decodeSpectrumFrame(frame)
+        if (!spectrum) return lost("The native audio host returned an invalid spectrum frame.")
+        for (const listener of spectrumFrameListeners) listener(spectrum)
       } else if (frame.readUInt32BE(8) === scheduleProgressType) {
         const progress = decodeScheduleProgress(frame)
         if (!progress || progress.revision === 0 || progress.epoch === 0
@@ -1473,6 +1511,14 @@ export const createNativeAudioHostSupervisor = (
     onMeterBatch(listener) {
       meterBatchListeners.add(listener)
       return () => meterBatchListeners.delete(listener)
+    },
+    async setSpectrumNode(nodeId) {
+      const payload = Buffer.from(serializeNativeSpectrumSelection(nodeId))
+      await request(spectrumSelectionType, payload)
+    },
+    onSpectrumFrame(listener) {
+      spectrumFrameListeners.add(listener)
+      return () => spectrumFrameListeners.delete(listener)
     },
     onScheduleProgress(listener) {
       scheduleProgressListeners.add(listener)

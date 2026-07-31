@@ -40,6 +40,7 @@ type UseEffectsPanelAudioSyncOptions = {
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
   };
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
+  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -286,33 +287,18 @@ export function useEffectsPanelAudioSync(
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
-  const sampleSpectrum = () => {
-    try {
-      const audioEngine = options.audioEngine();
-      const id = options.currentTargetId();
-      const data = id === "master"
-        ? audioEngine.getMasterSpectrum()
-        : audioEngine.getTrackSpectrum(id);
-      setSpectrum(data ?? null);
-    } catch {
-      setSpectrum(null);
-    }
-  };
-
   createEffect(() => {
     if (!options.isOpen()) {
       setSpectrum(null);
       return;
     }
-    sampleSpectrum();
-
-    // Spectrum visualization needs its own bounded sampling clock because live
-    // MIDI can produce audio while the transport playhead is stopped.
-    let frame = requestAnimationFrame(function tick() {
-      sampleSpectrum();
-      frame = requestAnimationFrame(tick);
-    });
-    onCleanup(() => cancelAnimationFrame(frame));
+    const provider = options.spectrumProvider?.()
+    if (!provider) {
+      setSpectrum(null)
+      return
+    }
+    const unsubscribe = provider(options.currentTargetId(), setSpectrum)
+    onCleanup(unsubscribe)
   });
 
   return {

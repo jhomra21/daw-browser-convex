@@ -9,9 +9,10 @@ import {
   serializeNativeVstParameterEvents,
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
-import type { TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
+import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostMeterBatch,
+  NativeHostSpectrumFrame,
   NativeHostRecordingStatus,
   NativeInstrumentEvent,
   NativeSessionAsset,
@@ -74,6 +75,8 @@ type NativePlaybackBridge = Pick<
     | "onScheduleProgress"
   > & {
     reenableVstScheduleAutomation?: NonNullable<DesktopBridge["audioHost"]>["session"]["reenableVstScheduleAutomation"]
+    setSpectrumNode?: NonNullable<DesktopBridge["audioHost"]>["session"]["setSpectrumNode"]
+    onSpectrumFrame?: NonNullable<DesktopBridge["audioHost"]>["session"]["onSpectrumFrame"]
   }
 }
 
@@ -194,11 +197,16 @@ export const createNativePlaybackController = (input: {
   let scheduleCoordinator: NativeScheduleCoordinator | undefined
   const nativeMeterListeners = new Set<(levels: TrackStereoLevelsBatch) => void>()
   const nativeMasterMeterListeners = new Set<(levels: TrackStereoLevels) => void>()
+  const nativeSpectrumListeners = new Set<(frame: SpectrumFrame | null) => void>()
   let nativeMeterNodeIds = new Map<bigint, string>()
   let nativeMeterRevision = 0
   let latestMeterSequence = 0n
   let nativeLevels: TrackStereoLevelsBatch = new Map()
   let nativeMasterLevels: TrackStereoLevels = { left: 0, right: 0 }
+  let nativeSpectrumNodeIds = new Map<string, bigint>()
+  let nativeSpectrumTarget: string | undefined
+  let latestSpectrumSequence = 0n
+  let unsubscribeSpectrum: (() => void) | undefined
 
   const resetNativeMeters = () => {
     const levels = new Map<string, TrackStereoLevels>()
@@ -228,6 +236,54 @@ export const createNativePlaybackController = (input: {
     nativeMeterNodeIds = new Map()
     nativeMeterRevision = 0
     latestMeterSequence = 0n
+  }
+
+  const clearNativeSpectrum = () => {
+    unsubscribeSpectrum?.()
+    unsubscribeSpectrum = undefined
+    nativeSpectrumTarget = undefined
+    nativeSpectrumNodeIds = new Map()
+    latestSpectrumSequence = 0n
+    for (const listener of nativeSpectrumListeners) listener(null)
+  }
+
+  const configureNativeSpectrum = (tracks: readonly { id: string }[]) => {
+    nativeSpectrumNodeIds = new Map([
+      ...tracks.map((track) => [track.id, nativeGraphNodeId(track.id)] as const),
+      ["master", nativeGraphNodeId("master")] as const,
+    ])
+    latestSpectrumSequence = 0n
+    for (const listener of nativeSpectrumListeners) listener(null)
+    if (nativeSpectrumTarget !== undefined) {
+      const nodeId = nativeSpectrumNodeIds.get(nativeSpectrumTarget)
+      void input.bridge?.session.setSpectrumNode?.(nodeId ?? null)
+    }
+  }
+
+  const handleNativeSpectrumFrame = (frame: NativeHostSpectrumFrame) => {
+    const nodeId = nativeSpectrumNodeIds.get(nativeSpectrumTarget ?? "")
+    if (
+      !nodeId || frame.graphRevision !== nativeMeterRevision
+      || frame.transportEpoch !== transportEpoch || frame.nodeId !== nodeId
+      || frame.sequence <= latestSpectrumSequence
+    ) return
+    latestSpectrumSequence = frame.sequence
+    const data = new Float32Array(frame.data)
+    const next: SpectrumFrame = {
+      data,
+      sampleRate: frame.sampleRateHz,
+      graphRevision: frame.graphRevision,
+      transportEpoch: frame.transportEpoch,
+      sequence: frame.sequence,
+      nodeId: frame.nodeId,
+      fftSize: frame.fftSize,
+      binCount: frame.binCount,
+    }
+    for (const listener of nativeSpectrumListeners) listener(next)
+  }
+  const clearNativeSpectrumFrame = () => {
+    latestSpectrumSequence = 0n
+    for (const listener of nativeSpectrumListeners) listener(null)
   }
 
   const handleNativeMeterBatch = (batch: NativeHostMeterBatch) => {
@@ -310,6 +366,7 @@ export const createNativePlaybackController = (input: {
     scheduleCoordinator?.dispose()
     scheduleCoordinator = undefined
     clearNativeMeters()
+    clearNativeSpectrum()
     preparedProjectGeneration = undefined
     preparedSnapshot = undefined
     preparedGraph = undefined
@@ -353,6 +410,7 @@ export const createNativePlaybackController = (input: {
           preparedProjectGeneration = undefined
         } else {
           transportEpoch += 1
+          clearNativeSpectrumFrame()
           const frame = Math.round(transport.playheadSec * sampleRate)
           previousCoordinator?.dispose()
           const nextCoordinator = createCoordinatorForEpoch({
@@ -410,6 +468,7 @@ export const createNativePlaybackController = (input: {
       scheduleCoordinator?.dispose()
       scheduleCoordinator = undefined
       clearNativeMeters()
+      clearNativeSpectrum()
       active = false
       prepared = false
       livePreviewActive = false
@@ -586,8 +645,11 @@ export const createNativePlaybackController = (input: {
       prepared = true
       preparedProjectGeneration = projectGeneration
       configureNativeMeters(snapshot.revision, snapshot.tracks)
+      configureNativeSpectrum(snapshot.tracks)
       unsubscribeMeters?.()
       unsubscribeMeters = bridge.session.onMeterBatch?.(handleNativeMeterBatch)
+      unsubscribeSpectrum?.()
+      unsubscribeSpectrum = bridge.session.onSpectrumFrame?.(handleNativeSpectrumFrame)
       assertReply(await bridge.session.start())
       if (cancelled()) {
         await dispose()
@@ -696,6 +758,7 @@ export const createNativePlaybackController = (input: {
     try {
       const frame = Math.round(playheadSec * sampleRate)
       transportEpoch += 1
+      clearNativeSpectrumFrame()
       const nextCoordinator = preparedSnapshot && scheduleCoordinator
         ? createCoordinatorForEpoch({
           snapshot: preparedSnapshot,
@@ -1073,6 +1136,21 @@ export const createNativePlaybackController = (input: {
     return () => nativeMasterMeterListeners.delete(listener)
   }
 
+  const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
+    nativeSpectrumListeners.add(listener)
+    nativeSpectrumTarget = targetId
+    const nodeId = nativeSpectrumNodeIds.get(targetId)
+    void input.bridge?.session.setSpectrumNode?.(nodeId ?? null)
+    listener(null)
+    return () => {
+      nativeSpectrumListeners.delete(listener)
+      if (nativeSpectrumListeners.size === 0) {
+        nativeSpectrumTarget = undefined
+        void input.bridge?.session.setSpectrumNode?.(null)
+      }
+    }
+  }
+
   return {
     start,
     pause,
@@ -1091,5 +1169,6 @@ export const createNativePlaybackController = (input: {
     releaseLiveMidiNote,
     subscribeTrackMeters,
     subscribeMasterMeter,
+    subscribeSpectrum,
   }
 }

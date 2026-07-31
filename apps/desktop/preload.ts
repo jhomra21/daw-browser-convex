@@ -16,6 +16,7 @@ import type {
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
   NativeHostMeterBatch,
+  NativeHostSpectrumFrame,
   NativeHostTransport,
   NativeScheduleProgress,
   NativeInputDevice,
@@ -181,6 +182,12 @@ const desktopBridge = {
           const notify = (_event: Electron.IpcRendererEvent, batch: NativeHostMeterBatch) => listener(batch)
           ipcRenderer.on("daw:audio-host:meter-batch", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:meter-batch", notify)
+        },
+        setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession("daw:audio-host:session:set-spectrum-node", nodeId),
+        onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
+          const notify = (_event: Electron.IpcRendererEvent, frame: NativeHostSpectrumFrame) => listener(frame)
+          ipcRenderer.on("daw:audio-host:spectrum-frame", notify)
+          return () => ipcRenderer.removeListener("daw:audio-host:spectrum-frame", notify)
         },
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, progress: NativeScheduleProgress) => listener(progress)

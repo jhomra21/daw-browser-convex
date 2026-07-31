@@ -1,6 +1,6 @@
 import { createEffect, createMemo, onCleanup, type Accessor } from "solid-js";
 import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
-import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
@@ -40,6 +40,7 @@ type EffectsPanelControllerOptions = {
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void;
+  spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
 };
 
 const deviceInsertActionsEqual = (
@@ -158,6 +159,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       arp: instrument.arp.readDraftForTarget,
     },
     samplerBufferSync,
+    spectrumProvider: options.spectrumProvider,
   });
 
   createEffect(() => {

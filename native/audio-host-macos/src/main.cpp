@@ -170,6 +170,26 @@ bool WriteMeterBatch(const daw::audio_host_macos::MeterBatch& batch) {
   return WriteFrame(daw::audio_host_macos::ControlType::kMeterBatch, payload);
 }
 
+bool WriteSpectrumFrame(const daw::audio_host_macos::SpectrumFrame& frame) {
+  if (frame.bin_count == 0 || frame.bin_count > daw::audio_host_macos::kMaximumSpectrumBins
+    || frame.bin_count != frame.fft_size / 2) return false;
+  std::vector<std::uint8_t> payload;
+  payload.reserve(40 + static_cast<std::size_t>(frame.bin_count) * 4);
+  WriteU32(payload, frame.graph_revision);
+  WriteU32(payload, frame.transport_epoch);
+  WriteU64(payload, frame.sequence);
+  WriteU64(payload, frame.node_id);
+  WriteU32(payload, frame.sample_rate_hz);
+  WriteU32(payload, frame.fft_size);
+  WriteU32(payload, frame.bin_count);
+  WriteU32(payload, frame.bin_count * 4);
+  for (std::uint32_t index = 0; index < frame.bin_count; ++index) {
+    if (!std::isfinite(frame.data[index]) || frame.data[index] < 0.0F || frame.data[index] > 1.0F) return false;
+    WriteFloat(payload, frame.data[index]);
+  }
+  return WriteFrame(daw::audio_host_macos::ControlType::kSpectrumFrame, payload);
+}
+
 void WriteFloat(std::vector<std::uint8_t>& payload, const float value) {
   std::uint32_t bits = 0;
   std::memcpy(&bits, &value, sizeof(bits));
@@ -401,10 +421,12 @@ int main() {
   std::atomic<bool> recording_thread_running = false;
   std::atomic<bool> notification_thread_running = false;
   std::atomic<bool> meter_thread_running = false;
+  std::atomic<bool> spectrum_thread_running = false;
   std::atomic<bool> schedule_thread_running = false;
   std::thread recording_thread;
   std::thread notification_thread;
   std::thread meter_thread;
+  std::thread spectrum_thread;
   std::thread schedule_thread;
   struct RecordingThreadGuard {
     std::atomic<bool>& running;
@@ -436,6 +458,16 @@ int main() {
       if (thread.joinable()) thread.join();
     }
   } meter_thread_guard{meter_thread_running, meter_thread, host};
+  struct SpectrumThreadGuard {
+    std::atomic<bool>& running;
+    std::thread& thread;
+    std::unique_ptr<daw::audio_host_macos::AudioHost>& host;
+    ~SpectrumThreadGuard() {
+      running.store(false, std::memory_order_release);
+      host->WakeSpectrumWait();
+      if (thread.joinable()) thread.join();
+    }
+  } spectrum_thread_guard{spectrum_thread_running, spectrum_thread, host};
   struct ScheduleThreadGuard {
     std::atomic<bool>& running;
     std::thread& thread;
@@ -490,6 +522,24 @@ int main() {
     host->WakeMeterWait();
     if (meter_thread.joinable()) meter_thread.join();
   };
+  auto stop_spectrum_thread = [&] {
+    spectrum_thread_running.store(false, std::memory_order_release);
+    host->WakeSpectrumWait();
+    if (spectrum_thread.joinable()) spectrum_thread.join();
+  };
+  auto start_spectrum_thread = [&] {
+    stop_spectrum_thread();
+    spectrum_thread_running.store(true, std::memory_order_release);
+    auto* spectrum_host = host.get();
+    spectrum_thread = std::thread([&spectrum_thread_running, spectrum_host] {
+      while (spectrum_thread_running.load(std::memory_order_acquire)) {
+        if (!spectrum_host->WaitForSpectrumFrame(&spectrum_thread_running)) break;
+        const auto frame = spectrum_host->DrainSpectrumFrame();
+        if (frame && !WriteSpectrumFrame(*frame)) break;
+      }
+      spectrum_thread_running.store(false, std::memory_order_release);
+    });
+  };
   auto start_meter_thread = [&] {
     stop_meter_thread();
     meter_thread_running.store(true, std::memory_order_release);
@@ -523,6 +573,7 @@ int main() {
   };
   start_notification_thread();
   start_meter_thread();
+  start_spectrum_thread();
   start_schedule_thread();
   for (;;) {
     if (host) host->ProcessNativeVstControl();
@@ -592,11 +643,13 @@ int main() {
       stop_recording_thread();
       stop_notification_thread();
       stop_meter_thread();
+      stop_spectrum_thread();
       stop_schedule_thread();
       host.swap(staged_host);
       staged_host.reset();
       start_notification_thread();
       start_meter_thread();
+      start_spectrum_thread();
       start_schedule_thread();
       if (!WriteAck(request->type, true)) return EXIT_FAILURE;
       continue;
@@ -670,6 +723,10 @@ int main() {
         break;
       case daw::audio_host_macos::ControlType::kSourceEvents:
         accepted = control_session && control_session->QueueSourceEvents(payload);
+        break;
+      case daw::audio_host_macos::ControlType::kSpectrumSelection:
+        accepted = active_session && payload.size() == 8
+          && active_session->SetSpectrumNode(ReadU64(payload.data()));
         break;
       case daw::audio_host_macos::ControlType::kVstParameterEvents:
         accepted = control_session && control_session->QueueNativeVstParameterEvents(payload);

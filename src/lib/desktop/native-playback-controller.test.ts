@@ -4,7 +4,8 @@ import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { automationTargetKey, createDefaultAutoFilterParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
-import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 
 class TestAudioBuffer implements AudioBuffer {
@@ -125,6 +126,7 @@ const createBridge = (
   let recordingBlock = (_block: NativeHostRecordingBlock) => {}
   let recordingStatus = (_status: NativeHostRecordingStatus) => {}
   let meterBatch = (_batch: NativeHostMeterBatch) => {}
+  let spectrumFrame = (_frame: NativeHostSpectrumFrame) => {}
   let scheduleProgress = (_progress: NativeScheduleProgress) => {}
   let progressSequence = 0n
   let transportEpoch = 1
@@ -172,6 +174,7 @@ const createBridge = (
     emitRecordingBlock: (block: NativeHostRecordingBlock) => recordingBlock(block),
     emitRecordingStatus: (status: NativeHostRecordingStatus) => recordingStatus(status),
     emitMeterBatch: (batch: NativeHostMeterBatch) => meterBatch(batch),
+    emitSpectrumFrame: (frame: NativeHostSpectrumFrame) => spectrumFrame(frame),
     emitScheduleProgress: (progress: NativeScheduleProgress) => scheduleProgress(progress),
     bridge: {
       resolveOutputDevice: async () => ({
@@ -361,6 +364,11 @@ const createBridge = (
           meterBatch = listener
           return () => { meterBatch = () => {} }
         },
+        setSpectrumNode: async () => ({ ok: true as const }),
+        onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
+          spectrumFrame = listener
+          return () => { spectrumFrame = () => {} }
+        },
         onScheduleProgress: (listener: typeof scheduleProgress) => {
           scheduleProgress = listener
           return () => { scheduleProgress = () => {} }
@@ -455,6 +463,34 @@ test("queues native live notes and releases them through the native backend", as
   expect(noteOn.getUint32(36, true)).toBe(101)
   expect(noteOff.getUint32(36, true)).toBe(102)
   await controller.dispose()
+})
+
+test("filters native spectrum frames by target, revision, epoch, and sequence", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+  const frames: Array<SpectrumFrame | null> = []
+  const unsubscribe = controller.subscribeSpectrum("track", (frame) => frames.push(frame))
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  const valid = {
+    graphRevision: 1,
+    transportEpoch: 1,
+    sequence: 1n,
+    nodeId: nativeGraphNodeId("track"),
+    sampleRateHz: 48_000,
+    fftSize: 2_048,
+    binCount: 1_024,
+    data: new Float32Array(1_024),
+  } satisfies NativeHostSpectrumFrame
+  fixture.emitSpectrumFrame(valid)
+  fixture.emitSpectrumFrame({ ...valid, sequence: 1n })
+  fixture.emitSpectrumFrame({ ...valid, graphRevision: 2, sequence: 2n })
+  expect(frames.at(-1)).toMatchObject({ sampleRate: 48_000, fftSize: 2_048, binCount: 1_024 })
+  await controller.dispose()
+  expect(frames.at(-1)).toBeNull()
+  unsubscribe()
 })
 
 test("lazily starts a paused native preview and preserves queued note order", async () => {

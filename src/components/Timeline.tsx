@@ -444,6 +444,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     nativeLiveMidi,
     subscribeTrackLevels,
     subscribeMasterLevels,
+    subscribeSpectrum,
   } = usePlayheadControls({
     audioEngine,
     tracks: renderTracks,
@@ -1815,6 +1816,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId: projectId(),
       userId: userId(),
       audioEngine,
+      spectrumProvider: subscribeSpectrum,
       canWriteTrackRouting: canWriteTrack,
       grantClipWrite,
       onSelectClip: jumpToClip,

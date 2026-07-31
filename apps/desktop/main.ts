@@ -138,6 +138,7 @@ let removeAudioHostLossListener: (() => void) | undefined
 let removeAudioHostRecordingBlockListener: (() => void) | undefined
 let removeAudioHostRecordingStatusListener: (() => void) | undefined
 let removeAudioHostMeterBatchListener: (() => void) | undefined
+let removeAudioHostSpectrumListener: (() => void) | undefined
 let removeAudioHostScheduleProgressListener: (() => void) | undefined
 let removeAudioHostWorkerNotificationListener: (() => void) | undefined
 const activeEditorProjectBindings = createNativeVstProjectBindings()
@@ -1013,6 +1014,16 @@ const registerIpc = () => {
   registerNativeSessionBytes("daw:audio-host:session:queue-schedule-window", (supervisor, bytes, transactionToken) => supervisor.queueScheduleWindow(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:reenable-vst-schedule-automation", (supervisor, bytes, transactionToken) => supervisor.reenableVstScheduleAutomation(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-source-events", (supervisor, bytes, transactionToken) => supervisor.queueSourceEvents(bytes, transactionToken))
+  ipcMain.handle("daw:audio-host:session:set-spectrum-node", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (!supervisor || (value !== null && (typeof value !== "bigint" || value <= 0n))) return nativeSessionFailure()
+    try {
+      await supervisor.setSpectrumNode(value)
+      return { ok: true as const }
+    } catch {
+      return nativeSessionFailure()
+    }
+  })
   ipcMain.handle("daw:audio-host:session:set-transport", async (event, value: unknown) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeSessionEnvelope(value)
@@ -1291,6 +1302,7 @@ const finishQuit = async () => {
   removeAudioHostRecordingBlockListener?.()
   removeAudioHostRecordingStatusListener?.()
   removeAudioHostMeterBatchListener?.()
+  removeAudioHostSpectrumListener?.()
   removeAudioHostScheduleProgressListener?.()
   removeAudioHostWorkerNotificationListener?.()
   await closeSocket()
@@ -1403,6 +1415,12 @@ else {
       const target = window_?.webContents
       if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
         target.send("daw:audio-host:meter-batch", batch)
+      }
+    })
+    removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
+      const target = window_?.webContents
+      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
+        target.send("daw:audio-host:spectrum-frame", frame)
       }
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {

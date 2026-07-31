@@ -91,6 +91,26 @@ export type NativeHostMeterBatch = {
   entries: readonly NativeHostMeterEntry[]
 }
 
+export type NativeHostSpectrumFrame = {
+  graphRevision: number
+  transportEpoch: number
+  sequence: bigint
+  nodeId: bigint
+  sampleRateHz: number
+  fftSize: number
+  binCount: number
+  data: Float32Array
+}
+
+export const serializeNativeSpectrumSelection = (nodeId: bigint | null) => {
+  if (nodeId !== null && (nodeId <= 0n || nodeId > 0xffff_ffff_ffff_ffffn)) {
+    throw new Error("Native spectrum node selection is invalid.")
+  }
+  const output = new Uint8Array(8)
+  new DataView(output.buffer).setBigUint64(0, nodeId ?? 0n, true)
+  return output
+}
+
 /**
  * Session-local, planar float32 PCM transferred as raw bytes. No persistent
  * identity, path, handle, or Web Audio object crosses the native boundary.

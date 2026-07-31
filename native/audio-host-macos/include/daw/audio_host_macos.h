@@ -23,6 +23,7 @@ constexpr std::uint32_t kMaximumAssetChannels = 64;
 constexpr std::uint32_t kMaximumAssetFrames = 262'144;
 constexpr std::size_t kMaximumInstalledAssets = 64;
 constexpr std::size_t kMaximumMeterEntries = 64;
+constexpr std::size_t kMaximumSpectrumBins = 1024;
 constexpr std::size_t kMaximumScheduleChunks = 16;
 constexpr std::size_t kMaximumScheduleRecords = 2'048;
 constexpr std::size_t kMaximumScheduleAutomationSegments = 2'048;
@@ -77,6 +78,8 @@ enum class ControlType : std::uint32_t {
   kScheduleProgress = 46,
   kVstScheduleAutomationEnable = 47,
   kInstrumentStates = 48,
+  kSpectrumSelection = 49,
+  kSpectrumFrame = 50,
 };
 
 struct ControlFrame {
@@ -348,6 +351,17 @@ struct MeterBatch {
   std::array<MeterEntry, kMaximumMeterEntries> entries{};
 };
 
+struct SpectrumFrame {
+  std::uint32_t graph_revision = 0;
+  std::uint32_t transport_epoch = 0;
+  std::uint64_t sequence = 0;
+  std::uint64_t node_id = 0;
+  std::uint32_t sample_rate_hz = 0;
+  std::uint32_t fft_size = 0;
+  std::uint32_t bin_count = 0;
+  std::array<float, kMaximumSpectrumBins> data{};
+};
+
 struct ScheduleProgress {
   std::uint32_t revision = 0;
   std::uint32_t epoch = 0;
@@ -415,10 +429,14 @@ class AudioHost {
   std::optional<WorkerNotification> WaitForWorkerNotification(const std::atomic<bool>* running);
   bool WaitForMeterBatch(const std::atomic<bool>* running);
   std::optional<MeterBatch> DrainMeterBatch();
+  bool SetSpectrumNode(std::uint64_t node_id);
+  bool WaitForSpectrumFrame(const std::atomic<bool>* running);
+  std::optional<SpectrumFrame> DrainSpectrumFrame();
   bool WaitForScheduleProgress(const std::atomic<bool>* running);
   std::optional<ScheduleProgress> DrainScheduleProgress();
   void WakeWorkerNotificationWait();
   void WakeMeterWait();
+  void WakeSpectrumWait();
   void WakeScheduleProgressWait();
   std::uint64_t recordingStatusRevision() const;
   std::uint64_t appliedUrgentSequence() const;

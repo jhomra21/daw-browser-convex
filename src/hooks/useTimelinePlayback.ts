@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
-import { canFallbackToRepitchStretch, LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
+import { canFallbackToRepitchStretch, LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type DeferredStretchWindow, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createNativePlaybackController } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
@@ -61,6 +61,8 @@ type TimelinePlaybackAudioEngine = Pick<
   | 'subscribeStretchRenderState'
 > & {
   getAudioContext?: () => AudioContext | null
+  getTrackSpectrum?: AudioEngine['getTrackSpectrum']
+  getMasterSpectrum?: AudioEngine['getMasterSpectrum']
   subscribeTrackStereoLevels?: AudioEngine['subscribeTrackStereoLevels']
   subscribeMasterStereoLevels?: AudioEngine['subscribeMasterStereoLevels']
 }
@@ -165,6 +167,38 @@ export function useTimelinePlayback(
     return () => {
       unsubscribeNative()
       unsubscribeBrowser()
+    }
+  }
+
+  const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
+    let browserFrame: number | undefined
+    let released = false
+    const sampleBrowser = () => {
+      if (released || nativePlayback.isPrepared()) return
+      try {
+        listener(targetId === "master"
+          ? audioEngine.getMasterSpectrum?.() ?? null
+          : audioEngine.getTrackSpectrum?.(targetId) ?? null)
+      } catch {
+        listener(null)
+      }
+      if (!released && !nativePlayback.isPrepared()) browserFrame = requestAnimationFrame(sampleBrowser)
+    }
+    const unsubscribeNative = nativePlayback.subscribeSpectrum(targetId, (frame) => {
+      if (released) return
+      if (nativePlayback.isPrepared() && frame) {
+        if (browserFrame !== undefined) cancelAnimationFrame(browserFrame)
+        browserFrame = undefined
+        listener(frame)
+        return
+      }
+      if (!nativePlayback.isPrepared()) sampleBrowser()
+    })
+    if (!nativePlayback.isPrepared()) sampleBrowser()
+    return () => {
+      released = true
+      unsubscribeNative()
+      if (browserFrame !== undefined) cancelAnimationFrame(browserFrame)
     }
   }
 
@@ -625,6 +659,7 @@ export function useTimelinePlayback(
     },
     subscribeTrackLevels,
     subscribeMasterLevels,
+    subscribeSpectrum,
     playheadSec,
     handlePlay,
     handlePause,

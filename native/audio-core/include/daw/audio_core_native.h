@@ -27,6 +27,7 @@ enum class NativeInstrumentEventType : std::uint32_t {
  * it must not allocate, lock, perform IPC, or invoke a plug-in SDK. */
 struct NativeGraphNodeRender {
   std::uint32_t graph_revision = 0;
+  std::uint32_t node_index = 0;
   std::uint64_t node_id = 0;
   std::uint32_t frame_count = 0;
   std::uint32_t channel_count = 0;

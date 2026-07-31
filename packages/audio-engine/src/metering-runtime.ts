@@ -6,6 +6,12 @@ import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 export type SpectrumFrame = {
   data: Float32Array
   sampleRate: number
+  graphRevision?: number
+  transportEpoch?: number
+  sequence?: bigint
+  nodeId?: bigint
+  fftSize?: number
+  binCount?: number
 }
 
 export type TrackStereoLevels = {
@@ -431,7 +437,12 @@ export function createMeteringRuntime(options: {
         spectrumOut.set(trackId, out)
       }
       for (let i = 0; i < tmp.length; i++) out[i] = tmp[i] / 255
-      const frame: SpectrumFrame = { data: out, sampleRate: ctx?.sampleRate ?? 44100 }
+      const frame: SpectrumFrame = {
+        data: out,
+        sampleRate: ctx?.sampleRate ?? 44100,
+        fftSize: analyser.fftSize,
+        binCount: analyser.frequencyBinCount,
+      }
       spectrumLast.set(trackId, frame)
       return frame
     },

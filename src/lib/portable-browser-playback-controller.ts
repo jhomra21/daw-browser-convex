@@ -3,12 +3,14 @@ import {
   type PortableWasmCapability,
   type PortableWasmBackendSelection,
   type PortableWasmPlaybackSession,
-  type PortableProjectSupport,
   WasmAudioWorkletBackend,
 } from "@daw-browser/audio-engine/wasm-audio-worklet-backend"
-import { projectPortableClipEvents } from "@daw-browser/audio-engine/portable-clip-projector"
-import type { AudioAssetRef, PlanarPcm } from "@daw-browser/audio-core-contract"
-import type { PreparedPortableSession, PortableAssetRegistryInput } from "@daw-browser/audio-engine/portable-session-compiler"
+import type { PlanarPcm } from "@daw-browser/audio-core-contract"
+import type {
+  PreparedPortableSession,
+  PortableAssetRegistryInput,
+  PortablePreparedQualification,
+} from "@daw-browser/audio-engine/portable-session-compiler"
 import { portableWasmProtocolVersion, type PortableWasmStatusMessage } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
@@ -93,39 +95,6 @@ const preparedSession = (
   rangeEndSec: snapshot.transport.playheadSec + portableScheduleHorizonSec,
 })
 
-const projectSupport = (session: Extract<PreparedPortableSession, { supported: true }>): PortableProjectSupport => ({
-  processorKinds: session.graph.nodes.flatMap((node) => node.processorOrder.map((processor) => processor.kind)),
-  trackCount: session.graph.nodes.length,
-  hasClips: session.graph.assets.length > 0,
-  hasRouting: session.graph.edges.length > 0,
-  hasAutomation: session.schedule.events.length > 0,
-  hasExternalPlugins: false,
-  sampleRateHz: session.schedule.sampleRateHz,
-  inputBusCount: 1,
-  channelCount: 2,
-  hasSynthMidi: session.schedule.events.some((event) => event.type === "note-on" || event.type === "note-off"),
-})
-
-const assertPortablePlaybackComplete = (
-  session: Extract<PreparedPortableSession, { supported: true }>,
-  snapshot: LivePlaybackSnapshot,
-  epoch: number,
-) => {
-  const assets = new Map<string, AudioAssetRef>(session.graph.assets.map((asset) => [asset.assetId, asset]))
-  const sources = projectPortableClipEvents({
-    tracks: snapshot.tracks.filter((track) => track.kind !== "instrument"),
-    assets,
-    bpm: snapshot.bpm,
-    sampleRateHz: session.schedule.sampleRateHz,
-    rangeStartSec: snapshot.transport.playheadSec,
-    rangeEndSec: snapshot.transport.playheadSec + portableScheduleHorizonSec,
-    epoch,
-    firstSequence: 1,
-  })
-  if (!sources.supported) throw new Error(sources.reasons.join(" "))
-  return sources.events
-}
-
 type PortableRecordingSession = {
   numericSessionId: number
   source: MediaStreamAudioSourceNode
@@ -155,7 +124,7 @@ export const createPortableBrowserPlaybackController = (input: {
   getProjectGeneration?: () => number
   reportFault?: (message: string) => void
   backend?: PortableBackend
-  select?: (project: PortableProjectSupport) => Promise<PortableWasmBackendSelection>
+  select?: (project: PortablePreparedQualification) => Promise<PortableWasmBackendSelection>
   createRecordingWriter?: typeof createPortableRecordingWriter
 }) => {
   const backend = input.backend ?? new WasmAudioWorkletBackend()
@@ -251,10 +220,9 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!compilation.supported || compilation.snapshot.transport.loopEnabled) return "unavailable"
       const prepared = preparedSession(compilation.snapshot, context.sampleRate, nextEpoch)
       if (!prepared.supported) return "unavailable"
-      const selection = await select(projectSupport(prepared))
+      const selection = await select(prepared.qualification)
       if (cancelled()) return "unavailable"
       if (!selection.selected) return "unavailable"
-      const sourceEvents = assertPortablePlaybackComplete(prepared, compilation.snapshot, nextEpoch)
       const playbackSession = await backend.createPlaybackSession(context, selection.capability, 8_192)
       session = playbackSession
       if (cancelled()) {
@@ -291,7 +259,7 @@ export const createPortableBrowserPlaybackController = (input: {
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       await playbackSession.installSchedule(prepared.schedule)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
-      await playbackSession.scheduleSources(prepared.graph.revision, nextEpoch, sourceEvents)
+      await playbackSession.scheduleSources(prepared.graph.revision, nextEpoch, prepared.sources)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       await playbackSession.setTransport(nextEpoch, true, prepared.schedule.timeOrigin.frame)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")

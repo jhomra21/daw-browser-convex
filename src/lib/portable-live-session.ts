@@ -50,10 +50,13 @@ export const compilePreparedPortableLiveSession = (
   mixer: snapshot.mixer.graph,
   fx: snapshot.mixer.fx,
   automationEnvelopes: snapshot.mixer.automationEnvelopes,
+  tracks: snapshot.tracks,
   assetRegistry: input.assetRegistry,
   revision: snapshot.revision,
   sampleRateHz: input.sampleRateHz,
   bpm: snapshot.bpm,
   sidechainRoutes: snapshot.mixer.sidechainRoutes,
+  sourceRangeEndSec: input.rangeEndSec,
+  sourceFirstSequence: 1,
   schedule: compilePortableLiveFrameSchedule(snapshot, input),
 })

@@ -27,18 +27,24 @@ import {
   portableWasmMaxAssets,
   portableWasmMaxGraphEdges,
   portableWasmMaxGraphNodes,
+  portableWasmMaxPendingEvents,
   parsePortableWasmControlMessage,
 } from './portable-wasm-protocol'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import type { ExportFx } from './export-types'
 import { createPortableGraphSnapshot } from './mixer/graph-contract'
 import type { ResolvedMixerGraph } from './mixer/types'
-import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
+import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import {
   assertPortableFrameSchedule,
   type PortableFrameSchedule,
   type PortableFrameScheduleEvent,
 } from './portable-frame-scheduling'
+import {
+  projectPortableClipEvents,
+  type PortableProjectedSourceEvent,
+} from './portable-clip-projector'
+import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
 export type PortableSynthConfiguration = {
   nodeId: string
@@ -477,13 +483,15 @@ export type PreparedPortableSession =
     supported: true
     graph: AudioCoreGraphSnapshot
     schedule: PortableFrameSchedule
-    assets: readonly PortableAssetRegistryEntry[]
+    assets: readonly AudioAssetRef[]
+    sources: readonly PreparedPortableSource[]
     instruments: readonly (
       | PortableSynthConfiguration
       | PortableSamplerConfiguration
       | PortableDrumRackConfiguration
       | PortableGranularConfiguration
     )[]
+    qualification: PortablePreparedQualification
   }
   | {
     supported: false
@@ -491,15 +499,36 @@ export type PreparedPortableSession =
   }
 
 export type PreparedPortableSessionInput = PortableSessionCompilerInput & {
+  tracks: readonly Track[]
   revision: number
   sampleRateHz: number
   bpm: number
   sidechainRoutes: readonly ExternalSidechainRoute[]
   schedule: PortableFrameSchedule
   assetRegistry: PortableAssetRegistryInput
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset>
+  sourceRangeEndSec: number
+  sourceFirstSequence: number
 }
 
 type PortableInstrumentConfiguration = Exclude<PreparedPortableSession, { supported: false }>['instruments'][number]
+
+export type PreparedPortableSource = PortableProjectedSourceEvent & {
+  sourceIdentity: string
+}
+
+export type PortablePreparedQualification = {
+  processorKinds: readonly string[]
+  trackCount: number
+  hasClips: boolean
+  hasRouting: boolean
+  hasAutomation: boolean
+  hasExternalPlugins: boolean
+  sampleRateHz: number
+  inputBusCount: number
+  channelCount: number
+  hasSynthMidi: boolean
+}
 
 const assetRefs = (assets: readonly PortableAssetRegistryEntry[]): AudioAssetRef[] => assets.map((asset) => ({
   version: audioCoreContractVersion,
@@ -637,6 +666,116 @@ const capabilityReasons = (
   return reasons
 }
 
+const sourceFrameRange = (schedule: PortableFrameSchedule, rangeEndSec: number) => ({
+  start: schedule.timeOrigin.frame,
+  end: schedule.timeOrigin.frame + Math.round((rangeEndSec - schedule.timeOrigin.timelineSec) * schedule.sampleRateHz),
+})
+
+const prepareSources = (
+  input: PreparedPortableSessionInput,
+  assets: readonly AudioAssetRef[],
+  graph: AudioCoreGraphSnapshot,
+): { sources?: readonly PreparedPortableSource[]; reasons: readonly string[] } => {
+  if (!positiveSafeInteger(input.sourceFirstSequence)) {
+    return { reasons: ['Portable source event sequence namespace is invalid.'] }
+  }
+  if (!Number.isFinite(input.sourceRangeEndSec) || input.sourceRangeEndSec <= input.schedule.timeOrigin.timelineSec) {
+    return { reasons: ['Portable source scheduling range is invalid.'] }
+  }
+  const projection = projectPortableClipEvents({
+    tracks: input.tracks,
+    assets: new Map<string, AudioAssetRef>(
+      input.assetRegistry.assets.map((asset) => [asset.projectAssetId, {
+        version: audioCoreContractVersion,
+        assetId: asset.portableAssetId,
+        frameCount: asset.decoded.frameCount,
+        sampleRateHz: asset.decoded.sampleRateHz,
+        channelCount: asset.decoded.channelCount,
+      }]),
+    ),
+    preparedStretchAssets: input.preparedStretchAssets,
+    projectGeneration: input.assetRegistry.projectGeneration,
+    bpm: input.bpm,
+    sampleRateHz: input.sampleRateHz,
+    rangeStartSec: input.schedule.timeOrigin.timelineSec,
+    rangeEndSec: input.sourceRangeEndSec,
+    epoch: input.schedule.transportEpoch,
+    firstSequence: input.sourceFirstSequence,
+    includeStableIdentity: true,
+    allowInstruments: true,
+  })
+  if (!projection.supported) return { reasons: [...projection.reasons] }
+  const frameRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)
+  if (!Number.isSafeInteger(frameRange.end) || frameRange.end <= frameRange.start) {
+    return { reasons: ['Portable source scheduling range resolves to invalid frames.'] }
+  }
+  const assetById = new Map(assets.map((asset) => [asset.assetId, asset]))
+  const identities = new Set<string>()
+  const ordered = [...projection.events].sort((left, right) => (
+    // Source ordering is canonical: timeline start frame, then the
+    // project-domain track/clip identity. Source sequences are assigned only
+    // after this ordering and never share the frame-schedule namespace.
+    left.startFrame - right.startFrame
+    || (left.sourceIdentity ?? '').localeCompare(right.sourceIdentity ?? '')
+  ))
+  if (ordered.length > 0
+    && !Number.isSafeInteger(input.sourceFirstSequence + ordered.length - 1)) {
+    return { reasons: ['Portable source event sequence namespace exceeds its safe integer range.'] }
+  }
+  const reasons: string[] = []
+  const sources: PreparedPortableSource[] = []
+  for (let index = 0; index < ordered.length; index += 1) {
+    const event = ordered[index]
+    if (!event) continue
+    const identity = event.sourceIdentity
+    if (!identity) {
+      reasons.push('Portable source event is missing its stable identity.')
+      continue
+    }
+    if (identities.has(identity)) {
+      reasons.push(`${identity}: duplicate portable source identity.`)
+      continue
+    }
+    identities.add(identity)
+    const asset = assetById.get(event.assetId)
+    if (!asset) {
+      reasons.push(`${identity}: portable source asset "${event.assetId}" is absent from the asset manifest.`)
+      continue
+    }
+    const sourceNode = graph.nodes.find((node) => node.id === event.sourceNodeId)
+    if (!sourceNode || sourceNode.kind !== 'source') {
+      reasons.push(`${identity}: portable source target "${event.sourceNodeId}" is absent from the graph snapshot.`)
+      continue
+    }
+    if (event.epoch !== input.schedule.transportEpoch
+      || asset.sampleRateHz !== input.sampleRateHz
+      || event.startFrame < frameRange.start
+      || event.stopFrame <= event.startFrame
+      || event.stopFrame > frameRange.end
+      || event.sourceOffsetFrame < 0
+      || event.sourceFrameCount <= 0
+      || event.sourceOffsetFrame + event.sourceFrameCount > asset.frameCount
+      || event.fadeInStartFrame > event.fadeInEndFrame
+      || event.fadeOutStartFrame > event.fadeOutEndFrame
+      || !Number.isSafeInteger(event.fadeInStartFrame)
+      || !Number.isSafeInteger(event.fadeInEndFrame)
+      || !Number.isSafeInteger(event.fadeOutStartFrame)
+      || !Number.isSafeInteger(event.fadeOutEndFrame)) {
+      reasons.push(`${identity}: portable source event bounds or epoch are invalid.`)
+      continue
+    }
+    sources.push({
+      ...event,
+      sourceIdentity: identity,
+      sequence: input.sourceFirstSequence + index,
+    })
+  }
+  if (sources.length > portableWasmMaxPendingEvents) {
+    reasons.push(`Portable source schedule exceeds the ${portableWasmMaxPendingEvents}-event capacity.`)
+  }
+  return reasons.length > 0 ? { reasons } : { sources, reasons: [] }
+}
+
 /**
  * Produces the single immutable session payload that a future portable
  * runtime can prepare atomically. Routing stays wholly inside the canonical
@@ -657,7 +796,12 @@ export const compilePreparedPortableSession = (
   }
   const compilation = compilePortableSessionInput(input)
   if (compilation.unsupportedInstruments.length > 0) return unsupported(compilation.unsupportedInstruments)
-  const assets = compilation.portableAssets
+  const assets = [
+    ...assetRefs(compilation.portableAssets),
+    ...(input.preparedStretchAssets
+      ? [...input.preparedStretchAssets.values()].map((asset) => asset.asset)
+      : []),
+  ]
   let graph: AudioCoreGraphSnapshot
   try {
     graph = createPortableGraphSnapshot({
@@ -665,7 +809,7 @@ export const compilePreparedPortableSession = (
       revision: input.revision,
       sampleRate: input.sampleRateHz,
       bpm: input.bpm,
-      assets: assetRefs(assets),
+      assets,
       sidechainRoutes: input.sidechainRoutes,
     })
   } catch (error) {
@@ -675,6 +819,8 @@ export const compilePreparedPortableSession = (
   const withInstruments = graphWithInstruments(graph, instruments)
   if (!withInstruments.graph) return unsupported(withInstruments.reasons)
   graph = withInstruments.graph
+  const sourceCompilation = prepareSources(input, assets, graph)
+  if (!sourceCompilation.sources) return unsupported(sourceCompilation.reasons)
   const reasons = capabilityReasons(graph, input.schedule)
   if (reasons.length > 0) return unsupported(reasons)
   if (parsePortableWasmControlMessage({
@@ -685,5 +831,25 @@ export const compilePreparedPortableSession = (
   }) === null) {
     return unsupported(['Portable graph snapshot does not satisfy the portable protocol.'])
   }
-  return { supported: true, graph, schedule: input.schedule, assets, instruments }
+  const qualification: PortablePreparedQualification = {
+    processorKinds: graph.nodes.flatMap((node) => node.processorOrder.map((processor) => processor.kind)),
+    trackCount: graph.nodes.length,
+    hasClips: graph.assets.length > 0,
+    hasRouting: graph.edges.length > 0,
+    hasAutomation: input.schedule.events.length > 0,
+    hasExternalPlugins: false,
+    sampleRateHz: input.schedule.sampleRateHz,
+    inputBusCount: 1,
+    channelCount: 2,
+    hasSynthMidi: input.schedule.events.some((event) => event.type === 'note-on' || event.type === 'note-off'),
+  }
+  return {
+    supported: true,
+    graph,
+    schedule: input.schedule,
+    assets,
+    sources: sourceCompilation.sources,
+    instruments,
+    qualification,
+  }
 }

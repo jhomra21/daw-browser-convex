@@ -28,6 +28,7 @@ import {
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import type { Track } from '@daw-browser/timeline-core/types'
 
 const assets: PortableAssetRegistryInput = {
   projectGeneration: 7,
@@ -275,6 +276,7 @@ const portableSessionInput = (): PreparedPortableSessionInput => {
   const firstPad = drumDefaults.pads[0]
   if (!firstPad) throw new Error('Expected default drum pad.')
   return {
+    tracks: [],
     mixer,
     fx: {
       masterFxInstances: [],
@@ -288,6 +290,8 @@ const portableSessionInput = (): PreparedPortableSessionInput => {
     },
     automationEnvelopes: [],
     assetRegistry: assets,
+    sourceRangeEndSec: 1,
+    sourceFirstSequence: 1,
     revision: 9,
     sampleRateHz: 48_000,
     bpm: 120,
@@ -310,6 +314,159 @@ const portableSessionInput = (): PreparedPortableSessionInput => {
     },
   }
 }
+
+const sourceTrack = (clipId = 'clip-a'): Track => ({
+  id: 'audio',
+  kind: 'audio',
+  name: 'Audio',
+  volume: 1,
+  clips: [{
+    id: clipId,
+    name: clipId,
+    color: '#fff',
+    startSec: 2,
+    duration: 1,
+    sourceAssetKey: 'kick',
+    bufferOffsetSec: 0,
+    gain: 0.5,
+    fades: { fadeInSec: 0, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 },
+  }],
+})
+
+const sourceSessionInput = (tracks: readonly Track[] = [sourceTrack()]): PreparedPortableSessionInput => {
+  const base = portableSessionInput()
+  return {
+    ...base,
+    tracks,
+    mixer: resolveMixerGraph({
+      channels: createMixerChannels([
+        ...base.mixer.channels.map((entry) => ({
+          id: entry.channel.id,
+          name: entry.channel.name,
+          volume: entry.channel.volume,
+          clips: [],
+          kind: entry.channel.kind,
+          channelRole: entry.channel.role === 'master' ? undefined : entry.channel.role,
+          outputTargetId: entry.channel.outputTargetId,
+          sends: entry.channel.sends,
+          muted: entry.channel.muted,
+          soloed: entry.channel.soloed,
+        })),
+        { id: 'audio', kind: 'audio', name: 'Audio', volume: 1, clips: [] },
+      ]),
+      trackFx: base.fx.trackFx,
+    }),
+    schedule: { ...base.schedule, events: [] },
+    sourceRangeEndSec: 10,
+    sourceFirstSequence: 1,
+  }
+}
+
+test('canonicalizes source identity and ordering independently of mixer state', () => {
+  const baseline = compilePreparedPortableSession(sourceSessionInput([
+    sourceTrack('clip-b'),
+    { ...sourceTrack('clip-a'), clips: [{ ...sourceTrack('clip-a').clips[0]!, startSec: 1 }] },
+  ]))
+  const changedMixer = sourceSessionInput([
+    sourceTrack('clip-b'),
+    { ...sourceTrack('clip-a'), clips: [{ ...sourceTrack('clip-a').clips[0]!, startSec: 1 }] },
+  ])
+  changedMixer.mixer = resolveMixerGraph({
+    channels: changedMixer.mixer.channels.map((entry) => ({
+      ...entry.channel,
+      volume: entry.channel.id === 'audio' ? 0.2 : 0.9,
+      muted: entry.channel.id === 'audio',
+      soloed: true,
+      outputTargetId: entry.channel.id === 'audio' ? 'group' : undefined,
+      sends: entry.channel.id === 'audio' ? [{ targetId: 'return', amount: 0.5 }] : [],
+    })),
+    trackFx: changedMixer.fx.trackFx,
+  })
+  const mixed = compilePreparedPortableSession(changedMixer)
+  expect(baseline.supported).toBe(true)
+  expect(mixed.supported).toBe(true)
+  if (!baseline.supported || !mixed.supported) throw new Error('Expected source sessions to be supported.')
+  expect(mixed.sources).toEqual(baseline.sources)
+  expect(mixed.sources.map((source) => source.sourceIdentity)).toEqual([
+    'source:5:audio:6:clip-a',
+    'source:5:audio:6:clip-b',
+  ])
+  expect(mixed.sources.map((source) => source.sequence)).toEqual([1, 2])
+})
+
+test('rejects duplicate source identities, missing source targets, and missing assets', () => {
+  const duplicate = compilePreparedPortableSession(sourceSessionInput([
+    sourceTrack('clip-a'),
+    sourceTrack('clip-a'),
+  ]))
+  expect(duplicate).toMatchObject({ supported: false })
+  if (duplicate.supported) throw new Error('Expected duplicate source identity rejection.')
+  expect(duplicate.reasons).toContain('source:5:audio:6:clip-a: duplicate portable source identity.')
+
+  const missingTarget = compilePreparedPortableSession({
+    ...sourceSessionInput(),
+    tracks: [{ ...sourceTrack(), id: 'missing' }],
+  })
+  expect(missingTarget).toMatchObject({ supported: false })
+  if (missingTarget.supported) throw new Error('Expected missing graph target rejection.')
+  expect(missingTarget.reasons).toContain('source:7:missing:6:clip-a: portable source target "missing" is absent from the graph snapshot.')
+
+  const missingAsset = compilePreparedPortableSession({
+    ...sourceSessionInput(),
+    tracks: [{ ...sourceTrack(), clips: [{ ...sourceTrack().clips[0]!, sourceAssetKey: 'missing' }] }],
+  })
+  expect(missingAsset).toMatchObject({ supported: false })
+  if (missingAsset.supported) throw new Error('Expected missing source asset rejection.')
+  expect(missingAsset.reasons).toContain('clip-a: source asset is not registered.')
+})
+
+test('projects nonzero playhead windows and adjacent windows without losing source coverage', () => {
+  const whole = compilePreparedPortableSession({
+    ...sourceSessionInput(),
+    sourceRangeEndSec: 3,
+  })
+  const first = compilePreparedPortableSession({
+    ...sourceSessionInput(),
+    schedule: {
+      ...sourceSessionInput().schedule,
+      timeOrigin: { timelineSec: 0, frame: 0 },
+    },
+    sourceRangeEndSec: 2.5,
+  })
+  const second = compilePreparedPortableSession({
+    ...sourceSessionInput(),
+    schedule: {
+      ...sourceSessionInput().schedule,
+      timeOrigin: { timelineSec: 2.5, frame: 120_000 },
+    },
+    sourceRangeEndSec: 3,
+  })
+  expect(whole.supported).toBe(true)
+  expect(first.supported).toBe(true)
+  expect(second.supported).toBe(true)
+  if (!whole.supported || !first.supported || !second.supported) throw new Error('Expected source windows to be supported.')
+  expect(second.sources[0]).toMatchObject({
+    startFrame: 120_000,
+    sourceOffsetFrame: 24_000,
+  })
+  const wholeSource = whole.sources[0]
+  const firstSource = first.sources[0]
+  const secondSource = second.sources[0]
+  if (!wholeSource || !firstSource || !secondSource) throw new Error('Expected projected source windows.')
+  expect({
+    identity: [firstSource.sourceIdentity, secondSource.sourceIdentity],
+    startFrame: firstSource.startFrame,
+    stopFrame: secondSource.stopFrame,
+    sourceOffsetFrame: firstSource.sourceOffsetFrame,
+    sourceFrameCount: firstSource.sourceFrameCount + secondSource.sourceFrameCount,
+  }).toEqual({
+    identity: [wholeSource.sourceIdentity, wholeSource.sourceIdentity],
+    startFrame: wholeSource.startFrame,
+    stopFrame: wholeSource.stopFrame,
+    sourceOffsetFrame: wholeSource.sourceOffsetFrame,
+    sourceFrameCount: wholeSource.sourceFrameCount,
+  })
+})
 
 test('atomically assembles a deterministic fixture-proven portable live session', () => {
   const input = portableSessionInput()

@@ -183,6 +183,48 @@ test('installs an acknowledged MIDI schedule before starting portable output onc
   expect(controller.isActive()).toBe(true)
 })
 
+test('rejects unsupported prepared sources before creating or activating a worklet session', async () => {
+  const calls: string[] = []
+  let createdSessions = 0
+  const unsupportedSource: RuntimeTrack = {
+    id: 'audio',
+    kind: 'audio',
+    name: 'Audio',
+    volume: 1,
+    clips: [{
+      id: 'missing-source',
+      name: 'Missing source',
+      color: '#fff',
+      startSec: 0,
+      duration: 1,
+      sourceAssetKey: 'missing',
+    }],
+  }
+  const sourceCompilation = compilation()
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async () => ({
+      ...sourceCompilation,
+      snapshot: {
+        ...sourceCompilation.snapshot,
+        tracks: [unsupportedSource],
+      },
+    }),
+    getAudioContext: () => context,
+    backend: {
+      createPlaybackSession: async () => {
+        createdSessions += 1
+        return createSession(calls, async () => undefined)
+      },
+    },
+    select: async () => selected,
+  })
+
+  expect(await controller.start(sourceCompilation.snapshot.transport)).toBe('unavailable')
+  expect(createdSessions).toBe(0)
+  expect(calls).toEqual([])
+  expect(controller.isActive()).toBeFalse()
+})
+
 test('shares one in-flight portable playback startup across concurrent callers', async () => {
   const calls: string[] = []
   const compile = Promise.withResolvers<ReturnType<typeof compilation>>()

@@ -24,10 +24,15 @@ export type PortableClipProject = {
   epoch: number
   firstSequence: number
   allowInstruments?: boolean
+  includeStableIdentity?: boolean
+}
+
+export type PortableProjectedSourceEvent = AudioCoreSampleSourceEventDto & {
+  sourceIdentity?: string
 }
 
 export type PortableClipProjection =
-  | { supported: true; events: readonly AudioCoreSampleSourceEventDto[] }
+  | { supported: true; events: readonly PortableProjectedSourceEvent[] }
   | {
     supported: false
     reasons: readonly string[]
@@ -59,7 +64,7 @@ const projectClip = (
   sequence: number,
   sourceNodeId: string,
 ): {
-  event: AudioCoreSampleSourceEventDto
+  event: PortableProjectedSourceEvent
 } | {
   reason: string
   diagnostic?: PortableStretchDiagnostic
@@ -164,6 +169,9 @@ const projectClip = (
       epoch: input.epoch,
       sequence,
       sourceNodeId,
+      ...(input.includeStableIdentity
+        ? { sourceIdentity: stableSourceIdentity(sourceNodeId, clip.id) }
+        : {}),
       assetId: asset.assetId,
       startFrame,
       stopFrame,
@@ -177,6 +185,9 @@ const projectClip = (
     },
   }
 }
+
+export const stableSourceIdentity = (trackId: string, clipId: string) =>
+  `source:${trackId.length}:${trackId}:${clipId.length}:${clipId}`
 
 export const projectPortableClipEvents = (input: PortableClipProject): PortableClipProjection => {
   if (!finitePositiveInteger(input.sampleRateHz)) return unsupported(['The portable sample rate is invalid.'])

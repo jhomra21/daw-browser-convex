@@ -18,6 +18,7 @@ export const portableWasmCapabilityMatrix = Object.freeze({
     'compressor',
     'limiter',
     'delay',
+    'spectral',
   ]),
   sidechains: true,
   synthMidi: true,

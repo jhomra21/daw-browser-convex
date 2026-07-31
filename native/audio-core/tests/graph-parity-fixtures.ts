@@ -93,9 +93,7 @@ export type PortableGraphParityFixture = {
   legacySpectral?: PortableLegacySpectralFixture
   legacyTolerance?: number
   legacyDifferenceMinimum?: number
-  legacyStateRestoreDifferenceMinimum?: number
   stateRestoreDirtyInput?: Float32Array
-  legacyExpectedNonfinite?: boolean
   knownGapIds?: readonly string[]
   characterizationPairKey?: string
   characterizationPairDifferenceMinimum?: number
@@ -104,7 +102,6 @@ export type PortableGraphParityFixture = {
   portableUnsupportedReason?:
     | 'legacy-delay-filter-response-mismatch'
     | 'legacy-convolver-response-mismatch'
-    | 'legacy-spectral-state-restore-and-nonfinite-mismatch'
   assertOutput: (output: readonly Float32Array[]) => boolean
 }
 
@@ -1916,6 +1913,8 @@ const spectralFixture = (
     inputBusCount?: 1 | 2
     maxFramesPerBlock?: number
     blockPartitions?: readonly number[]
+    parameters?: Uint8Array
+    mixValues?: Float32Array
     assertReset?: boolean
     bypassed?: boolean
   } = {},
@@ -1934,18 +1933,18 @@ const spectralFixture = (
     frames,
     blockPartitions: options.blockPartitions,
     input,
+    parameters: options.parameters,
     assertReset: options.assertReset,
     expectedLatencyFrames: state.fftSize,
     expectedTailFrames: 0,
     // A 512-point FFT accumulates native-libm versus Wasm-libm rounding across
     // nine butterfly stages; this remains below one ten-thousandth full scale.
     nativeWasmTolerance: 1e-4,
-    legacySpectral: { kind: 'spectral', state },
+    legacySpectral: { kind: 'spectral', state, mixValues: options.mixValues },
     // The shipped worklet computes FFT state in Float64Array while the portable
     // core stores it as float; keep the bound below five ten-thousandths FS.
     legacyTolerance: 5e-4,
-    portableEligible: false,
-    portableUnsupportedReason: 'legacy-spectral-state-restore-and-nonfinite-mismatch',
+    portableEligible: true,
     assertOutput: (output) => finite(output) && changedFromInput(output, input.subarray(0, frames * 2), 1e-5),
   }
 }
@@ -1968,7 +1967,28 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       },
     )
     fixture.stateRestoreDirtyInput = new Float32Array(fixture.input.length)
-    fixture.legacyStateRestoreDifferenceMinimum = 1e-3
+    fixture.assertOutput = (output) => finite(output)
+      && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0))
+      && output.some((plane) => plane.slice(512).some((sample) => Math.abs(sample) > 1e-6))
+    return fixture
+  })(),
+  (() => {
+    const frames = 1_024
+    const left = Array.from({ length: frames }, () => 0)
+    const right = Array.from({ length: frames }, () => 0)
+    left[127] = 1
+    right[127] = -0.5
+    const fixture = spectralFixture(
+      'latency-impulse-44100',
+      'sampleRates',
+      44_100,
+      stereo(left, right),
+      spectralState({ mode: 'shift-blur', binShift: 1, blur: 0.25 }),
+      { maxFramesPerBlock: 256, blockPartitions: [1, 7, 64, 128, 256, 256, 256, 56] },
+    )
+    fixture.assertOutput = (output) => finite(output)
+      && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0))
+      && output.some((plane) => plane.slice(512).some((sample) => Math.abs(sample) > 1e-6))
     return fixture
   })(),
   spectralFixture(
@@ -2001,6 +2021,29 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     spectralState({ mode: 'shift-blur', binShift: 2.5, blur: 0.35 }),
     { maxFramesPerBlock: 960, blockPartitions: [1, 63, 128, 288, 480, 960, 128] },
   ),
+  (() => {
+    const state = spectralState({ fftSize: 4_096, overlap: 2, mode: 'shift-blur', binShift: 1.5, blur: 0.25 })
+    const frames = 8_192
+    const left = Array.from({ length: frames }, () => 0)
+    const right = Array.from({ length: frames }, () => 0)
+    left[127] = 1
+    right[127] = -0.5
+    const fixture = spectralFixture(
+      'fft4096-overlap2-exact-latency-96000',
+      'sampleRates',
+      96_000,
+      stereo(left, right),
+      state,
+      {
+        maxFramesPerBlock: 1_024,
+        blockPartitions: [1, 63, 128, 512, 1_024, 1_024, 1_024, 1_024, 1_024, 1_024, 1_024, 320],
+      },
+    )
+    fixture.assertOutput = (output) => finite(output)
+      && output.every((plane) => plane.slice(0, state.fftSize).every((sample) => sample === 0))
+      && output.some((plane) => plane.slice(state.fftSize).some((sample) => Math.abs(sample) > 1e-6))
+    return fixture
+  })(),
   spectralFixture(
     'hpss-seeded-noise',
     'chains',
@@ -2036,6 +2079,36 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     return fixture
   })(),
   (() => {
+    const frames = 1_024
+    const mixValues = Float32Array.from({ length: frames }, (_, frame) => frame < frames / 2 ? 0 : 1)
+    return spectralFixture(
+      'mix-automation-48000',
+      'fullBlockAutomation',
+      48_000,
+      stereo(sine(frames, 997, 48_000), sine(frames, 1_993, 48_000, 0.25)),
+      spectralState({ mode: 'shift-blur', binShift: 2.5, blur: 0.35 }),
+      {
+        maxFramesPerBlock: frames,
+        parameters: parameterEnvelopeForTarget(25, [...mixValues]),
+        mixValues,
+      },
+    )
+  })(),
+  (() => {
+    const fixture = spectralFixture(
+      'stereo-isolation-48000',
+      'chains',
+      48_000,
+      stereo(sine(1_024, 997, 48_000), Array.from({ length: 1_024 }, () => 0)),
+      spectralState({ mode: 'shift-blur', binShift: 1.5, blur: 0.25 }),
+      { maxFramesPerBlock: 512, blockPartitions: [1, 31, 127, 512, 353] },
+    )
+    fixture.assertOutput = (output) => finite(output)
+      && output[1]?.every((sample) => sample === 0) === true
+      && changedFromInput(output, fixture.input, 1e-5)
+    return fixture
+  })(),
+  (() => {
     const fixture = spectralFixture(
       'nonfinite',
       'nonfinite',
@@ -2047,7 +2120,6 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       spectralState({ mode: 'shift-blur', binShift: 1, blur: 0.25 }),
     )
     fixture.assertOutput = finite
-    fixture.legacyExpectedNonfinite = true
     return fixture
   })(),
 ]

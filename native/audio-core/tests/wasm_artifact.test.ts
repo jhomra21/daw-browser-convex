@@ -980,22 +980,16 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       }
       if (fixture.legacySpectral) {
         const legacyOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral)
-        if (fixture.legacyExpectedNonfinite) {
-          if (legacyOutput.every((plane) => plane.every(Number.isFinite))) {
-            throw new Error(`${fixture.name} did not prove the expected legacy non-finite output mismatch.`)
-          }
-        } else {
-          const legacyDifference = maximumDifference(output, legacyOutput)
-          const legacyTolerance = fixture.legacyTolerance ?? 5e-4
-          if (legacyDifference > legacyTolerance) {
-            throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
-          }
+        const legacyDifference = maximumDifference(output, legacyOutput)
+        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        if (legacyDifference > legacyTolerance) {
+          throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
-        if (fixture.legacyStateRestoreDifferenceMinimum !== undefined) {
+        if (fixture.stateRestoreDirtyInput) {
           const stateRestoreOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral, true)
           const stateRestoreDifference = maximumDifference(output, stateRestoreOutput)
-          if (stateRestoreDifference < fixture.legacyStateRestoreDifferenceMinimum) {
-            throw new Error(`${fixture.name} portable/legacy state-restore difference ${stateRestoreDifference} did not prove the expected mismatch ${fixture.legacyStateRestoreDifferenceMinimum}.`)
+          if (stateRestoreDifference > legacyTolerance) {
+            throw new Error(`${fixture.name} portable/legacy state-restore difference ${stateRestoreDifference} exceeded ${legacyTolerance}.`)
           }
         }
       }
@@ -1108,7 +1102,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   expect(portableWasmCapabilityMatrix.nonfiniteInputSanitization && capabilities.has('nonfinite')).toBe(true)
   expect(portableWasmCapabilityMatrix.processorKinds.every((kind) => processorKinds.has(kind))).toBe(true)
   expect(portableGraphParityFixtures
-    .filter((fixture) => fixture.processorKind === 'reverb' || fixture.processorKind === 'spectral')
+    .filter((fixture) => fixture.processorKind === 'reverb')
     .every((fixture) => fixture.portableUnsupportedReason !== undefined)).toBe(true)
   const reverbFixtures = portableGraphParityFixtures.filter((fixture) => fixture.processorKind === 'reverb')
   expect(reverbFixtures.length).toBeGreaterThan(0)

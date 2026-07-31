@@ -2488,6 +2488,15 @@ float spectral_parameter(
   return processor_parameter_value(core, processor, target, frame, fallback);
 }
 
+float spectral_transform_parameter(
+  const Core &core, const GraphRevision::Processor &processor, uint32_t target, uint32_t frame, float fallback) {
+  const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[processor.history_slot];
+  const uint32_t parameter_frame = parameters != nullptr && parameters->frame_count > 1
+    ? parameters->frame_count - 1
+    : frame;
+  return processor_parameter_value(core, processor, target, parameter_frame, fallback);
+}
+
 void spectral_fft(std::array<float, kMaximumSpectralFftSize> &real,
                   std::array<float, kMaximumSpectralFftSize> &imaginary,
                   uint32_t size, bool inverse) {
@@ -2559,16 +2568,16 @@ void transform_spectrum(
   auto &side_real = history.side_real[channel];
   auto &side_imaginary = history.side_imaginary[channel];
   const uint32_t bins = state.fft_size / 2 + 1;
-  const float freeze = spectral_parameter(core, processor, 15, frame, state.freeze);
-  const float threshold_db = spectral_parameter(core, processor, 16, frame, state.gate_threshold_db);
-  const float attack_ms = spectral_parameter(core, processor, 17, frame, state.gate_attack_ms);
-  const float release_ms = spectral_parameter(core, processor, 18, frame, state.gate_release_ms);
-  const float morph = spectral_parameter(core, processor, 19, frame, state.morph);
-  const float bin_shift = spectral_parameter(core, processor, 20, frame, state.bin_shift);
-  const float blur = spectral_parameter(core, processor, 21, frame, state.blur);
-  const float hpss_balance = spectral_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
-  const float noise_reduction = spectral_parameter(core, processor, 23, frame, state.noise_reduction);
-  const float profile_learn = spectral_parameter(core, processor, 24, frame, state.profile_learn);
+  const float freeze = spectral_transform_parameter(core, processor, 15, frame, state.freeze);
+  const float threshold_db = spectral_transform_parameter(core, processor, 16, frame, state.gate_threshold_db);
+  const float attack_ms = spectral_transform_parameter(core, processor, 17, frame, state.gate_attack_ms);
+  const float release_ms = spectral_transform_parameter(core, processor, 18, frame, state.gate_release_ms);
+  const float morph = spectral_transform_parameter(core, processor, 19, frame, state.morph);
+  const float bin_shift = spectral_transform_parameter(core, processor, 20, frame, state.bin_shift);
+  const float blur = spectral_transform_parameter(core, processor, 21, frame, state.blur);
+  const float hpss_balance = spectral_transform_parameter(core, processor, 22, frame, state.harmonic_percussive_balance);
+  const float noise_reduction = spectral_transform_parameter(core, processor, 23, frame, state.noise_reduction);
+  const float profile_learn = spectral_transform_parameter(core, processor, 24, frame, state.profile_learn);
   if (state.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
     if (freeze > 0.0F && !history.freeze_captured[channel]) {
       for (uint32_t bin = 0; bin < bins; ++bin) {
@@ -4570,8 +4579,7 @@ bool compatible_processor_history(
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
       return current.spectral.enabled == next.spectral.enabled
         && current.spectral.fft_size == next.spectral.fft_size
-        && current.spectral.overlap == next.spectral.overlap
-        && current.spectral.mode == next.spectral.mode;
+        && current.spectral.overlap == next.spectral.overlap;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
       return current.autofilter.enabled == next.autofilter.enabled
         && current.autofilter.mode == next.autofilter.mode

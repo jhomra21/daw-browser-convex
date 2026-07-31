@@ -1136,6 +1136,93 @@ void test_portable_spectral_processor_characterization_and_capacity() {
     assert(wet_peak > 1e-5F);
     daw_audio_core_destroy(core);
   }
+  {
+    daw_audio_core_handle lifecycle_core = create_core(1024, 2, 1);
+    std::array<daw_audio_graph_node_descriptor, 3> lifecycle_nodes = nodes;
+    std::array<daw_audio_graph_edge_descriptor, 2> lifecycle_edges{{edges[0], edges[1]}};
+    lifecycle_edges[1].target_processor_id = 71;
+    const std::array<uint32_t, 11> lifecycle_targets{{15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}};
+    std::array<uint8_t, 60> lifecycle_state{};
+    const auto write_lifecycle_state = [&](uint32_t mode, uint32_t enabled, uint32_t fft_size) {
+      lifecycle_state.fill(0);
+      write_u32(lifecycle_state, 0, enabled);
+      write_u32(lifecycle_state, 4, fft_size);
+      write_u32(lifecycle_state, 8, 4);
+      write_u32(lifecycle_state, 12, mode);
+      write_f32(lifecycle_state, 16, 1.0F);
+      write_f32(lifecycle_state, 20, -60.0F);
+      write_f32(lifecycle_state, 24, 1.0F);
+      write_f32(lifecycle_state, 28, 20.0F);
+      write_f32(lifecycle_state, 32, 1.0F);
+      write_f32(lifecycle_state, 36, 2.0F);
+      write_f32(lifecycle_state, 40, 0.5F);
+      write_f32(lifecycle_state, 44, 0.25F);
+      write_f32(lifecycle_state, 48, 0.5F);
+      write_f32(lifecycle_state, 52, 1.0F);
+      write_f32(lifecycle_state, 56, 1.0F);
+    };
+    const auto publish_lifecycle = [&](uint32_t revision, uint32_t mode, uint32_t enabled, uint32_t fft_size) {
+      lifecycle_nodes[2].latency_frames = fft_size;
+      write_lifecycle_state(mode, enabled, fft_size);
+      const daw_audio_processor_descriptor processor{
+        .node_id = 3, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 1,
+        .state_size = 60, .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .latency_frames = fft_size, .tail_frames = 0,
+        .parameter_count = static_cast<uint32_t>(lifecycle_targets.size()), .parameter_targets = lifecycle_targets.data(),
+        .state = lifecycle_state.data(),
+      };
+      const daw_audio_graph_prepare_request request{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = revision,
+        .node_count = static_cast<uint32_t>(lifecycle_nodes.size()), .edge_count = static_cast<uint32_t>(lifecycle_edges.size()),
+        .processor_count = 1, .nodes = lifecycle_nodes.data(), .edges = lifecycle_edges.data(), .processors = &processor,
+      };
+      expect(daw_audio_core_prepare_graph(lifecycle_core, &request), DAW_AUDIO_CORE_OK);
+      expect(daw_audio_core_publish(lifecycle_core, revision), DAW_AUDIO_CORE_OK);
+    };
+    std::array<float, 1024> program_left{};
+    std::array<float, 1024> program_right{};
+    std::array<float, 1024> side_left{};
+    std::array<float, 1024> side_right{};
+    std::array<float, 1024> output_left{};
+    std::array<float, 1024> output_right{};
+    const auto render_lifecycle = [&](uint32_t revision) {
+      output_left.fill(0.0F);
+      output_right.fill(0.0F);
+      const float *inputs[]{program_left.data(), program_right.data(), side_left.data(), side_right.data()};
+      float *outputs[]{output_left.data(), output_right.data()};
+      const daw_audio_core_process_block block{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 1024, .channel_count = 2,
+        .input_bus_count = 2, .inputs = inputs, .outputs = outputs, .graph_revision = revision,
+      };
+      expect(daw_audio_core_process(lifecycle_core, &block), DAW_AUDIO_CORE_OK);
+    };
+    const auto peak = [](const std::array<float, 1024> &values, uint32_t start) {
+      float result = 0.0F;
+      for (uint32_t frame = start; frame < values.size(); ++frame) result = std::fmax(result, std::abs(values[frame]));
+      return result;
+    };
+    program_left[128] = 1.0F;
+    program_right[128] = -0.5F;
+    publish_lifecycle(1, DAW_AUDIO_SPECTRAL_MODE_FREEZE, 1, 512);
+    render_lifecycle(1);
+    assert(peak(output_left, 512) > 1e-5F);
+    program_left.fill(0.0F);
+    program_right.fill(0.0F);
+    publish_lifecycle(2, DAW_AUDIO_SPECTRAL_MODE_GATE, 1, 512);
+    render_lifecycle(2);
+    publish_lifecycle(3, DAW_AUDIO_SPECTRAL_MODE_FREEZE, 1, 512);
+    render_lifecycle(3);
+    assert(peak(output_left, 512) > 1e-5F);
+    publish_lifecycle(4, DAW_AUDIO_SPECTRAL_MODE_FREEZE, 0, 512);
+    render_lifecycle(4);
+    publish_lifecycle(5, DAW_AUDIO_SPECTRAL_MODE_FREEZE, 1, 512);
+    render_lifecycle(5);
+    assert(peak(output_left, 512) == 0.0F);
+    publish_lifecycle(6, DAW_AUDIO_SPECTRAL_MODE_FREEZE, 1, 1024);
+    render_lifecycle(6);
+    assert(peak(output_left, 1024) == 0.0F);
+    daw_audio_core_destroy(lifecycle_core);
+  }
   daw_audio_core_handle capacity_core = create_core(64, 2, 1);
   std::array<daw_audio_graph_node_descriptor, 2> capacity_nodes{{nodes[0], nodes[2]}};
   capacity_nodes[1].latency_frames = 512 * 9;

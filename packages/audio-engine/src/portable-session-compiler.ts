@@ -347,8 +347,8 @@ export const compilePortableGranularConfiguration = (
 const waveform = (value: 'sine' | 'square' | 'sawtooth' | 'triangle'): 0 | 1 | 2 | 3 =>
   value === 'square' ? 1 : value === 'sawtooth' ? 2 : value === 'triangle' ? 3 : 0
 
-const filterMode = (value: 'lowpass' | 'highpass' | 'bandpass' | 'notch'): 0 | 1 =>
-  value === 'highpass' ? 1 : 0
+const filterMode = (value: 'lowpass' | 'highpass' | 'bandpass' | 'notch'): 0 | 1 | 2 | 3 =>
+  value === 'highpass' ? 1 : value === 'bandpass' ? 2 : value === 'notch' ? 3 : 0
 
 /** Compiles the browser synth profile into the fixed portable synth ABI. */
 export const compilePortableSynthConfiguration = (
@@ -752,11 +752,15 @@ const prepareSources = (
       continue
     }
     if (event.epoch !== input.schedule.transportEpoch
-      || asset.sampleRateHz !== input.sampleRateHz
       || event.startFrame < frameRange.start
       || event.stopFrame <= event.startFrame
       || event.stopFrame > frameRange.end
       || event.sourceOffsetFrame < 0
+      || event.sourceOffsetFraction !== undefined && (
+        !Number.isFinite(event.sourceOffsetFraction)
+        || event.sourceOffsetFraction < 0
+        || event.sourceOffsetFraction >= 1
+      )
       || event.sourceFrameCount <= 0
       || event.sourceOffsetFrame + event.sourceFrameCount > asset.frameCount
       || event.fadeInStartFrame > event.fadeInEndFrame

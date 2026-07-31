@@ -634,14 +634,14 @@ export const nativeAssetIdentity = (asset: AudioAssetRef): NativeAssetIdentity =
 })
 
 export type NativeSourceEvent = Pick<AudioCoreSampleSourceEventDto,
-  "epoch" | "sequence" | "sourceNodeId" | "assetId" | "startFrame" | "stopFrame" | "sourceOffsetFrame" | "sourceFrameCount" | "gain" | "fadeInStartFrame" | "fadeInEndFrame" | "fadeOutStartFrame" | "fadeOutEndFrame">
+  "epoch" | "sequence" | "sourceNodeId" | "assetId" | "startFrame" | "stopFrame" | "sourceOffsetFrame" | "sourceOffsetFraction" | "sourceFrameCount" | "gain" | "fadeInStartFrame" | "fadeInEndFrame" | "fadeOutStartFrame" | "fadeOutEndFrame">
 
 export const serializeNativeSourceEvents = (
   events: readonly NativeSourceEvent[],
   assets: readonly NativeSessionAsset[],
 ) => {
   const assetIds = new Map(assets.map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
-  const output = new Uint8Array(4 + events.length * 92)
+  const output = new Uint8Array(4 + events.length * 96)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
@@ -661,7 +661,8 @@ export const serializeNativeSourceEvents = (
     view.setBigInt64(offset + 68, BigInt(event.fadeInEndFrame), true)
     view.setBigInt64(offset + 76, BigInt(event.fadeOutStartFrame), true)
     view.setBigInt64(offset + 84, BigInt(event.fadeOutEndFrame), true)
-    offset += 92
+    view.setFloat32(offset + 92, event.sourceOffsetFraction ?? 0, true)
+    offset += 96
   }
   return output
 }

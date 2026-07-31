@@ -149,15 +149,13 @@ const projectClip = (
       }
     }
   }
-  const sourceOffsetFrame = Math.max(
-    0,
-    frameAt(sourceOffsetSec, asset.sampleRateHz),
-  )
+  const sourcePosition = Math.max(0, sourceOffsetSec * asset.sampleRateHz)
+  const sourceOffsetFrame = Math.floor(sourcePosition)
+  const sourceOffsetFraction = sourcePosition - sourceOffsetFrame
   const sourceFrameCount = Math.min(
     asset.frameCount - sourceOffsetFrame,
-    Math.max(0, frameAt(
-      preparedStretch ? map.timelineDurationSec : map.sourceDurationSec,
-      asset.sampleRateHz,
+    Math.max(0, Math.ceil(
+      (preparedStretch ? map.timelineDurationSec : map.sourceDurationSec) * asset.sampleRateHz,
     )),
   )
   const startFrame = frameAt(map.timelineStartSec, input.sampleRateHz)
@@ -176,6 +174,7 @@ const projectClip = (
       startFrame,
       stopFrame,
       sourceOffsetFrame,
+      ...(sourceOffsetFraction === 0 ? {} : { sourceOffsetFraction }),
       sourceFrameCount,
       gain: normalizeClipGain(clip.gain ?? 1),
       fadeInStartFrame: frameAt(clip.startSec + fades.fadeInStartSec, input.sampleRateHz),
@@ -224,14 +223,23 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
           const elapsedFrames = emitRange.start - result.event.startFrame
           const sourceOffsetDelta = Math.min(
             result.event.sourceFrameCount,
-            Math.max(0, Math.round(result.event.sourceFrameCount * elapsedFrames / timelineFrames)),
+            Math.max(0, result.event.sourceFrameCount * elapsedFrames / timelineFrames),
           )
-          const sourceFrameCount = result.event.sourceFrameCount - sourceOffsetDelta
+          const sourcePosition = result.event.sourceOffsetFrame
+            + (result.event.sourceOffsetFraction ?? 0)
+            + sourceOffsetDelta
+          const sourceOffsetFrame = Math.floor(sourcePosition)
+          const sourceOffsetFraction = sourcePosition - sourceOffsetFrame
+          const sourceEndPosition = result.event.sourceOffsetFrame
+            + (result.event.sourceOffsetFraction ?? 0)
+            + result.event.sourceFrameCount
+          const sourceFrameCount = Math.ceil(sourceEndPosition - sourcePosition)
           if (sourceFrameCount > 0) {
             events.push({
               ...result.event,
               startFrame: emitRange.start,
-              sourceOffsetFrame: result.event.sourceOffsetFrame + sourceOffsetDelta,
+              sourceOffsetFrame,
+              sourceOffsetFraction,
               sourceFrameCount,
             })
             sequence += 1

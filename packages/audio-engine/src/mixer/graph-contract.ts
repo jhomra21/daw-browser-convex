@@ -118,9 +118,6 @@ const toPortableInstrument = (
     throw new Error(`Native instrument "${instrument.kind}" is not supported by the portable graph.`)
   }
   const params = normalizeSynthParams(instrument.params)
-  if (params.filter.mode !== 'lowpass' && params.filter.mode !== 'highpass') {
-    throw new Error(`Native synth filter mode "${params.filter.mode}" is not supported by the portable graph.`)
-  }
   return {
     version: audioCoreContractVersion,
     kind: 'synth',

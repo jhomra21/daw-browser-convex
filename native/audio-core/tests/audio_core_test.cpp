@@ -2,6 +2,7 @@
 #include "utility_fixture.h"
 #include "daw/audio_core_native.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <new>
 #include <utility>
+#include <vector>
 
 static_assert(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS == 16u);
 
@@ -49,17 +51,21 @@ void expect(daw_audio_core_result actual, daw_audio_core_result expected) {
   assert(actual == expected);
 }
 
-daw_audio_core_handle create_core(uint32_t frames, uint32_t channels, uint32_t assets) {
+daw_audio_core_handle create_core_at_rate(uint32_t frames, uint32_t channels, uint32_t assets, uint32_t sample_rate_hz) {
   daw_audio_core_handle core = 0;
   const daw_audio_core_config config{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
     .max_frames_per_block = frames,
     .max_channels = channels,
     .max_assets = assets,
-    .sample_rate_hz = 48000,
+    .sample_rate_hz = sample_rate_hz,
   };
   expect(daw_audio_core_create(&config, &core), DAW_AUDIO_CORE_OK);
   return core;
+}
+
+daw_audio_core_handle create_core(uint32_t frames, uint32_t channels, uint32_t assets) {
+  return create_core_at_rate(frames, channels, assets, 48000);
 }
 
 void publish(daw_audio_core_handle core, uint32_t revision) {
@@ -1455,6 +1461,88 @@ void test_sample_source_partition_invariance_and_mono() {
   daw_audio_core_destroy(core);
 }
 
+void test_sample_source_fractional_rate_matrix_and_overlaps() {
+  const std::array<std::pair<uint32_t, uint32_t>, 4> rates{{
+    {44'100, 48'000}, {48'000, 44'100}, {48'000, 96'000}, {96'000, 48'000},
+  }};
+  for (const auto [asset_rate, core_rate] : rates) {
+    for (const uint32_t channel_count : {1U, 2U}) {
+      constexpr uint32_t output_frames = 37;
+      constexpr uint32_t asset_frames = 96;
+      std::vector<std::vector<float>> planes(channel_count, std::vector<float>(asset_frames));
+      for (uint32_t channel = 0; channel < channel_count; ++channel) {
+        for (uint32_t frame = 0; frame < asset_frames; ++frame) {
+          planes[channel][frame] = static_cast<float>(channel + 1) * (0.1F + static_cast<float>(frame) * 0.01F);
+        }
+      }
+      std::vector<const float *> plane_pointers;
+      for (const auto &plane : planes) plane_pointers.push_back(plane.data());
+      const daw_audio_asset_descriptor descriptor{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .revision = 1,
+        .byte_length = asset_frames * channel_count * sizeof(float), .content_hash_prefix = 0,
+        .frame_count = asset_frames, .sample_rate_hz = asset_rate, .channel_count = channel_count,
+        .planes = plane_pointers.data(),
+      };
+      const auto render = [&](const std::array<uint32_t, 6> &blocks, uint32_t block_count) {
+        const daw_audio_core_config config{
+          .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .max_frames_per_block = output_frames,
+          .max_channels = 2, .max_assets = 1, .sample_rate_hz = core_rate,
+        };
+        daw_audio_core_handle core = 0;
+        expect(daw_audio_core_create(&config, &core), DAW_AUDIO_CORE_OK);
+        publish(core, 1);
+        daw_audio_asset_handle asset = 0;
+        expect(daw_audio_core_create_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+        const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+        expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+        const std::array<daw_audio_sample_source_event, 2> events{{
+          {.abi_version = DAW_AUDIO_CORE_ABI_VERSION, .epoch = 1, .sequence = 1, .asset = asset,
+            .start_frame = 0, .stop_frame = output_frames, .source_offset_frame = 1, .source_frame_count = 30,
+            .gain = 1.0F, .fade_in_start_frame = 0, .fade_in_end_frame = 2,
+            .fade_out_start_frame = output_frames - 2, .fade_out_end_frame = output_frames,
+            .source_offset_fraction = 0.25F},
+          {.abi_version = DAW_AUDIO_CORE_ABI_VERSION, .epoch = 1, .sequence = 2, .asset = asset,
+            .start_frame = 4, .stop_frame = output_frames - 3, .source_offset_frame = 10, .source_frame_count = 24,
+            .gain = 0.5F, .fade_in_start_frame = 4, .fade_in_end_frame = 5,
+            .fade_out_start_frame = output_frames - 5, .fade_out_end_frame = output_frames - 3,
+            .source_offset_fraction = 0.5F},
+        }};
+        for (const auto &event : events) expect(daw_audio_core_schedule_sample_source(core, &event), DAW_AUDIO_CORE_OK);
+        std::array<float, output_frames> left{};
+        std::array<float, output_frames> right{};
+        uint32_t frame = 0;
+        for (uint32_t block = 0; block < block_count; ++block) {
+          const uint32_t count = std::min(blocks[block], output_frames - frame);
+          float *outputs[]{left.data() + frame, right.data() + frame};
+          const daw_audio_core_process_block process{
+            .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = count, .channel_count = 2,
+            .input_bus_count = 0, .inputs = nullptr, .outputs = outputs,
+          };
+          expect(daw_audio_core_process(core, &process), DAW_AUDIO_CORE_OK);
+          frame += count;
+        }
+        assert(frame == output_frames);
+        daw_audio_core_destroy(core);
+        return std::pair{left, right};
+      };
+      const auto whole = render({output_frames, 0, 0, 0, 0, 0}, 1);
+      const auto partitioned = render({3, 7, 1, 11, 5, 10}, 6);
+      for (uint32_t frame = 0; frame < output_frames; ++frame) {
+        assert(std::isfinite(whole.first[frame]) && std::isfinite(whole.second[frame]));
+        assert(std::abs(whole.first[frame] - partitioned.first[frame]) <= 1e-6F);
+        assert(std::abs(whole.second[frame] - partitioned.second[frame]) <= 1e-6F);
+      }
+      const double expected_position = 1.25 + static_cast<double>(asset_rate) / static_cast<double>(core_rate);
+      const uint32_t expected_frame = static_cast<uint32_t>(std::floor(expected_position));
+      const float expected_fraction = static_cast<float>(expected_position - expected_frame);
+      const float expected_frame_one = (planes[0][expected_frame]
+        + (planes[0][expected_frame + 1] - planes[0][expected_frame]) * expected_fraction) * 0.5F;
+      assert(std::abs(whole.first[1] - expected_frame_one) <= 1e-6F);
+      if (channel_count == 2) assert(std::abs(whole.second[1] - expected_frame_one * 2.0F) <= 1e-6F);
+    }
+  }
+}
+
 void test_sample_source_targets_published_graph_source() {
   daw_audio_core_handle core = create_core(4, 2, 1);
   const std::array<daw_audio_graph_node_descriptor, 3> nodes{{
@@ -2012,6 +2100,114 @@ void test_instrument_synthesis_lifecycle_determinism_and_boundaries() {
   daw_audio_core_destroy(steal_reference);
 }
 
+void test_synth_filter_modes_and_partition_invariance() {
+  const std::array<uint32_t, 4> modes{
+    DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS,
+    DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS,
+    DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS,
+    DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH,
+  };
+  const std::array<float, 2> resonances{0.05F, 20.0F};
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0,
+      .instrument = {.kind = DAW_AUDIO_INSTRUMENT_KIND_SYNTH, .version = 1, .voice_capacity = 4,
+        .parameter_count = 0, .parameter_targets = {}}},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
+      .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
+  }};
+  const std::array<daw_audio_instrument_event, 3> events{{
+    {.node_id = 1, .note_id = 1, .sequence = 1, .epoch = 1, .frame_offset = 0,
+      .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .channel = 0, .note = 60, .value = 1.0F},
+    {.node_id = 1, .note_id = 2, .sequence = 2, .epoch = 1, .frame_offset = 32,
+      .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .channel = 0, .note = 67, .value = 0.8F},
+    {.node_id = 1, .note_id = 1, .sequence = 3, .epoch = 1, .frame_offset = 64,
+      .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF, .channel = 0, .note = 60, .value = 0.0F},
+  }};
+  const std::array<uint32_t, 3> sample_rates{44'100, 48'000, 96'000};
+  for (const uint32_t sample_rate : sample_rates) {
+    for (const uint32_t mode : modes) {
+      for (const float resonance : resonances) {
+      const daw_audio_synth_state synth{
+        .version = 1, .seed = 0x4321U,
+        .oscillators = {
+          {.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, .level = 1.0F,
+            .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+          {.enabled = 0, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 0.0F,
+            .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+        },
+        .noise_enabled = 0, .noise_level = 0.0F, .filter_enabled = 1, .filter_mode = mode,
+        .filter_cutoff_hz = 1800.0F, .filter_resonance = resonance, .filter_key_tracking = 0.25F,
+        .filter_envelope_amount_octaves = 1.5F, .filter_attack_ms = 0.0F, .filter_decay_ms = 18.0F,
+        .filter_sustain = 0.35F, .filter_release_ms = 4.0F, .amp_attack_ms = 0.0F,
+        .amp_decay_ms = 12.0F, .amp_sustain = 0.65F, .amp_release_ms = 4.0F,
+        .lfo_enabled = 1, .lfo_waveform = DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE, .lfo_rate_hz = 4.0F,
+        .lfo_pitch_cents = 6.0F, .lfo_filter_octaves = 0.5F, .lfo_amplitude = 0.2F,
+        .lfo_pan = 0.1F, .output_gain = 0.7F, .output_pan = 0.0F,
+      };
+      const auto prepare = [&] {
+        daw_audio_core_handle core = create_core_at_rate(96, 2, 1, sample_rate);
+        prepare_graph(core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
+        expect(daw_audio_core_configure_synth(core, 1, &synth), DAW_AUDIO_CORE_OK);
+        const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+        expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+        return core;
+      };
+      const auto render = [&](daw_audio_core_handle core, bool partitioned, std::array<float, 96> &left, std::array<float, 96> &right) {
+        auto process = [&](uint32_t offset, uint32_t frames, const daw_audio_instrument_event *event_data, uint32_t event_count) {
+          float *outputs[]{left.data() + offset, right.data() + offset};
+          const daw_audio_core_process_block block{
+            .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = frames, .channel_count = 2,
+            .input_bus_count = 0, .inputs = nullptr, .outputs = outputs, .graph_revision = 1,
+            .transport_epoch = 1, .instrument_event_count = event_count, .instrument_events = event_data,
+          };
+          expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+        };
+        if (!partitioned) {
+          process(0, 96, events.data(), events.size());
+          return;
+        }
+        const std::array<daw_audio_instrument_event, 1> first{{events[0]}};
+        const std::array<daw_audio_instrument_event, 1> second{{{
+          .node_id = 1, .note_id = 2, .sequence = 2, .epoch = 1, .frame_offset = 0,
+          .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .channel = 0, .note = 67, .value = 0.8F,
+        }}};
+        const std::array<daw_audio_instrument_event, 1> third{{{
+          .node_id = 1, .note_id = 1, .sequence = 3, .epoch = 1, .frame_offset = 0,
+          .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF, .channel = 0, .note = 60, .value = 0.0F,
+        }}};
+        process(0, 32, first.data(), first.size());
+        process(32, 32, second.data(), second.size());
+        process(64, 32, third.data(), third.size());
+      };
+      daw_audio_core_handle whole_core = prepare();
+      daw_audio_core_handle partitioned_core = prepare();
+      std::array<float, 96> whole_left{};
+      std::array<float, 96> whole_right{};
+      std::array<float, 96> partitioned_left{};
+      std::array<float, 96> partitioned_right{};
+      render(whole_core, false, whole_left, whole_right);
+      render(partitioned_core, true, partitioned_left, partitioned_right);
+      bool has_audio = false;
+      for (uint32_t frame = 0; frame < whole_left.size(); ++frame) {
+        assert(std::isfinite(whole_left[frame]) && std::isfinite(whole_right[frame]));
+        assert(std::abs(whole_left[frame] - partitioned_left[frame]) <= 1e-6F);
+        assert(std::abs(whole_right[frame] - partitioned_right[frame]) <= 1e-6F);
+        has_audio = has_audio || std::abs(whole_left[frame]) > 1e-5F;
+      }
+      assert(has_audio);
+      daw_audio_core_destroy(whole_core);
+      daw_audio_core_destroy(partitioned_core);
+      }
+    }
+  }
+}
+
+
 void test_sampler_and_drum_rack_asset_voices() {
   daw_audio_core_handle core = create_core(8, 2, 2);
   const std::array<daw_audio_graph_node_descriptor, 3> nodes{{
@@ -2268,6 +2464,7 @@ int main() {
   test_stale_asset_handles();
   test_sample_source_scheduling();
   test_sample_source_partition_invariance_and_mono();
+  test_sample_source_fractional_rate_matrix_and_overlaps();
   test_sample_source_targets_published_graph_source();
   test_process_allocates_nothing();
   test_prepared_graph_ranges_are_partition_invariant_and_allocation_free();
@@ -2278,6 +2475,7 @@ int main() {
   test_utility_fixture_protocol();
   test_instrument_graph_epoch_events_and_voice_capacity();
   test_instrument_synthesis_lifecycle_determinism_and_boundaries();
+  test_synth_filter_modes_and_partition_invariance();
   test_sampler_and_drum_rack_asset_voices();
   test_granular_asset_seed_freeze_and_note_ownership();
   test_recording_capture_boundaries_ownership_and_overflow();

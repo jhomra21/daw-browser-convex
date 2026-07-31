@@ -1884,14 +1884,14 @@ bool AudioHost::QueueInstrumentEvents(const std::span<const std::uint8_t> payloa
 bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
   if (impl_->prepared_core != 0 || payload.size() < 4) return false;
   const std::uint32_t count = ReadLeU32(payload.data());
-  if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 92) return false;
+  if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 96) return false;
   if (!impl_->HasCapacity(Impl::QueuedControlKind::kSource, count)) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
-    const auto* bytes = payload.data() + 4 + index * 92;
+    const auto* bytes = payload.data() + 4 + index * 96;
     if (!impl_->assets.contains(ReadLeU32(bytes + 20))) return false;
   }
   for (std::uint32_t index = 0; index < count; ++index) {
-    const auto* bytes = payload.data() + 4 + index * 92;
+    const auto* bytes = payload.data() + 4 + index * 96;
     const auto asset = impl_->assets.find(ReadLeU32(bytes + 20));
     Impl::QueuedControlEvent event{};
     event.kind = Impl::QueuedControlKind::kSource;
@@ -1900,7 +1900,8 @@ bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
       .stop_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 32)), .source_offset_frame = ReadLeU64(bytes + 40),
       .source_frame_count = ReadLeU64(bytes + 48), .gain = ReadLeFloat(bytes + 56),
       .fade_in_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 60)), .fade_in_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 68)),
-      .fade_out_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 76)), .fade_out_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 84))};
+      .fade_out_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 76)), .fade_out_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 84)),
+      .source_offset_fraction = ReadLeFloat(bytes + 92)};
     if (!impl_->EnqueueControlEvent(event)) return false;
   }
   return true;
@@ -2108,7 +2109,7 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
   std::uint64_t previous_source_sequence = 0;
   bool has_previous_source = false;
   for (std::uint32_t index = 0; index < source_count; ++index) {
-    if (offset + 92 > payload.size()) return false;
+    if (offset + 96 > payload.size()) return false;
     const auto* bytes = payload.data() + offset;
     const auto source_start = ReadLeU64(bytes + 24);
     const auto source_sequence = ReadLeU64(bytes + 4);
@@ -2146,13 +2147,14 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
       .fade_in_start_frame = static_cast<std::int64_t>(fade_in_start),
       .fade_in_end_frame = static_cast<std::int64_t>(fade_in_end),
       .fade_out_start_frame = static_cast<std::int64_t>(fade_out_start),
-      .fade_out_end_frame = static_cast<std::int64_t>(fade_out_end)};
+      .fade_out_end_frame = static_cast<std::int64_t>(fade_out_end),
+      .source_offset_fraction = ReadLeFloat(bytes + 92)};
     if (event.source.epoch != epoch || staging.record_count >= staging.events.size()) return false;
     staging.events[staging.record_count++] = event;
     previous_source_frame = source_start;
     previous_source_sequence = source_sequence;
     has_previous_source = true;
-    offset += 92;
+    offset += 96;
   }
   std::string previous_automation_instance;
   std::uint32_t previous_automation_parameter = 0;

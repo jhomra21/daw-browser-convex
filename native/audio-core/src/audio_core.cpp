@@ -73,6 +73,7 @@ struct SampleSource {
   int64_t start_frame = 0;
   int64_t stop_frame = 0;
   uint64_t source_offset_frame = 0;
+  float source_offset_fraction = 0.0F;
   uint64_t source_frame_count = 0;
   float gain = 0.0F;
   int64_t fade_in_start_frame = 0;
@@ -211,8 +212,7 @@ struct InstrumentVoice {
   uint32_t noise_state = 1;
   float amp_level = 0.0F;
   float filter_level = 0.0F;
-  float filter_left = 0.0F;
-  float filter_right = 0.0F;
+  BiquadHistory filter_history[2]{};
   uint32_t amp_stage = 0;
   uint32_t filter_stage = 0;
   bool held = false;
@@ -484,7 +484,7 @@ constexpr daw_audio_synth_state default_synth_state() {
 
 bool valid_synth_state(const daw_audio_synth_state &state) {
   if (state.version != 1 || state.seed == 0 || state.noise_enabled > 1 || state.filter_enabled > 1
-    || state.filter_mode > DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS || state.lfo_enabled > 1
+    || state.filter_mode > DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH || state.lfo_enabled > 1
     || state.lfo_waveform > DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE
     || !std::isfinite(state.noise_level) || state.noise_level < 0.0F || state.noise_level > 1.0F
     || !std::isfinite(state.filter_cutoff_hz) || state.filter_cutoff_hz < 20.0F || state.filter_cutoff_hz > 20000.0F
@@ -2782,6 +2782,9 @@ bool valid_sample_source_event(const daw_audio_sample_source_event &event) {
     && event.stop_frame > event.start_frame
     && event.source_frame_count > 0
     && std::isfinite(event.gain)
+    && std::isfinite(event.source_offset_fraction)
+    && event.source_offset_fraction >= 0.0F
+    && event.source_offset_fraction < 1.0F
     && event.fade_in_start_frame <= event.fade_in_end_frame
     && event.fade_out_start_frame <= event.fade_out_end_frame;
 }
@@ -2872,18 +2875,33 @@ void render_sample_source_range(
       continue;
     }
     const uint64_t elapsed_output_frames = static_cast<uint64_t>(transport_frame - source.start_frame);
-    const uint64_t elapsed_source_frames = (elapsed_output_frames / core.config.sample_rate_hz) * asset->sample_rate_hz
-      + (elapsed_output_frames % core.config.sample_rate_hz) * asset->sample_rate_hz / core.config.sample_rate_hz;
-    if (elapsed_source_frames >= source.source_frame_count
-      || source.source_offset_frame > asset->frame_count
-      || elapsed_source_frames > asset->frame_count - source.source_offset_frame) {
+    const double source_position = static_cast<double>(source.source_offset_frame)
+      + static_cast<double>(source.source_offset_fraction)
+      + static_cast<double>(elapsed_output_frames) * static_cast<double>(asset->sample_rate_hz)
+        / static_cast<double>(core.config.sample_rate_hz);
+    const double source_end = static_cast<double>(source.source_offset_frame)
+      + static_cast<double>(source.source_offset_fraction)
+      + static_cast<double>(source.source_frame_count);
+    if (source_position >= source_end
+      || source.source_offset_frame >= asset->frame_count
+      || source_position < 0.0
+      || source_position >= static_cast<double>(asset->frame_count)) {
       source.active = false;
       continue;
     }
-    const uint64_t source_frame = source.source_offset_frame + elapsed_source_frames;
+    const uint64_t source_frame = static_cast<uint64_t>(std::floor(source_position));
+    const uint64_t next_source_frame = std::min(source_frame + 1, static_cast<uint64_t>(asset->frame_count - 1));
+    const float fraction = static_cast<float>(source_position - static_cast<double>(source_frame));
     const float gain = source_envelope_gain(source, transport_frame);
-    const float left = asset->planes[0][source_frame];
-    const float right = asset->planes[asset->channel_count > 1 ? 1 : 0][source_frame];
+    const float left = fraction == 0.0F
+      ? asset->planes[0][source_frame]
+      : asset->planes[0][source_frame]
+        + (asset->planes[0][next_source_frame] - asset->planes[0][source_frame]) * fraction;
+    const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
+    const float right = fraction == 0.0F
+      ? asset->planes[right_channel][source_frame]
+      : asset->planes[right_channel][source_frame]
+        + (asset->planes[right_channel][next_source_frame] - asset->planes[right_channel][source_frame]) * fraction;
     *left_output += std::isfinite(left) ? left * gain : 0.0F;
     if (right_output != left_output) *right_output += std::isfinite(right) ? right * gain : 0.0F;
   }
@@ -3173,15 +3191,20 @@ void render_instrument_frame(
     cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking
       + voice.filter_level * synth.filter_envelope_amount_octaves + lfo * synth.lfo_filter_octaves);
     cutoff = std::fmax(20.0F, std::fmin(cutoff, static_cast<float>(sample_rate_hz) * 0.45F));
-    const float filter_coefficient = std::exp(-6.2831853071795864769F * cutoff / static_cast<float>(sample_rate_hz));
     const float resonance = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE, synth.filter_resonance);
-    const float filtered = synth.filter_enabled == 0 ? sample : (
-      synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS
-        ? (voice.filter_left = (1.0F - filter_coefficient) * sample + filter_coefficient * voice.filter_left)
-        : sample - (voice.filter_left = (1.0F - filter_coefficient) * sample + filter_coefficient * voice.filter_left)
-    );
+    const uint32_t filter_type = synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
+      ? DAW_AUDIO_EQ_BAND_HIGHPASS
+      : synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS
+        ? DAW_AUDIO_EQ_BAND_BANDPASS
+        : synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH
+          ? DAW_AUDIO_EQ_BAND_NOTCH
+          : DAW_AUDIO_EQ_BAND_LOWPASS;
+    const BiquadCoefficients filter_coefficients = rbj_coefficients(
+      filter_type, cutoff, std::fmax(0.0001F, resonance), 0.0F, sample_rate_hz);
+    const float filtered = synth.filter_enabled == 0
+      ? sample
+      : process_biquad(sample, filter_coefficients, voice.filter_history[0]);
     const float amplitude = voice.amp_level * voice.velocity * instrument.expression * synth.output_gain
-      * std::fmax(0.0F, 1.0F - std::fmin(0.95F, resonance * 0.01F))
       * std::fmax(0.0F, 1.0F - lfo * synth.lfo_amplitude);
     const float pan = std::fmax(-1.0F, std::fmin(1.0F, synth.output_pan + lfo * synth.lfo_pan));
     left += filtered * amplitude * std::cos((pan + 1.0F) * 0.7853981633974483096F) * 1.4142135623730950488F;
@@ -4916,6 +4939,7 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     .start_frame = event->start_frame,
     .stop_frame = event->stop_frame,
     .source_offset_frame = event->source_offset_frame,
+    .source_offset_fraction = event->source_offset_fraction,
     .source_frame_count = event->source_frame_count,
     .gain = event->gain,
     .fade_in_start_frame = event->fade_in_start_frame,
@@ -5218,7 +5242,8 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_sourc
   int64_t fade_in_start_frame,
   int64_t fade_in_end_frame,
   int64_t fade_out_start_frame,
-  int64_t fade_out_end_frame) {
+  int64_t fade_out_end_frame,
+  float source_offset_fraction) {
   if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
   const daw_audio_sample_source_event event{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
@@ -5235,6 +5260,7 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_sourc
     .fade_in_end_frame = fade_in_end_frame,
     .fade_out_start_frame = fade_out_start_frame,
     .fade_out_end_frame = fade_out_end_frame,
+    .source_offset_fraction = source_offset_fraction,
   };
   return daw_audio_core_schedule_sample_source(to_handle(&wasm_graph_core), &event);
 }

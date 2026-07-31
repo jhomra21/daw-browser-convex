@@ -256,7 +256,9 @@ typedef enum daw_audio_synth_waveform {
 
 typedef enum daw_audio_synth_filter_mode {
   DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS = 0,
-  DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS = 1
+  DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS = 1,
+  DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS = 2,
+  DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH = 3
 } daw_audio_synth_filter_mode;
 
 typedef struct daw_audio_synth_oscillator_state {
@@ -796,6 +798,7 @@ typedef struct daw_audio_sample_source_event {
   int64_t fade_in_end_frame;
   int64_t fade_out_start_frame;
   int64_t fade_out_end_frame;
+  float source_offset_fraction;
 } daw_audio_sample_source_event;
 
 uint32_t daw_audio_core_get_abi_version(void);
@@ -985,7 +988,8 @@ daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_source(
   int64_t fade_in_start_frame,
   int64_t fade_in_end_frame,
   int64_t fade_out_start_frame,
-  int64_t fade_out_end_frame);
+  int64_t fade_out_end_frame,
+  float source_offset_fraction);
 daw_audio_core_result daw_audio_core_wasm_graph_register_pcm_asset(
   uint32_t frame_count,
   uint32_t sample_rate_hz,

@@ -279,7 +279,7 @@ export type AudioCoreSynthState = {
   noiseEnabled?: boolean
   noiseLevel?: number
   filterEnabled?: boolean
-  filterMode?: 0 | 1
+  filterMode?: 0 | 1 | 2 | 3
   filterCutoffHz?: number
   filterResonance?: number
   filterKeyTracking?: number
@@ -575,7 +575,7 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
   if (complete && (
     !Array.isArray(value.oscillators) || value.oscillators.length !== 2
     || typeof value.noiseEnabled !== 'boolean' || !isFiniteNumber(value.noiseLevel)
-    || typeof value.filterEnabled !== 'boolean' || (value.filterMode !== 0 && value.filterMode !== 1)
+    || typeof value.filterEnabled !== 'boolean' || typeof value.filterMode !== 'number' || ![0, 1, 2, 3].includes(value.filterMode)
     || !isBoundedFloat(value.filterCutoffHz, 20, 20_000)
     || !isBoundedFloat(value.filterResonance, 0.05, 30)
     || !isBoundedFloat(value.filterKeyTracking, -1, 1)
@@ -1017,6 +1017,7 @@ export type AudioCoreSampleSourceEventDto = {
   startFrame: number
   stopFrame: number
   sourceOffsetFrame: number
+  sourceOffsetFraction?: number
   sourceFrameCount: number
   gain: number
   fadeInStartFrame: number

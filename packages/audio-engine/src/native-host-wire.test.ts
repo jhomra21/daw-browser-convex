@@ -29,6 +29,7 @@ test("serializes source events using the session asset identifier", () => {
     startFrame: 3,
     stopFrame: 4,
     sourceOffsetFrame: 5,
+    sourceOffsetFraction: 0.25,
     sourceFrameCount: 6,
     gain: 0.5,
     fadeInStartFrame: 7,
@@ -38,10 +39,11 @@ test("serializes source events using the session asset identifier", () => {
   }], mapNativeSessionAssets([asset("a")]))
   const view = new DataView(bytes.buffer)
 
-  expect(bytes.byteLength).toBe(96)
+  expect(bytes.byteLength).toBe(100)
   expect(view.getUint32(0, true)).toBe(1)
   expect(view.getUint32(24, true)).toBe(1)
   expect(view.getBigInt64(28, true)).toBe(3n)
+  expect(view.getFloat32(96, true)).toBeCloseTo(0.25)
 })
 
 test("serializes bounded native VST parameter events with normalized values", () => {

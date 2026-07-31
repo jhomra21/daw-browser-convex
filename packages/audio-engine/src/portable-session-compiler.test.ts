@@ -91,12 +91,24 @@ test('compiles normalized browser synth controls into the portable synth ABI pro
   expect(compiled.state.voiceCapacity).toBe(32)
   expect(compiled.values).toMatchObject({
     oscillators: [{ waveform: 1, octave: 1 }, { waveform: 3, octave: -1 }],
-    filterMode: 0,
+    filterMode: 2,
     ampAttackMs: 10,
     filterReleaseMs: 70,
     lfoWaveform: 2,
     outputGain: 0.9,
   })
+})
+
+test('encodes every portable synth filter mode', () => {
+  const modes = ['lowpass', 'highpass', 'bandpass', 'notch'] as const
+  for (const [index, mode] of modes.entries()) {
+    const defaults = createDefaultSynthParams()
+    const compiled = compilePortableSynthConfiguration(`track-${index}`, `instrument:${index}`, {
+      ...defaults,
+      filter: { ...defaults.filter, mode },
+    })
+    expect(compiled.values.filterMode).toBe(index)
+  }
 })
 
 test('compiles browser sampler controls and exact registered asset metadata into the portable ABI', () => {

@@ -873,7 +873,10 @@ export class DawPortableAudioCoreHost {
         || event.sequence <= previousSequence || typeof event.sourceNodeId !== 'string' || event.sourceNodeId.length === 0
         || typeof event.assetId !== 'string' || !this.assets.has(event.assetId)
         || !Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.stopFrame) || event.stopFrame <= event.startFrame
-        || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0 || !Number.isSafeInteger(event.sourceFrameCount)
+        || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0
+        || event.sourceOffsetFraction !== undefined && (typeof event.sourceOffsetFraction !== 'number' || !Number.isFinite(event.sourceOffsetFraction)
+          || event.sourceOffsetFraction < 0 || event.sourceOffsetFraction >= 1)
+        || !Number.isSafeInteger(event.sourceFrameCount)
         || event.sourceFrameCount < 1 || typeof event.gain !== 'number' || !Number.isFinite(event.gain)
         || !Number.isSafeInteger(event.fadeInStartFrame) || !Number.isSafeInteger(event.fadeInEndFrame)
         || event.fadeInEndFrame < event.fadeInStartFrame || !Number.isSafeInteger(event.fadeOutStartFrame)
@@ -883,7 +886,8 @@ export class DawPortableAudioCoreHost {
       const handle = this.assets.get(event.assetId).handle.value
       const result = this.sourceSchedule(message.epoch, BigInt(event.sequence), stableId(event.sourceNodeId), handle,
         BigInt(event.startFrame), BigInt(event.stopFrame), BigInt(event.sourceOffsetFrame), BigInt(event.sourceFrameCount), event.gain,
-        BigInt(event.fadeInStartFrame), BigInt(event.fadeInEndFrame), BigInt(event.fadeOutStartFrame), BigInt(event.fadeOutEndFrame))
+        BigInt(event.fadeInStartFrame), BigInt(event.fadeInEndFrame), BigInt(event.fadeOutStartFrame), BigInt(event.fadeOutEndFrame),
+        event.sourceOffsetFraction || 0)
       if (result !== 0) return this.sourceScheduleResult(message, 'rejected')
       previousSequence = event.sequence
     }

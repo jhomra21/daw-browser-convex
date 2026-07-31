@@ -152,6 +152,9 @@ const isSampleSourceEvent = (value: unknown): value is AudioCoreSampleSourceEven
   && typeof value.startFrame === 'number' && Number.isSafeInteger(value.startFrame)
   && typeof value.stopFrame === 'number' && Number.isSafeInteger(value.stopFrame) && value.stopFrame > value.startFrame
   && typeof value.sourceOffsetFrame === 'number' && Number.isSafeInteger(value.sourceOffsetFrame) && value.sourceOffsetFrame >= 0
+  && (value.sourceOffsetFraction === undefined
+    || typeof value.sourceOffsetFraction === 'number' && Number.isFinite(value.sourceOffsetFraction)
+      && value.sourceOffsetFraction >= 0 && value.sourceOffsetFraction < 1)
   && isPositiveInteger(value.sourceFrameCount)
   && typeof value.gain === 'number' && Number.isFinite(value.gain)
   && typeof value.fadeInStartFrame === 'number' && Number.isSafeInteger(value.fadeInStartFrame)

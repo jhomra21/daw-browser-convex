@@ -380,6 +380,10 @@ HistoryFixtureState history_fixture_state(uint32_t kind) {
     fixture.size = 24; fixture.latency = 240;
     write_u32(0, 1); write_f32(4, -6.0F); write_f32(8, 50.0F); write_f32(12, 5.0F);
     write_f32(16, 1.0F); write_u32(20, 4);
+  } else if (kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
+    fixture.size = 32;
+    write_u32(0, 1); write_f32(4, 10.0F); write_f32(8, 0.5F); write_f32(12, 0.5F);
+    write_u32(16, 1); write_u32(20, 1); write_f32(24, 120.0F); write_f32(28, 8000.0F);
   } else {
     fixture.size = 60; fixture.latency = 512;
     write_u32(0, 1); write_u32(4, 512); write_u32(8, 4); write_u32(12, DAW_AUDIO_SPECTRAL_MODE_FREEZE);
@@ -466,7 +470,7 @@ void test_per_instance_history_isolation_and_republication() {
   };
   for (const uint32_t kind : {DAW_AUDIO_PROCESSOR_KIND_EQ, DAW_AUDIO_PROCESSOR_KIND_SATURATOR,
     DAW_AUDIO_PROCESSOR_KIND_GATE, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR, DAW_AUDIO_PROCESSOR_KIND_LIMITER,
-    DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, DAW_AUDIO_PROCESSOR_KIND_UTILITY}) {
+    DAW_AUDIO_PROCESSOR_KIND_DELAY, DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, DAW_AUDIO_PROCESSOR_KIND_UTILITY}) {
     const auto continuous = render(kind, false);
     const auto republished = render(kind, true);
     for (uint32_t frame = frames / 2; frame < frames; ++frame) {

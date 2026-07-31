@@ -384,7 +384,6 @@ test('projects fixture-proven static, modulation, and dynamics processors for of
   expect(unsupported).toEqual({
     supported: false,
     reasons: [
-      'unsupported-delay: processor "delay" is not supported by the portable core.',
       'unsupported-reverb: processor "reverb" is not supported by the portable core.',
     ],
     diagnostics: [],

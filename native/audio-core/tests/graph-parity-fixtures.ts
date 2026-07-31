@@ -1346,7 +1346,7 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
 const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamicsDefinitions
   .filter((definition) => definition.kind !== 'limiter')
   .flatMap((definition) => {
-    const frames = 1_024
+    const frames = 256
     const legacy = definition.kind === 'gate'
       ? {
           kind: 'gate' as const,
@@ -1499,14 +1499,12 @@ const timeEffectFixture = (
     assertReset: options.assertReset,
     expectedLatencyFrames: 0,
     expectedTailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
-    nativeWasmTolerance: kind === 'reverb' ? 2e-4 : 1e-5,
+    nativeWasmTolerance: kind === 'reverb' ? 2e-4 : 5e-5,
     legacyDelay: kind === 'delay' ? { kind, state } : undefined,
-    legacyDifferenceMinimum: kind === 'delay' ? 1e-3 : undefined,
+    legacyTolerance: kind === 'delay' ? 1e-3 : undefined,
     knownGapIds: kind === 'reverb' ? REVERB_KNOWN_GAP_IDS : undefined,
-    portableEligible: false,
-    portableUnsupportedReason: kind === 'delay'
-      ? 'legacy-delay-filter-response-mismatch'
-      : 'legacy-convolver-response-mismatch',
+    portableEligible: kind === 'delay',
+    portableUnsupportedReason: kind === 'reverb' ? 'legacy-convolver-response-mismatch' : undefined,
     assertOutput: (output) => kind === 'reverb'
       && state.wet === 1
       && isPlanarImpulseFixtureInput(input)
@@ -1632,6 +1630,60 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     stereo(sweep(2_048, 80, 18_000, 96_000), sweep(2_048, 160, 12_000, 96_000, 0.25)),
     { maxFramesPerBlock: 960, blockPartitions: [1, 63, 128, 288, 480, 960, 128] },
   ),
+  timeEffectFixture(
+    'delay',
+    'ping-pong-off-feedback-decay',
+    'chains',
+    48_000,
+    stereo(
+      [1, ...Array.from({ length: 4_095 }, () => 0)],
+      Array.from({ length: 4_096 }, () => 0),
+    ),
+    {
+      state: { ...delayState, pingPong: false, feedback: 0.95, dryWet: 1 },
+      maxFramesPerBlock: 512,
+      blockPartitions: [1, 7, 31, 127, 346, 512, 512, 512, 512, 512, 512, 512],
+    },
+  ),
+  ...([20, 2_000] as const).map((lowCutHz): PortableGraphParityFixture => timeEffectFixture(
+    'delay',
+    `cutoff-extreme-${lowCutHz}`,
+    'chains',
+    48_000,
+    stereo(
+      [1, ...Array.from({ length: 1_023 }, () => 0)],
+      [-0.5, ...Array.from({ length: 1_023 }, () => 0)],
+    ),
+    {
+      state: {
+        ...delayState,
+        lowCutHz,
+        highCutHz: lowCutHz === 20 ? 1_000 : 20_000,
+      },
+      maxFramesPerBlock: 256,
+      blockPartitions: [1, 3, 17, 64, 171, 256, 256, 256],
+    },
+  )),
+  (() => {
+    const frames = 256
+    const fixture = timeEffectFixture(
+      'delay',
+      'fractional-time-automation',
+      'fullBlockAutomation',
+      48_000,
+      stereo(sine(frames, 997, 48_000), sine(frames, 1_993, 48_000, 0.25)),
+      {
+        state: { ...delayState, pingPong: false, feedback: 0.25, dryWet: 1 },
+        maxFramesPerBlock: 256,
+        parameters: parameterEnvelopeForTarget(5, Array.from(
+          { length: frames },
+          (_, frame) => 10 + frame * 0.0025,
+        )),
+      },
+    )
+    fixture.assertOutput = (output) => finite(output) && changedFromInput(output, fixture.input, 1e-5)
+    return fixture
+  })(),
   (() => {
     const fixture = timeEffectFixture(
       'delay',

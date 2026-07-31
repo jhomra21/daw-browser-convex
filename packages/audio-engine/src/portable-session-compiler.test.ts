@@ -658,7 +658,6 @@ test('rejects unsupported graph features and unresolved schedule targets without
   })
   expect(unsupportedEffect).toMatchObject({ supported: false })
   if (unsupportedEffect.supported) throw new Error('Expected unsupported portable session.')
-  expect(unsupportedEffect.reasons).toContain('unsupported-delay: processor "delay" is not fixture-proven for portable sessions.')
   expect(unsupportedEffect.reasons).toContain('unsupported-reverb: processor "reverb" is not fixture-proven for portable sessions.')
 
   const targetInput = portableSessionInput()

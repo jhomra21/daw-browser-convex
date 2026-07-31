@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createDefaultGateParams, createDefaultUtilityParams } from '@daw-browser/shared'
+import { createDefaultDelayParams, createDefaultGateParams, createDefaultUtilityParams } from '@daw-browser/shared'
 import { getEffectChainTimingWithExternal, getEffectTiming } from './timing'
 
 describe('utility and gate timing', () => {
@@ -23,4 +23,21 @@ test('includes external reported latency in PDC timing without widening built-in
     latencyFrames: 256,
     tail: { kind: 'finite', frames: 512 },
   })
+})
+
+test('bounds sync-resolved Delay timing and removes disabled or dry-only tails', () => {
+  const params = createDefaultDelayParams()
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, mode: 'sync', syncDivision: '1/1', feedback: 0 } },
+    48_000,
+    20,
+  ).tail).toEqual({ kind: 'finite', frames: 144_000 })
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, dryWet: 0 } },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 0 })
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, enabled: false } },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 0 })
 })

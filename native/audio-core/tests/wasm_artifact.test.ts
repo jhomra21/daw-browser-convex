@@ -359,31 +359,59 @@ const renderLegacyBiquad = (
   return output
 }
 
+const delayParameterValues = (
+  fixture: PortableGraphParityFixture,
+  target: number,
+) => {
+  const parameters = fixture.parameters
+  if (!parameters) return undefined
+  const view = new DataView(parameters.buffer, parameters.byteOffset, parameters.byteLength)
+  const envelopeCount = view.getUint32(0, true)
+  let offset = 4
+  for (let envelope = 0; envelope < envelopeCount; envelope += 1) {
+    const frameCount = view.getUint32(offset + 8, true)
+    const parameterTarget = view.getUint32(offset + 16, true)
+    if (parameterTarget === target) {
+      return Array.from({ length: frameCount }, (_, frame) => view.getFloat32(offset + 20 + frame * 4, true))
+    }
+    offset += 20 + frameCount * 4
+  }
+  return undefined
+}
+
 /**
  * Test-only reference for the shipped Web Audio DelayNode -> highpass Biquad ->
- * lowpass Biquad graph. The portable core intentionally uses cheaper one-pole
- * feedback filters, so these fixtures preserve the measured legacy mismatch
- * rather than promoting Delay into the portable capability matrix.
+ * lowpass Biquad graph.
  */
 const renderLegacyDelayFixture = (
   fixture: PortableGraphParityFixture,
   delay: PortableLegacyDelayFixture,
 ) => {
   const state = delay.state
-  const delayFrames = Math.max(1, Math.round(state.delayMs * fixture.sampleRateHz / 1_000))
-  const bufferLength = delayFrames + 1
+  const delayValues = delayParameterValues(fixture, 5)
+  const feedbackValues = delayParameterValues(fixture, 6)
+  const dryWetValues = delayParameterValues(fixture, 7)
+  const lowCutValues = delayParameterValues(fixture, 8)
+  const highCutValues = delayParameterValues(fixture, 9)
+  const maximumDelayMs = Math.max(state.delayMs, ...(delayValues ?? []))
+  const bufferLength = Math.ceil(Math.min(3_000, maximumDelayMs) * fixture.sampleRateHz / 1_000) + 2
   const buffers = Array.from({ length: fixture.channelCount }, () => new Float64Array(bufferLength))
-  const lowCut = state.filterEnabled ? state.lowCutHz : 20
-  const highCut = state.filterEnabled ? state.highCutHz : 20_000
-  const highpass = legacyBiquadCoefficients('highpass', lowCut, fixture.sampleRateHz)
-  const lowpass = legacyBiquadCoefficients('lowpass', highCut, fixture.sampleRateHz)
   const highpassStates = Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 }))
   const lowpassStates = Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 }))
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   let write = 0
   for (let frame = 0; frame < fixture.frames; frame += 1) {
+    const delayFrames = Math.max(1, Math.min(3_000, delayValues?.[frame] ?? state.delayMs) * fixture.sampleRateHz / 1_000)
+    const delayBase = Math.floor(write - delayFrames)
+    const delayFraction = write - delayFrames - delayBase
+    const readIndex = (index: number) => (index % bufferLength + bufferLength) % bufferLength
+    const lowCut = state.filterEnabled ? Math.max(20, Math.min(2_000, lowCutValues?.[frame] ?? state.lowCutHz)) : 20
+    const highCut = state.filterEnabled ? Math.max(1_000, Math.min(20_000, highCutValues?.[frame] ?? state.highCutHz)) : 20_000
+    const highpass = legacyBiquadCoefficients('highpass', lowCut, fixture.sampleRateHz)
+    const lowpass = legacyBiquadCoefficients('lowpass', highCut, fixture.sampleRateHz)
     const wet = buffers.map((buffer, channel) => {
-      const raw = buffer[(write + bufferLength - delayFrames) % bufferLength] ?? 0
+      const raw = (buffer[readIndex(delayBase)] ?? 0)
+        + ((buffer[readIndex(delayBase + 1)] ?? 0) - (buffer[readIndex(delayBase)] ?? 0)) * delayFraction
       return renderLegacyBiquad(
         renderLegacyBiquad(raw, highpass, highpassStates[channel]),
         lowpass,
@@ -395,9 +423,10 @@ const renderLegacyDelayFixture = (
       const feedbackChannel = state.pingPong ? (channel + 1) % fixture.channelCount : channel
       const feedback = wet[feedbackChannel] ?? 0
       const buffer = buffers[channel]
-      if (buffer) buffer[write] = dry + feedback * state.feedback
+      if (buffer) buffer[write] = dry + feedback * Math.max(0, Math.min(0.95, feedbackValues?.[frame] ?? state.feedback))
       const plane = output[channel]
-      if (plane) plane[frame] = dry * (1 - state.dryWet) + (wet[channel] ?? 0) * state.dryWet
+      const dryWet = Math.max(0, Math.min(1, dryWetValues?.[frame] ?? state.dryWet))
+      if (plane) plane[frame] = dry * (1 - dryWet) + (wet[channel] ?? 0) * dryWet
     }
     write = (write + 1) % bufferLength
   }
@@ -941,9 +970,9 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       if (fixture.legacyDelay) {
         const legacyOutput = renderLegacyDelayFixture(fixture, fixture.legacyDelay)
         const legacyDifference = maximumDifference(output, legacyOutput)
-        const mismatchMinimum = fixture.legacyDifferenceMinimum
-        if (mismatchMinimum === undefined || legacyDifference < mismatchMinimum) {
-          throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} did not prove the expected Delay mismatch ${mismatchMinimum ?? 'declaration'}.`)
+        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        if (legacyDifference > legacyTolerance) {
+          throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
         if (fixture.assertReset) {
           expect(renderLegacyDelayFixture(fixture, fixture.legacyDelay)).toEqual(legacyOutput)
@@ -1079,7 +1108,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   expect(portableWasmCapabilityMatrix.nonfiniteInputSanitization && capabilities.has('nonfinite')).toBe(true)
   expect(portableWasmCapabilityMatrix.processorKinds.every((kind) => processorKinds.has(kind))).toBe(true)
   expect(portableGraphParityFixtures
-    .filter((fixture) => fixture.processorKind === 'delay' || fixture.processorKind === 'reverb' || fixture.processorKind === 'spectral')
+    .filter((fixture) => fixture.processorKind === 'reverb' || fixture.processorKind === 'spectral')
     .every((fixture) => fixture.portableUnsupportedReason !== undefined)).toBe(true)
   const reverbFixtures = portableGraphParityFixtures.filter((fixture) => fixture.processorKind === 'reverb')
   expect(reverbFixtures.length).toBeGreaterThan(0)

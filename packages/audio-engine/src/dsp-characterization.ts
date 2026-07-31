@@ -1,10 +1,24 @@
-type AudioFixture = readonly Float32Array[]
+export type AudioFixture = readonly Float32Array[]
 
 type AudioMetrics = {
   peak: number
   rms: number
   dcOffset: readonly number[]
   containsNonFiniteSamples: boolean
+}
+
+export const ANALYZER_FFT_SIZE = 2048
+export const ANALYZER_BIN_COUNT = ANALYZER_FFT_SIZE / 2
+export const ANALYZER_NYQUIST_BIN = ANALYZER_FFT_SIZE / 2
+export const ANALYZER_SMOOTHING = 0.7
+export const ANALYZER_MIN_DECIBELS = -100
+export const ANALYZER_MAX_DECIBELS = -30
+export const ANALYZER_BLACKMAN_ALPHA = 0.16
+
+export type AnalyzerReferenceFrame = {
+  magnitude: Float32Array
+  decibels: Float32Array
+  normalized: Float32Array
 }
 
 const createChannels = (channelCount: number, length: number) =>
@@ -145,4 +159,149 @@ export const measureChannelLeakageDb = (sourcePeak: number, leakedPeak: number) 
   if (leakedPeak <= 0) return Number.NEGATIVE_INFINITY
   if (sourcePeak <= 0) return Number.POSITIVE_INFINITY
   return 20 * Math.log10(leakedPeak / sourcePeak)
+}
+
+const blackmanWindow = (frame: number, length: number) => {
+  const progress = frame / (length - 1)
+  return (1 - ANALYZER_BLACKMAN_ALPHA) / 2
+    - 0.5 * Math.cos(2 * Math.PI * progress)
+    + ANALYZER_BLACKMAN_ALPHA / 2 * Math.cos(4 * Math.PI * progress)
+}
+
+const downmixAnalyzerFrame = (channels: AudioFixture) => {
+  const frame = new Float64Array(ANALYZER_FFT_SIZE)
+  const left = channels[0]
+  const right = channels[1]
+  for (let index = 0; index < ANALYZER_FFT_SIZE; index += 1) {
+    const leftSample = Number.isFinite(left?.[index]) ? left[index] : 0
+    const rightSample = Number.isFinite(right?.[index]) ? right[index] : 0
+    frame[index] = channels.length > 1
+      ? (leftSample + rightSample) * 0.5
+      : leftSample
+  }
+  return frame
+}
+
+/**
+ * Pure reference for the analyzer contract used by the browser meter.
+ *
+ * The DFT is intentionally direct rather than shared with production DSP:
+ * this keeps the characterization independent and makes the DC, Nyquist, and
+ * one-sided-bin scaling explicit. Previous-frame smoothing is caller-owned.
+ */
+export const characterizeAnalyzerFrame = (
+  channels: AudioFixture,
+  previousMagnitude?: Float32Array,
+): AnalyzerReferenceFrame => {
+  const input = downmixAnalyzerFrame(channels)
+  const magnitude = new Float32Array(ANALYZER_BIN_COUNT)
+  const decibels = new Float32Array(ANALYZER_BIN_COUNT)
+  const normalized = new Float32Array(ANALYZER_BIN_COUNT)
+  for (let bin = 0; bin < ANALYZER_BIN_COUNT; bin += 1) {
+    let real = 0
+    let imaginary = 0
+    for (let frame = 0; frame < ANALYZER_FFT_SIZE; frame += 1) {
+      const angle = 2 * Math.PI * bin * frame / ANALYZER_FFT_SIZE
+      const sample = input[frame] * blackmanWindow(frame, ANALYZER_FFT_SIZE)
+      real += sample * Math.cos(angle)
+      imaginary -= sample * Math.sin(angle)
+    }
+    // Web Audio exposes bins [0, N/2), so Nyquist is not present in the
+    // 1024-value output. DC is not doubled; every exposed non-DC bin is.
+    const scale = bin === 0 ? 1 / ANALYZER_FFT_SIZE : 2 / ANALYZER_FFT_SIZE
+    const currentMagnitude = Math.hypot(real, imaginary) * scale
+    const smoothedMagnitude = previousMagnitude && previousMagnitude.length === ANALYZER_BIN_COUNT
+      ? ANALYZER_SMOOTHING * previousMagnitude[bin] + (1 - ANALYZER_SMOOTHING) * currentMagnitude
+      : currentMagnitude
+    magnitude[bin] = Number.isFinite(smoothedMagnitude) ? smoothedMagnitude : 0
+    const db = 20 * Math.log10(Math.max(magnitude[bin], Number.MIN_VALUE))
+    decibels[bin] = Math.min(ANALYZER_MAX_DECIBELS, Math.max(ANALYZER_MIN_DECIBELS, db))
+    normalized[bin] = (decibels[bin] - ANALYZER_MIN_DECIBELS)
+      / (ANALYZER_MAX_DECIBELS - ANALYZER_MIN_DECIBELS)
+  }
+  return { magnitude, decibels, normalized }
+}
+
+export type ReverbCharacterizationMetrics = {
+  onsetFrame: number | null
+  peak: number
+  decayFrameAtMinus60Db: number | null
+  earlyReflectionEnergy: number
+  stereoCorrelation: number | null
+  finite: boolean
+}
+
+export const measureReverbCharacterization = (
+  channels: AudioFixture,
+  options: {
+    earlyWindow: readonly [number, number]
+    onsetThreshold?: number
+    decayThresholdDb?: number
+  },
+): ReverbCharacterizationMetrics => {
+  const left = channels[0] ?? new Float32Array()
+  const right = channels[1] ?? left
+  let peak = 0
+  let finite = true
+  for (const channel of channels) {
+    for (const sample of channel) {
+      finite = finite && Number.isFinite(sample)
+      if (Number.isFinite(sample)) peak = Math.max(peak, Math.abs(sample))
+    }
+  }
+  const onsetThreshold = options.onsetThreshold ?? 1e-6
+  const onsetFrame = channels.reduce<number | null>((first, channel) => {
+    for (let frame = 0; frame < channel.length; frame += 1) {
+      if (Number.isFinite(channel[frame]) && Math.abs(channel[frame]) >= onsetThreshold) {
+        return first === null ? frame : Math.min(first, frame)
+      }
+    }
+    return first
+  }, null)
+  const decayThreshold = peak * Math.pow(10, (options.decayThresholdDb ?? -60) / 20)
+  let decayFrameAtMinus60Db: number | null = null
+  if (peak > 0) {
+    for (const channel of channels) {
+      for (let frame = channel.length - 1; frame >= 0; frame -= 1) {
+        if (Number.isFinite(channel[frame]) && Math.abs(channel[frame]) >= decayThreshold) {
+          decayFrameAtMinus60Db = decayFrameAtMinus60Db === null
+            ? frame
+            : Math.max(decayFrameAtMinus60Db, frame)
+          break
+        }
+      }
+    }
+  }
+  const start = Math.max(0, options.earlyWindow[0])
+  const end = Math.min(Math.max(left.length, right.length), options.earlyWindow[1])
+  let earlyReflectionEnergy = 0
+  for (const channel of channels) {
+    for (let frame = start; frame < end && frame < channel.length; frame += 1) {
+      const sample = channel[frame]
+      if (Number.isFinite(sample)) earlyReflectionEnergy += sample * sample
+    }
+  }
+  let leftEnergy = 0
+  let rightEnergy = 0
+  let crossEnergy = 0
+  const correlationLength = Math.min(left.length, right.length)
+  for (let frame = 0; frame < correlationLength; frame += 1) {
+    const leftSample = Number.isFinite(left[frame]) ? left[frame] : 0
+    const rightSample = Number.isFinite(right[frame]) ? right[frame] : 0
+    leftEnergy += leftSample * leftSample
+    rightEnergy += rightSample * rightSample
+    crossEnergy += leftSample * rightSample
+  }
+  const minimumEnergy = 1e-10
+  const stereoCorrelation = leftEnergy < minimumEnergy || rightEnergy < minimumEnergy
+    ? null
+    : crossEnergy / Math.sqrt(leftEnergy * rightEnergy)
+  return {
+    onsetFrame,
+    peak,
+    decayFrameAtMinus60Db,
+    earlyReflectionEnergy,
+    stereoCorrelation,
+    finite,
+  }
 }

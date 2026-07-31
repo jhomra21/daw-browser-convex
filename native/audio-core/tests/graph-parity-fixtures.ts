@@ -91,6 +91,9 @@ export type PortableGraphParityFixture = {
   legacyStateRestoreDifferenceMinimum?: number
   stateRestoreDirtyInput?: Float32Array
   legacyExpectedNonfinite?: boolean
+  knownGapIds?: readonly string[]
+  characterizationPairKey?: string
+  characterizationPairDifferenceMinimum?: number
   portableEligible?: boolean
   portableUnsupportedReason?:
     | 'legacy-delay-filter-response-mismatch'
@@ -98,6 +101,14 @@ export type PortableGraphParityFixture = {
     | 'legacy-spectral-state-restore-and-nonfinite-mismatch'
   assertOutput: (output: readonly Float32Array[]) => boolean
 }
+
+export const REVERB_KNOWN_GAP_IDS = [
+  'reverb.native-reflection-modulation-zero-reflections',
+  'reverb.native-pre-delay-not-covering-wet-path',
+  'reverb.native-density-diffusion-decay-shortening',
+  'reverb.native-mono-no-stereo-expansion',
+  'reverb.native-time-effect-capacity-nine',
+] as const
 
 type PortableFixtureAsset = {
   identity: number
@@ -549,6 +560,73 @@ const sampleZone = (assetId: string, note: number, overrides: Partial<AudioCoreS
 const finite = (output: readonly Float32Array[]) => output.every((plane) => plane.every(Number.isFinite))
 const sampleAt = (output: readonly Float32Array[], frame: number) => output[0]?.[frame] ?? 0
 const closeTo = (value: number, expected: number, tolerance = 1e-4) => Math.abs(value - expected) <= tolerance
+const reverbOnsetFrame = (output: readonly Float32Array[], threshold = 1e-6) => {
+  for (let frame = 0; frame < (output[0]?.length ?? 0); frame += 1) {
+    if (output.some((plane) => Math.abs(plane[frame] ?? 0) >= threshold)) return frame
+  }
+  return null
+}
+const reverbStereoCorrelation = (output: readonly Float32Array[]): number | null => {
+  const left = output[0]
+  const right = output[1]
+  if (!left || !right) return null
+  let leftEnergy = 0
+  let rightEnergy = 0
+  let crossEnergy = 0
+  for (let frame = 0; frame < Math.min(left.length, right.length); frame += 1) {
+    leftEnergy += left[frame] * left[frame]
+    rightEnergy += right[frame] * right[frame]
+    crossEnergy += left[frame] * right[frame]
+  }
+  const minimumEnergy = 1e-10
+  return leftEnergy < minimumEnergy || rightEnergy < minimumEnergy
+    ? null
+    : crossEnergy / Math.sqrt(leftEnergy * rightEnergy)
+}
+const reverbDecayFrame = (output: readonly Float32Array[], thresholdDb = -60) => {
+  let peak = 0
+  for (const plane of output) {
+    for (const sample of plane) peak = Math.max(peak, Math.abs(sample))
+  }
+  const threshold = peak * Math.pow(10, thresholdDb / 20)
+  for (let frame = (output[0]?.length ?? 0) - 1; frame >= 0; frame -= 1) {
+    if (output.some((plane) => Math.abs(plane[frame] ?? 0) >= threshold)) return frame
+  }
+  return null
+}
+const reverbCharacterizationOutput = (
+  output: readonly Float32Array[],
+  expectedOnsetRange: readonly [number, number],
+) => {
+  const onset = reverbOnsetFrame(output)
+  const decay = reverbDecayFrame(output)
+  const correlation = reverbStereoCorrelation(output)
+  const earlyEnergy = output.reduce((total, plane) =>
+    total + plane.slice(onset ?? 0, (onset ?? 0) + 240).reduce((sum, sample) => sum + sample * sample, 0), 0)
+  return finite(output)
+    && onset !== null
+    && onset >= expectedOnsetRange[0]
+    && onset <= expectedOnsetRange[1]
+    && decay !== null
+    && decay >= onset + 128
+    && earlyEnergy > 1e-8
+    && output.some((plane) => plane.slice(onset + 1).some((sample) => Math.abs(sample) > 1e-6))
+    // Correlation is only meaningful once both channels carry energy. The
+    // mono-expansion gap is asserted separately by the spin pair fixture.
+    && correlation !== null
+}
+export const isPlanarImpulseFixtureInput = (input: Float32Array, channelCount = 2) => {
+  if (channelCount <= 0 || input.length % channelCount !== 0) return false
+  const frames = input.length / channelCount
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    const offset = channel * frames
+    if (!Number.isFinite(input[offset]) || input[offset] === 0) return false
+    for (let frame = 1; frame < frames; frame += 1) {
+      if (input[offset + frame] !== 0) return false
+    }
+  }
+  return true
+}
 const sourceMaster = (processorCount = 0) => graph(
   [{ id: 1n, kind: 1, bus: 0 }, { id: 2n, kind: 6, bus: 0 }],
   [{ from: 1n, to: 2n }],
@@ -1282,13 +1360,87 @@ const timeEffectFixture = (
     nativeWasmTolerance: 1e-5,
     legacyDelay: kind === 'delay' ? { kind, state } : undefined,
     legacyDifferenceMinimum: kind === 'delay' ? 1e-3 : undefined,
+    knownGapIds: kind === 'reverb' ? REVERB_KNOWN_GAP_IDS : undefined,
     portableEligible: false,
     portableUnsupportedReason: kind === 'delay'
       ? 'legacy-delay-filter-response-mismatch'
       : 'legacy-convolver-response-mismatch',
-    assertOutput: (output) => finite(output) && changedFromInput(output, input, 1e-5),
+    assertOutput: (output) => kind === 'reverb'
+      && state.wet === 1
+      && isPlanarImpulseFixtureInput(input)
+      ? reverbCharacterizationOutput(output, [Math.max(0, Math.round(state.preDelayMs * sampleRateHz / 1000) - 80), Math.round(state.preDelayMs * sampleRateHz / 1000) + 120])
+      : finite(output) && changedFromInput(output, input, 1e-5),
   }
 }
+
+const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => {
+  const fixture = timeEffectFixture(
+    'reverb',
+    reflectionSpin ? 'reflections-zero-spin-on' : 'reflections-zero-spin-off',
+    'chains',
+    48_000,
+    stereo([1, ...Array.from({ length: 4_095 }, () => 0)], Array.from({ length: 4_096 }, () => 0)),
+    {
+      state: {
+        ...reverbState,
+        wet: 1,
+        reflections: 0,
+        reflectionSpin,
+        reflectionModAmountMs: 25,
+        reflectionModRateHz: 5,
+      },
+      maxFramesPerBlock: 2_048,
+      blockPartitions: [1, 31, 127, 512, 1_024, 1_024, 1_377],
+    },
+  )
+  fixture.characterizationPairKey = 'reverb.reflections-zero-spin'
+  fixture.characterizationPairDifferenceMinimum = 1e-5
+  fixture.knownGapIds = [
+    'reverb.native-reflection-modulation-zero-reflections',
+    'reverb.native-mono-no-stereo-expansion',
+  ]
+  fixture.assertOutput = (output) => {
+    const onset = reverbOnsetFrame(output)
+    const rightEnergy = output[1]?.reduce((sum, sample) => sum + sample * sample, 0) ?? 0
+    return finite(output)
+      && onset !== null
+      && onset >= 1_300
+      && onset <= 2_200
+      && rightEnergy < 1e-10
+  }
+  return fixture
+}
+
+const reverbCapacityFixture = (processorCount: number): PortableGraphParityFixture => ({
+  name: `reverb-time-effect-capacity-${processorCount}`,
+  capability: 'chains',
+  processorKind: 'reverb',
+  sampleRateHz: 48_000,
+  maxFramesPerBlock: 4,
+  inputBusCount: 1,
+  channelCount: 2,
+  graph: graph(
+    [
+      { id: 1n, kind: 1, bus: 0 },
+      { id: 2n, kind: 6, bus: 0 },
+    ],
+    [{ from: 1n, to: 2n }],
+    Array.from({ length: processorCount }, (_, index) => ({
+      nodeId: 2n,
+      instanceId: index + 11,
+      kindId: 14,
+      state: encodeReverbProcessorState(reverbState),
+      parameterTargets: [10, 11, 12, 13, 14],
+    })),
+  ),
+  frames: 4,
+  input: new Float32Array(8).fill(0.25),
+  expectedResult: processorCount === 9 ? 'reject' : undefined,
+  knownGapIds: REVERB_KNOWN_GAP_IDS,
+  portableEligible: false,
+  portableUnsupportedReason: 'legacy-convolver-response-mismatch',
+  assertOutput: processorCount === 9 ? () => false : finite,
+})
 
 const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
   timeEffectFixture(
@@ -1390,11 +1542,49 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       [-0.5, ...Array.from({ length: 4_095 }, () => 0)],
     ),
     {
+      state: { ...reverbState, wet: 1 },
       maxFramesPerBlock: 2_048,
       blockPartitions: [1, 7, 64, 256, 512, 1_024, 2_048, 184],
       assertReset: true,
     },
   ),
+  reverbSpinPair(false),
+  reverbSpinPair(true),
+  (() => {
+    const fixture = timeEffectFixture(
+      'reverb',
+      'size-density-diffusion-extremes',
+      'chains',
+      48_000,
+      stereo(
+        [1, ...Array.from({ length: 4_095 }, () => 0)],
+        [0, ...Array.from({ length: 4_095 }, () => 0)],
+      ),
+      {
+        state: {
+          ...reverbState,
+          wet: 1,
+          size: 1,
+          density: 0,
+          diffusion: 0,
+        },
+        maxFramesPerBlock: 2_048,
+        blockPartitions: [1, 7, 64, 256, 512, 1_024, 2_048, 184],
+      },
+    )
+    fixture.assertOutput = (output) => {
+      const onset = reverbOnsetFrame(output)
+      const decay = reverbDecayFrame(output)
+      return finite(output)
+        && onset !== null
+        && onset >= 880
+        && onset <= 1_080
+        && decay === onset
+    }
+    return fixture
+  })(),
+  reverbCapacityFixture(8),
+  reverbCapacityFixture(9),
   timeEffectFixture(
     'reverb',
     'step-44100',

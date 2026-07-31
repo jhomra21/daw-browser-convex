@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import {
   encodePortableGraphParityFixture,
+  isPlanarImpulseFixtureInput,
   portableGraphParityFixtures,
+  REVERB_KNOWN_GAP_IDS,
   type PortableGraphParityFixture,
   type PortableLegacyDynamicsFixture,
   type PortableLegacyDelayFixture,
@@ -811,6 +813,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
   }
   expect(exports.daw_audio_core_graph_fixture_protocol_version()).toBe(3)
 
+  const characterizationPairs = new Map<string, readonly Float32Array[]>()
   for (const fixture of portableGraphParityFixtures) {
     const fixtureBytes = encodePortableGraphParityFixture(fixture)
     const pointerBytes = fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
@@ -856,6 +859,18 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
         new Float32Array(exports.memory.buffer,
           outputOffset + channel * fixture.frames * Float32Array.BYTES_PER_ELEMENT, fixture.frames).slice())
       if (!fixture.assertOutput(output)) throw new Error(`Graph fixture ${fixture.name} produced an unexpected output: ${JSON.stringify(output.map((plane) => [...plane]))}`)
+      if (fixture.characterizationPairKey) {
+        const previous = characterizationPairs.get(fixture.characterizationPairKey)
+        if (previous) {
+          const difference = maximumDifference(previous, output)
+          const minimum = fixture.characterizationPairDifferenceMinimum ?? 0
+          if (difference < minimum) {
+            throw new Error(`${fixture.name} characterization pair ${fixture.characterizationPairKey} difference ${difference} did not exceed ${minimum}.`)
+          }
+        } else {
+          characterizationPairs.set(fixture.characterizationPairKey, output)
+        }
+      }
       if (fixture.assertReset) {
         expect(exports.daw_audio_core_run_graph_fixture(fixtureOffset, fixtureBytes.byteLength, pointersOffset)).toBe(0)
         for (let channel = 0; channel < fixture.channelCount; channel += 1) {
@@ -1062,9 +1077,21 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   expect(portableGraphParityFixtures
     .filter((fixture) => fixture.processorKind === 'delay' || fixture.processorKind === 'reverb' || fixture.processorKind === 'spectral')
     .every((fixture) => fixture.portableUnsupportedReason !== undefined)).toBe(true)
+  const reverbFixtures = portableGraphParityFixtures.filter((fixture) => fixture.processorKind === 'reverb')
+  expect(reverbFixtures.length).toBeGreaterThan(0)
+  expect(reverbFixtures.every((fixture) =>
+    (fixture.knownGapIds?.length ?? 0) > 0
+      && fixture.knownGapIds?.every((gap) => REVERB_KNOWN_GAP_IDS.some((knownGap) => knownGap === gap)))).toBe(true)
   expect([...portableWasmCapabilityMatrix.sampleRatesHz].sort()).toEqual([...new Set(
     portableGraphParityFixtures.filter((fixture) => fixture.capability === 'sampleRates').map((fixture) => fixture.sampleRateHz),
   )].sort())
   expect(portableWasmCapabilityMatrix.maxInputBuses).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.inputBusCount)))
   expect(portableWasmCapabilityMatrix.maxChannels).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.channelCount)))
+})
+
+test('the reverb impulse characterization inspects each planar channel', () => {
+  const fixture = portableGraphParityFixtures.find((candidate) => candidate.name === 'reverb-impulse-partitions-reset')
+  if (!fixture) throw new Error('The reverb impulse fixture is unavailable.')
+  expect(isPlanarImpulseFixtureInput(fixture.input, fixture.channelCount)).toBe(true)
+  expect(fixture.input.slice(2).every((sample) => sample === 0)).toBe(false)
 })

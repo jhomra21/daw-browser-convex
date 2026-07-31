@@ -485,6 +485,10 @@ bool valid_instrument_descriptor(const daw_audio_graph_node_descriptor &node) {
   return true;
 }
 
+GraphRevision &configuration_graph(Core &core) {
+  return core.published_revision == 0 ? core.prepared_graph : core.published_graph;
+}
+
 bool valid_mixer_state(const daw_audio_mixer_state &mixer) {
   if (mixer.instance_id == 0) {
     return mixer.gain == 0.0F && mixer.pan == 0.0F && mixer.muted == 0 && mixer.soloed == 0;
@@ -3879,6 +3883,17 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
     const auto next_time_effect_histories = std::unique_ptr<std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>>(
       new (std::nothrow) std::array<TimeEffectHistory, kMaximumTimeEffectProcessors>{});
     if (!next_modulation_histories || !next_time_effect_histories) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const auto previous_instruments = std::unique_ptr<std::array<InstrumentNodeState, kMaximumGraphNodes>>(
+      new (std::nothrow) std::array<InstrumentNodeState, kMaximumGraphNodes>{});
+    const auto previous_graph_nodes = std::unique_ptr<std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>>(
+      new (std::nothrow) std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes>{});
+    if (!previous_instruments || !previous_graph_nodes) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const uint32_t previous_graph_node_count = core->published_graph.node_count;
+    std::copy(core->instruments.begin(), core->instruments.end(), previous_instruments->begin());
+    std::copy(
+      core->published_graph.nodes.begin(),
+      core->published_graph.nodes.end(),
+      previous_graph_nodes->begin());
     for (uint32_t next_index = 0; next_index < core->prepared_graph.processor_count; ++next_index) {
       const GraphRevision::Processor &next_processor = core->prepared_graph.processors[next_index];
       for (uint32_t current_index = 0; current_index < core->published_graph.processor_count; ++current_index) {
@@ -3902,6 +3917,15 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[node_index];
       if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
         core->instruments[node_index].synth = default_synth_state();
+        for (uint32_t current_index = 0; current_index < previous_graph_node_count; ++current_index) {
+          const daw_audio_graph_node_descriptor &current_node = (*previous_graph_nodes)[current_index];
+          if (current_node.id != node.id || current_node.kind != node.kind) continue;
+          core->instruments[node_index].synth = (*previous_instruments)[current_index].synth;
+          core->instruments[node_index].sampler = (*previous_instruments)[current_index].sampler;
+          core->instruments[node_index].zones = (*previous_instruments)[current_index].zones;
+          core->instruments[node_index].granular = (*previous_instruments)[current_index].granular;
+          break;
+        }
       }
     }
     for (auto &edge_delay : core->graph_delay_lines) {
@@ -4022,8 +4046,9 @@ extern "C" daw_audio_core_result daw_audio_core_configure_synth(
   const daw_audio_synth_state *state) {
   Core *core = to_core(core_handle);
   if (core == nullptr || state == nullptr || !valid_synth_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const int32_t node_index = graph_node_index(core->published_graph, node_id);
-  if (node_index < 0 || core->published_graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+  const GraphRevision &graph = configuration_graph(*core);
+  const int32_t node_index = graph_node_index(graph, node_id);
+  if (node_index < 0 || graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   core->instruments[static_cast<uint32_t>(node_index)].synth = *state;
@@ -4037,9 +4062,10 @@ extern "C" daw_audio_core_result daw_audio_core_configure_sampler(
   const daw_audio_sample_zone *zones) {
   Core *core = to_core(core_handle);
   if (core == nullptr || state == nullptr || zones == nullptr || !valid_sampler_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const int32_t node_index = graph_node_index(core->published_graph, node_id);
+  const GraphRevision &graph = configuration_graph(*core);
+  const int32_t node_index = graph_node_index(graph, node_id);
   if (node_index < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[static_cast<uint32_t>(node_index)];
+  const daw_audio_graph_node_descriptor &node = graph.nodes[static_cast<uint32_t>(node_index)];
   if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT
     || (node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_SAMPLER && node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -4065,9 +4091,10 @@ extern "C" daw_audio_core_result daw_audio_core_configure_granular(
   const daw_audio_granular_state *state) {
   Core *core = to_core(core_handle);
   if (core == nullptr || state == nullptr || !valid_granular_state(*core, *state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const int32_t node_index = graph_node_index(core->published_graph, node_id);
+  const GraphRevision &graph = configuration_graph(*core);
+  const int32_t node_index = graph_node_index(graph, node_id);
   if (node_index < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const daw_audio_graph_node_descriptor &node = core->published_graph.nodes[static_cast<uint32_t>(node_index)];
+  const daw_audio_graph_node_descriptor &node = graph.nodes[static_cast<uint32_t>(node_index)];
   if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT || node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }

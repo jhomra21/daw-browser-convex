@@ -73,6 +73,7 @@ type NativeSessionBridge = {
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
+  configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   queueParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueVstParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueInstrumentEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>

@@ -52,6 +52,7 @@ export const nativeAudioHostControlTypes = {
   scheduleWindow: 45,
   scheduleProgress: 46,
   vstScheduleAutomationEnable: 47,
+  instrumentStates: 48,
 } as const
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096

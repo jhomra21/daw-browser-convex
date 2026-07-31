@@ -1,7 +1,9 @@
+import { encodeAudioCoreInstrumentState } from "../../audio-core-contract/src/index"
 import type {
   AudioAssetRef,
   AudioCoreGraphSnapshot,
   AudioCoreSampleSourceEventDto,
+  AudioCoreInstrumentState,
 } from "../../audio-core-contract/src/index"
 import type { PortableWasmInstrumentEvent, PortableWasmProcessorEvent } from "./portable-wasm-protocol"
 import {
@@ -508,6 +510,50 @@ export type NativeAssetIdentity = Pick<AudioAssetRef, "assetId" | "frameCount" |
 export type NativeSessionAsset = {
   asset: AudioAssetRef
   sessionAssetId: number
+}
+
+export type NativeInstrumentState = {
+  nodeId: string
+  state: AudioCoreInstrumentState
+}
+
+export const serializeNativeInstrumentStates = (
+  instruments: readonly NativeInstrumentState[],
+  assets: readonly NativeSessionAsset[],
+) => {
+  const sessionAssetIds = new Map(assets.map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
+  const resolveAssetHandle = (assetId: string) => {
+    const sessionAssetId = sessionAssetIds.get(assetId)
+    if (sessionAssetId === undefined) throw new Error(`Native instrument asset "${assetId}" is not staged.`)
+    return 0x1_0000_0000n | BigInt(sessionAssetId)
+  }
+  const encoded = instruments.map(({ nodeId, state }) => ({
+    nodeId,
+    kind: state.kind,
+    state: encodeAudioCoreInstrumentState(state, resolveAssetHandle),
+  }))
+  const byteLength = 4 + encoded.reduce((total, entry) => (
+    total + 24 + entry.state.state.byteLength + (entry.state.zones?.byteLength ?? 0)
+  ), 0)
+  const output = new Uint8Array(byteLength)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, encoded.length, true)
+  let offset = 4
+  for (const entry of encoded) {
+    view.setBigUint64(offset, nativeGraphNodeId(entry.nodeId), true)
+    view.setUint32(offset + 8, entry.kind === "synth" ? 1 : entry.kind === "sampler" ? 2 : entry.kind === "drum-rack" ? 3 : 4, true)
+    view.setUint32(offset + 12, entry.state.state.byteLength, true)
+    view.setUint32(offset + 16, entry.state.zones?.byteLength ?? 0, true)
+    view.setUint32(offset + 20, 0, true)
+    offset += 24
+    output.set(entry.state.state, offset)
+    offset += entry.state.state.byteLength
+    if (entry.state.zones) {
+      output.set(entry.state.zones, offset)
+      offset += entry.state.zones.byteLength
+    }
+  }
+  return output
 }
 
 /**

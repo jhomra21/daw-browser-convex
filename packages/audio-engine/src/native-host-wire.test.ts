@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../audio-core-contract/src/index"
 import { graphEnvelope } from "../../../public/audio-worklets/daw-portable-graph-envelope-v3.js"
-import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeVstParameterEvents } from "./native-host-wire"
+import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeVstParameterEvents } from "./native-host-wire"
 
 const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -92,6 +92,30 @@ test("serializes native instrument events with absolute transport frames", () =>
     note: 60,
     value: 1,
   }])).toThrow()
+})
+
+test("serializes native synth state with its bounded ABI payload", () => {
+  const bytes = serializeNativeInstrumentStates([{
+    nodeId: "instrument",
+    state: {
+      version: audioCoreContractVersion,
+      kind: "synth",
+      voiceCapacity: 8,
+      outputLayout: "stereo",
+      parameterTargets: [],
+      outputGain: 0.75,
+      outputPan: -0.25,
+    },
+  }], [])
+  const view = new DataView(bytes.buffer)
+
+  expect(bytes.byteLength).toBe(184)
+  expect(view.getUint32(0, true)).toBe(1)
+  expect(view.getUint32(12, true)).toBe(1)
+  expect(view.getUint32(16, true)).toBe(156)
+  expect(view.getUint32(20, true)).toBe(0)
+  expect(view.getFloat32(28 + 148, true)).toBeCloseTo(0.75)
+  expect(view.getFloat32(28 + 152, true)).toBeCloseTo(-0.25)
 })
 
 test("serializes bounded native schedule ownership events", () => {

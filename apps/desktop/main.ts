@@ -1006,6 +1006,7 @@ const registerIpc = () => {
     }
   })
   registerNativeSessionBytes("daw:audio-host:session:publish-graph", (supervisor, bytes, transactionToken) => supervisor.publishGraph(bytes, transactionToken))
+  registerNativeSessionBytes("daw:audio-host:session:configure-instrument-states", (supervisor, bytes, transactionToken) => supervisor.configureInstrumentStates(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-parameter-events", (supervisor, bytes, transactionToken) => supervisor.queueParameterEvents(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-vst-parameter-events", (supervisor, bytes, transactionToken) => supervisor.queueVstParameterEvents(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-instrument-events", (supervisor, bytes, transactionToken) => supervisor.queueInstrumentEvents(bytes, transactionToken))

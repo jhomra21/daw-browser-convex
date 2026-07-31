@@ -244,6 +244,39 @@ export type AudioCoreSynthState = {
   voiceCapacity: number
   outputLayout: 'stereo'
   parameterTargets: readonly AudioCoreProcessorParameterTarget[]
+  oscillators?: readonly {
+    enabled: boolean
+    waveform: 0 | 1 | 2 | 3
+    level: number
+    octave: number
+    semitone: number
+    detuneCents: number
+  }[]
+  noiseEnabled?: boolean
+  noiseLevel?: number
+  filterEnabled?: boolean
+  filterMode?: 0 | 1
+  filterCutoffHz?: number
+  filterResonance?: number
+  filterKeyTracking?: number
+  filterEnvelopeAmountOctaves?: number
+  filterAttackMs?: number
+  filterDecayMs?: number
+  filterSustain?: number
+  filterReleaseMs?: number
+  ampAttackMs?: number
+  ampDecayMs?: number
+  ampSustain?: number
+  ampReleaseMs?: number
+  lfoEnabled?: boolean
+  lfoWaveform?: 0 | 1 | 2 | 3
+  lfoRateHz?: number
+  lfoPitchCents?: number
+  lfoFilterOctaves?: number
+  lfoAmplitude?: number
+  lfoPan?: number
+  outputGain?: number
+  outputPan?: number
 }
 
 /**
@@ -381,24 +414,50 @@ export const encodeAudioCoreInstrumentState = (
 ): AudioCoreInstrumentBinaryState => {
   if (!isAudioCoreInstrumentState(state)) throw new Error('Invalid audio-core instrument state.')
   if (state.kind === 'synth') {
+    const oscillators = state.oscillators ?? [
+      { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
+      { enabled: true, waveform: 0, level: 0.5, octave: 0, semitone: 0, detuneCents: 0 },
+    ]
     const output = new Uint8Array(156)
     const view = new DataView(output.buffer)
-    view.setUint32(0, 1, true)
+    view.setUint32(0, state.version, true)
     view.setUint32(4, 0xA341316C, true)
     view.setUint32(8, 1, true)
     view.setUint32(12, 2, true)
-    view.setFloat32(16, 0.5, true)
-    view.setUint32(32, 0, true)
-    view.setUint32(36, 0, true)
-    view.setFloat32(40, 0.5, true)
-    view.setUint32(64, 1, true)
-    view.setFloat32(72, 20_000, true)
-    view.setFloat32(76, 0.707, true)
-    ;[88, 92, 104, 108].forEach((offset) => view.setFloat32(offset, 1, true))
-    ;[96, 112].forEach((offset) => view.setFloat32(offset, 1, true))
-    ;[100, 116].forEach((offset) => view.setFloat32(offset, 10, true))
-    view.setFloat32(128, 1, true)
-    view.setFloat32(148, 1, true)
+    oscillators.slice(0, 2).forEach((oscillator, index) => {
+      const offset = 8 + index * 24
+      view.setUint32(offset, oscillator.enabled ? 1 : 0, true)
+      view.setUint32(offset + 4, oscillator.waveform, true)
+      view.setFloat32(offset + 8, oscillator.level, true)
+      view.setInt32(offset + 12, oscillator.octave, true)
+      view.setInt32(offset + 16, oscillator.semitone, true)
+      view.setFloat32(offset + 20, oscillator.detuneCents, true)
+    })
+    view.setUint32(56, state.noiseEnabled ? 1 : 0, true)
+    view.setFloat32(60, state.noiseLevel ?? 0, true)
+    view.setUint32(64, state.filterEnabled === false ? 0 : 1, true)
+    view.setUint32(68, state.filterMode ?? 0, true)
+    view.setFloat32(72, state.filterCutoffHz ?? 20_000, true)
+    view.setFloat32(76, state.filterResonance ?? 0.707, true)
+    view.setFloat32(80, state.filterKeyTracking ?? 0, true)
+    view.setFloat32(84, state.filterEnvelopeAmountOctaves ?? 0, true)
+    view.setFloat32(88, state.filterAttackMs ?? 1, true)
+    view.setFloat32(92, state.filterDecayMs ?? 1, true)
+    view.setFloat32(96, state.filterSustain ?? 1, true)
+    view.setFloat32(100, state.filterReleaseMs ?? 10, true)
+    view.setFloat32(104, state.ampAttackMs ?? 1, true)
+    view.setFloat32(108, state.ampDecayMs ?? 1, true)
+    view.setFloat32(112, state.ampSustain ?? 1, true)
+    view.setFloat32(116, state.ampReleaseMs ?? 10, true)
+    view.setUint32(120, state.lfoEnabled ? 1 : 0, true)
+    view.setUint32(124, state.lfoWaveform ?? 0, true)
+    view.setFloat32(128, state.lfoRateHz ?? 1, true)
+    view.setFloat32(132, state.lfoPitchCents ?? 0, true)
+    view.setFloat32(136, state.lfoFilterOctaves ?? 0, true)
+    view.setFloat32(140, state.lfoAmplitude ?? 0, true)
+    view.setFloat32(144, state.lfoPan ?? 0, true)
+    view.setFloat32(148, state.outputGain ?? 1, true)
+    view.setFloat32(152, state.outputPan ?? 0, true)
     return { state: output }
   }
   if (state.kind === 'granular') {
@@ -460,13 +519,63 @@ export const isAudioCoreGranularState = (value: unknown): value is AudioCoreGran
   && isFiniteNumber(value.reverseProbability) && value.reverseProbability >= 0 && value.reverseProbability <= 1
   && isFiniteNumber(value.stereoSpread) && value.stereoSpread >= 0 && value.stereoSpread <= 1
 
+const isAudioCoreSynthOscillator = (
+  value: unknown,
+): value is NonNullable<AudioCoreSynthState['oscillators']>[number] => (
+  isRecord(value)
+  && hasOnlyKeys(value, ['enabled', 'waveform', 'level', 'octave', 'semitone', 'detuneCents'])
+  && typeof value.enabled === 'boolean'
+  && typeof value.waveform === 'number' && [0, 1, 2, 3].includes(value.waveform)
+  && isBoundedFloat(value.level, 0, 1)
+  && typeof value.octave === 'number' && Number.isInteger(value.octave) && value.octave >= -8 && value.octave <= 8
+  && typeof value.semitone === 'number' && Number.isInteger(value.semitone) && value.semitone >= -12 && value.semitone <= 12
+  && isBoundedFloat(value.detuneCents, -100, 100)
+)
+
 export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthState => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['version', 'kind', 'voiceCapacity', 'outputLayout', 'parameterTargets'])) return false
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'version', 'kind', 'voiceCapacity', 'outputLayout', 'parameterTargets', 'oscillators',
+    'noiseEnabled', 'noiseLevel', 'filterEnabled', 'filterMode', 'filterCutoffHz',
+    'filterResonance', 'filterKeyTracking', 'filterEnvelopeAmountOctaves', 'filterAttackMs',
+    'filterDecayMs', 'filterSustain', 'filterReleaseMs', 'ampAttackMs', 'ampDecayMs',
+    'ampSustain', 'ampReleaseMs', 'lfoEnabled', 'lfoWaveform', 'lfoRateHz', 'lfoPitchCents',
+    'lfoFilterOctaves', 'lfoAmplitude', 'lfoPan', 'outputGain', 'outputPan',
+  ])) return false
+  const complete = value.oscillators !== undefined
+  const oscillators = value.oscillators
   if (value.version !== audioCoreContractVersion || value.kind !== 'synth'
     || typeof value.voiceCapacity !== 'number' || !Number.isSafeInteger(value.voiceCapacity)
     || value.voiceCapacity < 1 || value.voiceCapacity > audioCoreMaxInstrumentVoices
     || value.outputLayout !== 'stereo' || !Array.isArray(value.parameterTargets)
     || value.parameterTargets.length > audioCoreMaxInstrumentParameterTargets) return false
+  if (complete && (
+    !Array.isArray(value.oscillators) || value.oscillators.length !== 2
+    || typeof value.noiseEnabled !== 'boolean' || !isFiniteNumber(value.noiseLevel)
+    || typeof value.filterEnabled !== 'boolean' || (value.filterMode !== 0 && value.filterMode !== 1)
+    || !isBoundedFloat(value.filterCutoffHz, 20, 20_000)
+    || !isBoundedFloat(value.filterResonance, 0.05, 30)
+    || !isBoundedFloat(value.filterKeyTracking, -1, 1)
+    || !isBoundedFloat(value.filterEnvelopeAmountOctaves, -8, 8)
+    || !isBoundedFloat(value.filterAttackMs, 0, 10_000)
+    || !isBoundedFloat(value.filterDecayMs, 0, 10_000)
+    || !isBoundedFloat(value.filterSustain, 0, 1)
+    || !isBoundedFloat(value.filterReleaseMs, 0, 10_000)
+    || !isBoundedFloat(value.ampAttackMs, 0, 10_000)
+    || !isBoundedFloat(value.ampDecayMs, 0, 10_000)
+    || !isBoundedFloat(value.ampSustain, 0, 1)
+    || !isBoundedFloat(value.ampReleaseMs, 0, 10_000)
+    || typeof value.lfoEnabled !== 'boolean'
+    || typeof value.lfoWaveform !== 'number' || ![0, 1, 2, 3].includes(value.lfoWaveform)
+    || !isBoundedFloat(value.lfoRateHz, 0, 1_000)
+    || !isBoundedFloat(value.lfoPitchCents, -4_800, 4_800)
+    || !isBoundedFloat(value.lfoFilterOctaves, -8, 8)
+    || !isBoundedFloat(value.lfoAmplitude, -1, 1)
+    || !isBoundedFloat(value.lfoPan, -1, 1)
+    || !isBoundedFloat(value.outputGain, 0, 2)
+    || !isBoundedFloat(value.outputPan, -1, 1))) return false
+  if (complete && Array.isArray(oscillators) && !oscillators.every((oscillator) => (
+    isAudioCoreSynthOscillator(oscillator)
+  ))) return false
   const ids = new Set<string>()
   const targets = new Set<number>()
   return value.parameterTargets.every((parameter) => {

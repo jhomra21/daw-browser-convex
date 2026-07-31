@@ -85,6 +85,7 @@ const {
   scheduleWindow: scheduleWindowType,
   scheduleProgress: scheduleProgressType,
   vstScheduleAutomationEnable: vstScheduleAutomationEnableType,
+  instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 const requiredHostCapabilities = 0x000003ff
 const nativeAudioHostArtifactId = "daw-audio-host-macos/v3"
@@ -446,6 +447,7 @@ type NativeHostRequestType =
   | typeof diagnosticStartType
   | typeof scheduleWindowType
   | typeof vstScheduleAutomationEnableType
+  | typeof instrumentStatesType
 
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
@@ -577,6 +579,7 @@ export type NativeAudioHostSupervisor = {
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<void>
+  configureInstrumentStates(bytes: Uint8Array, transactionToken?: string): Promise<void>
   prepareGraphRevision(bytes: Uint8Array, transactionToken?: string): Promise<NativeGraphRevisionStatus>
   publishGraphRevision(revision: number, transactionToken?: string): Promise<NativeGraphRevisionStatus>
   rollbackGraphRevision(revision: number, transactionToken?: string): Promise<NativeGraphRevisionStatus>
@@ -1281,6 +1284,11 @@ export const createNativeAudioHostSupervisor = (
       const payload = nativeBinaryPayload(bytes, 13)
       if (!payload) throw new Error("The native audio host graph payload is invalid.")
       await request(graphSnapshotType, payload, transactionToken)
+    },
+    async configureInstrumentStates(bytes, transactionToken) {
+      const payload = nativeBinaryPayload(bytes, 4)
+      if (!payload) throw new Error("The native audio host instrument state payload is invalid.")
+      await request(instrumentStatesType, payload, transactionToken)
     },
     async prepareGraphRevision(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 13)

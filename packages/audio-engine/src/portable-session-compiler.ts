@@ -44,34 +44,8 @@ export type PortableSynthConfiguration = {
   nodeId: string
   instanceId: string
   state: AudioCoreSynthState
-  values: {
-    oscillators: readonly { enabled: boolean; waveform: 0 | 1 | 2 | 3; level: number; octave: number; semitone: number; detuneCents: number }[]
-    noiseEnabled: boolean
-    noiseLevel: number
-    filterEnabled: boolean
-    filterMode: 0 | 1
-    filterCutoffHz: number
-    filterResonance: number
-    filterKeyTracking: number
-    filterEnvelopeAmountOctaves: number
-    filterAttackMs: number
-    filterDecayMs: number
-    filterSustain: number
-    filterReleaseMs: number
-    ampAttackMs: number
-    ampDecayMs: number
-    ampSustain: number
-    ampReleaseMs: number
-    lfoEnabled: boolean
-    lfoWaveform: 0 | 1 | 2 | 3
-    lfoRateHz: number
-    lfoPitchCents: number
-    lfoFilterOctaves: number
-    lfoAmplitude: number
-    lfoPan: number
-    outputGain: number
-    outputPan: number
-  }
+  /** @deprecated Use state; retained as an identity alias for existing callers. */
+  values: AudioCoreSynthState
 }
 
 export type PortableSessionCompilerInput = {
@@ -377,53 +351,53 @@ export const compilePortableSynthConfiguration = (
   input: SynthParamsInput,
 ): PortableSynthConfiguration => {
   const params = normalizeSynthParams(input)
+  const state: AudioCoreSynthState = {
+    version: audioCoreContractVersion,
+    kind: 'synth',
+    voiceCapacity: Math.min(32, params.polyphony),
+    outputLayout: 'stereo',
+    parameterTargets: synthParameterRegistry
+      .filter((entry) => !entry.tombstone)
+      .map(({ id, target }) => ({ id, target })),
+    oscillators: params.oscillators.map((oscillator) => ({
+      enabled: oscillator.enabled,
+      waveform: waveform(oscillator.wave),
+      level: oscillator.level,
+      octave: oscillator.octave,
+      semitone: oscillator.semitone,
+      detuneCents: oscillator.detuneCents,
+    })),
+    noiseEnabled: params.noise.enabled,
+    noiseLevel: params.noise.level,
+    filterEnabled: params.filter.enabled,
+    filterMode: filterMode(params.filter.mode),
+    filterCutoffHz: params.filter.frequencyHz,
+    filterResonance: params.filter.q,
+    filterKeyTracking: params.filter.keyTracking,
+    filterEnvelopeAmountOctaves: params.filter.envelopeAmountOctaves,
+    filterAttackMs: params.filter.envelope.attackSec * 1000,
+    filterDecayMs: params.filter.envelope.decaySec * 1000,
+    filterSustain: params.filter.envelope.sustain,
+    filterReleaseMs: params.filter.envelope.releaseSec * 1000,
+    ampAttackMs: params.ampEnvelope.attackSec * 1000,
+    ampDecayMs: params.ampEnvelope.decaySec * 1000,
+    ampSustain: params.ampEnvelope.sustain,
+    ampReleaseMs: params.ampEnvelope.releaseSec * 1000,
+    lfoEnabled: params.lfo.enabled,
+    lfoWaveform: waveform(params.lfo.wave),
+    lfoRateHz: params.lfo.frequencyHz,
+    lfoPitchCents: params.lfo.pitchCents,
+    lfoFilterOctaves: params.lfo.filterOctaves,
+    lfoAmplitude: params.lfo.amp,
+    lfoPan: params.lfo.pan,
+    outputGain: params.gain,
+    outputPan: params.pan,
+  }
   return {
     nodeId,
     instanceId,
-    state: {
-      version: audioCoreContractVersion,
-      kind: 'synth',
-      voiceCapacity: Math.min(32, params.polyphony),
-      outputLayout: 'stereo',
-      parameterTargets: synthParameterRegistry
-        .filter((entry) => !entry.tombstone)
-        .map(({ id, target }) => ({ id, target })),
-    },
-    values: {
-      oscillators: params.oscillators.map((oscillator) => ({
-        enabled: oscillator.enabled,
-        waveform: waveform(oscillator.wave),
-        level: oscillator.level,
-        octave: oscillator.octave,
-        semitone: oscillator.semitone,
-        detuneCents: oscillator.detuneCents,
-      })),
-      noiseEnabled: params.noise.enabled,
-      noiseLevel: params.noise.level,
-      filterEnabled: params.filter.enabled,
-      filterMode: filterMode(params.filter.mode),
-      filterCutoffHz: params.filter.frequencyHz,
-      filterResonance: params.filter.q,
-      filterKeyTracking: params.filter.keyTracking,
-      filterEnvelopeAmountOctaves: params.filter.envelopeAmountOctaves,
-      filterAttackMs: params.filter.envelope.attackSec * 1000,
-      filterDecayMs: params.filter.envelope.decaySec * 1000,
-      filterSustain: params.filter.envelope.sustain,
-      filterReleaseMs: params.filter.envelope.releaseSec * 1000,
-      ampAttackMs: params.ampEnvelope.attackSec * 1000,
-      ampDecayMs: params.ampEnvelope.decaySec * 1000,
-      ampSustain: params.ampEnvelope.sustain,
-      ampReleaseMs: params.ampEnvelope.releaseSec * 1000,
-      lfoEnabled: params.lfo.enabled,
-      lfoWaveform: waveform(params.lfo.wave),
-      lfoRateHz: params.lfo.frequencyHz,
-      lfoPitchCents: params.lfo.pitchCents,
-      lfoFilterOctaves: params.lfo.filterOctaves,
-      lfoAmplitude: params.lfo.amp,
-      lfoPan: params.lfo.pan,
-      outputGain: params.gain,
-      outputPan: params.pan,
-    },
+    state,
+    values: state,
   }
 }
 
@@ -540,7 +514,7 @@ const unsupported = (reasons: readonly string[]): PreparedPortableSession => ({
   reasons,
 })
 
-const instrumentConfigurations = (
+export const instrumentConfigurations = (
   compilation: ReturnType<typeof compilePortableSessionInput>,
 ): readonly PortableInstrumentConfiguration[] => [
   ...compilation.synths,
@@ -549,7 +523,7 @@ const instrumentConfigurations = (
   ...compilation.granulars,
 ]
 
-const graphWithInstruments = (
+export const graphWithInstruments = (
   graph: AudioCoreGraphSnapshot,
   instruments: readonly PortableInstrumentConfiguration[],
 ): { graph?: AudioCoreGraphSnapshot; reasons: readonly string[] } => {

@@ -20,6 +20,11 @@ import {
   type PortablePreparedStretchAsset,
   type PortableStretchDiagnostic,
 } from './portable-stretch-preparation'
+import {
+  compilePortableSessionInput,
+  graphWithInstruments,
+  instrumentConfigurations,
+} from './portable-session-compiler'
 
 export type PortableExportAsset = {
   asset: AudioAssetRef
@@ -263,21 +268,54 @@ export const compilePortableExportSnapshot = (
   })
 
   try {
+    const instrumentCompilation = compilePortableSessionInput({
+      mixer: resolveExportMixerGraph({
+        tracks: [...input.tracks],
+        fx: input.fx,
+      }),
+      fx: input.fx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} },
+      automationEnvelopes: [],
+      assetRegistry: {
+        projectGeneration: 1,
+        assets: [...bySourceAssetKey.entries()].flatMap(([projectAssetId, asset], slot) => {
+          const exportAsset = assets.find((entry) => entry.asset.assetId === asset.assetId)
+          return exportAsset ? [{
+            projectAssetId,
+            portableAssetId: asset.assetId,
+            projectGeneration: 1,
+            handle: { slot, generation: 1 },
+            decoded: {
+              sampleRateHz: exportAsset.asset.sampleRateHz,
+              channelCount: exportAsset.asset.channelCount,
+              frameCount: exportAsset.asset.frameCount,
+            },
+          }] : []
+        }),
+      },
+    })
+    if (instrumentCompilation.unsupportedInstruments.length > 0) {
+      return unsupported([...reasons, ...instrumentCompilation.unsupportedInstruments], diagnostics)
+    }
+    const baseGraph = createPortableGraphSnapshot({
+      graph: resolveExportMixerGraph({
+        tracks: [...input.tracks],
+        fx: input.fx,
+      }),
+      revision: input.revision,
+      sampleRate: input.sampleRateHz,
+      bpm: input.bpm,
+      assets: assets.map((entry) => entry.asset),
+      sidechainRoutes: input.sidechainRoutes,
+      includeInstruments: false,
+      externalLatencyFrames: input.externalLatencyFrames,
+    })
+    const instrumentGraph = input.allowInstruments === true
+      ? graphWithInstruments(baseGraph, instrumentConfigurations(instrumentCompilation))
+      : { graph: baseGraph, reasons: [] as readonly string[] }
+    if (!instrumentGraph.graph) return unsupported([...reasons, ...instrumentGraph.reasons], diagnostics)
     return {
       supported: true,
-      graph: createPortableGraphSnapshot({
-        graph: resolveExportMixerGraph({
-          tracks: [...input.tracks],
-          fx: input.fx,
-        }),
-        revision: input.revision,
-        sampleRate: input.sampleRateHz,
-        bpm: input.bpm,
-        assets: assets.map((entry) => entry.asset),
-        sidechainRoutes: input.sidechainRoutes,
-        includeInstruments: input.allowInstruments === true,
-        externalLatencyFrames: input.externalLatencyFrames,
-      }),
+      graph: instrumentGraph.graph,
       assets,
       events,
     }

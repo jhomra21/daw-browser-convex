@@ -814,7 +814,7 @@ std::optional<ControlFrame> DecodeControlFrame(std::span<const std::uint8_t> byt
   const std::uint32_t length = ReadU32(bytes.data() + 12);
   if (length > kMaximumControlPayloadBytes || bytes.size() != kControlFrameHeaderBytes + length) return std::nullopt;
   if (type < static_cast<std::uint32_t>(ControlType::kHostHello)
-    || type > static_cast<std::uint32_t>(ControlType::kScheduleProgress)) return std::nullopt;
+    || type > static_cast<std::uint32_t>(ControlType::kInstrumentStates)) return std::nullopt;
   return ControlFrame{
     .type = static_cast<ControlType>(type),
     .payload = {bytes.begin() + static_cast<std::ptrdiff_t>(kControlFrameHeaderBytes), bytes.end()},
@@ -1278,7 +1278,17 @@ struct AudioHost::Impl {
     };
     if (daw_audio_core_create(&core_config, &core) != DAW_AUDIO_CORE_OK) return 0;
     prepared_asset_handles.clear();
+    std::vector<std::uint32_t> asset_ids;
+    asset_ids.reserve(assets.size());
     for (const auto& [asset_id, asset] : assets) {
+      static_cast<void>(asset);
+      asset_ids.push_back(asset_id);
+    }
+    std::sort(asset_ids.begin(), asset_ids.end());
+    for (const auto asset_id : asset_ids) {
+      const auto asset_iterator = assets.find(asset_id);
+      if (asset_iterator == assets.end()) continue;
+      const auto& asset = asset_iterator->second;
       const daw_audio_asset_descriptor descriptor{
         .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
         .revision = revision,
@@ -1562,6 +1572,51 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   impl_->prepared_core = prepared_core;
   impl_->prepared_revision.store(revision, std::memory_order_release);
   return status(GraphRevisionStatusCode::kPrepared);
+}
+
+bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> payload) {
+  const daw_audio_core_handle target_core = impl_->prepared_core != 0
+    ? impl_->prepared_core
+    : impl_->active_core.load(std::memory_order_acquire);
+  if (target_core == 0 || payload.size() < 4) return false;
+  const std::uint32_t count = ReadLeU32(payload.data());
+  if (count > 64) return false;
+  std::size_t offset = 4;
+  for (std::uint32_t index = 0; index < count; ++index) {
+    if (payload.size() - offset < 24) return false;
+    const std::uint64_t node_id = ReadLeU64(payload.data() + offset);
+    const std::uint32_t kind = ReadLeU32(payload.data() + offset + 8);
+    const std::uint32_t state_size = ReadLeU32(payload.data() + offset + 12);
+    const std::uint32_t zones_size = ReadLeU32(payload.data() + offset + 16);
+    offset += 24;
+    if (state_size > kMaximumControlPayloadBytes || zones_size > kMaximumControlPayloadBytes
+      || payload.size() - offset < static_cast<std::size_t>(state_size) + zones_size) return false;
+    const auto* state_bytes = payload.data() + offset;
+    offset += state_size;
+    const auto* zones_bytes = payload.data() + offset;
+    offset += zones_size;
+    daw_audio_core_result result = DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    if (kind == 1 && state_size == sizeof(daw_audio_synth_state) && zones_size == 0) {
+      daw_audio_synth_state state{};
+      std::memcpy(&state, state_bytes, sizeof(state));
+      result = daw_audio_core_configure_synth(target_core, node_id, &state);
+    } else if ((kind == 2 || kind == 3) && state_size == sizeof(daw_audio_sampler_state)
+      && zones_size % sizeof(daw_audio_sample_zone) == 0
+      && zones_size / sizeof(daw_audio_sample_zone) > 0
+      && zones_size / sizeof(daw_audio_sample_zone) <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES) {
+      daw_audio_sampler_state state{};
+      std::memcpy(&state, state_bytes, sizeof(state));
+      std::vector<daw_audio_sample_zone> zones(zones_size / sizeof(daw_audio_sample_zone));
+      std::memcpy(zones.data(), zones_bytes, zones_size);
+      result = daw_audio_core_configure_sampler(target_core, node_id, &state, zones.data());
+    } else if (kind == 4 && state_size == sizeof(daw_audio_granular_state) && zones_size == 0) {
+      daw_audio_granular_state state{};
+      std::memcpy(&state, state_bytes, sizeof(state));
+      result = daw_audio_core_configure_granular(target_core, node_id, &state);
+    }
+    if (result != DAW_AUDIO_CORE_OK) return false;
+  }
+  return offset == payload.size();
 }
 
 GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision) {

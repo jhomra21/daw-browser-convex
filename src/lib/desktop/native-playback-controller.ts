@@ -4,6 +4,7 @@ import {
 import {
   mapNativeSessionAssets,
   serializeNativeGraph,
+  serializeNativeInstrumentStates,
   serializeNativeInstrumentEvents,
   serializeNativeVstParameterEvents,
   nativeGraphNodeId,
@@ -52,6 +53,7 @@ type NativePlaybackBridge = Pick<
     | "installAsset"
     | "releaseAsset"
     | "publishGraph"
+    | "configureInstrumentStates"
     | "queueInstrumentEvents"
     | "queueScheduleWindow"
     | "queueSourceEvents"
@@ -528,6 +530,17 @@ export const createNativePlaybackController = (input: {
         if (cancelled()) throw new Error("Native playback startup was cancelled.")
       }
       assertReply(await bridge.session.publishGraph(serializeNativeGraph(nativeGraph), transactionToken))
+      if (bridge.session.configureInstrumentStates) {
+        assertReply(await bridge.session.configureInstrumentStates(
+          serializeNativeInstrumentStates(
+            nativeGraph.nodes.flatMap((node) => node.kind === "instrument" && node.instrument
+              ? [{ nodeId: node.id, state: node.instrument }]
+              : []),
+            assets,
+          ),
+          transactionToken,
+        ))
+      }
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
       const parameterQueue = bridge.session.queueVstParameterEvents
       const parameterBatches = nativeVstParameterEventsForSnapshot(

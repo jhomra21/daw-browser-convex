@@ -76,6 +76,7 @@ enum class ControlType : std::uint32_t {
   kScheduleWindow = 45,
   kScheduleProgress = 46,
   kVstScheduleAutomationEnable = 47,
+  kInstrumentStates = 48,
 };
 
 struct ControlFrame {
@@ -373,6 +374,7 @@ class AudioHost {
   bool Configure(const HostConfig& config);
   bool PrepareAndPublishGraph(std::uint32_t revision, std::span<const std::uint8_t> snapshot);
   GraphRevisionStatus PrepareGraphRevision(std::uint32_t revision, std::span<const std::uint8_t> snapshot);
+  bool ConfigureInstrumentStates(std::span<const std::uint8_t> payload);
   GraphRevisionStatus PublishGraphRevision(std::uint32_t revision);
   GraphRevisionStatus RollbackGraphRevision(std::uint32_t revision);
   GraphRevisionStatus RetireGraphRevision(std::uint32_t revision);

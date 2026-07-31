@@ -638,6 +638,9 @@ int main() {
         if (!active_session || payload.size() != 4) return EXIT_FAILURE;
         if (!WriteGraphRevisionStatus(active_session->RollbackGraphRevision(ReadU32(payload.data())))) return EXIT_FAILURE;
         continue;
+      case daw::audio_host_macos::ControlType::kInstrumentStates:
+        accepted = session && session->ConfigureInstrumentStates(payload);
+        break;
       case daw::audio_host_macos::ControlType::kAssetInstall: accepted = session && InstallAsset(*session, payload); break;
       case daw::audio_host_macos::ControlType::kAssetRelease:
         accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));

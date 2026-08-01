@@ -480,15 +480,15 @@ export function useTimelinePlayback(
   const setPlayhead = (sec: number, tracks: Track[]) => {
     publishPlayhead(sec)
     setLastTracks(tracks)
-    if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
-      setIsPlaying(false)
-      cancelRaf()
-      void nativePlayback.dispose()
-      portableBrowserPlayback.dispose()
-      setActiveBackend('idle')
-      return
-    }
     if (isPlaying()) {
+      if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
+        setIsPlaying(false)
+        cancelRaf()
+        void nativePlayback.dispose()
+        portableBrowserPlayback.dispose()
+        setActiveBackend('idle')
+        return
+      }
       // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
       audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)

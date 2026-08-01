@@ -721,6 +721,70 @@ test('uses the committed native backend without scheduling Web Audio', async () 
   }
 })
 
+test('preserves a prepared native preview across an idle seek', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const transportEvents: string[] = []
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        applyAutomationAtTimelineSec: () => transportEvents.push('applyAutomationAtTimelineSec'),
+        cancelAutomationSchedules: () => transportEvents.push('cancelAutomationSchedules'),
+        onTransportSeek: () => transportEvents.push('onTransportSeek'),
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => true,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        })
+
+        await playback.handlePlay([track])
+        await playback.handlePause()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        const beforeCounts = {
+          begin: fixture.calls.filter((call) => call === 'begin').length,
+          release: fixture.calls.filter((call) => call === 'release').length,
+          stop: fixture.calls.filter((call) => call === 'stop').length,
+          teardown: fixture.calls.filter((call) => call === 'teardown').length,
+        }
+
+        transportEvents.length = 0
+        playback.setPlayhead(4, [track])
+        await flushMicrotasks()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
+        expect(transportEvents).toEqual([
+          'cancelAutomationSchedules',
+          'onTransportSeek',
+          'applyAutomationAtTimelineSec',
+        ])
+        expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(beforeCounts.begin)
+        expect(fixture.calls.filter((call) => call === 'release')).toHaveLength(beforeCounts.release)
+        expect(fixture.calls.filter((call) => call === 'stop')).toHaveLength(beforeCounts.stop)
+        expect(fixture.calls.filter((call) => call === 'teardown')).toHaveLength(beforeCounts.teardown)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
 test('rebuilds a prepared native backend before the next play', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []

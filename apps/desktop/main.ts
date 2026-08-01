@@ -1016,9 +1016,15 @@ const registerIpc = () => {
   registerNativeSessionBytes("daw:audio-host:session:queue-source-events", (supervisor, bytes, transactionToken) => supervisor.queueSourceEvents(bytes, transactionToken))
   ipcMain.handle("daw:audio-host:session:set-spectrum-node", async (event, value: unknown) => {
     const supervisor = sessionSupervisorFor(event)
-    if (!supervisor || (value !== null && (typeof value !== "bigint" || value <= 0n))) return nativeSessionFailure()
+    const envelope = nativeSessionEnvelope(value)
+    if (
+      !supervisor
+      || !envelope
+      || envelope.transactionToken !== undefined
+      || (envelope.value !== null && (typeof envelope.value !== "bigint" || envelope.value <= 0n))
+    ) return nativeSessionFailure()
     try {
-      await supervisor.setSpectrumNode(value)
+      await supervisor.setSpectrumNode(envelope.value)
       return { ok: true as const }
     } catch {
       return nativeSessionFailure()

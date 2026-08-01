@@ -171,6 +171,7 @@ export const createNativePlaybackController = (input: {
 }) => {
   let active = false
   let prepared = false
+  let nativeSessionStarted = false
   let livePreviewActive = false
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
@@ -241,7 +242,6 @@ export const createNativePlaybackController = (input: {
   const clearNativeSpectrum = () => {
     unsubscribeSpectrum?.()
     unsubscribeSpectrum = undefined
-    nativeSpectrumTarget = undefined
     nativeSpectrumNodeIds = new Map()
     latestSpectrumSequence = 0n
     for (const listener of nativeSpectrumListeners) listener(null)
@@ -254,10 +254,14 @@ export const createNativePlaybackController = (input: {
     ])
     latestSpectrumSequence = 0n
     for (const listener of nativeSpectrumListeners) listener(null)
-    if (nativeSpectrumTarget !== undefined) {
-      const nodeId = nativeSpectrumNodeIds.get(nativeSpectrumTarget)
-      void input.bridge?.session.setSpectrumNode?.(nodeId ?? null)
-    }
+  }
+
+  const configureNativeSpectrumTarget = () => {
+    if (!nativeSessionStarted) return
+    const nodeId = nativeSpectrumTarget === undefined
+      ? null
+      : nativeSpectrumNodeIds.get(nativeSpectrumTarget) ?? null
+    void input.bridge?.session.setSpectrumNode?.(nodeId)
   }
 
   const handleNativeSpectrumFrame = (frame: NativeHostSpectrumFrame) => {
@@ -361,6 +365,7 @@ export const createNativePlaybackController = (input: {
     installedAssetIds = []
     active = false
     prepared = false
+    nativeSessionStarted = false
     livePreviewActive = false
     liveNoteReadiness.clear()
     scheduleCoordinator?.dispose()
@@ -471,6 +476,7 @@ export const createNativePlaybackController = (input: {
       clearNativeSpectrum()
       active = false
       prepared = false
+      nativeSessionStarted = false
       livePreviewActive = false
       liveInstrumentQueueGeneration += 1
       preparedProjectGeneration = undefined
@@ -651,6 +657,8 @@ export const createNativePlaybackController = (input: {
       unsubscribeSpectrum?.()
       unsubscribeSpectrum = bridge.session.onSpectrumFrame?.(handleNativeSpectrumFrame)
       assertReply(await bridge.session.start())
+      nativeSessionStarted = true
+      configureNativeSpectrumTarget()
       if (cancelled()) {
         await dispose()
         return "unavailable"
@@ -1139,14 +1147,13 @@ export const createNativePlaybackController = (input: {
   const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
     nativeSpectrumListeners.add(listener)
     nativeSpectrumTarget = targetId
-    const nodeId = nativeSpectrumNodeIds.get(targetId)
-    void input.bridge?.session.setSpectrumNode?.(nodeId ?? null)
+    if (prepared) configureNativeSpectrumTarget()
     listener(null)
     return () => {
       nativeSpectrumListeners.delete(listener)
       if (nativeSpectrumListeners.size === 0) {
         nativeSpectrumTarget = undefined
-        void input.bridge?.session.setSpectrumNode?.(null)
+        configureNativeSpectrumTarget()
       }
     }
   }

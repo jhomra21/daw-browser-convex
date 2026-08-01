@@ -37,3 +37,17 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
   expect(main).toContain('catalogViewForRenderer')
 })
+
+test("keeps spectrum selection on the native session envelope contract", async () => {
+  const [main, preload] = await Promise.all([
+    readFile(mainPath, "utf8"),
+    readFile(preloadPath, "utf8"),
+  ])
+
+  expect(preload).toContain('setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession("daw:audio-host:session:set-spectrum-node", nodeId)')
+  expect(main).toContain('const envelope = nativeSessionEnvelope(value)')
+  expect(main).toContain('envelope.transactionToken !== undefined')
+  expect(main).toContain('typeof envelope.value !== "bigint"')
+  expect(main).toContain('await supervisor.setSpectrumNode(envelope.value)')
+  expect(main).not.toContain('[native-spectrum]')
+})

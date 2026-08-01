@@ -116,6 +116,8 @@ const createBridge = (
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
+  const spectrumNodeIds: Array<bigint | null> = []
+  const spectrumSelections: Array<{ nodeId: bigint | null; sessionStarted: boolean }> = []
   const instrumentRequests: Array<{
     bytes: Uint8Array
     resolve: (reply: BridgeReply) => void
@@ -169,6 +171,8 @@ const createBridge = (
     instrumentPayloads,
     schedulePayloads,
     graphPayloads,
+    spectrumNodeIds,
+    spectrumSelections,
     instrumentRequests,
     emitLoss: () => loss(),
     emitRecordingBlock: (block: NativeHostRecordingBlock) => recordingBlock(block),
@@ -364,7 +368,14 @@ const createBridge = (
           meterBatch = listener
           return () => { meterBatch = () => {} }
         },
-        setSpectrumNode: async () => ({ ok: true as const }),
+        setSpectrumNode: async (nodeId: bigint | null) => {
+          spectrumNodeIds.push(nodeId)
+          spectrumSelections.push({ nodeId, sessionStarted })
+          if (nodeId !== null && !sessionStarted) {
+            return { ok: false as const, error: "session is not started" }
+          }
+          return { ok: true as const }
+        },
         onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
           spectrumFrame = listener
           return () => { spectrumFrame = () => {} }
@@ -473,7 +484,12 @@ test("filters native spectrum frames by target, revision, epoch, and sequence", 
   })
   const frames: Array<SpectrumFrame | null> = []
   const unsubscribe = controller.subscribeSpectrum("track", (frame) => frames.push(frame))
+  expect(fixture.spectrumSelections.filter(({ nodeId, sessionStarted }) => nodeId !== null && !sessionStarted)).toEqual([])
   await expect(controller.start(input().transport)).resolves.toBe("started")
+  expect(fixture.spectrumSelections.at(-1)).toEqual({
+    nodeId: nativeGraphNodeId("track"),
+    sessionStarted: true,
+  })
   const valid = {
     graphRevision: 1,
     transportEpoch: 1,
@@ -491,6 +507,42 @@ test("filters native spectrum frames by target, revision, epoch, and sequence", 
   await controller.dispose()
   expect(frames.at(-1)).toBeNull()
   unsubscribe()
+})
+
+test("retains the spectrum target while rebuilding the native session", async () => {
+  const fixture = createBridge()
+  let projectGeneration = 1
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectGeneration: () => projectGeneration,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+  const frames: Array<SpectrumFrame | null> = []
+  const unsubscribe = controller.subscribeSpectrum("track", (frame) => frames.push(frame))
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  expect(fixture.spectrumNodeIds).toContain(nativeGraphNodeId("track"))
+
+  await controller.pause(0.5)
+  projectGeneration += 1
+  await expect(controller.start({ ...input().transport, playheadSec: 0.5 })).resolves.toBe("started")
+  expect(fixture.spectrumNodeIds.at(-1)).toBe(nativeGraphNodeId("track"))
+
+  fixture.emitSpectrumFrame({
+    graphRevision: 1,
+    transportEpoch: 2,
+    sequence: 1n,
+    nodeId: nativeGraphNodeId("track"),
+    sampleRateHz: 48_000,
+    fftSize: 2_048,
+    binCount: 1_024,
+    data: new Float32Array(1_024),
+  })
+  expect(frames.at(-1)).toMatchObject({ nodeId: nativeGraphNodeId("track"), sequence: 1n })
+
+  unsubscribe()
+  expect(fixture.spectrumNodeIds.at(-1)).toBeNull()
+  await controller.dispose()
 })
 
 test("lazily starts a paused native preview and preserves queued note order", async () => {

@@ -107,7 +107,7 @@ export const serializeNativeSpectrumSelection = (nodeId: bigint | null) => {
     throw new Error("Native spectrum node selection is invalid.")
   }
   const output = new Uint8Array(8)
-  new DataView(output.buffer).setBigUint64(0, nodeId ?? 0n, true)
+  new DataView(output.buffer).setBigUint64(0, nodeId ?? 0n)
   return output
 }
 

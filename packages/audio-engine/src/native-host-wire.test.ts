@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../audio-core-contract/src/index"
 import { graphEnvelope } from "../../../public/audio-worklets/daw-portable-graph-envelope-v3.js"
-import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeVstParameterEvents } from "./native-host-wire"
+import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeSpectrumSelection, serializeNativeVstParameterEvents } from "./native-host-wire"
 
 const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -9,6 +9,15 @@ const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
   frameCount,
   sampleRateHz: 48_000,
   channelCount: 2,
+})
+
+test("serializes native spectrum selection in the host protocol byte order", () => {
+  expect([...serializeNativeSpectrumSelection(0x0123_4567_89ab_cdefn)]).toEqual([
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+  ])
+  expect([...serializeNativeSpectrumSelection(null)]).toEqual([
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ])
 })
 
 test("maps unique portable assets into deterministic session-local uint32 identifiers", () => {

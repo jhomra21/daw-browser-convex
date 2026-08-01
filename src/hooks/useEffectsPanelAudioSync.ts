@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   AUDIO_EFFECT_CONTRACTS,
@@ -287,19 +287,25 @@ export function useEffectsPanelAudioSync(
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
-  createEffect(() => {
-    if (!options.isOpen()) {
-      setSpectrum(null);
-      return;
-    }
-    const provider = options.spectrumProvider?.()
-    if (!provider) {
-      setSpectrum(null)
-      return
-    }
-    const unsubscribe = provider(options.currentTargetId(), setSpectrum)
-    onCleanup(unsubscribe)
-  });
+  const spectrumIsOpen = createMemo(options.isOpen);
+  const spectrumProvider = createMemo(() => options.spectrumProvider?.());
+  const spectrumTargetId = createMemo(options.currentTargetId);
+
+  createEffect(on(
+    [spectrumIsOpen, spectrumProvider, spectrumTargetId],
+    ([isOpen, provider, targetId]) => {
+      if (!isOpen) {
+        setSpectrum(null);
+        return;
+      }
+      if (!provider) {
+        setSpectrum(null)
+        return
+      }
+      const unsubscribe = provider(targetId, setSpectrum)
+      onCleanup(unsubscribe)
+    },
+  ));
 
   return {
     spectrum,

@@ -1,6 +1,6 @@
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
-import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEngine, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
@@ -46,6 +46,7 @@ export type TimelinePanelsProps = {
     projectId?: string
     userId?: string
     audioEngine: AudioEngine
+    spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
     onSelectClip: (trackId: Track['id'], clipId: string, startSec: number) => void
@@ -146,6 +147,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onClose={props.effectsPanel.onClose}
         onOpen={props.effectsPanel.onOpen}
         audioEngine={props.effectsPanel.audioEngine}
+        spectrumProvider={props.effectsPanel.spectrumProvider}
         projectId={props.effectsPanel.projectId}
         userId={props.effectsPanel.userId}
         canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}

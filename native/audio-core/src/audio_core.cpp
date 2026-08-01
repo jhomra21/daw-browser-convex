@@ -51,8 +51,7 @@ constexpr std::array<double, 48> kLimiterTruePeakFir = {
 };
 // One extra frame lets a 96 kHz processor read the full 3,000 ms contract maximum.
 constexpr uint32_t kMaximumTimeEffectDelayFrames = 288001;
-// Reverb only needs its bounded pre-delay and decorrelation window; its tail is
-// carried by the persistent feedback state below.
+// Reverb uses the same fixed ring for pre-delay and its bounded late network.
 constexpr uint32_t kMaximumReverbDelayFrames = 24001;
 static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
 static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == DAW_AUDIO_CORE_ABI_VERSION);
@@ -293,8 +292,6 @@ struct TimeEffectHistory {
   std::array<float, DelayFrames> left{};
   std::array<float, DelayFrames> right{};
   uint32_t write = 0;
-  float feedback_left = 0.0F;
-  float feedback_right = 0.0F;
   BiquadHistory highpass_left{};
   BiquadHistory highpass_right{};
   BiquadHistory lowpass_left{};
@@ -2274,39 +2271,58 @@ void render_time_effect_processor_impl(
     right = dry_right * (1.0F - bounded_dry_wet) + wet_right * bounded_dry_wet;
     enabled = delay_state.enabled != 0;
   } else {
-    const float pre_delay_frames = std::fmax(1.0F, reverb_pre_delay * rate / 1000.0F + reverb_modulation_ms * rate / 1000.0F);
+    const float bounded_wet = std::fmax(0.0F, std::fmin(reverb_wet, 1.0F));
+    const float bounded_pre_delay_ms = std::fmax(0.0F, std::fmin(reverb_pre_delay, 250.0F));
+    const float bounded_low_cut_hz = std::fmax(20.0F, std::fmin(reverb_low_cut, 1200.0F));
+    const float bounded_high_cut_hz = std::fmax(1200.0F, std::fmin(reverb_high_cut, 20000.0F));
+    const float bounded_width = std::fmax(0.0F, std::fmin(reverb_width, 2.0F));
+    const float bounded_size = std::fmax(0.0F, std::fmin(reverb_state.size, 1.0F));
+    const float pre_delay_frames = std::fmax(
+      1.0F,
+      bounded_pre_delay_ms * rate / 1000.0F + reverb_modulation_ms * rate / 1000.0F);
     const float stereo_spread_frames = processor.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO
-      ? (6.0F + reverb_state.size * 8.0F) * rate / 1000.0F
+      ? (6.0F + bounded_size * 8.0F) * rate / 1000.0F
       : 0.0F;
     const float raw_left = read_time_effect_delay(history.left, history.write, pre_delay_frames);
     const float raw_right = read_time_effect_delay(history.right, history.write, pre_delay_frames + stereo_spread_frames);
-    const float low_cut = std::fmax(reverb_low_cut, reverb_state.diffusion_low_cut_hz);
-    const float high_cut = std::fmin(reverb_high_cut, reverb_state.diffusion_high_cut_hz);
-    const float wet_left = filter_reverb_sample(raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
-    const float wet_right = filter_reverb_sample(raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
+    const float diffusion_delay_ms = std::fmax(20.0F, std::fmin(20.0F + bounded_size * 80.0F, 100.0F));
+    const float network_delay_frames = std::fmax(
+      1.0F,
+      pre_delay_frames + diffusion_delay_ms * rate / 1000.0F);
+    const float late_raw_left = read_time_effect_delay(history.left, history.write, network_delay_frames);
+    const float late_raw_right = read_time_effect_delay(
+      history.right, history.write, network_delay_frames + stereo_spread_frames);
+    const float low_cut = std::fmax(bounded_low_cut_hz, reverb_state.diffusion_low_cut_hz);
+    const float high_cut = std::fmin(bounded_high_cut_hz, reverb_state.diffusion_high_cut_hz);
+    const float late_left = filter_reverb_sample(
+      late_raw_left, low_cut, high_cut, core, &history.low_left, &history.high_input_left, &history.high_left);
+    const float late_right = filter_reverb_sample(
+      late_raw_right, low_cut, high_cut, core, &history.low_right, &history.high_input_right, &history.high_right);
     const float decay = std::fmax(0.05F, reverb_state.decay_sec);
-    const float decay_step = std::pow(1.0e-4F, 1.0F / (decay * rate));
-    const float texture_gain = reverb_state.diffuse
-      * reverb_state.density
-      * (0.5F + 0.5F * reverb_state.diffusion);
+    const float feedback_gain = std::fmin(
+      0.9999F,
+      std::pow(1.0e-4F, network_delay_frames / (decay * rate)));
+    const float texture_gain = std::fmax(0.0F, std::fmin(
+      reverb_state.diffuse * reverb_state.density
+      * (0.5F + 0.5F * reverb_state.diffusion), 1.0F));
     const float reflection_gain = reverb_state.reflections * (0.65F + reverb_state.reflection_shape * 0.7F);
-    history.feedback_left = history.feedback_left * decay_step + wet_left * texture_gain;
-    history.feedback_right = history.feedback_right * decay_step + wet_right * texture_gain;
     const float early_left = raw_left * reflection_gain;
     const float early_right = raw_right * reflection_gain;
-    history.left[history.write] = dry_left;
-    history.right[history.write] = dry_right;
-    history.write = (history.write + 1) % static_cast<uint32_t>(history.left.size());
-    const float width = reverb_width;
     const bool has_late_texture = reverb_state.diffuse > 0.0F
       && reverb_state.density > 0.0F
       && reverb_state.diffusion > 0.0F;
-    const float late_left = has_late_texture ? wet_left + history.feedback_left : 0.0F;
-    const float late_right = has_late_texture ? wet_right + history.feedback_right : 0.0F;
-    const float wide_left = late_left * (1.0F + width) * 0.5F + late_right * (1.0F - width) * 0.5F;
-    const float wide_right = late_right * (1.0F + width) * 0.5F + late_left * (1.0F - width) * 0.5F;
-    left = dry_left * (1.0F - reverb_wet) + (wide_left + early_left) * reverb_wet;
-    right = dry_right * (1.0F - reverb_wet) + (wide_right + early_right) * reverb_wet;
+    const float late_write_gain = has_late_texture ? texture_gain * feedback_gain : 0.0F;
+    history.left[history.write] = dry_left + late_left * late_write_gain;
+    history.right[history.write] = dry_right + late_right * late_write_gain;
+    history.write = (history.write + 1) % static_cast<uint32_t>(history.left.size());
+    const float output_late_left = has_late_texture ? late_left * texture_gain : 0.0F;
+    const float output_late_right = has_late_texture ? late_right * texture_gain : 0.0F;
+    const float wide_left = output_late_left * (1.0F + bounded_width) * 0.5F
+      + output_late_right * (1.0F - bounded_width) * 0.5F;
+    const float wide_right = output_late_right * (1.0F + bounded_width) * 0.5F
+      + output_late_left * (1.0F - bounded_width) * 0.5F;
+    left = dry_left * (1.0F - bounded_wet) + (wide_left + early_left) * bounded_wet;
+    right = dry_right * (1.0F - bounded_wet) + (wide_right + early_right) * bounded_wet;
     history.phase += static_cast<double>(reverb_state.reflection_mod_rate_hz) / static_cast<double>(core.config.sample_rate_hz);
     history.phase -= std::floor(history.phase);
     enabled = reverb_state.enabled != 0;

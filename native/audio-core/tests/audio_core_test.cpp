@@ -1073,6 +1073,39 @@ void test_portable_delay_and_reverb_characterization() {
   for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
     assert(std::isfinite(output_left[frame]) && std::isfinite(output_right[frame]));
   }
+  left.fill(0.0F);
+  right.fill(0.0F);
+  float impulse_tail_peak = 0.0F;
+  for (uint32_t block_index = 0; block_index < 8; ++block_index) {
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      assert(std::isfinite(output_left[frame]) && std::isfinite(output_right[frame]));
+      impulse_tail_peak = std::max(
+        impulse_tail_peak,
+        std::max(std::abs(output_left[frame]), std::abs(output_right[frame])));
+    }
+  }
+  assert(impulse_tail_peak > 1e-5F);
+
+  left.fill(0.25F);
+  right.fill(-0.125F);
+  float sustained_peak = 0.0F;
+  double sustained_energy = 0.0;
+  constexpr uint32_t sustained_blocks = 288;
+  for (uint32_t block_index = 0; block_index < sustained_blocks; ++block_index) {
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+      assert(std::isfinite(output_left[frame]) && std::isfinite(output_right[frame]));
+      sustained_peak = std::max(
+        sustained_peak,
+        std::max(std::abs(output_left[frame]), std::abs(output_right[frame])));
+      sustained_energy += static_cast<double>(output_left[frame]) * output_left[frame]
+        + static_cast<double>(output_right[frame]) * output_right[frame];
+    }
+  }
+  const double sustained_rms = std::sqrt(sustained_energy / (2.0 * sustained_blocks * block.frame_count));
+  assert(sustained_peak < 2.0F);
+  assert(sustained_rms < 0.75);
   daw_audio_core_destroy(core);
 }
 

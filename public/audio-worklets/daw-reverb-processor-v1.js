@@ -39,8 +39,6 @@ class DawReverbProcessor extends AudioWorkletProcessor {
     this.left = new Float32Array(MAX_DELAY_FRAMES)
     this.right = new Float32Array(MAX_DELAY_FRAMES)
     this.write = 0
-    this.feedbackLeft = 0
-    this.feedbackRight = 0
     this.lowLeft = 0
     this.lowRight = 0
     this.highInputLeft = 0
@@ -82,8 +80,6 @@ class DawReverbProcessor extends AudioWorkletProcessor {
     this.left.fill(0)
     this.right.fill(0)
     this.write = 0
-    this.feedbackLeft = 0
-    this.feedbackRight = 0
     this.lowLeft = 0
     this.lowRight = 0
     this.highInputLeft = 0
@@ -119,39 +115,57 @@ class DawReverbProcessor extends AudioWorkletProcessor {
       const modulationMs = state.reflections > 0 && state.reflectionSpin
         ? Math.sin(this.phase * PI2) * finite(state.reflectionModAmountMs) * 0.5
         : 0
-      const preDelayFrames = Math.max(1, preDelayMs * sampleRate / 1000 + modulationMs * sampleRate / 1000)
+      const boundedWet = Math.max(0, Math.min(1, wet))
+      const boundedPreDelayMs = Math.max(0, Math.min(250, preDelayMs))
+      const boundedLowCutHz = Math.max(20, Math.min(1200, lowCutHz))
+      const boundedHighCutHz = Math.max(1200, Math.min(20000, highCutHz))
+      const boundedWidth = Math.max(0, Math.min(2, width))
+      const boundedSize = Math.max(0, Math.min(1, finite(state.size)))
+      const preDelayFrames = Math.max(
+        1,
+        boundedPreDelayMs * sampleRate / 1000 + modulationMs * sampleRate / 1000,
+      )
       const mono = !input[1]
-      const spreadFrames = mono ? (6 + finite(state.size) * 8) * sampleRate / 1000 : 0
+      const spreadFrames = mono ? (6 + boundedSize * 8) * sampleRate / 1000 : 0
       const rawLeft = readDelay(this.left, this.write, preDelayFrames)
       const rawRight = readDelay(this.right, this.write, preDelayFrames + spreadFrames)
-      const lowCut = Math.max(lowCutHz, finite(state.diffusionLowCutHz, 20))
-      const highCut = Math.min(highCutHz, finite(state.diffusionHighCutHz, 20000))
+      const diffusionDelayMs = Math.max(20, Math.min(20 + boundedSize * 80, 100))
+      const networkDelayFrames = Math.max(
+        1,
+        preDelayFrames + diffusionDelayMs * sampleRate / 1000,
+      )
+      const lateRawLeft = readDelay(this.left, this.write, networkDelayFrames)
+      const lateRawRight = readDelay(this.right, this.write, networkDelayFrames + spreadFrames)
+      const lowCut = Math.max(boundedLowCutHz, finite(state.diffusionLowCutHz, 20))
+      const highCut = Math.min(boundedHighCutHz, finite(state.diffusionHighCutHz, 20000))
       const lowpassAlpha = 1 - Math.exp(-PI2 * Math.min(highCut, sampleRate * 0.49) / sampleRate)
       const highpassAlpha = Math.exp(-PI2 * lowCut / sampleRate)
-      this.lowLeft += lowpassAlpha * (rawLeft - this.lowLeft)
+      this.lowLeft += lowpassAlpha * (lateRawLeft - this.lowLeft)
       this.highLeft = highpassAlpha * (this.highLeft + this.lowLeft - this.highInputLeft)
       this.highInputLeft = this.lowLeft
-      this.lowRight += lowpassAlpha * (rawRight - this.lowRight)
+      this.lowRight += lowpassAlpha * (lateRawRight - this.lowRight)
       this.highRight = highpassAlpha * (this.highRight + this.lowRight - this.highInputRight)
       this.highInputRight = this.lowRight
-      const textureGain = finite(state.diffuse) * finite(state.density) * (0.5 + 0.5 * finite(state.diffusion))
+      const textureGain = Math.max(0, Math.min(
+        1,
+        finite(state.diffuse) * finite(state.density) * (0.5 + 0.5 * finite(state.diffusion)),
+      ))
       const decay = Math.max(0.05, finite(state.decaySec, 2.2))
-      const decayStep = Math.pow(1e-4, 1 / (decay * sampleRate))
-      this.feedbackLeft = this.feedbackLeft * decayStep + this.highLeft * textureGain
-      this.feedbackRight = this.feedbackRight * decayStep + this.highRight * textureGain
+      const feedbackGain = Math.min(0.9999, Math.pow(1e-4, networkDelayFrames / (decay * sampleRate)))
       const reflectionGain = finite(state.reflections) * (0.65 + finite(state.reflectionShape) * 0.7)
       const earlyLeft = rawLeft * reflectionGain
       const earlyRight = rawRight * reflectionGain
-      this.left[this.write] = dryLeft
-      this.right[this.write] = dryRight
-      this.write = (this.write + 1) % MAX_DELAY_FRAMES
       const hasLateTexture = state.diffuse > 0 && state.density > 0 && state.diffusion > 0
-      const lateLeft = hasLateTexture ? this.highLeft + this.feedbackLeft : 0
-      const lateRight = hasLateTexture ? this.highRight + this.feedbackRight : 0
-      const wideLeft = lateLeft * (1 + width) * 0.5 + lateRight * (1 - width) * 0.5
-      const wideRight = lateRight * (1 + width) * 0.5 + lateLeft * (1 - width) * 0.5
-      let processedLeft = dryLeft * (1 - wet) + (wideLeft + earlyLeft) * wet
-      let processedRight = dryRight * (1 - wet) + (wideRight + earlyRight) * wet
+      const lateWriteGain = hasLateTexture ? textureGain * feedbackGain : 0
+      this.left[this.write] = dryLeft + this.highLeft * lateWriteGain
+      this.right[this.write] = dryRight + this.highRight * lateWriteGain
+      this.write = (this.write + 1) % MAX_DELAY_FRAMES
+      const outputLateLeft = hasLateTexture ? this.highLeft * textureGain : 0
+      const outputLateRight = hasLateTexture ? this.highRight * textureGain : 0
+      const wideLeft = outputLateLeft * (1 + boundedWidth) * 0.5 + outputLateRight * (1 - boundedWidth) * 0.5
+      const wideRight = outputLateRight * (1 + boundedWidth) * 0.5 + outputLateLeft * (1 - boundedWidth) * 0.5
+      let processedLeft = dryLeft * (1 - boundedWet) + (wideLeft + earlyLeft) * boundedWet
+      let processedRight = dryRight * (1 - boundedWet) + (wideRight + earlyRight) * boundedWet
       if (!Number.isFinite(processedLeft) || !Number.isFinite(processedRight)) {
         processedLeft = 0
         processedRight = 0

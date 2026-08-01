@@ -1217,3 +1217,42 @@ test('the reverb impulse characterization inspects each planar channel', () => {
   expect(isPlanarImpulseFixtureInput(fixture.input, fixture.channelCount)).toBe(true)
   expect(fixture.input.slice(2).every((sample) => sample === 0)).toBe(false)
 })
+
+test('the browser reverb worklet stays bounded under sustained input and emits a tail', async () => {
+  const base = portableGraphParityFixtures.find((candidate) => candidate.name === 'reverb-sine-48000')
+  const state = base?.legacyReverb?.state
+  if (!base || !state) throw new Error('The reverb worklet characterization state is unavailable.')
+  const frames = 3 * 48_000
+  const sustainedFrames = 2 * 48_000
+  const input = new Float32Array(frames * 2)
+  for (let frame = 0; frame < sustainedFrames; frame += 1) {
+    input[frame] = 0.25
+    input[frames + frame] = -0.125
+  }
+  const fixture: PortableGraphParityFixture = {
+    ...base,
+    name: 'reverb-worklet-sustained-bounded-tail',
+    frames,
+    input,
+    maxFramesPerBlock: 4_096,
+    blockPartitions: [...Array.from({ length: 35 }, () => 4_096), 640],
+    legacyReverb: { state: { ...state, decaySec: 2.2 } },
+  }
+  const output = await renderLegacyReverbFixture(fixture, fixture.legacyReverb)
+  let peak = 0
+  let energy = 0
+  let tailPeak = 0
+  for (const plane of output) {
+    for (let frame = 0; frame < plane.length; frame += 1) {
+      const sample = plane[frame] ?? 0
+      expect(Number.isFinite(sample)).toBe(true)
+      peak = Math.max(peak, Math.abs(sample))
+      energy += sample * sample
+      if (frame >= sustainedFrames) tailPeak = Math.max(tailPeak, Math.abs(sample))
+    }
+  }
+  const rms = Math.sqrt(energy / (output.length * frames))
+  expect(peak).toBeLessThan(2)
+  expect(rms).toBeLessThan(0.75)
+  expect(tailPeak).toBeGreaterThan(1e-5)
+})

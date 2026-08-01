@@ -1572,8 +1572,8 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
     const rightEnergy = output[1]?.reduce((sum, sample) => sum + sample * sample, 0) ?? 0
     return finite(output)
       && onset !== null
-      && onset >= 880
-      && onset <= 1_080
+      && onset >= 1_840
+      && onset <= 2_040
       && rightEnergy > 1e-8
   }
   return fixture

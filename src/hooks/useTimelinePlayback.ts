@@ -480,31 +480,31 @@ export function useTimelinePlayback(
   const setPlayhead = (sec: number, tracks: Track[]) => {
     publishPlayhead(sec)
     setLastTracks(tracks)
-    if (isPlaying()) {
-      if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
-        setIsPlaying(false)
-        cancelRaf()
-        void nativePlayback.dispose()
-        portableBrowserPlayback.dispose()
-        setActiveBackend('idle')
-        return
-      }
-      // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
-      audioEngine.cancelAutomationSchedules()
-      audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
-      deferredStretchQueue.clear()
-      const { isActive, end } = getLoopParams()
-      scheduledUntilSec = getScheduleHorizonEnd(sec, isActive ? end : undefined)
-      scheduleAndTrackDeferred(tracks, sec, { endLimitSec: scheduledUntilSec })
-      audioEngine.scheduleAutomationFromPlayhead(sec, {
-        horizonSec: scheduledUntilSec - sec,
-        tracks,
-      })
-    } else {
+    if (!isPlaying()) {
       audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
       audioEngine.applyAutomationAtTimelineSec(sec)
+      return
     }
+    if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
+      setIsPlaying(false)
+      cancelRaf()
+      void nativePlayback.dispose()
+      portableBrowserPlayback.dispose()
+      setActiveBackend('idle')
+      return
+    }
+    // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
+    audioEngine.cancelAutomationSchedules()
+    audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
+    deferredStretchQueue.clear()
+    const { isActive, end } = getLoopParams()
+    scheduledUntilSec = getScheduleHorizonEnd(sec, isActive ? end : undefined)
+    scheduleAndTrackDeferred(tracks, sec, { endLimitSec: scheduledUntilSec })
+    audioEngine.scheduleAutomationFromPlayhead(sec, {
+      horizonSec: scheduledUntilSec - sec,
+      tracks,
+    })
   }
   const disposePreparedBackends = async () => {
     await Promise.allSettled([

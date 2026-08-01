@@ -64,8 +64,8 @@ type PersistedAudioEffectDescriptor<Params> = {
   removeLocal: (projectId: string, targetId: string, instanceId: string) => Promise<void>;
   publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params, instanceId: string) => Promise<unknown>;
   publishMasterParams: (projectId: string, userId: string, params: Params, instanceId: string) => Promise<unknown>;
-  commitTrackParams: (trackId: string, previous: Params, next: Params, projectId?: string) => void;
-  commitMasterParams: (previous: Params, next: Params, projectId?: string) => void;
+  commitTrackParams: (trackId: string, instanceId: string, previous: Params, next: Params, projectId?: string) => void;
+  commitMasterParams: (instanceId: string, previous: Params, next: Params, projectId?: string) => void;
 };
 
 type EffectsPanelAudioEffectsContext = {
@@ -314,13 +314,15 @@ export function createEffectsPanelAudioDevice(
     },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
       if (previous === undefined) return;
+      const instanceId = descriptor.instanceId(targetId);
+      if (!instanceId) return;
       if (targetId === "master") {
-        descriptor.commitMasterParams(previous, next, persistContext.projectId);
+        descriptor.commitMasterParams(instanceId, previous, next, persistContext.projectId);
         return;
       }
       const track = resolveTrackByTargetId(targetId);
       if (!track) return;
-      descriptor.commitTrackParams(track.id, previous, next, persistContext.projectId);
+      descriptor.commitTrackParams(track.id, instanceId, previous, next, persistContext.projectId);
     },
   });
   }
@@ -342,8 +344,8 @@ export function createEffectsPanelAudioDevice(
       kind: "effects.setMasterEqParams",
       payload: { params, instanceId },
     }),
-    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "eq", from: previous, to: next }, projectId),
-    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", from: previous, to: next }, projectId),
+    commitTrackParams: (trackId, instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "eq", instanceId, from: previous, to: next }, projectId),
+    commitMasterParams: (instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-eq", instanceId, from: previous, to: next }, projectId),
   });
 
   const reverbState = createAudioEffectState<ReverbParams>({
@@ -363,8 +365,8 @@ export function createEffectsPanelAudioDevice(
       kind: "effects.setMasterReverbParams",
       payload: { params, instanceId },
     }),
-    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "reverb", from: previous, to: next }, projectId),
-    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", from: previous, to: next }, projectId),
+    commitTrackParams: (trackId, instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "reverb", instanceId, from: previous, to: next }, projectId),
+    commitMasterParams: (instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-reverb", instanceId, from: previous, to: next }, projectId),
   });
 
   const compressorState = createAudioEffectState<CompressorParams>({
@@ -384,8 +386,8 @@ export function createEffectsPanelAudioDevice(
       kind: "effects.setMasterCompressorParams",
       payload: { params, instanceId },
     }),
-    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "compressor", from: previous, to: next }, projectId),
-    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", from: previous, to: next }, projectId),
+    commitTrackParams: (trackId, instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "compressor", instanceId, from: previous, to: next }, projectId),
+    commitMasterParams: (instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-compressor", instanceId, from: previous, to: next }, projectId),
   });
 
   const saturatorState = createAudioEffectState<SaturatorParams>({
@@ -405,8 +407,8 @@ export function createEffectsPanelAudioDevice(
       kind: "effects.setMasterSaturatorParams",
       payload: { params, instanceId },
     }),
-    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "saturator", from: previous, to: next }, projectId),
-    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", from: previous, to: next }, projectId),
+    commitTrackParams: (trackId, instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "saturator", instanceId, from: previous, to: next }, projectId),
+    commitMasterParams: (instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-saturator", instanceId, from: previous, to: next }, projectId),
   });
 
   const delayState = createAudioEffectState<DelayParams>({
@@ -426,8 +428,8 @@ export function createEffectsPanelAudioDevice(
       kind: "effects.setMasterDelayParams",
       payload: { params, instanceId },
     }),
-    commitTrackParams: (trackId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "delay", from: previous, to: next }, projectId),
-    commitMasterParams: (previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", from: previous, to: next }, projectId),
+    commitTrackParams: (trackId, instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: trackId, effect: "delay", instanceId, from: previous, to: next }, projectId),
+    commitMasterParams: (instanceId, previous, next, projectId) => context.onEffectParamsCommitted?.({ targetId: "master", effect: "master-delay", instanceId, from: previous, to: next }, projectId),
   });
 
   type AudioEffectParams = UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope;

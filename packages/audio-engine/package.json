@@ -31,7 +31,8 @@
     "./portable-stretch-preparation": "./src/portable-stretch-preparation.ts",
     "./portable-export-worker": "./src/portable-export-worker.ts",
     "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",
-    "./wasm-audio-worklet-backend": "./src/backends/wasm-audio-worklet-backend.ts"
+    "./wasm-audio-worklet-backend": "./src/backends/wasm-audio-worklet-backend.ts",
+    "./mixer/graph-contract": "./src/mixer/graph-contract.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"

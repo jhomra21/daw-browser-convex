@@ -41,6 +41,7 @@ import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import { mapNativeBuiltInParameterCommit } from "~/lib/desktop/native-built-in-parameter-mapper";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -431,6 +432,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const {
     isPlaying,
     isNativePlaybackPrepared,
+    queueNativeBuiltInParameterEvents,
     playheadSec,
     handlePause,
     handleStop,
@@ -442,6 +444,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     setScrollElement,
     rescheduleChangedClips: playbackRescheduleChangedClips,
     restartTimelineSchedule,
+    disposePreparedBackends,
     portableRecording,
     nativeRecording,
     nativeLiveMidi,
@@ -712,20 +715,51 @@ const Timeline: Component<TimelineProps> = (props) => {
     );
   };
 
+  const handleNativeBuiltInParameterResult = async (
+    realtimeCommit: Parameters<typeof queueNativeBuiltInParameterEvents>[0],
+  ) => {
+    const result = await queueNativeBuiltInParameterEvents(realtimeCommit);
+    if (result.handled) return;
+    notify(
+      "Built-in effect update failed",
+      result.error ?? "The native playback graph could not apply the built-in effect change.",
+    );
+    if (isPlaying()) {
+      void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+        notify(
+          "Built-in effect update failed",
+          error instanceof Error
+            ? error.message
+            : "The active playback graph could not be rebuilt for the built-in effect change.",
+        );
+      });
+    } else {
+      void disposePreparedBackends();
+    }
+  };
+
   function handleEffectParamsCommitted<Effect extends EffectType>(
     payload: EffectParamsCommitPayload<Effect>,
     committedProjectId?: string,
   ) {
     pushEffectParamsHistory(payload, committedProjectId);
-    if (!isPlaying()) return;
-    void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
-      notify(
-        "Built-in effect update failed",
-        error instanceof Error
-          ? error.message
-          : "The active playback graph could not be rebuilt for the built-in effect change.",
-      );
-    });
+    const realtimeCommit = mapNativeBuiltInParameterCommit(payload, bpm());
+    if (isNativePlaybackPrepared() && realtimeCommit) {
+      void handleNativeBuiltInParameterResult(realtimeCommit);
+      return;
+    }
+    if (isPlaying()) {
+      void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+        notify(
+          "Built-in effect update failed",
+          error instanceof Error
+            ? error.message
+            : "The active playback graph could not be rebuilt for the built-in effect change.",
+        );
+      });
+      return;
+    }
+    if (isNativePlaybackPrepared()) void disposePreparedBackends();
   }
 
   // DOM refs

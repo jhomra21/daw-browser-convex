@@ -624,6 +624,7 @@ export function useTimelinePlayback(
     isPlaying,
     isNativePlayback: nativePlayback.isActive,
     isNativePlaybackPrepared: nativePlayback.isPrepared,
+    queueNativeBuiltInParameterEvents: nativePlayback.queueBuiltInParameterEvents,
     isPortableBrowserPlayback: portableBrowserPlayback.isActive,
     backendDiagnostics: () => ({
       ...audioBackendRolloutPolicy,
@@ -665,5 +666,6 @@ export function useTimelinePlayback(
     setPlayhead,
     rescheduleChangedClips: rescheduleAndTrackDeferred,
     restartTimelineSchedule,
+    disposePreparedBackends,
   }
 }

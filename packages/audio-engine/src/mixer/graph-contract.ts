@@ -136,7 +136,7 @@ const toPortableInstrument = (
   }
 }
 
-const resolvePortableDelayMs = (
+export const resolvePortableDelayMs = (
   params: ReturnType<typeof normalizeDelayParams>,
   bpm: number,
 ) => {

@@ -112,6 +112,8 @@ struct GraphRevision {
     uint32_t tail_frames = 0;
     uint32_t parameter_count = 0;
     std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> parameter_targets{};
+    std::array<float, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> live_parameter_values{};
+    std::array<bool, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> live_parameter_valid{};
     uint32_t state_size = 0;
     std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES> state{};
     daw_audio_utility_state utility{};
@@ -129,6 +131,7 @@ struct GraphRevision {
     daw_audio_spectral_state spectral{};
     daw_audio_autofilter_state autofilter{};
     daw_audio_lofi_state lofi{};
+    uint32_t control_slot = 0;
     uint32_t history_slot = 0;
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
@@ -788,6 +791,7 @@ daw_audio_core_result prepare_graph_revision(
     }
     GraphRevision::Processor &processor = graph.processors[index];
     processor.node_index = static_cast<uint16_t>(node_index);
+    processor.control_slot = index;
     bool history_slot_assigned = false;
     bool delay_slot_assigned = false;
     bool reverb_slot_assigned = false;
@@ -1516,8 +1520,14 @@ float processor_parameter_value(
   uint32_t target,
   uint32_t frame,
   float fallback) {
-  const uint32_t slot = processor.history_slot;
+  const uint32_t slot = processor.control_slot;
   float value = fallback;
+  for (uint32_t parameter = 0; parameter < processor.parameter_count; ++parameter) {
+    if (processor.parameter_targets[parameter] == target && processor.live_parameter_valid[parameter]) {
+      value = processor.live_parameter_values[parameter];
+      break;
+    }
+  }
   const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[slot];
   if (parameters != nullptr) {
     for (uint32_t index = 0; index < parameters->parameter_count; ++index) {
@@ -1532,6 +1542,24 @@ float processor_parameter_value(
     if (event.parameter_target == target && event.frame_offset <= frame) value = event.value;
   }
   return value;
+}
+
+void latch_processor_parameter_events(Core &core) {
+  for (uint32_t processor_index = 0; processor_index < core.published_graph.processor_count; ++processor_index) {
+    GraphRevision::Processor &processor = core.published_graph.processors[processor_index];
+    for (uint32_t event_index = core.event_starts[processor_index];
+      event_index < core.event_ends[processor_index];
+      ++event_index) {
+      const daw_audio_processor_event &event = core.active_events[event_index];
+      for (uint32_t parameter = 0; parameter < processor.parameter_count; ++parameter) {
+        if (processor.parameter_targets[parameter] == event.parameter_target) {
+          processor.live_parameter_values[parameter] = event.value;
+          processor.live_parameter_valid[parameter] = true;
+          break;
+        }
+      }
+    }
+  }
 }
 
 float mixer_parameter_value(
@@ -2521,7 +2549,7 @@ float spectral_parameter(
 
 float spectral_transform_parameter(
   const Core &core, const GraphRevision::Processor &processor, uint32_t target, uint32_t frame, float fallback) {
-  const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[processor.history_slot];
+  const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[processor.control_slot];
   const uint32_t parameter_frame = parameters != nullptr && parameters->frame_count > 1
     ? parameters->frame_count - 1
     : frame;
@@ -4761,6 +4789,14 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       if (!preserve_spectral[slot]) core->spectral_histories[slot] = {};
     }
     core->published_graph = core->prepared_graph;
+    for (uint32_t processor_index = 0;
+      processor_index < core->published_graph.processor_count;
+      ++processor_index) {
+      GraphRevision::Processor &processor = core->published_graph.processors[processor_index];
+      processor.control_slot = processor_index;
+      processor.live_parameter_values.fill(0.0F);
+      processor.live_parameter_valid.fill(false);
+    }
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     core->published_native_hooks = core->prepared_native_hooks;
 #endif
@@ -4834,6 +4870,9 @@ extern "C" daw_audio_core_result daw_audio_core_process(
     || block->event_count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS
     || block->instrument_event_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   if (block->instrument_event_count > 0 && block->transport_epoch != core->transport.epoch) return DAW_AUDIO_CORE_STALE_REVISION;
+  for (uint32_t channel = 0; channel < block->channel_count; ++channel) {
+    if (block->outputs[channel] == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
   if (!bind_process_transport(*core, *block)) {
     return (block->parameter_block_count > 0 || block->event_count > 0 || block->instrument_event_count > 0)
       && block->graph_revision != core->published_graph.revision ? DAW_AUDIO_CORE_STALE_REVISION : DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -4841,13 +4880,13 @@ extern "C" daw_audio_core_result daw_audio_core_process(
   if (core->published_graph.revision == core->published_revision) {
     prepare_active_source_ranges(*core, &core->published_graph);
     process_graph(*core, *block);
+    latch_processor_parameter_events(*core);
     if (core->transport.running != 0) core->transport.frame += static_cast<int64_t>(block->frame_count);
     return DAW_AUDIO_CORE_OK;
   }
   prepare_active_source_ranges(*core, nullptr);
   for (uint32_t channel = 0; channel < block->channel_count; ++channel) {
     float *output = block->outputs[channel];
-    if (output == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     for (uint32_t frame = 0; frame < block->frame_count; ++frame) output[frame] = summed_input(*block, channel, frame);
   }
   for (uint32_t frame = 0; frame < block->frame_count; ++frame) {

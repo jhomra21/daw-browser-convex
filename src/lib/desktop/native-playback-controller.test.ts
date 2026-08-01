@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -114,6 +114,7 @@ const createBridge = (
 ) => {
   const calls: string[] = []
   const parameterPayloads: Uint8Array[] = []
+  const builtInParameterPayloads: Uint8Array[] = []
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
@@ -169,6 +170,7 @@ const createBridge = (
   return {
     calls,
     parameterPayloads,
+    builtInParameterPayloads,
     instrumentPayloads,
     schedulePayloads,
     graphPayloads,
@@ -245,6 +247,13 @@ const createBridge = (
           return request.promise.finally(() => {
             instrumentRequestPending = false
           })
+        },
+        queueParameterEvents: async (bytes: Uint8Array) => {
+          calls.push("built-in-parameter")
+          builtInParameterPayloads.push(bytes)
+          return failure === "built-in-parameter"
+            ? { ok: false as const, error: failureMessage }
+            : { ok: true as const }
         },
         queueSourceEvents: reply("source"),
         queueScheduleWindow: async (bytes: Uint8Array) => {
@@ -410,6 +419,87 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+const utilityPlaybackInput = (): LivePlaybackSnapshotInput => {
+  const utility = createDefaultUtilityParams()
+  return {
+    ...input(),
+    renderState: {
+      fx: {
+        masterVolume: 1,
+        masterFxInstances: [],
+        trackFx: {
+          track: {
+            instances: [{ id: "utility:1", kind: "utility", params: { version: 1, state: utility } }],
+          },
+        },
+      },
+      automationEnvelopes: [],
+    },
+  }
+}
+
+test("queues supported built-in parameters for active native playback without lifecycle changes", async () => {
+  const fixture = createBridge()
+  const snapshotInput = utilityPlaybackInput()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.start(snapshotInput.transport)).resolves.toBe("started")
+  const before = fixture.calls.slice()
+  await expect(controller.queueBuiltInParameterEvents({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.gainDb", value: -6 }],
+  })).resolves.toEqual({ handled: true })
+  expect(fixture.calls.slice(0, before.length)).toEqual(before)
+  expect(fixture.calls.slice(before.length)).toEqual(["built-in-parameter"])
+  const payload = fixture.builtInParameterPayloads[0]
+  if (!payload) throw new Error("Expected built-in parameter payload.")
+  const view = new DataView(payload.buffer)
+  expect(view.getUint32(0, true)).toBe(1)
+  expect(view.getUint32(12, true)).toBe(1)
+  expect(view.getUint32(16, true)).toBe(0)
+  expect(view.getFloat32(20, true)).toBe(-6)
+  expect(fixture.calls).not.toContain("stop")
+  expect(fixture.calls).not.toContain("teardown")
+  await controller.dispose()
+})
+
+test("queues built-in parameters for paused prepared preview and reports target or bridge failures", async () => {
+  const fixture = createBridge()
+  const snapshotInput = utilityPlaybackInput()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  await expect(controller.queueBuiltInParameterEvents({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.pan", value: 0.25 }],
+  })).resolves.toEqual({ handled: true })
+  await expect(controller.queueBuiltInParameterEvents({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.unknown", value: 0.25 }],
+  })).resolves.toEqual({ handled: false, reason: "unsupported-target" })
+  await expect(controller.queueBuiltInParameterEvents({
+    instanceId: "missing",
+    values: [{ parameterId: "utility.pan", value: 0.25 }],
+  })).resolves.toEqual({ handled: false, reason: "unsupported-instance" })
+  await controller.dispose()
+
+  const failedFixture = createBridge("built-in-parameter", false, false, "queue rejected")
+  const failedController = createNativePlaybackController({
+    bridge: failedFixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(failedController.ensureLivePreview(0)).resolves.toBe("started")
+  await expect(failedController.queueBuiltInParameterEvents({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.pan", value: 0.25 }],
+  })).resolves.toEqual({ handled: false, reason: "bridge-error", error: "queue rejected" })
+  await failedController.dispose()
 })
 
 test("maps native graph meters and ignores stale revision or sequence batches", async () => {

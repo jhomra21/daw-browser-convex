@@ -6,6 +6,7 @@ import {
   serializeNativeGraph,
   serializeNativeInstrumentStates,
   serializeNativeInstrumentEvents,
+  serializeNativeProcessorEvents,
   serializeNativeVstParameterEvents,
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
@@ -67,6 +68,7 @@ type NativePlaybackBridge = Pick<
     | "publishGraph"
     | "configureInstrumentStates"
     | "queueInstrumentEvents"
+    | "queueParameterEvents"
     | "queueScheduleWindow"
     | "queueSourceEvents"
     | "queueVstParameterEvents"
@@ -92,6 +94,9 @@ type NativePlaybackBridge = Pick<
 }
 
 type NativeStartResult = "started" | "unavailable" | "blocked"
+export type NativeBuiltInParameterQueueResult =
+  | { handled: true }
+  | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-target" | "unavailable" | "bridge-error"; error?: string }
 export type NativeRecordingDiagnostics = Pick<
   NativeHostRecordingStatus,
   "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
@@ -1084,6 +1089,46 @@ export const createNativePlaybackController = (input: {
     return queued
   }
 
+  const queueBuiltInParameterEvents = async (request: {
+    instanceId: string
+    values: readonly { parameterId: string; value: number }[]
+  }): Promise<NativeBuiltInParameterQueueResult> => {
+    const bridge = input.bridge
+    if (!bridge) return { handled: false, reason: "unavailable" }
+    if (!prepared || !preparedGraph) return { handled: false, reason: "unprepared" }
+    const processor = preparedGraph.nodes
+      .flatMap((node) => node.processorOrder)
+      .find((candidate) => candidate.id === request.instanceId)
+    if (!processor) return { handled: false, reason: "unsupported-instance" }
+    const targets = new Map(processor.parameterTargets.map((target) => [target.id, target.target]))
+    const events = []
+    for (const value of request.values) {
+      const parameterTarget = targets.get(value.parameterId)
+      if (parameterTarget === undefined || !Number.isFinite(value.value)) {
+        return { handled: false, reason: "unsupported-target" }
+      }
+      events.push({
+        processorInstanceId: processor.instanceId,
+        parameterTarget,
+        frameOffset: 0,
+        value: value.value,
+      })
+    }
+    if (events.length === 0) return { handled: true }
+    try {
+      const reply = await bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events))
+      return reply.ok
+        ? { handled: true }
+        : { handled: false, reason: "bridge-error", error: reply.error }
+    } catch (error) {
+      return {
+        handled: false,
+        reason: "bridge-error",
+        error: error instanceof Error ? error.message : "Native built-in parameter queue failed.",
+      }
+    }
+  }
+
   const startLiveMidiNote = (note: {
     trackId: string
     pitch: number
@@ -1224,6 +1269,7 @@ export const createNativePlaybackController = (input: {
     isRecording: () => recording !== undefined,
     sampleRate: () => sampleRate,
     ensureLivePreview,
+    queueBuiltInParameterEvents,
     startLiveMidiNote,
     releaseLiveMidiNote,
     subscribeTrackMeters,

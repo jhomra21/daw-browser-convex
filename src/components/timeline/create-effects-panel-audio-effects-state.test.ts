@@ -4,6 +4,7 @@ import { createRoot, createSignal } from "solid-js";
 import { AudioEngine, type AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine";
 import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance } from "@daw-browser/shared";
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
+import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import {
   createAudioEffectInstanceIdentityCache,
   createEffectsPanelAudioDevice,
@@ -27,6 +28,7 @@ const createDevice = (
     persistAudioEffectOrder?: PersistOrder;
     persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
     sidechainRoutes?: ExternalSidechainRoute[];
+    onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   } = {},
 ) => {
   const [currentTargetId, setCurrentTargetId] = createSignal("track-1");
@@ -42,6 +44,7 @@ const createDevice = (
       canWriteCurrentTargetEffects,
       persistAudioEffectOrder: options.persistAudioEffectOrder,
       persistSidechainRoute: options.persistSidechainRoute,
+      onEffectParamsCommitted: options.onEffectParamsCommitted,
     },
     currentTargetId,
     () => undefined,
@@ -50,6 +53,31 @@ const createDevice = (
 };
 
 describe("effects panel instance engine synchronization", () => {
+  test("commits a real reverb edit with the persisted row instance ID", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const commits: EffectParamsCommitPayload[] = [];
+      const { device } = createDevice(engine, {
+        onEffectParamsCommitted: (payload) => commits.push(payload),
+      });
+      await device.addByKindToTarget("track-1", "reverb");
+      const inserted = engine.trackFxCalls.at(-1)?.instances[0];
+      if (!inserted || inserted.kind !== "reverb") throw new Error("Expected an inserted reverb instance.");
+
+      device.reverb.changeInstance(inserted.id, (params) => ({ ...params, wet: 0.35 }));
+      await device.flushPending();
+      await Promise.resolve();
+
+      expect(commits.at(-1)).toMatchObject({
+        targetId: "track-1",
+        effect: "reverb",
+        instanceId: inserted.id,
+        to: { wet: 0.35 },
+      });
+      dispose();
+    });
+  });
+
   test("applies an optimistic parameter edit to the engine before persistence", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();

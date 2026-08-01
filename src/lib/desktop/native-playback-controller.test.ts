@@ -110,6 +110,7 @@ const createBridge = (
   failure?: string,
   serializeInstrumentRequests = false,
   requireStartedForSchedule = false,
+  failureMessage = "failed",
 ) => {
   const calls: string[] = []
   const parameterPayloads: Uint8Array[] = []
@@ -163,7 +164,7 @@ const createBridge = (
   }
   const reply = (name: string) => async () => {
     calls.push(name)
-    return name === failure ? { ok: false as const, error: "failed" } : { ok: true as const }
+    return name === failure ? { ok: false as const, error: failureMessage } : { ok: true as const }
   }
   return {
     calls,
@@ -207,7 +208,7 @@ const createBridge = (
         configure: reply("configure"),
         beginTransaction: async (): Promise<BridgeTransactionReply> => {
           calls.push("begin")
-          return failure === "begin" ? { ok: false as const, error: "failed" } : { ok: true as const, transactionToken: "transaction-token" }
+          return failure === "begin" ? { ok: false as const, error: failureMessage } : { ok: true as const, transactionToken: "transaction-token" }
         },
         commitTransaction: reply("commit"),
         rollbackTransaction: reply("rollback"),
@@ -1148,6 +1149,7 @@ test("ignores native host loss before native ownership begins", () => {
   fixture.emitLoss()
 
   expect(controller.isActive()).toBeFalse()
+  expect(controller.isAvailable()).toBeTrue()
   expect(faults).toEqual([])
   expect(fixture.calls).toEqual([])
 })
@@ -1182,7 +1184,24 @@ test("host loss reports the fault without starting another backend", async () =>
   fixture.emitLoss()
   expect(controller.isActive()).toBeFalse()
   expect(faults).toEqual(["Native playback host connection was lost."])
+  expect(controller.isAvailable()).toBeFalse()
+  expect(controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })).toBeUndefined()
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport", "stop"])
+})
+
+test("disables native after a start failure caused by host loss", async () => {
+  const fixture = createBridge("begin", false, false, "The native audio host is unavailable.")
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(controller.isAvailable()).toBeFalse()
+  const callsAfterFailure = fixture.calls.length
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("unavailable")
+  await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(fixture.calls).toHaveLength(callsAfterFailure)
 })
 
 test("persists native recording blocks and finalizes only after terminal status", async () => {

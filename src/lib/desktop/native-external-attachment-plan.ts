@@ -162,7 +162,9 @@ export const compileNativeExternalAttachmentSnapshot = (
   input: NativeExternalAttachmentSnapshotInput,
 ): NativeExternalAttachmentSnapshotCompilation => {
   if (input.target === "browser") {
-    const live = input.processors.find((processor) => !processor.bypassed)
+    const live = input.processors.find((processor) => (
+      !processor.bypassed && processor.health.state !== "degraded"
+    ))
     return live
       ? { supported: false, reasons: [`External plugin ${live.instanceId} must be frozen or bypassed before browser playback.`] }
       : { supported: true, attachments: [] }
@@ -173,7 +175,7 @@ export const compileNativeExternalAttachmentSnapshot = (
   const attachments: NativeExternalAttachmentProjection[] = []
   const processorsByNode = new Map<string, ExternalProcessor[]>()
   for (const processor of input.processors) {
-    if (processor.bypassed) continue
+    if (processor.bypassed || processor.health.state === "degraded") continue
     const processors = processorsByNode.get(processor.targetId) ?? []
     processors.push(processor)
     processorsByNode.set(processor.targetId, processors)

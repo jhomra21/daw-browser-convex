@@ -294,6 +294,23 @@ test("rejects live processors for browser playback and projects frozen processor
   })
 })
 
+test("excludes persisted degraded processors from native and browser attachment candidates", () => {
+  const degraded = processor({
+    health: { state: "degraded", reason: "Native playback failed.", updatedAt: 8 },
+  })
+  const ready = processor({ targetId: "track-b", chainIndex: 1 })
+
+  const native = compileNativeExternalAttachmentSnapshot(input([degraded, ready]))
+  expect(native.supported).toBeTrue()
+  if (!native.supported) return
+  expect(native.attachments.map(({ instanceId }) => instanceId)).toEqual([ready.instanceId])
+
+  expect(compileNativeExternalAttachmentSnapshot(input([degraded], "browser"))).toEqual({
+    supported: true,
+    attachments: [],
+  })
+})
+
 test("encodes equivalent native projections identically regardless of persisted record order", () => {
   const a = processor({ chainIndex: 0 })
   const b = processor({ targetId: "track-b", chainIndex: 0 })

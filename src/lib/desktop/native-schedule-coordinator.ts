@@ -633,6 +633,13 @@ export const createNativeScheduleCoordinator = (input: {
     }).finally(() => finishRefill(marker, release))
   }
 
+  const unsubscribeListeners = () => {
+    unsubscribeProgress?.()
+    unsubscribeProgress = undefined
+    unsubscribeLoss?.()
+    unsubscribeLoss = undefined
+  }
+
   const install = () => {
     if (installed || disposed) return
     installed = true
@@ -640,6 +647,7 @@ export const createNativeScheduleCoordinator = (input: {
     unsubscribeLoss = input.bridge.onLoss(() => {
       if (disposed) return
       disposed = true
+      unsubscribeListeners()
       failWaiters(new Error("Native playback host connection was lost."))
       input.onHostLoss?.()
     })
@@ -648,10 +656,7 @@ export const createNativeScheduleCoordinator = (input: {
   const dispose = () => {
     if (disposed) return
     disposed = true
-    unsubscribeProgress?.()
-    unsubscribeProgress = undefined
-    unsubscribeLoss?.()
-    unsubscribeLoss = undefined
+    unsubscribeListeners()
     activeNoteIds.clear()
     emittedSources.clear()
     failWaiters(new Error("Native schedule coordinator was disposed."))

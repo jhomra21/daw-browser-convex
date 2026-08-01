@@ -320,6 +320,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       .filter((processor) => !processor.bypassed)
       .map((processor) => setLocalExternalProcessor(currentProjectId, {
         ...processor,
+        bypassed: true,
         health: { state: "degraded", reason, updatedAt },
         updatedAt,
       })));
@@ -349,7 +350,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     });
     if (!result.supported || !isLocalId("project", projectId())) return result;
-    const processors = (await listLocalExternalProcessors(projectId())).filter((processor) => !processor.bypassed);
+    const processors = (await listLocalExternalProcessors(projectId()))
+      .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
     if (processors.length === 0) return result;
     const attachmentPlan = compileNativeExternalAttachmentPlan({
       target: "native",
@@ -457,7 +459,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       const currentProjectId = projectId();
       if (!isLocalId("project", currentProjectId)) return true;
       const liveProcessor = (await listLocalExternalProcessors(currentProjectId))
-        .find((processor) => !processor.bypassed);
+        .find((processor) => !processor.bypassed && processor.health.state !== "degraded");
       if (!liveProcessor) return true;
       if (appPreferences.audio.preferences().nativePlaybackEnabled) return true;
       notify(

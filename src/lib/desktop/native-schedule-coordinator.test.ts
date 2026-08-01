@@ -134,12 +134,26 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
   let remainingFailures = options.failureCount ?? 0
   let onAccept = options.onAccept
   let attempt = 0
-  let progressListener: (progress: NativeScheduleProgress) => void = () => {}
+  const progressListeners = new Set<(progress: NativeScheduleProgress) => void>()
+  const lossListeners = new Set<() => void>()
+  let progressUnsubscribeCount = 0
+  let lossUnsubscribeCount = 0
   return {
     payloads,
     setFailureCount: (count: number) => { remainingFailures = count },
     setOnAccept: (listener: (attempt: number) => void) => { onAccept = listener },
-    emitProgress: (progress: NativeScheduleProgress) => progressListener(progress),
+    emitProgress: (progress: NativeScheduleProgress) => {
+      for (const listener of [...progressListeners]) listener(progress)
+    },
+    emitLoss: () => {
+      for (const listener of [...lossListeners]) listener()
+    },
+    listenerStats: () => ({
+      progress: progressListeners.size,
+      loss: lossListeners.size,
+      progressUnsubscribeCount,
+      lossUnsubscribeCount,
+    }),
     bridge: {
       queueScheduleWindow: async (bytes: Uint8Array) => {
         payloads.push(bytes)
@@ -156,10 +170,19 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
         return { ok: true as const }
       },
       onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
-        progressListener = listener
-        return () => { progressListener = () => {} }
+        progressListeners.add(listener)
+        return () => {
+          if (!progressListeners.delete(listener)) return
+          progressUnsubscribeCount += 1
+        }
       },
-      onLoss: () => () => {},
+      onLoss: (listener: () => void) => {
+        lossListeners.add(listener)
+        return () => {
+          if (!lossListeners.delete(listener)) return
+          lossUnsubscribeCount += 1
+        }
+      },
     },
     instrumentPayloads,
   }
@@ -184,8 +207,13 @@ const initialInstrumentSequencesFrom = (payload: Uint8Array) => {
   return Array.from({ length: count }, (_, index) => view.getBigUint64(20 + index * 48, true))
 }
 
-const coordinatorFor = (snapshot: LivePlaybackSnapshot, failureCount = 0) => {
-  const fixture = bridgeFor({ failureCount })
+const coordinatorFor = (
+  snapshot: LivePlaybackSnapshot,
+  failureCount = 0,
+  fixture = bridgeFor({ failureCount }),
+  onHostLoss?: () => void,
+) => {
+  fixture.setFailureCount(failureCount)
   return {
     fixture,
     coordinator: createNativeScheduleCoordinator({
@@ -205,6 +233,7 @@ const coordinatorFor = (snapshot: LivePlaybackSnapshot, failureCount = 0) => {
         sessionAssetId: index + 1,
       })),
       startFrame: Math.round(snapshot.transport.playheadSec * 48_000),
+      onHostLoss,
     }),
   }
 }
@@ -285,6 +314,68 @@ const automationSnapshot = (
     },
   }
 }
+
+test("removes both native schedule listeners on host loss and explicit disposal", async () => {
+  const hostLossFixture = bridgeFor()
+  let hostLossCount = 0
+  const { coordinator: hostLossCoordinator } = coordinatorFor(
+    snapshotFor(sourceTrack),
+    0,
+    hostLossFixture,
+    () => { hostLossCount += 1 },
+  )
+  hostLossCoordinator.install()
+  const accepted = hostLossCoordinator.waitForAccepted(1)
+  hostLossFixture.emitLoss()
+  await expect(accepted).rejects.toThrow("Native playback host connection was lost.")
+  expect(hostLossFixture.listenerStats()).toEqual({
+    progress: 0,
+    loss: 0,
+    progressUnsubscribeCount: 1,
+    lossUnsubscribeCount: 1,
+  })
+  expect(hostLossCount).toBe(1)
+  hostLossCoordinator.dispose()
+  expect(hostLossFixture.listenerStats()).toEqual({
+    progress: 0,
+    loss: 0,
+    progressUnsubscribeCount: 1,
+    lossUnsubscribeCount: 1,
+  })
+
+  const disposeFixture = bridgeFor()
+  const { coordinator: disposeCoordinator } = coordinatorFor(
+    snapshotFor(sourceTrack),
+    0,
+    disposeFixture,
+  )
+  disposeCoordinator.install()
+  disposeCoordinator.dispose()
+  disposeCoordinator.dispose()
+  expect(disposeFixture.listenerStats()).toEqual({
+    progress: 0,
+    loss: 0,
+    progressUnsubscribeCount: 1,
+    lossUnsubscribeCount: 1,
+  })
+})
+
+test("does not accumulate listeners across repeated host-loss cycles", () => {
+  const fixture = bridgeFor()
+  const snapshot = snapshotFor(sourceTrack)
+  const cycleCount = 24
+  for (let index = 0; index < cycleCount; index += 1) {
+    const { coordinator } = coordinatorFor(snapshot, 0, fixture)
+    coordinator.install()
+    fixture.emitLoss()
+  }
+  expect(fixture.listenerStats()).toEqual({
+    progress: 0,
+    loss: 0,
+    progressUnsubscribeCount: cycleCount,
+    lossUnsubscribeCount: cycleCount,
+  })
+})
 
 test("retries one rejected source window without changing its ledger", async () => {
   const { fixture, coordinator } = coordinatorFor(snapshotFor(sourceTrack), 1)

@@ -243,8 +243,10 @@ export function useTimelineMidiOverlay(
       if (!trackId) return
       if (options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
         const handle = options.nativeLiveMidi.start({ trackId, pitch, velocity })
-        if (handle) activeLiveNotes.set(pitch, { handle, backend: "native" })
-        return
+        if (handle) {
+          activeLiveNotes.set(pitch, { handle, backend: "native" })
+          return
+        }
       }
       options.audioEngine.ensureAudio()
       void options.audioEngine.resume().catch(() => undefined)

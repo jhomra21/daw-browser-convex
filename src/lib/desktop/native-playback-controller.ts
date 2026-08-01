@@ -37,8 +37,19 @@ export type NativeLiveMidiNoteHandle = {
 const sanitizeNativeVst3DiagnosticError = (error: unknown) => {
   const message = error instanceof Error
     ? error.message
+    : typeof error === "string"
+      ? error
     : "Native playback could not start."
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
+}
+
+const indicatesNativeHostConnectionLoss = (error: unknown) => {
+  const message = sanitizeNativeVst3DiagnosticError(error).toLowerCase()
+  return message.includes("native playback host connection was lost")
+    || message.includes("native audio host is unavailable")
+    || message.includes("native audio host stopped")
+    || message.includes("host connection was lost")
+    || message.includes("host connection closed")
 }
 
 type NativePlaybackBridge = Pick<
@@ -173,6 +184,8 @@ export const createNativePlaybackController = (input: {
   let prepared = false
   let nativeSessionStarted = false
   let livePreviewActive = false
+  let nativeHostConnectionLost = false
+  let nativeHostLossProjectGeneration: number | undefined
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
@@ -320,6 +333,26 @@ export const createNativePlaybackController = (input: {
     input.reportFault?.(message)
   }
 
+  const hasNativeHostConnectionLoss = () => {
+    if (!nativeHostConnectionLost) return false
+    const projectGeneration = input.getProjectGeneration?.()
+    if (
+      projectGeneration !== undefined
+      && nativeHostLossProjectGeneration !== undefined
+      && projectGeneration !== nativeHostLossProjectGeneration
+    ) {
+      nativeHostConnectionLost = false
+      nativeHostLossProjectGeneration = undefined
+      return false
+    }
+    return true
+  }
+
+  const markNativeHostConnectionLost = () => {
+    nativeHostConnectionLost = true
+    nativeHostLossProjectGeneration = input.getProjectGeneration?.()
+  }
+
   const createCoordinatorForEpoch = (options: {
     snapshot: LivePlaybackSnapshot
     epoch: number
@@ -390,14 +423,14 @@ export const createNativePlaybackController = (input: {
   }
 
   const handleNativeHostLoss = () => {
-    const ownsNativeSession = pendingStart !== undefined
-      || prepared
+    const ownsNativeSession = prepared
       || nativeSessionStarted
       || active
       || livePreviewActive
       || scheduleCoordinator !== undefined
       || recording !== undefined
     if (!ownsNativeSession) return
+    markNativeHostConnectionLost()
     if (recording) failRecording(recording, new Error("Native playback host connection was lost."))
     void dispose().catch(() => undefined)
     reportFault("Native playback host connection was lost.")
@@ -410,7 +443,7 @@ export const createNativePlaybackController = (input: {
     runTransport: boolean,
   ): Promise<NativeStartResult> => {
     const bridge = input.bridge
-    if (!bridge) return "unavailable"
+    if (!bridge || hasNativeHostConnectionLoss()) return "unavailable"
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
     if (prepared && preparedProjectGeneration === projectGeneration) {
@@ -470,6 +503,9 @@ export const createNativePlaybackController = (input: {
           result: "unavailable",
           error: sanitizeNativeVst3DiagnosticError(error),
         })
+        if (!cancelled() && indicatesNativeHostConnectionLoss(error)) {
+          markNativeHostConnectionLost()
+        }
         if (!cancelled()) reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
         await dispose()
         return "unavailable"
@@ -521,6 +557,9 @@ export const createNativePlaybackController = (input: {
       }
       const deviceReply = await bridge.resolveOutputDevice()
       if (cancelled()) return "unavailable"
+      if (!deviceReply.ok && indicatesNativeHostConnectionLoss(deviceReply.error)) {
+        markNativeHostConnectionLost()
+      }
       if (!deviceReply.ok || !deviceReply.device?.available) return unavailable("No native audio output device is available for the active VST3 effect.")
       const runtimeMaximumFrames = Math.min(deviceReply.device.maximumFramesPerBlock, maxVst3WorkerFrames)
       sampleRate = deviceReply.device.nominalSampleRateHz
@@ -702,12 +741,16 @@ export const createNativePlaybackController = (input: {
         result,
         error: sanitizeNativeVst3DiagnosticError(error),
       })
+      if (!wasCancelled && indicatesNativeHostConnectionLoss(error)) {
+        markNativeHostConnectionLost()
+      }
       if (!wasCancelled) reportFault(error instanceof Error ? error.message : "Native playback could not start.")
       return result
     }
   }
 
   const start = (transport: LivePlaybackTransport): Promise<NativeStartResult> => {
+    if (hasNativeHostConnectionLoss()) return Promise.resolve("unavailable")
     if (active) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -742,7 +785,7 @@ export const createNativePlaybackController = (input: {
   }
 
   const ensureLivePreview = (playheadSec: number): Promise<NativeStartResult> => {
-    if (!input.bridge) return Promise.resolve("unavailable")
+    if (!input.bridge || hasNativeHostConnectionLoss()) return Promise.resolve("unavailable")
     if (livePreviewActive) return Promise.resolve("started")
     if (pendingStart) {
       return pendingStart
@@ -1015,13 +1058,14 @@ export const createNativePlaybackController = (input: {
 
   const queueLiveInstrumentEvent = (event: NativeInstrumentEvent) => {
     const bridge = input.bridge
-    if (!bridge || !livePreviewActive || sampleRate === 0) return Promise.resolve(false)
+    if (!bridge || hasNativeHostConnectionLoss() || !livePreviewActive || sampleRate === 0) return Promise.resolve(false)
     const generation = liveInstrumentQueueGeneration
     const bytes = serializeNativeInstrumentEvents(transportEpoch, [event])
     const queued = liveInstrumentEventTail.then(async () => {
       if (
         generation !== liveInstrumentQueueGeneration
         || !input.bridge
+        || hasNativeHostConnectionLoss()
         || !livePreviewActive
         || sampleRate === 0
       ) return false
@@ -1046,7 +1090,7 @@ export const createNativePlaybackController = (input: {
     velocity: number
     playheadSec?: number
   }): NativeLiveMidiNoteHandle | undefined => {
-    if (!input.bridge || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
+    if (!input.bridge || hasNativeHostConnectionLoss() || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
       || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1) return undefined
     const noteId = nextLiveNoteId++
     const queueNoteOn = () => queueLiveInstrumentEvent({
@@ -1171,7 +1215,7 @@ export const createNativePlaybackController = (input: {
     pause,
     dispose,
     isActive: () => active,
-    isAvailable: () => input.bridge !== undefined,
+    isAvailable: () => input.bridge !== undefined && !hasNativeHostConnectionLoss(),
     canProcessLiveMidi: () => livePreviewActive,
     isPrepared: () => prepared,
     startRecording,

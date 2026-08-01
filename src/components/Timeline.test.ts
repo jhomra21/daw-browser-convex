@@ -15,3 +15,13 @@ test("rebuilds the active backend once after a playing built-in effect commit", 
     .toHaveLength(1);
   expect(handler).toContain("if (!isPlaying()) return;");
 });
+
+test("bypasses degraded external processors and excludes persisted degraded rows from playback", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+
+  expect(source).toContain(`bypassed: true,
+        health: { state: "degraded"`);
+  expect(source).toContain(
+    `.filter((processor) => !processor.bypassed && processor.health.state !== "degraded");`,
+  );
+});

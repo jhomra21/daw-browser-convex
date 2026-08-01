@@ -22,6 +22,17 @@ test("keeps browser live MIDI as the fallback when native is unavailable", () =>
   expect(shouldUseNativeLiveMidi(undefined)).toBeFalse()
 })
 
+test("falls through to browser live MIDI when native start is synchronously unavailable", async () => {
+  const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
+  const nativeStart = source.slice(
+    source.indexOf("const startLiveNote"),
+    source.indexOf("  createEffect(() =>", source.indexOf("const startLiveNote")),
+  )
+  expect(nativeStart).toContain("if (handle) {")
+  expect(nativeStart).toContain("options.audioEngine.startLiveMidiNote")
+  expect(nativeStart).not.toContain("if (handle) activeLiveNotes.set(pitch, { handle, backend: \"native\" })\n        return")
+})
+
 test("keeps editor close separate from live-note safety cleanup", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
   expect(source).not.toContain("if (!midiEditorClipId())")

@@ -491,6 +491,7 @@ test('does not prepare native audio when disabled and keeps browser playback ava
 
         expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(0)
         expect(playback.nativeLiveMidi.isAvailable()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
         await playback.handlePlay([track])
         expect(webEnsures).toBe(1)
         expect(playback.isPlaying()).toBeTrue()
@@ -681,6 +682,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
         await playback.handlePlay([track])
         expect(webEnsures).toBe(0)
         expect(webSchedules).toBe(0)
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
         const initialCalls = [...calls]
         await playback.restartTimelineSchedule([track], { rebuildBackend: true })

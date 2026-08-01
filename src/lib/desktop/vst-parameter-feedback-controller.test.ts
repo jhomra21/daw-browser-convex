@@ -138,7 +138,41 @@ test.serial('persists active playback feedback without suppressing automation or
   }
 })
 
-test.serial('persists editor-session feedback and enqueues exactly once', async () => {
+test.serial('persists idle editor-session feedback without enqueueing or faulting', async () => {
+  const project = await createLocalProject(`Feedback editor idle ${crypto.randomUUID()}`)
+  await setLocalExternalProcessor(project.id, createProcessor())
+  const bridge = installSubscription()
+  const queued: unknown[] = []
+  const faults: string[] = []
+  try {
+    const controller = createVstParameterFeedbackController({
+      projectId: () => project.id,
+      mountedProjectGeneration: () => 0,
+      overrideTarget: () => undefined,
+      nativeVstParameterQueue: {
+        enqueue: async (event) => {
+          queued.push(event)
+          return false
+        },
+      },
+      isNativePlaybackPrepared: () => false,
+      reportFault: (message) => faults.push(message),
+    })
+    bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
+    await flushAsyncWork()
+
+    const db = await openLocalProjectDb(project.id)
+    const row = await db.get('entities', ['external-plugin', `external-plugin:${instanceId}`])
+    expect(row?.value).toMatchObject({ parameterOverrides: { '1': 0.875 } })
+    expect(queued).toEqual([])
+    expect(faults).toEqual([])
+    controller?.dispose()
+  } finally {
+    bridge.restore()
+  }
+})
+
+test.serial('persists prepared editor-session feedback and enqueues exactly once', async () => {
   const project = await createLocalProject(`Feedback editor ${crypto.randomUUID()}`)
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
@@ -155,6 +189,7 @@ test.serial('persists editor-session feedback and enqueues exactly once', async 
           return true
         },
       },
+      isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
     await flushAsyncWork()
@@ -183,6 +218,7 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
           return true
         },
       },
+      isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(project.id, 'editor-session', 1, 0.25))
     bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
@@ -208,6 +244,7 @@ test.serial('ignores project-mismatched and disposed feedback', async () => {
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
       nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(otherProject.id, 'editor-session'))
     controller?.dispose()
@@ -262,6 +299,7 @@ test.serial('does not override or enqueue unknown or read-only descriptors', asy
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
       nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(project.id, 'editor-session', 99, 0.4))
     bridge.emit(payload(project.id, 'editor-session', 2, 0.4))
@@ -290,6 +328,7 @@ test.serial('keeps persistence when native queue delivery fails', async () => {
           throw new Error('queue unavailable')
         },
       },
+      isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
     await flushAsyncWork()
@@ -308,12 +347,15 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
   const targets: string[] = []
+  const faults: string[] = []
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
       nativeVstParameterQueue: { enqueue: async () => false },
+      isNativePlaybackPrepared: () => true,
+      reportFault: (message) => faults.push(message),
     })
     bridge.emit(payload(project.id, 'editor-session', 1, 0.375))
     await flushAsyncWork()
@@ -322,6 +364,7 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
     const row = await db.get('entities', ['external-plugin', `external-plugin:${instanceId}`])
     expect(row?.value).toMatchObject({ parameterOverrides: { '1': 0.375 } })
     expect(targets).toHaveLength(0)
+    expect(faults).toEqual(["The native VST parameter feedback queue rejected delivery."])
     controller?.dispose()
   } finally {
     bridge.restore()

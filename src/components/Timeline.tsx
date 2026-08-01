@@ -430,6 +430,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Playback & playhead controls
   const {
     isPlaying,
+    isNativePlaybackPrepared,
     playheadSec,
     handlePause,
     handleStop,
@@ -544,6 +545,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     nativeVstParameterQueue: nativeVstParameterQueue
       ? { enqueue: nativeVstParameterQueue.enqueue }
       : undefined,
+    isNativePlaybackPrepared,
     reportFault: (message) => notify("Native VST feedback failed", message),
   });
   onCleanup(() => vstParameterFeedback?.dispose());

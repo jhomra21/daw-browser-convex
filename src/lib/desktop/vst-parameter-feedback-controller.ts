@@ -9,6 +9,7 @@ type VstParameterFeedbackControllerInput = {
   mountedProjectGeneration: () => number
   overrideTarget: (targetKey: string) => void
   nativeVstParameterQueue?: Pick<NativeVstParameterQueue, "enqueue">
+  isNativePlaybackPrepared?: () => boolean
   reportFault?: (message: string) => void
 }
 
@@ -71,6 +72,7 @@ export const createVstParameterFeedbackController = (
         if (input.projectId() !== first.projectId || input.mountedProjectGeneration() !== first.generation) continue
         for (const { payload } of snapshot) {
           if (payload.source === "editor-session") {
+            if (!input.isNativePlaybackPrepared?.()) continue
             const delivered = await input.nativeVstParameterQueue?.enqueue({
               instanceId,
               id: payload.parameterId,

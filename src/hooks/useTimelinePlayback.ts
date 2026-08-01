@@ -623,6 +623,7 @@ export function useTimelinePlayback(
   return {
     isPlaying,
     isNativePlayback: nativePlayback.isActive,
+    isNativePlaybackPrepared: nativePlayback.isPrepared,
     isPortableBrowserPlayback: portableBrowserPlayback.isActive,
     backendDiagnostics: () => ({
       ...audioBackendRolloutPolicy,

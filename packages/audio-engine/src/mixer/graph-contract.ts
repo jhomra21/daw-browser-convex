@@ -24,7 +24,7 @@ import {
   type AudioCoreInstrumentState,
 } from '../../../audio-core-contract/src/index'
 import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
-import { normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
+import { createEqBandParameterId, normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
 import { getEffectTiming } from '../effects/timing'
 import { getMixerChannelRole } from './channels'
 import {
@@ -90,6 +90,11 @@ const processorInstanceId = (id: string) => {
   for (const character of id) value = Math.imul(value ^ character.charCodeAt(0), 16777619)
   return (value >>> 0) || 1
 }
+
+const EQ_BAND_PARAMETER_TARGET_BASE = 45
+const EQ_BAND_PARAMETER_TARGET_STRIDE = 3
+const eqBandParameterTarget = (bandIndex: number, propertyOffset: number) =>
+  EQ_BAND_PARAMETER_TARGET_BASE + bandIndex * EQ_BAND_PARAMETER_TARGET_STRIDE + propertyOffset
 
 const toPortableMixerState = (
   id: string,
@@ -223,7 +228,11 @@ const toPortableProcessor = (
           q: band.q,
         })),
       }),
-      parameterTargets: [],
+      parameterTargets: instance.params.bands.flatMap((band, index) => [
+        { id: createEqBandParameterId(band.id, 'frequencyHz'), target: eqBandParameterTarget(index, 0) },
+        { id: createEqBandParameterId(band.id, 'gainDb'), target: eqBandParameterTarget(index, 1) },
+        { id: createEqBandParameterId(band.id, 'q'), target: eqBandParameterTarget(index, 2) },
+      ]),
       bypassed: !instance.params.enabled,
     }
   }

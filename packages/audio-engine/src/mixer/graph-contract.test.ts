@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  createEqBandParameterId,
   createDefaultAutoPanParams,
   createDefaultChorusParams,
   createDefaultCompressorParams,
@@ -273,6 +274,13 @@ describe('mixer routing plan', () => {
       ['saturator', 2, 32],
       ['eq', 3, 200],
     ])
+    expect(snapshot.nodes[0]?.processorOrder[1]?.parameterTargets).toEqual(
+      createDefaultEqParams().bands.flatMap((band, index) => [
+        { id: createEqBandParameterId(band.id, 'frequencyHz'), target: 45 + index * 3 },
+        { id: createEqBandParameterId(band.id, 'gainDb'), target: 46 + index * 3 },
+        { id: createEqBandParameterId(band.id, 'q'), target: 47 + index * 3 },
+      ]),
+    )
   })
 
   test('projects fixture-proven modulation state with exact zero latency and bounded tails', () => {

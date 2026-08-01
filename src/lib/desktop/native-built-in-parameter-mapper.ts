@@ -1,4 +1,4 @@
-import { normalizeDelayParams } from '@daw-browser/shared'
+import { createEqBandParameterId, normalizeDelayParams, type EqParams } from '@daw-browser/shared'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import { resolvePortableDelayMs } from '@daw-browser/audio-engine/mixer/graph-contract'
 
@@ -169,6 +169,31 @@ const mapReverb = (payload: EffectParamsCommitPayload<'reverb'> | EffectParamsCo
   )
 }
 
+const mapEq = (payload: EffectParamsCommitPayload<'eq'> | EffectParamsCommitPayload<'master-eq'>) => {
+  const from: EqParams = payload.from
+  const to: EqParams = payload.to
+  if (from.enabled !== to.enabled || from.channelMode !== to.channelMode || from.bands.length !== to.bands.length) return undefined
+  const values: NativeBuiltInParameterValue[] = []
+  for (let index = 0; index < from.bands.length; index += 1) {
+    const fromBand = from.bands[index]
+    const toBand = to.bands[index]
+    if (!fromBand || !toBand || fromBand.id !== toBand.id || fromBand.enabled !== toBand.enabled || fromBand.type !== toBand.type) return undefined
+    if (!same(fromBand.frequency, toBand.frequency)) values.push({
+      parameterId: createEqBandParameterId(fromBand.id, 'frequencyHz'),
+      value: toBand.frequency,
+    })
+    if (!same(fromBand.gainDb, toBand.gainDb)) values.push({
+      parameterId: createEqBandParameterId(fromBand.id, 'gainDb'),
+      value: toBand.gainDb,
+    })
+    if (!same(fromBand.q, toBand.q)) values.push({
+      parameterId: createEqBandParameterId(fromBand.id, 'q'),
+      value: toBand.q,
+    })
+  }
+  return values
+}
+
 const mapSpectral = (payload: EffectParamsCommitPayload<'spectral'> | EffectParamsCommitPayload<'master-spectral'>) => {
   const from = payload.from.state
   const to = payload.to.state
@@ -222,6 +247,10 @@ export const mapNativeBuiltInParameterCommit = (
     case 'reverb':
     case 'master-reverb':
       values = mapReverb(payload)
+      break
+    case 'eq':
+    case 'master-eq':
+      values = mapEq(payload)
       break
     case 'spectral':
     case 'master-spectral':

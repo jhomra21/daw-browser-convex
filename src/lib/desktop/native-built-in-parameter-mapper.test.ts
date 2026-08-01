@@ -3,6 +3,7 @@ import {
   createDefaultAutoFilterParams,
   createDefaultCompressorParams,
   createDefaultDelayParams,
+  createDefaultEqParams,
   createDefaultLoFiParams,
   createDefaultReverbParams,
   createDefaultSpectralParams,
@@ -135,4 +136,63 @@ test('maps LoFi and Reverb targets while rejecting state-only fields', () => {
     to: { ...reverb, decaySec: reverb.decaySec + 1, wet: 0.3 },
   } satisfies EffectParamsCommitPayload<'reverb'>
   expect(mapNativeBuiltInParameterCommit(reverbPayload, 120)).toBeUndefined()
+})
+
+test('maps track and master EQ continuous band controls with stable band IDs', () => {
+  const from = createDefaultEqParams()
+  const to = {
+    ...structuredClone(from),
+    bands: from.bands.map((band, index) => index === 2
+      ? { ...band, frequency: 1800, gainDb: 4, q: 1.5 }
+      : structuredClone(band)),
+  }
+  const trackPayload = {
+    targetId: 'track-1',
+    effect: 'eq',
+    instanceId: 'eq-1',
+    from: structuredClone(from),
+    to,
+  } satisfies EffectParamsCommitPayload<'eq'>
+  expect(mapNativeBuiltInParameterCommit(trackPayload, 120)).toEqual({
+    instanceId: 'eq-1',
+    values: [
+      { parameterId: 'eq.b3.frequencyHz', value: 1800 },
+      { parameterId: 'eq.b3.gainDb', value: 4 },
+      { parameterId: 'eq.b3.q', value: 1.5 },
+    ],
+  })
+
+  const masterPayload = {
+    targetId: 'master',
+    effect: 'master-eq',
+    instanceId: 'master-eq-1',
+    from: structuredClone(from),
+    to: { ...structuredClone(from), bands: from.bands.map((band, index) => index === 7 ? { ...band, gainDb: -3 } : structuredClone(band)) },
+  } satisfies EffectParamsCommitPayload<'master-eq'>
+  expect(mapNativeBuiltInParameterCommit(masterPayload, 120)).toEqual({
+    instanceId: 'master-eq-1',
+    values: [{ parameterId: 'eq.b8.gainDb', value: -3 }],
+  })
+})
+
+test('rejects unsupported EQ structural and mode changes atomically', () => {
+  const from = createDefaultEqParams()
+  const cases = [
+    { ...structuredClone(from), enabled: false },
+    { ...structuredClone(from), channelMode: 'mono' as const },
+    { ...structuredClone(from), bands: from.bands.map((band, index) => index === 0 ? { ...band, enabled: !band.enabled } : structuredClone(band)) },
+    { ...structuredClone(from), bands: from.bands.map((band, index) => index === 0 ? { ...band, type: 'peaking' as const } : structuredClone(band)) },
+    { ...structuredClone(from), bands: [...structuredClone(from.bands)].reverse() },
+    { ...structuredClone(from), bands: from.bands.slice(0, 7).map((band) => structuredClone(band)) },
+  ]
+  for (const to of cases) {
+    const payload = {
+      targetId: 'track-1',
+      effect: 'eq',
+      instanceId: 'eq-1',
+      from: structuredClone(from),
+      to,
+    } satisfies EffectParamsCommitPayload<'eq'>
+    expect(mapNativeBuiltInParameterCommit(payload, 120)).toBeUndefined()
+  }
 })

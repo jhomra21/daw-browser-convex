@@ -878,7 +878,8 @@ daw_audio_core_result prepare_graph_revision(
     processor.parameter_count = descriptor.parameter_count;
     for (uint32_t parameter = 0; parameter < descriptor.parameter_count; ++parameter) {
       const uint32_t target = descriptor.parameter_targets[parameter];
-      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target > DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      if (target < DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB
+        || target > DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       for (uint32_t previous = 0; previous < parameter; ++previous) {
         if (processor.parameter_targets[previous] == target) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
@@ -1481,7 +1482,12 @@ bool decode_processor_state(
     };
   }
   if (!valid_eq_state(state) || descriptor.latency_frames != 0
-    || descriptor.tail_frames != 0 || descriptor.parameter_count != 0) return false;
+    || descriptor.tail_frames != 0 || descriptor.parameter_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS) return false;
+  for (uint32_t index = 0; index < descriptor.parameter_count; ++index) {
+    const uint32_t target = descriptor.parameter_targets[index];
+    if (target < DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
+      || target > DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST) return false;
+  }
   out_processor->eq = state;
   return true;
 }
@@ -1828,7 +1834,7 @@ void render_saturator_processor(
 }
 
 void render_eq_processor(
-  Core &core, GraphRevision::Processor &processor, uint32_t,
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right) {
   EqHistory &history = core.eq_histories[processor.history_slot];
   float left = std::isfinite(input_left) ? input_left : 0.0F;
@@ -1840,7 +1846,14 @@ void render_eq_processor(
   for (uint32_t index = 0; index < 8; ++index) {
     const daw_audio_eq_band_state &band = processor.eq.bands[index];
     if (band.enabled == 0) continue;
-    const BiquadCoefficients coefficients = rbj_coefficients(band.type, band.frequency_hz, band.q, band.gain_db, core.config.sample_rate_hz);
+    const float frequency = processor_parameter_value(
+      core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_FREQUENCY_HZ(index), frame, band.frequency_hz);
+    const float gain_db = processor_parameter_value(
+      core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_GAIN_DB(index), frame, band.gain_db);
+    const float q = processor_parameter_value(
+      core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_Q(index), frame, band.q);
+    const BiquadCoefficients coefficients = rbj_coefficients(
+      band.type, frequency, q, gain_db, core.config.sample_rate_hz);
     left = process_biquad(left, coefficients, history.bands[index][0]);
     right = process_biquad(right, coefficients, history.bands[index][1]);
   }
@@ -3819,6 +3832,14 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB) return value >= -120.0F && value <= -24.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return value >= 0.0F && value <= 1.0F;
+  if (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
+    && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST) {
+    switch ((target - DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE) % DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE) {
+      case 0: return value >= 20.0F && value <= 20000.0F;
+      case 1: return value >= -24.0F && value <= 24.0F;
+      default: return value >= 0.2F && value <= 18.0F;
+    }
+  }
   return target == 22 && value >= -1.0F && value <= 1.0F;
 }
 

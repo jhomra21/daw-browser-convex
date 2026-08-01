@@ -489,16 +489,19 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold",
               track.collapsed ? "h-6 leading-none" : "h-7",
               isGroupTrack
-                ? isSelected()
-                  ? "border-border bg-timeline-surface-muted text-foreground"
-                  : "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
-                : isSelected()
-                  ? "border-primary bg-timeline-surface-muted"
-                  : "border-border hover:border-border",
+                ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
+                : muteDisabled
+                  ? "cursor-not-allowed border-border text-muted-foreground"
+                  : muted()
+                    ? "border-border bg-amber-500 text-black"
+                    : isSelected()
+                      ? "border-border"
+                      : "border-border hover:border-border",
             )}
             style={{
               "border-width": "0.5px",
             }}
+            disabled={muteDisabled}
             onDblClick={(event) => {
               if (!isGroupTrack || !track.collapsed) return;
               event.stopPropagation();
@@ -510,9 +513,16 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 setSuppressTrackClickId(undefined);
                 return;
               }
-              sidebar().onTrackClick(track.id);
+              if (muteDisabled) return;
+              sidebar().onToggleMute(track.id);
             }}
-            title={`Select ${displayTrackName(track)}`}
+            title={
+              lockedByOther
+                ? "Track locked by another user"
+                : muted()
+                  ? "Unmute track"
+                  : "Mute track"
+            }
           >
             <span class="truncate">{displayTrackName(track)}</span>
           </button>
@@ -619,7 +629,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
         </Show>
 
         <Show when={track.collapsed}>
-          <div class="grid w-full grid-cols-5 gap-1">
+          <div class="grid w-full grid-cols-4 gap-1">
             <button
               class={cn(
                 "h-6 min-w-0 border text-xs font-bold transition-colors",
@@ -648,31 +658,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               }}
             >
               R
-            </button>
-            <button
-              class={cn(
-                "h-6 min-w-0 border text-xs font-semibold transition-colors",
-                muteDisabled
-                  ? "cursor-not-allowed border-amber-900 bg-timeline-surface-muted text-amber-900"
-                  : muted()
-                    ? "border-amber-400 bg-amber-500 text-black shadow-inner"
-                    : "border-amber-500 text-amber-400 hover:bg-amber-500/20",
-              )}
-              disabled={muteDisabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (muteDisabled) return;
-                sidebar().onToggleMute(track.id);
-              }}
-              title={
-                lockedByOther
-                  ? "Track locked by another user"
-                  : muted()
-                    ? "Unmute track"
-                    : "Mute track"
-              }
-            >
-              M
             </button>
             <button
               class={cn(
@@ -744,7 +729,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
         <div class="track-row-control-panel flex items-center gap-2">
           <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
             <Show when={!track.collapsed}>
-              <div class="grid grid-cols-5 gap-1">
+              <div class="grid grid-cols-4 gap-1">
                 <button
                   class={cn(
                     "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
@@ -773,32 +758,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   }}
                 >
                   R
-                </button>
-
-                <button
-                  class={cn(
-                    "h-7 border text-xs font-semibold transition-colors",
-                    muteDisabled
-                      ? "cursor-not-allowed border-amber-900 bg-timeline-surface-muted text-amber-900"
-                      : muted()
-                        ? "border-amber-400 bg-amber-500 text-black shadow-inner"
-                        : "border-amber-500 text-amber-400 hover:bg-amber-500/20",
-                  )}
-                  disabled={muteDisabled}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (muteDisabled) return;
-                    sidebar().onToggleMute(track.id);
-                  }}
-                  title={
-                    lockedByOther
-                      ? "Track locked by another user"
-                      : muted()
-                        ? "Unmute track"
-                        : "Mute track"
-                  }
-                >
-                  M
                 </button>
 
                 <button

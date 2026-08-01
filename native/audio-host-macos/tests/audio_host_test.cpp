@@ -367,6 +367,8 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kVstEditor,
     daw::audio_host_macos::ControlType::kVstEditorStatus,
     daw::audio_host_macos::ControlType::kDiagnosticStart,
+    daw::audio_host_macos::ControlType::kSpectrumSelection,
+    daw::audio_host_macos::ControlType::kSpectrumFrame,
   }) {
     const auto frame = daw::audio_host_macos::EncodeControlFrame(type, {});
     const auto decodedFrame = daw::audio_host_macos::DecodeControlFrame(frame);

@@ -40,7 +40,7 @@ import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
-import type { EffectParamsCommitPayload } from "~/lib/undo/types";
+import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -707,6 +707,22 @@ const Timeline: Component<TimelineProps> = (props) => {
       600,
     );
   };
+
+  function handleEffectParamsCommitted<Effect extends EffectType>(
+    payload: EffectParamsCommitPayload<Effect>,
+    committedProjectId?: string,
+  ) {
+    pushEffectParamsHistory(payload, committedProjectId);
+    if (!isPlaying()) return;
+    void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+      notify(
+        "Built-in effect update failed",
+        error instanceof Error
+          ? error.message
+          : "The active playback graph could not be rebuilt for the built-in effect change.",
+      );
+    });
+  }
 
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
@@ -1826,7 +1842,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setMode("effects");
         bottomPanel.setOpen(true);
       },
-      onEffectParamsCommitted: pushEffectParamsHistory,
+      onEffectParamsCommitted: handleEffectParamsCommitted,
       enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       onEffectInstanceParamsReplayChange: (
         replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,

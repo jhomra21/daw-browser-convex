@@ -390,6 +390,14 @@ export const createNativePlaybackController = (input: {
   }
 
   const handleNativeHostLoss = () => {
+    const ownsNativeSession = pendingStart !== undefined
+      || prepared
+      || nativeSessionStarted
+      || active
+      || livePreviewActive
+      || scheduleCoordinator !== undefined
+      || recording !== undefined
+    if (!ownsNativeSession) return
     if (recording) failRecording(recording, new Error("Native playback host connection was lost."))
     void dispose().catch(() => undefined)
     reportFault("Native playback host connection was lost.")

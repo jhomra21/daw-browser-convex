@@ -119,10 +119,7 @@ export function useTimelinePlayback(
     })),
     reportFault: (message) => {
       setActiveBackend('idle')
-      if (!isPlaying()) {
-        nativeOptions?.reportFault?.(message)
-        return
-      }
+      if (!isPlaying()) return
       setIsPlaying(false)
       cancelRaf()
       nativeOptions?.reportFault?.(message)

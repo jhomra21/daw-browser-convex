@@ -39,17 +39,24 @@ const withFakeRaf = async (run: (flushRaf: () => void) => Promise<void>) => {
   }
 }
 
-const createNativeHookBridge = () => {
+const flushMicrotasks = async () => {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve()
+}
+
+const createNativeHookBridge = (failure?: string) => {
   const calls: string[] = []
   const reply = (name: string) => async () => {
     calls.push(name)
+    if (name === failure) return { ok: false as const, error: 'failed' }
     return { ok: true as const }
   }
   let progressListener = (_progress: NativeScheduleProgress) => {}
+  let lossListener = () => {}
   let progressSequence = 0n
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
   return {
     calls,
+    emitLoss: () => lossListener(),
     audioHost: {
       resolveOutputDevice: async () => ({
         ok: true as const,
@@ -102,7 +109,10 @@ const createNativeHookBridge = () => {
         start: reply('start'),
         stop: reply('stop'),
         teardown: reply('teardown'),
-        onLoss: () => () => {},
+        onLoss: (listener: () => void) => {
+          lossListener = listener
+          return () => { lossListener = () => {} }
+        },
         onRecordingBlock: () => () => {},
         onRecordingStatus: () => () => {},
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
@@ -484,6 +494,85 @@ test('does not prepare native audio when disabled and keeps browser playback ava
         await playback.handlePlay([track])
         expect(webEnsures).toBe(1)
         expect(playback.isPlaying()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('suppresses native faults while preparing an idle preview', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge('begin')
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(engine, undefined, {
+        enabled: () => true,
+        compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+          revision: 1,
+          bpm: 120,
+          transport,
+          tracks: [track],
+          renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+          sidechainRoutes: [],
+        }),
+        reportFault: (message) => faults.push(message),
+      })
+
+      playback.nativeLiveMidi.start({ trackId: 'track-1', pitch: 60, velocity: 0.5 })
+      await flushMicrotasks()
+      expect(fixture.calls).toContain('begin')
+      expect(faults).toEqual([])
+      expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('reports native faults and stops active playback', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => true,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+          reportFault: (message) => faults.push(message),
+        })
+
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+
+        fixture.emitLoss()
+        await flushMicrotasks()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        expect(faults).toEqual(['Native playback host connection was lost.'])
+        expect(fixture.calls).toContain('stop')
         dispose()
       })
     })

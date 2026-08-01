@@ -1136,6 +1136,39 @@ test("rolls back a failed transaction before allowing legacy fallback", async ()
   expect(fixture.calls).toEqual(["begin", "configure", "install", "rollback", "stop", "teardown"])
 })
 
+test("ignores native host loss before native ownership begins", () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
+  fixture.emitLoss()
+
+  expect(controller.isActive()).toBeFalse()
+  expect(faults).toEqual([])
+  expect(fixture.calls).toEqual([])
+})
+
+test("ignores native host loss after native session disposal", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
+  await controller.start(input().transport)
+  await controller.dispose()
+  fixture.emitLoss()
+
+  expect(controller.isActive()).toBeFalse()
+  expect(faults).toEqual([])
+})
+
 test("host loss reports the fault without starting another backend", async () => {
   const fixture = createBridge()
   const faults: string[] = []

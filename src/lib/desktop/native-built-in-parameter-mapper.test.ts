@@ -10,7 +10,7 @@ import {
   createDefaultUtilityParams,
 } from '@daw-browser/shared'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
-import { mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
+import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
 
 const envelope = <State>(state: State): { version: 1; state: State } => ({ version: 1, state })
 
@@ -37,6 +37,23 @@ test('maps changed nested built-in values and filters unchanged fields', () => {
       { parameterId: 'autofilter.lfo.stereoPhase', value: 0.25 },
     ],
   })
+})
+
+test('encodes a complete built-in state for same-core patching', () => {
+  const from = envelope(createDefaultUtilityParams())
+  const to = envelope({ ...from.state, polarity: 'invert', dcBlock: true } satisfies typeof from.state)
+  const payload = {
+    targetId: 'track-1',
+    effect: 'utility',
+    instanceId: 'fx-1',
+    from,
+    to,
+  } satisfies EffectParamsCommitPayload<'utility'>
+  const result = encodeNativeBuiltInStateCommit(payload, 120)
+  expect(result?.instanceId).toBe('fx-1')
+  expect(result?.state.byteLength).toBe(40)
+  expect(new DataView(result?.state.buffer ?? new ArrayBuffer()).getUint32(8, true)).toBe(1)
+  expect(new DataView(result?.state.buffer ?? new ArrayBuffer()).getUint32(36, true)).toBe(1)
 })
 
 test('maps booleans and master effects', () => {

@@ -21,7 +21,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   readVisibleParams?: (targetId: string) => TParams | undefined
   createInitialParams: (targetId: string) => TParams | undefined
   serializeParams: (params: TParams) => string
-  applyToEngine: (targetId: string, params: TParams) => void
+  applyToEngine: (targetId: string, params: TParams) => void | Promise<void>
   clearFromEngine?: (targetId: string) => void
   persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<unknown>
   persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<unknown>
@@ -74,6 +74,7 @@ export function createPersistedEffectState<TRow, TParams>(
   const persistContextByTarget = new Map<string, PersistedEffectContext>()
   const targetByKey = new Map<string, string>()
   const pendingCommitByTarget = new Map<string, PendingParamsCommit<TParams>>()
+  const pendingApplyByTarget = new Map<string, Promise<void>>()
   const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
   const appliedEngineStateByTarget = new Map<string, string | undefined>()
@@ -93,6 +94,7 @@ export function createPersistedEffectState<TRow, TParams>(
     persistContextByTarget.delete(key)
     targetByKey.delete(key)
     pendingCommitByTarget.delete(key)
+    pendingApplyByTarget.delete(key)
     lastLocalEdit.delete(key)
     setDraftByTarget((prev) => {
       if (!(key in prev)) return prev
@@ -278,7 +280,18 @@ export function createPersistedEffectState<TRow, TParams>(
       next,
       serialized: serializedNext,
     })
-    persistOrSchedule(targetId, key, next)
+    const apply = Promise.resolve(options.applyToEngine(targetId, next))
+    pendingApplyByTarget.set(key, apply)
+    void apply
+      .then(() => {
+        if (pendingApplyByTarget.get(key) !== apply) return
+        pendingApplyByTarget.delete(key)
+        persistOrSchedule(targetId, key, next)
+      })
+      .catch((error: unknown) => {
+        if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
+        options.onPersistError?.(error)
+      })
   }
 
   function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
@@ -364,6 +377,14 @@ export function createPersistedEffectState<TRow, TParams>(
   })
 
   const flushPending = async (projectId?: string) => {
+    await Promise.all(
+      [...pendingApplyByTarget.entries()]
+        .filter(([key]) => {
+          if (!projectId) return true
+          return persistContextByTarget.get(key)?.projectId === projectId
+        })
+        .map(([, apply]) => apply),
+    )
     for (const [key, timer] of Array.from(saveTimers.entries())) {
       const context = persistContextByTarget.get(key)
       if (projectId && context?.projectId !== projectId) continue

@@ -46,6 +46,7 @@ import {
   type PortableProjectedSourceEvent,
 } from './portable-clip-projector'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
+import { resolveGraphProcessor } from './mixer/resolve-graph-processor'
 
 export type PortableSynthConfiguration = {
   nodeId: string
@@ -498,6 +499,10 @@ export type PreparedPortableSession =
     supported: true
     graph: AudioCoreGraphSnapshot
     schedule: PortableFrameSchedule
+    scheduleRange: {
+      startFrame: number
+      endFrame: number
+    }
     assets: readonly AudioAssetRef[]
     sources: readonly PreparedPortableSource[]
     instruments: readonly (
@@ -626,8 +631,8 @@ const targetReasons = (
   const node = nodeId === undefined ? undefined : nodeById.get(nodeId)
   if (!node) return [`${nodeId ?? 'unknown'}: scheduled parameter targets no graph node.`]
   if (target.effectInstanceId) {
-    const processor = node.processorOrder.find((candidate) => candidate.id === target.effectInstanceId)
-    return processor?.parameterTargets.some((parameter) => parameter.id === target.parameterId)
+    const processor = resolveGraphProcessor(graph, target.effectInstanceId, node.id)
+    return processor?.parameterTargets.has(target.parameterId)
       ? []
       : [`${target.effectInstanceId}: scheduled parameter "${target.parameterId}" is not portable.`]
   }
@@ -647,7 +652,9 @@ const capabilityReasons = (
   if (graph.nodes.length > portableWasmMaxGraphNodes) reasons.push('The portable graph exceeds the node capacity.')
   if (graph.edges.length > portableWasmMaxGraphEdges) reasons.push('The portable graph exceeds the edge capacity.')
   if (graph.assets.length > portableWasmMaxAssets) reasons.push('The portable graph exceeds the asset capacity.')
-  const reverbCount = graph.nodes.reduce((count, node) => count + node.processorOrder.filter((processor) => processor.kind === 'reverb').length, 0)
+  const reverbCount = graph.nodes.reduce((count, node) => count + [
+    ...node.processorOrder,
+  ].filter((processor) => processor.kind === 'reverb').length, 0)
   if (reverbCount > portableWasmCapabilityMatrix.maxReverbProcessors) {
     reasons.push(`The portable graph exceeds the ${portableWasmCapabilityMatrix.maxReverbProcessors}-Reverb processor capacity.`)
   }
@@ -686,8 +693,8 @@ const capabilityReasons = (
 }
 
 const sourceFrameRange = (schedule: PortableFrameSchedule, rangeEndSec: number) => ({
-  start: schedule.timeOrigin.frame,
-  end: schedule.timeOrigin.frame + Math.round((rangeEndSec - schedule.timeOrigin.timelineSec) * schedule.sampleRateHz),
+  startFrame: schedule.timeOrigin.frame,
+  endFrame: schedule.timeOrigin.frame + Math.round((rangeEndSec - schedule.timeOrigin.timelineSec) * schedule.sampleRateHz),
 })
 
 const prepareSources = (
@@ -725,7 +732,7 @@ const prepareSources = (
   })
   if (!projection.supported) return { reasons: [...projection.reasons] }
   const frameRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)
-  if (!Number.isSafeInteger(frameRange.end) || frameRange.end <= frameRange.start) {
+  if (!Number.isSafeInteger(frameRange.endFrame) || frameRange.endFrame <= frameRange.startFrame) {
     return { reasons: ['Portable source scheduling range resolves to invalid frames.'] }
   }
   const assetById = new Map(assets.map((asset) => [asset.assetId, asset]))
@@ -767,9 +774,9 @@ const prepareSources = (
       continue
     }
     if (event.epoch !== input.schedule.transportEpoch
-      || event.startFrame < frameRange.start
+      || event.startFrame < frameRange.startFrame
       || event.stopFrame <= event.startFrame
-      || event.stopFrame > frameRange.end
+      || event.stopFrame > frameRange.endFrame
       || event.sourceOffsetFrame < 0
       || event.sourceOffsetFraction !== undefined && (
         !Number.isFinite(event.sourceOffsetFraction)
@@ -844,6 +851,7 @@ export const compilePreparedPortableSession = (
   graph = withInstruments.graph
   const sourceCompilation = prepareSources(input, assets, graph)
   if (!sourceCompilation.sources) return unsupported(sourceCompilation.reasons)
+  const scheduleRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)
   const reasons = capabilityReasons(graph, input.schedule)
   if (reasons.length > 0) return unsupported(reasons)
   if (parsePortableWasmControlMessage({
@@ -855,7 +863,9 @@ export const compilePreparedPortableSession = (
     return unsupported(['Portable graph snapshot does not satisfy the portable protocol.'])
   }
   const qualification: PortablePreparedQualification = {
-    processorKinds: graph.nodes.flatMap((node) => node.processorOrder.map((processor) => processor.kind)),
+    processorKinds: graph.nodes.flatMap((node) => [
+      ...node.processorOrder,
+    ].map((processor) => processor.kind)),
     trackCount: graph.nodes.length,
     hasClips: graph.assets.length > 0,
     hasRouting: graph.edges.length > 0,
@@ -870,6 +880,7 @@ export const compilePreparedPortableSession = (
     supported: true,
     graph,
     schedule: input.schedule,
+    scheduleRange,
     assets,
     sources: sourceCompilation.sources,
     instruments,

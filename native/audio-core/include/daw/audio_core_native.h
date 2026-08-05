@@ -12,6 +12,8 @@
 
 namespace daw::audio_core {
 
+constexpr std::uint32_t kNativeGraphStageAppend = 0xffff'ffffU;
+
 /* Native-only event meanings. They are intentionally outside the portable
  * event enum so Wasm and browser callers cannot accidentally depend on host
  * voice ownership semantics. */
@@ -20,6 +22,11 @@ enum class NativeInstrumentEventType : std::uint32_t {
   kLiveNoteOff = 102,
   kTransportRelease = 103,
   kAllSoundOff = 104,
+};
+
+enum class NativeGraphStageRole : std::uint8_t {
+  kEffect = 1,
+  kInstrument = 2,
 };
 
 /* This is a native host extension, deliberately separate from the portable C
@@ -35,6 +42,16 @@ struct NativeGraphNodeRender {
   std::uint32_t transport_epoch = 0;
   bool transport_running = false;
   std::int64_t transport_frame = 0;
+  std::int64_t project_time_samples = 0;
+  double tempo_bpm = 0.0;
+  double project_time_music = 0.0;
+  std::uint32_t time_signature_numerator = 0;
+  std::uint32_t time_signature_denominator = 0;
+  bool cycle_active = false;
+  double cycle_start_music = 0.0;
+  double cycle_end_music = 0.0;
+  std::uint32_t stage_index = 0;
+  NativeGraphStageRole stage_role = NativeGraphStageRole::kEffect;
   std::array<float*, 2> planes{};
   std::span<const daw_audio_instrument_event> instrument_events{};
   void* attachment = nullptr;
@@ -44,10 +61,11 @@ using NativeGraphNodeHook = void (*)(const NativeGraphNodeRender&) noexcept;
 
 struct NativeGraphHookBinding {
   std::uint64_t node_id = 0;
-  std::uint32_t chain_index = 0;
+  std::uint32_t stage_index = kNativeGraphStageAppend;
   std::uint32_t output_layout = 0;
   std::uint32_t pdc_latency_frames = 0;
   std::uint32_t external_latency_frames = 0;
+  NativeGraphStageRole stage_role = NativeGraphStageRole::kEffect;
   void* attachment = nullptr;
 };
 

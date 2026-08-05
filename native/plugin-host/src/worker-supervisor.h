@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,12 +22,40 @@ constexpr std::size_t kMaximumWorkerFrames = 8'192;
 constexpr std::size_t kMaximumWorkerEvents = 2'048;
 constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
-constexpr std::uint32_t kWorkerTransportAbiVersion = 2;
+constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
+constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t kWorkerTransportAbiVersion = 5;
 constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
 constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
 constexpr std::string_view kWorkerArtifactVersion = "2";
+
+[[nodiscard]] constexpr bool IsInfiniteTailFrames(const std::uint64_t tailFrames) noexcept {
+  return tailFrames == kInfiniteTailFrames;
+}
+
+[[nodiscard]] constexpr bool IsValidWorkerTailFrames(const std::uint64_t tailFrames) noexcept {
+  return IsInfiniteTailFrames(tailFrames) || tailFrames <= kMaximumWorkerTailFrames;
+}
+
+[[nodiscard]] constexpr bool IsValidFiniteWorkerTailFrames(const std::uint64_t tailFrames) noexcept {
+  return tailFrames <= kMaximumWorkerTailFrames;
+}
+
+[[nodiscard]] constexpr std::optional<std::uint32_t> NormalizeWorkerTailFrames(
+  const std::uint64_t tailFrames
+) noexcept {
+  return IsValidWorkerTailFrames(tailFrames)
+    ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(tailFrames))
+    : std::nullopt;
+}
+
+[[nodiscard]] constexpr std::optional<std::uint64_t> ChannelMask(const std::size_t channelCount) noexcept {
+  if (channelCount > kMaximumWorkerChannels) return std::nullopt;
+  if (channelCount == kMaximumWorkerChannels) return std::numeric_limits<std::uint64_t>::max();
+  return (std::uint64_t{1} << channelCount) - 1U;
+}
 
 struct WorkerArtifactIdentity {
   std::string id;
@@ -247,6 +276,8 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kMiss,
   kEditorInteraction,
   kParameterEdit,
+  kTail,
+  kEditorState,
 };
 
 struct WorkerDiagnostic {
@@ -257,6 +288,12 @@ struct WorkerDiagnostic {
   double normalized_value = 0.0;
 };
 static_assert(std::is_trivially_copyable_v<WorkerDiagnostic>);
+
+struct WorkerTailMetadata {
+  std::uint64_t workerGeneration = 0;
+  std::uint32_t tailFrames = 0;
+};
+static_assert(std::is_trivially_copyable_v<WorkerTailMetadata>);
 
 enum class WorkerEventKind : std::uint8_t {
   kParameter,
@@ -269,6 +306,22 @@ struct WorkerTransportEvent {
   std::uint32_t parameterId = 0;
   double parameterValue = 0.0;
   std::uint8_t midiData[3]{};
+};
+
+struct WorkerBlockContext {
+  std::int64_t projectTimeSamples = 0;
+  std::int64_t continuousTimeSamples = 0;
+  double tempoBpm = 0.0;
+  double projectTimeMusic = 0.0;
+  std::uint32_t timeSignatureNumerator = 0;
+  std::uint32_t timeSignatureDenominator = 0;
+  double cycleStartMusic = 0.0;
+  double cycleEndMusic = 0.0;
+  std::uint32_t transportEpoch = 1;
+  bool playing = false;
+  bool recording = false;
+  bool cycleActive = false;
+  bool discontinuity = false;
 };
 
 class WorkerTransport {
@@ -286,7 +339,8 @@ class WorkerTransport {
     std::size_t slotIndex,
     std::uint64_t sequence,
     std::size_t numSamples,
-    std::span<const WorkerTransportEvent> events
+    std::span<const WorkerTransportEvent> events,
+    const WorkerBlockContext& context = {}
   );
   [[nodiscard]] bool Complete(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DropLate(std::size_t slotIndex, std::uint64_t expectedSequence);
@@ -298,6 +352,7 @@ class WorkerTransport {
   [[nodiscard]] bool Read(std::size_t slotIndex, std::uint64_t expectedSequence) const;
   [[nodiscard]] WorkerHealth health() const;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
+  [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;
   [[nodiscard]] int fileDescriptor() const;
   [[nodiscard]] std::uint64_t token() const;
   [[nodiscard]] bool valid() const;
@@ -307,11 +362,15 @@ class WorkerTransport {
   [[nodiscard]] std::size_t outputChannels() const;
   [[nodiscard]] std::size_t numSamples(std::size_t slotIndex) const;
   [[nodiscard]] std::span<const WorkerTransportEvent> events(std::size_t slotIndex) const;
+  [[nodiscard]] WorkerBlockContext context(std::size_t slotIndex) const;
+  [[nodiscard]] std::uint64_t outputSilenceFlags(std::size_t slotIndex) const;
+  void SetOutputSilenceFlags(std::size_t slotIndex, std::uint64_t flags);
   [[nodiscard]] std::span<float> input(std::size_t slotIndex);
   [[nodiscard]] std::span<const float> output(std::size_t slotIndex) const;
   [[nodiscard]] std::span<float> output(std::size_t slotIndex);
   void PublishHealth(WorkerHealth health);
   [[nodiscard]] bool PublishDiagnostic(WorkerDiagnostic diagnostic);
+  void PublishTailMetadata(std::uint32_t tailFrames);
 
  private:
   struct Mapping;
@@ -344,7 +403,8 @@ class WorkerRuntime {
     std::size_t slotIndex,
     std::uint64_t sequence,
     std::size_t numSamples,
-    std::span<const WorkerTransportEvent> events
+    std::span<const WorkerTransportEvent> events,
+    const WorkerBlockContext& context = {}
   );
   [[nodiscard]] bool CancelPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DispatchPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
@@ -358,13 +418,15 @@ class WorkerRuntime {
   [[nodiscard]] bool CopyCompletedOutput(
     std::size_t slotIndex,
     std::uint64_t expectedSequence,
-    std::span<float> output
+    std::span<float> output,
+    std::uint64_t* outputSilenceFlags = nullptr
   );
   [[nodiscard]] bool CopyInput(std::size_t slotIndex, std::span<const float> input);
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] WorkerHealth callbackHealth() const;
   [[nodiscard]] WorkerHealth health() const;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
+  [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;
   [[nodiscard]] const WorkerTransport* transport() const;
 
  private:

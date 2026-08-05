@@ -4,27 +4,48 @@ import {
 import {
   mapNativeSessionAssets,
   serializeNativeGraph,
+  serializeNativeProcessorStatePatch,
+  nativeProcessorLatencyForState,
+  nativeProcessorLayoutsForState,
   serializeNativeInstrumentStates,
   serializeNativeInstrumentEvents,
   serializeNativeProcessorEvents,
   serializeNativeVstParameterEvents,
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
+import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
+  NativeHostTransport,
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeHostRecordingStatus,
   NativeInstrumentEvent,
   NativeSessionAsset,
+  NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type { LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
+import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { DesktopBridge } from "~/types/desktop-bridge"
-import { createNativeScheduleCoordinator, type NativeScheduleCoordinator } from "./native-schedule-coordinator"
+import type {
+  LiveProcessorControl,
+  LiveProcessorControlRequest,
+  LiveProcessorControlResult,
+} from "~/lib/live-processor-control"
+import {
+  arrangementFrameForNativeFrame,
+  createNativeScheduleCoordinator,
+  nativeLoopFramesForSnapshot,
+  type NativeScheduleCoordinator,
+} from "./native-schedule-coordinator"
+import {
+  encodeNativeBuiltInStateCommit,
+  nativeBuiltInTimingForCommit,
+} from "./native-built-in-parameter-mapper"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
@@ -51,6 +72,15 @@ const indicatesNativeHostConnectionLoss = (error: unknown) => {
     || message.includes("native audio host stopped")
     || message.includes("host connection was lost")
     || message.includes("host connection closed")
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const enabledValue = (value: unknown) => {
+  if (!isRecord(value)) return undefined
+  const state = isRecord(value.state) ? value.state : value
+  return typeof state.enabled === "boolean" ? state.enabled : undefined
 }
 
 type NativePlaybackBridge = Pick<
@@ -87,6 +117,7 @@ type NativePlaybackBridge = Pick<
     | "onMeterBatch"
     | "onScheduleProgress"
   > & {
+    queueProcessorStatePatch?: NonNullable<DesktopBridge["audioHost"]>["session"]["queueProcessorStatePatch"]
     reenableVstScheduleAutomation?: NonNullable<DesktopBridge["audioHost"]>["session"]["reenableVstScheduleAutomation"]
     setSpectrumNode?: NonNullable<DesktopBridge["audioHost"]>["session"]["setSpectrumNode"]
     onSpectrumFrame?: NonNullable<DesktopBridge["audioHost"]>["session"]["onSpectrumFrame"]
@@ -94,9 +125,35 @@ type NativePlaybackBridge = Pick<
 }
 
 type NativeStartResult = "started" | "unavailable" | "blocked"
+
+const nativeTransportFor = (
+  snapshot: LivePlaybackSnapshot,
+  epoch: number,
+  running: boolean,
+  frame: number,
+  transitionId: bigint,
+): NativeHostTransport => ({
+  epoch,
+  running,
+  frame,
+  bpm: snapshot.bpm,
+  timeSignatureNumerator: snapshot.timeSignature?.numerator ?? 4,
+  timeSignatureDenominator: snapshot.timeSignature?.denominator ?? 4,
+  cycleActive: snapshot.transport.loopEnabled,
+  ...(snapshot.transport.loopEnabled
+    ? {
+        cycleStartSec: snapshot.transport.loopStartSec,
+        cycleEndSec: snapshot.transport.loopEndSec,
+      }
+    : {}),
+  transitionId,
+})
 export type NativeBuiltInParameterQueueResult =
   | { handled: true }
   | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-target" | "unavailable" | "bridge-error"; error?: string }
+export type NativeBuiltInStatePatchResult =
+  | { handled: true }
+  | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-state" | "unavailable" | "bridge-error"; error?: string }
 export type NativeRecordingDiagnostics = Pick<
   NativeHostRecordingStatus,
   "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
@@ -119,6 +176,8 @@ type LiveNoteReadiness = {
   promise: Promise<void>
   released: boolean
   force: boolean
+  noteOnQueued: boolean
+  releaseQueued: boolean
 }
 
 const assertReply: <T extends NativeSessionReply>(reply: T) => asserts reply is Extract<T, { ok: true }> = (reply) => {
@@ -191,11 +250,15 @@ export const createNativePlaybackController = (input: {
   let livePreviewActive = false
   let nativeHostConnectionLost = false
   let nativeHostLossProjectGeneration: number | undefined
+  let nativeHostLossReason: string | undefined
+  let intentionalHostTransitionDepth = 0
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
   let lifecycleGeneration = 0
+  let nativeSessionGeneration = 0
   let transportEpoch = 1
+  let nextLiveProcessorSequence = 0
   let nextTransportTransitionId = 0n
   let installedAssetIds: readonly number[] = []
   let installedAssets: readonly NativeSessionAsset[] = []
@@ -212,8 +275,23 @@ export const createNativePlaybackController = (input: {
   let nextLiveEventSequence = 1_000_000
   let liveInstrumentQueueGeneration = 0
   let liveInstrumentEventTail = Promise.resolve()
+  let preparedTransportTransitionGeneration = 0
+  type PendingStatePatch = {
+    instanceId: string
+    request: {
+      payload: EffectParamsCommitPayload
+      bpm: number
+    }
+    resolve: (result: NativeBuiltInStatePatchResult) => void
+  }
+  const pendingStatePatches = new Map<string, PendingStatePatch>()
+  let statePatchActive = false
+  let statePatchPumpScheduled = false
   const liveNoteReadiness = new Map<number, LiveNoteReadiness>()
+  const releasedLiveNoteHandles = new WeakSet<NativeLiveMidiNoteHandle>()
+  let liveMidiTailOwned = false
   let scheduleCoordinator: NativeScheduleCoordinator | undefined
+  const nativeLiveMidiResetListeners = new Set<() => void>()
   const nativeMeterListeners = new Set<(levels: TrackStereoLevelsBatch) => void>()
   const nativeMasterMeterListeners = new Set<(levels: TrackStereoLevels) => void>()
   const nativeSpectrumListeners = new Set<(frame: SpectrumFrame | null) => void>()
@@ -225,6 +303,13 @@ export const createNativePlaybackController = (input: {
   let nativeSpectrumNodeIds = new Map<string, bigint>()
   let nativeSpectrumTarget: string | undefined
   let latestSpectrumSequence = 0n
+  let latestScheduleProgress: NativeScheduleProgress | undefined
+  const processorSequenceWaiters = new Set<{
+    revision: number
+    epoch: number
+    sequence: number
+    resolve: (applied: boolean) => void
+  }>()
   let unsubscribeSpectrum: (() => void) | undefined
 
   const resetNativeMeters = () => {
@@ -290,9 +375,8 @@ export const createNativePlaybackController = (input: {
       || frame.sequence <= latestSpectrumSequence
     ) return
     latestSpectrumSequence = frame.sequence
-    const data = new Float32Array(frame.data)
     const next: SpectrumFrame = {
-      data,
+      data: frame.data,
       sampleRate: frame.sampleRateHz,
       graphRevision: frame.graphRevision,
       transportEpoch: frame.transportEpoch,
@@ -338,6 +422,41 @@ export const createNativePlaybackController = (input: {
     input.reportFault?.(message)
   }
 
+  const handleNativeScheduleProgress = (progress: NativeScheduleProgress) => {
+    latestScheduleProgress = progress
+    for (const waiter of processorSequenceWaiters) {
+      if (progress.revision !== waiter.revision || progress.epoch !== waiter.epoch) {
+        waiter.resolve(false)
+        processorSequenceWaiters.delete(waiter)
+      } else if (progress.appliedProcessorSequence >= BigInt(waiter.sequence)) {
+        waiter.resolve(true)
+        processorSequenceWaiters.delete(waiter)
+      }
+    }
+  }
+
+  const waitForNativeProcessorSequence = (revision: number, epoch: number, sequence: number) => {
+    const progress = latestScheduleProgress
+    if (
+      progress?.revision === revision
+      && progress.epoch === epoch
+      && progress.appliedProcessorSequence >= BigInt(sequence)
+    ) return Promise.resolve(true)
+    return new Promise<boolean>((resolve) => {
+      const waiter = { revision, epoch, sequence, resolve }
+      processorSequenceWaiters.add(waiter)
+      const timeout = setTimeout(() => {
+        if (!processorSequenceWaiters.delete(waiter)) return
+        resolve(false)
+      }, 1000)
+      const originalResolve = resolve
+      waiter.resolve = (applied) => {
+        clearTimeout(timeout)
+        originalResolve(applied)
+      }
+    })
+  }
+
   const hasNativeHostConnectionLoss = () => {
     if (!nativeHostConnectionLost) return false
     const projectGeneration = input.getProjectGeneration?.()
@@ -348,14 +467,34 @@ export const createNativePlaybackController = (input: {
     ) {
       nativeHostConnectionLost = false
       nativeHostLossProjectGeneration = undefined
+      nativeHostLossReason = undefined
       return false
     }
     return true
   }
 
-  const markNativeHostConnectionLost = () => {
+  const nativeHostConnectionLossMessage = () =>
+    nativeHostLossReason ?? "Native playback host connection was lost."
+
+  const reportBlockedByNativeHostConnectionLoss = () => {
+    const message = `Native playback start was skipped: ${nativeHostConnectionLossMessage()}`
+    console.error("[native-vst3] native start unavailable", {
+      result: "unavailable",
+      error: message,
+    })
+    reportFault(message)
+  }
+
+  const markNativeHostConnectionLost = (reason?: string) => {
     nativeHostConnectionLost = true
     nativeHostLossProjectGeneration = input.getProjectGeneration?.()
+    nativeHostLossReason = reason ?? nativeHostConnectionLossMessage()
+  }
+
+  const resetNativeHostConnectionLoss = () => {
+    nativeHostConnectionLost = false
+    nativeHostLossProjectGeneration = undefined
+    nativeHostLossReason = undefined
   }
 
   const createCoordinatorForEpoch = (options: {
@@ -364,18 +503,26 @@ export const createNativePlaybackController = (input: {
     sampleRateHz: number
     assets: readonly NativeSessionAsset[]
     startFrame: number
+    graph?: AudioCoreGraphSnapshot
   }) => {
     const bridge = input.bridge
     if (!bridge) throw new Error("The native playback bridge is unavailable.")
+    const sessionGeneration = ++nativeSessionGeneration
     return createNativeScheduleCoordinator({
       bridge: {
         queueScheduleWindow: bridge.session.queueScheduleWindow,
         queueInstrumentEvents: bridge.session.queueInstrumentEvents,
         reenableVstScheduleAutomation: bridge.session.reenableVstScheduleAutomation,
-        onScheduleProgress: bridge.session.onScheduleProgress,
+        onScheduleProgress: (listener) => bridge.session.onScheduleProgress((progress) => {
+          if (sessionGeneration !== nativeSessionGeneration) return
+          handleNativeScheduleProgress(progress)
+          listener(progress)
+        }),
         onLoss: bridge.session.onLoss,
       },
       snapshot: options.snapshot,
+      graph: options.graph,
+      acceptsLiveMidi: true,
       epoch: options.epoch,
       sampleRateHz: options.sampleRateHz,
       capacity: {
@@ -384,50 +531,79 @@ export const createNativePlaybackController = (input: {
       },
       assets: options.assets,
       startFrame: options.startFrame,
-      onFault: (error) => reportFault(error.message),
+      onFault: (error) => {
+        if (sessionGeneration !== nativeSessionGeneration) return
+        void dispose().catch(() => undefined)
+        reportFault(error.message)
+      },
       onRenderedFrame: (renderedFrame) => {
         if (renderedFrame >= transportFrame) transportFrame = renderedFrame
       },
-      onHostLoss: handleNativeHostLoss,
+      onHostLoss: (error) => {
+        if (sessionGeneration !== nativeSessionGeneration) return
+        handleNativeHostLoss(error)
+      },
     })
   }
 
   const dispose = async () => {
-    lifecycleGeneration += 1
-    liveInstrumentQueueGeneration += 1
-    liveInstrumentEventTail = Promise.resolve()
-    pendingStart = undefined
-    pendingStartMode = undefined
-    const bridge = input.bridge
-    const assetIds = installedAssetIds
-    installedAssetIds = []
-    active = false
-    prepared = false
-    nativeSessionStarted = false
-    livePreviewActive = false
-    liveNoteReadiness.clear()
-    scheduleCoordinator?.dispose()
-    scheduleCoordinator = undefined
-    clearNativeMeters()
-    clearNativeSpectrum()
-    preparedProjectGeneration = undefined
-    preparedSnapshot = undefined
-    preparedGraph = undefined
-    installedAssets = []
-    sampleRate = 0
-    maximumFramesPerBlock = 0
-    transportFrame = 0
-    if (!bridge) return
-    const stopPromise = bridge.session.stop()
-    await cancelRecording().catch(() => undefined)
-    await Promise.allSettled([
-      stopPromise,
-      ...assetIds.map((sessionAssetId) => bridge.session.releaseAsset(sessionAssetId)),
-    ])
-    await bridge.session.teardown().catch(() => undefined)
+    intentionalHostTransitionDepth += 1
+    try {
+      lifecycleGeneration += 1
+      preparedTransportTransitionGeneration += 1
+      nativeSessionGeneration += 1
+      for (const waiter of processorSequenceWaiters) waiter.resolve(false)
+      processorSequenceWaiters.clear()
+      latestScheduleProgress = undefined
+      const hadSession = prepared
+        || nativeSessionStarted
+        || active
+        || livePreviewActive
+        || scheduleCoordinator !== undefined
+      for (const pending of pendingStatePatches.values()) pending.resolve({ handled: true })
+      pendingStatePatches.clear()
+      statePatchPumpScheduled = false
+      liveInstrumentQueueGeneration += 1
+      liveInstrumentEventTail = Promise.resolve()
+      pendingStart = undefined
+      pendingStartMode = undefined
+      const bridge = input.bridge
+      const assetIds = installedAssetIds
+      installedAssetIds = []
+      active = false
+      prepared = false
+      nativeSessionStarted = false
+      livePreviewActive = false
+      for (const listener of nativeLiveMidiResetListeners) listener()
+      liveNoteReadiness.clear()
+      liveMidiTailOwned = false
+      scheduleCoordinator?.dispose()
+      scheduleCoordinator = undefined
+      clearNativeMeters()
+      clearNativeSpectrum()
+      preparedProjectGeneration = undefined
+      preparedSnapshot = undefined
+      preparedGraph = undefined
+      installedAssets = []
+      sampleRate = 0
+      maximumFramesPerBlock = 0
+      transportFrame = 0
+      if (hadSession) transportEpoch += 1
+      if (!bridge) return
+      const stopPromise = bridge.session.stop()
+      await cancelRecording().catch(() => undefined)
+      await Promise.allSettled([
+        stopPromise,
+        ...assetIds.map((sessionAssetId) => bridge.session.releaseAsset(sessionAssetId)),
+      ])
+      await bridge.session.teardown().catch(() => undefined)
+    } finally {
+      intentionalHostTransitionDepth -= 1
+    }
   }
 
-  const handleNativeHostLoss = () => {
+  const handleNativeHostLoss = (error?: string) => {
+    if (intentionalHostTransitionDepth > 0) return
     const ownsNativeSession = prepared
       || nativeSessionStarted
       || active
@@ -435,10 +611,11 @@ export const createNativePlaybackController = (input: {
       || scheduleCoordinator !== undefined
       || recording !== undefined
     if (!ownsNativeSession) return
-    markNativeHostConnectionLost()
-    if (recording) failRecording(recording, new Error("Native playback host connection was lost."))
+    const message = error ?? "Native playback host connection was lost."
+    markNativeHostConnectionLost(message)
+    if (recording) failRecording(recording, new Error(message))
     void dispose().catch(() => undefined)
-    reportFault("Native playback host connection was lost.")
+    reportFault(message)
   }
 
   const startAttempt = async (
@@ -448,7 +625,11 @@ export const createNativePlaybackController = (input: {
     runTransport: boolean,
   ): Promise<NativeStartResult> => {
     const bridge = input.bridge
-    if (!bridge || hasNativeHostConnectionLoss()) return "unavailable"
+    if (!bridge) return "unavailable"
+    if (hasNativeHostConnectionLoss()) {
+      reportBlockedByNativeHostConnectionLoss()
+      return "unavailable"
+    }
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
     if (prepared && preparedProjectGeneration === projectGeneration) {
@@ -463,6 +644,7 @@ export const createNativePlaybackController = (input: {
           transportEpoch += 1
           clearNativeSpectrumFrame()
           const frame = Math.round(transport.playheadSec * sampleRate)
+          nativeSessionGeneration += 1
           previousCoordinator?.dispose()
           const nextCoordinator = createCoordinatorForEpoch({
             snapshot: refreshed.snapshot,
@@ -470,34 +652,30 @@ export const createNativePlaybackController = (input: {
             sampleRateHz: sampleRate,
             assets: installedAssets,
             startFrame: frame,
+            graph: preparedGraph,
           })
           if (preparedGraph) nextCoordinator.preflight(preparedGraph)
           nextCoordinator.install()
           scheduleCoordinator = nextCoordinator
           const transitionId = ++nextTransportTransitionId
-          assertReply(await bridge.session.setTransport({
-            epoch: transportEpoch,
-            running: false,
-            frame,
-            transitionId,
-          }))
+          assertReply(await bridge.session.setTransport(
+            nativeTransportFor(refreshed.snapshot, transportEpoch, false, frame, transitionId),
+          ))
           await nextCoordinator.waitForTransition(transitionId, false)
+          await nextCoordinator.prime(frame)
+          await nextCoordinator.waitForAccepted(frame + Math.min(maximumFramesPerBlock, nextCoordinator.scheduleEndFrame() - frame))
           if (runTransport) {
-            await nextCoordinator.prime(frame)
-            await nextCoordinator.waitForAccepted(frame + Math.min(maximumFramesPerBlock, nextCoordinator.scheduleEndFrame() - frame))
             const runTransitionId = ++nextTransportTransitionId
-            assertReply(await bridge.session.setTransport({
-              epoch: transportEpoch,
-              running: true,
-              frame,
-              transitionId: runTransitionId,
-            }))
+            assertReply(await bridge.session.setTransport(
+              nativeTransportFor(refreshed.snapshot, transportEpoch, true, frame, runTransitionId),
+            ))
             await nextCoordinator.waitForTransition(runTransitionId, true)
           }
           if (cancelled()) {
             await dispose()
             return "unavailable"
           }
+          preparedSnapshot = refreshed.snapshot
           transportFrame = frame
           active = runTransport
           livePreviewActive = true
@@ -509,7 +687,7 @@ export const createNativePlaybackController = (input: {
           error: sanitizeNativeVst3DiagnosticError(error),
         })
         if (!cancelled() && indicatesNativeHostConnectionLoss(error)) {
-          markNativeHostConnectionLost()
+          markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
         }
         if (!cancelled()) reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
         await dispose()
@@ -519,6 +697,7 @@ export const createNativePlaybackController = (input: {
     if (prepared) {
       const assetIds = installedAssetIds
       installedAssetIds = []
+      nativeSessionGeneration += 1
       scheduleCoordinator?.dispose()
       scheduleCoordinator = undefined
       clearNativeMeters()
@@ -546,8 +725,12 @@ export const createNativePlaybackController = (input: {
     try {
       const snapshotResult = await input.compileSnapshot(transport)
       if (cancelled()) return "unavailable"
-      if (!snapshotResult.supported || snapshotResult.snapshot.transport.loopEnabled) return "unavailable"
-
+      if (!snapshotResult.supported) {
+        const message = snapshotResult.reasons.join(" ") || "The project cannot be compiled for native playback."
+        console.error("[native-vst3] native snapshot unsupported", { error: message })
+        reportFault(message)
+        return "unavailable"
+      }
       const { snapshot } = snapshotResult
       requiresNative = snapshot.requiresNativePlayback === true
       const unavailable = (message: string) => {
@@ -563,24 +746,37 @@ export const createNativePlaybackController = (input: {
       const deviceReply = await bridge.resolveOutputDevice()
       if (cancelled()) return "unavailable"
       if (!deviceReply.ok && indicatesNativeHostConnectionLoss(deviceReply.error)) {
-        markNativeHostConnectionLost()
+        markNativeHostConnectionLost(deviceReply.error)
       }
       if (!deviceReply.ok || !deviceReply.device?.available) return unavailable("No native audio output device is available for the active VST3 effect.")
       const runtimeMaximumFrames = Math.min(deviceReply.device.maximumFramesPerBlock, maxVst3WorkerFrames)
       sampleRate = deviceReply.device.nominalSampleRateHz
       maximumFramesPerBlock = runtimeMaximumFrames
-      const attachmentPlan = snapshot.nativeExternalAttachmentPlan
-        ? {
-          ...snapshot.nativeExternalAttachmentPlan,
-          attachments: snapshot.nativeExternalAttachmentPlan.attachments.map((attachment) => ({
-            ...attachment,
-            workerTransport: {
-              ...attachment.workerTransport,
-              maximumFrames: runtimeMaximumFrames,
-            },
-          })),
-        }
-        : undefined
+      const attachmentPlan = (() => {
+        const plan = snapshot.nativeExternalAttachmentPlan
+        if (!plan) return undefined
+        return plan.version === 1
+          ? {
+            ...plan,
+            attachments: plan.attachments.map((attachment) => ({
+              ...attachment,
+              workerTransport: {
+                ...attachment.workerTransport,
+                maximumFrames: runtimeMaximumFrames,
+              },
+            })),
+          }
+          : {
+            ...plan,
+            attachments: plan.attachments.map((attachment) => ({
+              ...attachment,
+              workerTransport: {
+                ...attachment.workerTransport,
+                maximumFrames: runtimeMaximumFrames,
+              },
+            })),
+          }
+      })()
       const runtimeSnapshot = attachmentPlan
         ? { ...snapshot, nativeExternalAttachmentPlan: attachmentPlan }
         : snapshot
@@ -677,16 +873,16 @@ export const createNativePlaybackController = (input: {
         sampleRateHz: deviceReply.device.nominalSampleRateHz,
         assets,
         startFrame: initialFrame,
+        graph: nativeGraph,
       })
       if (runTransport) nextCoordinator.preflight(nativeGraph)
       nextCoordinator.install()
       scheduleCoordinator = nextCoordinator
-      assertReply(await bridge.session.setTransport({
-        epoch: transportEpoch,
-        running: false,
-        frame: initialFrame,
-        transitionId: ++nextTransportTransitionId,
-      }, transactionToken))
+      const initialTransitionId = ++nextTransportTransitionId
+      assertReply(await bridge.session.setTransport(
+        nativeTransportFor(runtimeSnapshot, transportEpoch, false, initialFrame, initialTransitionId),
+        transactionToken,
+      ))
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
       await nextCoordinator.queueInitialSynthState(initialFrame, transactionToken)
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
@@ -716,19 +912,15 @@ export const createNativePlaybackController = (input: {
         return "unavailable"
       }
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
+      // VST workers are started only after the graph transaction is committed.
+      // Prime the bounded owned schedule before either paused preview or playback.
+      await nextCoordinator.prime(initialFrame)
+      await nextCoordinator.waitForAccepted(initialFrame + Math.min(runtimeMaximumFrames, nextCoordinator.scheduleEndFrame() - initialFrame))
       if (runTransport) {
-        // VST workers are started only after the graph transaction is committed.
-        // Prime the arranged schedule against that active session, matching the
-        // already-prepared live-preview promotion path.
-        await nextCoordinator.prime(initialFrame)
-        await nextCoordinator.waitForAccepted(initialFrame + Math.min(runtimeMaximumFrames, nextCoordinator.scheduleEndFrame() - initialFrame))
         const runTransitionId = ++nextTransportTransitionId
-        assertReply(await bridge.session.setTransport({
-          epoch: transportEpoch,
-          running: true,
-          frame: initialFrame,
-          transitionId: runTransitionId,
-        }))
+        assertReply(await bridge.session.setTransport(
+          nativeTransportFor(runtimeSnapshot, transportEpoch, true, initialFrame, runTransitionId),
+        ))
         await nextCoordinator.waitForTransition(runTransitionId, true)
       }
       active = runTransport
@@ -747,7 +939,7 @@ export const createNativePlaybackController = (input: {
         error: sanitizeNativeVst3DiagnosticError(error),
       })
       if (!wasCancelled && indicatesNativeHostConnectionLoss(error)) {
-        markNativeHostConnectionLost()
+        markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
       }
       if (!wasCancelled) reportFault(error instanceof Error ? error.message : "Native playback could not start.")
       return result
@@ -755,7 +947,10 @@ export const createNativePlaybackController = (input: {
   }
 
   const start = (transport: LivePlaybackTransport): Promise<NativeStartResult> => {
-    if (hasNativeHostConnectionLoss()) return Promise.resolve("unavailable")
+    if (hasNativeHostConnectionLoss()) {
+      reportBlockedByNativeHostConnectionLoss()
+      return Promise.resolve("unavailable")
+    }
     if (active) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -790,7 +985,11 @@ export const createNativePlaybackController = (input: {
   }
 
   const ensureLivePreview = (playheadSec: number): Promise<NativeStartResult> => {
-    if (!input.bridge || hasNativeHostConnectionLoss()) return Promise.resolve("unavailable")
+    if (!input.bridge) return Promise.resolve("unavailable")
+    if (hasNativeHostConnectionLoss()) {
+      reportBlockedByNativeHostConnectionLoss()
+      return Promise.resolve("unavailable")
+    }
     if (livePreviewActive) return Promise.resolve("started")
     if (pendingStart) {
       return pendingStart
@@ -815,34 +1014,51 @@ export const createNativePlaybackController = (input: {
     return request
   }
 
-  const pause = async (playheadSec: number) => {
+  const rebuildPrepared = async (playheadSec: number): Promise<NativeStartResult> => {
+    if (!prepared) return "unavailable"
+    await dispose()
+    return ensureLivePreview(playheadSec)
+  }
+
+  let preparedTransportTransition = Promise.resolve()
+  const queuePreparedTransportTransition = <T>(task: () => Promise<T>) => {
+    const transition = preparedTransportTransition.then(task)
+    preparedTransportTransition = transition.then(() => undefined, () => undefined)
+    return transition
+  }
+
+  const transitionPreparedTransport = async (
+    playheadSec: number,
+    releaseTransportNotes: boolean,
+  ): Promise<boolean> => {
     const bridge = input.bridge
-    if (!bridge || !active) return
-    if (recording) throw new Error("Native recording must stop before playback can pause.")
-    try {
-      const frame = Math.round(playheadSec * sampleRate)
-      transportEpoch += 1
-      clearNativeSpectrumFrame()
-      const nextCoordinator = preparedSnapshot && scheduleCoordinator
-        ? createCoordinatorForEpoch({
-          snapshot: preparedSnapshot,
-          epoch: transportEpoch,
-          sampleRateHz: sampleRate,
-          assets: installedAssets,
-          startFrame: frame,
-        })
-        : undefined
-      scheduleCoordinator?.dispose()
-      nextCoordinator?.install()
-      scheduleCoordinator = nextCoordinator
-      const transitionId = ++nextTransportTransitionId
-      assertReply(await bridge.session.setTransport({
+    if (!bridge) return false
+    const frame = Math.round(playheadSec * sampleRate)
+    const transitionGeneration = preparedTransportTransitionGeneration
+    transportEpoch += 1
+    clearNativeSpectrumFrame()
+    const nextCoordinator = preparedSnapshot && scheduleCoordinator
+      ? createCoordinatorForEpoch({
+        snapshot: preparedSnapshot,
         epoch: transportEpoch,
-        running: false,
-        frame,
-        transitionId,
-      }))
-      await nextCoordinator?.waitForTransition(transitionId, false)
+        sampleRateHz: sampleRate,
+        assets: installedAssets,
+        startFrame: frame,
+        graph: preparedGraph,
+      })
+      : undefined
+    scheduleCoordinator?.dispose()
+    nextCoordinator?.install()
+    scheduleCoordinator = nextCoordinator
+    const transitionId = ++nextTransportTransitionId
+    if (!preparedSnapshot) return false
+    assertReply(await bridge.session.setTransport(
+      nativeTransportFor(preparedSnapshot, transportEpoch, false, frame, transitionId),
+    ))
+    if (transitionGeneration !== preparedTransportTransitionGeneration) return false
+    await nextCoordinator?.waitForTransition(transitionId, false)
+    if (transitionGeneration !== preparedTransportTransitionGeneration) return false
+    if (releaseTransportNotes) {
       const instrumentNodeIds = preparedSnapshot?.tracks
         .filter((track) => track.kind === "instrument")
         .map((track) => track.id) ?? []
@@ -866,10 +1082,40 @@ export const createNativePlaybackController = (input: {
         0,
       )
       if (lastSequence > 0) await nextCoordinator?.waitForUrgent(BigInt(lastSequence))
-      transportFrame = frame
-      active = false
+    }
+    transportFrame = frame
+    active = false
+    return true
+  }
+
+  const pause = async (playheadSec: number) => {
+    const bridge = input.bridge
+    if (!bridge || !active) return
+    if (recording) throw new Error("Native recording must stop before playback can pause.")
+    try {
+      await queuePreparedTransportTransition(async () => {
+        if (!prepared || !active) return
+        await transitionPreparedTransport(playheadSec, true)
+      })
     } catch (error) {
       reportFault(error instanceof Error ? error.message : "Native playback could not pause.")
+      await dispose()
+      throw error
+    }
+  }
+
+  const seekPrepared = async (playheadSec: number): Promise<NativeStartResult> => {
+    const bridge = input.bridge
+    if (!bridge || !prepared || active) return "unavailable"
+    if (recording) throw new Error("Native recording must stop before playback can seek.")
+    try {
+      return await queuePreparedTransportTransition(async () => {
+        if (!prepared || active) return "unavailable"
+        const transitioned = await transitionPreparedTransport(playheadSec, false)
+        return transitioned ? "started" : "unavailable"
+      })
+    } catch (error) {
+      reportFault(error instanceof Error ? error.message : "Native playback could not seek.")
       await dispose()
       throw error
     }
@@ -1092,23 +1338,23 @@ export const createNativePlaybackController = (input: {
   const queueBuiltInParameterEvents = async (request: {
     instanceId: string
     values: readonly { parameterId: string; value: number }[]
+    revision?: number
+    epoch?: number
+    sequence?: number
   }): Promise<NativeBuiltInParameterQueueResult> => {
     const bridge = input.bridge
     if (!bridge) return { handled: false, reason: "unavailable" }
     if (!prepared || !preparedGraph) return { handled: false, reason: "unprepared" }
-    const processor = preparedGraph.nodes
-      .flatMap((node) => node.processorOrder)
-      .find((candidate) => candidate.id === request.instanceId)
+    const processor = resolveGraphProcessor(preparedGraph, request.instanceId)
     if (!processor) return { handled: false, reason: "unsupported-instance" }
-    const targets = new Map(processor.parameterTargets.map((target) => [target.id, target.target]))
     const events = []
     for (const value of request.values) {
-      const parameterTarget = targets.get(value.parameterId)
+      const parameterTarget = processor.parameterTargets.get(value.parameterId)
       if (parameterTarget === undefined || !Number.isFinite(value.value)) {
         return { handled: false, reason: "unsupported-target" }
       }
       events.push({
-        processorInstanceId: processor.instanceId,
+        processorInstanceId: processor.processor.instanceId,
         parameterTarget,
         frameOffset: 0,
         value: value.value,
@@ -1116,7 +1362,14 @@ export const createNativePlaybackController = (input: {
     }
     if (events.length === 0) return { handled: true }
     try {
-      const reply = await bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events))
+      const batch = request.revision === undefined || request.epoch === undefined || request.sequence === undefined
+        ? undefined
+        : {
+            revision: request.revision,
+            epoch: request.epoch,
+            sequence: request.sequence,
+          }
+      const reply = await bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch))
       return reply.ok
         ? { handled: true }
         : { handled: false, reason: "bridge-error", error: reply.error }
@@ -1129,6 +1382,183 @@ export const createNativePlaybackController = (input: {
     }
   }
 
+  const queueLiveProcessorControl = async (
+    request: LiveProcessorControlRequest,
+    flush: boolean,
+  ): Promise<LiveProcessorControlResult> => {
+    if (request.epoch !== undefined && request.epoch !== transportEpoch) return { accepted: false, reason: "stale" }
+    if (request.revision !== undefined && request.revision !== preparedGraph?.revision) return { accepted: false, reason: "stale" }
+    const sequence = Math.max(nextLiveProcessorSequence + 1, request.sequence ?? 0)
+    nextLiveProcessorSequence = sequence
+    const result = await queueBuiltInParameterEvents({ ...request, revision: request.revision ?? preparedGraph?.revision ?? 0, epoch: request.epoch ?? transportEpoch, sequence })
+    if (result.handled) {
+      if (flush) {
+        const applied = await waitForNativeProcessorSequence(
+          request.revision ?? preparedGraph?.revision ?? 0,
+          request.epoch ?? transportEpoch,
+          sequence,
+        )
+        if (!applied) return { accepted: false, reason: "bridge-error", error: "Native processor update was not applied before timeout." }
+      }
+      return { accepted: true, sequence, appliedSequence: flush ? sequence : undefined }
+    }
+    if (result.reason === "unprepared") return { accepted: false, reason: "unprepared" }
+    if (result.reason === "unavailable") return { accepted: false, reason: "unavailable" }
+    if (result.reason === "unsupported-instance" || result.reason === "unsupported-target") {
+      return { accepted: false, reason: "unsupported", error: result.reason }
+    }
+    return { accepted: false, reason: "bridge-error", error: result.error }
+  }
+
+  const liveProcessorControl: LiveProcessorControl = {
+    preview: (request) => queueLiveProcessorControl(request, false),
+    flush: (request) => queueLiveProcessorControl(request, true),
+    reenableAutomation: async (instanceId, parameterIds, revision, epoch) => {
+      if (revision !== preparedGraph?.revision || epoch !== transportEpoch) return { accepted: false, reason: "stale" }
+      return reenableProcessorAutomation(instanceId, parameterIds)
+    },
+  }
+  const reenableProcessorAutomation = async (
+    instanceId: string,
+    parameterIds: readonly string[],
+  ): Promise<LiveProcessorControlResult> => {
+    if (!prepared || !preparedGraph) return { accepted: false, reason: "unprepared" }
+    const processor = resolveGraphProcessor(preparedGraph, instanceId)
+      ?? resolveGraphProcessor(preparedGraph, `external-plugin:${instanceId}`)
+    if (!processor || parameterIds.some((parameterId) => !processor.parameterTargets.has(parameterId))) {
+      return { accepted: false, reason: "unsupported" }
+    }
+    const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
+      .filter((target): target is number => target !== undefined)
+    if (processor.processor.kind !== "external-vst3" || !scheduleCoordinator) {
+      const sequence = ++nextLiveProcessorSequence
+      return { accepted: true, sequence, appliedSequence: sequence }
+    }
+    try {
+      await scheduleCoordinator.reenableAutomation(
+        processor.processor.id.startsWith("external-plugin:") ? processor.processor.id.slice("external-plugin:".length) : processor.processor.id,
+        targets,
+      )
+      const sequence = ++nextLiveProcessorSequence
+      return { accepted: true, sequence, appliedSequence: sequence }
+    } catch (error) {
+      return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const runBuiltInStatePatch = async (
+    request: PendingStatePatch['request'],
+  ): Promise<NativeBuiltInStatePatchResult> => {
+    const bridge = input.bridge
+    if (!bridge) return { handled: false, reason: "unavailable" }
+    const queueProcessorStatePatch = bridge.session.queueProcessorStatePatch
+    if (!queueProcessorStatePatch) return { handled: false, reason: "unavailable" }
+    if (!prepared || !preparedGraph) return { handled: false, reason: "unprepared" }
+    const commit = encodeNativeBuiltInStateCommit(request.payload, request.bpm)
+    if (!commit) return { handled: false, reason: "unsupported-state" }
+    if (enabledValue(request.payload.from) !== enabledValue(request.payload.to)) {
+      return { handled: false, reason: "unsupported-state" }
+    }
+    const graph = preparedGraph
+    const match = resolveGraphProcessor(graph, commit.instanceId)
+    if (!match) return { handled: false, reason: "unsupported-instance" }
+    const fromEnabled = enabledValue(request.payload.from)
+    if (fromEnabled !== undefined && fromEnabled === match.processor.bypassed) {
+      return { handled: false, reason: "unsupported-state" }
+    }
+    const layouts = nativeProcessorLayoutsForState(match.node, commit.instanceId, commit.state)
+    if (!layouts) return { handled: false, reason: "unsupported-state" }
+    const timing = nativeBuiltInTimingForCommit(request.payload, sampleRate, request.bpm)
+    if (!timing) return { handled: false, reason: "unsupported-state" }
+    if (
+      layouts.output !== nativeProcessorLayoutsForState(match.node, commit.instanceId, match.processor.state)?.output
+      || nativeProcessorLatencyForState(match.processor, commit.state) !== match.processor.latencyFrames
+    ) return { handled: false, reason: "unsupported-state" }
+    const tailFrames = timing.tail.kind === "unbounded" ? 0xffff_ffff : timing.tail.frames
+    const patch = serializeNativeProcessorStatePatch({
+      graphRevision: graph.revision,
+      nodeId: match.node.id,
+      instanceId: match.processor.instanceId,
+      kindId: match.processor.kindId,
+      stateVersion: match.processor.stateVersion,
+      state: commit.state,
+      bypassed: match.processor.bypassed,
+      inputLayout: layouts.input,
+      outputLayout: layouts.output,
+      parameterTargets: [...match.parameterTargets.values()],
+      latencyFrames: match.processor.latencyFrames,
+      tailFrames,
+    })
+    try {
+      const reply = await queueProcessorStatePatch(patch)
+      if (!reply.ok) return { handled: false, reason: "bridge-error", error: reply.error }
+      if (preparedGraph !== undefined) {
+        preparedGraph = {
+          ...preparedGraph,
+          nodes: preparedGraph.nodes.map((node) => ({
+            ...node,
+              processorOrder: node.processorOrder.map((processor) => {
+                if (processor.id !== commit.instanceId) return processor
+                const { tailKind: _tailKind, ...processorWithoutTailKind } = processor
+                return timing.tail.kind === "unbounded"
+                  ? { ...processorWithoutTailKind, state: commit.state.slice(), tailFrames, tailKind: "unbounded" }
+                  : { ...processorWithoutTailKind, state: commit.state.slice(), tailFrames }
+              }),
+          })),
+        }
+      }
+      return { handled: true }
+    } catch (error) {
+      return {
+        handled: false,
+        reason: "bridge-error",
+        error: error instanceof Error ? error.message : "Native built-in processor state patch failed.",
+      }
+    }
+  }
+
+  const pumpBuiltInStatePatches = async () => {
+    if (statePatchActive) return
+    statePatchActive = true
+    try {
+      while (pendingStatePatches.size > 0) {
+        const pending = pendingStatePatches.values().next().value
+        if (!pending) break
+        pendingStatePatches.delete(pending.instanceId)
+        pending.resolve(await runBuiltInStatePatch(pending.request))
+      }
+    } finally {
+      statePatchActive = false
+      statePatchPumpScheduled = false
+      if (pendingStatePatches.size > 0) {
+        statePatchPumpScheduled = true
+        void pumpBuiltInStatePatches()
+      }
+    }
+  }
+
+  const queueBuiltInStatePatch = (request: PendingStatePatch['request']): Promise<NativeBuiltInStatePatchResult> => {
+    const bridge = input.bridge
+    if (!bridge) return Promise.resolve({ handled: false, reason: "unavailable" })
+    if (!bridge.session.queueProcessorStatePatch) return Promise.resolve({ handled: false, reason: "unavailable" })
+    if (!prepared || !preparedGraph) return Promise.resolve({ handled: false, reason: "unprepared" })
+    const commit = encodeNativeBuiltInStateCommit(request.payload, request.bpm)
+    if (!commit) return Promise.resolve({ handled: false, reason: "unsupported-state" })
+    if (enabledValue(request.payload.from) !== enabledValue(request.payload.to)) {
+      return Promise.resolve({ handled: false, reason: "unsupported-state" })
+    }
+    const previous = pendingStatePatches.get(commit.instanceId)
+    previous?.resolve({ handled: true })
+    const result = new Promise<NativeBuiltInStatePatchResult>((resolve) => {
+      pendingStatePatches.set(commit.instanceId, { instanceId: commit.instanceId, request, resolve })
+    })
+    if (!statePatchActive && !statePatchPumpScheduled) {
+      statePatchPumpScheduled = true
+      void pumpBuiltInStatePatches()
+    }
+    return result
+  }
+
   const startLiveMidiNote = (note: {
     trackId: string
     pitch: number
@@ -1137,6 +1567,9 @@ export const createNativePlaybackController = (input: {
   }): NativeLiveMidiNoteHandle | undefined => {
     if (!input.bridge || hasNativeHostConnectionLoss() || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
       || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1) return undefined
+    if (preparedSnapshot && !preparedSnapshot.tracks.some((track) => track.id === note.trackId)) {
+      return undefined
+    }
     const noteId = nextLiveNoteId++
     const queueNoteOn = () => queueLiveInstrumentEvent({
         nodeId: note.trackId,
@@ -1148,35 +1581,47 @@ export const createNativePlaybackController = (input: {
         note: note.pitch,
         value: note.velocity,
       })
-    if (livePreviewActive) {
-      void queueNoteOn()
-      return { backend: "native", trackId: note.trackId, pitch: note.pitch, noteId }
-    }
     const readiness: LiveNoteReadiness = {
       promise: Promise.resolve(),
       released: false,
       force: false,
+      noteOnQueued: false,
+      releaseQueued: false,
     }
-    readiness.promise = ensureLivePreview(note.playheadSec ?? 0).then(async (result) => {
-      if (result !== "started" || readiness.force) {
+    const queueRelease = () => {
+      if (!readiness.noteOnQueued || readiness.releaseQueued) return
+      readiness.releaseQueued = true
+      void queueLiveInstrumentEvent({
+        nodeId: note.trackId,
+        noteId,
+        sequence: nextLiveEventSequence++,
+        frameOffset: 0,
+        type: "live-note-off",
+        channel: 0,
+        note: note.pitch,
+        value: 0,
+      }).finally(() => {
+        liveNoteReadiness.delete(noteId)
+      })
+    }
+    const queueAfterPreparation = async (result: NativeStartResult) => {
+      if (
+        result !== "started"
+        || readiness.force
+        || !preparedSnapshot?.tracks.some((track) => track.id === note.trackId)
+      ) {
         liveNoteReadiness.delete(noteId)
         return
       }
-      await queueNoteOn()
-      if (readiness.released) {
-        void queueLiveInstrumentEvent({
-          nodeId: note.trackId,
-          noteId,
-          sequence: nextLiveEventSequence++,
-          frameOffset: 0,
-          type: "live-note-off",
-          channel: 0,
-          note: note.pitch,
-          value: 0,
-        })
-      }
-      liveNoteReadiness.delete(noteId)
-    }).catch(() => {
+      readiness.noteOnQueued = (await queueNoteOn()) === true
+      if (readiness.noteOnQueued) liveMidiTailOwned = true
+      if (readiness.released && readiness.noteOnQueued) queueRelease()
+      else liveNoteReadiness.delete(noteId)
+    }
+    readiness.promise = (livePreviewActive
+      ? queueAfterPreparation("started")
+      : ensureLivePreview(note.playheadSec ?? 0).then(queueAfterPreparation)
+    ).catch(() => {
       liveNoteReadiness.delete(noteId)
     })
     liveNoteReadiness.set(noteId, readiness)
@@ -1185,48 +1630,31 @@ export const createNativePlaybackController = (input: {
 
   const releaseLiveMidiNote = (handle: NativeLiveMidiNoteHandle, force = false) => {
     if (handle.backend !== "native" || !input.bridge) return
+    if (releasedLiveNoteHandles.has(handle)) return
+    releasedLiveNoteHandles.add(handle)
     const readiness = liveNoteReadiness.get(handle.noteId)
     if (readiness) {
       readiness.released = true
       readiness.force = force
-      if (force) liveNoteReadiness.delete(handle.noteId)
-    }
-    const releaseQueueGeneration = liveInstrumentQueueGeneration
-    const release = () => {
-      if (!livePreviewActive) return
-      void queueLiveInstrumentEvent(force ? {
-        nodeId: handle.trackId,
-        noteId: handle.noteId,
-        sequence: nextLiveEventSequence++,
-        frameOffset: 0,
-        type: "all-sound-off",
-        channel: 0,
-        note: 0,
-        value: 0,
-      } : {
-        nodeId: handle.trackId,
-        noteId: handle.noteId,
-        sequence: nextLiveEventSequence++,
-        frameOffset: 0,
-        type: "live-note-off",
-        channel: 0,
-        note: handle.pitch,
-        value: 0,
-      })
-    }
-    if (force && !readiness) {
-      release()
+      void readiness.promise
       return
     }
-    if (!readiness) {
-      release()
-      return
-    }
-    void readiness.promise.then(() => {
-      if (!livePreviewActive || releaseQueueGeneration !== liveInstrumentQueueGeneration || readiness.force) return
-      if (readiness.released) release()
-      liveNoteReadiness.delete(handle.noteId)
+    if (!livePreviewActive) return
+    void queueLiveInstrumentEvent({
+      nodeId: handle.trackId,
+      noteId: handle.noteId,
+      sequence: nextLiveEventSequence++,
+      frameOffset: 0,
+      type: "live-note-off",
+      channel: 0,
+      note: handle.pitch,
+      value: 0,
     })
+  }
+
+  const subscribeNativeLiveMidiReset = (listener: () => void) => {
+    nativeLiveMidiResetListeners.add(listener)
+    return () => nativeLiveMidiResetListeners.delete(listener)
   }
 
   const subscribeTrackMeters = (listener: (levels: TrackStereoLevelsBatch) => void) => {
@@ -1255,23 +1683,41 @@ export const createNativePlaybackController = (input: {
     }
   }
 
+  const currentPositionSec = () => {
+    if (sampleRate <= 0) return undefined
+    const loop = preparedSnapshot ? nativeLoopFramesForSnapshot(preparedSnapshot, sampleRate) : undefined
+    return arrangementFrameForNativeFrame(transportFrame, loop) / sampleRate
+  }
+
   return {
+    getPendingStart: () => pendingStart
+      ? { mode: pendingStartMode, promise: pendingStart }
+      : undefined,
+    resetNativeHostConnectionLoss,
     start,
     pause,
     dispose,
     isActive: () => active,
     isAvailable: () => input.bridge !== undefined && !hasNativeHostConnectionLoss(),
     canProcessLiveMidi: () => livePreviewActive,
+    hasLiveMidiTails: () => liveMidiTailOwned,
     isPrepared: () => prepared,
     startRecording,
     stopRecording,
     cancelRecording,
     isRecording: () => recording !== undefined,
     sampleRate: () => sampleRate,
+    currentPositionSec,
     ensureLivePreview,
+    rebuildPrepared,
+    seekPrepared,
     queueBuiltInParameterEvents,
+    liveProcessorControl,
+    reenableProcessorAutomation,
+    queueBuiltInStatePatch,
     startLiveMidiNote,
     releaseLiveMidiNote,
+    subscribeNativeLiveMidiReset,
     subscribeTrackMeters,
     subscribeMasterMeter,
     subscribeSpectrum,

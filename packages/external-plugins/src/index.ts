@@ -58,7 +58,7 @@ export const migrateVstLaunchReference = (value: unknown): VstLaunchReference =>
 export const externalProcessorSchema = z.object({
   instanceId: uuidSchema,
   targetId: z.string().min(1).max(256),
-  chainIndex: z.number().int().nonnegative(),
+  index: z.number().int().nonnegative(),
   manifest: pluginManifestSchema,
   parameterOverrides: z.record(z.string().regex(/^\d+$/), finite),
   latencyFrames: z.number().int().nonnegative(),
@@ -70,6 +70,37 @@ export const externalProcessorSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 }).strict()
 export type ExternalProcessor = z.infer<typeof externalProcessorSchema>
+
+const legacyExternalProcessorSchema = externalProcessorSchema.omit({ index: true }).extend({
+  chainIndex: z.number().int().nonnegative(),
+}).strict()
+
+export type ExternalProcessorParseResult =
+  | { success: true; data: ExternalProcessor; migrated: boolean }
+  | { success: false; error: z.ZodError }
+
+const canonicalExternalProcessor = (processor: ExternalProcessor): ExternalProcessor => (
+  processor.manifest.role === 'instrument'
+    ? { ...processor, index: 0 }
+    : processor
+)
+
+export const parseExternalProcessorValue = (value: unknown): ExternalProcessorParseResult => {
+  const current = externalProcessorSchema.safeParse(value)
+  if (current.success) {
+    const data = canonicalExternalProcessor(current.data)
+    return {
+      success: true,
+      data,
+      migrated: data.index !== current.data.index,
+    }
+  }
+  const legacy = legacyExternalProcessorSchema.safeParse(value)
+  if (!legacy.success) return { success: false, error: current.error }
+  const { chainIndex, ...processor } = legacy.data
+  const data = canonicalExternalProcessor({ ...processor, index: chainIndex })
+  return { success: true, data, migrated: true }
+}
 
 export const externalInstrumentSchema = externalProcessorSchema.extend({
   manifest: pluginManifestSchema.refine((manifest) => manifest.role === 'instrument', 'External instrument requires an instrument manifest.'),

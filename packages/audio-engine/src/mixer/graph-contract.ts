@@ -24,8 +24,9 @@ import {
   type AudioCoreInstrumentState,
 } from '../../../audio-core-contract/src/index'
 import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
-import { createEqBandParameterId, normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
-import { getEffectTiming } from '../effects/timing'
+import { createEqBandParameterId, normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams } from '@daw-browser/shared'
+import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
+import { compilePortableSynthConfiguration } from '../portable-session-compiler'
 import { getMixerChannelRole } from './channels'
 import {
   MASTER_ROUTE_TARGET,
@@ -122,23 +123,11 @@ const toPortableInstrument = (
   if (instrument.kind !== 'synth') {
     throw new Error(`Native instrument "${instrument.kind}" is not supported by the portable graph.`)
   }
-  const params = normalizeSynthParams(instrument.params)
-  return {
-    version: audioCoreContractVersion,
-    kind: 'synth',
-    voiceCapacity: Math.min(32, Math.max(1, params.polyphony)),
-    outputLayout: 'stereo',
-    parameterTargets: [
-      { id: 'synth.outputGain', target: 1 },
-      { id: 'synth.outputPan', target: 2 },
-      { id: 'synth.filterCutoffHz', target: 3 },
-      { id: 'synth.filterResonance', target: 4 },
-      { id: 'synth.ampAttackMs', target: 5 },
-      { id: 'synth.ampDecayMs', target: 6 },
-      { id: 'synth.ampSustain', target: 7 },
-      { id: 'synth.ampReleaseMs', target: 8 },
-    ],
-  }
+  return compilePortableSynthConfiguration(
+    instrument.instanceId,
+    instrument.instanceId,
+    instrument.params,
+  ).state
 }
 
 export const resolvePortableDelayMs = (
@@ -166,6 +155,7 @@ const toPortableProcessor = (
     stateVersion: audioCoreContractVersion,
     latencyFrames: timing.latencyFrames,
     tailFrames: timing.tail.kind === 'finite' ? timing.tail.frames : 0,
+    ...(timing.tail.kind === 'unbounded' ? { tailKind: 'unbounded' as const } : {}),
   }
   if (instance.kind === 'utility') {
     return {
@@ -382,22 +372,23 @@ export const createPortableGraphSnapshot = ({
 }: CreatePortableGraphSnapshotOptions): AudioCoreGraphSnapshot => {
   if (!Number.isSafeInteger(revision) || revision <= 0) throw new Error('Portable graph revisions must be positive safe integers.')
   const timing = resolveMixerTiming(graph, sampleRate, bpm, externalLatencyFrames)
-  const nodes = graph.channels.map((entry) => ({
-    id: entry.channel.id,
-    kind: toPortableNodeKind(entry.channel, includeInstruments),
-    inputLayout: entry.inputLayout,
-    outputLayout: entry.outputLayout,
-    processorOrder: (entry.fx?.instances ?? []).map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
-    ...(externalLatencyFrames.has(entry.channel.id)
-      ? { externalLatencyFrames: externalLatencyFrames.get(entry.channel.id) ?? 0 }
-      : {}),
-    latencyFrames: (entry.fx?.instances ?? [])
-      .reduce((frames, instance) => frames + getEffectTiming(instance, sampleRate, bpm).latencyFrames, 0),
-    ...(includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument
-      ? { instrument: toPortableInstrument(entry.fx.instrument) }
-      : {}),
-    mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted),
-  }))
+  const nodes = graph.channels.map((entry) => {
+    return {
+      id: entry.channel.id,
+      kind: toPortableNodeKind(entry.channel, includeInstruments),
+      inputLayout: entry.inputLayout,
+      outputLayout: entry.outputLayout,
+      processorOrder: (entry.fx?.instances ?? []).map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
+      ...(externalLatencyFrames.has(entry.channel.id)
+        ? { externalLatencyFrames: externalLatencyFrames.get(entry.channel.id) ?? 0 }
+        : {}),
+      latencyFrames: getEffectChainTiming(entry.fx?.instances ?? [], sampleRate, bpm).latencyFrames,
+      ...(includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument
+        ? { instrument: toPortableInstrument(entry.fx.instrument) }
+        : {}),
+      mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted),
+    }
+  })
   const edges: AudioCoreGraphSnapshot['edges'][number][] = []
   for (const entry of graph.channels) {
     const outputTargetId = entry.outputTargetId ?? MASTER_ROUTE_TARGET
@@ -465,8 +456,7 @@ export const createPortableGraphSnapshot = ({
         inputLayout: graph.master.inputLayout,
         outputLayout: graph.master.outputLayout,
         processorOrder: graph.master.instances.map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
-        latencyFrames: graph.master.instances
-          .reduce((frames, instance) => frames + getEffectTiming(instance, sampleRate, bpm).latencyFrames, 0),
+        latencyFrames: getEffectChainTiming(graph.master.instances, sampleRate, bpm).latencyFrames,
         mixer: toPortableMixerState(MASTER_ROUTE_TARGET, graph.master.volume, false),
       },
     ],

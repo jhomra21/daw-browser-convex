@@ -25,7 +25,7 @@ const manifestV1: ProjectManifest = {
 
 describe('project format boundaries', () => {
   test('reports the current manifest schema version', () => {
-    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, 2, PROJECT_MANIFEST_SCHEMA_VERSION])
+    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, 2, 3, PROJECT_MANIFEST_SCHEMA_VERSION])
   })
 
   test('reads the current manifest schema without migration', () => {
@@ -43,8 +43,8 @@ describe('project format boundaries', () => {
   })
 
   test('rejects unsupported writer versions', () => {
-    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 4 })).toThrow(
-      'Unsupported project manifest schema version 4.',
+    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 5 })).toThrow(
+      'Unsupported project manifest schema version 5.',
     )
     expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 0 })).toThrow(
       'Unsupported project manifest schema version 0.',

@@ -5,7 +5,7 @@ import {
 import { loadWorkletModule } from '../worklet-loader'
 import { autoFilterWorklet, gateWorklet, limiterWorklet, loFiWorklet, modulationWorklet, resolveWorkletModuleUrl, spectralWorklet, utilityWorklet } from '../worklet-manifest'
 import { disconnectAudioNodes } from './chain'
-import { normalizeOwnedProcessorAudioState, ownedProcessorAudioParamValues } from './owned-processor-audio-descriptors'
+import { normalizeOwnedProcessorAudioState, ownedProcessorAudioParamValuesFromState } from './owned-processor-audio-descriptors'
 
 export type StaticWorkletKind = OwnedProcessorKind
 
@@ -21,6 +21,9 @@ export type StaticWorkletNodeChain = {
   node: AudioWorkletNode
   fault: Error | null
   revision: number
+  normalizedState?: object
+  normalizedStateKey?: string
+  spectralTopology?: { fftSize: number; overlap: number }
   gateMeterListeners: Set<GateMeterListener>
 }
 
@@ -39,6 +42,9 @@ export async function createStaticWorkletNodeChain(
 ): Promise<StaticWorkletNodeChain> {
   const asset = manifest(kind)
   await loadWorkletModule(ctx, resolveWorkletModuleUrl(asset.modulePath))
+  const normalizedState = normalizeOwnedProcessorAudioState(kind, params)
+  const fftSize = kind === 'spectral' ? Reflect.get(normalizedState, 'fftSize') : undefined
+  const overlap = kind === 'spectral' ? Reflect.get(normalizedState, 'overlap') : undefined
   const node = new AudioWorkletNode(ctx, asset.processorName, {
     numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
     numberOfOutputs: 1,
@@ -50,8 +56,8 @@ export async function createStaticWorkletNodeChain(
       ? { processorKind: kind }
       : kind === 'spectral'
         ? {
-            fftSize: Reflect.get(normalizeOwnedProcessorAudioState(kind, params), 'fftSize'),
-            overlap: Reflect.get(normalizeOwnedProcessorAudioState(kind, params), 'overlap'),
+            fftSize,
+            overlap,
           }
         : undefined,
   })
@@ -89,15 +95,20 @@ export async function createStaticWorkletNodeChain(
   return chain
 }
 
-function applyStaticWorkletNodeParams(
+export function applyStaticWorkletNodeParams(
   chain: StaticWorkletNodeChain,
   params: StaticWorkletParams,
 ) {
   const normalizedState = normalizeOwnedProcessorAudioState(chain.kind, params)
+  const stateKey = JSON.stringify(normalizedState)
+  if (chain.normalizedStateKey === stateKey) return
   if (chain.kind === 'spectral') {
     const fftSize = Reflect.get(normalizedState, 'fftSize')
     const overlap = Reflect.get(normalizedState, 'overlap')
-    chain.node.port.postMessage({ type: 'reconfigure', version: 1, fftSize, overlap })
+    if (chain.spectralTopology?.fftSize !== fftSize || chain.spectralTopology?.overlap !== overlap) {
+      chain.node.port.postMessage({ type: 'reconfigure', version: 1, fftSize, overlap })
+      chain.spectralTopology = { fftSize, overlap }
+    }
   }
   chain.revision += 1
   chain.node.port.postMessage({
@@ -107,7 +118,9 @@ function applyStaticWorkletNodeParams(
     processorKind: isModulationKind(chain.kind) ? chain.kind : undefined,
     state: normalizedState,
   })
-  for (const { parameterId, value } of ownedProcessorAudioParamValues(chain.kind, params)) {
+  chain.normalizedState = normalizedState
+  chain.normalizedStateKey = stateKey
+  for (const { parameterId, value } of ownedProcessorAudioParamValuesFromState(chain.kind, normalizedState)) {
     const param = chain.node.parameters.get(parameterId)
     if (param && typeof value === 'number') param.value = value
   }
@@ -118,6 +131,9 @@ export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) 
   chain.state = 'closed'
   publishGateMeterReset(chain)
   chain.gateMeterListeners.clear()
+  chain.normalizedState = undefined
+  chain.normalizedStateKey = undefined
+  chain.spectralTopology = undefined
   chain.node.port.onmessage = null
   chain.node.onprocessorerror = null
   try { chain.node.port.postMessage({ type: 'release', version: 1 }) } catch {}

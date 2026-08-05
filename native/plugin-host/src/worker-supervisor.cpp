@@ -48,7 +48,17 @@ struct alignas(kCacheLineBytes) SharedSlotControl {
   std::atomic<std::uint32_t> status{static_cast<std::uint32_t>(WorkerSlotStatus::kFree)};
   std::uint32_t numSamples = 0;
   std::uint32_t eventCount = 0;
-  std::uint32_t reserved = 0;
+  std::uint32_t contextFlags = 0;
+  std::uint32_t transportEpoch = 0;
+  std::int64_t projectTimeSamples = 0;
+  std::int64_t continuousTimeSamples = 0;
+  double tempoBpm = 0.0;
+  double projectTimeMusic = 0.0;
+  std::uint32_t timeSignatureNumerator = 0;
+  std::uint32_t timeSignatureDenominator = 0;
+  double cycleStartMusic = 0.0;
+  double cycleEndMusic = 0.0;
+  std::uint64_t outputSilenceFlags = 0;
 };
 
 struct alignas(kCacheLineBytes) SharedHeader {
@@ -68,6 +78,8 @@ struct alignas(kCacheLineBytes) SharedHeader {
   std::atomic<std::uint32_t> health{static_cast<std::uint32_t>(WorkerHealth::kStarting)};
   std::atomic<std::uint32_t> diagnosticWrite{0};
   std::atomic<std::uint32_t> diagnosticRead{0};
+  std::atomic<std::uint32_t> tailMetadataSequence{0};
+  std::atomic<std::uint32_t> tailMetadataFrames{0};
   WorkerDiagnostic diagnostics[kDiagnosticCapacity]{};
 };
 static_assert(alignof(SharedHeader) >= alignof(std::atomic<std::uint64_t>));
@@ -243,7 +255,8 @@ bool IsValidWorkerManifest(const WorkerManifest& manifest) {
     || manifest.transport.inputChannels > kMaximumWorkerChannels
     || manifest.transport.outputChannels == 0 || manifest.transport.outputChannels > kMaximumWorkerChannels
     || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > 10'000'000
-    || (manifest.tailFrames && *manifest.tailFrames > 100'000'000) || manifest.stateRevision > 0x7fff'ffffU
+    || (manifest.tailFrames && !IsValidFiniteWorkerTailFrames(*manifest.tailFrames))
+    || manifest.stateRevision > 0x7fff'ffffU
     || manifest.parameters.size() > 16'384) {
     return false;
   }
@@ -462,12 +475,18 @@ bool WorkerTransport::Submit(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
   const std::size_t numSamples,
-  const std::span<const WorkerTransportEvent> events
+  const std::span<const WorkerTransportEvent> events,
+  const WorkerBlockContext& context
 ) {
   if (!OwnsSlot(slotIndex) || sequence == 0 || numSamples > layout_.maximumFrames
     || events.size() > layout_.maximumEventsPerBlock) {
     return false;
   }
+  if (numSamples > 0 && (context.transportEpoch == 0 || context.projectTimeSamples < 0
+    || !std::isfinite(context.tempoBpm) || context.tempoBpm < 0.0
+    || !std::isfinite(context.projectTimeMusic)
+    || !std::isfinite(context.cycleStartMusic) || !std::isfinite(context.cycleEndMusic)
+    || context.timeSignatureNumerator > 32 || context.timeSignatureDenominator > 32)) return false;
   for (const auto& event : events) {
     if (event.sampleOffset >= numSamples) return false;
   }
@@ -476,6 +495,20 @@ bool WorkerTransport::Submit(
   if (status != WorkerSlotStatus::kFree && status != WorkerSlotStatus::kComplete) return false;
   control->numSamples = static_cast<std::uint32_t>(numSamples);
   control->eventCount = static_cast<std::uint32_t>(events.size());
+  control->contextFlags = (context.playing ? 1U : 0U)
+    | (context.recording ? 2U : 0U)
+    | (context.cycleActive ? 4U : 0U)
+    | (context.discontinuity ? 8U : 0U);
+  control->transportEpoch = context.transportEpoch;
+  control->projectTimeSamples = context.projectTimeSamples;
+  control->continuousTimeSamples = context.continuousTimeSamples;
+  control->tempoBpm = context.tempoBpm;
+  control->projectTimeMusic = context.projectTimeMusic;
+  control->timeSignatureNumerator = context.timeSignatureNumerator;
+  control->timeSignatureDenominator = context.timeSignatureDenominator;
+  control->cycleStartMusic = context.cycleStartMusic;
+  control->cycleEndMusic = context.cycleEndMusic;
+  control->outputSilenceFlags = 0;
   auto* storedEvents = reinterpret_cast<WorkerTransportEvent*>(SlotBytes(slotIndex) + Align(sizeof(SharedSlotControl)));
   std::memcpy(storedEvents, events.data(), events.size_bytes());
   control->sequence.store(sequence, std::memory_order_relaxed);
@@ -577,6 +610,22 @@ std::optional<WorkerDiagnostic> WorkerTransport::ReadDiagnostic() {
   return result;
 }
 
+std::optional<WorkerTailMetadata> WorkerTransport::ReadTailMetadata() const {
+  if (!mapping_) return std::nullopt;
+  const auto* header = static_cast<const SharedHeader*>(mapping_->address);
+  const auto first = header->tailMetadataSequence.load(std::memory_order_acquire);
+  if ((first & 1U) != 0) return std::nullopt;
+  const auto frames = header->tailMetadataFrames.load(std::memory_order_relaxed);
+  const auto second = header->tailMetadataSequence.load(std::memory_order_acquire);
+  if (first == 0 || first != second || (second & 1U) != 0 || !IsValidWorkerTailFrames(frames)) {
+    return std::nullopt;
+  }
+  return WorkerTailMetadata{
+    .workerGeneration = header->token,
+    .tailFrames = frames,
+  };
+}
+
 int WorkerTransport::fileDescriptor() const {
   return mapping_ ? mapping_->fileDescriptor : -1;
 }
@@ -617,6 +666,38 @@ std::span<const WorkerTransportEvent> WorkerTransport::events(const std::size_t 
   return {reinterpret_cast<const WorkerTransportEvent*>(SlotBytes(slotIndex) + Align(sizeof(SharedSlotControl))), control->eventCount};
 }
 
+WorkerBlockContext WorkerTransport::context(const std::size_t slotIndex) const {
+  if (!OwnsSlot(slotIndex)) return {};
+  const auto* control = reinterpret_cast<const SharedSlotControl*>(SlotBytes(slotIndex));
+  const auto flags = control->contextFlags;
+  return {
+    .projectTimeSamples = control->projectTimeSamples,
+    .continuousTimeSamples = control->continuousTimeSamples,
+    .tempoBpm = control->tempoBpm,
+    .projectTimeMusic = control->projectTimeMusic,
+    .timeSignatureNumerator = control->timeSignatureNumerator,
+    .timeSignatureDenominator = control->timeSignatureDenominator,
+    .cycleStartMusic = control->cycleStartMusic,
+    .cycleEndMusic = control->cycleEndMusic,
+    .transportEpoch = control->transportEpoch,
+    .playing = (flags & 1U) != 0,
+    .recording = (flags & 2U) != 0,
+    .cycleActive = (flags & 4U) != 0,
+    .discontinuity = (flags & 8U) != 0,
+  };
+}
+
+std::uint64_t WorkerTransport::outputSilenceFlags(const std::size_t slotIndex) const {
+  if (!OwnsSlot(slotIndex)) return 0;
+  return reinterpret_cast<const SharedSlotControl*>(SlotBytes(slotIndex))->outputSilenceFlags;
+}
+
+void WorkerTransport::SetOutputSilenceFlags(const std::size_t slotIndex, const std::uint64_t flags) {
+  if (OwnsSlot(slotIndex)) {
+    reinterpret_cast<SharedSlotControl*>(SlotBytes(slotIndex))->outputSilenceFlags = flags;
+  }
+}
+
 std::span<float> WorkerTransport::input(const std::size_t slotIndex) {
   if (!OwnsSlot(slotIndex)) return {};
   return {reinterpret_cast<float*>(SlotBytes(slotIndex) + Align(sizeof(SharedSlotControl)) + layout_.eventBytesPerSlot), layout_.maximumFrames * layout_.inputChannels};
@@ -640,6 +721,14 @@ void WorkerTransport::PublishHealth(const WorkerHealth health) {
 
 bool WorkerTransport::PublishDiagnostic(const WorkerDiagnostic diagnostic) {
   return mapping_ && PushDiagnostic(*static_cast<SharedHeader*>(mapping_->address), diagnostic);
+}
+
+void WorkerTransport::PublishTailMetadata(const std::uint32_t tailFrames) {
+  if (!mapping_ || !IsValidWorkerTailFrames(tailFrames)) return;
+  auto* header = static_cast<SharedHeader*>(mapping_->address);
+  header->tailMetadataSequence.fetch_add(1, std::memory_order_acq_rel);
+  header->tailMetadataFrames.store(tailFrames, std::memory_order_relaxed);
+  header->tailMetadataSequence.fetch_add(1, std::memory_order_release);
 }
 
 WorkerRuntime::WorkerRuntime() = default;
@@ -797,9 +886,10 @@ bool WorkerRuntime::PublishSubmission(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
   const std::size_t numSamples,
-  const std::span<const WorkerTransportEvent> events
+  const std::span<const WorkerTransportEvent> events,
+  const WorkerBlockContext& context
 ) {
-  return transport_ && transport_->Submit(slotIndex, sequence, numSamples, events);
+  return transport_ && transport_->Submit(slotIndex, sequence, numSamples, events, context);
 }
 
 bool WorkerRuntime::CancelPublishedSubmission(const std::size_t slotIndex, const std::uint64_t sequence) {
@@ -836,12 +926,14 @@ bool WorkerRuntime::ReadCompleted(const std::size_t slotIndex, const std::uint64
 bool WorkerRuntime::CopyCompletedOutput(
   const std::size_t slotIndex,
   const std::uint64_t expectedSequence,
-  const std::span<float> output
+  const std::span<float> output,
+  std::uint64_t* const outputSilenceFlags
 ) {
   if (!transport_ || !transport_->Read(slotIndex, expectedSequence)) return false;
   const auto source = transport_->output(slotIndex);
   const std::size_t samples = transport_->numSamples(slotIndex);
   const std::size_t channels = transport_->outputChannels();
+  const auto silenceFlags = transport_->outputSilenceFlags(slotIndex);
   if (output.size() < samples * channels) {
     static_cast<void>(transport_->ReleaseCompleted(slotIndex, expectedSequence));
     return false;
@@ -853,6 +945,7 @@ bool WorkerRuntime::CopyCompletedOutput(
       samples * sizeof(float)
     );
   }
+  if (outputSilenceFlags != nullptr) *outputSilenceFlags = silenceFlags;
   return transport_->ReleaseCompleted(slotIndex, expectedSequence);
 }
 
@@ -892,6 +985,10 @@ WorkerHealth WorkerRuntime::health() const {
 
 std::optional<WorkerDiagnostic> WorkerRuntime::ReadDiagnostic() {
   return transport_ ? transport_->ReadDiagnostic() : std::nullopt;
+}
+
+std::optional<WorkerTailMetadata> WorkerRuntime::ReadTailMetadata() const {
+  return transport_ ? transport_->ReadTailMetadata() : std::nullopt;
 }
 
 const WorkerTransport* WorkerRuntime::transport() const {

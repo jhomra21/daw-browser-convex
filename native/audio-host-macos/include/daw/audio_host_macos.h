@@ -15,7 +15,7 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 12;
+constexpr std::uint32_t kControlProtocolVersion = 14;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -80,6 +80,7 @@ enum class ControlType : std::uint32_t {
   kInstrumentStates = 48,
   kSpectrumSelection = 49,
   kSpectrumFrame = 50,
+  kProcessorStatePatch = 51,
 };
 
 struct ControlFrame {
@@ -172,7 +173,8 @@ struct NativeVstEditorAnchor {
  * paths and never crosses project, Wasm, preload, or renderer boundaries. */
 struct NativeVstAttachment {
   std::uint64_t graph_node_id = 0;
-  std::uint32_t chain_index = 0;
+  std::uint32_t stage_index = 0;
+  std::uint32_t source_index = 0;
   std::string instance_id;
   std::string class_id;
   std::string vendor_id;
@@ -186,8 +188,11 @@ struct NativeVstAttachment {
   std::uint32_t input_layout = 0;
   std::uint32_t output_layout = 0;
   std::uint32_t declared_latency_frames = 0;
+  std::optional<std::uint32_t> declared_tail_frames;
+  bool infinite_tail = false;
   std::uint32_t transport_latency_frames = 0;
   bool playback_enabled = false;
+  bool render_enabled = true;
   NativeVstWorkerTransportConfig transport{};
 };
 
@@ -225,10 +230,19 @@ enum class GraphRevisionStatusCode : std::uint32_t {
   kPrepareFailed = 7,
   kPublishFailed = 8,
   kRetirementNotSafe = 9,
+  kRetirementCapacityExceeded = 10,
+};
+
+enum class GraphRevisionContinuity : std::uint32_t {
+  kNotEvaluated = 0,
+  kAccepted = 1,
+  kFallback = 2,
+  kRejected = 3,
 };
 
 struct GraphRevisionStatus {
   GraphRevisionStatusCode code = GraphRevisionStatusCode::kInvalidRevision;
+  GraphRevisionContinuity continuity = GraphRevisionContinuity::kNotEvaluated;
   std::uint32_t requested_revision = 0;
   std::uint32_t active_revision = 0;
   std::uint32_t prepared_revision = 0;
@@ -244,6 +258,8 @@ enum class WorkerNotificationKind : std::uint32_t {
   kMiss = 5,
   kEditorInteraction = 6,
   kParameterEdit = 7,
+  kTail = 8,
+  kEditorState = 9,
 };
 
 enum class NativeVstWorkerHealth : std::uint32_t {
@@ -371,6 +387,7 @@ struct ScheduleProgress {
   std::uint64_t last_accepted_window_id = 0;
   std::uint64_t applied_transport_transition_id = 0;
   std::uint64_t applied_urgent_sequence = 0;
+  std::uint64_t applied_processor_sequence = 0;
   bool running = false;
   bool schedule_complete = false;
   std::uint32_t instrument_credits = 0;
@@ -393,6 +410,7 @@ class AudioHost {
   GraphRevisionStatus RollbackGraphRevision(std::uint32_t revision);
   GraphRevisionStatus RetireGraphRevision(std::uint32_t revision);
   bool QueueParameterEvents(std::span<const std::uint8_t> payload);
+  bool QueueProcessorStatePatch(std::span<const std::uint8_t> payload);
   bool QueueInstrumentEvents(std::span<const std::uint8_t> payload);
   bool QueueSourceEvents(std::span<const std::uint8_t> payload);
   bool QueueNativeVstParameterEvents(std::span<const std::uint8_t> payload);
@@ -412,6 +430,12 @@ class AudioHost {
     std::uint32_t epoch,
     bool running,
     std::int64_t frame,
+    double bpm = 0.0,
+    std::uint32_t time_signature_numerator = 0,
+    std::uint32_t time_signature_denominator = 0,
+    bool cycle_active = false,
+    double cycle_start_sec = 0.0,
+    double cycle_end_sec = 0.0,
     std::uint64_t transition_id = 0
   );
   bool QueueScheduleWindow(std::span<const std::uint8_t> payload);

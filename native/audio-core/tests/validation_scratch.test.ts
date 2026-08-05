@@ -9,7 +9,7 @@ test('native validation scratch stays persistent while Wasm uses its configured 
   const source = await Bun.file(coreSourceUrl).text()
   const persistentScratchStart = source.indexOf('#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)')
   const persistentScratchEnd = source.indexOf('#endif', persistentScratchStart)
-  const validationStart = source.indexOf('  std::copy(core.instruments.begin()')
+  const validationStart = source.indexOf('  std::copy((*core.published_instruments).begin()')
   const validationEnd = source.indexOf('  for (auto &indices : core.instrument_event_indices)', validationStart)
 
   expect(persistentScratchStart).toBeGreaterThanOrEqual(0)
@@ -19,8 +19,8 @@ test('native validation scratch stays persistent while Wasm uses its configured 
   expect(validationEnd).toBeGreaterThan(validationStart)
 
   const validation = source.slice(validationStart, validationEnd)
-  expect(validation).toContain('std::copy(core.instruments.begin(), core.instruments.end(), core.proposed_instruments.begin())')
-  expect(validation).toContain('auto proposed_instruments = core.instruments')
+  expect(validation).toContain('std::copy((*core.published_instruments).begin(), (*core.published_instruments).end(), core.proposed_instruments.begin())')
+  expect(validation).toContain('auto &proposed_instruments = core.proposed_instruments')
   expect(validation).not.toContain('std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments')
 })
 
@@ -45,6 +45,24 @@ test('Wasm build validates a same-filesystem directory before publication', asyn
   expect(publishScript).toContain('mv "$public_artifact_dir" "$backup_dir"')
   expect(publishScript).toContain('mv "$staging_dir" "$public_artifact_dir"')
   expect(publishScript).not.toMatch(/mv[^\n]*daw-audio-core\.(wasm|manifest\.json)/)
+})
+
+test('native graph stages cache built-in renderers outside the callback', async () => {
+  const source = await Bun.file(coreSourceUrl).text()
+  const nativeStageStart = source.indexOf('struct NativeGraphStage {')
+  const nativeStageEnd = source.indexOf('struct NativeGraphHooks {', nativeStageStart)
+  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = core.published_native_hooks;')
+  const callbackEnd = source.indexOf('#else', callbackStart)
+
+  expect(nativeStageStart).toBeGreaterThanOrEqual(0)
+  expect(nativeStageEnd).toBeGreaterThan(nativeStageStart)
+  expect(source.slice(nativeStageStart, nativeStageEnd)).toContain('ProcessorRenderer renderer = nullptr')
+  expect(source).toContain('static_assert(std::is_trivially_copyable_v<NativeGraphStage>)')
+  expect(source).toContain('const ProcessorRenderer renderer = find_processor_renderer(graph.processors[processor_index].kind)')
+  expect(source).toContain('if (renderer == nullptr) return false')
+  expect(callbackStart).toBeGreaterThanOrEqual(0)
+  expect(callbackEnd).toBeGreaterThan(callbackStart)
+  expect(source.slice(callbackStart, callbackEnd)).not.toContain('find_processor_renderer')
 })
 
 test('Wasm directory publication restores the old asset set when the replacement fails', async () => {

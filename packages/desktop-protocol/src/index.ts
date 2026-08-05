@@ -346,7 +346,7 @@ export const desktopHostVstInstancesResultSchemaV1 = z.object({
   instances: z.array(z.object({
     instanceId: z.string().uuid(),
     targetId: z.string().min(1).max(256),
-    chainIndex: z.number().int().nonnegative(),
+    stageIndex: z.number().int().nonnegative(),
     identity: desktopHostVstIdentitySchemaV1,
     role: z.enum(["effect", "instrument"]),
     bypassed: z.boolean(),

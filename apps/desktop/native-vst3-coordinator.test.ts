@@ -85,7 +85,7 @@ const attachment = (input: {
   instanceId: input.instanceId,
   graphNodeId: input.graphNodeId,
   nativeGraphNodeId: input.nativeGraphNodeId,
-  chainIndex: 0,
+  stageIndex: 0,
   catalogIdentity: {
     format: "vst3",
     classId: input.classId,
@@ -416,7 +416,7 @@ test("accepts serial attachments that share one native graph node", () => {
     instanceId: "33333333-3333-4333-8333-333333333333",
     graphNodeId: first.graphNodeId,
     nativeGraphNodeId: first.nativeGraphNodeId,
-    chainIndex: 1,
+    stageIndex: 1,
   }
   const snapshot = nativeGraph()
   const chainedSnapshot = {
@@ -432,6 +432,78 @@ test("accepts serial attachments that share one native graph node", () => {
   expect(createNativeVst3RevisionCoordinator({
     snapshot: chainedSnapshot,
     attachments: [first, chained, second],
+    attachmentHandshakeAcknowledged: true,
+    graphRevisionAcknowledged: true,
+    browserPlaybackActive: false,
+    host: revisionHost({ calls: [], prepared: [] }),
+  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
+})
+
+test("accounts for an instrument source and effect stages once in node latency", () => {
+  const instrument = {
+    ...first,
+    instanceId: "33333333-3333-4333-8333-333333333333",
+    role: "instrument" as const,
+    inputBuses: [],
+    sourceIndex: 0,
+    workerTransport: {
+      ...first.workerTransport,
+      inputChannels: 0,
+    },
+  }
+  const effect = {
+    ...second,
+    instanceId: "44444444-4444-4444-8444-444444444444",
+    graphNodeId: first.graphNodeId,
+    nativeGraphNodeId: first.nativeGraphNodeId,
+    stageIndex: 0,
+  }
+  const snapshot = nativeGraph()
+  const mixedSnapshot = {
+    ...snapshot,
+    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
+      ? {
+        ...node,
+        kind: "instrument" as const,
+        externalLatencyFrames: (
+          instrument.declaredLatencyFrames + instrument.workerTransport.maximumFrames
+          + effect.declaredLatencyFrames + effect.workerTransport.maximumFrames
+        ),
+      }
+      : node),
+  }
+  expect(createNativeVst3RevisionCoordinator({
+    snapshot: mixedSnapshot,
+    attachments: [instrument, effect, second],
+    attachmentHandshakeAcknowledged: true,
+    graphRevisionAcknowledged: true,
+    browserPlaybackActive: false,
+    host: revisionHost({ calls: [], prepared: [] }),
+  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
+})
+
+test("accepts sparse external stage indexes for validation by the mixed native compiler", () => {
+  const sparse = {
+    ...second,
+    instanceId: "33333333-3333-4333-8333-333333333333",
+    graphNodeId: first.graphNodeId,
+    nativeGraphNodeId: first.nativeGraphNodeId,
+    stageIndex: 2,
+  }
+  const snapshot = nativeGraph()
+  const sparseSnapshot = {
+    ...snapshot,
+    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
+      ? {
+        ...node,
+        externalLatencyFrames: first.declaredLatencyFrames + first.workerTransport.maximumFrames
+          + sparse.declaredLatencyFrames + sparse.workerTransport.maximumFrames,
+      }
+      : node),
+  }
+  expect(createNativeVst3RevisionCoordinator({
+    snapshot: sparseSnapshot,
+    attachments: [first, sparse, second],
     attachmentHandshakeAcknowledged: true,
     graphRevisionAcknowledged: true,
     browserPlaybackActive: false,
@@ -514,6 +586,20 @@ test("publishes latency changes as revision plus one with recomputed PDC metadat
   if (!preparedRevision) throw new Error("missing prepared revision")
   expect(new DataView(preparedRevision.serializedGraph.buffer).getBigUint64(0, false)).toBe(11n)
   expect(creation.coordinator.status()).toEqual({ active: true, revision: 11 })
+})
+
+test("applies tail metadata changes without publishing a graph revision", async () => {
+  const calls: string[] = []
+  const creation = revisionCoordinator({ calls, prepared: [] })
+  if (!creation.ok) throw new Error(creation.status.reason)
+  await expect(creation.coordinator.handleNotification({
+    kind: "tail",
+    instanceId: first.instanceId,
+    revision: 10,
+    frames: 1024,
+  })).resolves.toEqual({ ok: true, status: "unchanged", revision: 10 })
+  expect(calls).toEqual([])
+  expect(creation.coordinator.status()).toEqual({ active: true, revision: 10 })
 })
 
 test("ignores stale worker notifications without touching the active graph", async () => {

@@ -1,11 +1,18 @@
 const PROTOCOL_VERSION = 1
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
-const ABI_VERSION = 1
+const ABI_VERSION = 2
 const GRAPH_ENVELOPE_VERSION = 3
+const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
+const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
+  GRAPH_ENVELOPE_VERSION,
+  GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY,
+])
 const MAX_FAULTS = 4
 const MAX_INPUT_BUSES = 64
 const CHANNEL_COUNT = 2
+
+const continuityResultForCoreResult = (result) => result === 3 || result === 14 ? 'capacity' : 'rejected'
 
 const writeProcessorId = (view, offset, id) => view.setBigUint64(offset, BigInt(id), true)
 
@@ -120,7 +127,10 @@ export class DawPortableAudioCoreHost {
     this.instrumentEventOffset = 0
     this.instrumentEventByteCount = 0
     this.graphPrepareDiagnostics = null
+    this.graphContinuity = null
+    this.graphCancel = null
     this.preparedSnapshot = null
+    this.publishedSnapshot = null
     this.synthConfigure = null
     this.samplerConfigure = null
     this.granularConfigure = null
@@ -206,16 +216,34 @@ export class DawPortableAudioCoreHost {
     }
     if (message.type === 'recording-capture-drain') return this.drainRecordingCapture()
     if (message.type === 'publish-graph' && Number.isInteger(message.requestId) && Number.isInteger(message.revision) && message.revision > this.revision) {
-      if (!this.graphPublish || this.graphPublish(message.revision) !== 0) {
+      if (!this.preparedSnapshot || this.preparedSnapshot.revision !== message.revision || !this.configureInstruments(this.preparedSnapshot)) {
+        if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
+        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: 'rejected' })
         return
       }
-      if (!this.preparedSnapshot || this.preparedSnapshot.revision !== message.revision || !this.configureInstruments(this.preparedSnapshot)) {
+      const continuityResult = this.graphContinuity && this.graphContinuity() === 0 ? 'fallback' : 'accepted'
+      const publishResult = this.graphPublish ? this.graphPublish(message.revision) : -1
+      if (publishResult !== 0) {
+        if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
+        this.postMessage({
+          version: PROTOCOL_VERSION,
+          type: 'graph-continuity',
+          revision: message.revision,
+          result: continuityResultForCoreResult(publishResult),
+        })
         return
       }
       this.revision = message.revision
+      this.publishedSnapshot = this.preparedSnapshot
       this.liveInputBusCount = this.preparedInputBusCount
+      this.postMessage({
+        version: PROTOCOL_VERSION,
+        type: 'graph-continuity',
+        revision: message.revision,
+        result: continuityResult,
+      })
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'published' })
       return
     }
@@ -231,7 +259,7 @@ export class DawPortableAudioCoreHost {
         return
       }
       const envelopeView = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
-      if (envelopeView.getUint32(0, true) !== GRAPH_ENVELOPE_VERSION) {
+      if (!SUPPORTED_GRAPH_ENVELOPE_VERSIONS.has(envelopeView.getUint32(0, true))) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
         return
       }
@@ -243,7 +271,7 @@ export class DawPortableAudioCoreHost {
       new Uint8Array(this.memory.buffer, allocation, envelope.byteLength).set(envelope)
       const result = this.graphPrepare(allocation, envelope.byteLength)
       const view = envelopeView
-      const edgeOffset = 24 + snapshot.nodes.length * 132
+      const edgeOffset = 24 + snapshot.nodes.length * (envelopeView.getUint32(0, true) === GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136 : 132)
       this.graphPrepareDiagnostics = {
         byteLength: envelope.byteLength,
         byteHash: byteHash(envelope),
@@ -256,7 +284,14 @@ export class DawPortableAudioCoreHost {
       }
       this.free(allocation)
       if (result !== 0) {
+        if (this.graphCancel) this.graphCancel(snapshot.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
+        this.postMessage({
+          version: PROTOCOL_VERSION,
+          type: 'graph-continuity',
+          revision: snapshot.revision,
+          result: continuityResultForCoreResult(result),
+        })
         return
       }
       this.preparedSnapshot = snapshot
@@ -391,7 +426,11 @@ export class DawPortableAudioCoreHost {
       }
       this.coreProcess = exports.daw_audio_core_wasm_graph_process_planar
       this.graphPrepare = exports.daw_audio_core_wasm_graph_prepare
+      this.graphContinuity = typeof exports.daw_audio_core_wasm_graph_prepared_continuity === 'function'
+        ? exports.daw_audio_core_wasm_graph_prepared_continuity : null
       this.graphPublish = exports.daw_audio_core_wasm_graph_publish
+      this.graphCancel = typeof exports.daw_audio_core_wasm_graph_cancel === 'function'
+        ? exports.daw_audio_core_wasm_graph_cancel : null
       this.graphSetTransport = exports.daw_audio_core_wasm_graph_set_transport
       this.sourceSchedule = exports.daw_audio_core_wasm_graph_schedule_sample_source
       this.assetRegister = exports.daw_audio_core_wasm_graph_register_pcm_asset

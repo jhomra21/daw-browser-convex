@@ -873,7 +873,7 @@ test('projects only canonical, bounded external parameter overrides', () => {
     externalProcessors: [{
       instanceId: 'instance-1',
       targetId: 'master',
-      chainIndex: 0,
+      index: 0,
       manifest: {
         identity: { name: 'Fixture', vendor: 'Vendor', classId: 'class-1' },
         role: 'effect',

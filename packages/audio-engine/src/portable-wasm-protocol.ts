@@ -7,6 +7,7 @@ import {
   isAudioCoreGraphProcessor,
   isAudioCoreInstrumentState,
 } from '../../audio-core-contract/src/index'
+import { audioCoreWasmAbiVersion } from '../../audio-core-wasm/src/index'
 import { isPortableFrameSchedule, type PortableFrameSchedule } from './portable-frame-scheduling'
 
 export const portableWasmProtocolVersion = 1
@@ -50,7 +51,8 @@ export type PortableWasmControlMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'prepare-graph'; requestId: number; snapshot: AudioCoreGraphSnapshot }
   | { version: typeof portableWasmProtocolVersion; type: 'processor-state'; revision: number; envelope: AudioCoreProcessorStateEnvelope }
   | { version: typeof portableWasmProtocolVersion; type: 'parameter-blocks'; revision: number; blocks: readonly PortableWasmParameterBlock[] }
-  | { version: typeof portableWasmProtocolVersion; type: 'processor-events'; revision: number; events: readonly PortableWasmProcessorEvent[] }
+  | { version: typeof portableWasmProtocolVersion; type: 'processor-events'; requestId: number; revision: number; epoch: number; sequence: number; events: readonly PortableWasmProcessorEvent[] }
+  | { version: typeof portableWasmProtocolVersion; type: 'reenable-processor-automation'; requestId: number; revision: number; epoch: number; processorInstanceId: number; parameterTargets: readonly number[] }
   | { version: typeof portableWasmProtocolVersion; type: 'utility-state'; revision: number; state: UtilityProcessorState }
   | { version: typeof portableWasmProtocolVersion; type: 'instrument-state'; revision: number; nodeId: string; state: AudioCoreInstrumentState }
   | { version: typeof portableWasmProtocolVersion; type: 'transport'; requestId: number; epoch: number; running: boolean; frame: number }
@@ -75,9 +77,13 @@ export type PortableWasmStatusMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'asset-released'; requestId: number; generation: number; assetId: string; result: 'released' | 'stale-generation' }
   | { version: typeof portableWasmProtocolVersion; type: 'graph-prepared'; requestId: number; revision: number; result: 'prepared' | 'rejected' }
   | { version: typeof portableWasmProtocolVersion; type: 'graph-published'; requestId: number; revision: number; result: 'published' | 'rejected' }
+  | { version: typeof portableWasmProtocolVersion; type: 'graph-continuity'; revision: number; result: 'accepted' | 'fallback' | 'rejected' | 'capacity' }
   | { version: typeof portableWasmProtocolVersion; type: 'transport-applied'; requestId: number; epoch: number; result: 'applied' | 'rejected' }
+  | { version: typeof portableWasmProtocolVersion; type: 'transport-position'; sessionId: number; epoch: number; sequence: number; running: boolean; frame: number }
   | { version: typeof portableWasmProtocolVersion; type: 'schedule-installed'; requestId: number; revision: number; epoch: number; result: 'installed' | 'rejected' }
   | { version: typeof portableWasmProtocolVersion; type: 'sources-scheduled'; requestId: number; revision: number; epoch: number; result: 'scheduled' | 'rejected' }
+  | { version: typeof portableWasmProtocolVersion; type: 'processor-events-applied'; requestId: number; revision: number; epoch: number; sequence: number; result: 'applied' | 'rejected' }
+  | { version: typeof portableWasmProtocolVersion; type: 'processor-automation-reenabled'; requestId: number; revision: number; epoch: number; result: 'applied' | 'rejected' }
   | { version: typeof portableWasmProtocolVersion; type: 'recording-capture-block'; generation: number; sessionId: number; sequence: number; frameCount: number; channelCount: number; planes: readonly Float32Array[]; rms: number; peak: number }
   | { version: typeof portableWasmProtocolVersion; type: 'recording-capture-available'; generation: number; sessionId: number }
   | { version: typeof portableWasmProtocolVersion; type: 'recording-capture-applied'; generation: number; sessionId: number; action: 'configured' | 'finalized' | 'cancelled'; frame: number }
@@ -265,6 +271,40 @@ export const readPortableWasmRecordingStatusMessage = (
   return null
 }
 
+export const readPortableWasmGraphContinuityMessage = (
+  value: unknown,
+): Extract<PortableWasmStatusMessage, { type: 'graph-continuity' }> | null => {
+  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || value.type !== 'graph-continuity'
+    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || (value.result !== 'accepted' && value.result !== 'fallback' && value.result !== 'rejected' && value.result !== 'capacity')) return null
+  return {
+    version: portableWasmProtocolVersion,
+    type: 'graph-continuity',
+    revision: value.revision,
+    result: value.result,
+  }
+}
+
+export const readPortableWasmTransportPositionMessage = (
+  value: unknown,
+): Extract<PortableWasmStatusMessage, { type: 'transport-position' }> | null => {
+  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || value.type !== 'transport-position'
+    || typeof value.sessionId !== 'number' || !Number.isSafeInteger(value.sessionId) || value.sessionId < 1
+    || typeof value.epoch !== 'number' || !Number.isSafeInteger(value.epoch) || value.epoch < 1
+    || typeof value.sequence !== 'number' || !Number.isSafeInteger(value.sequence) || value.sequence < 1
+    || typeof value.running !== 'boolean'
+    || typeof value.frame !== 'number' || !Number.isSafeInteger(value.frame) || value.frame < 0) return null
+  return {
+    version: portableWasmProtocolVersion,
+    type: 'transport-position',
+    sessionId: value.sessionId,
+    epoch: value.epoch,
+    sequence: value.sequence,
+    running: value.running,
+    frame: value.frame,
+  }
+}
+
 const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapshot => {
   if (!isRecord(value)
     || value.version !== audioCoreContractVersion
@@ -301,7 +341,8 @@ const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapsho
       processorIds.add(processor.id)
       processorNodeIds.set(processor.id, typeof node.id === 'string' ? node.id : '')
       return true
-    }))
+    })
+  )
   if (!validNodes || !nodeIds.has(value.masterNodeId)) return false
   const edgeIds = new Set<string>()
   return value.edges.every((edge) => isRecord(edge)
@@ -374,13 +415,43 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
     return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, blocks: value.blocks }
   }
   if (value.type === 'processor-events' && isPositiveInteger(value.revision) && Array.isArray(value.events)
-    && value.events.length <= portableWasmMaxPendingEvents && value.events.every(isProcessorEvent)) {
+    && value.events.length <= portableWasmMaxPendingEvents && value.events.every(isProcessorEvent)
+    && isPositiveInteger(value.requestId)
+    && isPositiveInteger(value.epoch)
+    && isPositiveInteger(value.sequence)) {
     let previousOffset = -1
     for (const event of value.events) {
       if (event.frameOffset < previousOffset) return null
       previousOffset = event.frameOffset
     }
-    return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, events: value.events }
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      revision: value.revision,
+      requestId: value.requestId,
+      epoch: value.epoch,
+      sequence: value.sequence,
+      events: value.events,
+    }
+  }
+  if (value.type === 'reenable-processor-automation'
+    && isPositiveInteger(value.requestId)
+    && isPositiveInteger(value.revision)
+    && isPositiveInteger(value.epoch)
+    && isPositiveInteger(value.processorInstanceId)
+    && Array.isArray(value.parameterTargets)
+    && value.parameterTargets.length > 0
+    && value.parameterTargets.length <= audioCoreMaxProcessorParameterTargets
+    && value.parameterTargets.every(isPositiveInteger)) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      epoch: value.epoch,
+      processorInstanceId: value.processorInstanceId,
+      parameterTargets: value.parameterTargets,
+    }
   }
   if (value.type === 'utility-state' && isPositiveInteger(value.revision) && isUtilityState(value.state)) {
     return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, state: value.state }
@@ -474,7 +545,7 @@ export const createPortableWasmInitializeMessage = (
 ): PortableWasmControlMessage => ({
   version: portableWasmProtocolVersion,
   type: 'initialize',
-  abiVersion: audioCoreContractVersion,
+  abiVersion: audioCoreWasmAbiVersion,
   contractHash,
   maxFramesPerBlock,
 })

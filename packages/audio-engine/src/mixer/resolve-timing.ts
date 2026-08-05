@@ -1,4 +1,4 @@
-import { getEffectChainTiming } from '../effects/timing'
+import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
 import type { ResolvedMixerGraph } from './types'
 
 type MixerTimingPlan = {
@@ -40,6 +40,15 @@ export const resolveMixerTiming = (
   const getNodeLatency = (channel: ResolvedMixerGraph['channels'][number]) => (
     getChannelLatency(channel, sampleRate, bpm) + getExternalLatency(channel.channel.id)
   )
+  const getTapLatency = (
+    source: ResolvedMixerGraph['channels'][number],
+    sourceOutputLatency: number,
+    tap: MixerSendTap,
+  ) => {
+    if (tap === 'pre-fx') return sourceOutputLatency - getNodeLatency(source)
+    if (tap === 'pre-fader') return sourceOutputLatency
+    return sourceOutputLatency
+  }
   const incoming = new Map<string, Array<{ sourceId: string; kind: MixerEdgeKind; tap?: MixerSendTap }>>()
   for (const entry of graph.channels) {
     const edges = [
@@ -70,10 +79,10 @@ export const resolveMixerTiming = (
     if (!entry) throw new Error(`Missing mixer channel ${channelId}`)
     const upstreamLatency = Math.max(0, ...(incoming.get(channelId) ?? []).map((edge) => {
       const sourceOutputLatency = visit(edge.sourceId)
-      if (edge.kind !== 'send' || edge.tap !== 'pre-fx') return sourceOutputLatency
+      if (edge.kind !== 'send') return sourceOutputLatency
       const source = channelById.get(edge.sourceId)
       if (!source) throw new Error(`Missing mixer channel ${edge.sourceId}`)
-      return sourceOutputLatency - getNodeLatency(source)
+      return getTapLatency(source, sourceOutputLatency, edge.tap ?? 'post-fader')
     }))
     const latency = upstreamLatency + getNodeLatency(entry)
     pathLatency.set(channelId, latency)
@@ -87,9 +96,9 @@ export const resolveMixerTiming = (
   for (const [targetId, edges] of incoming) {
     const edgeLatency = (edge: (typeof edges)[number]) => {
       const channelLatency = pathLatency.get(edge.sourceId) ?? 0
-      return edge.kind === 'send' && edge.tap === 'pre-fx'
-        ? channelLatency - getNodeLatency(channelById.get(edge.sourceId)!)
-        : channelLatency
+      if (edge.kind !== 'send') return channelLatency
+      const source = channelById.get(edge.sourceId)!
+      return getTapLatency(source, channelLatency, edge.tap ?? 'post-fader')
     }
     const convergenceLatency = Math.max(0, ...edges.map(edgeLatency))
     for (const edge of edges) {

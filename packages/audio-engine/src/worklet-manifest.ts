@@ -24,8 +24,8 @@ export const utilityWorklet = {
 }
 
 export const portableAudioCoreWorklet = {
-  processorName: 'daw-portable-audio-core-processor-v1',
-  modulePath: 'audio-worklets/daw-portable-audio-core-processor-v1.js',
+  processorName: 'daw-portable-audio-core-processor-v2',
+  modulePath: 'audio-worklets/daw-portable-audio-core-processor-v2.js',
 }
 
 export const portableAudioCoreWasmManifest = {

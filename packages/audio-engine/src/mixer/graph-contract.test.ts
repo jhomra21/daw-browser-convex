@@ -87,7 +87,8 @@ describe('mixer routing plan', () => {
     expect(node?.processorOrder[0]?.parameterTargets.map((target) => target.id)).not.toContain('delay.delayMs')
   })
 
-  test('leaves instrument attachment to the portable session compiler', () => {
+  test('projects the complete synth state through the portable session compiler', () => {
+    const synthParams = createDefaultSynthParams()
     const graph = resolveMixerGraph({
       channels: createMixerChannels([
         { id: 'synth', kind: 'instrument', name: 'Synth', clips: [], volume: 1 },
@@ -98,7 +99,10 @@ describe('mixer routing plan', () => {
           instrument: {
             kind: 'synth',
             instanceId: 'synth:1',
-            params: createDefaultSynthParams(),
+            params: {
+              ...synthParams,
+              ampEnvelope: { ...synthParams.ampEnvelope, releaseSec: 60 },
+            },
           },
         },
       },
@@ -108,10 +112,15 @@ describe('mixer routing plan', () => {
       graph,
       revision: 1,
       sampleRate: 48_000,
+      includeInstruments: true,
     }).nodes.find((entry) => entry.id === 'synth')
 
-    expect(node?.kind).toBe('source')
-    expect(node?.instrument).toBeUndefined()
+    expect(node?.kind).toBe('instrument')
+    const instrument = node?.instrument
+    expect(instrument?.kind).toBe('synth')
+    if (!instrument || instrument.kind !== 'synth') throw new Error('Synth state was not projected.')
+    expect(instrument.ampReleaseMs).toBe(60_000)
+    expect(instrument.oscillators).toHaveLength(2)
   })
 
   test('projects normalized project topology and PDC declarations without becoming a routing authority', () => {
@@ -407,4 +416,5 @@ describe('mixer routing plan', () => {
     expect(processor?.state.byteLength).toBe(60)
     expect(processor?.parameterTargets).toHaveLength(11)
   })
+
 })

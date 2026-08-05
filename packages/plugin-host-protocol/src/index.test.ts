@@ -206,7 +206,7 @@ test('round trips the bounded native worker artifact and runtime hello contract'
       artifact: { id: 'daw-vst3-worker', version: '2' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
-      transportAbiVersion: 2,
+      transportAbiVersion: 5,
       architecture: 'arm64',
       role: 'effect',
       latencyFrames: 32,
@@ -329,7 +329,7 @@ const attachmentPlan = (): NativeExternalAttachmentPlan => ({
     instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
     graphNodeId: 'track-1',
     nativeGraphNodeId: '15667978324023168200',
-    chainIndex: 0,
+    stageIndex: 0,
     catalogIdentity: {
       format: 'vst3',
       classId: '0123456789abcdef0123456789abcdef',
@@ -366,7 +366,7 @@ test('round trips a versioned, path-free native external attachment plan', () =>
     instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
     graphNodeId: 'track-1',
     nativeGraphNodeId: '15667978324023168200',
-    chainIndex: 0,
+    stageIndex: 0,
     catalogIdentity: { classId: '0123456789abcdef0123456789abcdef' },
     bundleFingerprint: 'b'.repeat(64),
     binaryFingerprint: 'a'.repeat(64),
@@ -376,6 +376,20 @@ test('round trips a versioned, path-free native external attachment plan', () =>
     declaredTailFrames: 480,
     stateRevision: 7,
   })
+})
+
+test('accepts native stage metadata while retaining version-one compatibility', () => {
+  const legacy = attachmentPlan()
+  const staged = {
+    version: 2,
+    attachments: [{ ...legacy.attachments[0], stageIndex: 3 }],
+  }
+
+  expect(decodeNativeExternalAttachmentPlan(JSON.stringify(staged))).toMatchObject({
+    version: 2,
+    attachments: [{ stageIndex: 3 }],
+  })
+  expect(decodeNativeExternalAttachmentPlan(encodeNativeExternalAttachmentPlan(legacy))).toEqual(legacy)
 })
 
 test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensions', () => {
@@ -422,22 +436,23 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
       {
         ...attachment,
         instanceId: 'b7a0b9ac-7884-492c-8b68-80f15802442c',
-        chainIndex: 1,
+        stageIndex: 1,
       },
     ],
   }))
   expect(serial.attachments).toHaveLength(2)
-  expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
+  const sparse = decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [
       attachment,
       {
         ...attachment,
         instanceId: 'b7a0b9ac-7884-492c-8b68-80f15802442c',
-        chainIndex: 2,
+        stageIndex: 2,
       },
     ],
-  }))).toThrow('contiguous')
+  }))
+  expect(sparse.attachments).toHaveLength(2)
   expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [

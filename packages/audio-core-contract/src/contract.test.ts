@@ -152,12 +152,14 @@ test('synth instrument codec emits the fixed native default profile', () => {
     kind: 'synth',
     voiceCapacity: 2,
     outputLayout: 'stereo',
+    ampReleaseMs: 60_000,
     parameterTargets: [{ id: 'synth.outputGain', target: 1 }],
   }, () => 0n)
   expect(binary.state.byteLength).toBe(156)
   const view = new DataView(binary.state.buffer)
   expect(view.getUint32(0, true)).toBe(1)
   expect(view.getFloat32(72, true)).toBe(20_000)
+  expect(view.getFloat32(116, true)).toBe(60_000)
   expect(view.getFloat32(148, true)).toBe(1)
 })
 

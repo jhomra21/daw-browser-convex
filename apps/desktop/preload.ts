@@ -26,7 +26,7 @@ import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import type { DesktopBridge } from "../../src/types/desktop-bridge"
+import type { DesktopBridge, DesktopVstEditorState } from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 
 const incomingChannel = "daw:host-request"
@@ -149,6 +149,7 @@ const desktopBridge = {
         publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:publish-graph", bytes, transactionToken),
         configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:configure-instrument-states", bytes, transactionToken),
         queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-parameter-events", bytes, transactionToken),
+        queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-processor-state-patch", bytes, transactionToken),
         queueVstParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-vst-parameter-events", bytes, transactionToken),
         queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-instrument-events", bytes, transactionToken),
         queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-schedule-window", bytes, transactionToken),
@@ -163,8 +164,10 @@ const desktopBridge = {
         start: () => invokeNativeSession("daw:audio-host:session:start"),
         stop: () => invokeNativeSession("daw:audio-host:session:stop"),
         teardown: () => invokeNativeSession("daw:audio-host:session:teardown"),
-        onLoss: (listener: () => void) => {
-          const notify = () => listener()
+        onLoss: (listener: (error?: string) => void) => {
+          const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+            listener(typeof value === "string" && value.length <= 256 ? value : undefined)
+          }
           ipcRenderer.on("daw:audio-host:loss", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:loss", notify)
         },
@@ -202,6 +205,34 @@ const desktopBridge = {
           ipcRenderer.on("daw:audio-host:vst-parameter-edit", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:vst-parameter-edit", notify)
         },
+      },
+      onVstEditorState: (listener: (payload: DesktopVstEditorState) => void) => {
+        const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+          if (typeof value !== "object" || value === null
+            || !("projectId" in value) || typeof value.projectId !== "string"
+            || !("instanceId" in value) || typeof value.instanceId !== "string"
+            || !("open" in value) || typeof value.open !== "boolean") return
+          listener({ projectId: value.projectId, instanceId: value.instanceId, open: value.open })
+        }
+        ipcRenderer.on("daw:audio-host:vst-editor-state", notify)
+        return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-state", notify)
+      },
+      getLifecycle: () => ipcRenderer.invoke("daw:audio-host:lifecycle"),
+      completeRecovery: (powerGeneration: number, result: "ready" | "failed") => (
+        ipcRenderer.invoke("daw:audio-host:recovery-complete", { powerGeneration, result })
+      ),
+      retryRecovery: () => ipcRenderer.invoke("daw:audio-host:recovery-retry"),
+      onLifecycle: (listener: Parameters<NonNullable<DesktopBridge["audioHost"]>["onLifecycle"]>[0]) => {
+        const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+          if (typeof value !== "object" || value === null || !("state" in value) || !("powerGeneration" in value)) return
+          if (
+            (value.state !== "suspended" && value.state !== "recovering" && value.state !== "ready" && value.state !== "failed")
+            || typeof value.powerGeneration !== "number"
+          ) return
+          listener({ state: value.state, powerGeneration: value.powerGeneration })
+        }
+        ipcRenderer.on("daw:audio-host:lifecycle", notify)
+        return () => ipcRenderer.removeListener("daw:audio-host:lifecycle", notify)
       },
     },
     pluginCatalog: {

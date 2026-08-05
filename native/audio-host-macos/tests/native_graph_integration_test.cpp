@@ -64,7 +64,8 @@ void AppendBeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
 
 std::vector<std::uint8_t> GraphSnapshot(const bool instrument, const bool active) {
   std::vector<std::uint8_t> payload;
-  AppendLeU32(payload, active ? 4u : DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
+  AppendLeU32(payload, active ? DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
+    : DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
   AppendLeU32(payload, 2);
   AppendLeU32(payload, 2);
   AppendLeU32(payload, 1);

@@ -15,6 +15,7 @@ type Options = {
   loopEndSec?: Accessor<number>
   pixelsPerSecond: Accessor<number>
   preflightPlayback?: () => Promise<boolean>
+  requiresNativeAudio?: boolean
   nativePlayback?: {
     enabled: Accessor<boolean>
     projectId?: Accessor<string>
@@ -30,13 +31,13 @@ type Options = {
   }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, nativePlayback, portableBrowserPlayback }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
-  }, nativePlayback, portableBrowserPlayback)
+  }, nativePlayback ? { ...nativePlayback, requiresNativeAudio } : undefined, portableBrowserPlayback)
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false

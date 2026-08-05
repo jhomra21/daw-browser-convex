@@ -34,9 +34,10 @@ bool WorkerCallbackPort::ReadCompleted(const std::size_t slotIndex, const std::u
 bool WorkerCallbackPort::CopyCompletedOutput(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
-  const std::span<float> output
+  const std::span<float> output,
+  std::uint64_t* const outputSilenceFlags
 ) const noexcept {
-  return service_ && service_->CopyCompletionOutputFromCallback(slotIndex, sequence, output);
+  return service_ && service_->CopyCompletionOutputFromCallback(slotIndex, sequence, output, outputSilenceFlags);
 }
 
 bool WorkerCallbackPort::CopyInput(const std::size_t slotIndex, const std::span<const float> input) const noexcept {
@@ -49,6 +50,10 @@ bool WorkerCallbackPort::DiscardLate(const std::size_t slotIndex, const std::uin
 
 bool WorkerCallbackPort::PublishDiagnostic(const WorkerDiagnostic diagnostic) const noexcept {
   return service_ && service_->PublishDiagnosticFromCallback(diagnostic);
+}
+
+std::optional<WorkerTailMetadata> WorkerCallbackPort::ReadTailMetadata() const noexcept {
+  return service_ ? service_->ReadTailMetadataFromCallback() : std::nullopt;
 }
 
 WorkerHealth WorkerCallbackPort::health() const noexcept {
@@ -125,6 +130,11 @@ WorkerHealth WorkerControlService::health() const noexcept {
   return health_.load(std::memory_order_acquire);
 }
 
+std::uint64_t WorkerControlService::workerGeneration() const noexcept {
+  const auto* transport = runtime_.transport();
+  return transport == nullptr ? 0 : transport->token();
+}
+
 std::optional<WorkerDiagnostic> WorkerControlService::ReadDiagnostic() {
   WorkerDiagnostic diagnostic{};
   if (!diagnostics_.TryPop(diagnostic)) return std::nullopt;
@@ -158,7 +168,7 @@ WorkerCallbackPort WorkerControlService::callbackPort() noexcept {
 WorkerSubmissionStatus WorkerControlService::PublishFromCallback(const WorkerSubmission& submission) noexcept {
   if (!running_.load(std::memory_order_acquire)) return WorkerSubmissionStatus::kUnavailable;
   if (submission.sequence == 0 || !runtime_.PublishSubmission(
-    submission.slotIndex, submission.sequence, submission.numSamples, submission.events
+    submission.slotIndex, submission.sequence, submission.numSamples, submission.events, submission.context
   )) {
     return WorkerSubmissionStatus::kInvalid;
   }
@@ -180,9 +190,10 @@ bool WorkerControlService::ReadCompletionFromCallback(
 bool WorkerControlService::CopyCompletionOutputFromCallback(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
-  const std::span<float> output
+  const std::span<float> output,
+  std::uint64_t* const outputSilenceFlags
 ) noexcept {
-  return runtime_.CopyCompletedOutput(slotIndex, sequence, output);
+  return runtime_.CopyCompletedOutput(slotIndex, sequence, output, outputSilenceFlags);
 }
 
 bool WorkerControlService::CopyInputFromCallback(const std::size_t slotIndex, const std::span<const float> input) noexcept {
@@ -197,6 +208,10 @@ bool WorkerControlService::PublishDiagnosticFromCallback(const WorkerDiagnostic 
   if (!callbackDiagnostics_.TryPush(diagnostic)) return false;
   callbackActivitySequence_.fetch_add(1, std::memory_order_release);
   return true;
+}
+
+std::optional<WorkerTailMetadata> WorkerControlService::ReadTailMetadataFromCallback() const noexcept {
+  return runtime_.ReadTailMetadata();
 }
 
 WorkerHealth WorkerControlService::ReadHealthFromCallback() const noexcept {

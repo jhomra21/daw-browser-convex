@@ -22,6 +22,7 @@ import type {
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
 type NativeVstEditorReply = { ok: true; status: { success: boolean; owned: boolean; supported: boolean; open: boolean; width: number; height: number } } | { ok: false; error: string }
+export type DesktopVstEditorState = { projectId: string; instanceId: string; open: boolean }
 type NativeVstEditorAnchor = { x: number; y: number }
 type NativeVstAttachmentCoordinationInput = { projectId: string; serializedPlan: string; sampleRateHz: number }
 export type DesktopPluginCatalogEntry = {
@@ -76,6 +77,7 @@ type NativeSessionBridge = {
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   queueParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
+  queueProcessorStatePatch(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueVstParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueInstrumentEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueScheduleWindow(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
@@ -90,7 +92,7 @@ type NativeSessionBridge = {
   start(): Promise<NativeSessionReply>
   stop(): Promise<NativeSessionReply>
   teardown(): Promise<NativeSessionReply>
-  onLoss(listener: () => void): () => void
+  onLoss(listener: (error?: string) => void): () => void
   onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
@@ -102,6 +104,10 @@ type NativeSessionBridge = {
 
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+export type DesktopAudioLifecycle = {
+  state: "suspended" | "recovering" | "ready" | "failed"
+  powerGeneration: number
+}
 
 type DesktopBridge = {
   setRequestHandler(next: unknown): void
@@ -118,6 +124,14 @@ type DesktopBridge = {
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
     resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDeviceReply>
     session: NativeSessionBridge
+    onVstEditorState(listener: (payload: DesktopVstEditorState) => void): () => void
+    getLifecycle(): Promise<DesktopAudioLifecycle>
+    onLifecycle(listener: (lifecycle: DesktopAudioLifecycle) => void): () => void
+    completeRecovery(
+      generation: number,
+      result: "ready" | "failed",
+    ): Promise<{ accepted: boolean }>
+    retryRecovery(): Promise<{ accepted: boolean }>
   }
   pluginCatalog?: {
     read(): Promise<DesktopPluginCatalogReply>

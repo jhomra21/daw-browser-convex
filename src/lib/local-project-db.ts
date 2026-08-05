@@ -4,13 +4,14 @@ import type { ProjectManifestPluginArtifact } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
+import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
 
-export const LOCAL_PROJECT_SCHEMA_VERSION = 1
+export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
 const GLOBAL_DB_VERSION = 1
-const PROJECT_DB_VERSION = 4
+const PROJECT_DB_VERSION = 6
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
 export type LocalProjectMode = 'local-only' | 'backup'
@@ -344,7 +345,7 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
   const cached = projectDbPromises.get(dbName)
   if (cached) return cached
   const promise = openDB<ProjectDB>(dbName, PROJECT_DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion, _newVersion, transaction) {
       if (!db.objectStoreNames.contains('entities')) {
         const entities = db.createObjectStore('entities', { keyPath: ['kind', 'id'] })
         entities.createIndex('by-kind', 'kind')
@@ -389,6 +390,13 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
         const store = db.createObjectStore('controlAssetGc', { keyPath: 'id' })
         store.createIndex('by-eligible-at', 'eligibleAt')
         store.createIndex('by-storage-path', 'storagePath')
+      }
+      if (oldVersion < 6) {
+        const store = transaction.objectStore('entities')
+        void store.getAll().then((rows) => {
+          const normalized = normalizeMixedEffectEntityRows(rows)
+          for (const row of normalized) store.put(row)
+        })
       }
     },
     blocking(_currentVersion, _blockedVersion, event) {
@@ -525,10 +533,11 @@ export const importLocalProjectUnlocked = async (
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
+  const entities = normalizeMixedEffectEntityRows(rows.entities)
   const projectState = normalizedProjectState(project, rows.projectState)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
   await Promise.all([
-    ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
+    ...entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
     ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
@@ -567,6 +576,7 @@ const replaceLocalProjectUnlocked = async (
   const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
   const projectState = normalizedProjectState(project, rows.projectState)
+  const entities = normalizeMixedEffectEntityRows(rows.entities)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   await Promise.all([
     tx.objectStore('entities').clear(),
@@ -580,7 +590,7 @@ const replaceLocalProjectUnlocked = async (
     tx.objectStore('controlApprovals').clear(),
     tx.objectStore('controlRecoveries').clear(),
     tx.objectStore('controlAssetGc').clear(),
-    ...rows.entities.map((row) => tx.objectStore('entities').put(row)),
+    ...entities.map((row) => tx.objectStore('entities').put(row)),
     ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
     ...projectState.map((row) => tx.objectStore('projectState').put(row)),
     ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),

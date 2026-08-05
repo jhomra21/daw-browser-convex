@@ -1,3 +1,3 @@
 #include "daw/audio_core.h"
 
-static_assert(DAW_AUDIO_CORE_ABI_VERSION == 1);
+static_assert(DAW_AUDIO_CORE_ABI_VERSION == 2);

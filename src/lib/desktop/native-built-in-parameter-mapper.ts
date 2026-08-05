@@ -1,5 +1,25 @@
-import { createEqBandParameterId, normalizeDelayParams, type EqParams } from '@daw-browser/shared'
+import { createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, type EqParams } from '@daw-browser/shared'
+import { getEffectTiming } from '@daw-browser/audio-engine/effects/timing'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
+import {
+  encodeAutoFilterProcessorState,
+  encodeAutoPanProcessorState,
+  encodeChorusProcessorState,
+  encodeCompressorProcessorState,
+  encodeDelayProcessorState,
+  encodeEnsembleProcessorState,
+  encodeEqProcessorState,
+  encodeFlangerProcessorState,
+  encodeGateProcessorState,
+  encodeLimiterProcessorState,
+  encodeLoFiProcessorState,
+  encodePhaserProcessorState,
+  encodeReverbProcessorState,
+  encodeSaturatorProcessorState,
+  encodeSpectralProcessorState,
+  encodeTremoloProcessorState,
+  encodeUtilityProcessorState,
+} from '@daw-browser/audio-core-contract'
 import { resolvePortableDelayMs } from '@daw-browser/audio-engine/mixer/graph-contract'
 
 export type NativeBuiltInParameterValue = {
@@ -10,6 +30,76 @@ export type NativeBuiltInParameterValue = {
 export type NativeBuiltInParameterCommit = {
   instanceId: string
   values: NativeBuiltInParameterValue[]
+}
+
+export type NativeBuiltInStateCommit = {
+  instanceId: string
+  state: Uint8Array
+}
+
+export const nativeBuiltInTimingForCommit = (
+  payload: EffectParamsCommitPayload,
+  sampleRateHz: number,
+  bpm: number,
+) => {
+  const id = payload.instanceId ?? payload.effect
+  switch (payload.effect) {
+    case 'utility':
+    case 'master-utility':
+      return getEffectTiming({ id, kind: 'utility', params: payload.to }, sampleRateHz, bpm)
+    case 'autofilter':
+    case 'master-autofilter':
+      return getEffectTiming({ id, kind: 'autofilter', params: payload.to }, sampleRateHz, bpm)
+    case 'lofi':
+    case 'master-lofi':
+      return getEffectTiming({ id, kind: 'lofi', params: payload.to }, sampleRateHz, bpm)
+    case 'eq':
+    case 'master-eq':
+      return getEffectTiming({ kind: 'eq', params: payload.to }, sampleRateHz, bpm)
+    case 'gate':
+    case 'master-gate':
+      return getEffectTiming({ id, kind: 'gate', params: payload.to }, sampleRateHz, bpm)
+    case 'compressor':
+    case 'master-compressor':
+      return getEffectTiming({ kind: 'compressor', params: payload.to }, sampleRateHz, bpm)
+    case 'saturator':
+    case 'master-saturator':
+      return getEffectTiming({ kind: 'saturator', params: payload.to }, sampleRateHz, bpm)
+    case 'limiter':
+    case 'master-limiter':
+      return getEffectTiming({ id, kind: 'limiter', params: payload.to }, sampleRateHz, bpm)
+    case 'delay':
+    case 'master-delay':
+      return getEffectTiming({ kind: 'delay', params: normalizeDelayParams(payload.to) }, sampleRateHz, bpm)
+    case 'reverb':
+    case 'master-reverb':
+      return getEffectTiming({ kind: 'reverb', params: normalizeReverbParams(payload.to) }, sampleRateHz, bpm)
+    case 'chorus':
+    case 'master-chorus':
+      return getEffectTiming({ id, kind: 'chorus', params: payload.to }, sampleRateHz, bpm)
+    case 'flanger':
+    case 'master-flanger':
+      return getEffectTiming({ id, kind: 'flanger', params: payload.to }, sampleRateHz, bpm)
+    case 'phaser':
+    case 'master-phaser':
+      return getEffectTiming({ id, kind: 'phaser', params: payload.to }, sampleRateHz, bpm)
+    case 'tremolo':
+    case 'master-tremolo':
+      return getEffectTiming({ id, kind: 'tremolo', params: payload.to }, sampleRateHz, bpm)
+    case 'autopan':
+    case 'master-autopan':
+      return getEffectTiming({ id, kind: 'autopan', params: payload.to }, sampleRateHz, bpm)
+    case 'ensemble':
+    case 'master-ensemble':
+      return getEffectTiming({ id, kind: 'ensemble', params: payload.to }, sampleRateHz, bpm)
+    case 'spectral':
+    case 'master-spectral':
+      return getEffectTiming({ id, kind: 'spectral', params: payload.to }, sampleRateHz, bpm)
+    case 'synth':
+    case 'instrument':
+    case 'arp':
+      return undefined
+  }
 }
 
 type ChangedValue = number | boolean
@@ -260,4 +350,98 @@ export const mapNativeBuiltInParameterCommit = (
       return undefined
   }
   return values === undefined ? undefined : { instanceId, values }
+}
+
+export const encodeNativeBuiltInStateCommit = (
+  payload: EffectParamsCommitPayload,
+  bpm: number,
+): NativeBuiltInStateCommit | undefined => {
+  const instanceId = instanceIdOf(payload)
+  if (!instanceId) return undefined
+  let state: Uint8Array
+  switch (payload.effect) {
+    case 'utility':
+    case 'master-utility':
+      state = encodeUtilityProcessorState(payload.to.state)
+      break
+    case 'autofilter':
+    case 'master-autofilter':
+      state = encodeAutoFilterProcessorState(payload.to.state)
+      break
+    case 'lofi':
+    case 'master-lofi':
+      state = encodeLoFiProcessorState(payload.to.state)
+      break
+    case 'saturator':
+    case 'master-saturator':
+      state = encodeSaturatorProcessorState(payload.to)
+      break
+    case 'eq':
+    case 'master-eq':
+      state = encodeEqProcessorState(payload.to)
+      break
+    case 'gate':
+    case 'master-gate':
+      state = encodeGateProcessorState(payload.to.state)
+      break
+    case 'compressor':
+    case 'master-compressor':
+      state = encodeCompressorProcessorState(payload.to)
+      break
+    case 'limiter':
+    case 'master-limiter':
+      state = encodeLimiterProcessorState(payload.to.state)
+      break
+    case 'delay':
+    case 'master-delay':
+      {
+        const normalized = normalizeDelayParams(payload.to)
+        state = encodeDelayProcessorState({
+          enabled: normalized.enabled,
+          delayMs: resolvePortableDelayMs(normalized, bpm),
+          feedback: normalized.feedback,
+          dryWet: normalized.dryWet,
+          pingPong: normalized.pingPong,
+          filterEnabled: normalized.filterEnabled,
+          lowCutHz: normalized.lowCutHz,
+          highCutHz: normalized.highCutHz,
+        })
+      }
+      break
+    case 'reverb':
+    case 'master-reverb':
+      state = encodeReverbProcessorState(normalizeReverbParams(payload.to))
+      break
+    case 'chorus':
+    case 'master-chorus':
+      state = encodeChorusProcessorState(payload.to.state)
+      break
+    case 'flanger':
+    case 'master-flanger':
+      state = encodeFlangerProcessorState(payload.to.state)
+      break
+    case 'phaser':
+    case 'master-phaser':
+      state = encodePhaserProcessorState(payload.to.state)
+      break
+    case 'tremolo':
+    case 'master-tremolo':
+      state = encodeTremoloProcessorState(payload.to.state)
+      break
+    case 'autopan':
+    case 'master-autopan':
+      state = encodeAutoPanProcessorState(payload.to.state)
+      break
+    case 'ensemble':
+    case 'master-ensemble':
+      state = encodeEnsembleProcessorState(payload.to.state)
+      break
+    case 'spectral':
+    case 'master-spectral':
+      state = encodeSpectralProcessorState(payload.to.state)
+      break
+    default:
+      return undefined
+  }
+  return { instanceId, state }
 }

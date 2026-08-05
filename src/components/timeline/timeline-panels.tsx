@@ -14,6 +14,7 @@ import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-
 import type { ExternalProcessor } from '@daw-browser/external-plugins'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
+import type { TimelinePlaybackRebuildIntent } from '~/hooks/useTimelinePlayback'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import type { TimelineExportService } from '~/lib/export/timeline-export-service'
@@ -54,6 +55,10 @@ export type TimelinePanelsProps = {
     onClose: () => void
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
+    usesLegacyAudioEngine?: () => boolean
+    projectGeneration?: () => number
+    onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void
+    onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>
     onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
@@ -61,7 +66,13 @@ export type TimelinePanelsProps = {
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
     autoOpenExternalProcessorId?: string
     onExternalProcessorAutoOpenHandled?: (instanceId: string) => void
-    onExternalProcessorUpdated?: (processor: ExternalProcessor, previous: ExternalProcessor) => void
+    onExternalProcessorUpdated?: (
+      processor: ExternalProcessor,
+      previous: ExternalProcessor,
+      intent?: TimelinePlaybackRebuildIntent,
+    ) => void
+    captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent
+    onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void
     automationEnvelopes?: AutomationEnvelope[]
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
@@ -156,6 +167,10 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onSelectClip={props.effectsPanel.onSelectClip}
         insertLocalClip={props.effectsPanel.insertLocalClip}
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+        usesLegacyAudioEngine={props.effectsPanel.usesLegacyAudioEngine}
+        projectGeneration={props.effectsPanel.projectGeneration}
+        onEffectParamsPreview={props.effectsPanel.onEffectParamsPreview}
+        onEffectParamsFlush={props.effectsPanel.onEffectParamsFlush}
         onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
@@ -164,6 +179,8 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         autoOpenExternalProcessorId={props.effectsPanel.autoOpenExternalProcessorId}
         onExternalProcessorAutoOpenHandled={props.effectsPanel.onExternalProcessorAutoOpenHandled}
         onExternalProcessorUpdated={props.effectsPanel.onExternalProcessorUpdated}
+        captureStructuralPlaybackIntent={props.effectsPanel.captureStructuralPlaybackIntent}
+        onMixedReorderCommitted={props.effectsPanel.onMixedReorderCommitted}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
         evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}
         onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}

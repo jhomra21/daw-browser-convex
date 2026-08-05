@@ -53,6 +53,7 @@ export type NativeVst3PlaybackStatus =
 
 export type NativeVst3WorkerRevisionNotification =
   | { kind: "latency"; instanceId: string; revision: number; frames: number }
+  | { kind: "tail"; instanceId: string; revision: number; frames: number }
   | {
     kind: "buses"
     instanceId: string
@@ -135,6 +136,7 @@ export const nativeVst3WorkerRevisionNotification = (
     revision: notification.graphRevision,
   }
   if (notification.kind === "latency") return { kind: "latency", ...identity, frames: notification.value }
+  if (notification.kind === "tail") return { kind: "tail", ...identity, frames: notification.value }
   if (notification.kind === "buses") return { kind: "buses", ...identity }
   if (notification.kind === "restart") return { kind: "restart", ...identity }
   if (notification.kind === "miss") return { kind: "miss", ...identity }
@@ -146,7 +148,6 @@ export const connectNativeVst3RevisionCoordinator = (
   supervisor: Pick<NativeAudioHostSupervisor, "onWorkerNotification">,
   coordinator: NativeVst3RevisionCoordinator,
 ) => supervisor.onWorkerNotification((notification) => {
-  if (notification.kind === "editor-interaction") return
   const revisionNotification = nativeVst3WorkerRevisionNotification(notification)
   if (!revisionNotification) return
   void coordinator.handleNotification(revisionNotification)
@@ -154,10 +155,12 @@ export const connectNativeVst3RevisionCoordinator = (
 
 const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachments].sort((left, right) => (
   left.graphNodeId.localeCompare(right.graphNodeId)
-  || left.chainIndex - right.chainIndex
+  || left.stageIndex - right.stageIndex
   || left.catalogIdentity.classId.localeCompare(right.catalogIdentity.classId)
   || left.instanceId.localeCompare(right.instanceId)
 ))
+
+const maximumExternalStageIndex = 0x7fff_ffff
 
 const sameBuses = (left: Attachment["inputBuses"], right: Attachment["inputBuses"]) => (
   left.length === right.length
@@ -240,7 +243,10 @@ const resolveAttachment = (
     || expectedOutputChannels !== attachment.workerTransport.outputChannels) return undefined
   return {
     graphNodeId: BigInt(attachment.nativeGraphNodeId),
-    chainIndex: attachment.chainIndex,
+    stageIndex: attachment.role === "instrument" ? 0 : attachment.stageIndex,
+    ...(attachment.role === "instrument"
+      ? { sourceIndex: attachment.sourceIndex ?? 0 }
+      : {}),
     instanceId: attachment.instanceId,
     classId: eligibility.classId,
     vendorId: eligibility.vendorId,
@@ -253,10 +259,12 @@ const resolveAttachment = (
     inputLayout,
     outputLayout,
     declaredLatencyFrames: attachment.declaredLatencyFrames,
+    declaredTailFrames: attachment.declaredTailFrames,
     transportLatencyFrames: attachment.workerTransport.maximumFrames,
     workerTransport: attachment.workerTransport,
     stateRevision: attachment.stateRevision,
-    renderEnabled: true,
+    renderEnabled: !attachment.bypassed,
+    workerEnabled: true,
   }
 }
 
@@ -275,24 +283,38 @@ const attachmentSubsetIsProven = (
   if (instanceIds.size !== attachments.length) return false
   const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]))
   const chains = new Map<string, Attachment[]>()
+  const instruments = new Map<string, Attachment>()
   const graphNodeByNativeId = new Map<string, string>()
   for (const attachment of attachments) {
+    if (
+      !Number.isSafeInteger(attachment.stageIndex)
+      || attachment.stageIndex < 0
+      || attachment.stageIndex > maximumExternalStageIndex
+    ) return false
     const existingGraphNode = graphNodeByNativeId.get(attachment.nativeGraphNodeId)
     if (existingGraphNode !== undefined && existingGraphNode !== attachment.graphNodeId) return false
     graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
+    if (attachment.role === "instrument") {
+      if (instruments.has(attachment.graphNodeId)) return false
+      instruments.set(attachment.graphNodeId, attachment)
+      continue
+    }
     const chain = chains.get(attachment.graphNodeId) ?? []
-    if (chain.some((candidate) => candidate.chainIndex === attachment.chainIndex)) return false
+    if (chain.some((candidate) => candidate.stageIndex === attachment.stageIndex)) return false
     chain.push(attachment)
     chains.set(attachment.graphNodeId, chain)
   }
-  for (const [graphNodeId, chain] of chains) {
+  const graphNodeIds = new Set([...chains.keys(), ...instruments.keys()])
+  for (const graphNodeId of graphNodeIds) {
+    const chain = chains.get(graphNodeId) ?? []
     const node = nodes.get(graphNodeId)
     if (!node) return false
-    const ordered = [...chain].sort((left, right) => left.chainIndex - right.chainIndex)
-    if (!ordered.every((attachment, index) => attachment.chainIndex === index)) return false
-    let totalLatency = 0
+    const ordered = [...chain].sort((left, right) => left.stageIndex - right.stageIndex)
+    const instrument = instruments.get(graphNodeId)
+    let totalLatency = instrument && !instrument.bypassed ? attachmentLatency(instrument) : 0
+    if (instrument && (instrument.sourceIndex ?? 0) !== 0) return false
     for (const [index, attachment] of ordered.entries()) {
-      if (attachment.bypassed || attachment.nativeGraphNodeId !== ordered[0]?.nativeGraphNodeId) return false
+      if (attachment.nativeGraphNodeId !== ordered[0]?.nativeGraphNodeId) return false
       const previous = ordered[index - 1]
       const expectedInput = index === 0
         ? node.inputLayout
@@ -310,7 +332,7 @@ const attachmentSubsetIsProven = (
         || (index > 0 && attachment.role !== "effect")
         || attachment.workerTransport.inputChannels !== (inputLayout === "mono" ? 1 : inputLayout === "stereo" ? 2 : 0)
         || attachment.workerTransport.outputChannels !== (outputLayout === "mono" ? 1 : 2)) return false
-      totalLatency += attachmentLatency(attachment)
+      if (!attachment.bypassed) totalLatency += attachmentLatency(attachment)
       if (!Number.isSafeInteger(totalLatency)) return false
     }
     if ((node.externalLatencyFrames ?? 0) !== totalLatency) return false
@@ -323,8 +345,7 @@ const attachmentSubsetIsProven = (
     const outputLayout = layoutFor(attachment.outputBuses)
     const inputChannels = attachment.workerTransport.inputChannels
     const outputChannels = attachment.workerTransport.outputChannels
-    return !attachment.bypassed
-      && node !== undefined
+      return node !== undefined
       && outputLayout !== undefined
       && outputChannels === (outputLayout === "mono" ? 1 : 2)
       && (attachment.role === "instrument"
@@ -334,6 +355,19 @@ const attachmentSubsetIsProven = (
           && node.inputLayout === inputLayout)
       && node.outputLayout === outputLayout
   }))
+  && [...instruments.entries()].every(([graphNodeId, attachment]) => {
+    const node = nodes.get(graphNodeId)
+    const inputLayout = attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
+    const outputLayout = layoutFor(attachment.outputBuses)
+    return node !== undefined
+      && attachment.sourceIndex === 0
+      && outputLayout !== undefined
+      && attachment.workerTransport.inputChannels === 0
+      && attachment.workerTransport.outputChannels === (outputLayout === "mono" ? 1 : 2)
+      && inputLayout === "none"
+      && node.kind === "instrument"
+      && node.outputLayout === outputLayout
+  })
 }
 
 const chainLatency = (attachments: readonly Attachment[], graphNodeId: string) => (
@@ -502,6 +536,21 @@ const createNativeVst3RevisionCoordinatorImplementation = (
     if (notification.kind === "restart") return stopSafely("worker-faulted", notification.instanceId)
     if (notification.kind === "miss") return stopSafely("worker-missed-deadline", notification.instanceId)
     if (notification.kind === "fault") return stopSafely("worker-faulted", notification.instanceId)
+    if (notification.kind === "tail") {
+      const declaredTailFrames = notification.frames === 0xffff_ffff ? null : notification.frames
+      if (!Number.isSafeInteger(notification.frames)
+        || notification.frames < 0
+        || (declaredTailFrames !== null && declaredTailFrames > 100_000_000)) {
+        return stopSafely("revision-prepare-failed", notification.instanceId)
+      }
+      if ((attachment.declaredTailFrames ?? null) === declaredTailFrames) {
+        return { ok: true, status: "unchanged", revision: snapshot.revision }
+      }
+      attachments = attachments.map((candidate, index) => index === attachmentIndex
+        ? { ...candidate, declaredTailFrames }
+        : candidate)
+      return { ok: true, status: "unchanged", revision: snapshot.revision }
+    }
     if (notification.frames === attachment.declaredLatencyFrames) {
       return { ok: true, status: "unchanged", revision: snapshot.revision }
     }

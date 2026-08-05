@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../audio-core-contract/src/index"
 import { graphEnvelope } from "../../../public/audio-worklets/daw-portable-graph-envelope-v3.js"
-import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeSpectrumSelection, serializeNativeVstParameterEvents } from "./native-host-wire"
+import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeProcessorEvents, serializeNativeProcessorStatePatch, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeSpectrumSelection, serializeNativeVstParameterEvents } from "./native-host-wire"
 
 const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -18,6 +18,58 @@ test("serializes native spectrum selection in the host protocol byte order", () 
   expect([...serializeNativeSpectrumSelection(null)]).toEqual([
     0, 0, 0, 0, 0, 0, 0, 0,
   ])
+})
+
+test("serializes bounded same-core processor state patches", () => {
+  const bytes = serializeNativeProcessorStatePatch({
+    graphRevision: 7,
+    nodeId: "master",
+    instanceId: 11,
+    kindId: 12,
+    stateVersion: audioCoreContractVersion,
+    state: Uint8Array.of(1, 2, 3, 4),
+    bypassed: false,
+    inputLayout: "stereo",
+    outputLayout: "stereo",
+    parameterTargets: [101, 102],
+    latencyFrames: 0,
+    tailFrames: 99,
+  })
+  const view = new DataView(bytes.buffer)
+  expect(bytes.byteLength).toBe(68)
+  expect(view.getUint32(0, true)).toBe(1)
+  expect(view.getUint32(4, true)).toBe(7)
+  expect(view.getUint32(16, true)).toBe(11)
+  expect(view.getUint32(28, true)).toBe(4)
+  expect(Array.from(bytes.slice(56, 60))).toEqual([1, 2, 3, 4])
+  expect(view.getUint32(60, true)).toBe(101)
+  expect(view.getUint32(64, true)).toBe(102)
+  expect(() => serializeNativeProcessorStatePatch({
+    graphRevision: 7,
+    nodeId: "master",
+    instanceId: 11,
+    kindId: 12,
+    stateVersion: audioCoreContractVersion,
+    state: new Uint8Array(257),
+    bypassed: false,
+    inputLayout: "stereo",
+    outputLayout: "stereo",
+    parameterTargets: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+  })).toThrow()
+})
+
+test("serializes native processor batches with revision, epoch, and sequence identity", () => {
+  const bytes = serializeNativeProcessorEvents([
+    { processorInstanceId: 11, parameterTarget: 2, frameOffset: 0, value: 0.75 },
+  ], { revision: 7, epoch: 3, sequence: 19 })
+  const view = new DataView(bytes.buffer)
+  expect(view.getUint32(0, true)).toBe(1)
+  expect(view.getUint32(4, true)).toBe(7)
+  expect(view.getUint32(8, true)).toBe(3)
+  expect(view.getBigUint64(12, true)).toBe(19n)
+  expect(view.getBigUint64(20, true)).toBe(11n)
 })
 
 test("maps unique portable assets into deterministic session-local uint32 identifiers", () => {

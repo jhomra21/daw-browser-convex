@@ -24,6 +24,7 @@ import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
 import { convexClient, convexApi } from "~/lib/convex";
 import { useTimelineData } from "~/hooks/useTimelineData";
 import { usePlayheadControls } from "~/hooks/usePlayheadControls";
+import type { TimelinePlaybackRebuildIntent } from "~/hooks/useTimelinePlayback";
 import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
@@ -41,7 +42,7 @@ import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
-import { mapNativeBuiltInParameterCommit } from "~/lib/desktop/native-built-in-parameter-mapper";
+import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from "~/lib/desktop/native-built-in-parameter-mapper";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -122,6 +123,8 @@ type TimelineProps = {
 };
 
 const Timeline: Component<TimelineProps> = (props) => {
+  // Electron audio is native-only; browser Web Audio is never a desktop fallback.
+  const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
   const exportQueue = createExportQueue();
   onCleanup(exportQueue.dispose);
   const nativeVstParameterQueue = window.dawDesktop
@@ -332,6 +335,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     const result = compileLivePlaybackSnapshot({
       revision: ++nativePlaybackRevision,
       bpm: bpm(),
+      timeSignature: {
+        numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
+        denominator: fullView.data?.project.timeSignatureDenominator ?? 4,
+      },
       transport,
       tracks: renderTracks(),
       renderState: await createExportRenderStateSnapshot({
@@ -384,6 +391,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
   const exportService = createTimelineExportService({
     queue: exportQueue,
+    nativeRendererRequired: requiresNativeAudio,
     getTracks: renderTracks,
     getBpm: bpm,
     getMasterVolume: () => masterVolume.volume(),
@@ -432,7 +440,12 @@ const Timeline: Component<TimelineProps> = (props) => {
   const {
     isPlaying,
     isNativePlaybackPrepared,
-    queueNativeBuiltInParameterEvents,
+    isPortableBrowserPlaybackPrepared,
+    liveProcessorControl,
+    reenableProcessorAutomation,
+    queueLiveProcessorParameters,
+    queueNativeBuiltInStatePatch,
+    usesLegacyAudioEngine,
     playheadSec,
     handlePause,
     handleStop,
@@ -444,7 +457,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     setScrollElement,
     rescheduleChangedClips: playbackRescheduleChangedClips,
     restartTimelineSchedule,
-    disposePreparedBackends,
     portableRecording,
     nativeRecording,
     nativeLiveMidi,
@@ -453,6 +465,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     subscribeSpectrum,
   } = usePlayheadControls({
     audioEngine,
+    requiresNativeAudio,
     tracks: renderTracks,
     ensureClipBuffer: clipBuffers.preload,
     loopEnabled,
@@ -465,7 +478,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       const liveProcessor = (await listLocalExternalProcessors(currentProjectId))
         .find((processor) => !processor.bypassed && processor.health.state !== "degraded");
       if (!liveProcessor) return true;
-      if (appPreferences.audio.preferences().nativePlaybackEnabled) return true;
+      if (requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled) return true;
       notify(
         "Native plug-in playback is disabled",
         liveProcessor.health.reason ?? "Enable native playback to use the external plug-in.",
@@ -473,21 +486,25 @@ const Timeline: Component<TimelineProps> = (props) => {
       return false;
     },
     nativePlayback: {
-      enabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+      enabled: () => requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled,
       projectId,
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
       reportFault: (message) => {
         notify("Native playback stopped", message);
-        void markLiveExternalProcessorsDegraded(message).catch(() => undefined);
       },
     },
     portableBrowserPlayback: {
-      enabled: () => appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
+      enabled: () => !requiresNativeAudio && appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
       reportFault: (message) => notify("Portable browser playback stopped", message),
     },
+  });
+  const captureStructuralPlaybackIntent = (): TimelinePlaybackRebuildIntent => ({
+    resumePlayback: isPlaying(),
+    playheadSec: playheadSec(),
+    projectId: projectId(),
   });
 
   function rescheduleChangedClips(clipIds: string[]) {
@@ -536,6 +553,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         ];
       }),
     audioEngine,
+    reenableProcessorAutomation,
     isPlaying,
     playheadSec,
     selectedTrackId: selection.selectedTrackId,
@@ -715,40 +733,68 @@ const Timeline: Component<TimelineProps> = (props) => {
     );
   };
 
-  const handleNativeBuiltInParameterResult = async (
-    realtimeCommit: Parameters<typeof queueNativeBuiltInParameterEvents>[0],
-  ) => {
-    const result = await queueNativeBuiltInParameterEvents(realtimeCommit);
-    if (result.handled) return;
+  const handleNativeBuiltInStatePatchResult = async (
+    payload: EffectParamsCommitPayload,
+  ): Promise<boolean> => {
+    const result = await queueNativeBuiltInStatePatch({ payload, bpm: bpm() });
+    if (result.handled) return true;
     notify(
       "Built-in effect update failed",
       result.error ?? "The native playback graph could not apply the built-in effect change.",
     );
-    if (isPlaying()) {
-      void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
-        notify(
-          "Built-in effect update failed",
-          error instanceof Error
-            ? error.message
-            : "The active playback graph could not be rebuilt for the built-in effect change.",
-        );
-      });
-    } else {
-      void disposePreparedBackends();
-    }
+    return false;
   };
 
-  function handleEffectParamsCommitted<Effect extends EffectType>(
+  const handleNativeBuiltInPreview = async (
+    payload: EffectParamsCommitPayload<"eq" | "master-eq">,
+  ) => {
+    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
+    if (mapped) {
+      const result = await queueLiveProcessorParameters(mapped);
+      if (result.accepted) return;
+    }
+    if (!isNativePlaybackPrepared()) return;
+    await handleNativeBuiltInStatePatchResult(payload);
+  };
+
+  const handleNativeBuiltInFlush = async (
+    payload: EffectParamsCommitPayload<"eq" | "master-eq">,
+  ) => {
+    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
+    if (!mapped || (!isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared())) return;
+    const result = await liveProcessorControl()?.flush(mapped);
+    if (!result?.accepted) throw new Error("The final effect value was not applied to active playback.");
+  };
+
+  async function handleEffectParamsCommitted<Effect extends EffectType>(
     payload: EffectParamsCommitPayload<Effect>,
     committedProjectId?: string,
   ) {
     pushEffectParamsHistory(payload, committedProjectId);
-    const realtimeCommit = mapNativeBuiltInParameterCommit(payload, bpm());
-    if (isNativePlaybackPrepared() && realtimeCommit) {
-      void handleNativeBuiltInParameterResult(realtimeCommit);
+    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
+    if (mapped && (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())) {
+      const control = liveProcessorControl();
+      const result = await control?.flush(mapped);
+      if (result?.accepted) return;
+    }
+    if (usesLegacyAudioEngine()) return;
+    if (isNativePlaybackPrepared() && encodeNativeBuiltInStateCommit(payload, bpm())) {
+      void handleNativeBuiltInStatePatchResult(payload).then((handled) => untrack(() => {
+        if (!handled && (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())) {
+          return restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+            notify(
+              "Built-in effect update failed",
+              error instanceof Error
+                ? error.message
+                : "The active playback graph could not be rebuilt for the built-in effect change.",
+            );
+          });
+        }
+        return undefined;
+      }));
       return;
     }
-    if (isPlaying()) {
+    if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
       void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
         notify(
           "Built-in effect update failed",
@@ -759,7 +805,6 @@ const Timeline: Component<TimelineProps> = (props) => {
       });
       return;
     }
-    if (isNativePlaybackPrepared()) void disposePreparedBackends();
   }
 
   // DOM refs
@@ -804,6 +849,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     midiKeyboard,
   } = useTimelineMidiOverlay({
     audioEngine,
+    requiresNativeAudio,
     tracks: renderTracks,
     projectId,
     isPlaying,
@@ -811,6 +857,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     activeRecordingTargetId: activeMidiRecordingTargetId,
     nativeLiveMidi,
+    reportFault: (message) => notify("Native MIDI unavailable", message),
     canOpenMidiEditorFor: (clipId) => clipId !== provisionalMidiClipId(),
   });
   const removeCreatedCloudTrack = (track: Track | undefined) =>
@@ -1151,6 +1198,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const recordingControls = useTrackRecording({
     audioEngine,
+    requiresNativeAudio,
     tracks: renderTracks,
     setTrackLock: projection.setTrackLock,
     clearTrackLock: projection.clearTrackLock,
@@ -1166,13 +1214,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexClient,
     convexApi,
     requestTransportPlay: requestPlay,
+    requestTransportStop: handleStop,
     portableRecording: {
-      enabled: () => appPreferences.recording.preferences().portableEnabled
+      enabled: () => !requiresNativeAudio && appPreferences.recording.preferences().portableEnabled
         && appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
       controller: portableRecording,
     },
     nativeRecording: {
-      enabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+      enabled: () => requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled,
       controller: nativeRecording,
     },
     createTrackForRecording: async () =>
@@ -1639,29 +1688,28 @@ const Timeline: Component<TimelineProps> = (props) => {
     enableNativePlayback: () => appPreferences.audio.setNativePlaybackEnabled(true),
     handleInsertSample,
     onDeviceDrop: handleBrowserDeviceDrop,
+    captureStructuralPlaybackIntent,
     onExternalPluginInsertionResult: (title, message) => notify(title, message),
-    onExternalPluginInserted: async (processor) => {
+    onExternalPluginInserted: async (processor, playbackIntent) => {
       openEffectsForTarget(processor.targetId);
-      const playing = isPlaying();
+      const intent = playbackIntent ?? captureStructuralPlaybackIntent();
       const nativePlaybackEnabled =
         appPreferences.audio.preferences().nativePlaybackEnabled;
       console.info("[native-vst3] external plugin inserted", {
         instanceId: processor.instanceId,
         targetId: processor.targetId,
-        isPlaying: playing,
+        isPlaying: intent.resumePlayback,
         nativePlaybackEnabled,
       });
-      if (!playing) {
-        await restartTimelineSchedule(renderTracks(), { rebuildBackend: true });
-        setPendingExternalProcessorEditorId(processor.instanceId);
-        return;
-      }
       try {
-        await restartTimelineSchedule(renderTracks(), { rebuildBackend: true });
-        console.info("[native-vst3] active rebuild succeeded", {
+        await restartTimelineSchedule(renderTracks(), {
+          rebuildBackend: true,
+          ...intent,
+        });
+        console.info("[native-vst3] rebuild succeeded", {
           instanceId: processor.instanceId,
           targetId: processor.targetId,
-          isPlaying: playing,
+          isPlaying: intent.resumePlayback,
           nativePlaybackEnabled,
         });
       } catch (error) {
@@ -1673,6 +1721,10 @@ const Timeline: Component<TimelineProps> = (props) => {
           "Native playback rebuild failed",
           message,
         );
+        return;
+      }
+      if (!intent.resumePlayback) {
+        setPendingExternalProcessorEditorId(processor.instanceId);
         return;
       }
       // When playback is active, wait until the new graph owns this attachment
@@ -1881,6 +1933,12 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: handleEffectParamsCommitted,
+      usesLegacyAudioEngine,
+      projectGeneration: mountedProjectGeneration,
+      onEffectParamsPreview: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => {
+        void handleNativeBuiltInPreview(payload);
+      },
+      onEffectParamsFlush: handleNativeBuiltInFlush,
       enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       onEffectInstanceParamsReplayChange: (
         replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,
@@ -1894,9 +1952,32 @@ const Timeline: Component<TimelineProps> = (props) => {
           setPendingExternalProcessorEditorId();
         }
       },
-      onExternalProcessorUpdated: (processor: ExternalProcessor, previous: ExternalProcessor) => {
-        if (processor.bypassed === previous.bypassed || !isPlaying()) return;
-        void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+      captureStructuralPlaybackIntent,
+      onExternalProcessorUpdated: (
+        processor: ExternalProcessor,
+        previous: ExternalProcessor,
+        playbackIntent: TimelinePlaybackRebuildIntent | undefined,
+      ) => {
+        if (processor.bypassed === previous.bypassed) return;
+        const intent = playbackIntent ?? captureStructuralPlaybackIntent();
+        if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
+        void restartTimelineSchedule(renderTracks(), {
+          rebuildBackend: true,
+          ...intent,
+        }).catch((error: unknown) => {
+          notify(
+            "Native playback rebuild failed",
+            error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",
+          );
+        });
+      },
+      onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
+        const intent = playbackIntent ?? captureStructuralPlaybackIntent();
+        if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
+        void restartTimelineSchedule(renderTracks(), {
+          rebuildBackend: true,
+          ...intent,
+        }).catch((error: unknown) => {
           notify(
             "Native playback rebuild failed",
             error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",

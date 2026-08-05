@@ -7,6 +7,7 @@ import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParam
 import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 1 / 48_000
@@ -58,13 +59,39 @@ const instrumentTrack: RuntimeTrack = {
   }],
 }
 
+const nativeInstrumentInput = (): LivePlaybackSnapshotInput => ({
+  ...input(instrumentTrack),
+  renderState: {
+    fx: {
+      masterVolume: 1,
+      masterFxInstances: [],
+      trackFx: {
+        instrument: {
+          instances: [],
+          instrument: {
+            kind: "synth",
+            instanceId: "synth:1",
+            params: createDefaultSynthParams(),
+          },
+        },
+      },
+    },
+    automationEnvelopes: [],
+  },
+})
+
+const liveMidiInput = (): LivePlaybackSnapshotInput => input({
+  ...sourceTrack(),
+  id: "instrument",
+})
+
 const nativeAttachmentPlan: NativeExternalAttachmentPlan = {
   version: 1,
   attachments: [{
     instanceId: "11111111-1111-4111-8111-111111111111",
     graphNodeId: "track",
     nativeGraphNodeId: "123",
-    chainIndex: 0,
+    stageIndex: 0,
     catalogIdentity: {
       format: "vst3",
       classId: "class",
@@ -115,9 +142,11 @@ const createBridge = (
   const calls: string[] = []
   const parameterPayloads: Uint8Array[] = []
   const builtInParameterPayloads: Uint8Array[] = []
+  const statePatchPayloads: Uint8Array[] = []
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
+  const transports: Array<{ epoch: number; frame: number; running: boolean }> = []
   const spectrumNodeIds: Array<bigint | null> = []
   const spectrumSelections: Array<{ nodeId: bigint | null; sessionStarted: boolean }> = []
   const instrumentRequests: Array<{
@@ -126,7 +155,8 @@ const createBridge = (
   }> = []
   const deviceId: `coreaudio:${string}` = "coreaudio:default"
   let instrumentRequestPending = false
-  let loss = () => {}
+  let loss = (_error?: string) => {}
+  const lossListeners = new Set<(error?: string) => void>()
   let recordingBlock = (_block: NativeHostRecordingBlock) => {}
   let recordingStatus = (_status: NativeHostRecordingStatus) => {}
   let meterBatch = (_batch: NativeHostMeterBatch) => {}
@@ -136,7 +166,9 @@ const createBridge = (
   let transportEpoch = 1
   let appliedTransitionId = 0n
   let appliedUrgentSequence = 0n
+  let appliedProcessorSequence = 0n
   let sessionStarted = false
+  let rejectScheduleWindows = false
   const emitProgress = (frame: number) => {
     progressSequence += 1n
     const currentWindows = schedulePayloads.filter((payload) => {
@@ -156,6 +188,7 @@ const createBridge = (
       lastAcceptedWindowId: BigInt(currentWindows.length),
       appliedTransportTransitionId: appliedTransitionId,
       appliedUrgentSequence,
+      appliedProcessorSequence,
       running: false,
       scheduleComplete: currentWindows.some((payload) => new DataView(payload.buffer).getUint32(40, true) === 1),
       instrumentCredits: 256,
@@ -171,18 +204,26 @@ const createBridge = (
     calls,
     parameterPayloads,
     builtInParameterPayloads,
+    statePatchPayloads,
     instrumentPayloads,
     schedulePayloads,
     graphPayloads,
+    transports,
     spectrumNodeIds,
     spectrumSelections,
     instrumentRequests,
-    emitLoss: () => loss(),
+    captureLoss: () => loss,
+    emitLoss: (error?: string) => {
+      for (const listener of lossListeners) listener(error)
+    },
     emitRecordingBlock: (block: NativeHostRecordingBlock) => recordingBlock(block),
     emitRecordingStatus: (status: NativeHostRecordingStatus) => recordingStatus(status),
     emitMeterBatch: (batch: NativeHostMeterBatch) => meterBatch(batch),
     emitSpectrumFrame: (frame: NativeHostSpectrumFrame) => spectrumFrame(frame),
     emitScheduleProgress: (progress: NativeScheduleProgress) => scheduleProgress(progress),
+    setScheduleFailure: (rejected: boolean) => {
+      rejectScheduleWindows = rejected
+    },
     bridge: {
       resolveOutputDevice: async () => ({
         ok: true as const,
@@ -251,7 +292,18 @@ const createBridge = (
         queueParameterEvents: async (bytes: Uint8Array) => {
           calls.push("built-in-parameter")
           builtInParameterPayloads.push(bytes)
+          if (bytes.byteLength >= 20) {
+            appliedProcessorSequence = new DataView(bytes.buffer).getBigUint64(12, true)
+            queueMicrotask(() => emitProgress(0))
+          }
           return failure === "built-in-parameter"
+            ? { ok: false as const, error: failureMessage }
+            : { ok: true as const }
+        },
+        queueProcessorStatePatch: async (bytes: Uint8Array) => {
+          calls.push("processor-state-patch")
+          statePatchPayloads.push(bytes)
+          return failure === "processor-state-patch"
             ? { ok: false as const, error: failureMessage }
             : { ok: true as const }
         },
@@ -263,7 +315,9 @@ const createBridge = (
           }
           schedulePayloads.push(bytes)
           queueMicrotask(() => emitProgress(0))
-          return failure === "schedule" ? { ok: false as const, error: "failed" } : { ok: true as const }
+          return failure === "schedule" || rejectScheduleWindows
+            ? { ok: false as const, error: "failed" }
+            : { ok: true as const }
         },
         queueVstParameterEvents: async (bytes: Uint8Array) => {
           calls.push("parameter")
@@ -276,6 +330,11 @@ const createBridge = (
         },
         setTransport: async (transport: { epoch: number; frame: number; running: boolean; transitionId?: bigint }) => {
           calls.push("transport")
+          transports.push({
+            epoch: transport.epoch,
+            frame: transport.frame,
+            running: transport.running,
+          })
           transportEpoch = transport.epoch
           appliedTransitionId = transport.transitionId ?? (appliedTransitionId + 1n)
           if (requireStartedForSchedule && !sessionStarted) return { ok: true as const }
@@ -300,6 +359,7 @@ const createBridge = (
                 lastAcceptedWindowId: BigInt(currentWindows.length),
                 appliedTransportTransitionId: appliedTransitionId,
                 appliedUrgentSequence,
+                appliedProcessorSequence,
                 running: transport.running,
                 scheduleComplete: currentWindows.some((payload) => new DataView(payload.buffer).getUint32(40, true) === 1),
                 instrumentCredits: 256,
@@ -364,7 +424,11 @@ const createBridge = (
         teardown: reply("teardown"),
         onLoss: (listener: () => void) => {
           loss = listener
-          return () => { loss = () => {} }
+          lossListeners.add(listener)
+          return () => {
+            lossListeners.delete(listener)
+            if (loss === listener) loss = () => {}
+          }
         },
         onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => {
           recordingBlock = listener
@@ -405,6 +469,15 @@ const nativeInstrumentEventTypes = (payload: Uint8Array) => {
   return Array.from({ length: count }, (_, index) => view.getUint32(36 + index * 48, true))
 }
 
+const nativeLiveInstrumentEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer)
+  const count = view.getUint32(0, true)
+  return Array.from({ length: count }, (_, index) => ({
+    nodeId: view.getBigUint64(4 + index * 48, true),
+    type: view.getUint32(36 + index * 48, true),
+  })).filter(({ type }) => type === 101 || type === 102)
+})
+
 test("commits a supported native session before starting and tears it down deterministically", async () => {
   const fixture = createBridge()
   const controller = createNativePlaybackController({
@@ -419,6 +492,128 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+test("rebuilds a fresh paused native session with a new transport epoch", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.ensureLivePreview(2)).resolves.toBe("started")
+  await controller.dispose()
+  await expect(controller.ensureLivePreview(2)).resolves.toBe("started")
+
+  expect(fixture.transports.map((transport) => ({
+    epoch: transport.epoch,
+    frame: transport.frame,
+    running: transport.running,
+  }))).toEqual([
+    { epoch: 1, frame: 0, running: false },
+    { epoch: 2, frame: 0, running: false },
+  ])
+  expect(controller.isActive()).toBeFalse()
+  await controller.dispose()
+})
+
+test("seeks a paused native preview without rebuilding its prepared session", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
+  })
+  let resetCount = 0
+  const unsubscribeReset = controller.subscribeNativeLiveMidiReset(() => { resetCount += 1 })
+
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const handle = controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })
+  if (!handle) throw new Error("Native live note did not start.")
+  controller.releaseLiveMidiNote(handle)
+  await Bun.sleep(0)
+  expect(controller.hasLiveMidiTails()).toBeTrue()
+
+  const beforeCounts = {
+    begin: fixture.calls.filter((call) => call === "begin").length,
+    graph: fixture.calls.filter((call) => call === "graph").length,
+    install: fixture.calls.filter((call) => call === "install").length,
+    coordinate: fixture.calls.filter((call) => call === "coordinate").length,
+    release: fixture.calls.filter((call) => call === "release").length,
+    stop: fixture.calls.filter((call) => call === "stop").length,
+    teardown: fixture.calls.filter((call) => call === "teardown").length,
+  }
+
+  await expect(controller.seekPrepared(0.5)).resolves.toBe("started")
+
+  expect(controller.isPrepared()).toBeTrue()
+  expect(controller.isActive()).toBeFalse()
+  expect(controller.canProcessLiveMidi()).toBeTrue()
+  expect(controller.hasLiveMidiTails()).toBeTrue()
+  expect(resetCount).toBe(0)
+  expect(fixture.transports.at(-1)).toEqual({ epoch: 2, frame: 24_000, running: false })
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beforeCounts.begin)
+  expect(fixture.calls.filter((call) => call === "graph")).toHaveLength(beforeCounts.graph)
+  expect(fixture.calls.filter((call) => call === "install")).toHaveLength(beforeCounts.install)
+  expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(beforeCounts.coordinate)
+  expect(fixture.calls.filter((call) => call === "release")).toHaveLength(beforeCounts.release)
+  expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(beforeCounts.stop)
+  expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(beforeCounts.teardown)
+
+  await controller.dispose()
+  unsubscribeReset()
+})
+
+test("keeps released live-note ownership separate across focused instrument targets", async () => {
+  const firstTrack: RuntimeTrack = { ...instrumentTrack, id: "instrument-a" }
+  const secondTrack: RuntimeTrack = {
+    ...instrumentTrack,
+    id: "instrument-b",
+    clips: instrumentTrack.clips.map((clip) => ({ ...clip, id: "midi-b" })),
+  }
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...input(),
+      transport,
+      tracks: [firstTrack, secondTrack],
+      renderState: {
+        fx: {
+          masterVolume: 1,
+          masterFxInstances: [],
+          trackFx: {
+            "instrument-a": {
+              instances: [],
+              instrument: { kind: "synth", instanceId: "synth:a", params: createDefaultSynthParams() },
+            },
+            "instrument-b": {
+              instances: [],
+              instrument: { kind: "synth", instanceId: "synth:b", params: createDefaultSynthParams() },
+            },
+          },
+        },
+        automationEnvelopes: [],
+      },
+      sidechainRoutes: [],
+    }),
+  })
+
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const first = controller.startLiveMidiNote({ trackId: "instrument-a", pitch: 60, velocity: 0.8 })
+  if (!first) throw new Error("First native live note did not start.")
+  controller.releaseLiveMidiNote(first)
+  await Bun.sleep(0)
+  await expect(controller.seekPrepared(0.5)).resolves.toBe("started")
+  const second = controller.startLiveMidiNote({ trackId: "instrument-b", pitch: 60, velocity: 0.8 })
+  if (!second) throw new Error("Second native live note did not start.")
+  await Bun.sleep(0)
+
+  const liveEvents = nativeLiveInstrumentEvents(fixture.instrumentPayloads)
+  expect(liveEvents.filter(({ nodeId }) => nodeId === nativeGraphNodeId("instrument-a"))).toHaveLength(2)
+  expect(liveEvents.filter(({ nodeId }) => nodeId === nativeGraphNodeId("instrument-b"))).toHaveLength(1)
+  expect(controller.hasLiveMidiTails()).toBeTrue()
+
+  await controller.dispose()
 })
 
 const utilityPlaybackInput = (): LivePlaybackSnapshotInput => {
@@ -439,6 +634,214 @@ const utilityPlaybackInput = (): LivePlaybackSnapshotInput => {
     },
   }
 }
+
+const utilityCommit = (
+  instanceId: string,
+  fromState: ReturnType<typeof createDefaultUtilityParams>,
+  toState: ReturnType<typeof createDefaultUtilityParams>,
+) => ({
+  targetId: "track",
+  effect: "utility" as const,
+  instanceId,
+  from: { version: 1 as const, state: fromState },
+  to: { version: 1 as const, state: toState },
+} satisfies EffectParamsCommitPayload<"utility">)
+
+const reverbPlaybackInput = () => ({
+  ...input(),
+  renderState: {
+    fx: {
+      masterVolume: 1,
+      masterFxInstances: [],
+      trackFx: {
+        track: {
+          instances: [{
+            id: "reverb:1",
+            kind: "reverb" as const,
+            params: createDefaultReverbParams(),
+          }],
+        },
+      },
+    },
+    automationEnvelopes: [],
+  },
+})
+
+const reverbCommit = (
+  fromState: ReturnType<typeof createDefaultReverbParams>,
+  toState: ReturnType<typeof createDefaultReverbParams>,
+) => ({
+  targetId: "track",
+  effect: "reverb" as const,
+  instanceId: "reverb:1",
+  from: fromState,
+  to: toState,
+} satisfies EffectParamsCommitPayload<"reverb">)
+
+test("refreshes native built-in tail metadata when reverb state changes", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(reverbPlaybackInput()),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const from = createDefaultReverbParams()
+  const to = { ...from, decaySec: 2 }
+  await expect(controller.queueBuiltInStatePatch({
+    payload: reverbCommit(from, to),
+    bpm: 120,
+  })).resolves.toEqual({ handled: true })
+  const patch = fixture.statePatchPayloads.at(-1)
+  expect(patch).toBeDefined()
+  if (!patch) return
+  expect(new DataView(patch.buffer).getUint32(52, true)).toBe(96_960)
+  await controller.dispose()
+})
+
+test("rejects enabled changes instead of claiming a same-core patch succeeded", async () => {
+  const fixture = createBridge()
+  const snapshotInput = utilityPlaybackInput()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const from = createDefaultUtilityParams()
+  await expect(controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:1", from, { ...from, enabled: false }),
+    bpm: 120,
+  })).resolves.toEqual({ handled: false, reason: "unsupported-state" })
+  expect(fixture.statePatchPayloads).toHaveLength(0)
+  await controller.dispose()
+})
+
+test("coalesces each processor independently without dropping distinct updates", async () => {
+  const fixture = createBridge()
+  const first = createDefaultUtilityParams()
+  const second = { ...first, gainDb: -3 }
+  const snapshotInput = {
+    ...utilityPlaybackInput(),
+    renderState: {
+      ...utilityPlaybackInput().renderState,
+      fx: {
+        ...utilityPlaybackInput().renderState.fx,
+        trackFx: {
+          track: {
+            instances: [
+              { id: "utility:1", kind: "utility" as const, params: { version: 1 as const, state: first } },
+              { id: "utility:2", kind: "utility" as const, params: { version: 1 as const, state: first } },
+            ],
+          },
+        },
+      },
+    },
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  await Promise.all([
+    controller.queueBuiltInStatePatch({ payload: utilityCommit("utility:1", first, second), bpm: 120 }),
+    controller.queueBuiltInStatePatch({ payload: utilityCommit("utility:2", first, { ...first, pan: 0.25 }), bpm: 120 }),
+  ])
+  expect(fixture.calls.filter((call) => call === "processor-state-patch")).toHaveLength(2)
+  expect(fixture.statePatchPayloads.map((bytes) => new DataView(bytes.buffer).getUint32(16, true))).toHaveLength(2)
+  await controller.dispose()
+})
+
+test("serializes native state patches globally while retaining one latest pending patch per processor", async () => {
+  const fixture = createBridge()
+  const pending: Array<{
+    bytes: Uint8Array
+    resolve: (reply: BridgeReply) => void
+  }> = []
+  fixture.bridge.session.queueProcessorStatePatch = (bytes) => new Promise((resolve) => {
+    pending.push({ bytes, resolve })
+  })
+  const first = createDefaultUtilityParams()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot({
+      ...utilityPlaybackInput(),
+      renderState: {
+        ...utilityPlaybackInput().renderState,
+        fx: {
+          ...utilityPlaybackInput().renderState.fx,
+          trackFx: {
+            track: {
+              instances: [
+                { id: "utility:1", kind: "utility", params: { version: 1, state: first } },
+                { id: "utility:2", kind: "utility", params: { version: 1, state: first } },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const firstPatch = controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:1", first, { ...first, gainDb: -1 }),
+    bpm: 120,
+  })
+  const replacement = controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:1", first, { ...first, gainDb: -2 }),
+    bpm: 120,
+  })
+  const distinct = controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:2", first, { ...first, pan: 0.25 }),
+    bpm: 120,
+  })
+  expect(pending).toHaveLength(1)
+  pending[0]?.resolve({ ok: true })
+  await Bun.sleep(0)
+  expect(pending).toHaveLength(2)
+  pending[1]?.resolve({ ok: true })
+  await Bun.sleep(0)
+  expect(pending).toHaveLength(3)
+  pending[2]?.resolve({ ok: true })
+  await expect(Promise.all([firstPatch, replacement, distinct])).resolves.toEqual([
+    { handled: true },
+    { handled: true },
+    { handled: true },
+  ])
+  await controller.dispose()
+})
+
+test("continues the serialized native state patch queue after a timed-out request", async () => {
+  const fixture = createBridge()
+  let calls = 0
+  fixture.bridge.session.queueProcessorStatePatch = async (bytes) => {
+    calls += 1
+    if (calls === 1) throw new Error("Native audio host control request timed out.")
+    fixture.statePatchPayloads.push(bytes)
+    return { ok: true as const }
+  }
+  const snapshotInput = utilityPlaybackInput()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const from = createDefaultUtilityParams()
+  const first = controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:1", from, { ...from, gainDb: -1 }),
+    bpm: 120,
+  })
+  const second = controller.queueBuiltInStatePatch({
+    payload: utilityCommit("utility:1", from, { ...from, gainDb: -2 }),
+    bpm: 120,
+  })
+  await expect(first).resolves.toEqual({
+    handled: false,
+    reason: "bridge-error",
+    error: "Native audio host control request timed out.",
+  })
+  await expect(second).resolves.toEqual({ handled: true })
+  expect(calls).toBe(2)
+  await controller.dispose()
+})
 
 test("queues supported built-in parameters for active native playback without lifecycle changes", async () => {
   const fixture = createBridge()
@@ -502,6 +905,31 @@ test("queues built-in parameters for paused prepared preview and reports target 
   await failedController.dispose()
 })
 
+test("accepts live processor control only for the prepared revision and epoch", async () => {
+  const fixture = createBridge()
+  const snapshotInput = utilityPlaybackInput()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  await expect(controller.liveProcessorControl.flush({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.gainDb", value: -3 }],
+    revision: 1,
+    epoch: 1,
+    sequence: 1,
+  })).resolves.toEqual({ accepted: true, sequence: 1, appliedSequence: 1 })
+  await expect(controller.liveProcessorControl.flush({
+    instanceId: "utility:1",
+    values: [{ parameterId: "utility.gainDb", value: -2 }],
+    revision: 0,
+    epoch: 1,
+    sequence: 2,
+  })).resolves.toEqual({ accepted: false, reason: "stale" })
+  await controller.dispose()
+})
+
 test("maps native graph meters and ignores stale revision or sequence batches", async () => {
   const fixture = createBridge()
   const controller = createNativePlaybackController({
@@ -547,15 +975,19 @@ test("queues native live notes and releases them through the native backend", as
   const fixture = createBridge()
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
-    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
   })
 
-  expect(await controller.start(input().transport)).toBe("started")
+  expect(await controller.ensureLivePreview(0)).toBe("started")
+  const initialSchedule = fixture.schedulePayloads[0]
+  expect(initialSchedule).toBeDefined()
+  if (initialSchedule) expect(new DataView(initialSchedule.buffer).getUint32(40, true)).toBe(0)
   const handle = controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })
   expect(handle).toMatchObject({ backend: "native", trackId: "instrument", pitch: 60 })
   if (!handle) throw new Error("Native live note did not start.")
   controller.releaseLiveMidiNote(handle)
   await Bun.sleep(0)
+  expect(controller.hasLiveMidiTails()).toBeTrue()
   expect(fixture.instrumentPayloads).toHaveLength(2)
   const noteOn = new DataView(fixture.instrumentPayloads[0]!.buffer)
   const noteOff = new DataView(fixture.instrumentPayloads[1]!.buffer)
@@ -565,6 +997,109 @@ test("queues native live notes and releases them through the native backend", as
   expect(noteOn.getUint32(36, true)).toBe(101)
   expect(noteOff.getUint32(36, true)).toBe(102)
   await controller.dispose()
+  expect(controller.hasLiveMidiTails()).toBeFalse()
+})
+
+test("does not retain live MIDI tail ownership when note-on preparation fails", async () => {
+  const fixture = createBridge("instrument")
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
+  })
+
+  expect(await controller.ensureLivePreview(0)).toBe("started")
+  const handle = controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })
+  if (!handle) throw new Error("Native live note did not start.")
+  await Bun.sleep(0)
+
+  expect(fixture.instrumentPayloads).toHaveLength(1)
+  expect(controller.hasLiveMidiTails()).toBeFalse()
+  await controller.dispose()
+})
+
+test("does not retain live MIDI tail ownership when note preparation is cancelled", async () => {
+  const fixture = createBridge()
+  const compilation = Promise.withResolvers<ReturnType<typeof compileLivePlaybackSnapshot>>()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: () => compilation.promise,
+  })
+
+  const handle = controller.startLiveMidiNote({
+    trackId: "instrument",
+    pitch: 60,
+    velocity: 0.8,
+    playheadSec: 0.75,
+  })
+  if (!handle) throw new Error("Native live note did not queue.")
+  expect(controller.hasLiveMidiTails()).toBeFalse()
+  controller.releaseLiveMidiNote(handle, true)
+
+  compilation.resolve(compileLivePlaybackSnapshot(liveMidiInput()))
+  await expect(controller.ensureLivePreview(0.75)).resolves.toBe("started")
+  await Bun.sleep(0)
+
+  expect(fixture.instrumentPayloads).toHaveLength(0)
+  expect(controller.hasLiveMidiTails()).toBeFalse()
+  await controller.dispose()
+})
+
+test("retains one session-level live MIDI tail owner across repeated notes", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
+  })
+
+  expect(await controller.ensureLivePreview(0)).toBe("started")
+  for (let index = 0; index < 32; index += 1) {
+    const handle = controller.startLiveMidiNote({
+      trackId: "instrument",
+      pitch: index % 12 + 48,
+      velocity: 0.8,
+    })
+    if (!handle) throw new Error("Native live note did not start.")
+    controller.releaseLiveMidiNote(handle)
+  }
+  await Bun.sleep(0)
+
+  expect(fixture.instrumentPayloads).toHaveLength(64)
+  expect(controller.hasLiveMidiTails()).toBeTrue()
+  await controller.dispose()
+})
+
+test("forces only the requested live MIDI note off", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
+  })
+
+  expect(await controller.ensureLivePreview(0)).toBe("started")
+  const first = controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })
+  const second = controller.startLiveMidiNote({ trackId: "instrument", pitch: 64, velocity: 0.8 })
+  if (!first || !second) throw new Error("Native live notes did not start.")
+  controller.releaseLiveMidiNote(first, true)
+  await Bun.sleep(0)
+  const forcedRelease = new DataView(fixture.instrumentPayloads.at(-1)!.buffer)
+  expect(forcedRelease.getUint32(36, true)).toBe(102)
+  expect(forcedRelease.getUint32(44, true)).toBe(60)
+  controller.releaseLiveMidiNote(second)
+  await controller.dispose()
+})
+
+test("notifies MIDI overlay ownership when preview disposal rebuilds the session", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
+  })
+  let resetCount = 0
+  const unsubscribe = controller.subscribeNativeLiveMidiReset(() => { resetCount += 1 })
+  await controller.ensureLivePreview(0)
+  await controller.dispose()
+  expect(resetCount).toBe(1)
+  unsubscribe()
 })
 
 test("filters native spectrum frames by target, revision, epoch, and sequence", async () => {
@@ -658,7 +1193,7 @@ test("lazily starts a paused native preview and preserves queued note order", as
   expect(controller.isActive()).toBeFalse()
   expect(controller.canProcessLiveMidi()).toBeFalse()
 
-  compilation.resolve(compileLivePlaybackSnapshot(input()))
+  compilation.resolve(compileLivePlaybackSnapshot(liveMidiInput()))
   await expect(controller.ensureLivePreview(0.75)).resolves.toBe("started")
   expect(compiledTransport).toMatchObject({ state: "paused", playheadSec: 0.75 })
   expect(controller.isActive()).toBeFalse()
@@ -668,6 +1203,7 @@ test("lazily starts a paused native preview and preserves queued note order", as
   expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
 
   if (!handle) throw new Error("Native live note did not queue.")
+  controller.releaseLiveMidiNote(handle)
   controller.releaseLiveMidiNote(handle)
   await Bun.sleep(0)
 
@@ -679,6 +1215,52 @@ test("lazily starts a paused native preview and preserves queued note order", as
   expect(noteOn.getUint32(32, true)).toBe(noteOff.getUint32(32, true))
   expect(noteOn.getBigUint64(20, true)).toBe(1_000_000n)
   expect(noteOff.getBigUint64(20, true)).toBe(1_000_001n)
+  await controller.dispose()
+})
+
+test("releases a short native note exactly once after deferred preview preparation", async () => {
+  const fixture = createBridge()
+  const compilation = Promise.withResolvers<ReturnType<typeof compileLivePlaybackSnapshot>>()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: () => compilation.promise,
+  })
+
+  const handle = controller.startLiveMidiNote({
+    trackId: "instrument",
+    pitch: 60,
+    velocity: 0.8,
+    playheadSec: 0.75,
+  })
+  expect(handle).toBeDefined()
+  if (!handle) throw new Error("Native live note did not queue.")
+  controller.releaseLiveMidiNote(handle)
+  controller.releaseLiveMidiNote(handle)
+
+  compilation.resolve(compileLivePlaybackSnapshot(liveMidiInput()))
+  await expect(controller.ensureLivePreview(0.75)).resolves.toBe("started")
+  await Bun.sleep(0)
+
+  expect(fixture.instrumentPayloads).toHaveLength(2)
+  expect(new DataView(fixture.instrumentPayloads[0]!.buffer).getUint32(36, true)).toBe(101)
+  expect(new DataView(fixture.instrumentPayloads[1]!.buffer).getUint32(36, true)).toBe(102)
+  await controller.dispose()
+})
+
+test("does not claim live MIDI for a track absent from the prepared native graph", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  expect(controller.startLiveMidiNote({
+    trackId: "instrument",
+    pitch: 60,
+    velocity: 0.8,
+  })).toBeUndefined()
+  expect(fixture.instrumentPayloads).toHaveLength(0)
   await controller.dispose()
 })
 
@@ -714,11 +1296,11 @@ test("serializes synchronous native live note events through the single host req
   const faults: string[] = []
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
-    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    compileSnapshot: async () => compileLivePlaybackSnapshot(liveMidiInput()),
     reportFault: (message) => faults.push(message),
   })
 
-  expect(await controller.start(input().transport)).toBe("started")
+  expect(await controller.ensureLivePreview(0)).toBe("started")
   const handle = controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })
   expect(handle).toBeDefined()
   if (!handle) throw new Error("Native live note did not start.")
@@ -1261,6 +1843,78 @@ test("ignores native host loss after native session disposal", async () => {
   expect(faults).toEqual([])
 })
 
+test("invalidates native ownership before reporting a terminal refill fault", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const longInstrumentTrack: RuntimeTrack = {
+    ...instrumentTrack,
+    clips: instrumentTrack.clips.map((clip) => ({ ...clip, duration: 10 })),
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...nativeInstrumentInput(),
+      transport,
+      tracks: [longInstrumentTrack],
+    }),
+    reportFault: (message) => faults.push(message),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  fixture.setScheduleFailure(true)
+  for (let index = 0; index < 16; index += 1) {
+    fixture.emitScheduleProgress({
+      revision: 1,
+      epoch: 1,
+      progressSequence: BigInt(index + 100),
+      renderedThroughFrame: BigInt((index + 1) * 48_000),
+      acceptedThroughFrame: 96_000n,
+      lastAcceptedWindowId: 1n,
+      appliedTransportTransitionId: 2n,
+      appliedUrgentSequence: 0n,
+      appliedProcessorSequence: 0n,
+      running: true,
+      scheduleComplete: false,
+      instrumentCredits: 256,
+      sourceCredits: 256,
+      automationCredits: 256,
+    })
+    await Bun.sleep(0)
+  }
+  await Bun.sleep(200)
+
+  expect(controller.isActive()).toBeFalse()
+  expect(controller.isPrepared()).toBeFalse()
+  expect(faults).toHaveLength(1)
+
+  fixture.setScheduleFailure(false)
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  expect(controller.isActive()).toBeTrue()
+  await controller.dispose()
+})
+
+test("ignores a queued loss from a retired coordinator after replacement", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    const retiredLoss = fixture.captureLoss()
+    await controller.dispose()
+    await expect(controller.start(input().transport)).resolves.toBe("started")
+    retiredLoss(`stale retired coordinator loss ${cycle}`)
+    expect(controller.isActive()).toBeTrue()
+    expect(controller.isAvailable()).toBeTrue()
+  }
+  expect(faults).toEqual([])
+  await controller.dispose()
+})
+
 test("host loss reports the fault without starting another backend", async () => {
   const fixture = createBridge()
   const faults: string[] = []
@@ -1279,18 +1933,54 @@ test("host loss reports the fault without starting another backend", async () =>
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport", "stop"])
 })
 
-test("disables native after a start failure caused by host loss", async () => {
-  const fixture = createBridge("begin", false, false, "The native audio host is unavailable.")
+test("preserves the native host loss reason in the playback fault", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
+  await controller.start(input().transport)
+  fixture.emitLoss("The native audio host control request timed out.")
+
+  expect(faults).toEqual(["The native audio host control request timed out."])
+  expect(controller.isAvailable()).toBeFalse()
+})
+
+test("allows a new native session after explicit host recovery", async () => {
+  const fixture = createBridge()
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
   })
 
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  fixture.emitLoss("The native audio host stopped.")
+  await controller.dispose()
+  controller.resetNativeHostConnectionLoss()
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  await controller.dispose()
+})
+
+test("disables native after a start failure caused by host loss", async () => {
+  const fixture = createBridge("begin", false, false, "The native audio host is unavailable.")
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
   await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(faults).toEqual(["The native audio host is unavailable."])
   expect(controller.isAvailable()).toBeFalse()
   const callsAfterFailure = fixture.calls.length
   await expect(controller.ensureLivePreview(0)).resolves.toBe("unavailable")
   await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(faults.at(-1)).toContain("The native audio host is unavailable")
   expect(fixture.calls).toHaveLength(callsAfterFailure)
 })
 

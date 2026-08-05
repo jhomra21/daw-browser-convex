@@ -495,6 +495,7 @@ type EffectOrderRow = {
   _id: string
   type: string
   targetType?: string
+  trackId?: string
   instanceId?: string
   index?: number
 }
@@ -535,9 +536,10 @@ const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], orde
   const requestedRowIds = new Set(requested.map((row) => row._id))
   const omitted = audioRows.filter((row) => !requestedRowIds.has(row._id))
   const nextRows = [...requested, ...omitted]
+  const nextIndex = (index: number) => index
   const changed = nextRows.some((row, index) => row.index !== index)
   if (!changed) return { changed: false }
-  await Promise.all(nextRows.map((row, index) => row.index === index ? undefined : ctx.db.patch(row._id, { index })))
+  await Promise.all(nextRows.map((row, index) => row.index === nextIndex(index) ? undefined : ctx.db.patch(row._id, { index: nextIndex(index) })))
   return { changed: true }
 }
 

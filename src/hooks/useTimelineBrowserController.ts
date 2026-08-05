@@ -33,6 +33,7 @@ import {
 } from "~/lib/desktop/native-vst3-insertion";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import type { TimelinePlaybackRebuildIntent } from "./useTimelinePlayback";
 
 type Options = {
   projectId: Accessor<string>;
@@ -53,7 +54,8 @@ type Options = {
   handleInsertSample: (sample: SampleDragData) => void | Promise<void>;
   onDeviceDrop: (payload: BrowserDragPayload, target: BrowserDropTarget) => void | Promise<void>;
   onExternalPluginInsertionResult?: (title: string, message: string) => void;
-  onExternalPluginInserted?: (processor: ExternalProcessor) => void | Promise<void>;
+  captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent;
+  onExternalPluginInserted?: (processor: ExternalProcessor, intent?: TimelinePlaybackRebuildIntent) => void | Promise<void>;
   enableNativePlayback?: () => void;
 };
 
@@ -662,6 +664,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const addExternalPlugin = async (itemId: string, selection: NativeVst3CatalogSelection) => {
     const projectId = options.projectId();
     const targetId = options.currentEffectsTargetId();
+    const playbackIntent = options.captureStructuralPlaybackIntent?.();
     const targetTrack = options.tracks().find((track) => track.id === targetId);
     const actions = options.deviceInsertActions();
     const availability = nativeVst3InsertionAvailability({
@@ -701,17 +704,19 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
         return;
       }
       try {
-        await options.onExternalPluginInserted?.(result.processor);
+        await options.onExternalPluginInserted?.(result.processor, playbackIntent);
       } catch (error) {
         options.onExternalPluginInsertionResult?.(
           "Native VST3 playback update failed",
           error instanceof Error ? error.message : "The active native graph could not be rebuilt.",
         );
       }
-    } catch {
-      const message = "The native VST3 host preflight failed.";
+    } catch (error) {
+      const message = error instanceof Error
+        ? `The native VST3 preflight request failed: ${error.message}`
+        : "The native VST3 preflight request failed.";
       setExternalPluginStatusById((statuses) => ({ ...statuses, [itemId]: message }));
-      options.onExternalPluginInsertionResult?.("VST3 insertion failed", message);
+      options.onExternalPluginInsertionResult?.("VST3 preflight unavailable", message);
     } finally {
       setInsertingExternalPluginId(undefined);
     }

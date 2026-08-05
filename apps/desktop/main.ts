@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net as electronNet, protocol, session, shell } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, net as electronNet, powerMonitor, protocol, session, shell } from "electron"
 import { createServer, type Socket } from "node:net"
 import { chmod, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -48,6 +48,7 @@ import { packagedVst3WorkerPath } from "./vst3-preflight"
 import { coordinateNativeVst3Attachments } from "./native-vst3-coordinator"
 import {
   createNativeAudioHostSupervisor,
+  probeNativeAudioOutputDevice,
   NativeAudioHostCommandError,
   nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
@@ -55,6 +56,7 @@ import {
   type NativeVstEditorCommand,
 } from "./audio-host"
 import { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
+import { completeDesktopAudioRecovery } from "../../src/lib/desktop-audio-lifecycle"
 import {
   nativeReleaseArtifactManifestName,
   verifyPackagedNativeReleaseArtifacts,
@@ -74,7 +76,7 @@ import {
 import {
   allowsTrustedAudioCapturePermission,
   allowsTrustedMidiPermission,
-  isTrustedDesktopOrigin,
+  createTrustedDesktopOriginPolicy,
 } from "./permission-policy"
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
@@ -98,7 +100,7 @@ const externalUrl = (url: string) => {
     return false
   }
 }
-const sameAppOrigin = isTrustedDesktopOrigin
+const sameAppOrigin = createTrustedDesktopOriginPolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL)
 type PendingRendererRequest = {
   generation: number
   resolve: (frame: Extract<DesktopFrameV1, { type: "reply" }>) => void
@@ -130,6 +132,12 @@ let audioHostPath: string | undefined
 let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
 let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
+let audioLifecycle: {
+  state: "suspended" | "recovering" | "ready" | "failed"
+  powerGeneration: number
+} = { state: "ready", powerGeneration: 0 }
+let audioSuspendPromise: Promise<void> | undefined
+let audioRecoveryGeneration: number | undefined
 let vst3ScannerSupervisor: ReturnType<typeof createVst3ScannerSupervisor> | undefined
 let nativeReleaseArtifactVerification:
   | { status: "disabled" | "development" | "verified" }
@@ -156,6 +164,32 @@ const settleCapabilityRevocation = (operation: Promise<void>) => {
   void operation.catch(() => undefined)
 }
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
+const publishAudioLifecycle = () => {
+  const target = window_?.webContents
+  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
+  target.send("daw:audio-host:lifecycle", audioLifecycle)
+}
+const recoverAudioHost = (recoveryGeneration: number) => {
+  if (audioRecoveryGeneration === recoveryGeneration) return
+  audioRecoveryGeneration = recoveryGeneration
+  void (async () => {
+    try {
+      await audioSuspendPromise
+      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
+      await audioHostSupervisor?.resume()
+      await audioHostSupervisor?.start()
+      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
+      audioLifecycle = { state: "recovering", powerGeneration: recoveryGeneration }
+      publishAudioLifecycle()
+    } catch {
+      if (audioLifecycle.state !== "suspended" || audioLifecycle.powerGeneration !== recoveryGeneration) return
+      audioLifecycle = { state: "failed", powerGeneration: recoveryGeneration }
+      publishAudioLifecycle()
+    } finally {
+      if (audioRecoveryGeneration === recoveryGeneration) audioRecoveryGeneration = undefined
+    }
+  })()
+}
 const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
 const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
 const translateRendererError = (
@@ -561,6 +595,36 @@ const handleSocket = (socket: Socket) => {
 }
 
 const registerIpc = () => {
+  ipcMain.handle("daw:audio-host:lifecycle", (event) => {
+    if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audioLifecycle.powerGeneration }
+    return audioLifecycle
+  })
+  ipcMain.handle("daw:audio-host:recovery-complete", (event, value: unknown) => {
+    if (!audioHostAllowed(event)
+      || typeof value !== "object"
+      || value === null
+      || !("powerGeneration" in value)
+      || !("result" in value)
+      || typeof value.powerGeneration !== "number"
+      || !Number.isSafeInteger(value.powerGeneration)
+      || (value.result !== "ready" && value.result !== "failed")) {
+      return { accepted: false }
+    }
+    const completion = completeDesktopAudioRecovery(audioLifecycle, value.powerGeneration, value.result)
+    if (!completion.accepted) return { accepted: false }
+    audioLifecycle = completion.lifecycle
+    publishAudioLifecycle()
+    return { accepted: true }
+  })
+  ipcMain.handle("daw:audio-host:recovery-retry", (event) => {
+    if (!audioHostAllowed(event) || audioLifecycle.state !== "failed") return { accepted: false }
+    audioLifecycle = {
+      state: "suspended",
+      powerGeneration: audioLifecycle.powerGeneration + 1,
+    }
+    recoverAudioHost(audioLifecycle.powerGeneration)
+    return { accepted: true }
+  })
   ipcMain.on(outgoingChannel, (event, message: unknown) => {
     if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
     if (typeof message !== "object" || message === null || !("generation" in message) || !("frame" in message)) return
@@ -694,13 +758,44 @@ const registerIpc = () => {
     }
   }
   const nativeSessionTransport = (value: unknown): NativeHostTransport | undefined => {
+    if (typeof value !== "object" || value === null) return undefined
+    const bpm = "bpm" in value && typeof value.bpm === "number" ? value.bpm : undefined
+    const timeSignatureNumerator = "timeSignatureNumerator" in value
+      && typeof value.timeSignatureNumerator === "number" ? value.timeSignatureNumerator : undefined
+    const timeSignatureDenominator = "timeSignatureDenominator" in value
+      && typeof value.timeSignatureDenominator === "number" ? value.timeSignatureDenominator : undefined
+    const cycleActive = "cycleActive" in value && typeof value.cycleActive === "boolean" ? value.cycleActive : undefined
+    const cycleStartSec = "cycleStartSec" in value && typeof value.cycleStartSec === "number" ? value.cycleStartSec : undefined
+    const cycleEndSec = "cycleEndSec" in value && typeof value.cycleEndSec === "number" ? value.cycleEndSec : undefined
     if (
-      typeof value !== "object" || value === null
-      || !("epoch" in value) || !validUnsigned32(value.epoch)
+      !("epoch" in value) || !validUnsigned32(value.epoch)
       || !("running" in value) || typeof value.running !== "boolean"
       || !("frame" in value) || typeof value.frame !== "number" || !Number.isSafeInteger(value.frame)
+      || (bpm !== undefined && (!Number.isFinite(bpm) || bpm <= 0))
+      || (("bpm" in value) && bpm === undefined)
+      || (timeSignatureNumerator !== undefined && (!Number.isSafeInteger(timeSignatureNumerator) || timeSignatureNumerator <= 0))
+      || (("timeSignatureNumerator" in value) && timeSignatureNumerator === undefined)
+      || (timeSignatureDenominator !== undefined && (!Number.isSafeInteger(timeSignatureDenominator) || timeSignatureDenominator <= 0))
+      || (("timeSignatureDenominator" in value) && timeSignatureDenominator === undefined)
+      || (("cycleActive" in value) && cycleActive === undefined)
+      || (cycleStartSec !== undefined && (!Number.isFinite(cycleStartSec) || cycleStartSec < 0))
+      || (("cycleStartSec" in value) && cycleStartSec === undefined)
+      || (cycleEndSec !== undefined && (!Number.isFinite(cycleEndSec) || cycleEndSec < 0))
+      || (("cycleEndSec" in value) && cycleEndSec === undefined)
+      || ((cycleStartSec !== undefined || cycleEndSec !== undefined)
+        && (cycleStartSec === undefined || cycleEndSec === undefined || cycleEndSec <= cycleStartSec))
     ) return undefined
-    return { epoch: value.epoch, running: value.running, frame: value.frame }
+    return {
+      epoch: value.epoch,
+      running: value.running,
+      frame: value.frame,
+      ...(bpm === undefined ? {} : { bpm }),
+      ...(timeSignatureNumerator === undefined ? {} : { timeSignatureNumerator }),
+      ...(timeSignatureDenominator === undefined ? {} : { timeSignatureDenominator }),
+      ...(cycleActive === undefined ? {} : { cycleActive }),
+      ...(cycleStartSec === undefined ? {} : { cycleStartSec }),
+      ...(cycleEndSec === undefined ? {} : { cycleEndSec }),
+    }
   }
   const nativeSessionRecordingConfiguration = (value: unknown): NativeHostRecordingConfiguration | undefined => {
     if (
@@ -899,6 +994,13 @@ const registerIpc = () => {
         ...("height" in value && typeof value.height === "number" ? { height: value.height } : {}),
         ...(anchor === undefined ? {} : { anchor }),
       }
+      // Prefer the isolated editor host. A plug-in editor can allocate UI or
+      // runtime state outside the realtime graph, so its failure should remain
+      // independent from playback whenever the isolated manager is available.
+      if (manager) {
+        const status = await manager.execute(command)
+        return { ok: true as const, status }
+      }
       if (activeHostCandidate) {
         try {
           if (activeHostCandidate.transactionOpen() && !envelope?.transactionToken) {
@@ -927,14 +1029,7 @@ const registerIpc = () => {
           if (diagnostics?.state === "running" || !manager) throw error
         }
       }
-      if (!manager) {
-        return { ok: false as const, error: "The isolated native VST editor session is unavailable." }
-      }
-      if (activeHostCandidate?.transactionOpen() && !envelope?.transactionToken) {
-        throw new Error("The native audio host transaction token is required.")
-      }
-      const status = await manager.execute(command)
-      return { ok: true as const, status }
+      return { ok: false as const, error: "The native VST editor session is unavailable." }
     } catch (error) {
       console.error("[native-vst3] editor command failed", {
         error: sanitizeNativeVst3DiagnosticError(error),
@@ -1009,6 +1104,7 @@ const registerIpc = () => {
   registerNativeSessionBytes("daw:audio-host:session:publish-graph", (supervisor, bytes, transactionToken) => supervisor.publishGraph(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:configure-instrument-states", (supervisor, bytes, transactionToken) => supervisor.configureInstrumentStates(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-parameter-events", (supervisor, bytes, transactionToken) => supervisor.queueParameterEvents(bytes, transactionToken))
+  registerNativeSessionBytes("daw:audio-host:session:queue-processor-state-patch", (supervisor, bytes, transactionToken) => supervisor.queueProcessorStatePatch(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-vst-parameter-events", (supervisor, bytes, transactionToken) => supervisor.queueVstParameterEvents(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-instrument-events", (supervisor, bytes, transactionToken) => supervisor.queueInstrumentEvents(bytes, transactionToken))
   registerNativeSessionBytes("daw:audio-host:session:queue-schedule-window", (supervisor, bytes, transactionToken) => supervisor.queueScheduleWindow(bytes, transactionToken))
@@ -1182,11 +1278,11 @@ const registerIpc = () => {
     if (!store || !request.success) {
       return { ok: false as const, code: "untrusted-catalog" as const, message: "The native VST3 insertion request is invalid." }
     }
-    if (!audioHostAllowed(event) || !audioHostSupervisor || !workerPath) {
+    if (!audioHostAllowed(event) || !audioHostPath || !workerPath) {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host is unavailable." }
     }
     try {
-      const device = await audioHostSupervisor.resolveOutputDevice()
+      const device = await probeNativeAudioOutputDevice(audioHostPath)
       if (!device?.available) {
         return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
       }
@@ -1304,6 +1400,8 @@ const finishQuit = async () => {
   await fileCapabilities.revokeAll()
   await nativeVst3EditorSessionManager?.teardownAll()
   await audioHostSupervisor?.teardown()
+  powerMonitor.removeAllListeners("suspend")
+  powerMonitor.removeAllListeners("resume")
   removeAudioHostLossListener?.()
   removeAudioHostRecordingBlockListener?.()
   removeAudioHostRecordingStatusListener?.()
@@ -1391,6 +1489,11 @@ else {
           app.focus({ steal: true })
           target.focus()
         },
+        onEditorOpenState: (input) => {
+          const target = window_?.webContents
+          if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
+          target.send("daw:audio-host:vst-editor-state", input)
+        },
         onParameterEdit: (input) => sendVstParameterEdit({
           projectId: input.projectId,
           source: "editor-session",
@@ -1400,10 +1503,30 @@ else {
         }),
       })
       : undefined
-    removeAudioHostLossListener = audioHostSupervisor?.onLoss(() => {
+    const handleSuspend = () => {
+      if (finishingQuit || (audioLifecycle.state === "suspended" && audioRecoveryGeneration === undefined)) return
+      audioRecoveryGeneration = undefined
+      audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
+      publishAudioLifecycle()
+      audioSuspendPromise = Promise.allSettled([
+        audioHostSupervisor?.suspend(),
+        nativeVst3EditorSessionManager?.suspendAll(),
+      ]).then(() => undefined)
+    }
+    const handleResume = () => {
+      if (finishingQuit || audioLifecycle.state !== "suspended") return
+      audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
+      const recoveryGeneration = audioLifecycle.powerGeneration
+      recoverAudioHost(recoveryGeneration)
+    }
+    powerMonitor.on("suspend", handleSuspend)
+    powerMonitor.on("resume", handleResume)
+    removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
       activeEditorProjectBindings.clear()
       const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) target.send("daw:audio-host:loss")
+      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
+        target.send("daw:audio-host:loss", sanitizeNativeVst3DiagnosticError(error))
+      }
     })
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
       const target = window_?.webContents
@@ -1453,9 +1576,9 @@ else {
       (
         allowsTrustedAudioCapturePermission({
           permission,
-          requestingUrl: webContents.getURL(),
+          requestingUrl: details.requestingUrl,
           mediaTypes: "mediaTypes" in details ? details.mediaTypes : undefined,
-        })
+        }, sameAppOrigin)
       )
       || allowsTrustedMidiPermission({
         permission,
@@ -1463,7 +1586,7 @@ else {
         requestingRendererId: webContents.id,
         requestingUrl: details.requestingUrl,
         isMainFrame: details.isMainFrame,
-      }),
+      }, sameAppOrigin),
     ))
     session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
       (
@@ -1472,7 +1595,7 @@ else {
           permission,
           requestingUrl: requestingOrigin,
           mediaTypes: details.mediaType === "audio" ? ["audio"] : undefined,
-        })
+        }, sameAppOrigin)
       )
       || allowsTrustedMidiPermission({
         permission,
@@ -1480,7 +1603,7 @@ else {
         requestingRendererId: webContents?.id,
         requestingUrl: requestingOrigin,
         isMainFrame: details.isMainFrame,
-      }))
+      }, sameAppOrigin))
     registerIpc()
     await startSocket()
     createWindow()

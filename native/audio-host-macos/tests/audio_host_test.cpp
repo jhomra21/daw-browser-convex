@@ -6,6 +6,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -70,14 +71,17 @@ void AppendBeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
 std::vector<std::uint8_t> GraphSnapshot(
   const std::uint32_t revision,
   const float gain,
-  const std::uint32_t native_node_latency = 0
+  const std::uint32_t native_node_latency = 0,
+  const bool with_utility = false
 ) {
   std::vector<std::uint8_t> payload;
-  AppendLeU32(payload, native_node_latency > 0 ? 4u : DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
+  AppendLeU32(payload, native_node_latency > 0
+    ? DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
+    : DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
   AppendLeU32(payload, revision);
   AppendLeU32(payload, 2);
   AppendLeU32(payload, 1);
-  AppendLeU32(payload, 0);
+  AppendLeU32(payload, with_utility ? 1 : 0);
   AppendLeU32(payload, 0);
   const auto append_node = [&payload, native_node_latency](const std::uint64_t id, const std::uint32_t kind) {
     AppendLeU64(payload, id);
@@ -104,11 +108,110 @@ std::vector<std::uint8_t> GraphSnapshot(
   AppendLeU32(payload, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
+  if (with_utility) {
+    AppendLeU64(payload, 2);
+    AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_UTILITY);
+    AppendLeU32(payload, 1);
+    AppendLeU32(payload, 40);
+    AppendLeU32(payload, 77);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 1);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeU32(payload, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
+    AppendLeU32(payload, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeFloat(payload, 1.0F);
+    AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+  }
   std::vector<std::uint8_t> frame;
   AppendBeU64(frame, revision);
   AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
   frame.insert(frame.end(), payload.begin(), payload.end());
   return frame;
+}
+
+std::vector<std::uint8_t> InstrumentGraphSnapshot(const std::uint32_t revision) {
+  auto frame = GraphSnapshot(revision, 1.0F);
+  WriteLeU32(frame, 44, 2);
+  constexpr std::size_t instrument_offset = 64;
+  WriteLeU32(frame, instrument_offset, DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  WriteLeU32(frame, instrument_offset + 4, 1);
+  WriteLeU32(frame, instrument_offset + 8, 2);
+  WriteLeU32(frame, instrument_offset + 12, 8);
+  const std::array<std::uint32_t, 8> targets{{
+    DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN,
+    DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN,
+    DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ,
+    DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE,
+    DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS,
+    DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS,
+    DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN,
+    DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS,
+  }};
+  for (std::size_t index = 0; index < targets.size(); ++index) {
+    WriteLeU32(frame, instrument_offset + 16 + index * 4, targets[index]);
+  }
+  return frame;
+}
+
+std::vector<std::uint8_t> InstrumentStatePayload(const float output_gain) {
+  daw_audio_synth_state state{
+    .version = 1,
+    .seed = 1,
+    .filter_cutoff_hz = 1000.0F,
+    .filter_resonance = 0.7F,
+    .filter_key_tracking = 0.5F,
+    .filter_sustain = 0.5F,
+    .amp_sustain = 0.5F,
+    .lfo_rate_hz = 1.0F,
+    .output_gain = output_gain,
+  };
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU32(payload, DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  AppendLeU32(payload, sizeof(state));
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  const auto* bytes = reinterpret_cast<const std::uint8_t*>(&state);
+  payload.insert(payload.end(), bytes, bytes + sizeof(state));
+  return payload;
+}
+
+std::vector<std::uint8_t> ProcessorStatePatch(const std::uint32_t revision, const float gain_db) {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, revision);
+  AppendLeU64(payload, 2);
+  AppendLeU32(payload, 77);
+  AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_UTILITY);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 40);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 1);
+  AppendLeFloat(payload, gain_db);
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 1.0F);
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  return payload;
 }
 
 void AppendInstanceId(std::vector<std::uint8_t>& bytes, const std::string_view instance_id) {
@@ -352,7 +455,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x0c,
+    0x00, 0x00, 0x00, 0x0e,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -454,6 +557,45 @@ void TestPausedProcessDoesNotAdvanceTransportFrame() {
 
   assert(host.ProcessPlanar(input, output, 4));
   assert(host.diagnostics().transport_frame == 100);
+  host.Stop();
+}
+
+void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F, 0, true)));
+  assert(host.StartDiagnosticMode());
+  const auto first_patch = ProcessorStatePatch(2, 6.0F);
+  auto timed_out = std::async(std::launch::async, [&host, &first_patch] {
+    return host.QueueProcessorStatePatch(first_patch);
+  });
+  assert(timed_out.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+  assert(!timed_out.get());
+
+  std::array<float, 4> input_left{1.0F, 1.0F, 1.0F, 1.0F};
+  std::array<float, 4> input_right{1.0F, 1.0F, 1.0F, 1.0F};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  assert(output_left[0] > 0.99F && output_left[0] < 1.01F);
+
+  const auto second_patch = ProcessorStatePatch(2, 6.0F);
+  auto applied = std::async(std::launch::async, [&host, &second_patch] {
+    return host.QueueProcessorStatePatch(second_patch);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  assert(host.ProcessPlanar(input, output, 4));
+  assert(applied.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+  assert(applied.get());
+  assert(output_left[0] > 1.99F && output_left[0] < 2.01F);
   host.Stop();
 }
 
@@ -919,6 +1061,37 @@ void TestRollbackSafeGraphRevisionLifecycle() {
   host.Stop();
 }
 
+void TestFallbackPublishesConfiguredInstrumentState() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareGraphRevision(1, InstrumentGraphSnapshot(1)).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.ConfigureInstrumentStates(InstrumentStatePayload(0.5F)));
+  assert(host.PublishGraphRevision(1).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+
+  assert(host.PrepareGraphRevision(2, InstrumentGraphSnapshot(2)).continuity
+    == daw::audio_host_macos::GraphRevisionContinuity::kAccepted);
+  assert(host.ConfigureInstrumentStates(InstrumentStatePayload(0.75F)));
+  assert(host.PublishGraphRevision(2).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  assert(host.RetireGraphRevision(1).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kRetired);
+
+  const auto repeated = host.PrepareGraphRevision(3, InstrumentGraphSnapshot(3));
+  assert(repeated.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(repeated.continuity == daw::audio_host_macos::GraphRevisionContinuity::kAccepted);
+  assert(host.RollbackGraphRevision(3).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kRolledBack);
+  host.Stop();
+}
+
 void TestWorkerNotificationCarriesRevisionIdentity() {
   daw::audio_host_macos::NativeVstAttachment attachment{
     .graph_node_id = 91,
@@ -1009,6 +1182,7 @@ int main() {
   TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
   TestPausedProcessDoesNotAdvanceTransportFrame();
+  TestProcessorStatePatchTimeoutCancelsAndReusesSlot();
   TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();
   TestNativeVstRuntimeControlBounds();
@@ -1021,6 +1195,7 @@ int main() {
   TestRejectedBlockDiagnosticsIdentifyLifecycleRejection();
   TestCoreAudioDeviceLossRoutesBySessionRole();
   TestRollbackSafeGraphRevisionLifecycle();
+  TestFallbackPublishesConfiguredInstrumentState();
   TestWorkerNotificationCarriesRevisionIdentity();
   TestWorkerNotificationQueuePolicy();
   return 0;

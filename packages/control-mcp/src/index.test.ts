@@ -61,7 +61,7 @@ const hostTools: HostToolService = {
     instances: [{
       instanceId: "123e4567-e89b-42d3-a456-426614174000",
       targetId: "track-1",
-      chainIndex: 0,
+      stageIndex: 0,
       identity: { format: "vst3", classId: "class-1", vendor: "Vendor", name: "Plugin", version: "1", architecture: "arm64" },
       role: "effect",
       bypassed: false,
@@ -229,7 +229,7 @@ describe("control MCP tools", () => {
       instances: [{
         instanceId: "123e4567-e89b-42d3-a456-426614174000",
         targetId: "track-1",
-        chainIndex: 0,
+        stageIndex: 0,
         identity: { format: "vst3", classId: "class-1", vendor: "Vendor", name: "Plugin", version: "1", architecture: "arm64" },
         role: "effect",
         bypassed: false,
@@ -247,7 +247,7 @@ describe("control MCP tools", () => {
         instances: [{
           instanceId: "123e4567-e89b-42d3-a456-426614174000",
           targetId: "track-1",
-          chainIndex: 0,
+          stageIndex: 0,
           identity: {
             format: "vst3",
             classId: "class-1",

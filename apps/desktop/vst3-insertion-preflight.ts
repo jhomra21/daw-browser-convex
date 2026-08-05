@@ -54,7 +54,7 @@ export const preflightVst3Insertion = async (input: {
     sampleRateHz: input.sampleRateHz,
     attachment: {
       graphNodeId: 1n,
-      chainIndex: 0,
+      stageIndex: 0,
       instanceId: input.request.instanceId,
       classId: resolved.classId,
       vendorId: resolved.vendorId,

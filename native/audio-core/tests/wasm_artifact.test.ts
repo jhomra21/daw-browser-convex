@@ -547,7 +547,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
 
   expect(manifest).toMatchObject({
     artifactKind: 'production',
-    abiVersion: 1,
+    abiVersion: 2,
     buildType: 'Release',
     lto: true,
     fixedMemory: true,
@@ -636,7 +636,7 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     const block = input + 3 * Float32Array.BYTES_PER_ELEMENT
     const diagnostics = block + 48
     const view = new DataView(exports.memory.buffer)
-    view.setUint32(config, 1, true)
+    view.setUint32(config, 2, true)
     view.setUint32(config + 4, 3, true)
     view.setBigUint64(config + 8, 11n, true)
     view.setUint32(config + 16, 1, true)

@@ -559,12 +559,12 @@ test('rejects unsupported graph features and unresolved schedule targets without
     processor.kind,
     processor.latencyFrames,
     processor.tailFrames,
-    processor.parameterTargets,
   ])).toEqual([
-    ['saturator', 0, 0, []],
-    ['eq', 0, 0, []],
-    ['chorus', 0, 768, []],
+    ['saturator', 0, 0],
+    ['eq', 0, 0],
+    ['chorus', 0, 768],
   ])
+  expect(group?.processorOrder[1]?.parameterTargets).toHaveLength(24)
 
   const closingEvent = portableEffectsInput.schedule.events[6]
   if (!closingEvent) throw new Error('Expected portable session closing event.')

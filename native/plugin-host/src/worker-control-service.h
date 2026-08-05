@@ -61,6 +61,7 @@ struct WorkerSubmission {
   std::uint64_t sequence = 0;
   std::size_t numSamples = 0;
   std::span<const WorkerTransportEvent> events;
+  WorkerBlockContext context{};
 };
 
 struct WorkerCompletion {
@@ -76,7 +77,8 @@ class WorkerCallbackPort {
   [[nodiscard]] bool CopyCompletedOutput(
     std::size_t slotIndex,
     std::uint64_t sequence,
-    std::span<float> output
+    std::span<float> output,
+    std::uint64_t* outputSilenceFlags = nullptr
   ) const noexcept;
   [[nodiscard]] bool CopyInput(
     std::size_t slotIndex,
@@ -84,6 +86,7 @@ class WorkerCallbackPort {
   ) const noexcept;
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence) const noexcept;
   [[nodiscard]] bool PublishDiagnostic(WorkerDiagnostic diagnostic) const noexcept;
+  [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const noexcept;
   [[nodiscard]] WorkerHealth health() const noexcept;
 
  private:
@@ -113,6 +116,7 @@ class WorkerControlService {
   [[nodiscard]] bool SetState(const WorkerState& state);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] WorkerHealth health() const noexcept;
+  [[nodiscard]] std::uint64_t workerGeneration() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   void SetDiagnosticListener(DiagnosticListener listener, void* context) noexcept;
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(
@@ -136,11 +140,13 @@ class WorkerControlService {
   [[nodiscard]] bool CopyCompletionOutputFromCallback(
     std::size_t slotIndex,
     std::uint64_t sequence,
-    std::span<float> output
+    std::span<float> output,
+    std::uint64_t* outputSilenceFlags = nullptr
   ) noexcept;
   [[nodiscard]] bool CopyInputFromCallback(std::size_t slotIndex, std::span<const float> input) noexcept;
   [[nodiscard]] bool DiscardLateFromCallback(std::size_t slotIndex, std::uint64_t sequence) noexcept;
   [[nodiscard]] bool PublishDiagnosticFromCallback(WorkerDiagnostic diagnostic) noexcept;
+  [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadataFromCallback() const noexcept;
   [[nodiscard]] WorkerHealth ReadHealthFromCallback() const noexcept;
   void BridgeCallbackActivity();
   void Run();

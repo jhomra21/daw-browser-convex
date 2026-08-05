@@ -575,7 +575,7 @@ const seedActionFixture = async (includeExternal = true) => {
   if (includeExternal) await setLocalExternalProcessor(project.id, {
     instanceId: externalInstanceId,
     targetId: target,
-    chainIndex: 0,
+    index: 0,
     manifest: {
       identity: {
         format: 'vst3',

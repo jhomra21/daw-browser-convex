@@ -85,7 +85,7 @@ const externalInstanceId = '00000000-0000-4000-8000-000000000001'
 const externalRow = externalProcessorSchema.parse({
   instanceId: externalInstanceId,
   targetId: 'track-1',
-  chainIndex: 0,
+  index: 0,
   manifest: {
     identity: {
       format: 'vst3',

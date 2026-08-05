@@ -256,7 +256,7 @@ export const synthParameterRegistry = [
   { id: 'synth.ampAttackMs', target: 5, minValue: 0, maxValue: 10_000, tombstone: false },
   { id: 'synth.ampDecayMs', target: 6, minValue: 0, maxValue: 10_000, tombstone: false },
   { id: 'synth.ampSustain', target: 7, minValue: 0, maxValue: 1, tombstone: false },
-  { id: 'synth.ampReleaseMs', target: 8, minValue: 0, maxValue: 10_000, tombstone: false },
+  { id: 'synth.ampReleaseMs', target: 8, minValue: 0, maxValue: 60_000, tombstone: false },
   { id: 'synth.reserved', target: 9, minValue: 0, maxValue: 0, tombstone: true },
 ] as const
 
@@ -623,7 +623,7 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
     || !isBoundedFloat(value.ampAttackMs, 0, 10_000)
     || !isBoundedFloat(value.ampDecayMs, 0, 10_000)
     || !isBoundedFloat(value.ampSustain, 0, 1)
-    || !isBoundedFloat(value.ampReleaseMs, 0, 10_000)
+    || !isBoundedFloat(value.ampReleaseMs, 0, 60_000)
     || typeof value.lfoEnabled !== 'boolean'
     || typeof value.lfoWaveform !== 'number' || ![0, 1, 2, 3].includes(value.lfoWaveform)
     || !isBoundedFloat(value.lfoRateHz, 0, 1_000)
@@ -668,6 +668,8 @@ export type AudioCoreGraphProcessorDto = {
   parameterTargets: readonly AudioCoreProcessorParameterTarget[]
   latencyFrames: number
   tailFrames: number
+  /** Explicit continuation semantics; omitted means the legacy finite form. */
+  tailKind?: 'finite' | 'unbounded'
   bypassed: boolean
 }
 
@@ -678,7 +680,7 @@ export type AudioCoreProcessorParameterTarget = {
 
 export const audioCoreMaxProcessorsPerNode = 8
 export const audioCoreMaxProcessorStateBytes = 256
-export const audioCoreMaxProcessorParameterTargets = 16
+export const audioCoreMaxProcessorParameterTargets = 24
 export const audioCoreProcessorStateEnvelopeBytes = 40
 
 export type AudioCoreProcessorStateEnvelope = {
@@ -1159,7 +1161,7 @@ export const parseUtilityProcessorContract = (value: unknown): UtilityProcessorC
 }
 
 export const isAudioCoreGraphProcessor = (value: unknown): value is AudioCoreGraphProcessorDto => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'kind', 'kindId', 'instanceId', 'stateVersion', 'state', 'parameterTargets', 'latencyFrames', 'tailFrames', 'bypassed'])) return false
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'kind', 'kindId', 'instanceId', 'stateVersion', 'state', 'parameterTargets', 'latencyFrames', 'tailFrames', 'tailKind', 'bypassed'])) return false
   const registryEntry = processorRegistry.find((entry) => entry.name === value.kind && entry.id === value.kindId)
   return typeof value.id === 'string'
     && value.id.length > 0
@@ -1177,7 +1179,9 @@ export const isAudioCoreGraphProcessor = (value: unknown): value is AudioCoreGra
     && value.parameterTargets.length <= audioCoreMaxProcessorParameterTargets
     && value.parameterTargets.every((target) => isRecord(target)
       && typeof target.id === 'string'
-      && registryEntry.parameters.some((parameter) => `${registryEntry.name}.${parameter.id}` === target.id)
+      && (registryEntry.parameters.length === 0
+        ? target.id.startsWith(`${registryEntry.name}.`)
+        : registryEntry.parameters.some((parameter) => `${registryEntry.name}.${parameter.id}` === target.id))
       && isPositiveSafeInteger(target.target))
     && typeof value.latencyFrames === 'number'
     && Number.isSafeInteger(value.latencyFrames)
@@ -1185,6 +1189,7 @@ export const isAudioCoreGraphProcessor = (value: unknown): value is AudioCoreGra
     && typeof value.tailFrames === 'number'
     && Number.isSafeInteger(value.tailFrames)
     && value.tailFrames >= 0
+    && (value.tailKind === undefined || value.tailKind === 'finite' || value.tailKind === 'unbounded')
     && typeof value.bypassed === 'boolean'
 }
 

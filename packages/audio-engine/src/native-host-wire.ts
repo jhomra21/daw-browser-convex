@@ -14,7 +14,7 @@ import {
 } from "@daw-browser/desktop-protocol/native-audio-host"
 
 const graphEnvelopeVersion = 3
-const graphEnvelopeVersionWithExternalLatency = 4
+const graphEnvelopeVersionExternalLatency = 4
 const nativeGraphFrameHeaderBytes = 12
 const maximumNativeAssetId = 0xffff_ffff
 const nativeTextEncoder = new TextEncoder()
@@ -35,6 +35,12 @@ export type NativeHostTransport = {
   epoch: number
   running: boolean
   frame: number
+  bpm?: number
+  timeSignatureNumerator?: number
+  timeSignatureDenominator?: number
+  cycleActive?: boolean
+  cycleStartSec?: number
+  cycleEndSec?: number
   transitionId?: bigint
 }
 
@@ -224,18 +230,58 @@ const processorOutputLayout = (
   return inputLayout
 }
 
+export const nativeProcessorOutputLayoutForState = (
+  processor: AudioCoreGraphSnapshot["nodes"][number]["processorOrder"][number],
+  inputLayout: AudioCoreGraphSnapshot["nodes"][number]["inputLayout"],
+  state: Uint8Array,
+) => processorOutputLayout({ ...processor, state }, inputLayout)
+
+export const nativeProcessorLatencyForState = (
+  processor: AudioCoreGraphSnapshot["nodes"][number]["processorOrder"][number],
+  state: Uint8Array,
+) => processor.kind === "spectral" ? processorStateUint32(state, 4) : processor.latencyFrames
+
+export const nativeProcessorLayoutsForState = (
+  node: AudioCoreGraphSnapshot["nodes"][number],
+  processorId: string,
+  state: Uint8Array,
+) => {
+  let layout = node.inputLayout
+  for (const processor of node.processorOrder) {
+    const input = layout
+    const output = processorOutputLayout({
+      ...processor,
+      state: processor.id === processorId ? state : processor.state,
+    }, input)
+    if (processor.id === processorId) return { input, output }
+    layout = output
+  }
+  return undefined
+}
+
 /**
  * Native control frames deliberately reuse the portable core's byte envelopes.
  * Only portable projections enter this boundary; file paths and Web Audio
  * objects never cross into the native host.
  */
 export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) => {
-  const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
+  const processorLayouts = new Map<number, { input: 'mono' | 'stereo'; output: 'mono' | 'stereo' }>()
+  const processors = snapshot.nodes.flatMap((node) => {
+    let layout = node.inputLayout
+    return node.processorOrder.map((processor) => {
+      const input = layout
+      const output = processorOutputLayout(processor, input)
+      processorLayouts.set(processor.instanceId, { input, output })
+      layout = output
+      return { node, processor }
+    })
+  })
   const hasExternalLatency = snapshot.nodes.some((node) => (
     (node.externalLatencyFrames ?? 0) > 0
   ))
-  const version = hasExternalLatency ? graphEnvelopeVersionWithExternalLatency : graphEnvelopeVersion
-  const nodeBytes = hasExternalLatency ? 136 : 132
+  const hasExtendedNode = hasExternalLatency
+  const version = hasExternalLatency ? graphEnvelopeVersionExternalLatency : graphEnvelopeVersion
+  const nodeBytes = hasExtendedNode ? 136 : 132
   let byteLength = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
   for (const { processor } of processors) byteLength += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
   const output = new Uint8Array(byteLength)
@@ -254,8 +300,8 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
     view.setUint32(offset + 16, node.outputLayout === "mono" ? 1 : 2, true)
     view.setUint32(offset + 20, node.kind === "source" ? sourceBus++ : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
-    const instrumentOffset = hasExternalLatency ? offset + 32 : offset + 28
-    if (hasExternalLatency) {
+    const instrumentOffset = hasExtendedNode ? offset + 32 : offset + 28
+    if (hasExtendedNode) {
       view.setUint32(offset + 28, node.externalLatencyFrames ?? 0, true)
     }
     const instrument = node.kind === "instrument" ? node.instrument : undefined
@@ -284,15 +330,6 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
     view.setUint32(offset + 44, edge.pdcDelayFrames, true)
     offset += 48
   }
-  const processorLayouts = new Map<number, { input: 'mono' | 'stereo'; output: 'mono' | 'stereo' }>()
-  for (const node of snapshot.nodes) {
-    let layout = node.inputLayout
-    for (const processor of node.processorOrder) {
-      const output = processorOutputLayout(processor, layout)
-      processorLayouts.set(processor.instanceId, { input: layout, output })
-      layout = output
-    }
-  }
   for (const { node, processor } of processors) {
     const layout = processorLayouts.get(processor.instanceId)
     if (!layout) throw new Error(`Missing portable layout for processor ${processor.instanceId}.`)
@@ -306,7 +343,7 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
     view.setUint32(offset + 32, layout.output === "mono" ? 1 : 2, true)
     view.setUint32(offset + 36, processor.parameterTargets.length, true)
     view.setUint32(offset + 40, processor.latencyFrames, true)
-    view.setUint32(offset + 44, processor.tailFrames, true)
+    view.setUint32(offset + 44, processor.tailKind === 'unbounded' ? 0xffffffff : processor.tailFrames, true)
     output.set(processor.state, offset + 48)
     offset += 48 + processor.state.byteLength
     for (const target of processor.parameterTargets) {
@@ -327,11 +364,75 @@ export const serializeNativeGraph = (snapshot: AudioCoreGraphSnapshot) => {
   return frame
 }
 
-export const serializeNativeProcessorEvents = (events: readonly PortableWasmProcessorEvent[]) => {
-  const output = new Uint8Array(4 + events.length * 20)
+export type NativeProcessorStatePatch = {
+  graphRevision: number
+  nodeId: string
+  instanceId: number
+  kindId: number
+  stateVersion: number
+  state: Uint8Array
+  bypassed: boolean
+  inputLayout: "mono" | "stereo"
+  outputLayout: "mono" | "stereo"
+  parameterTargets: readonly number[]
+  latencyFrames: number
+  tailFrames: number
+}
+
+export const serializeNativeProcessorStatePatch = (patch: NativeProcessorStatePatch) => {
+  if (
+    !Number.isSafeInteger(patch.graphRevision) || patch.graphRevision <= 0 || patch.graphRevision > 0xffff_ffff
+    || !Number.isSafeInteger(patch.instanceId) || patch.instanceId <= 0 || patch.instanceId > 0xffff_ffff
+    || !Number.isSafeInteger(patch.kindId) || patch.kindId <= 0 || patch.kindId > 0xffff_ffff
+    || !Number.isSafeInteger(patch.stateVersion) || patch.stateVersion <= 0 || patch.stateVersion > 0xffff_ffff
+    || patch.state.byteLength > 256
+    || patch.parameterTargets.length > 24
+    || !patch.parameterTargets.every((target) => Number.isSafeInteger(target) && target > 0 && target <= 0xffff_ffff)
+    || !Number.isSafeInteger(patch.latencyFrames) || patch.latencyFrames < 0 || patch.latencyFrames > 0xffff_ffff
+    || !Number.isSafeInteger(patch.tailFrames) || patch.tailFrames < 0 || patch.tailFrames > 0xffff_ffff
+  ) throw new Error("Native processor state patch is invalid.")
+  const output = new Uint8Array(56 + patch.state.byteLength + patch.parameterTargets.length * 4)
+  const view = new DataView(output.buffer)
+  view.setUint32(0, 1, true)
+  view.setUint32(4, patch.graphRevision, true)
+  view.setBigUint64(8, nativeGraphNodeId(patch.nodeId), true)
+  view.setUint32(16, patch.instanceId, true)
+  view.setUint32(20, patch.kindId, true)
+  view.setUint32(24, patch.stateVersion, true)
+  view.setUint32(28, patch.state.byteLength, true)
+  view.setUint32(32, patch.bypassed ? 1 : 0, true)
+  view.setUint32(36, patch.inputLayout === "mono" ? 1 : 2, true)
+  view.setUint32(40, patch.outputLayout === "mono" ? 1 : 2, true)
+  view.setUint32(44, patch.parameterTargets.length, true)
+  view.setUint32(48, patch.latencyFrames, true)
+  view.setUint32(52, patch.tailFrames, true)
+  output.set(patch.state, 56)
+  patch.parameterTargets.forEach((target, index) => {
+    view.setUint32(56 + patch.state.byteLength + index * 4, target, true)
+  })
+  return output
+}
+
+export type NativeProcessorEventBatch = {
+  revision: number
+  epoch: number
+  sequence: number
+}
+
+export const serializeNativeProcessorEvents = (
+  events: readonly PortableWasmProcessorEvent[],
+  batch?: NativeProcessorEventBatch,
+) => {
+  const headerBytes = batch ? 20 : 4
+  const output = new Uint8Array(headerBytes + events.length * 20)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
-  let offset = 4
+  if (batch) {
+    view.setUint32(4, batch.revision, true)
+    view.setUint32(8, batch.epoch, true)
+    view.setBigUint64(12, BigInt(batch.sequence), true)
+  }
+  let offset = headerBytes
   for (const event of events) {
     view.setBigUint64(offset, BigInt(event.processorInstanceId), true)
     view.setUint32(offset + 8, event.parameterTarget, true)
@@ -447,6 +548,7 @@ export type NativeScheduleProgress = {
   lastAcceptedWindowId: bigint
   appliedTransportTransitionId: bigint
   appliedUrgentSequence: bigint
+  appliedProcessorSequence: bigint
   running: boolean
   scheduleComplete: boolean
   instrumentCredits: number
@@ -577,11 +679,20 @@ export const serializeNativeInstrumentStates = (
     if (sessionAssetId === undefined) throw new Error(`Native instrument asset "${assetId}" is not staged.`)
     return 0x1_0000_0000n | BigInt(sessionAssetId)
   }
-  const encoded = instruments.map(({ nodeId, state }) => ({
-    nodeId,
-    kind: state.kind,
-    state: encodeAudioCoreInstrumentState(state, resolveAssetHandle),
-  }))
+  const encoded = instruments.map(({ nodeId, state }) => {
+    try {
+      return {
+        nodeId,
+        kind: state.kind,
+        state: encodeAudioCoreInstrumentState(state, resolveAssetHandle),
+      }
+    } catch (error) {
+      const detail = state.kind === 'synth'
+        ? `ampReleaseMs=${state.ampReleaseMs}, keys=${Object.keys(state).join(',')}`
+        : `keys=${Object.keys(state).join(',')}`
+      throw new Error(`Invalid native instrument state for node "${nodeId}" (${state.kind}; ${detail}).`, { cause: error })
+    }
+  })
   const byteLength = 4 + encoded.reduce((total, entry) => (
     total + 24 + entry.state.state.byteLength + (entry.state.zones?.byteLength ?? 0)
   ), 0)

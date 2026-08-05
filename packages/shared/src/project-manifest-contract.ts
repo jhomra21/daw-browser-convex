@@ -57,10 +57,11 @@ export type ProjectManifest = {
   externalPluginArtifacts: ProjectManifestPluginArtifact[];
 };
 
-export const PROJECT_MANIFEST_SCHEMA_VERSION = 3;
+export const PROJECT_MANIFEST_SCHEMA_VERSION = 4;
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
   1,
   2,
+  3,
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
@@ -254,7 +255,7 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
     assets,
     projectState: readArray(raw.projectState, "projectState").map(readProjectStateRow),
     syncState: readArray(raw.syncState, "syncState").map(readSyncStateRow),
-    externalPluginArtifacts: schemaVersion === 3
+    externalPluginArtifacts: schemaVersion >= 3
       ? readArray(raw.externalPluginArtifacts, "externalPluginArtifacts").map(readPluginArtifact)
       : [],
   };

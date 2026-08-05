@@ -193,6 +193,8 @@ export async function createOfflineMixerNodes(
       const channelId = channel.channelId
       const source = trackNodes.get(channelId)
       assert(source, `Missing offline mixer source for track ${channelId}`)
+      const resolvedTrack = graph.channels.find((entry) => entry.channel.id === channelId)
+      assert(resolvedTrack, `Missing resolved mixer source for track ${channelId}`)
       source.gain.gain.value = channel.gain
       source.output.gain.value = channel.outputGain
       const targetNodes = channel.outputTargetId

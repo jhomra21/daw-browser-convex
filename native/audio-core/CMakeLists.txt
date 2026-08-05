@@ -49,7 +49,9 @@ if(DAW_AUDIO_CORE_BUILD_WASM OR DAW_AUDIO_CORE_BUILD_WASM_HARNESS)
     _daw_audio_core_wasm_graph_initialize
     _daw_audio_core_wasm_graph_initialize_planar
     _daw_audio_core_wasm_graph_prepare
+    _daw_audio_core_wasm_graph_prepared_continuity
     _daw_audio_core_wasm_graph_publish
+    _daw_audio_core_wasm_graph_cancel
     _daw_audio_core_wasm_graph_process
     _daw_audio_core_wasm_graph_process_planar
     _daw_audio_core_wasm_graph_set_transport

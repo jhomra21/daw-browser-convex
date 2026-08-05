@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
 import {
   isExternalEditorInteractiveElement,
   isExternalEditorInteractiveTarget,
@@ -47,4 +48,14 @@ test('recognizes interactive editor card targets', () => {
   expect(isExternalEditorInteractiveElement({ tagName: "SPAN" })).toBe(false)
   expect(isExternalEditorInteractiveElement({ tagName: "DIV", role: "button" })).toBe(true)
   expect(isExternalEditorInteractiveTarget(null)).toBe(false)
+})
+
+test('consumes an auto-open request only after issuing editor IPC', async () => {
+  const source = await readFile(new URL('./external-plugin-card.tsx', import.meta.url), 'utf8')
+  const autoOpenStart = source.indexOf('setAutoOpenStarted(true);')
+  const handled = source.indexOf('props.onAutoOpenHandled?.', autoOpenStart)
+  const editorOpen = source.indexOf('void editor("open")', autoOpenStart)
+
+  expect(autoOpenStart).toBeGreaterThanOrEqual(0)
+  expect(handled).toBeGreaterThan(editorOpen)
 })

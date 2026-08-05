@@ -374,13 +374,13 @@ export const createAttachedHostController = (input: {
           const instances = [...processors]
             .sort((left, right) => (
               compareText(left.targetId, right.targetId)
-              || left.chainIndex - right.chainIndex
+              || left.index - right.index
               || compareText(left.instanceId, right.instanceId)
             ))
             .map((processor) => ({
               instanceId: processor.instanceId,
               targetId: processor.targetId,
-              chainIndex: processor.chainIndex,
+              stageIndex: processor.index,
               identity: {
                 format: processor.manifest.identity.format,
                 classId: processor.manifest.identity.classId,

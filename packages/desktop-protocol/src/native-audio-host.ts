@@ -1,10 +1,11 @@
 export const nativeAudioHostMagic = 0x44415748
-export const nativeAudioHostProtocolVersion = 12
+export const nativeAudioHostProtocolVersion = 14
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
 export const nativeAudioHostMaximumSpectrumPayloadBytes = 8_192
+export const nativeAudioHostMaximumProcessorStatePatchBytes = 512
 
 export const nativeAudioHostControlTypes = {
   hostHello: 1,
@@ -57,6 +58,7 @@ export const nativeAudioHostControlTypes = {
   instrumentStates: 48,
   spectrumSelection: 49,
   spectrumFrame: 50,
+  processorStatePatch: 51,
 } as const
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096
@@ -71,4 +73,4 @@ export const nativeAudioHostMaximumScheduleRecords = 2_048
 export const nativeAudioHostMaximumScheduleAutomationSegments = 2_048
 export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
 export const nativeAudioHostScheduleWindowHeaderBytes = 56
-export const nativeAudioHostScheduleProgressBytes = 72
+export const nativeAudioHostScheduleProgressBytes = 80

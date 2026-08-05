@@ -117,7 +117,7 @@ export const registrationRateHeaders = (count: number, windowStart: number) => (
   "RateLimit-Reset": String(windowStart + DCR_WINDOW_SECONDS),
 });
 
-const formData = async (request: Request) => {
+const formData = async (request: Pick<Request, "headers" | "text">) => {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.startsWith("application/x-www-form-urlencoded")) return null;
   return new URLSearchParams(await request.text());

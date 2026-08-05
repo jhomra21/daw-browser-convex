@@ -120,13 +120,15 @@ std::vector<std::uint8_t> Attachment() {
   AppendString(payload, "/private/catalog/Example.vst3");
   AppendString(payload, "/private/catalog/Example.vst3/Contents/MacOS/Example");
   AppendU32(payload, 0);
+  AppendU32(payload, 0);
   AppendU64(payload, 17);
   payload.push_back(1);
   payload.insert(payload.end(), 32, 1);
   payload.insert(payload.end(), 32, 2);
   AppendU32(payload, 2);
-  payload.insert(payload.end(), {1, 2, 2, 1});
+  payload.insert(payload.end(), {1, 2, 2, 1, 1});
   AppendU32(payload, 32);
+  AppendU32(payload, 0xffff'ffffU);
   AppendU32(payload, 4);
   AppendU32(payload, 2);
   AppendU32(payload, 4);

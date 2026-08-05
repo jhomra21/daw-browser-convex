@@ -1,4 +1,5 @@
 const GRAPH_ENVELOPE_VERSION = 3
+const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
 
 const graphNodeKind = (kind) => kind === 'source' ? 1 : kind === 'instrument' ? 2 : kind === 'master' ? 6 : 3
 const instrumentKind = (kind) => kind === 'synth' ? 1 : kind === 'sampler' ? 2 : kind === 'drum-rack' ? 3 : kind === 'granular' ? 4 : 0
@@ -31,12 +32,15 @@ const processorOutputLayout = (processor, inputLayout) => {
 }
 
 export const graphEnvelope = (snapshot) => {
+  const hasExternalLatency = snapshot.nodes.some((node) => (node.externalLatencyFrames || 0) > 0)
+  const hasExtendedNode = hasExternalLatency
+  const nodeBytes = hasExtendedNode ? 136 : 132
   const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
-  let bytes = 24 + snapshot.nodes.length * 132 + snapshot.edges.length * 48
+  let bytes = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
   for (const { processor } of processors) bytes += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
   const output = new Uint8Array(bytes)
   const view = new DataView(output.buffer)
-  view.setUint32(0, GRAPH_ENVELOPE_VERSION, true)
+  view.setUint32(0, hasExternalLatency ? GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY : GRAPH_ENVELOPE_VERSION, true)
   view.setUint32(4, snapshot.revision, true)
   view.setUint32(8, snapshot.nodes.length, true)
   view.setUint32(12, snapshot.edges.length, true)
@@ -50,21 +54,24 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 16, node.outputLayout === 'mono' ? 1 : 2, true)
     view.setUint32(offset + 20, node.kind === 'source' ? sourceBus++ : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
+    if (hasExtendedNode) view.setUint32(offset + 28, node.externalLatencyFrames || 0, true)
     const instrument = node.kind === 'instrument' ? node.instrument : null
-    view.setUint32(offset + 28, instrument ? instrumentKind(instrument.kind) : 0, true)
-    view.setUint32(offset + 32, instrument ? instrument.version : 0, true)
-    view.setUint32(offset + 36, instrument ? instrument.voiceCapacity : 0, true)
-    view.setUint32(offset + 40, instrument && instrument.kind === 'synth' ? instrument.parameterTargets.length : 0, true)
+    const instrumentOffset = hasExtendedNode ? offset + 32 : offset + 28
+    view.setUint32(instrumentOffset, instrument ? instrumentKind(instrument.kind) : 0, true)
+    view.setUint32(instrumentOffset + 4, instrument ? instrument.version : 0, true)
+    view.setUint32(instrumentOffset + 8, instrument ? instrument.voiceCapacity : 0, true)
+    view.setUint32(instrumentOffset + 12, instrument && instrument.kind === 'synth' ? instrument.parameterTargets.length : 0, true)
     for (let target = 0; target < 16; target += 1) {
-      view.setUint32(offset + 44 + target * 4, instrument && instrument.kind === 'synth' && target < instrument.parameterTargets.length ? instrument.parameterTargets[target].target : 0, true)
+      view.setUint32(instrumentOffset + 16 + target * 4, instrument && instrument.kind === 'synth' && target < instrument.parameterTargets.length ? instrument.parameterTargets[target].target : 0, true)
     }
     const mixer = node.mixer
-    view.setBigUint64(offset + 108, BigInt(mixer ? mixer.instanceId : 0), true)
-    view.setFloat32(offset + 116, mixer ? mixer.gain : 0, true)
-    view.setFloat32(offset + 120, mixer ? mixer.pan : 0, true)
-    view.setUint32(offset + 124, mixer && mixer.muted ? 1 : 0, true)
-    view.setUint32(offset + 128, mixer && mixer.soloed ? 1 : 0, true)
-    offset += 132
+    const mixerOffset = instrumentOffset + 80
+    view.setBigUint64(mixerOffset, BigInt(mixer ? mixer.instanceId : 0), true)
+    view.setFloat32(mixerOffset + 8, mixer ? mixer.gain : 0, true)
+    view.setFloat32(mixerOffset + 12, mixer ? mixer.pan : 0, true)
+    view.setUint32(mixerOffset + 16, mixer && mixer.muted ? 1 : 0, true)
+    view.setUint32(mixerOffset + 20, mixer && mixer.soloed ? 1 : 0, true)
+    offset += nodeBytes
   }
   for (const edge of snapshot.edges) {
     writeId(view, offset, edge.id)
@@ -98,7 +105,7 @@ export const graphEnvelope = (snapshot) => {
     view.setUint32(offset + 32, layout.output === 'mono' ? 1 : 2, true)
     view.setUint32(offset + 36, processor.parameterTargets.length, true)
     view.setUint32(offset + 40, processor.latencyFrames, true)
-    view.setUint32(offset + 44, processor.tailFrames, true)
+    view.setUint32(offset + 44, processor.tailKind === 'unbounded' ? 0xffffffff : processor.tailFrames, true)
     output.set(processor.state, offset + 48)
     offset += 48 + processor.state.byteLength
     for (const target of processor.parameterTargets) {

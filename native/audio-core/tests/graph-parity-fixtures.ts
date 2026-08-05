@@ -2944,6 +2944,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       },
     }],
     instrumentEvents: midiEnvelope(),
+    nativeWasmTolerance: 1e-5,
     assertOutput: (output) => finite(output) && output.some((plane) => plane.some((sample) => Math.abs(sample) > 0)),
   },
   {

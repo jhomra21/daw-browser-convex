@@ -29,10 +29,12 @@
     "./portable-export-snapshot": "./src/portable-export-snapshot.ts",
     "./portable-session-compiler": "./src/portable-session-compiler.ts",
     "./portable-stretch-preparation": "./src/portable-stretch-preparation.ts",
+    "./effects/timing": "./src/effects/timing.ts",
     "./portable-export-worker": "./src/portable-export-worker.ts",
     "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",
     "./wasm-audio-worklet-backend": "./src/backends/wasm-audio-worklet-backend.ts",
-    "./mixer/graph-contract": "./src/mixer/graph-contract.ts"
+    "./mixer/graph-contract": "./src/mixer/graph-contract.ts",
+    "./mixer/resolve-graph-processor": "./src/mixer/resolve-graph-processor.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"

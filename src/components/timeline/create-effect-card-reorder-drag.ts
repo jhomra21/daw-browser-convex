@@ -1,16 +1,16 @@
 import type { AudioEffectInstance } from "@daw-browser/shared";
 import { onCleanup } from "solid-js";
 
-type EffectCardReorderDragOptions = {
-  effect: AudioEffectInstance;
-  orderedEffects: () => AudioEffectInstance[];
+type EffectCardReorderDragOptions<T extends { id: string }> = {
+  effect: T;
+  orderedEffects: () => T[];
   canWrite: () => boolean;
-  onReorder: (effect: AudioEffectInstance, targetIndex: number) => void;
-  onPreviewChange: (preview: EffectCardReorderPreview | undefined) => void;
+  onReorder: (effect: T, targetIndex: number) => void;
+  onPreviewChange: (preview: EffectCardReorderPreview<T> | undefined) => void;
 };
 
-export type EffectCardReorderPreview = {
-  effect: AudioEffectInstance;
+export type EffectCardReorderPreview<T extends { id: string }> = {
+  effect: T;
   indicatorX: number;
   top: number;
   height: number;
@@ -28,7 +28,7 @@ const shouldStartReorderDrag = (event: PointerEvent) => {
   return !event.target.closest('button,input,select,textarea,[role="slider"],[contenteditable="true"]');
 };
 
-export function createEffectCardReorderDrag(options: EffectCardReorderDragOptions) {
+export function createEffectCardReorderDrag<T extends { id: string }>(options: EffectCardReorderDragOptions<T>) {
   let cardRects: Array<{ left: number; right: number; centerX: number }> = [];
   let chainRect: { top: number; height: number } | undefined;
   let sourceLeft = 0;

@@ -267,7 +267,6 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
   daw_audio_core_result result = daw_audio_core_wasm_graph_initialize_planar(
     sample_rate_hz, max_frames, input_bus_count == 0 ? 1 : input_bus_count, channel_count, DAW_AUDIO_GRAPH_FIXTURE_MAX_ASSETS);
   if (result == DAW_AUDIO_CORE_OK) result = daw_audio_core_wasm_graph_prepare(graph, graph_bytes);
-  if (result == DAW_AUDIO_CORE_OK) result = daw_audio_core_wasm_graph_publish(graph_revision);
   std::array<FixtureAsset, DAW_AUDIO_GRAPH_FIXTURE_MAX_ASSETS> asset_storage{};
   if (result == DAW_AUDIO_CORE_OK && asset_bytes != 0
     && !decode_assets(assets, asset_bytes, &asset_storage)) {
@@ -277,6 +276,7 @@ extern "C" daw_audio_core_result daw_audio_core_run_graph_fixture(
     && !decode_instrument_states(instrument_states, instrument_state_bytes)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
+  if (result == DAW_AUDIO_CORE_OK) result = daw_audio_core_wasm_graph_publish(graph_revision);
   uint32_t frame_offset = 0;
   for (uint32_t partition = 0; result == DAW_AUDIO_CORE_OK && partition < partition_count; ++partition) {
     const uint32_t partition_frames = partitions[partition];

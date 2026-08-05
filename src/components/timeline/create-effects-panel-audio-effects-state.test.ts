@@ -268,7 +268,7 @@ describe("effects panel instance engine synchronization", () => {
   test("projects draft edits, all-target insertions, reorders, and removals into export rows", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
-      const { device } = createDevice(engine, { projectId: "project:effects-export-projection" });
+      const { device } = createDevice(engine, { projectId: `project:effects-export-projection-${crypto.randomUUID()}` });
 
       const delayAdd = device.addByKindToTarget("track-1", "delay");
       expect(device.snapshotExportRows(["track-1"])).toEqual([

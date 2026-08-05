@@ -7,7 +7,11 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
 import type { DesktopPluginCatalogEntry } from "~/lib/desktop/attached-host-controller"
-import { appendLocalExternalProcessor } from "~/lib/external-plugins"
+import {
+  appendLocalExternalProcessor,
+  LocalExternalProcessorPersistenceError,
+  type LocalExternalProcessorPersistenceCode,
+} from "~/lib/external-plugins"
 
 export type NativeVst3CatalogSelection = {
   entry: DesktopPluginCatalogEntry
@@ -27,6 +31,12 @@ type NativeVst3TargetTrack = Pick<
   "id" | "kind" | "channelRole" | "groupId" | "outputTargetId" | "sends"
 >
 type NativeVst3InsertionUnavailable = Extract<NativeVst3InsertionAvailability, { enabled: false }>
+
+const persistenceFailureMessage = (code: LocalExternalProcessorPersistenceCode): string => {
+  if (code === "target-not-found") return "the selected track was not found"
+  if (code === "corrupt-row") return "an existing external plugin row is corrupt or incompatible"
+  return "the local project write failed"
+}
 
 const unavailable = (
   code: NativeVst3InsertionFailureCode,
@@ -120,45 +130,57 @@ export const insertNativeVst3Effect = async (input: {
     return { ok: false, code: "project-unavailable", message: "The selected project or track changed during VST3 preflight." }
   }
   const updatedAt = (input.now ?? Date.now)()
-  const processor = await (input.persist ?? appendLocalExternalProcessor)(input.projectId, {
-    instanceId,
-    targetId: input.targetId,
-    manifest: {
-      identity: {
-        format: "vst3",
-        classId: input.selection.pluginClass.classId,
-        vendor: input.selection.pluginClass.vendor,
-        name: input.selection.pluginClass.name,
-        version: input.selection.pluginClass.version,
-        architecture: catalogReference.architecture,
-        binaryFingerprint: catalogReference.binaryFingerprint,
+  let processor: ExternalProcessor
+  try {
+    processor = await (input.persist ?? appendLocalExternalProcessor)(input.projectId, {
+      instanceId,
+      targetId: input.targetId,
+      manifest: {
+        identity: {
+          format: "vst3",
+          classId: input.selection.pluginClass.classId,
+          vendor: input.selection.pluginClass.vendor,
+          name: input.selection.pluginClass.name,
+          version: input.selection.pluginClass.version,
+          architecture: catalogReference.architecture,
+          binaryFingerprint: catalogReference.binaryFingerprint,
+        },
+        role: preflight.manifest.role,
+        audioInputs: preflight.manifest.inputBuses,
+        audioOutputs: preflight.manifest.outputBuses,
+        sidechainInputs: [],
+        parameters: preflight.manifest.parameters,
+        latencyFrames: preflight.manifest.latencyFrames,
+        tailFrames: preflight.manifest.tailFrames,
+        supportsBypass: preflight.manifest.supportsBypass,
+        supportsEditor: preflight.manifest.supportsEditor,
+        supportsState: preflight.manifest.supportsState,
       },
-      role: preflight.manifest.role,
-      audioInputs: preflight.manifest.inputBuses,
-      audioOutputs: preflight.manifest.outputBuses,
-      sidechainInputs: [],
-      parameters: preflight.manifest.parameters,
+      parameterOverrides: {},
       latencyFrames: preflight.manifest.latencyFrames,
       tailFrames: preflight.manifest.tailFrames,
-      supportsBypass: preflight.manifest.supportsBypass,
-      supportsEditor: preflight.manifest.supportsEditor,
-      supportsState: preflight.manifest.supportsState,
-    },
-    parameterOverrides: {},
-    latencyFrames: preflight.manifest.latencyFrames,
-    tailFrames: preflight.manifest.tailFrames,
-    bypassed: false,
-    launchReference: {
-      ...catalogReference,
-      classId: input.selection.pluginClass.classId,
-      vendorId: input.selection.pluginClass.vendor,
-    },
-    health: {
-      state: "ready",
-      reason: "Native VST3 preflight passed; playback uses the native graph on compatible directly routed stereo tracks, including synth MIDI tracks.",
+      bypassed: false,
+      launchReference: {
+        ...catalogReference,
+        classId: input.selection.pluginClass.classId,
+        vendorId: input.selection.pluginClass.vendor,
+      },
+      health: {
+        state: "ready",
+        reason: "Native VST3 preflight passed; playback uses the native graph on compatible directly routed stereo tracks, including synth MIDI tracks.",
+        updatedAt,
+      },
       updatedAt,
-    },
-    updatedAt,
-  })
+    })
+  } catch (error) {
+    const persistence = error instanceof LocalExternalProcessorPersistenceError
+      ? error
+      : new LocalExternalProcessorPersistenceError("write-failed", "Local project write failed.")
+    return {
+      ok: false,
+      code: "project-unavailable",
+      message: `Native VST3 passed preflight but local persistence failed (${persistence.code}): ${persistenceFailureMessage(persistence.code)}.`,
+    }
+  }
   return { ok: true, processor }
 }

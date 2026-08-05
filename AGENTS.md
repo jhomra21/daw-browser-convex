@@ -1,6 +1,7 @@
-This is a browser/chrome based DAW (Digital Audio Workstation), like Ableton but all in browser. Local first with a cloud/shared project model using convex to power sharing and realtime collaboration. Mediabunny for exporting, reading/writing/decoding/encoding files. Web Audio API for audio engine and dsp processing.
+This is a DAW (Digital Audio Workstation), like Ableton but with a portable core to enable some browser usage, except for VST and other native features. Local first with a cloud/shared project model using convex to power sharing and realtime collaboration. Mediabunny for exporting, reading/writing/decoding/encoding files. Web Audio API for audio engine and dsp processing.
 Web Audio API Docs:
 https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API#web_audio_api_target_audience
+Always follow Ableton UX/UI patterns
 
 ## Philosophy
 Do not make baseless or empty assumptions. Never say if this works like 'x' or 'y'. Always read source code or up to date docs.

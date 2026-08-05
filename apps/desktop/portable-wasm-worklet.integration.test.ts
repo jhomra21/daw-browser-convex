@@ -15,6 +15,9 @@ type WorkletDiagnostics = {
   framesProcessed: number
   maximumAbsoluteSample: number
   maximumAbsoluteSampleAfterDisconnect: number
+  maximumAbsoluteLiveBefore: number
+  maximumAbsoluteLiveAfter: number
+  maximumAbsoluteSynthTailSample: number
   memoryBytes: number
   graphPrepare: {
     byteLength: number
@@ -34,6 +37,9 @@ const isWorkletDiagnostics = (value: unknown): value is WorkletDiagnostics =>
   && "framesProcessed" in value && typeof value.framesProcessed === "number"
   && "maximumAbsoluteSample" in value && typeof value.maximumAbsoluteSample === "number"
   && "maximumAbsoluteSampleAfterDisconnect" in value && typeof value.maximumAbsoluteSampleAfterDisconnect === "number"
+  && "maximumAbsoluteLiveBefore" in value && typeof value.maximumAbsoluteLiveBefore === "number"
+  && "maximumAbsoluteLiveAfter" in value && typeof value.maximumAbsoluteLiveAfter === "number"
+  && "maximumAbsoluteSynthTailSample" in value && typeof value.maximumAbsoluteSynthTailSample === "number"
   && "memoryBytes" in value && typeof value.memoryBytes === "number"
   && "graphPrepare" in value
 
@@ -49,12 +55,16 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
     await mkdir(path.join(fixtureRoot, "audio-worklets"), { recursive: true })
     await mkdir(path.join(fixtureRoot, "audio-core"), { recursive: true })
     await copyFile(
-      path.join(repositoryRoot, "public/audio-worklets/daw-portable-audio-core-processor-v1.js"),
-      path.join(fixtureRoot, "audio-worklets/daw-portable-audio-core-processor-v1.js"),
+      path.join(repositoryRoot, "public/audio-worklets/daw-portable-audio-core-processor-v2.js"),
+      path.join(fixtureRoot, "audio-worklets/daw-portable-audio-core-processor-v2.js"),
     )
     await copyFile(
-      path.join(repositoryRoot, "public/audio-worklets/daw-portable-audio-core-host-v1.js"),
-      path.join(fixtureRoot, "audio-worklets/daw-portable-audio-core-host-v1.js"),
+      path.join(repositoryRoot, "public/audio-worklets/daw-portable-audio-core-host-v2.js"),
+      path.join(fixtureRoot, "audio-worklets/daw-portable-audio-core-host-v2.js"),
+    )
+    await copyFile(
+      path.join(repositoryRoot, "public/audio-worklets/daw-portable-graph-envelope-v3.js"),
+      path.join(fixtureRoot, "audio-worklets/daw-portable-graph-envelope-v3.js"),
     )
     await copyFile(
       path.join(desktopDirectory, "portable-wasm-worklet-fixture.mjs"),
@@ -81,6 +91,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
     expect(output.framesProcessed).toBeGreaterThanOrEqual(130)
     expect(output.maximumAbsoluteSample).toBeCloseTo(0.25, 4)
     expect(output.maximumAbsoluteSampleAfterDisconnect).toBeLessThan(0.0001)
+    expect(output.maximumAbsoluteSynthTailSample).toBeGreaterThan(0.0001)
     expect(output.memoryBytes).toBe(184_549_376)
     expect(output.graphPrepare).toEqual({
       byteLength: 336,

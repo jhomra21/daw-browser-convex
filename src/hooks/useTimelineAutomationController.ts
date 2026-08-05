@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
@@ -55,6 +56,10 @@ type TimelineAutomationControllerOptions = {
     params?: unknown;
   }> | undefined>;
   audioEngine: AudioEngine;
+  reenableProcessorAutomation?: (
+    instanceId: string,
+    parameterIds: readonly string[],
+  ) => Promise<LiveProcessorControlResult>;
   isPlaying: Accessor<boolean>;
   playheadSec: Accessor<number>;
   selectedTrackId: Accessor<Track["id"] | "">;
@@ -283,10 +288,29 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       return next;
     });
   };
-  const reEnableAutomation = () => {
+  const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
     if (current.size === 0) return;
     const reEnabledTargetKeys = new Set(current);
+    const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
+    const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
+    for (const envelope of envelopes) {
+      if (!envelope.target.effectInstanceId) continue;
+      const key = envelope.target.effectInstanceId;
+      const entry = byProcessor.get(key) ?? { instanceId: key, parameterIds: [] };
+      if (!entry.parameterIds.includes(envelope.parameterId)) entry.parameterIds.push(envelope.parameterId);
+      byProcessor.set(key, entry);
+    }
+    const reenableProcessorAutomation = options.reenableProcessorAutomation;
+    if (reenableProcessorAutomation) {
+      const results = await Promise.all(
+        [...byProcessor.values()].map((processor) => (
+          reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
+        )),
+      );
+      const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
+      if (playbackControlAttempted && results.some((result) => !result.accepted)) return;
+    }
     const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
     setOverriddenAutomationTargetKeys(next);
     options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
@@ -295,7 +319,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     else options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
   };
   onMount(() => {
-    const releasePointerAutomation = () => reEnableAutomation();
+    const releasePointerAutomation = () => {
+      void reEnableAutomation();
+    };
     window.addEventListener("pointerup", releasePointerAutomation);
     window.addEventListener("pointercancel", releasePointerAutomation);
     onCleanup(() => {
@@ -473,7 +499,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
             targetId: processor.targetId,
             kind: "external",
             instanceId: processor.instanceId,
-            index: processor.chainIndex,
+            index: processor.index,
             external: {
               name: processor.manifest.identity.name,
               parameters: processor.manifest.parameters

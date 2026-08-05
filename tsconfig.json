@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
     "types": ["vite/client", "vite-plugin-pwa/client", "bun"],
     "paths": {
       "~/*": ["./src/*"],

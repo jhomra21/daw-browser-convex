@@ -220,7 +220,7 @@ describe("desktop protocol v1", () => {
       instances: [{
         instanceId: "123e4567-e89b-42d3-a456-426614174000",
         targetId: "track-1",
-        chainIndex: 0,
+        stageIndex: 0,
         identity: {
           format: "vst3",
           classId: "class-1",
@@ -246,7 +246,7 @@ describe("desktop protocol v1", () => {
       instances: [{
         instanceId: "123e4567-e89b-42d3-a456-426614174000",
         targetId: "track-1",
-        chainIndex: 0,
+        stageIndex: 0,
         identity: {
           format: "vst3",
           classId: "class-1",

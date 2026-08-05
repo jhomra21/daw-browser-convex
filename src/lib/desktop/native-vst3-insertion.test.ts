@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
+import { LocalExternalProcessorPersistenceError } from "~/lib/external-plugins"
 import {
   insertNativeVst3Effect,
   nativeVst3InsertionAvailability,
@@ -141,7 +142,7 @@ test("preflights and persists an external VST instrument on an instrument track"
     createInstanceId: () => "a7a0b9ac-7884-492c-8b68-80f15802442c",
     persist: async (_projectId, processor) => {
       persistedRole = processor.manifest.role
-      return { ...processor, chainIndex: 0 }
+      return { ...processor, index: 0 }
     },
   })
   expect(result).toMatchObject({ ok: true })
@@ -149,7 +150,7 @@ test("preflights and persists an external VST instrument on an instrument track"
 })
 
 test("persists only path-free identity after successful preflight", async () => {
-  let persisted: Omit<ExternalProcessor, "chainIndex"> | undefined
+  let persisted: Omit<ExternalProcessor, "index"> | undefined
   const result = await insertNativeVst3Effect({
     projectId: "project:00000000-0000-4000-8000-000000000000",
     targetId: "track-1",
@@ -185,7 +186,7 @@ test("persists only path-free identity after successful preflight", async () => 
     createInstanceId: () => "a7a0b9ac-7884-492c-8b68-80f15802442c",
     persist: async (_projectId, processor) => {
       persisted = processor
-      return { ...processor, chainIndex: 0 }
+      return { ...processor, index: 0 }
     },
   })
 
@@ -283,4 +284,74 @@ test("does not persist when the selected project or track changes during preflig
 
   expect(result).toMatchObject({ ok: false, code: "project-unavailable" })
   expect(persistCalls).toBe(0)
+})
+
+test("distinguishes persistence failure after successful native preflight", async () => {
+  const result = await insertNativeVst3Effect({
+    projectId: "project:00000000-0000-4000-8000-000000000000",
+    targetId: "track-1",
+    targetTrack: audioTrack(),
+    selection: selection(),
+    bridge: {
+      preflightInsertion: async () => ({
+        ok: true,
+        manifest: {
+          role: "effect",
+          inputBuses: [{ name: "Input", channels: 2, enabled: true }],
+          outputBuses: [{ name: "Output", channels: 2, enabled: true }],
+          parameters: [],
+          latencyFrames: 0,
+          tailFrames: 0,
+          supportsBypass: false,
+          supportsEditor: false,
+          supportsState: false,
+        },
+      }),
+    },
+    persist: async () => {
+      throw new Error("local project write failed")
+    },
+  })
+  expect(result).toMatchObject({
+    ok: false,
+    code: "project-unavailable",
+    message: "Native VST3 passed preflight but local persistence failed (write-failed): the local project write failed.",
+  })
+})
+
+test("sanitizes local persistence reasons while preserving their safe code", async () => {
+  const result = await insertNativeVst3Effect({
+    projectId: "project:00000000-0000-4000-8000-000000000000",
+    targetId: "track-1",
+    targetTrack: audioTrack(),
+    selection: selection(),
+    bridge: {
+      preflightInsertion: async () => ({
+        ok: true,
+        manifest: {
+          role: "effect",
+          inputBuses: [{ name: "Input", channels: 2, enabled: true }],
+          outputBuses: [{ name: "Output", channels: 2, enabled: true }],
+          parameters: [],
+          latencyFrames: 0,
+          tailFrames: 0,
+          supportsBypass: false,
+          supportsEditor: false,
+          supportsState: false,
+        },
+      }),
+    },
+    persist: async () => {
+      throw new LocalExternalProcessorPersistenceError(
+        "corrupt-row",
+        'External plugin row "external-plugin:private" contains /private/Plugin.vst3.',
+      )
+    },
+  })
+  expect(result).toEqual({
+    ok: false,
+    code: "project-unavailable",
+    message: "Native VST3 passed preflight but local persistence failed (corrupt-row): an existing external plugin row is corrupt or incompatible.",
+  })
+  expect(JSON.stringify(result)).not.toContain("/private/")
 })

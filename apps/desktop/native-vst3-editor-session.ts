@@ -27,6 +27,7 @@ type EditorSessionInput = {
   createSupervisor: () => EditorSessionSupervisor
   coordinate?: typeof coordinateNativeVst3Attachments
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void
+  onEditorOpenState?: (input: { projectId: string; instanceId: string; open: boolean }) => void
   onParameterEdit?: (input: { projectId: string; instanceId: string; parameterId: number; normalizedValue: number }) => void
 }
 
@@ -62,6 +63,7 @@ type EditorSessionEntry = {
   unsubscribeInteraction?: () => void
   projectId?: string
   queue: Promise<void>
+  teardownPromise?: Promise<void>
 }
 
 const initializationCommand = (command: NativeVstEditorCommand) => (
@@ -70,6 +72,7 @@ const initializationCommand = (command: NativeVstEditorCommand) => (
 
 export type NativeVst3EditorSessionManager = {
   execute(input: EditorCommandInput): Promise<NativeVstEditorStatus>
+  suspendAll(): Promise<void>
   teardownAll(): Promise<void>
 }
 
@@ -78,13 +81,17 @@ export const createNativeVst3EditorSessionManager = (
 ): NativeVst3EditorSessionManager => {
   const entries = new Map<string, EditorSessionEntry>()
   let shuttingDown = false
+  let lifecycleGeneration = 0
 
   const teardownEntry = async (entry: EditorSessionEntry) => {
+    if (entry.teardownPromise) return entry.teardownPromise
     const supervisor = entry.supervisor
     entry.unsubscribeInteraction?.()
     entry.unsubscribeInteraction = undefined
     entry.supervisor = undefined
-    await supervisor?.teardown()
+    const teardown = Promise.resolve().then(() => supervisor?.teardown()).then(() => undefined)
+    entry.teardownPromise = teardown
+    await teardown
   }
 
   const initialize = async (
@@ -92,29 +99,31 @@ export const createNativeVst3EditorSessionManager = (
     entry: EditorSessionEntry,
     projectId: string,
     serializedPlan: string,
+    generation: number,
   ) => {
     const supervisor = input.createSupervisor()
     entry.supervisor = supervisor
+    entry.teardownPromise = undefined
     entry.projectId = projectId
-    entry.unsubscribeInteraction = supervisor.onWorkerNotification((notification: NativeWorkerNotification) => {
-      if (notification.kind === "editor-interaction" && notification.instanceId === instanceId) {
-        input.onEditorInteraction?.({ projectId, instanceId })
+    const assertCurrent = () => {
+      if (generation !== lifecycleGeneration || entries.get(instanceId) !== entry || entry.supervisor !== supervisor) {
+        throw new Error("The native VST editor session was suspended.")
       }
-      if (notification.kind === "parameter-edit" && notification.instanceId === instanceId) {
-        input.onParameterEdit?.({
-          projectId,
-          instanceId,
-          parameterId: notification.parameterId,
-          normalizedValue: notification.normalizedValue,
-        })
-      }
-    })
+    }
     let transactionOpen = false
     let transactionToken: string | undefined
+    let resolveWorkerReady: (() => void) | undefined
+    let rejectWorkerReady: ((error: Error) => void) | undefined
+    const workerReady = new Promise<void>((resolve, reject) => {
+      resolveWorkerReady = resolve
+      rejectWorkerReady = reject
+    })
     try {
       transactionToken = await supervisor.beginTransaction()
       transactionOpen = true
+      assertCurrent()
       await supervisor.configure(diagnosticConfiguration, transactionToken)
+      assertCurrent()
       const result = await (input.coordinate ?? coordinateNativeVst3Attachments)({
         serializedPlan,
         sampleRateHz: diagnosticConfiguration.sampleRateHz,
@@ -123,11 +132,39 @@ export const createNativeVst3EditorSessionManager = (
         audioHost: supervisor,
         transactionToken,
       })
+      assertCurrent()
       if (!result.ok) throw new Error(result.message)
       await supervisor.commitTransaction(transactionToken)
       transactionOpen = false
       transactionToken = undefined
+      assertCurrent()
+      entry.unsubscribeInteraction = supervisor.onWorkerNotification((notification: NativeWorkerNotification) => {
+        if (generation !== lifecycleGeneration || entries.get(instanceId) !== entry || entry.supervisor !== supervisor) return
+        if (notification.kind === "buses") {
+          resolveWorkerReady?.()
+        }
+        if (notification.kind === "fault") {
+          rejectWorkerReady?.(new Error("The native VST editor worker failed to start."))
+        }
+        if (notification.instanceId !== instanceId) return
+        if (notification.kind === "editor-interaction") {
+          input.onEditorInteraction?.({ projectId, instanceId })
+        }
+        if (notification.kind === "editor-state") {
+          input.onEditorOpenState?.({ projectId, instanceId, open: notification.value === 1 })
+        }
+        if (notification.kind === "parameter-edit") {
+          input.onParameterEdit?.({
+            projectId,
+            instanceId,
+            parameterId: notification.parameterId,
+            normalizedValue: notification.normalizedValue,
+          })
+        }
+      })
       await supervisor.startDiagnosticAudio()
+      await workerReady
+      assertCurrent()
     } catch (error) {
       if (transactionOpen) {
         try {
@@ -141,10 +178,13 @@ export const createNativeVst3EditorSessionManager = (
     }
   }
 
-  const enqueue = <T>(instanceId: string, operation: (entry: EditorSessionEntry) => Promise<T>) => {
+  const enqueue = <T>(instanceId: string, generation: number, operation: (entry: EditorSessionEntry) => Promise<T>) => {
     const entry = entries.get(instanceId) ?? { queue: Promise.resolve() }
     entries.set(instanceId, entry)
-    const result = entry.queue.then(() => operation(entry))
+    const result = entry.queue.then(() => {
+      if (generation !== lifecycleGeneration) throw new Error("The native VST editor session was suspended.")
+      return operation(entry)
+    })
     const removeClosedEntry = () => {
       if (entries.get(instanceId) === entry && entry.queue === tail && !entry.supervisor) entries.delete(instanceId)
     }
@@ -156,7 +196,8 @@ export const createNativeVst3EditorSessionManager = (
   return {
     execute(inputCommand) {
       if (shuttingDown) return Promise.reject(new Error("The native VST editor session is shutting down."))
-      return enqueue(inputCommand.instanceId, async (entry) => {
+      const generation = lifecycleGeneration
+      return enqueue(inputCommand.instanceId, generation, async (entry) => {
         if (inputCommand.command === "close") {
           let status = closedStatus
           try {
@@ -177,7 +218,7 @@ export const createNativeVst3EditorSessionManager = (
           if (!initializationCommand(inputCommand.command) || inputCommand.serializedPlan === undefined) {
             throw new Error("The native VST editor session is unavailable.")
           }
-          await initialize(inputCommand.instanceId, entry, inputCommand.projectId, inputCommand.serializedPlan)
+          await initialize(inputCommand.instanceId, entry, inputCommand.projectId, inputCommand.serializedPlan, generation)
         }
         if (!entry.supervisor) throw new Error("The native VST editor session is unavailable.")
         try {
@@ -189,14 +230,22 @@ export const createNativeVst3EditorSessionManager = (
         }
       })
     },
+    async suspendAll() {
+      lifecycleGeneration += 1
+      const currentEntries = [...entries.values()]
+      entries.clear()
+      await Promise.all(currentEntries.map(async (entry) => {
+        await Promise.allSettled([entry.queue, teardownEntry(entry)])
+      }))
+    },
     async teardownAll() {
       shuttingDown = true
+      lifecycleGeneration += 1
       const currentEntries = [...entries.entries()]
-      await Promise.all(currentEntries.map(async ([, entry]) => {
-        await entry.queue
-        await teardownEntry(entry)
-      }))
       entries.clear()
+      await Promise.all(currentEntries.map(async ([, entry]) => {
+        await Promise.allSettled([entry.queue, teardownEntry(entry)])
+      }))
     },
   }
 }

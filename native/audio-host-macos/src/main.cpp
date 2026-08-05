@@ -1,4 +1,5 @@
 #include "daw/audio_host_macos.h"
+#include "worker-supervisor.h"
 #include "processor_contract_generated.h"
 
 #include <array>
@@ -66,7 +67,7 @@ bool WriteFrame(const daw::audio_host_macos::ControlType type, std::span<const s
 
 bool WriteScheduleProgress(const daw::audio_host_macos::ScheduleProgress& progress) {
   std::vector<std::uint8_t> payload;
-  payload.reserve(72);
+  payload.reserve(80);
   WriteU32(payload, progress.revision);
   WriteU32(payload, progress.epoch);
   WriteU64(payload, progress.progress_sequence);
@@ -75,6 +76,7 @@ bool WriteScheduleProgress(const daw::audio_host_macos::ScheduleProgress& progre
   WriteU64(payload, progress.last_accepted_window_id);
   WriteU64(payload, progress.applied_transport_transition_id);
   WriteU64(payload, progress.applied_urgent_sequence);
+  WriteU64(payload, progress.applied_processor_sequence);
   WriteU32(payload, (progress.running ? 1U : 0U) | (progress.schedule_complete ? 2U : 0U));
   WriteU32(payload, progress.instrument_credits);
   WriteU32(payload, progress.source_credits);
@@ -102,8 +104,9 @@ bool WriteAck(const daw::audio_host_macos::ControlType request, const bool succe
 
 bool WriteGraphRevisionStatus(const daw::audio_host_macos::GraphRevisionStatus& status) {
   std::vector<std::uint8_t> payload;
-  payload.reserve(28);
+  payload.reserve(32);
   WriteU32(payload, static_cast<std::uint32_t>(status.code));
+  WriteU32(payload, static_cast<std::uint32_t>(status.continuity));
   WriteU32(payload, status.requested_revision);
   WriteU32(payload, status.active_revision);
   WriteU32(payload, status.prepared_revision);
@@ -199,6 +202,13 @@ void WriteFloat(std::vector<std::uint8_t>& payload, const float value) {
 float ReadFloat(const std::uint8_t* bytes) {
   const std::uint32_t bits = ReadU32(bytes);
   float value = 0.0F;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+double ReadDouble(const std::uint8_t* bytes) {
+  const std::uint64_t bits = ReadU64(bytes);
+  double value = 0.0;
   std::memcpy(&value, &bits, sizeof(value));
   return value;
 }
@@ -374,10 +384,14 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   daw::audio_host_macos::NativeVstAttachment attachment{};
   if (!ReadString(payload, offset, attachment.instance_id) || !ReadString(payload, offset, attachment.class_id)
     || !ReadString(payload, offset, attachment.vendor_id) || !ReadPath(payload, offset, attachment.canonical_bundle_path)
-    || !ReadPath(payload, offset, attachment.canonical_executable_path) || offset + 4 + 8 + 1 + 32 + 32 + 4 + 4 + 4 + 4 + 5 * 4 != payload.size()) {
+    || !ReadPath(payload, offset, attachment.canonical_executable_path)) {
     return false;
   }
-  attachment.chain_index = ReadU32(payload.data() + offset);
+  constexpr std::size_t fixed_attachment_bytes = 4 + 4 + 8 + 1 + 32 + 32 + 4 + 5 + 8 * 4;
+  if (payload.size() != offset + fixed_attachment_bytes) return false;
+  attachment.stage_index = ReadU32(payload.data() + offset);
+  offset += 4;
+  attachment.source_index = ReadU32(payload.data() + offset);
   offset += 4;
   attachment.graph_node_id = ReadU64(payload.data() + offset);
   offset += 8;
@@ -392,12 +406,20 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   const std::uint8_t input_layout = payload[offset++];
   const std::uint8_t output_layout = payload[offset++];
   const std::uint8_t playback_enabled = payload[offset++];
+  const std::uint8_t render_enabled = payload[offset++];
   if (playback_enabled > 1) return false;
+  if (render_enabled > 1) return false;
+  attachment.playback_enabled = playback_enabled != 0;
+  attachment.render_enabled = render_enabled != 0;
   attachment.role = static_cast<daw::audio_host_macos::NativeVstRole>(role);
   attachment.input_layout = input_layout;
   attachment.output_layout = output_layout;
   attachment.declared_latency_frames = ReadU32(payload.data() + offset);
   offset += 4;
+  const auto declared_tail_frames = ReadU32(payload.data() + offset);
+  offset += 4;
+  attachment.infinite_tail = daw::plugin_host::IsInfiniteTailFrames(declared_tail_frames);
+  if (!attachment.infinite_tail) attachment.declared_tail_frames = declared_tail_frames;
   attachment.transport_latency_frames = ReadU32(payload.data() + offset);
   offset += 4;
   attachment.playback_enabled = playback_enabled == 1;
@@ -699,17 +721,26 @@ int main() {
         accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));
         break;
       case daw::audio_host_macos::ControlType::kTransport:
-        accepted = control_session && payload.size() == 24 && (payload[4] == 0 || payload[4] == 1)
-          && payload[5] == 0 && payload[6] == 0 && payload[7] == 0
-          && control_session->SetTransport(
-            ReadU32(payload.data()),
-            payload[4] == 1,
-            ReadI64(payload.data() + 8),
-            ReadU64(payload.data() + 16)
-          );
+        if (control_session && (payload.size() == 24 || payload.size() == 64)
+          && (payload[4] == 0 || payload[4] == 1)
+          && payload[5] == 0 && payload[6] == 0 && payload[7] == 0) {
+          accepted = payload.size() == 24
+            ? control_session->SetTransport(
+              ReadU32(payload.data()), payload[4] == 1, ReadI64(payload.data() + 8),
+              0.0, 0, 0, false, 0.0, 0.0, ReadU64(payload.data() + 16))
+            : control_session->SetTransport(
+              ReadU32(payload.data()), payload[4] == 1, ReadI64(payload.data() + 8),
+              ReadDouble(payload.data() + 24), ReadU32(payload.data() + 36),
+              ReadU32(payload.data() + 40), ReadU32(payload.data() + 32) == 1,
+              ReadDouble(payload.data() + 48), ReadDouble(payload.data() + 56),
+              ReadU64(payload.data() + 16));
+        }
         break;
       case daw::audio_host_macos::ControlType::kParameterEvents:
         accepted = control_session && control_session->QueueParameterEvents(payload);
+        break;
+      case daw::audio_host_macos::ControlType::kProcessorStatePatch:
+        accepted = active_session && active_session->QueueProcessorStatePatch(payload);
         break;
       case daw::audio_host_macos::ControlType::kMidiEvents:
         accepted = control_session && control_session->QueueInstrumentEvents(payload);

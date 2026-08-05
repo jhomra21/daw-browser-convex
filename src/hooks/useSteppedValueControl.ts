@@ -18,6 +18,9 @@ type UseSteppedValueControlOptions = {
   disabled: () => boolean
   onValueChange: (value: number) => void
   valueFromDrag: (context: DragValueContext) => number
+  onInteractionStart?: (value: number) => void
+  onInteractionEnd?: (value: number) => void
+  onInteractionCancel?: (value: number) => void
 }
 
 export function quantizeSteppedValue(value: number, min: number, max: number, step: number) {
@@ -55,6 +58,7 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
       fineDrag = event.shiftKey
       lastEmittedValue = startValue
       setDragValue(startValue)
+      options.onInteractionStart?.(startValue)
     },
     onDragMove: (currentPosition, event) => {
       event.preventDefault()
@@ -74,9 +78,11 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     },
     onDragEnd: (_position, event) => {
       event.preventDefault()
+      options.onInteractionEnd?.(visualValue())
       setDragValue(null)
     },
-    onDragCancel: () => {
+    onDragCancel: (_position, _event) => {
+      options.onInteractionCancel?.(visualValue())
       setDragValue(null)
     },
   })

@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#define DAW_AUDIO_CORE_ABI_VERSION 1u
+#define DAW_AUDIO_CORE_ABI_VERSION 2u
 #define DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE 8u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES 256u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS 24u
@@ -28,6 +28,7 @@ extern "C" {
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION 3u
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY_2 2u
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY 1u
+#define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY 4u
 #define DAW_AUDIO_CORE_WASM_GRAPH_HEADER_BYTES 24u
 #define DAW_AUDIO_CORE_WASM_GRAPH_NODE_BYTES 28u
 #define DAW_AUDIO_CORE_WASM_GRAPH_NODE_WITH_INSTRUMENT_BYTES 132u
@@ -52,7 +53,9 @@ typedef enum daw_audio_core_result {
   DAW_AUDIO_CORE_PROCESSOR_KIND_UNKNOWN = 9,
   DAW_AUDIO_CORE_PROCESSOR_IMPLEMENTATION_UNAVAILABLE = 10,
   DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID = 11,
-  DAW_AUDIO_CORE_NO_DATA = 12
+  DAW_AUDIO_CORE_NO_DATA = 12,
+  DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED = 13,
+  DAW_AUDIO_CORE_RETIREMENT_CAPACITY_EXCEEDED = 14
 } daw_audio_core_result;
 
 typedef enum daw_audio_core_graph_validation_code {
@@ -464,6 +467,23 @@ typedef struct daw_audio_processor_descriptor {
   const uint8_t *state;
 } daw_audio_processor_descriptor;
 
+typedef struct daw_audio_processor_state_patch {
+  uint32_t graph_revision;
+  uint64_t node_id;
+  uint64_t instance_id;
+  uint32_t kind;
+  uint32_t state_version;
+  uint32_t state_size;
+  uint32_t bypassed;
+  uint32_t input_layout;
+  uint32_t output_layout;
+  uint32_t parameter_count;
+  uint32_t latency_frames;
+  uint32_t tail_frames;
+  const uint32_t *parameter_targets;
+  const uint8_t *state;
+} daw_audio_processor_state_patch;
+
 typedef struct daw_audio_graph_prepare_request {
   uint32_t abi_version;
   uint32_t graph_revision;
@@ -804,6 +824,12 @@ typedef struct daw_audio_transport_state {
   uint32_t epoch;
   uint32_t running;
   int64_t frame;
+  double tempo_bpm;
+  uint32_t time_signature_numerator;
+  uint32_t time_signature_denominator;
+  uint32_t cycle_active;
+  int64_t cycle_start_frame;
+  int64_t cycle_end_frame;
 } daw_audio_transport_state;
 
 /* Fixed sample-frame commands. note_id is a control-plane identity, never a
@@ -873,6 +899,21 @@ daw_audio_core_graph_validation_diagnostic daw_audio_core_get_graph_validation_d
 daw_audio_core_result daw_audio_core_publish(
   daw_audio_core_handle core,
   uint32_t expected_revision);
+
+/* Discards an unpublished graph revision without changing the published
+ * graph. This is required when a same-core preparation is rolled back. */
+daw_audio_core_result daw_audio_core_cancel_prepared_graph(
+  daw_audio_core_handle core,
+  uint32_t expected_revision);
+uint32_t daw_audio_core_prepared_graph_continuity(
+  daw_audio_core_handle core);
+daw_audio_core_result daw_audio_core_stage_processor_state_patch(
+  daw_audio_core_handle core,
+  const daw_audio_processor_state_patch *patch);
+daw_audio_core_result daw_audio_core_apply_staged_processor_state_patch(
+  daw_audio_core_handle core);
+daw_audio_core_result daw_audio_core_cancel_staged_processor_state_patch(
+  daw_audio_core_handle core);
 daw_audio_core_result daw_audio_core_retire(
   daw_audio_core_handle core,
   uint32_t expected_revision);

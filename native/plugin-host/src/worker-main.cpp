@@ -217,7 +217,7 @@ int main(const int argc, char* argv[]) {
     if (startup->noPluginTestMode) return;
     const auto& notifications = plugin.notifications();
     while (notificationCount < notifications.size()) {
-      const auto& notification = notifications[notificationCount++];
+      const auto notification = notifications[notificationCount++];
       const auto kind = notification.kind == daw::plugin_host::WorkerNotificationKind::kLatency
         ? daw::plugin_host::WorkerDiagnosticKind::kLatency
         : notification.kind == daw::plugin_host::WorkerNotificationKind::kBuses
@@ -228,6 +228,10 @@ int main(const int argc, char* argv[]) {
           ? daw::plugin_host::WorkerDiagnosticKind::kEditorInteraction
         : notification.kind == daw::plugin_host::WorkerNotificationKind::kParameterEdit
           ? daw::plugin_host::WorkerDiagnosticKind::kParameterEdit
+        : notification.kind == daw::plugin_host::WorkerNotificationKind::kTail
+          ? daw::plugin_host::WorkerDiagnosticKind::kTail
+        : notification.kind == daw::plugin_host::WorkerNotificationKind::kEditorState
+          ? daw::plugin_host::WorkerDiagnosticKind::kEditorState
           : daw::plugin_host::WorkerDiagnosticKind::kFault;
       static_cast<void>(transport->PublishDiagnostic({
         .kind = kind,
@@ -235,6 +239,9 @@ int main(const int argc, char* argv[]) {
         .parameter_id = notification.parameter_id,
         .normalized_value = notification.normalized_value,
       }));
+      if (notification.kind == daw::plugin_host::WorkerNotificationKind::kRestart) {
+        plugin.RefreshLifecycleMetadata();
+      }
     }
   };
   const auto publishEditorFeedback = [&] {
@@ -258,7 +265,9 @@ int main(const int argc, char* argv[]) {
   for (;;) {
     if (editorOpen) {
       daw::plugin_host::PumpVst3EditorEvents();
-      editorOpen = !startup->noPluginTestMode && plugin.EditorStatus().open;
+      const bool nextEditorOpen = !startup->noPluginTestMode && plugin.EditorStatus().open;
+      if (nextEditorOpen != editorOpen) plugin.PublishEditorOpenState(nextEditorOpen);
+      editorOpen = nextEditorOpen;
       if (daw::plugin_host::ConsumeVst3EditorInteraction()) {
         static_cast<void>(transport->PublishDiagnostic({
           .kind = daw::plugin_host::WorkerDiagnosticKind::kEditorInteraction,
@@ -302,6 +311,7 @@ int main(const int argc, char* argv[]) {
       const auto success = !startup->noPluginTestMode
         && plugin.ExecuteEditorCommand(*editorCommand, command->width, command->height, command->anchor);
       const auto status = startup->noPluginTestMode ? daw::plugin_host::WorkerEditorStatus{} : plugin.EditorStatus();
+      plugin.PublishEditorOpenState(status.open);
       editorOpen = status.open;
       if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success, .status = status})) return EXIT_FAILURE;
       continue;
@@ -331,6 +341,20 @@ int main(const int argc, char* argv[]) {
               std::memset(outputPlane, 0, samples * sizeof(float));
             }
           }
+          std::uint64_t outputSilenceFlags = 0;
+          for (std::size_t channel = 0; channel < transport->outputChannels(); ++channel) {
+            bool silent = true;
+            const auto* outputPlane = output.data() + channel * transport->maximumFrames();
+            for (std::size_t frame = 0; frame < samples; ++frame) {
+              if (outputPlane[frame] != 0.0F) {
+                silent = false;
+                break;
+              }
+            }
+            if (silent) outputSilenceFlags |= 1ULL << channel;
+          }
+          outputSilenceFlags &= daw::plugin_host::ChannelMask(transport->outputChannels()).value_or(0);
+          transport->SetOutputSilenceFlags(slotIndex, outputSilenceFlags);
           if (!transport->Complete(slotIndex, *sequence)) failed = true;
         } else if (!plugin.ProcessSubmittedSlot(slotIndex)) {
           failed = true;

@@ -29,6 +29,11 @@ import { resetRecordingDiagnostics, updateRecordingDiagnostics } from '~/lib/rec
 import { createRecordingTempStorage } from '~/lib/recording/recording-temp-storage'
 import { encodeRecordingWav } from '~/lib/recording/encode-recording-wav'
 import {
+  createDesktopAudioLifecycleReconciler,
+  isNativeRecordingLifecycleEligible,
+  shouldCancelRecordingForLifecycle,
+} from '~/lib/desktop-audio-lifecycle'
+import {
   ensureTrackForRecording,
   finalizeAutoCreatedTrackFailure,
 } from '~/lib/track-recording-target'
@@ -54,6 +59,7 @@ type ConvexApiType = typeof convexApi
 
 type UseTrackRecordingOptions = {
   audioEngine: AudioEngine
+  requiresNativeAudio?: boolean
   tracks: Accessor<Track[]>
   setTrackLock: (trackId: Track['id'], lockedBy: string | null) => void
   clearTrackLock: (trackId: Track['id']) => void
@@ -69,6 +75,7 @@ type UseTrackRecordingOptions = {
   convexClient: ConvexClientType
   convexApi: ConvexApiType
   requestTransportPlay: () => Promise<void>
+  requestTransportStop?: () => Promise<void>
   portableRecording?: {
     enabled: Accessor<boolean>
     controller: {
@@ -141,6 +148,7 @@ type UseTrackRecordingReturn = {
 export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRecordingReturn {
   const {
     audioEngine,
+    requiresNativeAudio = false,
     tracks,
     setTrackLock,
     clearTrackLock,
@@ -156,6 +164,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     convexClient,
     convexApi,
     requestTransportPlay,
+    requestTransportStop,
     portableRecording,
     nativeRecording,
     createTrackForRecording,
@@ -178,6 +187,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<Track['id'] | null>(null)
 
   let activeCtx: RecordingContext | null = null
+  const audioHostBridge = typeof window === 'undefined' ? undefined : window.dawDesktop?.audioHost
+  const hasAudioLifecycle = typeof audioHostBridge?.onLifecycle === 'function'
+    && typeof audioHostBridge.getLifecycle === 'function'
+  let audioLifecycleState: "suspended" | "recovering" | "ready" | "failed" = hasAudioLifecycle ? "recovering" : "ready"
+  let recordingStartGeneration = 0
   let lockHeartbeatTimer: number | null = null
   let previewContextStartFrame = 0
   let previewSampleRate = 1
@@ -541,6 +555,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
   const startRecording = async (trackId: Track['id'], createdTrack: Track | null = null): Promise<StartRecordingResult> => {
     if (isRecordingInternal()) return { ok: false, reason: 'Already recording' }
+    if (audioLifecycleState === "suspended") return { ok: false, reason: 'Audio lifecycle is suspended' }
+    const startGeneration = recordingStartGeneration
+    const isStartCurrent = () => (
+      startGeneration === recordingStartGeneration
+      && audioLifecycleState !== 'suspended'
+    )
     const uid = userId()
     const rid = projectId()
     const isLocalProject = rid ? isLocalId('project', rid) : false
@@ -565,8 +585,16 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
 
     const recordingSupport = getRecordingSupport()
     const productionSupported = getProductionRecordingSupport()
-    const nativeRequested = nativeRecording?.enabled() ?? false
-    if (!nativeRequested && !productionSupported && !recordingSupport.supported) {
+    let nativeRequested = requiresNativeAudio || isNativeRecordingLifecycleEligible(
+      audioLifecycleState,
+      nativeRecording?.enabled() ?? false,
+    )
+    let portableRequested = !nativeRequested && (portableRecording?.enabled() ?? false)
+    if (requiresNativeAudio && !nativeRecording?.controller) {
+      emit('Native audio recording is unavailable.')
+      return { ok: false, reason: 'Native recorder unavailable' }
+    }
+    if (!requiresNativeAudio && !nativeRequested && !portableRequested && !productionSupported && !recordingSupport.supported) {
       emit('Recording is not supported in this browser.')
       return { ok: false, reason: 'Recorder unsupported' }
     }
@@ -624,11 +652,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const engineCaptureSessionId = `take-${Date.now()}`
     const requestedSettings = recordingPreferences()
     await resolveCalibrationPlatformIdentity(navigator)
-    ensureRecordingAudioContext(audioEngine)
-    const engineContext = audioEngine.getAudioContext()
+    if (!requiresNativeAudio) ensureRecordingAudioContext(audioEngine)
+    const engineContext = requiresNativeAudio ? undefined : audioEngine.getAudioContext()
     let sampleRate = engineContext?.sampleRate ?? 1
     if (nativeRequested) try {
       await requestTransportPlay()
+      if (!isStartCurrent() || audioLifecycleState !== 'ready') throw new Error('Native audio lifecycle is unavailable.')
       transportStarted = true
       if (!nativeRecording?.controller.isActive()) throw new Error('Native playback is unavailable.')
       const nativeSampleRate = nativeRecording.controller.sampleRate()
@@ -666,6 +695,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           })()
         },
       })
+      if (!isStartCurrent() || audioLifecycleState !== 'ready') {
+        await nativeRecording.controller.cancel().catch(() => undefined)
+        throw new Error('Native audio lifecycle is unavailable.')
+      }
       sampleRate = native.sampleRate
       startSec = native.startFrame / native.sampleRate
       const requestedSampleRate = audioPreferences().sampleRate
@@ -685,9 +718,24 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       engineCaptureActive = true
     } catch (err) {
       console.warn('[useTrackRecording] native PCM capture unavailable; using compatibility fallback', err)
+      if (requiresNativeAudio) {
+        await nativeRecording?.controller.cancel().catch(() => undefined)
+        if (transportStarted) await requestTransportStop?.().catch(() => undefined)
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        emit(err instanceof Error ? err.message : 'Native audio recording is unavailable.')
+        return { ok: false, reason: 'Native recorder unavailable' }
+      }
+      if (hasAudioLifecycle && audioLifecycleState !== 'ready') {
+        nativeRequested = false
+        portableRequested = portableRecording?.enabled() ?? false
+      }
+      if (!isStartCurrent()) {
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        return { ok: false, reason: 'Audio lifecycle is suspended' }
+      }
     }
 
-    if (!nativeCaptureActive) try {
+    if (!nativeCaptureActive && !requiresNativeAudio) try {
       stream = await acquireStream()
       const trackSampleRate = stream.getAudioTracks()[0]?.getSettings().sampleRate
       if (Number.isFinite(trackSampleRate) && trackSampleRate !== undefined) sampleRate = trackSampleRate
@@ -699,9 +747,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return { ok: false, reason: missingDevice ? 'Device unavailable' : permissionDenied ? 'Permission denied' : 'Capture failed' }
     }
 
-    const portableRequested = !nativeRequested && (portableRecording?.enabled() ?? false)
-    if (portableRequested) try {
+    if (portableRequested && !requiresNativeAudio) try {
       await requestTransportPlay()
+      if (!isStartCurrent()) throw new Error('Audio lifecycle is suspended.')
       transportStarted = true
       if (!portableRecording?.controller.isActive()) throw new Error('Portable playback is unavailable.')
       resetRecordingDiagnostics()
@@ -745,6 +793,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           })()
         },
       })
+      if (!isStartCurrent()) {
+        await portableRecording.controller.cancel().catch(() => undefined)
+        throw new Error('Audio lifecycle is suspended.')
+      }
       sampleRate = portable.sampleRate
       startSec = portable.startFrame / portable.sampleRate
       const requestedSampleRate = audioPreferences().sampleRate
@@ -764,11 +816,17 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       engineCaptureActive = true
     } catch (err) {
       console.warn('[useTrackRecording] portable PCM capture unavailable; using compatibility fallback', err)
+      if (!isStartCurrent()) {
+        stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        return { ok: false, reason: 'Audio lifecycle is suspended' }
+      }
     }
 
-    if (!engineCaptureActive && productionSupported && !portableRequested) try {
+    if (!requiresNativeAudio && !engineCaptureActive && productionSupported && !portableRequested) try {
       resetRecordingDiagnostics()
       await audioEngine.resume()
+      if (!isStartCurrent()) throw new Error('Audio lifecycle is suspended.')
       const captureContext = audioEngine.getAudioContext()
       if (!captureContext) throw new Error('Audio engine context unavailable.')
       if (!stream) throw new Error('Microphone capture is unavailable.')
@@ -814,9 +872,24 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       engineCaptureActive = true
     } catch (err) {
       console.warn('[useTrackRecording] production PCM capture unavailable; using compressed fallback', err)
+      if (!isStartCurrent()) {
+        stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        return { ok: false, reason: 'Audio lifecycle is suspended' }
+      }
     }
 
     if (!engineCaptureActive) {
+      if (requiresNativeAudio) {
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        emit('Native audio recording did not start.')
+        return { ok: false, reason: 'Native recorder unavailable' }
+      }
+      if (!isStartCurrent()) {
+        stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
+        await releaseTrackLock(trackId, uid, isLocalProject)
+        return { ok: false, reason: 'Audio lifecycle is suspended' }
+      }
       if (!stream) {
         await releaseTrackLock(trackId, uid, isLocalProject)
         return { ok: false, reason: 'Capture failed' }
@@ -883,6 +956,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       onStop,
       stopPromise: stopCompletion.promise,
       rejectStopPromise: stopCompletion.reject,
+    }
+    if (!isStartCurrent()) {
+      await cleanupRecording()
+      return { ok: false, reason: 'Audio lifecycle is suspended' }
     }
 
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
@@ -982,7 +1059,20 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     return result
   }
 
+  const removeAudioLifecycle = hasAudioLifecycle
+    ? createDesktopAudioLifecycleReconciler(audioHostBridge, (lifecycle) => {
+      audioLifecycleState = lifecycle.state
+      if (lifecycle.state === 'suspended') recordingStartGeneration += 1
+      if (!activeCtx || !shouldCancelRecordingForLifecycle(lifecycle.state, activeCtx.nativeCaptureActive)) return
+      const interruptedContext = activeCtx
+      void cleanupRecording()
+        .then(() => handleAutoCreatedTrackFailure(interruptedContext.createdTrack, interruptedContext))
+        .catch(() => undefined)
+    })
+    : undefined
+
   onCleanup(() => {
+    removeAudioLifecycle?.()
     unsubscribeRecordingStatus()
     lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
     void stopRecording()

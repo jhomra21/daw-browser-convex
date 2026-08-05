@@ -49,3 +49,18 @@ test('AudioHost publishes running state before opening CoreAudio', async () => {
   expect(runningPublication).toBeGreaterThanOrEqual(0)
   expect(deviceOpen).toBeGreaterThan(runningPublication)
 })
+
+test('render-enabled native VST processing is not gated by tail metadata or silence gaps', async () => {
+  const source = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
+  const processStart = source.indexOf('void Process(const daw::audio_core::NativeGraphNodeRender& render)')
+  const processEnd = source.indexOf('\n  }\n};', processStart)
+  expect(processStart).toBeGreaterThanOrEqual(0)
+  expect(processEnd).toBeGreaterThan(processStart)
+  const process = source.slice(processStart, processEnd)
+  expect(process).toContain('if (!metadata.render_enabled)')
+  expect(process).toContain('port.Submit(')
+  expect(process).not.toContain('ReadTailMetadata')
+  expect(process).not.toContain('tail_remaining_frames')
+  expect(process).not.toContain('silent_completion')
+  expect(process).not.toContain('kNativeVstTailGraceFrames')
+})

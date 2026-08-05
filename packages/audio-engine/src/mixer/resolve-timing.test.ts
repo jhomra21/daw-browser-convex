@@ -35,4 +35,31 @@ describe('mixer timing resolution', () => {
     expect(timing.routeDelayFrames.get(mixerRouteKey('prefx-return', MASTER_ROUTE_TARGET, 'output'))).toBe(480)
     expect(timing.routeDelayFrames.get(mixerRouteKey('postfx-return', MASTER_ROUTE_TARGET, 'output'))).toBe(0)
   })
+
+  test('aligns pre-fader and post-fader taps at a shared destination', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        {
+          id: 'source-pre',
+          name: 'Pre-fader Source',
+          clips: [],
+          volume: 1,
+          sends: [{ targetId: 'return', amount: 1, tap: 'pre-fader' }],
+        },
+        { id: 'source-post', name: 'Post-fader Source', clips: [], volume: 1, sends: [{ targetId: 'return', amount: 1, tap: 'post-fader' }] },
+        { id: 'return', name: 'Return', channelRole: 'return', clips: [], volume: 1 },
+      ]),
+      trackFx: {
+        'source-pre': {
+          instances: [],
+        },
+        'source-post': {
+          instances: [{ id: 'source-post-compressor', kind: 'compressor', params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) }],
+        },
+      },
+    })
+    const timing = resolveMixerTiming(graph, 48_000)
+    expect(timing.routeDelayFrames.get(mixerRouteKey('source-pre', 'return', 'send', 'pre-fader'))).toBe(480)
+    expect(timing.routeDelayFrames.get(mixerRouteKey('source-post', 'return', 'send', 'post-fader'))).toBe(0)
+  })
 })

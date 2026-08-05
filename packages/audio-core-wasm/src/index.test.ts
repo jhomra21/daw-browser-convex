@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { processorContractHash } from '../../audio-core-contract/src/generated/processor-contract-metadata'
-import { audioCoreWasmAbiVersion, loadAudioCoreWasmArtifact } from './index'
+import { audioCoreWasmAbiVersion, audioCoreWasmArtifactVersion, loadAudioCoreWasmArtifact } from './index'
 
 const manifest = {
-  version: 1,
+  version: audioCoreWasmArtifactVersion,
   abiVersion: audioCoreWasmAbiVersion,
   contractVersion: audioCoreContractVersion,
   contractHash: processorContractHash,
@@ -37,7 +37,7 @@ test('rejects incompatible portable Wasm contract and ABI manifests', async () =
   expect(incompatibleContract).toMatchObject({ available: false, reason: 'contract-mismatch' })
 
   const incompatibleAbi = await loadAudioCoreWasmArtifact('/manifest.json', fetchFrom(new Map([
-    ['/manifest.json', { ok: true, json: { ...manifest, abiVersion: 2 } }],
+      ['/manifest.json', { ok: true, json: { ...manifest, abiVersion: audioCoreWasmAbiVersion + 1 } }],
   ])))
   expect(incompatibleAbi).toMatchObject({ available: false, reason: 'abi-mismatch' })
 })
@@ -175,7 +175,7 @@ test('invalidates the artifact cache when the manifest hash or version changes',
 
   const incompatibleVersion = await loadAudioCoreWasmArtifact('/changing.manifest.json', async () => ({
     ok: true,
-    json: async () => ({ ...manifest, version: 2, memoryBytes: 65_536, sha256: secondHash }),
+    json: async () => ({ ...manifest, version: audioCoreWasmArtifactVersion + 1, memoryBytes: 65_536, sha256: secondHash }),
     arrayBuffer: async () => secondBytes,
   }))
   expect(incompatibleVersion).toMatchObject({ available: false, reason: 'manifest-invalid' })

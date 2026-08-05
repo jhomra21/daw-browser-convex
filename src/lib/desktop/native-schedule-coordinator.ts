@@ -12,7 +12,7 @@ import type {
 } from "@daw-browser/audio-engine/native-host-wire"
 import { compilePortableFrameScheduleWindow } from "~/lib/portable-frame-schedule"
 import { projectPortableClipEvents } from "@daw-browser/audio-engine/portable-clip-projector"
-import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
+import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-browser/shared"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
@@ -24,7 +24,7 @@ export type NativeScheduleCoordinatorBridge = {
   queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   reenableVstScheduleAutomation?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
   onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => () => void
-  onLoss: (listener: () => void) => () => void
+  onLoss: (listener: (error?: string) => void) => () => void
 }
 
 export type NativeScheduleCapacity = {
@@ -170,8 +170,81 @@ type ScheduleLedgers = {
   emittedSources: Map<string, number>
 }
 
+export type NativeLoopFrames = {
+  startFrame: number
+  endFrame: number
+  lengthFrames: number
+}
+
+export const nativeLoopFramesForSnapshot = (
+  snapshot: LivePlaybackSnapshot,
+  sampleRateHz: number,
+): NativeLoopFrames | undefined => {
+  if (!snapshot.transport.loopEnabled) return undefined
+  const startFrame = Math.round(snapshot.transport.loopStartSec * sampleRateHz)
+  const endFrame = Math.round(snapshot.transport.loopEndSec * sampleRateHz)
+  if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame)
+    || startFrame < 0 || endFrame <= startFrame) return undefined
+  return { startFrame, endFrame, lengthFrames: endFrame - startFrame }
+}
+
+export const arrangementFrameForNativeFrame = (
+  frame: number,
+  loop: NativeLoopFrames | undefined,
+) => {
+  if (!loop || frame < loop.endFrame) return frame
+  return loop.startFrame + ((frame - loop.startFrame) % loop.lengthFrames + loop.lengthFrames) % loop.lengthFrames
+}
+
+type NativeScheduleSlice = {
+  nativeStartFrame: number
+  nativeEndFrame: number
+  arrangementStartFrame: number
+  arrangementEndFrame: number
+  iteration: number
+  reachesLoopBoundary: boolean
+}
+
+const splitNativeScheduleRange = (
+  startFrame: number,
+  endFrame: number,
+  loop: NativeLoopFrames | undefined,
+): NativeScheduleSlice[] => {
+  if (!loop) return [{
+    nativeStartFrame: startFrame,
+    nativeEndFrame: endFrame,
+    arrangementStartFrame: startFrame,
+    arrangementEndFrame: endFrame,
+    iteration: 0,
+    reachesLoopBoundary: false,
+  }]
+  const slices: NativeScheduleSlice[] = []
+  let cursor = startFrame
+  while (cursor < endFrame) {
+    const beforeLoop = cursor < loop.startFrame
+    const arrangementStartFrame = beforeLoop
+      ? cursor
+      : arrangementFrameForNativeFrame(cursor, loop)
+    const nativeBoundary = beforeLoop
+      ? loop.startFrame
+      : cursor + loop.endFrame - arrangementStartFrame
+    const nativeEndFrame = Math.min(endFrame, nativeBoundary)
+    slices.push({
+      nativeStartFrame: cursor,
+      nativeEndFrame,
+      arrangementStartFrame,
+      arrangementEndFrame: arrangementStartFrame + nativeEndFrame - cursor,
+      iteration: beforeLoop ? 0 : Math.floor((cursor - loop.startFrame) / loop.lengthFrames) + 1,
+      reachesLoopBoundary: nativeEndFrame === nativeBoundary,
+    })
+    cursor = nativeEndFrame
+  }
+  return slices
+}
+
 type ScheduleWindowCandidate = {
   instrumentEvents: NativeInstrumentEvent[]
+  instrumentEventKeys: string[]
   sampleSourceEvents: NativeSourceEvent[]
   vstAutomationSegments: NativeVstAutomationSegment[]
   noteChanges: Array<[string, boolean]>
@@ -179,7 +252,47 @@ type ScheduleWindowCandidate = {
   sequenceCount: number
 }
 
-const scheduleEndFrameFor = (snapshot: LivePlaybackSnapshot, sampleRateHz: number) => {
+const tailFramesFor = (
+  snapshot: LivePlaybackSnapshot,
+  graph: AudioCoreGraphSnapshot | undefined,
+  sampleRateHz: number,
+) => {
+  const tailByNode = new Map<string, number>()
+  for (const node of graph?.nodes ?? []) {
+    let nodeTail = 0
+    for (const processor of node.processorOrder) {
+      // Unbounded tails are continued by the native host's tail observer and
+      // end only through explicit Stop/teardown. They must not turn the
+      // schedule into an arbitrary finite padding window.
+      if (processor.tailKind === "unbounded") continue
+      nodeTail += Math.max(0, processor.tailFrames)
+    }
+    if (node.instrument && "ampReleaseMs" in node.instrument) {
+      nodeTail += Math.round(
+        Math.max(0, node.instrument.ampReleaseMs ?? 0) * Math.max(1, sampleRateHz) / 1000,
+      )
+    }
+    tailByNode.set(node.id, nodeTail)
+  }
+  for (const attachment of snapshot.nativeExternalAttachmentPlan?.attachments ?? []) {
+    if (attachment.bypassed) continue
+    if (attachment.declaredTailFrames === null) {
+      continue
+    }
+    tailByNode.set(
+      attachment.graphNodeId,
+      (tailByNode.get(attachment.graphNodeId) ?? 0) + attachment.declaredTailFrames,
+    )
+  }
+  const finiteTailFrames = Math.max(0, ...tailByNode.values())
+  return finiteTailFrames
+}
+
+export const scheduleEndFrameFor = (
+  snapshot: LivePlaybackSnapshot,
+  sampleRateHz: number,
+  graph?: AudioCoreGraphSnapshot,
+) => {
   let contentEndFrame = Math.round(snapshot.transport.playheadSec * sampleRateHz)
   for (const track of snapshot.tracks) {
     for (const clip of track.clips) {
@@ -192,7 +305,9 @@ const scheduleEndFrameFor = (snapshot: LivePlaybackSnapshot, sampleRateHz: numbe
   // Native schedule windows are end-exclusive. Keep one empty frame after the
   // last timeline boundary so a note-off exactly at a clip end can be emitted
   // in the final window without violating the native window contract.
-  return contentEndFrame + 1
+  return nativeLoopFramesForSnapshot(snapshot, sampleRateHz)
+    ? Number.MAX_SAFE_INTEGER
+    : contentEndFrame + Math.max(1, tailFramesFor(snapshot, graph, sampleRateHz))
 }
 
 const capacityError = (message: string) => new Error(`Native schedule capacity exceeded: ${message}`)
@@ -200,13 +315,15 @@ const capacityError = (message: string) => new Error(`Native schedule capacity e
 export const createNativeScheduleCoordinator = (input: {
   bridge: NativeScheduleCoordinatorBridge
   snapshot: LivePlaybackSnapshot
+  graph?: AudioCoreGraphSnapshot
+  acceptsLiveMidi?: boolean
   epoch: number
   sampleRateHz: number
   capacity: NativeScheduleCapacity
   assets: readonly NativeSessionAsset[]
   startFrame: number
   onFault?: (error: Error) => void
-  onHostLoss?: () => void
+  onHostLoss?: (error?: string) => void
   onRenderedFrame?: (frame: number) => void
 }) => {
   let disposed = false
@@ -242,7 +359,22 @@ export const createNativeScheduleCoordinator = (input: {
     resolve: () => void
     reject: (error: Error) => void
   }>()
-  const scheduleEndFrame = scheduleEndFrameFor(input.snapshot, input.sampleRateHz)
+  const scheduleEndFrame = scheduleEndFrameFor(input.snapshot, input.sampleRateHz, input.graph)
+  const acceptsLiveMidi = input.acceptsLiveMidi === true
+  const ownedScheduleEndFrame = acceptsLiveMidi ? Number.MAX_SAFE_INTEGER : scheduleEndFrame
+  const loop = nativeLoopFramesForSnapshot(input.snapshot, input.sampleRateHz)
+  const arpeggiators = new Map(Object.entries(input.snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp]))
+  const assets = new Map<string, AudioAssetRef>(input.snapshot.assets.map((asset) => [
+    asset.assetId,
+    {
+      version: 1,
+      assetId: `portable-export:${asset.assetId}`,
+      frameCount: asset.buffer.length,
+      sampleRateHz: asset.buffer.sampleRate,
+      channelCount: asset.buffer.numberOfChannels,
+    },
+  ]))
+  const audioTracks = input.snapshot.tracks.filter((track) => track.kind !== "instrument")
 
   const failWaiters = (error: Error) => {
     for (const waiter of transitionWaiters) waiter.reject(error)
@@ -276,102 +408,170 @@ export const createNativeScheduleCoordinator = (input: {
     endFrame: number,
     ledgers: ScheduleLedgers = { activeNoteIds, emittedSources },
   ): ScheduleWindowCandidate => {
-    const schedule = compilePortableFrameScheduleWindow({
-      revision: input.snapshot.revision,
-      transportEpoch: input.epoch,
-      sampleRateHz: input.sampleRateHz,
-      bpm: input.snapshot.bpm,
-      timeOrigin: {
-        timelineSec: input.snapshot.transport.playheadSec,
-        frame: input.startFrame,
-      },
-      rangeStartFrame: startFrame,
-      rangeEndFrame: endFrame,
-      rangeEndSec: endFrame / input.sampleRateHz,
-      tracks: input.snapshot.tracks,
-      automationEnvelopes: [],
-      arpeggiators: new Map(Object.entries(input.snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp])),
-      stableNoteIds: true,
-      eventRangeStartSec: input.snapshot.transport.playheadSec,
-      noteScheduleStartSec: 0,
-      clipSpanningNoteOn: true,
-    })
     const instrumentEvents: NativeInstrumentEvent[] = []
+    const instrumentEventKeys: string[] = []
     const noteChanges = new Map<string, boolean>()
+    const sourceChanges = new Map<string, number>()
+    const sampleSourceEvents: NativeSourceEvent[] = []
+    const vstAutomationSegments: NativeVstAutomationSegment[] = []
     const noteIsActive = (key: string) => noteChanges.has(key)
       ? noteChanges.get(key) === true
       : ledgers.activeNoteIds.has(key)
-    const scheduledEvents = schedule.events
-      .filter((event) => event.type === "note-on" || event.type === "note-off")
-      .toSorted((left, right) => (
-        left.frame - right.frame
-          || (left.type === right.type ? left.sequence - right.sequence : left.type === "note-off" ? -1 : 1)
-      ))
-    for (const event of scheduledEvents) {
-      const noteEvent: NativeInstrumentEvent = {
-        nodeId: event.target.trackId,
-        noteId: event.noteId,
+    const releaseBoundaryNote = (key: string, frame: number) => {
+      const parts = key.split("\u0000")
+      const iteration = Number(parts[0])
+      const nodeId = parts[1]
+      const baseNoteId = Number(parts[2])
+      if (!nodeId || !Number.isSafeInteger(iteration) || !Number.isSafeInteger(baseNoteId)) return
+      const nativeNoteId = Number.isSafeInteger(baseNoteId + iteration * 0x1_0000_0000)
+        ? baseNoteId + iteration * 0x1_0000_0000
+        : baseNoteId
+      instrumentEvents.push({
+        nodeId,
+        noteId: nativeNoteId,
         sequence: nextSequence + instrumentEvents.length,
-        frameOffset: event.frame,
-        type: event.type,
+        frameOffset: frame,
+        type: "note-off",
         channel: 0,
-        note: event.pitch,
-        value: event.type === "note-on" ? event.velocity : 0,
-      }
-      if (event.type === "note-on") {
-        const noteKey = `${event.target.trackId}\u0000${event.noteId}`
-        if (noteIsActive(noteKey)) continue
-        noteChanges.set(noteKey, true)
-      } else {
-        const noteKey = `${event.target.trackId}\u0000${event.noteId}`
-        if (!noteIsActive(noteKey)) continue
-        noteChanges.set(noteKey, false)
-      }
-      instrumentEvents.push(noteEvent)
+        note: 0,
+        value: 0,
+      })
+      instrumentEventKeys.push(key)
+      noteChanges.set(key, false)
     }
-    const projection = projectPortableClipEvents({
-      tracks: input.snapshot.tracks.filter((track) => track.kind !== "instrument"),
-      assets: new Map(input.snapshot.assets.map((asset) => [
-        asset.assetId,
-        {
-          version: 1,
-          assetId: `portable-export:${asset.assetId}`,
-          frameCount: asset.buffer.length,
-          sampleRateHz: asset.buffer.sampleRate,
-          channelCount: asset.buffer.numberOfChannels,
-        },
-      ])),
-      bpm: input.snapshot.bpm,
-      sampleRateHz: input.sampleRateHz,
-      rangeStartSec: 0,
-      rangeEndSec: endFrame / input.sampleRateHz,
-      epoch: input.epoch,
-      firstSequence: nextSequence + instrumentEvents.length,
-      emitStartFrame: { start: startFrame, end: endFrame },
-      allowInstruments: false,
-    })
-    if (!projection.supported) throw new Error(projection.reasons.join(" "))
-    const sourceChanges = new Map<string, number>()
-    const sourceStop = (key: string) => sourceChanges.get(key) ?? ledgers.emittedSources.get(key)
-    const sampleSourceEvents = projection.events.filter((event) => {
-      const key = sourceKey(event)
-      const previousStop = sourceStop(key)
-      if (previousStop !== undefined && previousStop > startFrame) return false
-      if (!sourceChanges.has(key) && ledgers.emittedSources.size >= nativeSourceLedgerCapacity) {
-        throw capacityError(`the source ledger exceeds its fixed capacity of ${nativeSourceLedgerCapacity}.`)
+    const slices = splitNativeScheduleRange(startFrame, endFrame, loop)
+    for (const slice of slices) {
+      const arrangementStartSec = slice.arrangementStartFrame / input.sampleRateHz
+      const arrangementEndSec = slice.arrangementEndFrame / input.sampleRateHz
+      if (slice.iteration > 0 && slice.nativeStartFrame >= (loop?.endFrame ?? Number.MAX_SAFE_INTEGER)) {
+        const previousIteration = `${slice.iteration - 1}\u0000`
+        const carriedKeys = new Set([
+          ...noteChanges.keys(),
+          ...ledgers.activeNoteIds,
+        ])
+        for (const key of carriedKeys) {
+          const active = noteChanges.has(key)
+            ? noteChanges.get(key) === true
+            : ledgers.activeNoteIds.has(key)
+          if (active && key.startsWith(previousIteration)) releaseBoundaryNote(key, slice.nativeStartFrame)
+        }
       }
-      sourceChanges.set(key, event.stopFrame)
-      return true
-    })
-    return {
-      instrumentEvents,
-      sampleSourceEvents,
-      vstAutomationSegments: nativeVstAutomationSegmentsForSnapshot(
+      const schedule = compilePortableFrameScheduleWindow({
+        revision: input.snapshot.revision,
+        transportEpoch: input.epoch,
+        sampleRateHz: input.sampleRateHz,
+        bpm: input.snapshot.bpm,
+        timeOrigin: { timelineSec: arrangementStartSec, frame: slice.nativeStartFrame },
+        rangeStartFrame: slice.nativeStartFrame,
+        rangeEndFrame: slice.nativeEndFrame,
+        rangeEndSec: arrangementEndSec,
+        tracks: input.snapshot.tracks,
+        automationEnvelopes: [],
+        arpeggiators,
+        stableNoteIds: true,
+        eventRangeStartSec: arrangementStartSec,
+        noteScheduleStartSec: 0,
+        clipSpanningNoteOn: true,
+      })
+      const scheduledEvents = schedule.events
+        .filter((event) => event.type === "note-on" || event.type === "note-off")
+        .toSorted((left, right) => (
+          left.frame - right.frame
+            || (left.type === right.type ? left.sequence - right.sequence : left.type === "note-off" ? -1 : 1)
+        ))
+      for (const event of scheduledEvents) {
+        const noteKey = loop
+          ? `${slice.iteration}\u0000${event.target.trackId}\u0000${event.noteId}`
+          : `${event.target.trackId}\u0000${event.noteId}`
+        const nativeNoteId = loop && Number.isSafeInteger(event.noteId + slice.iteration * 0x1_0000_0000)
+          ? event.noteId + slice.iteration * 0x1_0000_0000
+          : event.noteId
+        const noteEvent: NativeInstrumentEvent = {
+          nodeId: event.target.trackId,
+          noteId: nativeNoteId,
+          sequence: nextSequence + instrumentEvents.length,
+          frameOffset: event.frame,
+          type: event.type,
+          channel: 0,
+          note: event.pitch,
+          value: event.type === "note-on" ? event.velocity : 0,
+        }
+        if (event.type === "note-on") {
+          if (noteIsActive(noteKey)) continue
+          noteChanges.set(noteKey, true)
+        } else {
+          if (!noteIsActive(noteKey)) continue
+          noteChanges.set(noteKey, false)
+        }
+        instrumentEvents.push(noteEvent)
+        instrumentEventKeys.push(noteKey)
+      }
+      const shiftFrame = (frame: number) =>
+        slice.nativeStartFrame + frame - slice.arrangementStartFrame
+      const projection = audioTracks.length === 0
+        ? { supported: true as const, events: [] }
+        : projectPortableClipEvents({
+          tracks: audioTracks,
+          assets,
+          bpm: input.snapshot.bpm,
+          sampleRateHz: input.sampleRateHz,
+          rangeStartSec: 0,
+          rangeEndSec: arrangementEndSec,
+          epoch: input.epoch,
+          firstSequence: nextSequence + instrumentEvents.length + sampleSourceEvents.length,
+          emitStartFrame: { start: slice.arrangementStartFrame, end: slice.arrangementEndFrame },
+          allowInstruments: false,
+          includeStableIdentity: true,
+        })
+      if (!projection.supported) throw new Error(projection.reasons.join(" "))
+      for (const event of projection.events) {
+        const eventStart = Math.max(event.startFrame, slice.arrangementStartFrame)
+        const eventEnd = Math.min(event.stopFrame, slice.arrangementEndFrame)
+        if (eventEnd <= eventStart) continue
+        const duration = event.stopFrame - event.startFrame
+        const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
+          + event.sourceFrameCount * (eventStart - event.startFrame) / duration
+        const sourceEnd = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
+          + event.sourceFrameCount * (eventEnd - event.startFrame) / duration
+        const sourceOffsetFrame = Math.floor(sourceStart)
+        const sourceFrameCount = Math.ceil(sourceEnd - sourceStart)
+        const key = `${slice.iteration}\u0000${event.sourceIdentity ?? sourceKey(event)}`
+        const previousStop = sourceChanges.get(key) ?? ledgers.emittedSources.get(key)
+        if (previousStop !== undefined && previousStop > startFrame) continue
+        if (!sourceChanges.has(key) && ledgers.emittedSources.size >= nativeSourceLedgerCapacity) {
+          throw capacityError(`the source ledger exceeds its fixed capacity of ${nativeSourceLedgerCapacity}.`)
+        }
+        if (sourceFrameCount <= 0) continue
+        sourceChanges.set(key, shiftFrame(eventEnd))
+        sampleSourceEvents.push({
+          ...event,
+          startFrame: shiftFrame(eventStart),
+          stopFrame: shiftFrame(eventEnd),
+          sourceOffsetFrame,
+          sourceOffsetFraction: sourceStart - sourceOffsetFrame,
+          sourceFrameCount,
+          fadeInStartFrame: shiftFrame(event.fadeInStartFrame),
+          fadeInEndFrame: shiftFrame(event.fadeInEndFrame),
+          fadeOutStartFrame: shiftFrame(event.fadeOutStartFrame),
+          fadeOutEndFrame: shiftFrame(event.fadeOutEndFrame),
+        })
+      }
+      vstAutomationSegments.push(...nativeVstAutomationSegmentsForSnapshot(
         input.snapshot,
         input.sampleRateHz,
-        startFrame,
-        endFrame,
-      ),
+        slice.arrangementStartFrame,
+        slice.arrangementEndFrame,
+      ).map((segment) => ({
+        ...segment,
+        startFrame: shiftFrame(segment.startFrame),
+        endFrame: shiftFrame(segment.endFrame),
+      })))
+    }
+    return {
+      instrumentEvents,
+      instrumentEventKeys,
+      sampleSourceEvents,
+      vstAutomationSegments,
       noteChanges: [...noteChanges],
       sourceChanges: [...sourceChanges],
       sequenceCount: instrumentEvents.length + sampleSourceEvents.length,
@@ -392,8 +592,14 @@ export const createNativeScheduleCoordinator = (input: {
         .filter((node) => node.kind === "instrument")
         .map((node) => [node.id, node.instrument?.voiceCapacity ?? nativeVoiceCapacity]),
     )
-    for (let start = input.startFrame; start < scheduleEndFrame; start += blockSize) {
-        const end = Math.min(scheduleEndFrame, start + blockSize)
+    const preflightEnd = loop
+      ? Math.max(
+        input.startFrame + Math.max(blockSize * 2, loop.lengthFrames * 2),
+        loop.endFrame + Math.max(blockSize * 2, loop.lengthFrames * 2),
+      )
+      : scheduleEndFrame
+    for (let start = input.startFrame; start < preflightEnd; start += blockSize) {
+        const end = Math.min(preflightEnd, start + blockSize)
         const window = compileWindow(start, end, preflightLedgers)
         const initial = start === input.startFrame ? synthStateEvents(input.snapshot, start) : []
         const instrumentCount = window.instrumentEvents.length + initial.length
@@ -410,8 +616,8 @@ export const createNativeScheduleCoordinator = (input: {
         if (processorCount > nativeProcessorEventCapacity) {
           throw capacityError(`callback at frame ${start} contains ${processorCount} processor events; the native limit is 256.`)
         }
-        for (const event of window.instrumentEvents) {
-          const noteKey = `${event.nodeId}\u0000${event.noteId}`
+        for (const [eventIndex, event] of window.instrumentEvents.entries()) {
+          const noteKey = window.instrumentEventKeys[eventIndex] ?? `${event.nodeId}\u0000${event.noteId}`
           if (event.type === "note-on") {
             preflightLedgers.activeNoteIds.add(noteKey)
             activeByNode.set(event.nodeId, (activeByNode.get(event.nodeId) ?? 0) + 1)
@@ -499,7 +705,7 @@ export const createNativeScheduleCoordinator = (input: {
         endFrame,
         chunkIndex: chunk,
         chunkCount,
-        endsSchedule: endFrame >= scheduleEndFrame && chunk === chunkCount - 1,
+        endsSchedule: !acceptsLiveMidi && endFrame >= scheduleEndFrame && chunk === chunkCount - 1,
         instrumentEvents,
         sampleSourceEvents,
         vstAutomationSegments,
@@ -530,13 +736,13 @@ export const createNativeScheduleCoordinator = (input: {
     }
     nextSequence += window.sequenceCount
     nextWindowStartFrame = endFrame
-    scheduleComplete = endFrame >= scheduleEndFrame
+    scheduleComplete = !acceptsLiveMidi && endFrame >= scheduleEndFrame
   }
 
   const refill = async (renderedFrame: number, token?: string) => {
     if (disposed || scheduleComplete) return
     const targetEnd = Math.min(
-      scheduleEndFrame,
+      ownedScheduleEndFrame,
       renderedFrame + Math.max(
         input.capacity.maximumFramesPerBlock,
         Math.round(input.sampleRateHz * nativeScheduleLookaheadSec),
@@ -644,12 +850,13 @@ export const createNativeScheduleCoordinator = (input: {
     if (installed || disposed) return
     installed = true
     unsubscribeProgress = input.bridge.onScheduleProgress(requestRefill)
-    unsubscribeLoss = input.bridge.onLoss(() => {
+    unsubscribeLoss = input.bridge.onLoss((error) => {
       if (disposed) return
       disposed = true
       unsubscribeListeners()
-      failWaiters(new Error("Native playback host connection was lost."))
-      input.onHostLoss?.()
+      const message = error ?? "Native playback host connection was lost."
+      failWaiters(new Error(message))
+      input.onHostLoss?.(message)
     })
   }
 
@@ -745,7 +952,7 @@ export const createNativeScheduleCoordinator = (input: {
     },
     currentProgress: () => latestProgress,
     currentFrame: () => Number(latestProgress?.renderedThroughFrame ?? refillFrame),
-    scheduleEndFrame: () => scheduleEndFrame,
+    scheduleEndFrame: () => ownedScheduleEndFrame,
     isDisposed: () => disposed,
   }
   return coordinator

@@ -15,7 +15,7 @@ export const nativeVst3WorkerArtifactVersion = '2'
 export const nativeVst3WorkerManifestVersion = 1
 export const nativeVst3WorkerStartupProtocolVersion = 1
 export const nativeVst3WorkerControlProtocolVersion = vst3WorkerProtocolVersion
-export const nativeVst3WorkerTransportAbiVersion = 2
+export const nativeVst3WorkerTransportAbiVersion = 5
 
 const requestIdSchema = z.string().min(1).max(96).regex(/^[A-Za-z0-9._-]+$/)
 const uuidSchema = z.string().uuid()
@@ -447,7 +447,7 @@ export type NativeVst3InsertionPreflightResult = z.infer<typeof nativeVst3Insert
  * audio graph snapshots. Catalog resolution adds local paths only after this
  * path-free contract crosses the renderer boundary.
  */
-export const nativeExternalAttachmentPlanProtocolVersion = 1
+export const nativeExternalAttachmentPlanProtocolVersion = 2
 export const maxNativeExternalAttachments = 64
 
 const nativeExternalCatalogIdentitySchema = z.object({
@@ -458,11 +458,12 @@ const nativeExternalCatalogIdentitySchema = z.object({
   scannerCatalogVersion: z.literal(2),
 }).strict()
 
-const nativeExternalAttachmentSchema = z.object({
+const nativeExternalAttachmentFields = {
   instanceId: uuidSchema,
   graphNodeId: z.string().min(1).max(256),
   nativeGraphNodeId: unsigned64DecimalSchema,
-  chainIndex: z.number().int().nonnegative().max(0x7fffffff),
+  stageIndex: z.number().int().nonnegative().max(0x7fffffff),
+  sourceIndex: z.number().int().nonnegative().max(0x7fffffff).optional(),
   catalogIdentity: nativeExternalCatalogIdentitySchema,
   bundleFingerprint: sha256Schema,
   binaryFingerprint: sha256Schema,
@@ -479,14 +480,24 @@ const nativeExternalAttachmentSchema = z.object({
     z.string().regex(/^\d+$/),
     finiteNumber.refine((value) => value >= 0 && value <= 1),
   ).optional(),
+} as const
+
+const nativeExternalAttachmentSchemaV1 = z.object(nativeExternalAttachmentFields).strict()
+const nativeExternalAttachmentSchemaV2 = z.object({
+  ...nativeExternalAttachmentFields,
+  stageIndex: z.number().int().nonnegative().max(0x7fffffff),
 }).strict()
 
-export const nativeExternalAttachmentPlanSchema = z.object({
-  version: z.literal(nativeExternalAttachmentPlanProtocolVersion),
-  attachments: z.array(nativeExternalAttachmentSchema).max(maxNativeExternalAttachments),
-}).strict().superRefine((value, context) => {
+const nativeExternalAttachmentPlanFields = {
+  attachments: z.array(nativeExternalAttachmentSchemaV1).max(maxNativeExternalAttachments),
+} as const
+
+const validateNativeExternalAttachmentPlan = (
+  value: { attachments: readonly z.infer<typeof nativeExternalAttachmentSchemaV1>[] },
+  context: z.RefinementCtx,
+) => {
   const instanceIds = new Set<string>()
-  const chains = new Map<string, Array<{ index: number; nativeGraphNodeId: string }>>()
+  const chains = new Map<string, Array<{ index: number; nativeGraphNodeId: string; role: 'effect' | 'instrument' }>>()
   const graphNodeByNativeId = new Map<string, string>()
   for (const [index, attachment] of value.attachments.entries()) {
     const inputChannels = attachment.inputBuses
@@ -516,6 +527,22 @@ export const nativeExternalAttachmentPlanSchema = z.object({
         message: 'Instrument attachments must not expose enabled audio input buses.',
       })
     }
+    if (attachment.role === 'instrument'
+      && attachment.sourceIndex !== undefined
+      && attachment.sourceIndex !== 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'sourceIndex'],
+        message: 'Instrument attachments must identify source index zero.',
+      })
+    }
+    if (attachment.role === 'effect' && attachment.sourceIndex !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attachments', index, 'sourceIndex'],
+        message: 'Effect attachments must not identify an instrument source.',
+      })
+    }
     if (attachment.role === 'effect' && inputChannels === 0) {
       context.addIssue({
         code: 'custom',
@@ -532,10 +559,10 @@ export const nativeExternalAttachmentPlanSchema = z.object({
     }
     instanceIds.add(attachment.instanceId)
     const chain = chains.get(attachment.graphNodeId) ?? []
-    if (chain.some((candidate) => candidate.index === attachment.chainIndex)) {
+    if (chain.some((candidate) => candidate.role === attachment.role && candidate.index === attachment.stageIndex)) {
       context.addIssue({
         code: 'custom',
-        path: ['attachments', index, 'chainIndex'],
+        path: ['attachments', index, 'stageIndex'],
         message: 'External attachment chain indexes must be unique per graph node.',
       })
     }
@@ -555,27 +582,31 @@ export const nativeExternalAttachmentPlanSchema = z.object({
       })
     }
     graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
-    chain.push({ index: attachment.chainIndex, nativeGraphNodeId: attachment.nativeGraphNodeId })
+    chain.push({
+      index: attachment.role === 'instrument' ? (attachment.sourceIndex ?? 0) : attachment.stageIndex,
+      nativeGraphNodeId: attachment.nativeGraphNodeId,
+      role: attachment.role,
+    })
     chains.set(attachment.graphNodeId, chain)
   }
-  for (const [graphNodeId, chain] of chains) {
-    const indexes = chain.map((candidate) => candidate.index).sort((left, right) => left - right)
-    indexes.forEach((chainIndex, index) => {
-      if (chainIndex !== index) {
-        const attachmentIndex = value.attachments.findIndex((attachment) => (
-          attachment.graphNodeId === graphNodeId && attachment.chainIndex === chainIndex
-        ))
-        if (attachmentIndex >= 0) {
-          context.addIssue({
-            code: 'custom',
-            path: ['attachments', attachmentIndex, 'chainIndex'],
-            message: 'External attachment chain indexes must be contiguous from zero.',
-          })
-        }
-      }
-    })
-  }
+}
+
+const nativeExternalAttachmentPlanSchemaV1 = z.object({
+  version: z.literal(1),
+  ...nativeExternalAttachmentPlanFields,
+}).strict().superRefine(validateNativeExternalAttachmentPlan)
+
+const nativeExternalAttachmentPlanSchemaV2 = z.object({
+  version: z.literal(nativeExternalAttachmentPlanProtocolVersion),
+  attachments: z.array(nativeExternalAttachmentSchemaV2).max(maxNativeExternalAttachments),
+}).strict().superRefine((value, context) => {
+  validateNativeExternalAttachmentPlan(value, context)
 })
+
+export const nativeExternalAttachmentPlanSchema = z.union([
+  nativeExternalAttachmentPlanSchemaV1,
+  nativeExternalAttachmentPlanSchemaV2,
+])
 export type NativeExternalAttachmentPlan = z.infer<typeof nativeExternalAttachmentPlanSchema>
 
 export const encodeNativeExternalAttachmentPlan = (plan: NativeExternalAttachmentPlan): string => (

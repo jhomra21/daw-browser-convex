@@ -16,8 +16,11 @@ import { loadWorkletModule } from '../worklet-loader'
 import {
   createPortableWasmInitializeMessage,
   portableWasmProtocolVersion,
+  readPortableWasmGraphContinuityMessage,
   readPortableWasmRecordingStatusMessage,
+  readPortableWasmTransportPositionMessage,
   type PortableWasmControlMessage,
+  type PortableWasmProcessorEvent,
   type PortableWasmStatusMessage,
 } from '../portable-wasm-protocol'
 import type { PortableFrameSchedule } from '../portable-frame-scheduling'
@@ -87,6 +90,8 @@ export class PortableWasmPlaybackSession {
   private pending = new Map<number, PendingPortableRequest>()
   private faultListeners = new Set<(error: Error) => void>()
   private recordingListeners = new Set<(message: PortableWasmStatusMessage) => void>()
+  private graphContinuityListeners = new Set<(message: Extract<PortableWasmStatusMessage, { type: 'graph-continuity' }>) => void>()
+  private transportPositionListeners = new Set<(message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void>()
   private active = false
   private disposed = false
 
@@ -121,6 +126,16 @@ export class PortableWasmPlaybackSession {
     const recordingMessage = readPortableWasmRecordingStatusMessage(value)
     if (recordingMessage) {
       for (const listener of this.recordingListeners) listener(recordingMessage)
+      return
+    }
+    const graphContinuity = readPortableWasmGraphContinuityMessage(value)
+    if (graphContinuity) {
+      for (const listener of this.graphContinuityListeners) listener(graphContinuity)
+      return
+    }
+    const transportPosition = readPortableWasmTransportPositionMessage(value)
+    if (transportPosition) {
+      for (const listener of this.transportPositionListeners) listener(transportPosition)
       return
     }
     if (typeof value.requestId !== 'number') return
@@ -213,6 +228,39 @@ export class PortableWasmPlaybackSession {
     this.require(response, 'schedule-installed', 'installed')
   }
 
+  async queueProcessorEvents(
+    revision: number,
+    epoch: number,
+    sequence: number,
+    events: readonly PortableWasmProcessorEvent[],
+  ) {
+    if (this.disposed) throw new Error('Portable playback session was disposed.')
+    const response = await this.request({
+      type: 'processor-events',
+      revision,
+      epoch,
+      sequence,
+      events,
+    })
+    this.require(response, 'processor-events-applied', 'applied')
+  }
+
+  async reenableProcessorAutomation(
+    revision: number,
+    epoch: number,
+    processorInstanceId: number,
+    parameterTargets: readonly number[],
+  ) {
+    const response = await this.request({
+      type: 'reenable-processor-automation',
+      revision,
+      epoch,
+      processorInstanceId,
+      parameterTargets,
+    })
+    this.require(response, 'processor-automation-reenabled', 'applied')
+  }
+
   markActive() {
     this.active = true
   }
@@ -225,6 +273,16 @@ export class PortableWasmPlaybackSession {
   onRecordingStatus(listener: (message: PortableWasmStatusMessage) => void) {
     this.recordingListeners.add(listener)
     return () => this.recordingListeners.delete(listener)
+  }
+
+  onGraphContinuity(listener: (message: Extract<PortableWasmStatusMessage, { type: 'graph-continuity' }>) => void) {
+    this.graphContinuityListeners.add(listener)
+    return () => this.graphContinuityListeners.delete(listener)
+  }
+
+  onTransportPosition(listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) {
+    this.transportPositionListeners.add(listener)
+    return () => this.transportPositionListeners.delete(listener)
   }
 
   postRecordingControl(message: Extract<PortableWasmControlMessage, { type: `recording-capture-${string}` }>) {
@@ -249,6 +307,7 @@ export class PortableWasmPlaybackSession {
     this.pending.clear()
     this.faultListeners.clear()
     this.recordingListeners.clear()
+    this.transportPositionListeners.clear()
     disposePortableWorkletNode(this.node, this.output)
   }
 

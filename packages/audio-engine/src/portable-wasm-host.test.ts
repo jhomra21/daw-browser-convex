@@ -81,6 +81,105 @@ test('the portable host captures bounded planar PCM only when explicitly configu
   }))
 })
 
+test('the actual portable Wasm host renders built-in effects without native hooks', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostUrl.href)
+  const messages: unknown[] = []
+  const host = new DawPortableAudioCoreHost({
+    sampleRate: 48_000,
+    postMessage: (message: unknown) => messages.push(message),
+    close: () => undefined,
+  })
+  const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
+  expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+
+  const utilityState = new Uint8Array(40)
+  const utilityView = new DataView(utilityState.buffer)
+  utilityView.setUint32(0, 1, true)
+  utilityView.setFloat32(4, 6, true)
+  utilityView.setFloat32(24, 1, true)
+  host.handleMessage({
+    version: 1,
+    type: 'prepare-graph',
+    requestId: 1,
+    snapshot: {
+      version: 1,
+      revision: 1,
+      masterNodeId: 'master',
+      nodes: [
+        {
+          id: 'track',
+          kind: 'source',
+          inputLayout: 'stereo',
+          outputLayout: 'stereo',
+          latencyFrames: 0,
+          processorOrder: [{
+            id: 'track-terminal',
+            instanceId: 31,
+            kind: 'utility',
+            kindId: 1,
+            stateVersion: 1,
+            state: utilityState,
+            parameterTargets: [],
+            bypassed: false,
+            latencyFrames: 0,
+            tailFrames: 0,
+          }],
+          mixer: { instanceId: 1, gain: 1, pan: 0, muted: false, soloed: false },
+        },
+        {
+          id: 'master',
+          kind: 'master',
+          inputLayout: 'stereo',
+          outputLayout: 'stereo',
+          latencyFrames: 0,
+          processorOrder: [],
+          mixer: { instanceId: 2, gain: 1, pan: 0, muted: false, soloed: false },
+        },
+      ],
+      edges: [{
+        version: 1,
+        id: 'track-master',
+        fromNodeId: 'track',
+        toNodeId: 'master',
+        gain: 1,
+        tap: 'post-fader',
+        sidechain: false,
+        pdcDelayFrames: 0,
+      }],
+      assets: [],
+    },
+  })
+
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'graph-prepared',
+    requestId: 1,
+    revision: 1,
+    result: 'prepared',
+  })
+  host.handleMessage({ version: 1, type: 'publish-graph', requestId: 2, revision: 1 })
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'graph-published',
+    requestId: 2,
+    revision: 1,
+    result: 'published',
+  })
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'graph-continuity',
+    revision: 1,
+    result: 'accepted',
+  })
+  const left = new Float32Array([1])
+  const right = new Float32Array([1])
+  const outputLeft = new Float32Array(1)
+  const outputRight = new Float32Array(1)
+  host.process([[left, right]], [[outputLeft, outputRight]])
+  expect(outputLeft[0]).toBeCloseTo(1.995, 3)
+  expect(outputRight[0]).toBeCloseTo(1.995, 3)
+})
+
 test('the portable host drains one block per acknowledgement before finalizing', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
   const messages: unknown[] = []

@@ -37,6 +37,7 @@ type PortableLiveSessionAdapterInput = Omit<
   'revision' | 'bpm' | 'tracks' | 'automationEnvelopes' | 'arpeggiators'
 > & {
   assetRegistry: PortableAssetRegistryInput
+  sourceFirstSequence: number
 }
 
 /**
@@ -57,6 +58,6 @@ export const compilePreparedPortableLiveSession = (
   bpm: snapshot.bpm,
   sidechainRoutes: snapshot.mixer.sidechainRoutes,
   sourceRangeEndSec: input.rangeEndSec,
-  sourceFirstSequence: 1,
   schedule: compilePortableLiveFrameSchedule(snapshot, input),
+  sourceFirstSequence: input.sourceFirstSequence,
 })

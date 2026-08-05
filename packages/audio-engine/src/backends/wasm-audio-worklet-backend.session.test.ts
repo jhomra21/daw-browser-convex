@@ -106,6 +106,18 @@ test("mutes and reports an active worklet fault", () => {
   expect(faults).toEqual(["Portable audio-core AudioWorklet control request failed."])
 })
 
+test("routes requestless graph continuity notifications to telemetry listeners", () => {
+  const fixture = createSession()
+  const continuity: string[] = []
+  fixture.session.onGraphContinuity((message) => continuity.push(`${message.revision}:${message.result}`))
+
+  fixture.node.port.onmessage?.(new MessageEvent("message", {
+    data: { version: 1, type: "graph-continuity", revision: 7, result: "fallback" },
+  }))
+
+  expect(continuity).toEqual(["7:fallback"])
+})
+
 test("rejects an unacknowledged schedule installation", async () => {
   const fixture = createSession(true, (message) => (
     message.type === "install-schedule"

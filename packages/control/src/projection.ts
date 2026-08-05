@@ -80,7 +80,7 @@ export type ControlProjectSnapshotInput = {
   externalProcessors?: Array<{
     instanceId: string;
     targetId: string;
-    chainIndex: number;
+    index: number;
     manifest: {
       identity: {
         name: string;
@@ -261,7 +261,7 @@ const projectControlSnapshotCore = <Snapshot>(
         ? { master: true }
         : { trackId: external.targetId },
       instanceId: external.instanceId,
-      index: external.chainIndex,
+      index: external.index,
       processor: {
         kind: "external-vst3",
         params: {

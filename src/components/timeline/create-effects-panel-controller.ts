@@ -36,6 +36,10 @@ type EffectsPanelControllerOptions = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  usesLegacyAudioEngine?: Accessor<boolean>;
+  projectGeneration?: Accessor<number>;
+  onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void;
+  onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
   onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined) => void;
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
@@ -134,6 +138,10 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       roomEffects: () => roomEffectsQuery.data,
       sidechainRoutes: options.sidechainRoutes,
       canWriteCurrentTargetEffects,
+      usesLegacyAudioEngine: options.usesLegacyAudioEngine,
+      projectGeneration: options.projectGeneration,
+      onEffectParamsPreview: options.onEffectParamsPreview,
+      onEffectParamsFlush: options.onEffectParamsFlush,
       onEffectParamsCommitted: options.onEffectParamsCommitted,
       onLocalSaveFailed: options.onLocalSaveFailed,
     },
@@ -148,6 +156,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     tracks: options.tracks,
     sidechainRoutes: options.sidechainRoutes,
     audioEngine: options.audioEngine,
+    usesLegacyAudioEngine: options.usesLegacyAudioEngine,
     roomEffects: () => roomEffectsQuery.data,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,

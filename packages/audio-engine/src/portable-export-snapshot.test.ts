@@ -339,20 +339,20 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     processor.kind,
     processor.latencyFrames,
     processor.tailFrames,
-    processor.parameterTargets,
   ])).toEqual([
-    ['saturator', 0, 0, []],
-    ['eq', 0, 0, []],
-    ['chorus', 0, 768, []],
-    ['flanger', 0, 1_080, []],
-    ['phaser', 0, 48, []],
-    ['tremolo', 0, 0, []],
-    ['autopan', 0, 0, []],
-    ['ensemble', 0, 1_152, []],
-    ['gate', 96, 0, []],
-    ['compressor', 480, 0, []],
-    ['limiter', 240, 0, []],
+    ['saturator', 0, 0],
+    ['eq', 0, 0],
+    ['chorus', 0, 768],
+    ['flanger', 0, 1_080],
+    ['phaser', 0, 48],
+    ['tremolo', 0, 0],
+    ['autopan', 0, 0],
+    ['ensemble', 0, 1_152],
+    ['gate', 96, 0],
+    ['compressor', 480, 0],
+    ['limiter', 240, 0],
   ])
+  expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder[1]?.parameterTargets).toHaveLength(24)
 
   const unsupported = compilePortableExportSnapshot({
     tracks: [source],

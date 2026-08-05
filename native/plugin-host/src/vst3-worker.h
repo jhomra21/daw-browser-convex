@@ -20,6 +20,8 @@ enum class WorkerNotificationKind {
   kFault,
   kEditorInteraction,
   kParameterEdit,
+  kTail,
+  kEditorState,
 };
 
 struct WorkerNotification {
@@ -56,6 +58,7 @@ class Vst3Worker {
   );
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool SetState(const WorkerState& state);
+  void RefreshLifecycleMetadata();
   [[nodiscard]] bool EditorCommandSupported() const;
   [[nodiscard]] WorkerEditorStatus EditorStatus() const;
   [[nodiscard]] bool ExecuteEditorCommand(
@@ -64,6 +67,7 @@ class Vst3Worker {
     std::uint32_t height = 0,
     std::optional<WorkerEditorAnchor> anchor = std::nullopt
   );
+  void PublishEditorOpenState(bool open);
   void Dispose();
 
   [[nodiscard]] bool ready() const;

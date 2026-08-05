@@ -17,7 +17,7 @@ import {
 } from '~/lib/local-project-db'
 import {
   externalPluginEntityKind,
-  externalProcessorSchema,
+  parseExternalProcessorValue,
   type ExternalProcessor,
 } from '@daw-browser/external-plugins'
 import {
@@ -187,15 +187,15 @@ export const materializeLocalControlSnapshot = (
   for (const item of snapshot.processors) {
     if (item.processor.kind === 'external-vst3') {
       const existingValue = externalProcessors.get(item.id)?.value
-      const existing = externalProcessorSchema.safeParse(existingValue)
+      const existing = parseExternalProcessorValue(existingValue)
       if (!existing.success) {
         throw new Error(`External plugin row "${item.id}" is missing or corrupt.`)
       }
-      const next: ExternalProcessor = externalProcessorSchema.parse({
+      const next: ExternalProcessor = {
         ...existing.data,
         parameterOverrides: item.processor.params.parameterOverrides,
         updatedAt: timestamp,
-      })
+      }
       entities.push(createLocalProjectEntityRow(
         externalPluginEntityKind,
         item.id,

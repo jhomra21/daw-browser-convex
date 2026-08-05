@@ -412,7 +412,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
   await setLocalExternalProcessor(project.id, {
     instanceId,
     targetId: track.id,
-    chainIndex: 0,
+    index: 0,
     manifest: {
       identity: {
         format: "vst3",
@@ -525,7 +525,7 @@ test("does not fail a durable external parameter commit when native delivery fai
   await setLocalExternalProcessor(project.id, {
     instanceId,
     targetId: track.id,
-    chainIndex: 0,
+    index: 0,
     manifest: {
       identity: {
         format: "vst3",
@@ -890,10 +890,10 @@ test("discovers only mounted VST instances and paginates safe parameter values",
   installBridge([])
   const project = await createLocalProject(`VST discovery ${crypto.randomUUID()}`)
   const other = await createLocalProject(`Other VST discovery ${crypto.randomUUID()}`)
-  const processor = (instanceId: string, targetId: string, chainIndex: number) => ({
+  const processor = (instanceId: string, targetId: string, index: number) => ({
     instanceId,
     targetId,
-    chainIndex,
+    index,
     manifest: {
       identity: {
         format: "vst3" as const,
@@ -962,7 +962,7 @@ test("discovers only mounted VST instances and paginates safe parameter values",
     instances: [{
       instanceId: secondInstance,
       targetId: "master",
-      chainIndex: 1,
+      stageIndex: 1,
       identity: { format: "vst3", classId: `class-${secondInstance}`, vendor: "Vendor", name: "Fixture", version: "1", architecture: "arm64" },
       role: "effect",
       bypassed: false,

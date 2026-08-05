@@ -13,6 +13,11 @@ export type LivePlaybackTransport = {
   loopEndSec: number
 }
 
+export type LivePlaybackTimeSignature = {
+  numerator: number
+  denominator: number
+}
+
 export type LivePlaybackAsset = {
   assetId: string
   buffer: AudioBuffer
@@ -21,6 +26,7 @@ export type LivePlaybackAsset = {
 export type LivePlaybackSnapshot = {
   revision: number
   bpm: number
+  timeSignature?: LivePlaybackTimeSignature
   transport: LivePlaybackTransport
   tracks: readonly RuntimeTrack[]
   assets: readonly LivePlaybackAsset[]
@@ -37,6 +43,7 @@ export type LivePlaybackSnapshot = {
 export type LivePlaybackSnapshotInput = {
   revision: number
   bpm: number
+  timeSignature?: LivePlaybackTimeSignature
   transport: LivePlaybackTransport
   tracks: readonly RuntimeTrack[]
   renderState: ExportRenderStateSnapshot
@@ -74,6 +81,11 @@ export const compileLivePlaybackSnapshot = (
   const reasons: string[] = []
   if (!Number.isSafeInteger(input.revision) || input.revision <= 0) reasons.push("Playback revision must be a positive safe integer.")
   if (!Number.isFinite(input.bpm) || input.bpm <= 0) reasons.push("Playback BPM must be positive and finite.")
+  const timeSignature = input.timeSignature ?? { numerator: 4, denominator: 4 }
+  if (!Number.isSafeInteger(timeSignature.numerator) || timeSignature.numerator <= 0
+    || !Number.isSafeInteger(timeSignature.denominator) || timeSignature.denominator <= 0) {
+    reasons.push("Playback time signature must contain positive integer values.")
+  }
   if (!Number.isFinite(input.transport.playheadSec) || input.transport.playheadSec < 0) reasons.push("Playback playhead must be finite and non-negative.")
   if (input.transport.loopEnabled && !(input.transport.loopStartSec >= 0 && input.transport.loopEndSec > input.transport.loopStartSec)) {
     reasons.push("An enabled playback loop must have a positive range.")
@@ -116,6 +128,7 @@ export const compileLivePlaybackSnapshot = (
     snapshot: {
       revision: input.revision,
       bpm: input.bpm,
+      timeSignature: structuredClone(timeSignature),
       transport: structuredClone(input.transport),
       tracks,
       assets: [...assetsById.entries()].map(([assetId, buffer]) => ({ assetId, buffer })),

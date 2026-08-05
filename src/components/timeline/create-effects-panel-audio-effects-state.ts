@@ -76,6 +76,10 @@ type EffectsPanelAudioEffectsContext = {
   sidechainRoutes?: Accessor<ExternalSidechainRoute[]>;
   persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
   canWriteCurrentTargetEffects: Accessor<boolean>;
+  usesLegacyAudioEngine?: Accessor<boolean>;
+  projectGeneration?: Accessor<number>;
+  onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
+  onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
   persistAudioEffectOrder?: (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
@@ -103,6 +107,10 @@ type EffectsPanelAudioDevice = {
   eq: {
     add: () => void;
     changeInstance: (instanceId: string, updates: (params: EqParams) => EqParams) => void;
+    beginInteraction: (instanceId: string) => void;
+    previewInteraction: (instanceId: string, updater: (params: EqParams) => EqParams) => void;
+    commitInteraction: (instanceId: string) => void;
+    cancelInteraction: (instanceId: string) => void;
     changeBand: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
     changeChannelMode: (mode: EqChannelMode) => void;
     params: Accessor<EqParams | undefined>;
@@ -151,6 +159,7 @@ type EffectsPanelAudioDevice = {
   flushPending: () => Promise<void>;
   paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
   orderedEffects: Accessor<AudioEffectInstance[]>;
+  effectIndexForTarget: (targetId: string, instanceId: string) => number | undefined;
   removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
   removeByInstanceFromTarget: (targetId: Track["id"] | "master", instance: AudioEffectInstance) => Promise<boolean>;
   replayInstanceParams: <Effect extends EffectType>(payload: {
@@ -266,7 +275,11 @@ export function createEffectsPanelAudioDevice(
     targetId: currentTargetId,
     scopeId: context.projectId,
     row: () => isLocalProject() ? descriptor.row(currentTargetId()) : remoteEffectForTarget(currentTargetId(), descriptor.kind),
-    applyToEngine: () => undefined,
+    applyToEngine: (targetId) => (
+      (context.usesLegacyAudioEngine?.() ?? true)
+        ? applyInstancesToEngine(targetId, currentOrderForTarget(targetId))
+        : undefined
+    ),
     readQueryParams: (row) => row?.params ? descriptor.normalizeParams(row.params) : undefined,
     createInitialParams: () => descriptor.createDefaultParams(),
     serializeParams: descriptor.serializeParams,
@@ -576,6 +589,17 @@ export function createEffectsPanelAudioDevice(
   );
 
   const instanceKey = (targetId: string, instanceId: string) => `${targetId}:${instanceId}`;
+  type EqInteraction = {
+    targetId: string;
+    instanceId: string;
+    generation: number;
+    baseline: EqParams;
+    latest: EqParams;
+  };
+  const eqInteractions = new Map<string, EqInteraction>();
+  const pendingEqPreviewFrames = new Map<string, number>();
+  const pendingEqPreviewPayloads = new Map<string, EffectParamsCommitPayload<"eq" | "master-eq">>();
+  const pendingEqWrites = new Set<Promise<void>>();
   const requiredInstanceId = (instanceId: string | undefined, kind: AudioEffectKind) => {
     if (!instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`);
     return instanceId;
@@ -708,7 +732,10 @@ export function createEffectsPanelAudioDevice(
     const targetId = currentTargetId();
     normalizedPersistedAudioEffectRows();
     draftParamsByInstance();
-    untrack(() => void applyInstancesToEngine(targetId, order).catch(() => undefined));
+    void order;
+    void targetId;
+    // Parameter drafts are applied by explicit update paths. Keeping this
+    // reactive observer side-effect free avoids duplicate chain rebuilds.
   });
 
   const currentOrderForTarget = (targetId: string) => {
@@ -718,6 +745,10 @@ export function createEffectsPanelAudioDevice(
         ? orderedEffects()
         : readPersistedOrderedEffectsForTarget(targetId);
   };
+
+  const effectIndexForTarget = (targetId: string, instanceId: string) => (
+    persistedRowsForTarget(targetId).find((row) => row.instanceId === instanceId)?.index
+  );
 
   const setOptimisticOrderForTarget = (targetId: string, order: AudioEffectInstance[]) => {
     optimisticOrdersByTarget.set(targetId, order);
@@ -789,23 +820,24 @@ export function createEffectsPanelAudioDevice(
   const paramsForInstance = (instance: AudioEffectInstance) => paramsForInstanceForTarget(currentTargetId(), instance);
 
   const exportRowForRuntime = (targetId: string, instanceId: string, index: number, runtime: AudioEffectRuntimeInstance): ExportEffectRow => {
-    if (runtime.kind === "utility") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "autofilter") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "eq") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "gate") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "compressor") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "saturator") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "limiter") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "lofi") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "delay") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "reverb") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "chorus") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "flanger") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "phaser") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "tremolo") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "autopan") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "ensemble") return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
-    return { targetId, instanceId, index, effect: runtime.kind, params: structuredClone(runtime.params) };
+    const extras = { targetId, instanceId, index };
+    if (runtime.kind === "utility") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "autofilter") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "eq") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "gate") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "compressor") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "saturator") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "limiter") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "lofi") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "delay") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "reverb") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "chorus") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "flanger") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "phaser") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "tremolo") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "autopan") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "ensemble") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
   };
   const snapshotExportProjection = (): ExportEffectsProjection => {
     const ownedTargetIds = new Set(optimisticOrdersByTarget.keys());
@@ -1072,13 +1104,126 @@ export function createEffectsPanelAudioDevice(
     if (areParamsForKindEqual(kind, current, next)) return;
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
     writeDraftParams(targetId, instanceId, kind, next);
-    void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
+    if (context.usesLegacyAudioEngine?.() ?? true) {
+      void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
+    }
     commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
     void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
   };
   const updateEq = (updater: (prev: EqParams) => EqParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "eq");
     if (instance) updateInstance(instance.id, "eq", (prev) => updater(normalizeEqParams(objectParamInput(prev))));
+  };
+
+  const createEqCommitPayload = (
+    targetId: string,
+    instanceId: string,
+    from: EqParams,
+    to: EqParams,
+  ): EffectParamsCommitPayload<"eq" | "master-eq"> => targetId === "master"
+    ? { targetId: "master", effect: "master-eq", instanceId, from, to }
+    : { targetId, effect: "eq", instanceId, from, to };
+
+  const dispatchEqPreview = (key: string, payload: EffectParamsCommitPayload<"eq" | "master-eq">) => {
+    pendingEqPreviewPayloads.set(key, payload);
+    if (pendingEqPreviewFrames.has(key)) return;
+    const flush = async () => {
+      pendingEqPreviewFrames.delete(key);
+      const latest = pendingEqPreviewPayloads.get(key);
+      pendingEqPreviewPayloads.delete(key);
+      if (!latest) return;
+      if (context.usesLegacyAudioEngine?.() ?? true) {
+        await applyInstancesToEngine(latest.targetId, currentOrderForTarget(latest.targetId)).catch(() => undefined);
+      } else {
+        await context.onEffectParamsPreview?.(latest);
+      }
+    };
+    if (typeof requestAnimationFrame === "function") {
+      pendingEqPreviewFrames.set(key, requestAnimationFrame(flush));
+    } else {
+      void flush();
+    }
+  };
+
+  const flushEqPreview = async (key: string) => {
+    const frame = pendingEqPreviewFrames.get(key);
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    pendingEqPreviewFrames.delete(key);
+    const latest = pendingEqPreviewPayloads.get(key);
+    pendingEqPreviewPayloads.delete(key);
+    if (!latest) return;
+    if (context.usesLegacyAudioEngine?.() ?? true) {
+      await applyInstancesToEngine(latest.targetId, currentOrderForTarget(latest.targetId)).catch(() => undefined);
+    } else {
+      await context.onEffectParamsPreview?.(latest);
+    }
+  };
+
+  const beginEqInteraction = (instanceId: string) => {
+    if (!context.canWriteCurrentTargetEffects()) return;
+    const targetId = currentTargetId();
+    const baseline = normalizeEqParams(objectParamInput(paramsForInstance({ id: instanceId, kind: "eq" })));
+    eqInteractions.set(instanceKey(targetId, instanceId), {
+      targetId,
+      instanceId,
+      generation: context.projectGeneration?.() ?? 0,
+      baseline,
+      latest: baseline,
+    });
+  };
+
+  const previewEqInteraction = (instanceId: string, updater: (params: EqParams) => EqParams) => {
+    const targetId = currentTargetId();
+    const key = instanceKey(targetId, instanceId);
+    const interaction = eqInteractions.get(key);
+    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    const current = normalizeEqParams(objectParamInput(paramsForInstance({ id: instanceId, kind: "eq" })));
+    const next = normalizeEqParams(updater(current));
+    if (areParamsForKindEqual("eq", current, next)) return;
+    interaction.latest = next;
+    writeDraftParams(targetId, instanceId, "eq", next);
+    dispatchEqPreview(key, createEqCommitPayload(targetId, instanceId, interaction.baseline, next));
+  };
+
+  const commitEqInteraction = async (instanceId: string) => {
+    const targetId = currentTargetId();
+    const key = instanceKey(targetId, instanceId);
+    const interaction = eqInteractions.get(key);
+    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    await flushEqPreview(key);
+    eqInteractions.delete(key);
+    const next = normalizeEqParams(objectParamInput(paramsForInstance({ id: instanceId, kind: "eq" })));
+    if (areParamsForKindEqual("eq", interaction.baseline, next)) return;
+    if (context.usesLegacyAudioEngine?.() ?? true) {
+      void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
+    }
+    const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind: "eq" });
+    if (!(context.usesLegacyAudioEngine?.() ?? true)) {
+      await context.onEffectParamsFlush?.(createEqCommitPayload(targetId, instanceId, interaction.baseline, next));
+    }
+    const write = persistInstanceParams(targetId, persistedInstanceId, "eq", next)
+      .then(() => commitInstanceParams(targetId, persistedInstanceId, "eq", interaction.baseline, next))
+      .catch(() => undefined)
+      .finally(() => pendingEqWrites.delete(write));
+    pendingEqWrites.add(write);
+  };
+
+  const cancelEqInteraction = (instanceId: string) => {
+    const targetId = currentTargetId();
+    const key = instanceKey(targetId, instanceId);
+    const interaction = eqInteractions.get(key);
+    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    const frame = pendingEqPreviewFrames.get(key);
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    pendingEqPreviewFrames.delete(key);
+    pendingEqPreviewPayloads.delete(key);
+    eqInteractions.delete(key);
+    writeDraftParams(targetId, instanceId, "eq", interaction.baseline);
+    if (context.usesLegacyAudioEngine?.() ?? true) {
+      void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
+    } else {
+      context.onEffectParamsPreview?.(createEqCommitPayload(targetId, instanceId, interaction.latest, interaction.baseline));
+    }
   };
   const updateReverb = (updater: (prev: ReverbParams) => ReverbParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "reverb");
@@ -1275,11 +1420,14 @@ export function createEffectsPanelAudioDevice(
 
   return {
     snapshotExportProjection,
-    snapshotExportRows: (targetIds) => targetIds.flatMap((targetId) => currentOrderForTarget(targetId).flatMap((instance, index) => {
-      const params = paramsForInstanceForTarget(targetId, instance);
-      if (params === undefined) return [];
-      return [exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params))];
-    })),
+    snapshotExportRows: (targetIds) => targetIds.flatMap((targetId) => {
+      const rows = currentOrderForTarget(targetId).flatMap((instance, index) => {
+        const params = paramsForInstanceForTarget(targetId, instance);
+        if (params === undefined) return [];
+        return [exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params))];
+      });
+      return rows;
+    }),
     snapshotSidechainRoutes,
     addByKindToTarget,
     addChainToTarget,
@@ -1325,6 +1473,10 @@ export function createEffectsPanelAudioDevice(
     eq: {
       add: addEq,
       changeInstance: (instanceId, updater) => updateInstance(instanceId, "eq", (prev) => updater(normalizeEqParams(objectParamInput(prev)))),
+      beginInteraction: beginEqInteraction,
+      previewInteraction: previewEqInteraction,
+      commitInteraction: commitEqInteraction,
+      cancelInteraction: cancelEqInteraction,
       changeBand: (bandId, updates) => updateEq((prev) => ({
         ...prev,
         bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band),
@@ -1342,9 +1494,10 @@ export function createEffectsPanelAudioDevice(
       toggleEnabled: (enabled) => updateEq((prev) => ({ ...prev, enabled })),
     },
     flushPending: async () => {
-      await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending(), ...pendingSidechainWrites]);
+      await Promise.all([eqState.flushPending(), compressorState.flushPending(), saturatorState.flushPending(), delayState.flushPending(), reverbState.flushPending(), ...pendingSidechainWrites, ...pendingEqWrites]);
     },
     orderedEffects,
+    effectIndexForTarget,
     paramsForInstance,
     removeAllFromTarget,
     removeByInstanceFromTarget,

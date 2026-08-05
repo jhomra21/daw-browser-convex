@@ -17,6 +17,7 @@ const supportsOutputSelection = (mediaDevices: MediaDevices): mediaDevices is Ou
 
 export function DashboardAudioView() {
   const preferences = useAppPreferences()
+  const requiresNativeAudio = import.meta.env.VITE_DESKTOP === "true"
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([])
   const [deviceError, setDeviceError] = createSignal("")
   const [sinkStatus, setSinkStatus] = createSignal(getAudioSinkStatus())
@@ -109,6 +110,11 @@ export function DashboardAudioView() {
     })
   })
   const startCalibration = async () => {
+    if (requiresNativeAudio) {
+      setCalibrationState("failed")
+      setCalibrationMessage("Browser loopback calibration is unavailable in the native desktop audio mode.")
+      return
+    }
     const audio = preferences.audio.preferences()
     const identity = await resolveCalibrationPlatformIdentity(navigator)
     setPlatformIdentity(identity)
@@ -177,6 +183,10 @@ export function DashboardAudioView() {
   }
 
   const playTestTone = async () => {
+    if (requiresNativeAudio) {
+      setDeviceError("The desktop native audio host does not expose a browser test tone.")
+      return
+    }
     try {
       await playAudioOutputTestTone()
       setDeviceError("")
@@ -262,39 +272,34 @@ export function DashboardAudioView() {
           </select>
         } />
         <DashboardRow label="Buffer size" value="Managed by the browser and operating system." />
-        <Show when={window.dawDesktop?.audioHost}>
+        <Show when={requiresNativeAudio} fallback={
           <DashboardRow
-            label="Experimental native playback"
-            value="Uses the desktop CoreAudio host for supported source-only sessions."
+            label="Experimental portable browser playback"
+            value="Uses the Wasm AudioWorklet only for fully supported source-only sessions."
             action={<input
               type="checkbox"
-              checked={preferences.audio.preferences().nativePlaybackEnabled}
-              onChange={(event) => preferences.audio.setNativePlaybackEnabled(event.currentTarget.checked)}
+              checked={preferences.audio.preferences().portableBrowserPlaybackEnabled}
+              onChange={(event) => preferences.audio.setPortableBrowserPlaybackEnabled(event.currentTarget.checked)}
             />}
           />
+        }>
+          <DashboardRow label="Playback backend" value="Native CoreAudio is required in the Electron app." />
         </Show>
-        <DashboardRow
-          label="Experimental portable browser playback"
-          value="Uses the Wasm AudioWorklet only for fully supported source-only sessions."
-          action={<input
-            type="checkbox"
-            checked={preferences.audio.preferences().portableBrowserPlaybackEnabled}
-            onChange={(event) => preferences.audio.setPortableBrowserPlaybackEnabled(event.currentTarget.checked)}
-          />}
-        />
       </DashboardSection>
 
       <DashboardSection title="Recording">
-        <DashboardRow
-          label="Experimental portable recording"
-          value="Uses the portable Wasm recorder only while portable browser playback is active. Legacy recording remains the default."
-          action={<input
-            type="checkbox"
-            disabled={!preferences.audio.preferences().portableBrowserPlaybackEnabled}
-            checked={recording().portableEnabled}
-            onChange={(event) => preferences.recording.setPortableEnabled(event.currentTarget.checked)}
-          />}
-        />
+        <Show when={!requiresNativeAudio}>
+          <DashboardRow
+            label="Experimental portable recording"
+            value="Uses the portable Wasm recorder only while portable browser playback is active. Legacy recording remains the default."
+            action={<input
+              type="checkbox"
+              disabled={!preferences.audio.preferences().portableBrowserPlaybackEnabled}
+              checked={recording().portableEnabled}
+              onChange={(event) => preferences.recording.setPortableEnabled(event.currentTarget.checked)}
+            />}
+          />
+        </Show>
         <DashboardRow label="Input layout" controlId="recording-layout" action={<select id="recording-layout" class="h-8 border border-border bg-background px-2 text-sm" value={recording().layout} onChange={(event) => setRecording({ layout: event.currentTarget.value === "stereo" ? "stereo" : "mono" })}><option value="mono">Mono</option><option value="stereo" disabled={!canUseStereoRecording(activeInputSettings()?.channelCount, recording().inputChannel)}>Stereo</option></select>} />
         <DashboardRow label="Mono input channel" controlId="recording-input-channel" value="Channels are shown one-based." action={<select id="recording-input-channel" class="h-8 border border-border bg-background px-2 text-sm" value={recording().inputChannel} disabled={recording().layout === "stereo"} onChange={(event) => setRecording({ inputChannel: Number(event.currentTarget.value) })}><For each={resolveRecordingChannelOptions(activeInputSettings()?.channelCount)}>{(option) => <option value={option.channel} disabled={option.disabled}>{option.label}</option>}</For></select>} />
         <DashboardRow label="Software monitoring" controlId="recording-monitor" value="Monitoring runs through the armed track FX. Disable interface direct monitoring to avoid doubled sound; speakers can cause feedback." action={<select id="recording-monitor" class="h-8 border border-border bg-background px-2 text-sm" value={recording().monitor} onChange={(event) => setRecording({ monitor: event.currentTarget.value === "auto" || event.currentTarget.value === "on" ? event.currentTarget.value : "off" })}><option value="off">Off</option><option value="auto">Auto</option><option value="on">On</option></select>} />
@@ -304,7 +309,9 @@ export function DashboardAudioView() {
         <DashboardRow label="Echo cancellation" controlId="audio-echo-cancellation" value={supportedConstraints.echoCancellation ? undefined : "Not supported by this browser."} action={<input id="audio-echo-cancellation" type="checkbox" disabled={!supportedConstraints.echoCancellation} checked={preferences.audio.preferences().echoCancellation} onChange={(event) => preferences.audio.setEchoCancellation(event.currentTarget.checked)} />} />
         <DashboardRow label="Noise suppression" controlId="audio-noise-suppression" value={supportedConstraints.noiseSuppression ? undefined : "Not supported by this browser."} action={<input id="audio-noise-suppression" type="checkbox" disabled={!supportedConstraints.noiseSuppression} checked={preferences.audio.preferences().noiseSuppression} onChange={(event) => preferences.audio.setNoiseSuppression(event.currentTarget.checked)} />} />
         <DashboardRow label="Automatic gain control" controlId="audio-auto-gain-control" value={supportedConstraints.autoGainControl ? undefined : "Not supported by this browser."} action={<input id="audio-auto-gain-control" type="checkbox" disabled={!supportedConstraints.autoGainControl} checked={preferences.audio.preferences().autoGainControl} onChange={(event) => preferences.audio.setAutoGainControl(event.currentTarget.checked)} />} />
-        <DashboardRow label="Loopback calibration" value="Connect the selected output to the selected input. Turn monitor volume down first. Hardware acceptance is not claimed." action={<Show when={calibrationState() === "running"} fallback={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => void startCalibration()}>Start calibration</button>}><button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => calibrationController?.abort()}>Cancel</button></Show>} />
+        <Show when={!requiresNativeAudio}>
+          <DashboardRow label="Loopback calibration" value="Connect the selected output to the selected input. Turn monitor volume down first. Hardware acceptance is not claimed." action={<Show when={calibrationState() === "running"} fallback={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => void startCalibration()}>Start calibration</button>}><button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => calibrationController?.abort()}>Cancel</button></Show>} />
+        </Show>
         <Show when={calibrationMessage()}>{(message) => <p class="px-4 py-2 text-xs text-muted-foreground">{message()} {exactCalibration() ? "Reusable for this exact configuration." : ""}</p>}</Show>
       </DashboardSection>
 
@@ -325,7 +332,9 @@ export function DashboardAudioView() {
         <DashboardRow label="Capture counters" value={`${formatFrames(diagnostics().capturedFrames)} captured, ${formatFrames(diagnostics().overrunFrames)} overrun, ${formatFrames(diagnostics().droppedFrames)} dropped, ${formatFrames(diagnostics().queuedFrames)} queued`} />
         <DashboardRow label="Input state" value={diagnostics().deviceLost ? "Device lost" : diagnostics().muted ? "Muted" : "Available"} />
         <DashboardRow label="Last recording failure" value={diagnostics().lastFailure ?? "None"} />
-        <DashboardRow label="Output test" action={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => void playTestTone()}>Play tone</button>} />
+        <Show when={!requiresNativeAudio}>
+          <DashboardRow label="Output test" action={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={() => void playTestTone()}>Play tone</button>} />
+        </Show>
         <Show when={deviceError()}>{(message) => <p class="px-4 py-2 text-xs text-destructive">{message()}</p>}</Show>
       </DashboardSection>
     </DashboardScrollView>

@@ -14,7 +14,7 @@ const instanceId = '11111111-1111-4111-8111-111111111111'
 const createProcessor = () => externalProcessorSchema.parse({
   instanceId,
   targetId: 'track-1',
-  chainIndex: 0,
+  index: 0,
   manifest: {
     identity: {
       format: 'vst3',

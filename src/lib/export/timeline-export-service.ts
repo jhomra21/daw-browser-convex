@@ -5,7 +5,7 @@ import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
-import { createExportRenderStateSnapshot, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportOutcome, type ExportProgress, type ExportRenderStateSnapshot, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportOutcome, type ExportProgress, type ExportRenderStateSnapshot, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/hooks/useClipBuffers"
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
@@ -13,6 +13,7 @@ import { flushMidiProjectWrites, projectMidiProjectTracks } from "~/lib/midi/edi
 
 type TimelineExportDependencies = {
   queue: ExportQueue
+  nativeRendererRequired?: boolean
   runTimelineExport?: typeof runTimelineExport
   getTracks: () => RuntimeTrack[]
   getBpm: () => number
@@ -90,6 +91,9 @@ export type TimelineExportService = {
 
 export const createTimelineExportService = (dependencies: TimelineExportDependencies): TimelineExportService => {
   const jobs = new Map<string, TimelineExportJobStatus>()
+  const assertRendererAvailable = () => {
+    if (dependencies.nativeRendererRequired) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
+  }
   const snapshotRequest = async (settings: ExportSettings) => {
     let projectId = dependencies.getProjectId()
     let tracks: RuntimeTrack[] | undefined
@@ -154,6 +158,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     onProgress: (progress: ExportProgress) => void,
   ) => ({
     ...snapshot.settings,
+    nativeRendererRequired: dependencies.nativeRendererRequired,
     getTracks: () => snapshot.tracks,
     bpm: snapshot.bpm,
     masterVolume: snapshot.masterVolume,
@@ -198,25 +203,33 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     })
     return { id: queued.id, completion: queued.completion }
   }
-  const prepareTimelineExport = async (input: TimelineExportInput): Promise<PreparedTimelineExport> => ({
-    kind: "timeline",
-    name: input.name ?? "Timeline mixdown",
-    snapshot: await snapshotRequest(input),
-  })
-  const prepareStemExport = async (input: TimelineStemExportInput): Promise<PreparedStemExport> => ({
-    kind: "stems",
-    name: input.name ?? (input.stemSelection === "all-tracks" ? "All track stems" : "Selected track stems"),
-    input: structuredClone(input),
-    snapshot: await snapshotRequest(input),
-  })
-  const submitPreparedTimelineExport = (prepared: PreparedTimelineExport, outputTargets: ExportOutputTargetFactory) => (
-    submit(prepared.name, (signal, onProgress) =>
+  const prepareTimelineExport = async (input: TimelineExportInput): Promise<PreparedTimelineExport> => {
+    assertRendererAvailable()
+    return {
+      kind: "timeline",
+      name: input.name ?? "Timeline mixdown",
+      snapshot: await snapshotRequest(input),
+    }
+  }
+  const prepareStemExport = async (input: TimelineStemExportInput): Promise<PreparedStemExport> => {
+    assertRendererAvailable()
+    return {
+      kind: "stems",
+      name: input.name ?? (input.stemSelection === "all-tracks" ? "All track stems" : "Selected track stems"),
+      input: structuredClone(input),
+      snapshot: await snapshotRequest(input),
+    }
+  }
+  const submitPreparedTimelineExport = (prepared: PreparedTimelineExport, outputTargets: ExportOutputTargetFactory) => {
+    assertRendererAvailable()
+    return submit(prepared.name, (signal, onProgress) =>
       (dependencies.runTimelineExport ?? runTimelineExport)({
         ...baseRequest(prepared.snapshot, signal, onProgress),
         outputTargets,
       }))
-  )
+  }
   const submitPreparedStemExport = (prepared: PreparedStemExport, outputTargets: ExportOutputTargetFactory) => {
+    assertRendererAvailable()
     const input = prepared.input
     return submit(prepared.name, (signal, onProgress) =>
       input.stemSelection === "all-tracks"

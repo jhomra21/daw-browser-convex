@@ -60,19 +60,39 @@ app.whenReady().then(async () => {
       audioDiagnostics.push({ method, parameters })
     }
   })
-  window.webContents.on("console-message", (_event, details) => {
-    process.stderr.write(`renderer: ${details.message}\n`)
+  window.webContents.on("console-message", (_event, _level, message, line, sourceId) => {
+    process.stderr.write(`renderer: ${message} (${sourceId}:${line})\n`)
   })
   window.webContents.on("did-fail-load", (_event, _code, description, validatedUrl) => {
     process.stderr.write(`load failed: ${description} (${validatedUrl})\n`)
   })
   await window.loadURL("daw-test://fixture/index.html")
   await window.webContents.debugger.sendCommand("WebAudio.enable")
-  const result = await window.webContents.executeJavaScript("globalThis.runPortableWasmWorkletFixture", true)
-  process.stdout.write(`${JSON.stringify(result)}\n`)
+  const result = await window.webContents.executeJavaScript(`(async () => {
+    try {
+      return { ok: true, value: await globalThis.runPortableWasmWorkletFixture }
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          name: error && error.name,
+          message: error && error.message,
+          stack: error && error.stack,
+          value: String(error),
+        },
+      }
+    }
+  })()`, true)
+  if (!result || result.ok !== true) {
+    throw new Error(`Portable fixture rejected: ${JSON.stringify(result && result.error)}`)
+  }
+  process.stdout.write(`${JSON.stringify(result.value)}\n`)
   app.exit(0)
 }).catch((error) => {
   if (audioDiagnostics.length > 0) process.stderr.write(`audio diagnostics: ${JSON.stringify(audioDiagnostics)}\n`)
-  process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
+  const details = error && typeof error === "object"
+    ? JSON.stringify(error, Object.getOwnPropertyNames(error))
+    : String(error)
+  process.stderr.write(`${error instanceof Error ? error.stack : details}\n`)
   app.exit(1)
 })

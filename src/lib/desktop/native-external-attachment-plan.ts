@@ -18,7 +18,8 @@ type NativeExternalAttachmentProjection = {
   instanceId: string
   graphNodeId: string
   nativeGraphNodeId: string
-  chainIndex: number
+  stageIndex: number
+  sourceIndex?: number
   catalogIdentity: {
     format: "vst3"
     classId: string
@@ -124,7 +125,7 @@ const compileProcessor = (
     instanceId: processor.instanceId,
     graphNodeId: node.channel.id,
     nativeGraphNodeId: nativeGraphNodeId(node.channel.id).toString(),
-    chainIndex: processor.chainIndex,
+    stageIndex: processor.index,
     catalogIdentity: {
       format: "vst3",
       classId: reference.classId,
@@ -162,9 +163,7 @@ export const compileNativeExternalAttachmentSnapshot = (
   input: NativeExternalAttachmentSnapshotInput,
 ): NativeExternalAttachmentSnapshotCompilation => {
   if (input.target === "browser") {
-    const live = input.processors.find((processor) => (
-      !processor.bypassed && processor.health.state !== "degraded"
-    ))
+    const live = input.processors.find((processor) => !processor.bypassed)
     return live
       ? { supported: false, reasons: [`External plugin ${live.instanceId} must be frozen or bypassed before browser playback.`] }
       : { supported: true, attachments: [] }
@@ -175,7 +174,10 @@ export const compileNativeExternalAttachmentSnapshot = (
   const attachments: NativeExternalAttachmentProjection[] = []
   const processorsByNode = new Map<string, ExternalProcessor[]>()
   for (const processor of input.processors) {
-    if (processor.bypassed || processor.health.state === "degraded") continue
+    if (processor.health.state === "degraded") {
+      reasons.push(`External plugin "${processor.instanceId}" is degraded and cannot participate in native playback.`)
+      continue
+    }
     const processors = processorsByNode.get(processor.targetId) ?? []
     processors.push(processor)
     processorsByNode.set(processor.targetId, processors)
@@ -189,8 +191,12 @@ export const compileNativeExternalAttachmentSnapshot = (
       continue
     }
     const ordered = [...processors].sort((left, right) => (
-      left.chainIndex - right.chainIndex || left.instanceId.localeCompare(right.instanceId)
+      left.index - right.index || left.instanceId.localeCompare(right.instanceId)
     ))
+    if (ordered.some((processor, index) => processor.index === ordered[index - 1]?.index)) {
+      reasons.push(`External processors on mixer node "${targetId}" must have unique persisted indexes.`)
+      continue
+    }
     let inputLayout = node.inputLayout
     for (const [index, processor] of ordered.entries()) {
       if (index > 0 && processor.manifest.role === "instrument") {
@@ -209,7 +215,11 @@ export const compileNativeExternalAttachmentSnapshot = (
       if (typeof attachment === "string") {
         reasons.push(attachment)
       } else {
-        attachments.push({ ...attachment, chainIndex: index })
+        attachments.push({
+          ...attachment,
+          stageIndex: processor.manifest.role === "instrument" ? 0 : processor.index,
+          ...(processor.manifest.role === "instrument" ? { sourceIndex: 0 } : {}),
+        })
         inputLayout = outputLayout ?? inputLayout
       }
     }
@@ -222,7 +232,7 @@ export const compileNativeExternalAttachmentSnapshot = (
     supported: true,
     attachments: attachments.sort((left, right) => (
       left.graphNodeId.localeCompare(right.graphNodeId)
-      || left.chainIndex - right.chainIndex
+      || left.stageIndex - right.stageIndex
       || left.catalogIdentity.classId.localeCompare(right.catalogIdentity.classId)
       || left.instanceId.localeCompare(right.instanceId)
     )),
@@ -245,7 +255,7 @@ const compileAttachmentPlan = (
     return {
       supported: true,
       plan: nativeExternalAttachmentPlanSchema.parse({
-        version: 1,
+        version: 2,
         attachments,
       }),
     }
@@ -294,5 +304,9 @@ export const compileNativeExternalEditorPlan = (
     maximumEventsPerBlock: 128,
   })
   if (typeof attachment === "string") return { supported: false, reasons: [attachment] }
-  return compileAttachmentPlan([{ ...attachment, chainIndex: 0 }], "External editor attachment plan is invalid.")
+  return compileAttachmentPlan([{
+    ...attachment,
+    stageIndex: 0,
+    ...(instrument ? { sourceIndex: 0 } : {}),
+  }], "External editor attachment plan is invalid.")
 }

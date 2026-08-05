@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -15,6 +16,7 @@ namespace {
 
 using daw::plugin_host::CreateWorkerTransportLayout;
 using daw::plugin_host::CreatePortableSharedMemoryDescriptor;
+using daw::plugin_host::ChannelMask;
 using daw::plugin_host::IsWorkerLaunchEligible;
 using daw::plugin_host::WorkerDiagnosticKind;
 using daw::plugin_host::WorkerHealth;
@@ -37,6 +39,7 @@ using daw::plugin_host::WorkerHello;
 using daw::plugin_host::WorkerHostConfiguration;
 using daw::plugin_host::WorkerManifest;
 using daw::plugin_host::WorkerPluginRole;
+using daw::plugin_host::WorkerBlockContext;
 using daw::plugin_host::WorkerPreflightResult;
 using daw::plugin_host::WorkerPreflightStatus;
 using daw::plugin_host::BoundedEditorParameterState;
@@ -228,11 +231,70 @@ int main(int argc, char* argv[]) {
   if (!Check(!CreateWorkerTransportLayout(maximumRequest).has_value(), "over-capacity transport layout was accepted")) return EXIT_FAILURE;
   if (!Check(CreatePortableSharedMemoryDescriptor("daw.worker.1", *layout).has_value(), "valid shared memory descriptor was rejected")) return EXIT_FAILURE;
   if (!Check(!CreatePortableSharedMemoryDescriptor("../unsafe", *layout).has_value(), "unsafe shared memory descriptor was accepted")) return EXIT_FAILURE;
+  if (!Check(
+    daw::plugin_host::NormalizeWorkerTailFrames(daw::plugin_host::kMaximumWorkerTailFrames).value_or(0)
+      == daw::plugin_host::kMaximumWorkerTailFrames
+      && !daw::plugin_host::NormalizeWorkerTailFrames(
+        static_cast<std::uint64_t>(daw::plugin_host::kMaximumWorkerTailFrames) + 1
+      )
+      && daw::plugin_host::NormalizeWorkerTailFrames(daw::plugin_host::kInfiniteTailFrames).value_or(0)
+        == daw::plugin_host::kInfiniteTailFrames,
+    "tail frame normalization contract failed"
+  )) return EXIT_FAILURE;
+  if (!Check(
+    ChannelMask(0).value_or(1) == 0
+      && ChannelMask(64).value_or(0) == std::numeric_limits<std::uint64_t>::max()
+      && !ChannelMask(65),
+    "channel silence mask contract failed"
+  )) return EXIT_FAILURE;
 
   auto transportResult = WorkerTransport::Create(*layout);
   if (!Check(transportResult.has_value(), "shared transport creation failed")) return EXIT_FAILURE;
   WorkerTransport transport = std::move(*transportResult);
-  if (!Check(transport.Submit(0, 1), "transport submit failed")) return EXIT_FAILURE;
+  if (!Check(!transport.ReadTailMetadata().has_value(), "unpublished tail metadata was visible")) return EXIT_FAILURE;
+  transport.PublishTailMetadata(480);
+  const auto finiteTail = transport.ReadTailMetadata();
+  if (!Check(finiteTail && finiteTail->workerGeneration == transport.token()
+    && finiteTail->tailFrames == 480, "finite tail metadata was not published")) return EXIT_FAILURE;
+  transport.PublishTailMetadata(daw::plugin_host::kInfiniteTailFrames);
+  const auto infiniteTail = transport.ReadTailMetadata();
+  if (!Check(infiniteTail && infiniteTail->tailFrames == daw::plugin_host::kInfiniteTailFrames,
+    "infinite tail metadata was not published")) return EXIT_FAILURE;
+  transport.PublishTailMetadata(32);
+  const auto shorterTail = transport.ReadTailMetadata();
+  if (!Check(shorterTail && shorterTail->tailFrames == 32, "shorter finite tail metadata was not published")) return EXIT_FAILURE;
+  transport.PublishTailMetadata(100'000'001);
+  const auto retainedTail = transport.ReadTailMetadata();
+  if (!Check(retainedTail && retainedTail->tailFrames == 32,
+    "malformed tail metadata replaced the last valid value")) return EXIT_FAILURE;
+  const WorkerBlockContext context{
+    .projectTimeSamples = 96,
+    .continuousTimeSamples = 144,
+    .tempoBpm = 128.0,
+    .projectTimeMusic = 2.5,
+    .timeSignatureNumerator = 3,
+    .timeSignatureDenominator = 4,
+    .cycleStartMusic = 4.0,
+    .cycleEndMusic = 8.0,
+    .transportEpoch = 7,
+    .playing = true,
+    .cycleActive = true,
+    .discontinuity = false,
+  };
+  if (!Check(transport.Submit(0, 1, 64, {}, context), "transport submit failed")) return EXIT_FAILURE;
+  const auto submittedContext = transport.context(0);
+  if (!Check(submittedContext.projectTimeSamples == 96
+    && submittedContext.continuousTimeSamples == 144
+    && submittedContext.tempoBpm == 128.0
+    && submittedContext.projectTimeMusic == 2.5
+    && submittedContext.timeSignatureNumerator == 3
+    && submittedContext.timeSignatureDenominator == 4
+    && submittedContext.cycleStartMusic == 4.0
+    && submittedContext.cycleEndMusic == 8.0
+    && submittedContext.transportEpoch == 7
+    && submittedContext.playing
+    && submittedContext.cycleActive
+    && !submittedContext.discontinuity, "transport context was not retained")) return EXIT_FAILURE;
   if (!Check(!transport.Complete(0, 2), "late response was accepted")) return EXIT_FAILURE;
   if (!Check(transport.DropLate(0, 2), "late response was not dropped")) return EXIT_FAILURE;
   if (!Check(transport.slot(0).status == WorkerSlotStatus::kDropped, "dropped slot status missing")) return EXIT_FAILURE;
@@ -342,6 +404,8 @@ int main(int argc, char* argv[]) {
 
   WorkerControlService service;
   if (!Check(service.Start(NoPluginStartup(), Configuration(argv[1]), Request()), "worker control service launch failed")) return EXIT_FAILURE;
+  const auto firstWorkerGeneration = service.workerGeneration();
+  if (!Check(firstWorkerGeneration != 0, "worker generation was not exposed after start")) return EXIT_FAILURE;
   const WorkerCallbackPort callback = service.callbackPort();
   if (!Check(
     callback.Submit({.slotIndex = 0, .sequence = 7, .numSamples = 64, .events = events}) == WorkerSubmissionStatus::kAccepted,
@@ -371,13 +435,29 @@ int main(int argc, char* argv[]) {
   for (int attempt = 0; attempt < 500 && !callback.ReadCompleted(1, 8); ++attempt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
-  if (!Check(callback.CopyCompletedOutput(1, 8, worker_output), "callback-safe output mapping failed")) return EXIT_FAILURE;
+  std::uint64_t output_silence_flags = 0xffff'ffff'ffff'ffffULL;
+  if (!Check(
+    callback.CopyCompletedOutput(1, 8, worker_output, &output_silence_flags),
+    "callback-safe output mapping failed"
+  )) return EXIT_FAILURE;
   if (!Check(worker_output[0] == worker_input[0] && worker_output[64] == worker_input[64],
     "worker output did not preserve mapped channel planes")) return EXIT_FAILURE;
+  if (!Check(output_silence_flags == 0, "non-silent worker output was marked silent")) return EXIT_FAILURE;
+  for (int attempt = 0; attempt < 500 && !callback.ReadCompleted(0, 9); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  output_silence_flags = 0;
+  if (!Check(
+    callback.CopyCompletedOutput(0, 9, worker_output, &output_silence_flags),
+    "silent worker output could not be copied"
+  )) return EXIT_FAILURE;
+  if (!Check(output_silence_flags == 3, "silent worker output did not expose channel silence flags")) return EXIT_FAILURE;
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   const auto diagnostic = service.ReadDiagnostic();
   if (!Check(diagnostic.has_value() && diagnostic->kind == WorkerDiagnosticKind::kReady, "worker ready diagnostic missing")) return EXIT_FAILURE;
   if (!Check(service.Restart(), "worker control service restart failed")) return EXIT_FAILURE;
+  if (!Check(service.workerGeneration() != 0 && service.workerGeneration() != firstWorkerGeneration,
+    "worker generation was not refreshed after restart")) return EXIT_FAILURE;
   for (int attempt = 0; attempt < 500 && callback.health() != WorkerHealth::kReady; ++attempt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }

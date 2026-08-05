@@ -51,3 +51,12 @@ test("keeps spectrum selection on the native session envelope contract", async (
   expect(main).toContain('await supervisor.setSpectrumNode(envelope.value)')
   expect(main).not.toContain('[native-spectrum]')
 })
+
+test("routes editor commands through the isolated session before the playback host", async () => {
+  const main = await readFile(mainPath, "utf8")
+  const isolatedRoute = main.indexOf("if (manager) {")
+  const playbackRoute = main.indexOf("if (activeHostCandidate) {")
+
+  expect(isolatedRoute).toBeGreaterThanOrEqual(0)
+  expect(playbackRoute).toBeGreaterThan(isolatedRoute)
+})

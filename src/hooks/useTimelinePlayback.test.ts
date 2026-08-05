@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { createRoot } from 'solid-js'
+import { readFile } from 'node:fs/promises'
+import { createRoot, createSignal } from 'solid-js'
 
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
+import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 
 type ScheduleCall = {
   playheadSec: number
@@ -43,20 +45,43 @@ const flushMicrotasks = async () => {
   for (let index = 0; index < 20; index += 1) await Promise.resolve()
 }
 
-const createNativeHookBridge = (failure?: string) => {
+const createNativeHookBridge = (
+  failure?: string | (() => string | undefined),
+  lifecycle?: {
+    initial: { state: "suspended" | "recovering" | "ready" | "failed"; powerGeneration: number }
+    completeRecovery: (generation: number, result: "ready" | "failed") => Promise<{ accepted: boolean }>
+    retryRecovery: () => Promise<{ accepted: boolean }>
+  },
+  initialBeginGate?: Promise<{ ok: true } | { ok: false; error: string }>,
+  transportGate?: Promise<{ ok: true } | { ok: false; error: string }>,
+) => {
   const calls: string[] = []
+  const transportStates: boolean[] = []
+  const transportFrames: number[] = []
+  let beginGate = initialBeginGate
   const reply = (name: string) => async () => {
     calls.push(name)
-    if (name === failure) return { ok: false as const, error: 'failed' }
+    const failureName = typeof failure === "function" ? failure() : failure
+    if (name === failureName) return { ok: false as const, error: 'failed' }
+    if (name === "begin" && beginGate) return beginGate
     return { ok: true as const }
   }
   let progressListener = (_progress: NativeScheduleProgress) => {}
   let lossListener = () => {}
   let progressSequence = 0n
+  let lifecycleListener: ((value: DesktopAudioLifecycle) => void) | undefined
+  let transportGateArmed = false
   const deviceId: `coreaudio:${string}` = 'coreaudio:default'
   return {
     calls,
+    transportStates,
+    transportFrames,
     emitLoss: () => lossListener(),
+    armTransportGate: () => { transportGateArmed = true },
+    setBeginGate: (gate: Promise<{ ok: true } | { ok: false; error: string }> | undefined) => {
+      beginGate = gate
+    },
+    emitLifecycle: (value: DesktopAudioLifecycle) => lifecycleListener?.(value),
     audioHost: {
       resolveOutputDevice: async () => ({
         ok: true as const,
@@ -78,12 +103,20 @@ const createNativeHookBridge = (failure?: string) => {
         installAsset: reply('install'),
         releaseAsset: reply('release'),
         publishGraph: reply('graph'),
+        coordinateVstAttachments: reply('coordinate'),
         queueParameterEvents: reply('parameter'),
         queueInstrumentEvents: reply('instrument'),
         queueSourceEvents: reply('source'),
         queueScheduleWindow: reply('schedule'),
         setTransport: async (transport: { epoch: number; frame: number; running: boolean; transitionId?: bigint }) => {
           calls.push('transport')
+          transportStates.push(transport.running)
+          transportFrames.push(transport.frame)
+          if (
+            !transport.running
+            && transportGate
+            && transportGateArmed
+          ) await transportGate
           progressSequence += 1n
           queueMicrotask(() => progressListener({
             revision: 1,
@@ -94,6 +127,7 @@ const createNativeHookBridge = (failure?: string) => {
             lastAcceptedWindowId: 1n,
             appliedTransportTransitionId: transport.transitionId ?? progressSequence,
             appliedUrgentSequence: 0n,
+  appliedProcessorSequence: 0n,
             running: transport.running,
             scheduleComplete: true,
             instrumentCredits: 256,
@@ -120,6 +154,15 @@ const createNativeHookBridge = (failure?: string) => {
           return () => { progressListener = () => {} }
         },
       },
+      ...(lifecycle ? {
+        getLifecycle: async () => lifecycle.initial,
+        completeRecovery: lifecycle.completeRecovery,
+        retryRecovery: lifecycle.retryRecovery,
+        onLifecycle: (listener: (value: DesktopAudioLifecycle) => void) => {
+          lifecycleListener = listener
+          return () => { lifecycleListener = undefined }
+        },
+      } : {}),
     },
   }
 }
@@ -174,12 +217,53 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
   }
 }
 
+const nativeRequiredSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => {
+  const result = compileLivePlaybackSnapshot({
+    revision: 1,
+    bpm: 120,
+    transport,
+    tracks: [track],
+    renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+    sidechainRoutes: [],
+  })
+  if (!result.supported) return result
+  return {
+    supported: true as const,
+    snapshot: {
+      ...result.snapshot,
+      nativeExternalAttachmentPlan: { version: 1 as const, attachments: [] },
+      requiresNativePlayback: true,
+    },
+  }
+}
+
+test('keeps lifecycle state reactive while limiting it to native backend selection', async () => {
+  const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
+  expect(source).toContain("const [audioLifecycleState, setAudioLifecycleState] = createSignal")
+  expect(source).toContain("audioLifecycleState() === \"ready\"")
+  expect(source).toContain("if (lifecycleState === \"suspended\") return")
+  expect(source).not.toContain("if (audioLifecycleState === \"failed\")")
+})
+
+test('fingerprints all playback-relevant audio clip compiler fields for paused preview', async () => {
+  const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
+  const fingerprint = source.slice(
+    source.indexOf("const readNativePreviewTrackFingerprint"),
+    source.indexOf("  const disposeNativePreview", source.indexOf("const readNativePreviewTrackFingerprint")),
+  )
+  expect(fingerprint).toContain("const { clips, ...trackCompilerInputs } = track")
+  expect(fingerprint).toContain("clips.map((clip)")
+  expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
+  expect(fingerprint).not.toContain("clip.id")
+})
+
 describe('useTimelinePlayback deferred stretch retries', () => {
   test('playing seek cancels automation before updating transport seek', async () => {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine)
+        await flushMicrotasks()
         await playback.handlePlay([track])
 
         fake.transportEvents.length = 0
@@ -216,6 +300,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
           loopEndSec: () => 6,
           getTracks: () => [track],
         })
+        await flushMicrotasks()
         await playback.handlePlay([track])
 
         fake.transportEvents.length = 0
@@ -460,6 +545,1304 @@ describe('useTimelinePlayback deferred stretch retries', () => {
   })
 })
 
+test('does not acknowledge stale recovery after suspend or unmount', async () => {
+  const previousWindow = globalThis.window
+  const gate = Promise.withResolvers<{ ok: true }>()
+  const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "suspended", powerGeneration: 1 },
+    completeRecovery: async (generation, result) => {
+      acknowledgements.push({ generation, result })
+      return { accepted: true }
+    },
+    retryRecovery: async () => ({ accepted: false }),
+  }, gate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+        enabled: () => true,
+        projectId: () => "project",
+        compileSnapshot: nativeRequiredSnapshot,
+      })
+      fixture.emitLifecycle({ state: "recovering", powerGeneration: 1 })
+      await flushMicrotasks()
+      fixture.emitLifecycle({ state: "suspended", powerGeneration: 2 })
+      dispose()
+      gate.resolve({ ok: true })
+      await flushMicrotasks()
+      expect(acknowledgements).toEqual([])
+      expect(playback.isPlaying()).toBeFalse()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('keeps legacy recovery inert until explicit play', async () => {
+  const previousWindow = globalThis.window
+  const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "suspended", powerGeneration: 1 },
+    completeRecovery: async (generation, result) => {
+      acknowledgements.push({ generation, result })
+      return { accepted: true }
+    },
+    retryRecovery: async () => ({ accepted: false }),
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(fake.engine)
+      fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
+      await flushMicrotasks()
+      expect(acknowledgements).toEqual([{ generation: 2, result: "ready" }])
+      expect(fake.scheduleCalls).toEqual([])
+      expect(playback.isPlaying()).toBeFalse()
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('plays through legacy Web Audio while lifecycle is recovering', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "recovering", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: true }),
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        expect(fixture.calls).not.toContain("begin")
+        expect(fake.scheduleCalls.length).toBeGreaterThan(0)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('plays through legacy Web Audio and retries native recovery while lifecycle is failed', async () => {
+  const previousWindow = globalThis.window
+  let retries = 0
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      retries += 1
+      return { accepted: true }
+    },
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        fixture.emitLifecycle({ state: "failed", powerGeneration: 1 })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        expect(retries).toBe(1)
+        expect(fixture.calls).not.toContain("begin")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('native-required play retries failed recovery and stays stopped while recovery runs', async () => {
+  const previousWindow = globalThis.window
+  let retries = 0
+  const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+  const lifecycleEmitter: { emit: (value: DesktopAudioLifecycle) => void } = {
+    emit: () => {},
+  }
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async (generation, result) => {
+      acknowledgements.push({ generation, result })
+      return { accepted: true }
+    },
+    retryRecovery: async () => {
+      retries += 1
+      lifecycleEmitter.emit({ state: "recovering", powerGeneration: 2 })
+      return { accepted: true }
+    },
+  })
+  lifecycleEmitter.emit = fixture.emitLifecycle
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const faults: string[] = []
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+        requiresNativeAudio: true,
+        enabled: () => true,
+        projectId: () => "project",
+        compileSnapshot: nativeRequiredSnapshot,
+        reportFault: (message) => faults.push(message),
+      })
+      await flushMicrotasks()
+      await playback.handlePlay([track])
+      await flushMicrotasks()
+      expect(retries).toBe(1)
+      expect(playback.isPlaying()).toBeFalse()
+      expect(faults).toEqual([])
+      expect(acknowledgements).toContainEqual({ generation: 2, result: "ready" })
+      expect(playback.isNativePlaybackPrepared()).toBeTrue()
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('native-required play reports rejected recovery and retries it on a later play', async () => {
+  const previousWindow = globalThis.window
+  let retries = 0
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      retries += 1
+      return { accepted: false }
+    },
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const faults: string[] = []
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+        requiresNativeAudio: true,
+        enabled: () => true,
+        projectId: () => "project",
+        compileSnapshot: nativeRequiredSnapshot,
+        reportFault: (message) => faults.push(message),
+      })
+      await flushMicrotasks()
+      await playback.handlePlay([track])
+      await playback.handlePlay([track])
+      expect(retries).toBe(2)
+      expect(playback.isPlaying()).toBeFalse()
+      expect(faults).toHaveLength(2)
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('coalesces concurrent native-required recovery retries', async () => {
+  const previousWindow = globalThis.window
+  const retryGate = Promise.withResolvers<{ accepted: boolean }>()
+  let retries = 0
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      retries += 1
+      return retryGate.promise
+    },
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const faults: string[] = []
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+        requiresNativeAudio: true,
+        enabled: () => true,
+        projectId: () => "project",
+        compileSnapshot: nativeRequiredSnapshot,
+        reportFault: (message) => faults.push(message),
+      })
+      await flushMicrotasks()
+      const first = playback.handlePlay([track])
+      const second = playback.handlePlay([track])
+      await flushMicrotasks()
+      expect(retries).toBe(1)
+      retryGate.resolve({ accepted: false })
+      await Promise.all([first, second])
+      expect(playback.isPlaying()).toBeFalse()
+      expect(faults).toHaveLength(1)
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('allows a rejected recovery retry to be attempted again in the same generation', async () => {
+  const previousWindow = globalThis.window
+  let retries = 0
+  let rejectRetry = true
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      retries += 1
+      if (rejectRetry) {
+        rejectRetry = false
+        throw new Error("retry failed")
+      }
+      return { accepted: true }
+    },
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine)
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        await flushMicrotasks()
+        await playback.handlePause()
+        await playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(retries).toBe(2)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('coalesces concurrent recovery retries', async () => {
+  const previousWindow = globalThis.window
+  const retryGate = Promise.withResolvers<{ accepted: boolean }>()
+  let retries = 0
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      retries += 1
+      return retryGate.promise
+    },
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine)
+        await flushMicrotasks()
+        const first = playback.handlePlay([track])
+        const second = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(retries).toBe(1)
+        retryGate.resolve({ accepted: false })
+        await Promise.all([first, second])
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('serializes three rapid play calls into one legacy startup', async () => {
+  await withFakeRaf(async () => {
+    const resumeGate = Promise.withResolvers<void>()
+    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    let resumeCalls = 0
+    let stopAllSourcesCalls = 0
+    const engine = {
+      ...fake.engine,
+      resume: () => {
+        resumeCalls += 1
+        return resumeGate.promise
+      },
+      stopAllSources: () => {
+        stopAllSourcesCalls += 1
+      },
+    }
+    await createRoot(async (dispose) => {
+      const first = useTimelinePlayback(engine)
+      const second = first.handlePlay([track])
+      const third = first.handlePlay([track])
+      await flushMicrotasks()
+      expect(resumeCalls).toBe(1)
+      resumeGate.resolve()
+      await Promise.all([second, third])
+      expect(resumeCalls).toBe(1)
+      expect(fake.scheduleCalls).toHaveLength(1)
+      expect(stopAllSourcesCalls).toBe(0)
+      expect(first.isPlaying()).toBeTrue()
+      expect(first.backendDiagnostics().activeBackend).toBe("legacy")
+      dispose()
+    })
+  })
+})
+
+test('cancels delayed legacy resume before it schedules playback', async () => {
+  await withFakeRaf(async () => {
+    const resumeGate = Promise.withResolvers<void>()
+    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    const engine = {
+      ...fake.engine,
+      resume: () => resumeGate.promise,
+    }
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(engine)
+      const play = playback.handlePlay([track])
+      await flushMicrotasks()
+      await playback.handlePause()
+      resumeGate.resolve()
+      await play
+      expect(playback.isPlaying()).toBeFalse()
+      expect(fake.scheduleCalls).toEqual([])
+      dispose()
+    })
+  })
+})
+
+test('waits for a cancelled play attempt before starting a fresh play', async () => {
+  await withFakeRaf(async () => {
+    const resumeGates = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ]
+    let resumeCalls = 0
+    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    const engine = {
+      ...fake.engine,
+      resume: () => {
+        const gate = resumeGates[resumeCalls]
+        resumeCalls += 1
+        if (!gate) throw new Error("Unexpected extra resume.")
+        return gate.promise
+      },
+    }
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(engine)
+      const first = playback.handlePlay([track])
+      await flushMicrotasks()
+      await playback.handlePause()
+      const second = playback.handlePlay([track])
+      const third = playback.handlePlay([track])
+      await flushMicrotasks()
+
+      expect(resumeCalls).toBe(1)
+      resumeGates[0]?.resolve()
+      await flushMicrotasks()
+      expect(resumeCalls).toBe(2)
+      resumeGates[1]?.resolve()
+      await Promise.all([first, second, third])
+
+      expect(fake.scheduleCalls).toHaveLength(1)
+      expect(playback.isPlaying()).toBeTrue()
+      dispose()
+    })
+  })
+})
+
+test('cancels delayed portable resume before it can start the portable backend', async () => {
+  await withFakeRaf(async () => {
+    const resumeGate = Promise.withResolvers<void>()
+    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    const engine = {
+      ...fake.engine,
+      resume: () => resumeGate.promise,
+    }
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(
+        engine,
+        undefined,
+        undefined,
+        {
+          enabled: () => true,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        },
+      )
+      const play = playback.handlePlay([track])
+      await flushMicrotasks()
+      await playback.handlePause()
+      resumeGate.resolve()
+      await play
+      expect(playback.isPlaying()).toBeFalse()
+      expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+      expect(fake.scheduleCalls).toEqual([])
+      dispose()
+    })
+  })
+})
+
+test('cancels delayed native startup and disposes the late backend', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+  const nativeEnabled = true
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => nativeEnabled,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls).toContain("begin")
+        await playback.handlePause()
+        beginGate.resolve({ ok: true })
+        await play
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+        expect(fake.scheduleCalls).toEqual([])
+        expect(fixture.calls).toContain("teardown")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('rebuilds from the persisted generation when native insertion races delayed startup', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+  const [nativeEnabled, setNativeEnabled] = createSignal(false)
+  let projectGeneration = 1
+  let insertionOrder = ['old']
+  const compiled: Array<{ generation: number; order: string[] }> = []
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: nativeEnabled,
+          projectId: () => "project",
+          projectGeneration: () => projectGeneration,
+          compileSnapshot: async (transport) => {
+            compiled.push({ generation: projectGeneration, order: [...insertionOrder] })
+            return compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: [track],
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+              sidechainRoutes: [],
+            })
+          },
+        })
+        setNativeEnabled(true)
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+
+        insertionOrder = ["new"]
+        projectGeneration = 2
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        await flushMicrotasks()
+        expect(playback.isPlaying()).toBeFalse()
+
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+        await play
+
+        expect(compiled.at(-1)).toEqual({ generation: 2, order: ["new"] })
+        expect(compiled.some((entry) => entry.generation === 1)).toBeTrue()
+        expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("native")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('waits for lifecycle recovery before restarting an active native graph', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "ready", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: true }),
+  })
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => false,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeTrue()
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(2)
+        expect(playback.backendDiagnostics().activeBackend).toBe("native")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('resumes an explicitly captured structural rebuild after project generation invalidation', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  let projectGeneration = 1
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      let dispose = () => {}
+      const playback = createRoot((cleanup) => {
+        dispose = cleanup
+        return useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          projectGeneration: () => projectGeneration,
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+      })
+      await flushMicrotasks()
+      await playback.handlePlay([track])
+      expect(playback.isPlaying()).toBeTrue()
+
+      const intent = {
+        resumePlayback: true,
+        playheadSec: 3,
+        projectId: "project",
+      }
+      projectGeneration = 2
+      await playback.handlePause()
+      expect(playback.isPlaying()).toBeFalse()
+
+      await playback.restartTimelineSchedule([track], {
+        rebuildBackend: true,
+        ...intent,
+      })
+
+      expect(playback.isPlaying()).toBeTrue()
+      expect(fixture.transportStates.filter((running) => running)).toHaveLength(2)
+      expect(fixture.transportFrames.at(-1)).toBe(144000)
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('resumes after the generation effect disposes playback before structural rebuild', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const [projectGeneration, setProjectGeneration] = createSignal(1)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          projectGeneration,
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        fake.setCurrentTimelineSec(3)
+        const intent = {
+          resumePlayback: playback.isPlaying(),
+          playheadSec: 3,
+          projectId: "project",
+        }
+
+        setProjectGeneration(2)
+        // Bun resolves Solid's createEffect through its server entry point, so
+        // model the generation effect's disposal explicitly in this hook test.
+        await playback.handlePause()
+        expect(playback.isPlaying()).toBeFalse()
+
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+        await playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          ...intent,
+        })
+
+        expect(playback.isPlaying()).toBeTrue()
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
+        expect(fixture.transportFrames.at(-1)).toBe(144000)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('coalesces queued structural rebuilds and resumes once', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      let dispose = () => {}
+      const playback = createRoot((cleanup) => {
+        dispose = cleanup
+        return useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+      })
+      await flushMicrotasks()
+      await playback.handlePlay([track])
+      fixture.transportStates.length = 0
+
+      const first = playback.restartTimelineSchedule([track], {
+        rebuildBackend: true,
+        resumePlayback: true,
+        playheadSec: 1,
+        projectId: "project",
+      })
+      const second = playback.restartTimelineSchedule([track], {
+        rebuildBackend: true,
+        resumePlayback: true,
+        playheadSec: 2,
+        projectId: "project",
+      })
+      await first
+      await second
+
+      expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
+      expect(fixture.transportFrames.at(-1)).toBe(96000)
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('does not restart after pause wins an active native rebuild', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        fixture.setBeginGate(beginGate.promise)
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        await flushMicrotasks()
+        await playback.handlePause()
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(0)
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('does not resume a structural rebuild after stop wins', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+        fixture.setBeginGate(beginGate.promise)
+
+        const rebuild = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: true,
+          playheadSec: 2,
+          projectId: "project",
+        })
+        await flushMicrotasks()
+        await playback.handleStop()
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(0)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('does not resume a structural rebuild after switching projects', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge()
+  let projectId = "project"
+  let projectGeneration = 1
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => projectId,
+          projectGeneration: () => projectGeneration,
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        await playback.handlePlay([track])
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+        fixture.setBeginGate(beginGate.promise)
+
+        const rebuild = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: true,
+          playheadSec: 2,
+          projectId: "project",
+        })
+        await flushMicrotasks()
+        projectId = "other-project"
+        projectGeneration = 2
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(0)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('rebuilds a delayed paused native preview without committing play intent', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        const note = playback.nativeLiveMidi.start({ trackId: track.id, pitch: 60, velocity: 0.5 })
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+        expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+        expect(fixture.transportStates).not.toContain(true)
+        if (note) playback.nativeLiveMidi.stop(note)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('fails safely when the fresh native graph cannot start after insertion', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  let failFreshBegin = false
+  const fixture = createNativeHookBridge(() => {
+    return failFreshBegin ? "begin" : undefined
+  }, undefined, beginGate.promise)
+  const [nativeEnabled, setNativeEnabled] = createSignal(false)
+  let projectGeneration = 1
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: nativeEnabled,
+          projectId: () => "project",
+          projectGeneration: () => projectGeneration,
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        setNativeEnabled(true)
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        projectGeneration = 2
+        const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
+        beginGate.resolve({ ok: true })
+        failFreshBegin = true
+
+        const rebuildError = await rebuild.catch((error: unknown) => error)
+        expect(rebuildError).toBeInstanceOf(Error)
+        if (rebuildError instanceof Error) expect(rebuildError.message).toContain("failed")
+        await play
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+        expect(fixture.calls.filter((call) => call === "start")).toHaveLength(0)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('serializes a delayed native pause before immediate play', async () => {
+  const previousWindow = globalThis.window
+  const pauseGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, pauseGate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await playback.handlePlay([track])
+        fixture.armTransportGate()
+        fixture.calls.length = 0
+        fixture.transportStates.length = 0
+
+        const pause = playback.handlePause()
+        await flushMicrotasks()
+        expect(playback.isPlaying()).toBeFalse()
+
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "transport")).toHaveLength(1)
+
+        pauseGate.resolve({ ok: true })
+        await Promise.all([pause, play])
+
+        expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("native")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('keeps fallback startup alive across a failed native retry', async () => {
+  const previousWindow = globalThis.window
+  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
+  const resumeGate = Promise.withResolvers<void>()
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      emitLifecycle({ state: "recovering", powerGeneration: 2 })
+      emitLifecycle({ state: "failed", powerGeneration: 2 })
+      return { accepted: true }
+    },
+  })
+  emitLifecycle = fixture.emitLifecycle
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        resume: () => resumeGate.promise,
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+        resumeGate.resolve()
+        await play
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        expect(fake.scheduleCalls).toHaveLength(1)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('preserves active legacy playback across a failed native retry', async () => {
+  const previousWindow = globalThis.window
+  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
+  const retryGate = Promise.withResolvers<{ accepted: boolean }>()
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "failed", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => {
+      await retryGate.promise
+      emitLifecycle({ state: "recovering", powerGeneration: 2 })
+      emitLifecycle({ state: "failed", powerGeneration: 2 })
+      return { accepted: true }
+    },
+  })
+  emitLifecycle = fixture.emitLifecycle
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        retryGate.resolve({ accepted: true })
+        await flushMicrotasks()
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        expect(fixture.calls).not.toContain("begin")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('suspension cancels delayed native startup before it can commit playback', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "recovering", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: true }),
+  }, beginGate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        fixture.emitLifecycle({ state: "ready", powerGeneration: 2 })
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls).toContain("begin")
+        fixture.emitLifecycle({ state: "suspended", powerGeneration: 3 })
+        beginGate.resolve({ ok: true })
+        await play
+        expect(playback.isPlaying()).toBeFalse()
+        expect(fake.scheduleCalls).toEqual([])
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('failed lifecycle transition cancels delayed native startup', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "ready", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: true }),
+  }, beginGate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls).toContain("begin")
+        fixture.emitLifecycle({ state: "failed", powerGeneration: 2 })
+        beginGate.resolve({ ok: true })
+        await play
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+        expect(fake.scheduleCalls).toEqual([])
+        expect(fixture.calls).toContain("teardown")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('native live MIDI availability includes a recoverable native preview', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+        })
+        expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
+        expect(playback.nativeLiveMidi.isActive()).toBeFalse()
+        await playback.handlePlay([track])
+        await playback.handlePause()
+        expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('retries failed recovery only after explicit play and stays paused until ready', async () => {
+  const previousWindow = globalThis.window
+  let failed = true
+  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
+  const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
+  const fixture = createNativeHookBridge(
+    () => failed ? "begin" : undefined,
+    {
+      initial: { state: "suspended", powerGeneration: 1 },
+      completeRecovery: async (generation, result) => {
+        acknowledgements.push({ generation, result })
+        emitLifecycle({ state: result, powerGeneration: generation })
+        return { accepted: true }
+      },
+      retryRecovery: async () => {
+        emitLifecycle({ state: "recovering", powerGeneration: 3 })
+        return { accepted: true }
+      },
+    },
+  )
+  emitLifecycle = fixture.emitLifecycle
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
+        for (let index = 0; index < 100; index += 1) await Promise.resolve()
+        expect(acknowledgements).toContainEqual({ generation: 2, result: "failed" })
+        failed = false
+        await playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
+        expect(acknowledgements).toContainEqual({ generation: 3, result: "ready" })
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        await playback.handlePause()
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
 test('does not prepare native audio when disabled and keeps browser playback available', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()
@@ -633,6 +2016,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
                 lastAcceptedWindowId: 1n,
                 appliedTransportTransitionId: transport.transitionId ?? progressSequence,
                 appliedUrgentSequence: 0n,
+  appliedProcessorSequence: 0n,
                 running: transport.running,
                 scheduleComplete: true,
                 instrumentCredits: 256,
@@ -721,7 +2105,40 @@ test('uses the committed native backend without scheduling Web Audio', async () 
   }
 })
 
-test('preserves a prepared native preview across an idle seek', async () => {
+test('native-required playback does not fall back when native startup fails', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge('begin')
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+    let webEnsures = 0
+    const engine = {
+      ...fake.engine,
+      ensureAudio: () => { webEnsures += 1 },
+    }
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(engine, undefined, {
+        requiresNativeAudio: true,
+        enabled: () => true,
+        compileSnapshot: async (transport) => nativeRequiredSnapshot(transport),
+        reportFault: (message) => faults.push(message),
+      })
+      await playback.handlePlay([track])
+      expect(playback.isPlaying()).toBeFalse()
+      expect(webEnsures).toBe(0)
+      expect(faults.length).toBeGreaterThan(0)
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('preserves a prepared native preview across a paused native seek', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, 'window', {
@@ -740,6 +2157,7 @@ test('preserves a prepared native preview across an idle seek', async () => {
       }
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
+          requiresNativeAudio: true,
           enabled: () => true,
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
             revision: 1,
@@ -768,15 +2186,13 @@ test('preserves a prepared native preview across an idle seek', async () => {
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
-        expect(transportEvents).toEqual([
-          'cancelAutomationSchedules',
-          'onTransportSeek',
-          'applyAutomationAtTimelineSec',
-        ])
+        expect(transportEvents).toEqual([])
         expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(beforeCounts.begin)
         expect(fixture.calls.filter((call) => call === 'release')).toHaveLength(beforeCounts.release)
         expect(fixture.calls.filter((call) => call === 'stop')).toHaveLength(beforeCounts.stop)
         expect(fixture.calls.filter((call) => call === 'teardown')).toHaveLength(beforeCounts.teardown)
+        expect(fixture.transportFrames.at(-1)).toBe(192_000)
+        expect(fixture.transportStates.at(-1)).toBeFalse()
         dispose()
       })
     })
@@ -785,7 +2201,7 @@ test('preserves a prepared native preview across an idle seek', async () => {
   }
 })
 
-test('rebuilds a prepared native backend before the next play', async () => {
+test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []
   const reply = (name: string): (() => Promise<{ ok: true }>) => async () => {
@@ -836,6 +2252,7 @@ test('rebuilds a prepared native backend before the next play', async () => {
                 lastAcceptedWindowId: 1n,
                 appliedTransportTransitionId: transport.transitionId ?? progressSequence,
                 appliedUrgentSequence: 0n,
+  appliedProcessorSequence: 0n,
                 running: transport.running,
                 scheduleComplete: true,
                 instrumentCredits: 256,
@@ -880,8 +2297,9 @@ test('rebuilds a prepared native backend before the next play', async () => {
 
         await playback.restartTimelineSchedule([track], { rebuildBackend: true })
         expect(playback.isPlaying()).toBeFalse()
-        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
-        expect(calls.filter((call) => call === 'begin')).toHaveLength(1)
+        expect(playback.backendDiagnostics().activeBackend).toBe('native')
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
         expect(calls).toContain('teardown')
 
         await playback.handlePlay([track])

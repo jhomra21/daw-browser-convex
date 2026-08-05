@@ -10,11 +10,11 @@ const processor = (input: {
   instanceId: string;
   role: "effect" | "instrument";
   targetId: string;
-  chainIndex: number;
+  index: number;
 }) => externalProcessorSchema.parse({
   instanceId: input.instanceId,
   targetId: input.targetId,
-  chainIndex: input.chainIndex,
+  index: input.index,
   manifest: {
     identity: {
       format: "vst3",
@@ -68,19 +68,19 @@ test("selects effects and instruments for the selected target in chain order", (
     instanceId: "00000000-0000-4000-8000-000000000002",
     role: "instrument",
     targetId: "track-a",
-    chainIndex: 2,
+    index: 2,
   })
   const effect = processor({
     instanceId: "00000000-0000-4000-8000-000000000001",
     role: "effect",
     targetId: "track-a",
-    chainIndex: 1,
+    index: 1,
   })
   const otherTarget = processor({
     instanceId: "00000000-0000-4000-8000-000000000003",
     role: "effect",
     targetId: "track-b",
-    chainIndex: 0,
+    index: 0,
   })
 
   expect(selectExternalProcessorsForTarget([instrument, otherTarget, effect], "track-a")).toEqual([effect, instrument])

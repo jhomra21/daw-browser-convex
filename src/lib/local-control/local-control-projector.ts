@@ -9,7 +9,7 @@ import {
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import {
   externalPluginEntityKind,
-  externalProcessorSchema,
+  parseExternalProcessorValue,
   type ExternalProcessor,
 } from '@daw-browser/external-plugins'
 import type { LocalEffectRow } from '~/lib/local-effects'
@@ -114,7 +114,7 @@ const isEffect = (value: unknown): value is LocalEffectRow => (
   && 'params' in value
 )
 const isExternalProcessor = (value: unknown): value is ExternalProcessor => (
-  externalProcessorSchema.safeParse(value).success
+  parseExternalProcessorValue(value).success
 )
 
 const isAutomation = (value: unknown): value is AutomationEnvelope => (
@@ -189,6 +189,10 @@ const projectLocalControlSnapshot = <Snapshot>(
   const projectMix = input.projectState.find((row) => row.key === 'projectMix')?.value
   const effects = valueOfKind(input.entities, 'effect', isEffect)
   const externalProcessors = valueOfKind(input.entities, externalPluginEntityKind, isExternalProcessor)
+    .flatMap((value) => {
+      const parsed = parseExternalProcessorValue(value)
+      return parsed.success ? [parsed.data] : []
+    })
   return projectSnapshot({
     omitUnavailableClipSources: true,
     project: {
@@ -230,7 +234,7 @@ const projectLocalControlSnapshot = <Snapshot>(
     externalProcessors: externalProcessors.map((processor) => ({
       instanceId: processor.instanceId,
       targetId: processor.targetId,
-      chainIndex: processor.chainIndex,
+      index: processor.index,
       manifest: {
         identity: {
           name: processor.manifest.identity.name,

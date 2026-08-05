@@ -43,7 +43,7 @@ const settings: TimelineExportInput = {
 const createExternalProcessor = () => externalProcessorSchema.parse({
   instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
   targetId: 'track-1',
-  chainIndex: 0,
+  index: 0,
   manifest: {
     identity: {
       format: 'vst3',
@@ -302,6 +302,60 @@ test("snapshot failure rejects before queue insertion or output target creation"
   expect(queue.activeJob()).toBeUndefined()
   expect(service.status()).toBeUndefined()
   expect(targetCreated).toBeFalse()
+  queue.dispose()
+})
+
+test("native-only export fails closed before snapshot, queue, or output work for mixdown and stems", async () => {
+  const queue = createExportQueue(() => "native-export")
+  let trackReads = 0
+  let effectsReads = 0
+  let outputTargetCreates = 0
+  const outputTargets: ExportOutputTargetFactory = {
+    async createMixdownTarget() {
+      outputTargetCreates += 1
+      throw new Error("native export must not create a mixdown target")
+    },
+    async createStemTarget() {
+      outputTargetCreates += 1
+      throw new Error("native export must not create a stem target")
+    },
+  }
+  const service = createTimelineExportService({
+    queue,
+    nativeRendererRequired: true,
+    getTracks: () => {
+      trackReads += 1
+      return []
+    },
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => "cloud-project",
+    getUserId: () => "user-1",
+    getCloudRenderRows: () => undefined,
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => {
+      effectsReads += 1
+      return undefined
+    },
+    getSidechainRoutes: () => [],
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+
+  await expect(service.enqueueTimelineExport(settings, outputTargets)).rejects.toThrow(
+    "Native desktop export is unavailable until native offline rendering is implemented.",
+  )
+  await expect(service.enqueueStemExport({
+    ...settings,
+    stemSelection: "all-tracks",
+    stemMode: "full-master-contribution",
+  }, outputTargets)).rejects.toThrow(
+    "Native desktop export is unavailable until native offline rendering is implemented.",
+  )
+  expect(trackReads).toBe(0)
+  expect(effectsReads).toBe(0)
+  expect(outputTargetCreates).toBe(0)
+  expect(queue.activeJob()).toBeUndefined()
+  expect(service.status()).toBeUndefined()
   queue.dispose()
 })
 

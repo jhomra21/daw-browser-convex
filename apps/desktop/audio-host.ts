@@ -87,6 +87,7 @@ const {
   meterBatch: meterBatchType,
   spectrumSelection: spectrumSelectionType,
   spectrumFrame: spectrumFrameType,
+  processorStatePatch: processorStatePatchType,
   scheduleWindow: scheduleWindowType,
   scheduleProgress: scheduleProgressType,
   vstScheduleAutomationEnable: vstScheduleAutomationEnableType,
@@ -159,14 +160,31 @@ const serializeDeviceConfiguration = (input: NativeHostDeviceConfiguration) => {
 
 const serializeTransport = (input: NativeHostTransport) => {
   if (!unsigned32(input.epoch) || !Number.isSafeInteger(input.frame) || input.frame < 0
+    || (input.bpm !== undefined && (!Number.isFinite(input.bpm) || input.bpm <= 0))
+    || (input.timeSignatureNumerator !== undefined
+      && (!Number.isSafeInteger(input.timeSignatureNumerator) || input.timeSignatureNumerator <= 0))
+    || (input.timeSignatureDenominator !== undefined
+      && (!Number.isSafeInteger(input.timeSignatureDenominator) || input.timeSignatureDenominator <= 0))
+    || (input.cycleActive !== undefined && typeof input.cycleActive !== "boolean")
+    || (input.cycleStartSec !== undefined && (!Number.isFinite(input.cycleStartSec) || input.cycleStartSec < 0))
+    || (input.cycleEndSec !== undefined && (!Number.isFinite(input.cycleEndSec) || input.cycleEndSec < 0))
+    || ((input.cycleStartSec !== undefined || input.cycleEndSec !== undefined)
+      && (input.cycleStartSec === undefined || input.cycleEndSec === undefined
+        || input.cycleEndSec <= input.cycleStartSec))
     || (input.transitionId !== undefined && (
       input.transitionId <= 0n || input.transitionId > 0xffff_ffff_ffff_ffffn
     ))) return undefined
-  const output = Buffer.alloc(24)
+  const output = Buffer.alloc(64)
   output.writeUInt32BE(input.epoch)
   output[4] = input.running ? 1 : 0
   output.writeBigInt64BE(BigInt(input.frame), 8)
   output.writeBigUInt64BE(input.transitionId ?? 1n, 16)
+  output.writeDoubleBE(input.bpm ?? 0, 24)
+  output.writeUInt32BE(input.cycleActive === true ? 1 : 0, 32)
+  output.writeUInt32BE(input.timeSignatureNumerator ?? 0, 36)
+  output.writeUInt32BE(input.timeSignatureDenominator ?? 0, 40)
+  output.writeDoubleBE(input.cycleStartSec ?? 0, 48)
+  output.writeDoubleBE(input.cycleEndSec ?? 0, 56)
   return output
 }
 
@@ -234,7 +252,8 @@ const serializeAssetInstall = (input: NativeHostPcmAsset) => {
 
 export type ResolvedVst3Attachment = {
   graphNodeId: bigint
-  chainIndex: number
+  stageIndex: number
+  sourceIndex?: number
   instanceId: string
   classId: string
   vendorId: string
@@ -247,6 +266,7 @@ export type ResolvedVst3Attachment = {
   inputLayout: "none" | "mono" | "stereo"
   outputLayout: "mono" | "stereo"
   declaredLatencyFrames: number
+  declaredTailFrames?: number | null
   transportLatencyFrames: number
   workerTransport: {
     slotCount: number
@@ -256,6 +276,7 @@ export type ResolvedVst3Attachment = {
     maximumEventsPerBlock: number
   }
   renderEnabled?: boolean
+  workerEnabled?: boolean
 }
 
 const fingerprintBytes = (value: string) => /^[a-f0-9]{64}$/.test(value) ? Buffer.from(value, "hex") : undefined
@@ -270,13 +291,17 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     || !input.canonicalExecutablePath.startsWith(`${input.canonicalBundlePath}/`)
     || input.scannerProtocolVersion !== 2
     || input.graphNodeId <= 0n
-    || !unsigned32(input.chainIndex) || input.chainIndex > 0x7fff_ffff
+    || !unsigned32(input.stageIndex) || input.stageIndex > 0x7fff_ffff
+    || (input.sourceIndex !== undefined && (!unsigned32(input.sourceIndex) || input.sourceIndex > 0x7fff_ffff))
     || (input.role !== "effect" && input.role !== "instrument")
     || (input.inputLayout !== "none" && input.inputLayout !== "mono" && input.inputLayout !== "stereo")
     || (input.role === "instrument" && input.inputLayout !== "none")
     || (input.role === "effect" && input.inputLayout === "none")
     || (input.outputLayout !== "mono" && input.outputLayout !== "stereo")
     || !unsigned32(input.declaredLatencyFrames)
+    || (input.declaredTailFrames !== undefined
+      && input.declaredTailFrames !== null
+      && (!unsigned32(input.declaredTailFrames) || input.declaredTailFrames > 100_000_000))
     || !unsigned32(input.transportLatencyFrames)
     || !unsigned32(input.workerTransport.slotCount) || input.workerTransport.slotCount === 0 || input.workerTransport.slotCount > 8
     || !unsigned32(input.workerTransport.maximumFrames) || input.workerTransport.maximumFrames === 0 || input.workerTransport.maximumFrames > 8_192
@@ -296,7 +321,8 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   const encodedStrings = [...strings, input.canonicalBundlePath, input.canonicalExecutablePath].map((value) => Buffer.from(value, "utf8"))
   return Buffer.concat([
     ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
-    writeUnsigned32(input.chainIndex),
+    writeUnsigned32(input.stageIndex),
+    writeUnsigned32(input.sourceIndex ?? 0xffff_ffff),
     writeUnsigned64(input.graphNodeId),
     Buffer.from([1]),
     bundleFingerprint,
@@ -306,9 +332,11 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
       input.role === "effect" ? 1 : 2,
       input.inputLayout === "none" ? 0 : input.inputLayout === "mono" ? 1 : 2,
       input.outputLayout === "mono" ? 1 : 2,
-      input.renderEnabled === true ? 1 : 0,
+      input.workerEnabled === true || input.renderEnabled === true ? 1 : 0,
+      input.renderEnabled === false ? 0 : 1,
     ]),
     writeUnsigned32(input.declaredLatencyFrames),
+    writeUnsigned32(input.declaredTailFrames ?? 0xffff_ffff),
     writeUnsigned32(input.transportLatencyFrames),
     writeUnsigned32(input.workerTransport.slotCount),
     writeUnsigned32(input.workerTransport.maximumFrames),
@@ -373,7 +401,9 @@ export type AudioHostHello = {
 export type NativeGraphRevisionStatus = {
   status: "prepared" | "published" | "retired" | "rolled-back" | "stale-revision"
     | "invalid-revision" | "prepare-failed" | "publish-failed" | "retirement-not-safe"
+    | "retirement-capacity-exceeded"
   requestedRevision: number
+  continuity: "not-evaluated" | "accepted" | "fallback" | "rejected"
   activeRevision: number
   preparedRevision: number
   retiredRevision: number
@@ -388,7 +418,7 @@ type NativeWorkerNotificationBase = {
 
 export type NativeWorkerNotification =
   | (NativeWorkerNotificationBase & {
-    kind: "latency" | "buses" | "restart" | "fault" | "miss" | "editor-interaction"
+    kind: "latency" | "buses" | "restart" | "fault" | "miss" | "tail" | "editor-interaction" | "editor-state"
     value: number
   })
   | (NativeWorkerNotificationBase & {
@@ -426,6 +456,7 @@ type NativeHostRequestType =
   | typeof graphSnapshotType
   | typeof transportType
   | typeof parameterEventsType
+  | typeof processorStatePatchType
   | typeof midiEventsType
   | typeof sourceEventsType
   | typeof deviceListType
@@ -572,6 +603,15 @@ type PendingControl = {
 
 type SpawnHost = (hostPath: string) => ChildProcessWithoutNullStreams
 
+export type NativeAudioHostSupervisorOptions = {
+  gracefulTerminationMs?: number
+  sigtermTerminationMs?: number
+  sigkillObservationMs?: number
+  schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
+  kill?: (child: ChildProcessWithoutNullStreams, signal: "SIGTERM" | "SIGKILL") => boolean
+}
+
 export type NativeAudioHostSupervisor = {
   start(): Promise<AudioHostHello>
   runTransaction<T>(operation: (transaction: Pick<NativeAudioHostSupervisor, "attachVst">) => Promise<T>): Promise<T>
@@ -591,6 +631,7 @@ export type NativeAudioHostSupervisor = {
   rollbackGraphRevision(revision: number, transactionToken?: string): Promise<NativeGraphRevisionStatus>
   retireGraphRevision(revision: number, transactionToken?: string): Promise<NativeGraphRevisionStatus>
   queueParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<void>
+  queueProcessorStatePatch(bytes: Uint8Array, transactionToken?: string): Promise<void>
   queueVstParameterEvents(bytes: Uint8Array, transactionToken?: string): Promise<void>
   queueInstrumentEvents(bytes: Uint8Array, transactionToken?: string): Promise<void>
   queueSourceEvents(bytes: Uint8Array, transactionToken?: string): Promise<void>
@@ -618,11 +659,14 @@ export type NativeAudioHostSupervisor = {
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<void>
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onWorkerNotification(listener: (notification: NativeWorkerNotification) => void): () => void
+  suspend(): Promise<void>
+  resume(): Promise<void>
 }
 
 export const createNativeAudioHostSupervisor = (
   hostPath: string,
   spawnHost: SpawnHost = (executable) => spawn(executable, [], { env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] }),
+  options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
   let child: ChildProcessWithoutNullStreams | undefined
   let hello: AudioHostHello | undefined
@@ -630,7 +674,17 @@ export const createNativeAudioHostSupervisor = (
   let pending: PendingControl | undefined
   let startPromise: Promise<AudioHostHello> | undefined
   let teardownPromise: Promise<void> | undefined
+  let childTerminationPromise: Promise<void> | undefined
+  let resumePromise: Promise<void> | undefined
   let lifecycleGeneration = 0
+  let suspended = false
+  let lifecycleIntentVersion = 0
+  let terminationFailure: Error | undefined
+  const schedule = options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs))
+  const cancelScheduled = options.cancelScheduled ?? ((timer) => clearTimeout(timer))
+  const gracefulTerminationMs = options.gracefulTerminationMs ?? 250
+  const sigtermTerminationMs = options.sigtermTerminationMs ?? 250
+  const sigkillObservationMs = options.sigkillObservationMs ?? 250
   let transactionTail = Promise.resolve()
   let transactionOwner: symbol | undefined
   let manualTransactionToken: string | undefined
@@ -650,19 +704,20 @@ export const createNativeAudioHostSupervisor = (
     allowDuringTeardown: boolean
     resolve: () => void
     reject: (error: Error) => void
+    editorResolve?: (status: NativeVstEditorStatus) => void
   }
   const urgentSends: QueuedSend[] = []
   const normalSends: QueuedSend[] = []
   const refillSends: QueuedSend[] = []
   let dispatchNext: () => void = () => {}
-  const rejectPending = (error: Error) => {
+  const rejectPending = (error: Error, dispatch = true) => {
     const current = pending
     pending = undefined
     if (current) {
       clearTimeout(current.deadline)
       current.reject(error)
     }
-    dispatchNext()
+    if (dispatch) dispatchNext()
   }
   const lost = (message: string, source = child) => {
     if (!source || child !== source) return
@@ -709,9 +764,59 @@ export const createNativeAudioHostSupervisor = (
       lastRejectedGraphRevision: frame.readUInt32BE(headerBytes + 84),
     }
   }
+  const terminateDetachedChild = (current: ChildProcessWithoutNullStreams) => new Promise<void>((resolve, reject) => {
+    let settled = false
+    const timers: {
+      graceful?: ReturnType<typeof setTimeout>
+      sigterm?: ReturnType<typeof setTimeout>
+      killObservation?: ReturnType<typeof setTimeout>
+    } = {}
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      if (timers.graceful) cancelScheduled(timers.graceful)
+      if (timers.sigterm) cancelScheduled(timers.sigterm)
+      if (timers.killObservation) cancelScheduled(timers.killObservation)
+      if (error) {
+        terminationFailure = error
+        reject(error)
+      }
+      else resolve()
+    }
+    current.once("close", () => finish())
+    // An error does not prove that the child has closed. Keep the bounded
+    // termination sequence alive until close is observed or it hard-fails.
+    current.once("error", () => undefined)
+    const kill = (signal: "SIGTERM" | "SIGKILL") => {
+      try {
+        return options.kill?.(current, signal) ?? current.kill(signal)
+      } catch {
+        return false
+      }
+    }
+    timers.graceful = schedule(() => {
+      kill("SIGTERM")
+      timers.sigterm = schedule(() => {
+        const killed = kill("SIGKILL")
+        timers.killObservation = schedule(() => {
+          finish(new Error(
+            killed
+              ? "The native audio host did not close after SIGKILL."
+              : "The native audio host could not be terminated.",
+          ))
+        }, sigkillObservationMs)
+      }, sigtermTerminationMs)
+    }, gracefulTerminationMs)
+  })
   const decodeGraphRevisionStatus = (frame: Buffer): NativeGraphRevisionStatus | undefined => {
-    if (frame.byteLength !== headerBytes + 28) return undefined
+    const legacy = frame.byteLength === headerBytes + 28
+    if (!legacy && frame.byteLength !== headerBytes + 32) return undefined
     const code = frame.readUInt32BE(headerBytes)
+    const continuityCode = legacy ? 0 : frame.readUInt32BE(headerBytes + 4)
+    const continuity = continuityCode === 1 ? "accepted"
+      : continuityCode === 2 ? "fallback"
+      : continuityCode === 3 ? "rejected"
+      : "not-evaluated"
     const status = code === 1 ? "prepared"
       : code === 2 ? "published"
       : code === 3 ? "retired"
@@ -721,15 +826,17 @@ export const createNativeAudioHostSupervisor = (
       : code === 7 ? "prepare-failed"
       : code === 8 ? "publish-failed"
       : code === 9 ? "retirement-not-safe"
+      : code === 10 ? "retirement-capacity-exceeded"
       : undefined
     if (!status) return undefined
     return {
       status,
-      requestedRevision: frame.readUInt32BE(headerBytes + 4),
-      activeRevision: frame.readUInt32BE(headerBytes + 8),
-      preparedRevision: frame.readUInt32BE(headerBytes + 12),
-      retiredRevision: frame.readUInt32BE(headerBytes + 16),
-      renderEpoch: frame.readBigUInt64BE(headerBytes + 20),
+      requestedRevision: frame.readUInt32BE(headerBytes + (legacy ? 4 : 8)),
+      continuity,
+      activeRevision: frame.readUInt32BE(headerBytes + (legacy ? 8 : 12)),
+      preparedRevision: frame.readUInt32BE(headerBytes + (legacy ? 12 : 16)),
+      retiredRevision: frame.readUInt32BE(headerBytes + (legacy ? 16 : 20)),
+      renderEpoch: frame.readBigUInt64BE(headerBytes + (legacy ? 20 : 24)),
     }
   }
   const decodeVstEditorStatus = (frame: Buffer): NativeVstEditorStatus | undefined => {
@@ -761,6 +868,8 @@ export const createNativeAudioHostSupervisor = (
       : kindValue === 5 ? "miss"
       : kindValue === 6 ? "editor-interaction"
       : kindValue === 7 ? "parameter-edit"
+      : kindValue === 8 ? "tail"
+      : kindValue === 9 ? "editor-state"
       : undefined
     if (kind === "parameter-edit") {
       if (payload.byteLength < 32) return undefined
@@ -934,12 +1043,12 @@ export const createNativeAudioHostSupervisor = (
   }
   const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | undefined => {
     const payload = frame.subarray(headerBytes)
-    if (payload.byteLength !== 72) return undefined
+    if (payload.byteLength !== 80) return undefined
     const revision = payload.readUInt32BE(0)
     const epoch = payload.readUInt32BE(4)
     const progressSequence = payload.readBigUInt64BE(8)
     if (revision === 0 || epoch === 0 || progressSequence === 0n) return undefined
-    const flags = payload.readUInt32BE(56)
+    const flags = payload.readUInt32BE(64)
     if ((flags & ~3) !== 0) return undefined
     return {
       revision,
@@ -950,11 +1059,12 @@ export const createNativeAudioHostSupervisor = (
       lastAcceptedWindowId: payload.readBigUInt64BE(32),
       appliedTransportTransitionId: payload.readBigUInt64BE(40),
       appliedUrgentSequence: payload.readBigUInt64BE(48),
+      appliedProcessorSequence: payload.readBigUInt64BE(56),
       running: (flags & 1) !== 0,
       scheduleComplete: (flags & 2) !== 0,
-      instrumentCredits: payload.readUInt32BE(60),
-      sourceCredits: payload.readUInt32BE(64),
-      automationCredits: payload.readUInt32BE(68),
+      instrumentCredits: payload.readUInt32BE(68),
+      sourceCredits: payload.readUInt32BE(72),
+      automationCredits: payload.readUInt32BE(76),
     }
   }
   const decode = (chunk: Buffer) => {
@@ -1062,7 +1172,7 @@ export const createNativeAudioHostSupervisor = (
     }
   }
   dispatchNext = () => {
-    if (pending || !child) return
+    if (suspended || pending || !child) return
     const next = urgentSends.shift() ?? refillSends.shift() ?? normalSends.shift()
     if (!next) return
     if ((teardownPromise && !next.allowDuringTeardown)
@@ -1079,7 +1189,9 @@ export const createNativeAudioHostSupervisor = (
     }
     const current = child
     const deadline = setTimeout(() => lost("The native audio host control request timed out.", current), 2_000)
-    pending = { resolve: next.resolve, reject: next.reject, deadline, expectedAckType: next.type }
+    pending = next.editorResolve
+      ? { resolve: () => undefined, reject: next.reject, deadline, editorResolve: next.editorResolve }
+      : { resolve: next.resolve, reject: next.reject, deadline, expectedAckType: next.type }
     current.stdin.write(frame)
   }
   const ownerForToken = (token: string | undefined) => (
@@ -1106,7 +1218,7 @@ export const createNativeAudioHostSupervisor = (
     owner?: symbol,
     allowDuringTeardown = false,
   ) => new Promise<void>((resolve, reject) => {
-    if (!child || (teardownPromise && !allowDuringTeardown)
+    if (suspended || !child || (teardownPromise && !allowDuringTeardown)
       || (typeof transactionOwner === "symbol" && transactionOwner !== owner)) {
       reject(new Error("The native audio host is unavailable."))
       return
@@ -1138,6 +1250,33 @@ export const createNativeAudioHostSupervisor = (
     await supervisor.start()
     await send(type, payload, assertTransactionAccess(token))
   }
+  const requestEditor = async (
+    payload: Buffer,
+    owner?: symbol,
+  ): Promise<NativeVstEditorStatus> => {
+    await supervisor.start()
+    return new Promise((resolve, reject) => {
+      if (suspended || !child || teardownPromise
+        || (typeof transactionOwner === "symbol" && transactionOwner !== owner)) {
+        reject(new Error("The native audio host is unavailable."))
+        return
+      }
+      if (normalSends.length >= 32) {
+        reject(new Error("The native host request queue is full."))
+        return
+      }
+      normalSends.push({
+        type: vstEditorType,
+        payload,
+        owner,
+        allowDuringTeardown: false,
+        resolve: () => undefined,
+        reject,
+        editorResolve: resolve,
+      })
+      dispatchNext()
+    })
+  }
   const requestGraphRevision = async (type: NativeHostRequestType, payload: Buffer, token?: string) => {
     await supervisor.start()
     assertTransactionAccess(token)
@@ -1159,12 +1298,19 @@ export const createNativeAudioHostSupervisor = (
   }
   const supervisor: NativeAudioHostSupervisor = {
     start() {
+      if (suspended) {
+        if (resumePromise) return resumePromise.then(() => supervisor.start())
+        return Promise.reject(new Error("The native audio host is suspended."))
+      }
+      if (terminationFailure) return Promise.reject(terminationFailure)
+      if (childTerminationPromise) return childTerminationPromise.then(() => supervisor.start())
       if (teardownPromise) return Promise.reject(new Error("The native audio host is tearing down."))
       if (hello) return Promise.resolve(hello)
       if (startPromise) return startPromise
       const generation = lifecycleGeneration
       let spawned: ChildProcessWithoutNullStreams | undefined
       const attempt = (async () => {
+        if (childTerminationPromise) await childTerminationPromise
         await access(hostPath)
         if (generation !== lifecycleGeneration || teardownPromise) {
           throw new Error("The native audio host startup was cancelled.")
@@ -1297,17 +1443,7 @@ export const createNativeAudioHostSupervisor = (
     async executeVstEditorCommand(input, transactionToken) {
       const payload = serializeVstEditor(input)
       if (!payload) throw new Error("The native VST editor command is invalid.")
-      assertTransactionAccess(transactionToken)
-      await supervisor.start()
-      const current = child
-      if (!current || pending) throw new Error("The native audio host is unavailable.")
-      const frame = encodeNativeAudioHostControlFrame(vstEditorType, payload)
-      if (!frame) throw new Error("The native audio host protocol is unavailable.")
-      return new Promise<NativeVstEditorStatus>((resolve, reject) => {
-        const deadline = setTimeout(() => lost("The native VST editor command timed out.", current), 2_000)
-        pending = { deadline, reject, resolve: () => undefined, editorResolve: resolve }
-        current.stdin.write(frame)
-      })
+      return requestEditor(payload, assertTransactionAccess(transactionToken))
     },
     async installAsset(input, transactionToken) {
       const payload = serializeAssetInstall(input)
@@ -1349,6 +1485,11 @@ export const createNativeAudioHostSupervisor = (
       const payload = nativeBinaryPayload(bytes, 4)
       if (!payload) throw new Error("The native audio host parameter payload is invalid.")
       await request(parameterEventsType, payload, transactionToken)
+    },
+    async queueProcessorStatePatch(bytes, transactionToken) {
+      const payload = nativeBinaryPayload(bytes, 56)
+      if (!payload) throw new Error("The native audio host processor state patch is invalid.")
+      await request(processorStatePatchType, payload, transactionToken)
     },
     async queueVstParameterEvents(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 8)
@@ -1466,11 +1607,14 @@ export const createNativeAudioHostSupervisor = (
     teardown() {
       if (teardownPromise) return teardownPromise
       lifecycleGeneration += 1
+      lifecycleIntentVersion += 1
       const current = child
       const hadPending = pending !== undefined
+      const termination = childTerminationPromise
       const stopping = (async () => {
         try {
-          if (hadPending) rejectPending(new Error("The native audio host is tearing down."))
+          if (termination) await termination
+          else if (hadPending) rejectPending(new Error("The native audio host is tearing down."))
           else if (current && hello && !transactionOwner) await send(teardownType, undefined, undefined, true)
         } finally {
           rejectPending(new Error("The native audio host is tearing down."))
@@ -1493,6 +1637,68 @@ export const createNativeAudioHostSupervisor = (
         },
       )
       return stopping
+    },
+    suspend() {
+      if (suspended && !resumePromise) return childTerminationPromise ?? (terminationFailure
+        ? Promise.reject(terminationFailure)
+        : Promise.resolve())
+      suspended = true
+      lifecycleIntentVersion += 1
+      lifecycleGeneration += 1
+      const current = child
+      const error = new Error("The native audio host was suspended.")
+      // Install the boundary before settling anything: rejected work must not
+      // dispatch another pre-suspend command.
+      child = undefined
+      hello = undefined
+      startPromise = undefined
+      transactionOwner = undefined
+      manualTransactionToken = undefined
+      manualTransactionGeneration = -1
+      nextTransportTransitionId = 0n
+      buffer = Buffer.alloc(0)
+      rejectPending(error, false)
+      for (const queue of [urgentSends, normalSends, refillSends]) {
+        while (queue.length > 0) queue.shift()?.reject(error)
+      }
+      if (current) {
+        try {
+          const frame = encodeNativeAudioHostControlFrame(teardownType)
+          if (frame) current.stdin.write(frame)
+        } catch {}
+      }
+      const termination = childTerminationPromise ?? (current ? terminateDetachedChild(current) : Promise.resolve())
+      childTerminationPromise = termination
+      void termination.then(
+        () => {
+          if (childTerminationPromise === termination) childTerminationPromise = undefined
+        },
+        () => {
+          if (childTerminationPromise === termination) childTerminationPromise = undefined
+        },
+      )
+      return termination
+    },
+    resume() {
+      if (teardownPromise) return teardownPromise
+      if (resumePromise) return resumePromise
+      if (terminationFailure) return Promise.reject(terminationFailure)
+      const requestedIntentVersion = lifecycleIntentVersion + 1
+      lifecycleIntentVersion = requestedIntentVersion
+      const termination = childTerminationPromise ?? Promise.resolve()
+      const next = termination.then(() => {
+        if (lifecycleIntentVersion === requestedIntentVersion) suspended = false
+      })
+      resumePromise = next
+      void next.then(
+        () => {
+          if (resumePromise === next) resumePromise = undefined
+        },
+        () => {
+          if (resumePromise === next) resumePromise = undefined
+        },
+      )
+      return next
     },
     status: () => ({ running: child !== undefined && hello !== undefined, ...(hello ? { hello } : {}) }),
     transactionOpen: () => transactionOwner !== undefined,
@@ -1530,4 +1736,17 @@ export const createNativeAudioHostSupervisor = (
     },
   }
   return supervisor
+}
+
+export const probeNativeAudioOutputDevice = async (
+  hostPath: string,
+  preferredDeviceId?: string,
+  createSupervisor: (hostPath: string) => NativeAudioHostSupervisor = createNativeAudioHostSupervisor,
+): Promise<NativeOutputDevice | null> => {
+  const probe = createSupervisor(hostPath)
+  try {
+    return await probe.resolveOutputDevice(preferredDeviceId)
+  } finally {
+    await probe.teardown().catch(() => undefined)
+  }
 }

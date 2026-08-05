@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   AUDIO_EFFECT_CONTRACTS,
@@ -29,6 +29,7 @@ type UseEffectsPanelAudioSyncOptions = {
   tracks: Accessor<Track[]>;
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>;
   audioEngine: Accessor<AudioEngine>;
+  usesLegacyAudioEngine?: Accessor<boolean>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
@@ -50,6 +51,55 @@ type UseEffectsPanelAudioSyncReturn = {
   spectrum: Accessor<SpectrumFrame | null>;
 };
 
+type SpectrumProvider = (
+  targetId: string,
+  listener: (frame: SpectrumFrame | null) => void,
+) => () => void;
+
+export const createSpectrumSubscriptionOwner = (
+  setFrame: (frame: SpectrumFrame | null) => void,
+) => {
+  let unsubscribe: () => void = () => undefined;
+  let generation = 0;
+  let disposed = false;
+  let activeOpen = false;
+  let activeProvider: SpectrumProvider | undefined;
+  let activeTargetId = "";
+
+  const update = (
+    isOpen: boolean,
+    provider: SpectrumProvider | undefined,
+    targetId: string,
+  ) => {
+    if (disposed) return;
+    if (isOpen === activeOpen && provider === activeProvider && targetId === activeTargetId) return;
+    generation += 1;
+    unsubscribe();
+    unsubscribe = () => undefined;
+    activeOpen = isOpen;
+    activeProvider = provider;
+    activeTargetId = targetId;
+    if (!isOpen || !provider) {
+      setFrame(null);
+      return;
+    }
+    const subscriptionGeneration = generation;
+    unsubscribe = provider(targetId, (frame) => {
+      if (!disposed && subscriptionGeneration === generation) setFrame(frame);
+    });
+  };
+
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    generation += 1;
+    unsubscribe();
+    unsubscribe = () => undefined;
+  };
+
+  return { update, dispose };
+};
+
 type SyncedAudioEffectInstanceRow = AudioEffectRuntimeInstance & {
   targetId: string;
   index?: number;
@@ -60,7 +110,7 @@ const createSyncedAudioEffectInstanceRow = (
   kind: AudioEffectKind,
   params: unknown,
   instanceId?: string,
-  index?: number,
+  index?: number
 ): SyncedAudioEffectInstanceRow => {
   if (!instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
   const id = instanceId;
@@ -85,15 +135,19 @@ const createSyncedAudioEffectInstanceRow = (
 };
 
 const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
-  const rows = effects.flatMap((row): SyncedAudioEffectInstanceRow[] => {
+  const rows: SyncedAudioEffectInstanceRow[] = [];
+  for (const row of effects) {
+    let instance: SyncedAudioEffectInstanceRow | undefined;
     if ("effect" in row) {
       const kind = audioEffectKindFromLocalEffect(row.effect);
-      return kind ? [createSyncedAudioEffectInstanceRow(row.targetId, kind, row.params, row.instanceId, row.index)] : [];
+      if (kind) instance = createSyncedAudioEffectInstanceRow(row.targetId, kind, row.params, row.instanceId, row.index);
+    } else if (isAudioEffectKind(row.type) && row.params) {
+      const targetId = row.targetType === "master" ? "master" : row.trackId;
+      if (targetId) instance = createSyncedAudioEffectInstanceRow(targetId, row.type, row.params, row.instanceId, row.index);
     }
-    if (!isAudioEffectKind(row.type) || !row.params) return [];
-    const targetId = row.targetType === "master" ? "master" : row.trackId;
-    return targetId ? [createSyncedAudioEffectInstanceRow(targetId, row.type, row.params, row.instanceId, row.index)] : [];
-  });
+    if (!instance) continue;
+    rows.push(instance);
+  }
   const instances = collectAudioEffectInstances(rows.map((row) => ({
     targetId: row.targetId,
     kind: row.kind,
@@ -167,7 +221,8 @@ export function useEffectsPanelAudioSync(
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
-      void audioEngine.setTrackFxInstances(trackId, []).catch(() => undefined);
+      void audioEngine.setTrackFxInstances(trackId, [])
+        .catch(() => undefined);
       audioEngine.clearTrackInstrument(trackId);
       audioEngine.clearTrackArpeggiator(trackId);
       drumRackBufferSync.clearTrack(trackId);
@@ -181,6 +236,7 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
+    if (options.usesLegacyAudioEngine && !options.usesLegacyAudioEngine()) return;
     const projectId = options.projectId();
     if (projectId) return;
     clearSyncedTrackState(audioEngine, syncedTrackIds);
@@ -191,6 +247,7 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
+    if (options.usesLegacyAudioEngine && !options.usesLegacyAudioEngine()) return;
     const projectId = options.projectId();
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
       ? localEffects()
@@ -287,25 +344,12 @@ export function useEffectsPanelAudioSync(
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
 
-  const spectrumIsOpen = createMemo(options.isOpen);
-  const spectrumProvider = createMemo(() => options.spectrumProvider?.());
-  const spectrumTargetId = createMemo(options.currentTargetId);
-
-  createEffect(on(
-    [spectrumIsOpen, spectrumProvider, spectrumTargetId],
-    ([isOpen, provider, targetId]) => {
-      if (!isOpen) {
-        setSpectrum(null);
-        return;
-      }
-      if (!provider) {
-        setSpectrum(null)
-        return
-      }
-      const unsubscribe = provider(targetId, setSpectrum)
-      onCleanup(unsubscribe)
-    },
-  ));
+  const spectrumSubscription = createSpectrumSubscriptionOwner(setSpectrum);
+  spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
+  createEffect(() => {
+    spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
+  });
+  onCleanup(spectrumSubscription.dispose);
 
   return {
     spectrum,

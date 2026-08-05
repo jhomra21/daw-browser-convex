@@ -43,6 +43,7 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
+import type { TimelinePlaybackRebuildIntent } from "~/hooks/useTimelinePlayback";
 import {
   createEffectsPanelController,
   type EffectsPanelAudioEffects,
@@ -70,10 +71,12 @@ import {
   mergeLocalExternalProcessorParameterOverride,
   setLocalExternalProcessorBypassed,
 } from "~/lib/external-plugins";
+import { reorderLocalMixedEffects } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
 import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
+import type { MixedEffectOrderItem } from "~/lib/mixed-effect-order";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -98,6 +101,10 @@ type EffectsPanelProps = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  usesLegacyAudioEngine?: () => boolean;
+  projectGeneration?: () => number;
+  onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void;
+  onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
   onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
@@ -109,7 +116,13 @@ type EffectsPanelProps = {
   onManualAutomationOverride?: (targetKey: Track["id"] | "master", parameterId: string, effectInstanceId?: string) => void;
   autoOpenExternalProcessorId?: string;
   onExternalProcessorAutoOpenHandled?: (instanceId: string) => void;
-  onExternalProcessorUpdated?: (processor: ExternalProcessor, previous: ExternalProcessor) => void;
+  onExternalProcessorUpdated?: (
+    processor: ExternalProcessor,
+    previous: ExternalProcessor,
+    intent?: TimelinePlaybackRebuildIntent,
+  ) => void;
+  captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent;
+  onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
   spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
 };
@@ -252,6 +265,7 @@ type EffectsPanelEffectCardsProps = {
   projectId?: string;
   audioEffects: EffectsPanelAudioEffects;
   externalProcessors: ExternalProcessor[];
+  externalInstrument?: ExternalProcessor;
   enqueueParameter: NativeVstParameterQueue["enqueue"];
   canWrite: boolean;
   onElementChange?: (element: HTMLElement | undefined) => void;
@@ -269,6 +283,7 @@ type EffectsPanelEffectCardsProps = {
   onRemoveExternalProcessor: (instanceId: string) => void;
   onExternalParameterChange: (instanceId: string, parameterId: number, value: number) => void;
   onExternalBypassChange: (instanceId: string, bypassed: boolean) => void;
+  onMixedReorder: (order: readonly MixedEffectOrderItem[]) => void;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -475,7 +490,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
       <Show when={displayedParams()}>
         {(value) => {
           const eq = () => normalizeEqParams(objectParams(value()));
-          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
+          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onPreviewBandChange={(bandId, updates) => props.audioEffects.eq.previewInteraction(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onBeginInteraction={() => props.audioEffects.eq.beginInteraction(props.effect.id)} onCommitInteraction={() => props.audioEffects.eq.commitInteraction(props.effect.id)} onCancelInteraction={() => props.audioEffects.eq.cancelInteraction(props.effect.id)} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
         }}
       </Show>
       </Match>
@@ -523,7 +538,26 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
 };
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => {
-  const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
+  type MixedCard =
+    | { kind: "builtin"; id: string; effect: AudioEffectInstance }
+    | { kind: "external"; id: string; processor: ExternalProcessor };
+  const mixedCards = createMemo<MixedCard[]>(() => {
+    const builtinEffects = props.audioEffects.orderedEffects();
+    const cards = [
+      ...builtinEffects.map((effect) => ({ kind: "builtin" as const, id: effect.id, effect })),
+      ...props.externalProcessors
+        .filter((processor) => processor.manifest.role === "effect")
+        .map((processor) => ({ kind: "external" as const, id: processor.instanceId, processor })),
+    ];
+    const indexForCard = (card: MixedCard) => card.kind === "builtin"
+      ? props.audioEffects.effectIndexForTarget(props.targetId, card.id)
+      : card.processor.index;
+    return cards
+      .map((card) => ({ card, index: indexForCard(card) ?? Number.MAX_SAFE_INTEGER }))
+      .sort((left, right) => left.index - right.index || left.card.id.localeCompare(right.card.id))
+      .map(({ card }) => card);
+  });
+  const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview<MixedCard>>();
   const [selection, setSelection] = createSignal<{ targetId: string; effectId: string }>();
   let effectCardsElement: HTMLDivElement | undefined;
   const contextMenuItems = (effect: AudioEffectInstance): TimelineContextMenuItem[] => {
@@ -559,9 +593,53 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     setSelection();
     void props.audioEffects.removeByInstanceFromTarget(props.targetId, effect).catch(() => undefined);
   };
+  const reorderMixedCards = (card: MixedCard, targetIndex: number) => {
+    const current = mixedCards();
+    const next = current.filter((entry) => entry.id !== card.id);
+    next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, card);
+    props.onMixedReorder(next.map((entry) => (
+      entry.kind === "builtin"
+        ? { kind: "builtin", instanceId: entry.effect.id }
+        : { kind: "external", instanceId: entry.processor.instanceId }
+    )));
+  };
+  const previewBuiltinEffect = () => {
+    const card = reorderPreview()?.effect;
+    return card?.kind === "builtin" ? card.effect : undefined;
+  };
 
   return (
     <>
+      <Show when={props.externalInstrument}>
+        {(processor) => {
+          let element: HTMLDivElement | undefined;
+          return (
+            <div
+              data-external-instrument-id={processor().instanceId}
+              class="shrink-0"
+              ref={(node) => { element = node; }}
+            >
+              <ExternalPluginCard
+                projectId={props.projectId}
+                processor={processor()}
+                enqueueParameter={props.enqueueParameter}
+                editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                targetId={props.targetId}
+                automationRanges={props.automationRangesByInstanceId?.get(processor().instanceId)}
+                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                onSelectAutomationParameter={props.onSelectAutomationParameter}
+                onManualAutomationOverride={props.onManualAutomationOverride}
+                autoOpen={props.autoOpenExternalProcessorId === processor().instanceId}
+                onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                canWrite={props.canWrite}
+                onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
+                onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
+                onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
+              />
+            </div>
+          );
+        }}
+      </Show>
       <div
         class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
         classList={{ "pointer-events-none opacity-60": !props.canWrite }}
@@ -572,14 +650,57 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
           props.onElementChange?.(element);
         }}
       >
-        <For each={props.audioEffects.orderedEffects()}>
-          {(effect) => {
+        <For each={mixedCards()}>
+          {(card) => {
+            if (card.kind === "external") {
+              const processor = card.processor;
+              let element: HTMLDivElement | undefined;
+              const drag = createEffectCardReorderDrag({
+                effect: card,
+                orderedEffects: mixedCards,
+                canWrite: () => props.canWrite,
+                onReorder: reorderMixedCards,
+                onPreviewChange: setReorderPreview,
+              });
+              return (
+                <div
+                  data-external-effect-id={processor.instanceId}
+                  data-effect-id={processor.instanceId}
+                  class="touch-none transition-opacity"
+                  ref={(node) => { element = node; }}
+                  onPointerDown={(event) => {
+                    element?.focus({ preventScroll: true });
+                    drag.onPointerDown(event);
+                  }}
+                  tabIndex={-1}
+                >
+                  <ExternalPluginCard
+                    projectId={props.projectId}
+                    processor={processor}
+                    enqueueParameter={props.enqueueParameter}
+                    editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                    targetId={props.targetId}
+                    automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
+                    evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                    onSelectAutomationParameter={props.onSelectAutomationParameter}
+                    onManualAutomationOverride={props.onManualAutomationOverride}
+                    autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
+                    onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                    canWrite={props.canWrite}
+                    onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
+                    onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
+                    onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
+                  />
+                </div>
+              );
+            }
+            const effect = card.effect;
             let element: HTMLDivElement | undefined;
             const drag = createEffectCardReorderDrag({
-              effect,
-              orderedEffects: props.audioEffects.orderedEffects,
+              effect: card,
+              orderedEffects: mixedCards,
               canWrite: () => props.canWrite,
-              onReorder: props.audioEffects.reorder,
+              onReorder: reorderMixedCards,
               onPreviewChange: setReorderPreview,
             });
             return (
@@ -588,7 +709,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 data-effect-id={effect.id}
                 class="touch-none transition-opacity focus:outline-none"
                 classList={{
-                  "opacity-30": reorderPreview()?.effect === effect,
+                  "opacity-30": reorderPreview()?.effect === card,
                   "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect.id,
                 }}
                 ref={(node) => {
@@ -620,38 +741,6 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
             );
           }}
         </For>
-        <For each={props.externalProcessors}>
-          {(processor) => {
-            let element: HTMLDivElement | undefined;
-            return (
-            <div
-              data-external-effect-id={processor.instanceId}
-              class="touch-none transition-opacity"
-              ref={(node) => {
-                element = node;
-              }}
-            >
-              <ExternalPluginCard
-                projectId={props.projectId}
-                processor={processor}
-                enqueueParameter={props.enqueueParameter}
-                editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
-                targetId={props.targetId}
-                automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
-                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                onSelectAutomationParameter={props.onSelectAutomationParameter}
-                onManualAutomationOverride={props.onManualAutomationOverride}
-                autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
-                onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
-                canWrite={props.canWrite}
-                onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
-                onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
-                onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
-              />
-            </div>
-            );
-          }}
-        </For>
       </div>
 
       <Show when={reorderPreview()}>
@@ -675,7 +764,11 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 height: `${preview().ghost.height}px`,
               }}
             >
-              <EffectsPanelAudioEffectCard effect={preview().effect} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+              <Show when={previewBuiltinEffect()}>
+                {(effect) => (
+                  <EffectsPanelAudioEffectCard effect={effect()} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                )}
+              </Show>
             </div>
           </>
         )}
@@ -815,6 +908,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onSelectClip: (trackId, clipId, startSec) => props.onSelectClip?.(trackId, clipId, startSec),
     insertLocalClip: (trackId, clip) => props.insertLocalClip?.(trackId, clip),
     onEffectParamsCommitted: (payload, projectId) => props.onEffectParamsCommitted?.(payload, projectId),
+    usesLegacyAudioEngine: () => props.usesLegacyAudioEngine?.() ?? true,
+    projectGeneration: () => props.projectGeneration?.() ?? 0,
+    onEffectParamsPreview: (payload) => props.onEffectParamsPreview?.(payload),
+    onEffectParamsFlush: (payload) => props.onEffectParamsFlush?.(payload),
     onEffectInstanceParamsReplayChange: (replay) => props.onEffectInstanceParamsReplayChange?.(replay),
     onLocalSaveFailed: (message) => props.onLocalSaveFailed?.(message),
     onDeviceInsertActionsChange: (actions) => props.onDeviceInsertActionsChange?.(actions),
@@ -850,17 +947,23 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
     const processor = externalProcessors().find((entry) => entry.instanceId === instanceId);
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
-    void deleteLocalExternalProcessor(projectId, instanceId).catch(() => undefined);
+    const playbackIntent = props.captureStructuralPlaybackIntent?.();
+    void deleteLocalExternalProcessor(projectId, instanceId)
+      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
+      .catch(() => undefined);
   };
-  const applyExternalProcessorCommit = (commit: {
+  const applyExternalProcessorCommit = (
+    commit: {
     previous: ExternalProcessor;
     current: ExternalProcessor;
-  }) => {
+    },
+    playbackIntent?: TimelinePlaybackRebuildIntent,
+  ) => {
     setExternalProcessors((processors) => processors.map((processor) => (
       processor.instanceId === commit.current.instanceId ? commit.current : processor
     )));
     if (commit.previous.bypassed !== commit.current.bypassed) {
-      untrack(() => props.onExternalProcessorUpdated?.(commit.current, commit.previous));
+      untrack(() => props.onExternalProcessorUpdated?.(commit.current, commit.previous, playbackIntent));
     }
   };
   const updateExternalProcessorParameter = (instanceId: string, parameterId: number, value: number) => {
@@ -875,10 +978,20 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const updateExternalProcessorBypass = (instanceId: string, bypassed: boolean) => {
     const projectId = props.projectId;
     if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
+    const playbackIntent = props.captureStructuralPlaybackIntent?.();
     void setLocalExternalProcessorBypassed(projectId, instanceId, bypassed)
       .then((commit) => {
-        if (commit) applyExternalProcessorCommit(commit);
+        if (commit) applyExternalProcessorCommit(commit, playbackIntent);
       })
+      .catch(() => undefined);
+  };
+  const reorderMixed = (order: readonly MixedEffectOrderItem[]) => {
+    const projectId = props.projectId;
+    if (!projectId || !isLocalId("project", projectId) || !canWriteCurrentTargetEffects()) return;
+    const targetId = props.selectedFXTarget;
+    const playbackIntent = props.captureStructuralPlaybackIntent?.();
+    void reorderLocalMixedEffects(projectId, targetId, order)
+      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
       .catch(() => undefined);
   };
   const panelContextMenuItems = () => createEffectsPanelContextMenuItems({
@@ -967,6 +1080,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       projectId={props.projectId}
                       audioEffects={audioEffects}
                       externalProcessors={externalProcessorsForTarget()}
+                      externalInstrument={externalProcessorsForTarget().find((processor) => processor.manifest.role === "instrument")}
                       enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve(false))}
                       canWrite={canWriteCurrentTargetEffects()}
                       onElementChange={props.onEffectChainElementChange}
@@ -984,6 +1098,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       onRemoveExternalProcessor={removeExternalProcessor}
                       onExternalParameterChange={updateExternalProcessorParameter}
                       onExternalBypassChange={updateExternalProcessorBypass}
+                      onMixedReorder={reorderMixed}
                     />
                     <Show when={isCurrentTargetReadOnly()}>
                       <EffectsPanelReadOnlyNotice />

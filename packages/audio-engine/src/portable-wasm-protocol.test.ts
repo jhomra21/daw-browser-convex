@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmRecordingStatusMessage } from './portable-wasm-protocol'
+import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage } from './portable-wasm-protocol'
 import { audioCoreContractVersion, audioCoreMaxProcessorParameterTargets, encodeAudioCoreProcessorStateEnvelope, encodeEqProcessorState, encodeSaturatorProcessorState, encodeUtilityProcessorState, type UtilityProcessorState } from '../../audio-core-contract/src/index'
 
 const utilityState: UtilityProcessorState = {
@@ -30,6 +30,49 @@ test('keeps the validated Wasm module outside portable control messages', () => 
     abiVersion: 1,
     contractHash: 'test',
     maxFramesPerBlock: 128,
+  })
+})
+
+test('accepts only monotonic-shaped portable transport positions', () => {
+  expect(readPortableWasmTransportPositionMessage({
+    version: portableWasmProtocolVersion,
+    type: 'transport-position',
+    sessionId: 2,
+    epoch: 4,
+    sequence: 8,
+    running: true,
+    frame: 128,
+  })).toEqual({
+    version: portableWasmProtocolVersion,
+    type: 'transport-position',
+    sessionId: 2,
+    epoch: 4,
+    sequence: 8,
+    running: true,
+    frame: 128,
+  })
+  expect(readPortableWasmTransportPositionMessage({
+    version: portableWasmProtocolVersion,
+    type: 'transport-position',
+    sessionId: 2,
+    epoch: 4,
+    sequence: 0,
+    running: true,
+    frame: 128,
+  })).toBeNull()
+})
+
+test('preserves portable capacity continuity results', () => {
+  expect(readPortableWasmGraphContinuityMessage({
+    version: portableWasmProtocolVersion,
+    type: 'graph-continuity',
+    revision: 9,
+    result: 'capacity',
+  })).toEqual({
+    version: portableWasmProtocolVersion,
+    type: 'graph-continuity',
+    revision: 9,
+    result: 'capacity',
   })
 })
 
@@ -215,12 +258,58 @@ test('accepts bounded scalar and a-rate parameter blocks with frame-ordered proc
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'processor-events',
+    requestId: 4,
     revision: 1,
+    epoch: 4,
+    sequence: 8,
     events: [
       { processorInstanceId: 3, parameterTarget: 1, frameOffset: 0, value: -6 },
       { processorInstanceId: 3, parameterTarget: 1, frameOffset: 1, value: 0 },
     ],
-  })).toMatchObject({ type: 'processor-events' })
+  })).toMatchObject({ type: 'processor-events', requestId: 4 })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'reenable-processor-automation',
+    requestId: 5,
+    revision: 1,
+    epoch: 4,
+    processorInstanceId: 3,
+    parameterTargets: [1],
+  })).toMatchObject({ type: 'reenable-processor-automation', requestId: 5 })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'processor-events',
+    requestId: 4,
+    revision: 1,
+    epoch: 4,
+    sequence: 9,
+    events: [{ processorInstanceId: 3, parameterTarget: 1, frameOffset: 0, value: -3 }],
+  })).toMatchObject({ type: 'processor-events', epoch: 4, sequence: 9 })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'processor-events',
+    revision: 1,
+    epoch: 4,
+    sequence: 9,
+    events: [{ processorInstanceId: 3, parameterTarget: 1, frameOffset: 0, value: -3 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'processor-events',
+    requestId: 4,
+    revision: 1,
+    epoch: 0,
+    sequence: 9,
+    events: [{ processorInstanceId: 3, parameterTarget: 1, frameOffset: 0, value: -3 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'processor-events',
+    revision: 1,
+    epoch: 0,
+    sequence: 9,
+    events: [{ processorInstanceId: 3, parameterTarget: 1, frameOffset: 0, value: -3 }],
+  })).toBeNull()
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'parameter-blocks',

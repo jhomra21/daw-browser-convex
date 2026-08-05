@@ -38,10 +38,16 @@ const readPath = (value: object, path: readonly string[]) => {
 export const normalizeOwnedProcessorAudioState = (kind: OwnedProcessorKind, params: unknown) =>
   normalizeOwnedProcessorParams(kind, params).state
 
-export const ownedProcessorAudioParamValues = (kind: OwnedProcessorKind, params: unknown) => {
-  const state = normalizeOwnedProcessorAudioState(kind, params)
-  return OWNED_PROCESSOR_PARAMETER_IDS[kind].map((parameterId) => ({
+const audioParamValuesFromState = (kind: OwnedProcessorKind, state: object) =>
+  OWNED_PROCESSOR_PARAMETER_IDS[kind].map((parameterId) => ({
     parameterId,
     value: readPath(state, statePath(parameterId)),
   }))
+
+export const ownedProcessorAudioParamValuesFromState = (kind: OwnedProcessorKind, state: object) =>
+  audioParamValuesFromState(kind, state)
+
+export const ownedProcessorAudioParamValues = (kind: OwnedProcessorKind, params: unknown) => {
+  const state = normalizeOwnedProcessorAudioState(kind, params)
+  return audioParamValuesFromState(kind, state)
 }

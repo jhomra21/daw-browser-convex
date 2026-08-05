@@ -58,6 +58,7 @@ export type ExportProgress = {
 }
 
 type TimelineExportRequest = {
+  nativeRendererRequired?: boolean
   getTracks: () => RuntimeTrack[]
   bpm: number
   masterVolume: number
@@ -89,6 +90,9 @@ export type ExportOutcome =
   | { type: 'success'; outputs: readonly ExportOutput[] }
   | { type: 'canceled'; outputs: readonly ExportOutput[] }
   | { type: 'error'; message: string; outputs: readonly ExportOutput[] }
+
+export const NATIVE_EXPORT_UNAVAILABLE_MESSAGE =
+  'Native desktop export is unavailable until native offline rendering is implemented.'
 
 export type ExportRenderStateSnapshot = {
   readonly fx: ExportFx
@@ -183,9 +187,11 @@ const applyExportEffectInstances = (fx: ExportFx, rows: ExportEffectInstanceRow[
     if (existing) existing.push(row)
     else trackRows.set(row.targetId, [row])
   }
-  fx.masterFxInstances = normalizeExportEffectInstances(masterRows)
+  const masterInstances = normalizeExportEffectInstances(masterRows)
+  fx.masterFxInstances = masterInstances
   for (const [trackId, instances] of trackRows) {
-    applyTrackFxPatch(trackFx, trackId, { instances: normalizeExportEffectInstances(instances) })
+    const normalized = normalizeExportEffectInstances(instances)
+    applyTrackFxPatch(trackFx, trackId, { instances: normalized })
   }
 }
 
@@ -204,11 +210,12 @@ const replaceExportEffectInstancesForTarget = (
     else if (row.effect === 'reverb') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
     else instances.push(createOwnedExportEffectRow(targetId, row.instanceId, row.effect, row.params, row.index))
   }
+  const normalized = normalizeExportEffectInstances(instances)
   if (targetId === 'master') {
-    fx.masterFxInstances = normalizeExportEffectInstances(instances)
+    fx.masterFxInstances = normalized
     return
   }
-  applyTrackFxPatch(ensureTrackFxMap(fx), targetId, { instances: normalizeExportEffectInstances(instances) })
+  applyTrackFxPatch(ensureTrackFxMap(fx), targetId, { instances: normalized })
 }
 
 const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffectRow[]) => {
@@ -539,6 +546,9 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     localMetadataRows.length = 0
   }
   try {
+    if (input.nativeRendererRequired) {
+      return { type: 'error', message: NATIVE_EXPORT_UNAVAILABLE_MESSAGE, outputs }
+    }
     input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const multiFormat = formats.length > 1
@@ -711,6 +721,9 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
 export async function runStemExport(input: StemExportRequest): Promise<ExportOutcome> {
   const outputs: ExportOutput[] = []
   try {
+    if (input.nativeRendererRequired) {
+      return { type: 'error', message: NATIVE_EXPORT_UNAVAILABLE_MESSAGE, outputs }
+    }
     input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
     const preloadTracks = input.getTracks()

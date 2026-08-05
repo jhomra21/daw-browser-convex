@@ -1,33 +1,48 @@
 import {
   externalPluginEntityKind,
   externalProcessorSchema,
+  parseExternalProcessorValue,
   type ExternalProcessor,
 } from '@daw-browser/external-plugins'
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { mixedOrderFromRows, normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
 
 const externalProcessorRowId = (instanceId: string) => `external-plugin:${instanceId}`
+const externalProjectWriteChains = new Map<string, Promise<void>>()
 const externalProcessorWriteChains = new Map<string, Promise<void>>()
 
-const withExternalProcessorWriteLock = async <Value>(
-  projectId: string,
-  instanceId: string,
+const withWriteChain = async <Value>(
+  chains: Map<string, Promise<void>>,
+  key: string,
   callback: () => Promise<Value>,
 ): Promise<Value> => {
-  const key = `${projectId}:${instanceId}`
-  const previous = externalProcessorWriteChains.get(key) ?? Promise.resolve()
+  const previous = chains.get(key) ?? Promise.resolve()
   let release: () => void = () => undefined
   const current = new Promise<void>((resolve) => { release = resolve })
   const next = previous.then(() => current, () => current)
-  externalProcessorWriteChains.set(key, next)
+  chains.set(key, next)
   await previous
   try {
     return await callback()
   } finally {
     release()
-    if (externalProcessorWriteChains.get(key) === next) externalProcessorWriteChains.delete(key)
+    if (chains.get(key) === next) chains.delete(key)
   }
 }
+
+export const withExternalProcessorProjectWriteLock = <Value>(
+  projectId: string,
+  callback: () => Promise<Value>,
+): Promise<Value> => withWriteChain(externalProjectWriteChains, projectId, callback)
+
+const withExternalProcessorWriteLock = async <Value>(
+  projectId: string,
+  instanceId: string,
+  callback: () => Promise<Value>,
+): Promise<Value> => withExternalProcessorProjectWriteLock(projectId, () => (
+  withWriteChain(externalProcessorWriteChains, `${projectId}:${instanceId}`, callback)
+))
 
 const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProcessor => {
   const { discoveredPath: _discoveredPath, ...identity } = processor.manifest.identity
@@ -41,7 +56,7 @@ const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProces
 }
 
 const parseExternalProcessor = (value: unknown, rowId: string): ExternalProcessor => {
-  const parsed = externalProcessorSchema.safeParse(value)
+  const parsed = parseExternalProcessorValue(value)
   if (parsed.success) return parsed.data
   throw new Error(`External plugin row "${rowId}" is incompatible or corrupt: ${parsed.error.issues[0]?.message ?? 'invalid processor data'}.`)
 }
@@ -68,7 +83,7 @@ const patchLocalExternalProcessor = async (
       await tx.done
       return undefined
     }
-    const current = externalProcessorSchema.safeParse(row.value)
+    const current = parseExternalProcessorValue(row.value)
     if (!current.success || current.data.instanceId !== instanceId) {
       await tx.done
       return undefined
@@ -76,6 +91,17 @@ const patchLocalExternalProcessor = async (
     const previous = current.data
     const updates = patch(previous)
     if (!updates) {
+      if (current.migrated) {
+        await tx.store.put(createLocalProjectEntityRow(
+          externalPluginEntityKind,
+          row.id,
+          previous,
+          row.updatedAt,
+        ))
+        await tx.done
+        notifyLocalProjectChanged(projectId)
+        return undefined
+      }
       await tx.done
       return undefined
     }
@@ -118,17 +144,22 @@ export const setLocalExternalProcessor = async (
   const parsed = pathFreeExternalProcessor(externalProcessorSchema.parse(processor))
   return withExternalProcessorWriteLock(projectId, parsed.instanceId, async () => {
     const db = await openLocalProjectDb(projectId)
-    await db.put(
-      'entities',
-      createLocalProjectEntityRow(
-        externalPluginEntityKind,
-        externalProcessorRowId(parsed.instanceId),
-        parsed,
-        parsed.updatedAt,
-      ),
-    )
+    const existing = await db.get('entities', [externalPluginEntityKind, externalProcessorRowId(parsed.instanceId)])
+    const prior = existing ? parseExternalProcessorValue(existing.value) : undefined
+    const next = pathFreeExternalProcessor(externalProcessorSchema.parse({
+      ...parsed,
+      index: parsed.manifest.role === 'instrument'
+        ? 0
+        : prior?.success ? prior.data.index : parsed.index,
+    }))
+    await db.put('entities', createLocalProjectEntityRow(
+      externalPluginEntityKind,
+      externalProcessorRowId(next.instanceId),
+      next,
+      next.updatedAt,
+    ))
     notifyLocalProjectChanged(projectId)
-    return parsed
+    return next
   })
 }
 
@@ -179,25 +210,38 @@ export const setLocalExternalProcessorBypassed = async (
 
 export const appendLocalExternalProcessor = async (
   projectId: string,
-  processor: Omit<ExternalProcessor, 'chainIndex'>,
+  processor: Omit<ExternalProcessor, 'index'>,
 ): Promise<ExternalProcessor> => {
-  const parsed = externalProcessorSchema.omit({ chainIndex: true }).parse(processor)
+  const parsed = externalProcessorSchema.omit({ index: true }).parse(processor)
   return withExternalProcessorWriteLock(projectId, parsed.instanceId, async () => {
     const db = await openLocalProjectDb(projectId)
     const tx = db.transaction('entities', 'readwrite')
-    const [rows, targetRow] = await Promise.all([
-      tx.store.index('by-kind').getAll(externalPluginEntityKind),
+    const [targetRow, allRows] = await Promise.all([
       parsed.targetId === 'master' ? Promise.resolve(undefined) : tx.store.get(['track', parsed.targetId]),
+      tx.store.getAll(),
     ])
     if (parsed.targetId !== 'master' && !targetRow) {
       await tx.done
-      throw new Error('Failed to insert external plugin because the target track was not found.')
+      throw new LocalExternalProcessorPersistenceError(
+        'target-not-found',
+        'Failed to insert external plugin because the target track was not found.',
+      )
     }
-    const chainIndex = rows.reduce((nextIndex, row) => {
-      const existing = parseExternalProcessor(row.value, row.id)
-      return existing.targetId === parsed.targetId ? Math.max(nextIndex, existing.chainIndex + 1) : nextIndex
-    }, 0)
-    const next = pathFreeExternalProcessor(externalProcessorSchema.parse({ ...parsed, chainIndex }))
+    let normalizedRows: typeof allRows
+    try {
+      normalizedRows = normalizeMixedEffectEntityRows(allRows)
+    } catch (error) {
+      await tx.done
+      const reason = error instanceof Error ? error.message : 'Existing external plugin data is invalid.'
+      throw new LocalExternalProcessorPersistenceError('corrupt-row', reason)
+    }
+    const currentOrder = mixedOrderFromRows(normalizedRows, parsed.targetId)
+    const index = currentOrder.length
+    const next = pathFreeExternalProcessor(externalProcessorSchema.parse({
+      ...parsed,
+      index: parsed.manifest.role === 'instrument' ? 0 : index,
+    }))
+    for (const row of normalizedRows) await tx.store.put(row)
     await tx.store.put(createLocalProjectEntityRow(
       externalPluginEntityKind,
       externalProcessorRowId(next.instanceId),
@@ -210,13 +254,39 @@ export const appendLocalExternalProcessor = async (
   })
 }
 
+export type LocalExternalProcessorPersistenceCode = 'target-not-found' | 'corrupt-row' | 'write-failed'
+
+export class LocalExternalProcessorPersistenceError extends Error {
+  readonly code: LocalExternalProcessorPersistenceCode
+
+  constructor(code: LocalExternalProcessorPersistenceCode, message: string) {
+    super(message)
+    this.name = 'LocalExternalProcessorPersistenceError'
+    this.code = code
+  }
+}
+
 export const deleteLocalExternalProcessor = async (
   projectId: string,
   instanceId: string,
 ): Promise<void> => {
   await withExternalProcessorWriteLock(projectId, instanceId, async () => {
     const db = await openLocalProjectDb(projectId)
-    await db.delete('entities', [externalPluginEntityKind, externalProcessorRowId(instanceId)])
+    const tx = db.transaction('entities', 'readwrite')
+    const rows = await tx.store.getAll()
+    const rowId = externalProcessorRowId(instanceId)
+    const target = rows.find((row) => row.kind === externalPluginEntityKind && row.id === rowId)
+    if (!target) {
+      await tx.done
+      return
+    }
+    parseExternalProcessor(target.value, target.id)
+    await tx.store.delete([externalPluginEntityKind, rowId])
+    const normalized = normalizeMixedEffectEntityRows(rows.filter((row) => (
+      row.kind !== externalPluginEntityKind || row.id !== rowId
+    )))
+    for (const row of normalized) await tx.store.put(row)
+    await tx.done
     notifyLocalProjectChanged(projectId)
   })
 }

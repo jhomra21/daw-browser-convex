@@ -318,6 +318,8 @@ const ExportDialog: Component<Props> = (props) => {
       setOutputs(outcome.outputs)
       if (outcome.type === 'error') setError(outcome.message)
       else if (outcome.type === 'canceled') setError(outcome.outputs.length > 0 ? 'Export canceled after saving completed outputs.' : 'Export canceled.')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Export failed.')
     } finally {
       setBusy(false)
     }

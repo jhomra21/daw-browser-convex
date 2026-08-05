@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
+import { externalProcessorSchema } from '@daw-browser/external-plugins'
 
 import {
   LOCAL_CONTROL_PROJECT_METADATA_KEY,
@@ -55,10 +56,69 @@ test('upgrades existing project databases additively and retains v1 rows', async
     transaction.oncomplete = () => resolve()
     transaction.onerror = () => reject(transaction.error)
   })
+  const processor = externalProcessorSchema.parse({
+    instanceId: '00000000-0000-4000-8000-000000000011',
+    targetId: 'legacy-track',
+    index: 0,
+    manifest: {
+      identity: {
+        format: 'vst3',
+        classId: 'legacy-class',
+        vendor: 'Legacy Vendor',
+        name: 'Legacy Plugin',
+        version: '1',
+        architecture: 'arm64',
+        binaryFingerprint: 'a'.repeat(64),
+      },
+      role: 'effect',
+      audioInputs: [{ name: 'Input', channels: 2, enabled: true }],
+      audioOutputs: [{ name: 'Output', channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: {},
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    launchReference: {
+      version: 1,
+      classId: 'legacy-class',
+      vendorId: 'Legacy Vendor',
+      architecture: 'arm64',
+      bundleFingerprint: 'b'.repeat(64),
+      binaryFingerprint: 'a'.repeat(64),
+      scannerCatalogVersion: 2,
+    },
+    health: { state: 'ready', updatedAt: 1 },
+    updatedAt: 1,
+  })
+  const { index: _index, ...legacyProcessor } = processor
+  const entityTransaction = legacy.transaction('entities', 'readwrite')
+  entityTransaction.objectStore('entities').put({
+    kind: 'external-plugin',
+    id: `external-plugin:${processor.instanceId}`,
+    value: { ...legacyProcessor, chainIndex: 0 },
+    updatedAt: 1,
+  })
+  await new Promise<void>((resolve, reject) => {
+    entityTransaction.oncomplete = () => resolve()
+    entityTransaction.onerror = () => reject(entityTransaction.error)
+  })
   legacy.close()
 
   const upgraded = await openLocalProjectDb(projectId)
   expect(await upgraded.get('projectState', 'legacy')).toEqual({ key: 'legacy', value: 1, updatedAt: 1 })
+  const migrated = await upgraded.get('entities', ['external-plugin', `external-plugin:${processor.instanceId}`])
+  expect(migrated?.value).toMatchObject({ index: 0 })
+  if (typeof migrated?.value !== 'object' || migrated.value === null || Array.isArray(migrated.value)) {
+    throw new Error('Expected migrated external processor row.')
+  }
+  expect(Object.hasOwn(migrated.value, 'chainIndex')).toBeFalse()
   expect(upgraded.objectStoreNames.contains('controlState')).toBe(true)
   expect(upgraded.objectStoreNames.contains('controlCommits')).toBe(true)
   expect(upgraded.objectStoreNames.contains('controlApprovals')).toBe(true)

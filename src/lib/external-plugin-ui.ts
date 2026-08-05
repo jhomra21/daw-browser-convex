@@ -25,7 +25,7 @@ export const selectExternalProcessorsForTarget = (
 ): ExternalProcessor[] => processors
   .filter((processor) => processor.targetId === targetId)
   .sort((left, right) => (
-    left.chainIndex - right.chainIndex
+    left.index - right.index
     || left.updatedAt - right.updatedAt
     || left.instanceId.localeCompare(right.instanceId)
   ));

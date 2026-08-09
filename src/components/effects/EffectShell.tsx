@@ -107,10 +107,9 @@ export default function EffectShell(props: EffectShellProps) {
           <button
             type="button"
             data-device-interactive="true"
-            class="effect-shell-chevron flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70"
+            class="effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70"
             classList={{
-              '-my-1 -ml-2 w-9 border-r border-border': !collapsed(),
-              'min-h-6 min-w-6': collapsed(),
+              '-my-1 -ml-2 border-r border-border': !collapsed(),
             }}
             aria-expanded={!collapsed()}
             aria-controls={contentId()}

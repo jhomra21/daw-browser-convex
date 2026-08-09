@@ -292,12 +292,6 @@
     transform: rotate(0deg);
   }
 
-  @media (prefers-reduced-motion: no-preference) {
-    .effect-shell-chevron-icon {
-      transition: transform 120ms ease-out;
-    }
-  }
-
   .device-lofi {
     width: 400px;
     min-width: 400px;

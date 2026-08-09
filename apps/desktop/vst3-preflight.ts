@@ -49,6 +49,7 @@ export const preflightNativeVst3Worker = async (input: {
   attachment: ResolvedVst3Attachment & { stateRevision: number }
   sampleRateHz: number
   deadlineMs?: number
+  signal?: AbortSignal
   spawnWorker?: SpawnWorker
   accessWorker?: typeof access
 }): Promise<NativeVst3PreflightResult> => {
@@ -73,6 +74,7 @@ export const preflightNativeVst3Worker = async (input: {
   if (!Number.isFinite(input.sampleRateHz) || input.sampleRateHz <= 0 || input.sampleRateHz > 384_000) {
     return unavailable("worker-unavailable", "The native VST3 worker preflight sample rate is invalid.")
   }
+  input.signal?.throwIfAborted()
   const attachment = input.attachment
   const arguments_ = [
     "--preflight",
@@ -90,7 +92,7 @@ export const preflightNativeVst3Worker = async (input: {
     "--maximum-events", String(attachment.workerTransport.maximumEventsPerBlock),
     "--state-revision", String(attachment.stateRevision),
   ]
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const launch = input.spawnWorker ?? ((workerPath, workerArguments) => spawn(workerPath, [...workerArguments], {
       env: { PATH: "/usr/bin:/bin" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -107,14 +109,26 @@ export const preflightNativeVst3Worker = async (input: {
     const chunks: Buffer[] = []
     let outputBytes = 0
     let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let abort = () => {}
     const finish = (result: NativeVst3PreflightResult) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      if (timer !== undefined) clearTimeout(timer)
+      input.signal?.removeEventListener("abort", abort)
       resolve(result)
     }
+    abort = () => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      child.kill("SIGKILL")
+      reject(new DOMException("Native VST3 worker preflight canceled.", "AbortError"))
+    }
+    input.signal?.addEventListener("abort", abort, { once: true })
+    if (settled) return
     // A hard deadline contains a hung native worker; every other terminal path clears it in finish().
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill("SIGKILL")
       finish(unavailable("worker-timeout", "The native VST3 worker preflight timed out."))
     }, input.deadlineMs ?? defaultPreflightDeadlineMs)

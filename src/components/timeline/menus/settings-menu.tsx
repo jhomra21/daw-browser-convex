@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/solid-router";
 import type { Component } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
 import { NativeMenuTrigger } from "../toolbar-context";
@@ -22,7 +21,7 @@ export const SettingsMenu: Component<{ toolbar: TransportControlsProps }> = (pro
           Audio settings
         </MenubarItem>
         <MenubarSeparator />
-        <MenubarItem as={Link} to="/about" class={nativeMenuItemClass}>
+        <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().projectMenu.onAbout}>
           About
         </MenubarItem>
       </MenubarContent>

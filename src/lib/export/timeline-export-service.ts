@@ -5,11 +5,16 @@ import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
-import { createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportOutcome, type ExportProgress, type ExportRenderStateSnapshot, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { cloneExportEffectsProjection, createExportRenderStateSnapshot, NATIVE_EXPORT_UNAVAILABLE_MESSAGE, snapshotCloudRenderRows, type ExportAutomationPatch, type ExportCloudRenderRowsSnapshot, type ExportOutcome, type ExportProgress, type ExportRenderStateSnapshot, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~/hooks/useClipBuffers"
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
 import { flushMidiProjectWrites, projectMidiProjectTracks } from "~/lib/midi/editor-persistence"
+import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import type { NativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer"
+import { snapshotAutomationPatches, snapshotExportSettings, snapshotSidechainRoutes, snapshotTimelineTracks } from "~/lib/export/timeline-export-snapshot"
+import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
+import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 
 type TimelineExportDependencies = {
   queue: ExportQueue
@@ -17,6 +22,7 @@ type TimelineExportDependencies = {
   runTimelineExport?: typeof runTimelineExport
   getTracks: () => RuntimeTrack[]
   getBpm: () => number
+  getTimeSignature?: () => { numerator: number; denominator: number }
   getMasterVolume: () => number
   getProjectId: () => string | undefined
   getUserId: () => string | undefined
@@ -25,6 +31,22 @@ type TimelineExportDependencies = {
   getEffectsExportSnapshot: () => EffectsPanelExportSnapshot | undefined
   getSidechainRoutes: () => ExternalSidechainRoute[]
   loadCapturedClipBuffer: (reference: CapturedClipMediaReference, signal: AbortSignal) => Promise<CapturedClipBufferLoadResult>
+  nativeOfflineRenderer?: NativeOfflineRenderer
+  getNativeOfflineExternalAttachments?: (input: {
+    projectId: string | undefined
+    tracks: readonly RuntimeTrack[]
+    renderState: ExportRenderStateSnapshot
+    bpm: number
+    timeSignature: { numerator: number; denominator: number }
+    sidechainRoutes: readonly ExternalSidechainRoute[]
+  }) => Promise<{
+    plan: NativeExternalAttachmentPlan
+    capturedVstStates?: readonly {
+      instanceId: string
+      bytes: Uint8Array
+      sha256: string
+    }[]
+  } | undefined>
 }
 
 type ExportSettings = {
@@ -51,10 +73,30 @@ type SubmittedExport = {
   completion: Promise<ExportOutcome>
 }
 
+const snapshotStemInput = (input: TimelineStemExportInput): TimelineStemExportInput => {
+  const settings = snapshotExportSettings(input)
+  if (input.stemSelection === "all-tracks") {
+    return {
+      ...settings,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      stemSelection: input.stemSelection,
+      stemMode: input.stemMode,
+    }
+  }
+  return {
+    ...settings,
+    ...(input.name === undefined ? {} : { name: input.name }),
+    stemSelection: input.stemSelection,
+    stemMode: input.stemMode,
+    selectedTrackIds: [...input.selectedTrackIds],
+  }
+}
+
 type ExportRequestSnapshot = {
   settings: ExportSettings
   tracks: RuntimeTrack[]
   bpm: number
+  timeSignature?: { numerator: number; denominator: number }
   masterVolume: number
   projectId: string | undefined
   userId: string | undefined
@@ -91,8 +133,15 @@ export type TimelineExportService = {
 
 export const createTimelineExportService = (dependencies: TimelineExportDependencies): TimelineExportService => {
   const jobs = new Map<string, TimelineExportJobStatus>()
-  const assertRendererAvailable = () => {
-    if (dependencies.nativeRendererRequired) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
+  const assertStemRendererAvailable = () => {
+    if (dependencies.nativeRendererRequired) {
+      throw new Error("Native desktop stems are unavailable in Phase A; choose Main mixdown.")
+    }
+  }
+  const assertNativeMixdownAvailable = () => {
+    if (dependencies.nativeRendererRequired && !dependencies.nativeOfflineRenderer) {
+      throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
+    }
   }
   const snapshotRequest = async (settings: ExportSettings) => {
     let projectId = dependencies.getProjectId()
@@ -100,7 +149,8 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (projectId) await flushMidiProjectWrites(projectId)
       if (dependencies.getProjectId() === projectId) {
-        tracks = projectMidiProjectTracks(projectId ?? '', dependencies.getTracks())
+        const currentTracks = dependencies.getTracks()
+        tracks = projectId ? projectMidiProjectTracks(projectId, currentTracks) : currentTracks
         if (dependencies.getProjectId() === projectId) break
       }
       projectId = dependencies.getProjectId()
@@ -109,63 +159,91 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       throw new Error("Project changed while preparing export.")
     }
     const snapshotClips = new Map<string, RuntimeTrack["clips"][number]>()
-    const capturedTracks = tracks.map((track) => {
-      const { clips, ...trackWithoutClips } = track
-      const clonedTrack = structuredClone(trackWithoutClips)
-      return {
-        ...clonedTrack,
-        clips: clips.map((clip) => {
-          const { buffer, ...clipWithoutBuffer } = clip
-          const snapshotClip = { ...structuredClone(clipWithoutBuffer), ...(buffer === undefined ? {} : { buffer }) }
-          snapshotClips.set(clip.id, snapshotClip)
-          return snapshotClip
-        }),
-      }
-    })
+    const capturedTracks = snapshotTimelineTracks(tracks)
+    for (const track of capturedTracks) {
+      for (const clip of track.clips) snapshotClips.set(clip.id, clip)
+    }
+    if (dependencies.nativeRendererRequired) {
+      preflightExportResources({
+        tracks: capturedTracks,
+        range: settings.range,
+        formats: settings.formats,
+        render: settings.render,
+        encoding: settings.encoding,
+        stemCount: 1,
+        maximumInMemoryPcmBytes: nativeAudioHostMaximumInMemoryPcmBytes,
+      })
+    }
     const effectsSnapshot = dependencies.getEffectsExportSnapshot()
     const userId = dependencies.getUserId()
     const bpm = dependencies.getBpm()
+    const timeSignature = dependencies.getTimeSignature?.() ?? { numerator: 4, denominator: 4 }
     const masterVolume = dependencies.getMasterVolume()
-    const cloudRows = structuredClone(dependencies.getCloudRenderRows())
+    const cloudRows = snapshotCloudRenderRows(dependencies.getCloudRenderRows())
     const effectsProjection = effectsSnapshot
-      ? structuredClone(effectsSnapshot.snapshotEffectsProjection())
+      ? cloneExportEffectsProjection(effectsSnapshot.snapshotEffectsProjection())
       : undefined
-    const automationPatches = structuredClone(dependencies.getAutomationPatches())
-    const sidechainRoutes = structuredClone(effectsSnapshot?.snapshotSidechainRoutes() ?? dependencies.getSidechainRoutes())
+    const automationPatches = snapshotAutomationPatches(dependencies.getAutomationPatches())
+    const sidechainRoutes = snapshotSidechainRoutes(effectsSnapshot?.snapshotSidechainRoutes() ?? dependencies.getSidechainRoutes())
     await effectsSnapshot?.flushPending()
+    const renderStateSnapshot = await createExportRenderStateSnapshot({
+      projectId,
+      userId,
+      masterVolume,
+      externalPluginPolicy: dependencies.nativeRendererRequired ? "native-offline" : undefined,
+      cloudRows,
+      effectsProjection,
+      automationPatches,
+    })
+    const nativeExternalAttachments = dependencies.nativeRendererRequired
+      ? await dependencies.getNativeOfflineExternalAttachments?.({
+        projectId: projectId ?? "",
+        tracks: capturedTracks,
+        renderState: renderStateSnapshot,
+        bpm,
+        timeSignature,
+        sidechainRoutes,
+      })
+      : undefined
     return {
-      settings: structuredClone(settings),
+      settings: snapshotExportSettings(settings),
       tracks: capturedTracks,
       bpm,
+      timeSignature,
       masterVolume,
       projectId,
       userId,
       sidechainRoutes,
-      renderStateSnapshot: await createExportRenderStateSnapshot({
-        projectId,
-        userId,
-        masterVolume,
-        cloudRows,
-        effectsProjection,
-        automationPatches,
-      }),
+      renderStateSnapshot: {
+        ...renderStateSnapshot,
+        ...(nativeExternalAttachments ? {
+          nativeExternalAttachments: nativeExternalAttachments.plan,
+          ...(nativeExternalAttachments.capturedVstStates
+            ? { capturedVstStates: nativeExternalAttachments.capturedVstStates }
+            : {}),
+        } : {}),
+      },
       snapshotClips,
     }
   }
   const baseRequest = (
-    snapshot: Awaited<ReturnType<typeof snapshotRequest>>,
+    snapshot: ExportRequestSnapshot,
     signal: AbortSignal,
     onProgress: (progress: ExportProgress) => void,
-  ) => ({
+  ) => {
+    const timeSignature = snapshot.timeSignature ?? { numerator: 4, denominator: 4 }
+    return {
     ...snapshot.settings,
     nativeRendererRequired: dependencies.nativeRendererRequired,
     getTracks: () => snapshot.tracks,
     bpm: snapshot.bpm,
+    timeSignature,
     masterVolume: snapshot.masterVolume,
     projectId: snapshot.projectId,
     userId: snapshot.userId,
     sidechainRoutes: snapshot.sidechainRoutes,
     renderStateSnapshot: snapshot.renderStateSnapshot,
+    nativeOfflineRenderer: dependencies.nativeOfflineRenderer,
     loadCapturedClipBuffer: async (clip: RuntimeClip, loadSignal: AbortSignal) => {
       const detached = snapshot.snapshotClips.get(clip.id)
       if (!detached || detached.buffer) return
@@ -179,7 +257,8 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     },
     signal,
     onProgress,
-  })
+    }
+  }
   const submit = (
     name: string,
     run: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void) => Promise<ExportOutcome>,
@@ -204,7 +283,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     return { id: queued.id, completion: queued.completion }
   }
   const prepareTimelineExport = async (input: TimelineExportInput): Promise<PreparedTimelineExport> => {
-    assertRendererAvailable()
+    assertNativeMixdownAvailable()
     return {
       kind: "timeline",
       name: input.name ?? "Timeline mixdown",
@@ -212,16 +291,16 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     }
   }
   const prepareStemExport = async (input: TimelineStemExportInput): Promise<PreparedStemExport> => {
-    assertRendererAvailable()
+    assertStemRendererAvailable()
     return {
       kind: "stems",
       name: input.name ?? (input.stemSelection === "all-tracks" ? "All track stems" : "Selected track stems"),
-      input: structuredClone(input),
+      input: snapshotStemInput(input),
       snapshot: await snapshotRequest(input),
     }
   }
   const submitPreparedTimelineExport = (prepared: PreparedTimelineExport, outputTargets: ExportOutputTargetFactory) => {
-    assertRendererAvailable()
+    assertNativeMixdownAvailable()
     return submit(prepared.name, (signal, onProgress) =>
       (dependencies.runTimelineExport ?? runTimelineExport)({
         ...baseRequest(prepared.snapshot, signal, onProgress),
@@ -229,7 +308,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       }))
   }
   const submitPreparedStemExport = (prepared: PreparedStemExport, outputTargets: ExportOutputTargetFactory) => {
-    assertRendererAvailable()
+    assertStemRendererAvailable()
     const input = prepared.input
     return submit(prepared.name, (signal, onProgress) =>
       input.stemSelection === "all-tracks"

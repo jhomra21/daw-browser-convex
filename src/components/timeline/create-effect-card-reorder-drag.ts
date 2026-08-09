@@ -1,5 +1,9 @@
-import type { AudioEffectInstance } from "@daw-browser/shared";
 import { onCleanup } from "solid-js";
+import {
+  isDeviceHeaderTarget,
+  isDeviceInteractiveTarget,
+  REORDER_ACTIVATION_THRESHOLD_PX,
+} from "~/components/timeline/device-interaction";
 
 type EffectCardReorderDragOptions<T extends { id: string }> = {
   effect: T;
@@ -23,9 +27,7 @@ export type EffectCardReorderPreview<T extends { id: string }> = {
 };
 
 const shouldStartReorderDrag = (event: PointerEvent) => {
-  if (!(event.target instanceof Element)) return false;
-  if (!event.target.closest('[data-effect-shell-header="true"]')) return false;
-  return !event.target.closest('button,input,select,textarea,[role="slider"],[contenteditable="true"]');
+  return isDeviceHeaderTarget(event.target) && !isDeviceInteractiveTarget(event.target);
 };
 
 export function createEffectCardReorderDrag<T extends { id: string }>(options: EffectCardReorderDragOptions<T>) {
@@ -114,7 +116,7 @@ export function createEffectCardReorderDrag<T extends { id: string }>(options: E
     if (event.pointerId !== pointerId || !pointerStart) return
     const position = { x: event.clientX, y: event.clientY }
     if (!dragActivated) {
-      if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < 4) return
+      if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < REORDER_ACTIVATION_THRESHOLD_PX) return
       activateDrag(position)
       return
     }

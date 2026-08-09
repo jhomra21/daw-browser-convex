@@ -455,7 +455,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x0e,
+    0x00, 0x00, 0x00, 0x0f,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -472,6 +472,11 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kDiagnosticStart,
     daw::audio_host_macos::ControlType::kSpectrumSelection,
     daw::audio_host_macos::ControlType::kSpectrumFrame,
+    daw::audio_host_macos::ControlType::kOfflineConfigure,
+    daw::audio_host_macos::ControlType::kOfflineStart,
+    daw::audio_host_macos::ControlType::kOfflinePcmChunk,
+    daw::audio_host_macos::ControlType::kOfflineComplete,
+    daw::audio_host_macos::ControlType::kOfflineError,
   }) {
     const auto frame = daw::audio_host_macos::EncodeControlFrame(type, {});
     const auto decodedFrame = daw::audio_host_macos::DecodeControlFrame(frame);
@@ -535,6 +540,31 @@ void TestCallbackPlanarBuffersAndSplitting() {
   host.Teardown();
   assert(host.diagnostics().state == daw::audio_host_macos::LifecycleState::kIdle);
 }
+void TestOfflineStartProcessesWithoutDevice() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "offline:render",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, true, 0));
+  assert(host.StartOffline());
+  std::array<float, 4> input_left{};
+  std::array<float, 4> input_right{};
+  const std::array<const float*, 2> input{
+    input_left.data(),
+    input_right.data(),
+  };
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  host.Stop();
+}
+
 
 void TestPausedProcessDoesNotAdvanceTransportFrame() {
   daw::audio_host_macos::AudioHost host;
@@ -671,6 +701,7 @@ void TestNativeVstAttachmentBoundsAndLatencyContract() {
   };
   reference.bundle_fingerprint.fill(1);
   reference.binary_fingerprint.fill(2);
+  reference.initial_parameter_values.emplace_back(48, 0.592999);
   assert(host.AttachNativeVst(reference));
   assert(!host.AttachNativeVst(reference));
   assert(!host.DetachVstReference("class-id"));
@@ -711,6 +742,11 @@ void TestNativeVstRuntimeControlBounds() {
   attachment.bundle_fingerprint.fill(1);
   attachment.binary_fingerprint.fill(2);
   assert(host.AttachNativeVst(attachment));
+  std::vector<std::uint8_t> malformed_state_request{0};
+  assert(!host.GetNativeVstState(malformed_state_request));
+  std::vector<std::uint8_t> unknown_state_request;
+  AppendInstanceId(unknown_state_request, "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2");
+  assert(!host.GetNativeVstState(unknown_state_request));
   const auto ownedButNotReady = host.ExecuteNativeVstEditorCommand(
     instance_id,
     daw::audio_host_macos::NativeVstEditorCommand::kStatus
@@ -1181,6 +1217,7 @@ int main() {
   TestControlFrames();
   TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
+  TestOfflineStartProcessesWithoutDevice();
   TestPausedProcessDoesNotAdvanceTransportFrame();
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();
   TestNativeMeterQueueAggregatesPostGraphOutput();

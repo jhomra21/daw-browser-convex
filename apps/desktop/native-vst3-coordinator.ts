@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto"
 import {
   decodeNativeExternalAttachmentPlan,
+  maxVst3WorkerStateBytes,
   type NativeExternalAttachmentPlan,
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
@@ -16,6 +18,7 @@ import { preflightNativeVst3Worker } from "./vst3-preflight"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
 type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
+type CapturedVst3State = { bytes: Uint8Array; sha256: string }
 
 export type NativeVst3CoordinatorFailureCode =
   | "invalid-plan"
@@ -161,6 +164,19 @@ const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachm
 ))
 
 const maximumExternalStageIndex = 0x7fff_ffff
+const sha256Pattern = /^[a-f0-9]{64}$/
+
+const decodeCapturedVst3State = (value: unknown): CapturedVst3State | undefined => {
+  if (typeof value !== "object" || value === null) return undefined
+  const bytes = Reflect.get(value, "bytes")
+  const sha256 = Reflect.get(value, "sha256")
+  if (!(bytes instanceof Uint8Array)
+    || bytes.byteLength > maxVst3WorkerStateBytes
+    || typeof sha256 !== "string"
+    || !sha256Pattern.test(sha256)
+    || createHash("sha256").update(bytes).digest("hex") !== sha256) return undefined
+  return { bytes, sha256 }
+}
 
 const sameBuses = (left: Attachment["inputBuses"], right: Attachment["inputBuses"]) => (
   left.length === right.length
@@ -265,6 +281,10 @@ const resolveAttachment = (
     stateRevision: attachment.stateRevision,
     renderEnabled: !attachment.bypassed,
     workerEnabled: true,
+    initialParameterValues: Object.entries(attachment.parameterOverrides ?? {}).map(([id, value]) => ({
+      id: Number(id),
+      value,
+    })),
   }
 }
 
@@ -693,4 +713,68 @@ export const coordinateNativeVst3Attachments = async (input: {
   } catch {
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }
   }
+}
+
+export const resolveNativeVst3AttachmentPlan = async (input: {
+  plan: NativeExternalAttachmentPlan
+  sampleRateHz: number
+  workerPath: string
+  catalogStore: { reload(): Promise<PluginCatalogData> }
+  capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
+  stateReader?: (instanceId: string, signal?: AbortSignal) => Promise<unknown>
+  preflight?: typeof preflightNativeVst3Worker
+  signal?: AbortSignal
+}): Promise<ResolvedVst3Attachment[]> => {
+  input.signal?.throwIfAborted()
+  const catalog = await input.catalogStore.reload()
+  input.signal?.throwIfAborted()
+  const resolved: Array<{ attachment: Attachment; native: PreflightAttachment }> = []
+  for (const attachment of canonicalAttachments(input.plan.attachments)) {
+    const native = resolveAttachment(catalog, attachment)
+    if (!native) throw new Error(`Native VST3 attachment "${attachment.instanceId}" is stale or untrusted.`)
+    resolved.push({ attachment, native })
+  }
+  const output: ResolvedVst3Attachment[] = []
+  for (const candidate of resolved) {
+    input.signal?.throwIfAborted()
+    const result = await (input.preflight ?? preflightNativeVst3Worker)({
+      workerPath: input.workerPath,
+      attachment: candidate.native,
+      sampleRateHz: input.sampleRateHz,
+      signal: input.signal,
+    })
+    if (result.status === "unavailable" || !matchesManifest(candidate.attachment, result)) {
+      throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" failed preflight.`)
+    }
+    if (candidate.attachment.bypassed) {
+      output.push(candidate.native)
+      continue
+    }
+    if (result.hello.manifest.supportsState !== true) {
+      // A plugin that explicitly lacks the state API is still exportable:
+      // instantiate its defaults and apply the persisted initial parameters.
+      output.push(candidate.native)
+      continue
+    }
+    const capturedState = input.capturedVstStates?.get(candidate.attachment.instanceId)
+    if (!capturedState && !input.stateReader) {
+      throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" cannot be exported without state capture.`)
+    }
+    let initialState = capturedState
+    if (!initialState && input.stateReader) {
+      let captured: unknown
+      try {
+        captured = await input.stateReader(candidate.attachment.instanceId, input.signal)
+      } catch (error) {
+        const detail = error instanceof Error ? ` ${error.message}` : ""
+        throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" state capture failed.${detail}`)
+      }
+      initialState = decodeCapturedVst3State(captured)
+    }
+    if (!initialState) {
+      throw new Error(`Native VST3 attachment "${candidate.attachment.instanceId}" state capture failed. The captured state is malformed.`)
+    }
+    output.push({ ...candidate.native, initialState })
+  }
+  return output
 }

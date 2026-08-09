@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <limits>
@@ -29,7 +30,7 @@ constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
 constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
-constexpr std::string_view kWorkerArtifactVersion = "2";
+constexpr std::string_view kWorkerArtifactVersion = "3";
 
 [[nodiscard]] constexpr bool IsInfiniteTailFrames(const std::uint64_t tailFrames) noexcept {
   return tailFrames == kInfiniteTailFrames;
@@ -112,10 +113,16 @@ struct WorkerLaunchEligibility {
 bool IsWorkerLaunchEligible(const WorkerLaunchEligibility& eligibility);
 
 struct WorkerProcessSetup {
+  enum class Mode : std::uint32_t {
+    kRealtime = 1,
+    kOffline = 2,
+  };
+
   double sampleRate = 0.0;
   std::size_t maximumBlockFrames = 0;
   std::size_t inputChannels = 0;
   std::size_t outputChannels = 0;
+  Mode mode = Mode::kRealtime;
 };
 
 struct WorkerState {
@@ -408,6 +415,11 @@ class WorkerRuntime {
   );
   [[nodiscard]] bool CancelPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DispatchPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
+  [[nodiscard]] bool WaitForOfflineCompletion(
+    std::size_t slotIndex,
+    std::uint64_t sequence,
+    std::chrono::milliseconds timeout
+  );
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(
     WorkerControlCommand command,
     std::uint32_t width = 0,

@@ -277,6 +277,27 @@
 }
 
 @layer utilities {
+  .effect-shell[data-device-collapsed="true"] {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    flex: 0 0 32px !important;
+  }
+
+  .effect-shell-chevron-icon {
+    transform: rotate(180deg);
+  }
+
+  .effect-shell-chevron[aria-expanded="false"] .effect-shell-chevron-icon {
+    transform: rotate(0deg);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .effect-shell-chevron-icon {
+      transition: transform 120ms ease-out;
+    }
+  }
+
   .device-lofi {
     width: 400px;
     min-width: 400px;

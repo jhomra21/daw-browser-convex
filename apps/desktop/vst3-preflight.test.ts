@@ -41,7 +41,7 @@ const hello: NativeVst3WorkerHello = {
   instanceId,
   manifest: {
     version: 1,
-    artifact: { id: "daw-vst3-worker", version: "2" },
+    artifact: { id: "daw-vst3-worker", version: "3" },
     startupProtocolVersion: 1,
     controlProtocolVersion: 2,
     transportAbiVersion: 5,

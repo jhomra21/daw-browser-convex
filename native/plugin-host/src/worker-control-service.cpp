@@ -5,8 +5,6 @@
 namespace daw::plugin_host {
 namespace {
 
-constexpr auto kCallbackBridgeInterval = std::chrono::microseconds(100);
-
 void DrainDiagnostics(
   WorkerRuntime& runtime,
   SpscQueue<WorkerDiagnostic, kMaximumWorkerSlots>& diagnostics,
@@ -79,16 +77,12 @@ bool WorkerControlService::Start(
   }
   running_.store(true, std::memory_order_release);
   thread_ = std::thread(&WorkerControlService::Run, this);
-  callbackBridgeRunning_.store(true, std::memory_order_release);
-  callbackBridgeThread_ = std::thread(&WorkerControlService::BridgeCallbackActivity, this);
   return true;
 }
 
 void WorkerControlService::Stop() {
   if (running_.exchange(false, std::memory_order_acq_rel)) {
-    callbackBridgeRunning_.store(false, std::memory_order_release);
     NotifyService();
-    if (callbackBridgeThread_.joinable()) callbackBridgeThread_.join();
     if (thread_.joinable()) thread_.join();
   }
   runtime_.Stop();
@@ -100,17 +94,13 @@ bool WorkerControlService::Restart() {
   // Restart is a control-plane operation. The host must quiesce its callback
   // port before replacing the shared transport.
   running_.store(false, std::memory_order_release);
-  callbackBridgeRunning_.store(false, std::memory_order_release);
   NotifyService();
-  if (callbackBridgeThread_.joinable()) callbackBridgeThread_.join();
   if (thread_.joinable()) thread_.join();
   const auto restarted = runtime_.Restart();
   health_.store(restarted ? WorkerHealth::kStarting : WorkerHealth::kFaulted, std::memory_order_release);
   if (restarted) {
     running_.store(true, std::memory_order_release);
     thread_ = std::thread(&WorkerControlService::Run, this);
-    callbackBridgeRunning_.store(true, std::memory_order_release);
-    callbackBridgeThread_ = std::thread(&WorkerControlService::BridgeCallbackActivity, this);
   }
   return restarted;
 }
@@ -160,6 +150,39 @@ std::optional<WorkerEditorResponse> WorkerControlService::ExecuteEditorCommand(
   return runtime_.ExecuteEditorCommand(command, width, height, anchor);
 }
 
+WorkerSubmissionStatus WorkerControlService::ProcessOffline(
+  const WorkerSubmission& submission,
+  const std::chrono::milliseconds timeout
+) {
+  bool completed = false;
+  {
+    std::lock_guard lock(control_mutex_);
+    if (!running_.load(std::memory_order_acquire)) return WorkerSubmissionStatus::kUnavailable;
+    if (!runtime_.PublishSubmission(
+      submission.slotIndex,
+      submission.sequence,
+      submission.numSamples,
+      submission.events,
+      submission.context
+    )) return WorkerSubmissionStatus::kInvalid;
+    if (!runtime_.DispatchPublishedSubmission(submission.slotIndex, submission.sequence)) {
+      static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
+    } else {
+      completed = runtime_.WaitForOfflineCompletion(submission.slotIndex, submission.sequence, timeout);
+    }
+  }
+  if (completed) {
+    health_.store(runtime_.health(), std::memory_order_release);
+    return WorkerSubmissionStatus::kAccepted;
+  }
+  PublishFault();
+  running_.store(false, std::memory_order_release);
+  NotifyService();
+  if (thread_.joinable()) thread_.join();
+  runtime_.Stop();
+  return WorkerSubmissionStatus::kUnavailable;
+}
+
 WorkerCallbackPort WorkerControlService::callbackPort() noexcept {
   return WorkerCallbackPort(this);
 }
@@ -176,7 +199,6 @@ WorkerSubmissionStatus WorkerControlService::PublishFromCallback(const WorkerSub
     static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
     return WorkerSubmissionStatus::kQueueFull;
   }
-  callbackActivitySequence_.fetch_add(1, std::memory_order_release);
   return WorkerSubmissionStatus::kAccepted;
 }
 
@@ -206,7 +228,6 @@ bool WorkerControlService::DiscardLateFromCallback(const std::size_t slotIndex, 
 
 bool WorkerControlService::PublishDiagnosticFromCallback(const WorkerDiagnostic diagnostic) noexcept {
   if (!callbackDiagnostics_.TryPush(diagnostic)) return false;
-  callbackActivitySequence_.fetch_add(1, std::memory_order_release);
   return true;
 }
 
@@ -219,25 +240,7 @@ WorkerHealth WorkerControlService::ReadHealthFromCallback() const noexcept {
 }
 // DAW_REALTIME_CALLBACK_REGION_END worker-control-service
 
-void WorkerControlService::BridgeCallbackActivity() {
-  std::uint64_t observed = callbackActivitySequence_.load(std::memory_order_acquire);
-  auto nextHealthCheck = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-  while (callbackBridgeRunning_.load(std::memory_order_acquire)) {
-    // The realtime producer cannot safely signal a scheduler primitive, so a
-    // dedicated non-realtime bridge polls its atomic sequence at a bounded
-    // sub-block interval and performs the actual control-thread wakeup.
-    std::this_thread::sleep_for(kCallbackBridgeInterval);
-    const std::uint64_t current = callbackActivitySequence_.load(std::memory_order_acquire);
-    const auto now = std::chrono::steady_clock::now();
-    if (current == observed && now < nextHealthCheck) continue;
-    observed = current;
-    nextHealthCheck = now + std::chrono::milliseconds(10);
-    NotifyService();
-  }
-}
-
 void WorkerControlService::Run() {
-  std::uint64_t observedWake = wakeSequence_.load(std::memory_order_acquire);
   while (running_.load(std::memory_order_acquire)) {
     QueuedSubmission submission{};
     auto currentHealth = health_.load(std::memory_order_acquire) == WorkerHealth::kFaulted
@@ -278,15 +281,14 @@ void WorkerControlService::Run() {
     if (currentHealth == WorkerHealth::kFaulted && previousHealth != WorkerHealth::kFaulted) {
       PublishFault();
     }
-    const auto nextWake = wakeSequence_.load(std::memory_order_acquire);
-    if (nextWake == observedWake && running_.load(std::memory_order_acquire)) {
+    if (running_.load(std::memory_order_acquire)) {
       std::unique_lock lock(wake_mutex_);
-      wake_ready_.wait(lock, [this, observedWake] {
+      const auto observedWake = wakeSequence_.load(std::memory_order_acquire);
+      wake_ready_.wait_for(lock, std::chrono::milliseconds(2), [this, observedWake] {
         return wakeSequence_.load(std::memory_order_acquire) != observedWake
           || !running_.load(std::memory_order_acquire);
       });
     }
-    observedWake = wakeSequence_.load(std::memory_order_acquire);
   }
 }
 

@@ -347,13 +347,15 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             class="h-4 w-4"
           />
         </Button>
-        <Menubar class="flex items-center gap-1">
-          <FileMenu toolbar={props} />
-          <EditMenu toolbar={props} />
-          <ViewMenu toolbar={props} />
-          <SettingsMenu toolbar={props} />
-          <TracksMenu tracksMenu={props.tracksMenu} />
-        </Menubar>
+        <Show when={import.meta.env.VITE_DESKTOP !== "true"}>
+          <Menubar class="flex items-center gap-1">
+            <FileMenu toolbar={props} />
+            <EditMenu toolbar={props} />
+            <ViewMenu toolbar={props} />
+            <SettingsMenu toolbar={props} />
+            <TracksMenu tracksMenu={props.tracksMenu} />
+          </Menubar>
+        </Show>
       </div>
 
       <TransportBar

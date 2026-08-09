@@ -114,6 +114,7 @@ const ExportFormatOption: Component<{
 const roundExportTime = (value: number): number => Math.round(value * 100) / 100
 
 const ExportDialog: Component<Props> = (props) => {
+  const nativeDesktop = import.meta.env.VITE_DESKTOP === 'true'
   const persisted = loadPersistedExportSettings()
   const initialDuration = () => getExportRangeDuration(props.getTracks(), { mode: 'whole' })
   const initialRange = untrack(() => ({
@@ -340,8 +341,8 @@ const ExportDialog: Component<Props> = (props) => {
                 setSource(value === 'all-stems' || value === 'selected-stems' ? value : 'mixdown')
               }}>
                 <option value="mixdown">Main</option>
-                <option value="all-stems">All Individual Tracks</option>
-                <option value="selected-stems" disabled={!selectedStemAvailable()}>Selected Tracks Only</option>
+                <option value="all-stems" disabled={nativeDesktop}>All Individual Tracks</option>
+                <option value="selected-stems" disabled={nativeDesktop || !selectedStemAvailable()}>Selected Tracks Only</option>
               </ExportSelect>
             </ExportField>
             <Show when={source() !== 'mixdown'}>
@@ -529,7 +530,11 @@ const ExportDialog: Component<Props> = (props) => {
           <Show when={localOutputs().length > 1}><div aria-live="polite" class="text-sm text-green-400">Saved {localOutputs().length} exports locally.</div></Show>
           <Show when={activeExportJob()}>{(job) => <div aria-live="polite" class="flex items-center gap-3 px-1 py-1 text-sm"><ExportProgressStatus job={job()} onCancel={exportContext.cancelExport} /></div>}</Show>
           <Show when={busy() && !activeExportJob()}><div aria-live="polite" class="px-1 py-1 text-sm">Preparing export...</div></Show>
-          <Show when={source() !== 'mixdown'}><div class="text-xs text-muted-foreground">Stems are local-only and save into a stems folder inside the folder you choose.</div></Show>
+          <Show when={source() !== 'mixdown'}>
+            <div class="text-xs text-muted-foreground">
+              {nativeDesktop ? 'Stems are unavailable in the desktop native renderer.' : 'Stems are local-only and save into a stems folder inside the folder you choose.'}
+            </div>
+          </Show>
         </div>
         <DialogFooter class="border-t border-border pt-3">
           <Button variant="outline" class="h-8 px-3" onClick={props.onClose} disabled={busy()}>Close</Button>

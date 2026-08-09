@@ -23,7 +23,7 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(preload).toContain("resolveOutputDevice")
   expect(preload).not.toContain("attachVst")
   expect(preload).toContain("detachVst")
-  expect(preload).not.toContain("Float32Array")
+  expect(preload).toContain("Float32Array")
   expect(preload).not.toContain("socket")
   expect(preload).not.toContain("AudioBuffer")
   expect(preload).not.toContain("path")

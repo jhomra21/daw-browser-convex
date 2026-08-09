@@ -219,7 +219,7 @@ int main(int argc, char* argv[]) {
   if (!Check(!daw::plugin_host::IsValidWorkerHello(invalidInstrumentHello), "instrument with audio input was accepted")) return EXIT_FAILURE;
   if (!Check(daw::plugin_host::IsValidWorkerHostConfiguration(Configuration(argv[1])), "valid worker configuration was rejected")) return EXIT_FAILURE;
   auto invalidConfiguration = Configuration(argv[1]);
-  invalidConfiguration.artifact.version = "3";
+  invalidConfiguration.artifact.version = "2";
   if (!Check(!daw::plugin_host::IsValidWorkerHostConfiguration(invalidConfiguration), "unknown worker artifact was accepted")) return EXIT_FAILURE;
 
   const auto layout = CreateWorkerTransportLayout(Request());
@@ -378,8 +378,20 @@ int main(int argc, char* argv[]) {
   close(helloProtocol[0]);
   if (!Check(decodedHello && decodedHello->instanceId == Hello().instanceId
     && decodedHello->manifest.artifact.id == daw::plugin_host::kWorkerArtifactId
-    && decodedHello->manifest.transport.maximumFrames == Request().maximumFrames,
+    && decodedHello->manifest.transport.maximumFrames == Request().maximumFrames
+    && !decodedHello->manifest.supportsState,
     "worker hello protocol round trip failed")) return EXIT_FAILURE;
+  auto statefulHello = Hello();
+  statefulHello.manifest.supportsState = true;
+  int statefulHelloProtocol[2]{};
+  if (!Check(pipe(statefulHelloProtocol) == 0, "stateful worker hello protocol pipe creation failed")) return EXIT_FAILURE;
+  if (!Check(daw::plugin_host::WriteWorkerHello(statefulHelloProtocol[1], statefulHello),
+    "stateful worker hello protocol write failed")) return EXIT_FAILURE;
+  close(statefulHelloProtocol[1]);
+  const auto decodedStatefulHello = daw::plugin_host::ReadWorkerHello(statefulHelloProtocol[0]);
+  close(statefulHelloProtocol[0]);
+  if (!Check(decodedStatefulHello && decodedStatefulHello->manifest.supportsState,
+    "stateful worker hello capability was not preserved")) return EXIT_FAILURE;
   auto invalidHello = Hello();
   invalidHello.manifest.inputBuses[0].channels = 1;
   if (!Check(!daw::plugin_host::IsValidWorkerHello(invalidHello), "worker hello accepted mismatched bus dimensions")) return EXIT_FAILURE;

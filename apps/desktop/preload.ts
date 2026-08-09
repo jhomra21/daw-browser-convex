@@ -9,6 +9,13 @@ import {
   type DesktopRendererRequestV1,
   type DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
+import {
+  desktopApplicationMenuCommandSchema,
+  desktopApplicationMenuStateSchema,
+  type DesktopApplicationMenuCommand,
+  type DesktopApplicationMenuState,
+} from "@daw-browser/desktop-protocol/application-menu"
+import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
@@ -21,16 +28,21 @@ import type {
   NativeScheduleProgress,
   NativeInputDevice,
   NativeOutputDevice,
+  NativeOfflineRenderPlan,
+  NativeOfflinePcmChunk,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
+import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
 import type { DesktopBridge, DesktopVstEditorState } from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
+const applicationMenuCommandChannel = "daw:application-menu:command"
+const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
 let closeHandler: (() => Promise<{ flushed: boolean }>) | undefined
 let activeGeneration = 0
@@ -58,6 +70,27 @@ const invokeNativeOutputDevice = (preferredDeviceId?: string): Promise<NativeOut
   ipcRenderer.invoke("daw:audio-host:resolve-output-device", preferredDeviceId)
 const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInputDeviceReply> =>
   ipcRenderer.invoke("daw:audio-host:resolve-input-device", preferredDeviceId)
+const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
+const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
+const offlinePcmChunk = (value: unknown): { jobId: string; chunk: NativeOfflinePcmChunk } | undefined => {
+  if (typeof value !== "object" || value === null) return undefined
+  const jobId = Reflect.get(value, "jobId")
+  const chunk = Reflect.get(value, "chunk")
+  if (typeof jobId !== "string" || typeof chunk !== "object" || chunk === null) return undefined
+  const startFrame = Reflect.get(chunk, "startFrame")
+  const frameCount = Reflect.get(chunk, "frameCount")
+  const channelCount = Reflect.get(chunk, "channelCount")
+  const planes = Reflect.get(chunk, "planes")
+  if (
+    !Number.isSafeInteger(startFrame) || startFrame < 0
+    || !Number.isSafeInteger(frameCount) || frameCount <= 0
+    || (channelCount !== 1 && channelCount !== 2)
+    || !Array.isArray(planes)
+    || planes.length !== channelCount
+    || !planes.every((plane) => plane instanceof Float32Array && plane.length === frameCount)
+  ) return undefined
+  return { jobId, chunk: { startFrame, frameCount, channelCount, planes } }
+}
 
 const reply = (generation: number, response: PreloadHostResponse) => {
   const parsed = desktopReplySchemaV1.safeParse({
@@ -113,6 +146,18 @@ const desktopBridge = {
   async prepareToClose() {
     return closeHandler ? await closeHandler() : { flushed: false }
   },
+  pickOutputFile(requestId: string, format: ExportAudioFormat) {
+    if (!validExportRequestId(requestId) || !isExportAudioFormat(format)) return invalidExportRequest()
+    return ipcRenderer.invoke("daw:export:pick-output-file", { requestId, format })
+  },
+  pickOutputDirectory(requestId: string) {
+    if (!validExportRequestId(requestId)) return invalidExportRequest()
+    return ipcRenderer.invoke("daw:export:pick-output-directory", { requestId })
+  },
+  releaseExportOutput(requestId: string) {
+    if (!validExportRequestId(requestId)) return invalidExportRequest()
+    return ipcRenderer.invoke("daw:export:release-output", { requestId })
+  },
   readChunk(requestId: string, token: string) {
     return ipcRenderer.invoke("daw:capability:readChunk", { requestId, token })
   },
@@ -132,6 +177,20 @@ const desktopBridge = {
     const frame = desktopExportTerminalSchemaV1.parse({ version: "v1", type: "export-terminal", jobId, status })
     ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
   },
+  applicationMenu: {
+    onCommand(listener: (command: DesktopApplicationMenuCommand) => void) {
+      const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+        const parsed = desktopApplicationMenuCommandSchema.safeParse(value)
+        if (parsed.success) listener(parsed.data)
+      }
+      ipcRenderer.on(applicationMenuCommandChannel, notify)
+      return () => ipcRenderer.removeListener(applicationMenuCommandChannel, notify)
+    },
+    setState(state: DesktopApplicationMenuState) {
+      const parsed = desktopApplicationMenuStateSchema.safeParse(state)
+      if (parsed.success) ipcRenderer.send(applicationMenuStateChannel, parsed.data)
+    },
+  },
   ...(process.platform === "darwin" && process.arch === "arm64" ? {
     audioHost: {
       diagnostics: (): Promise<NativeAudioHostDiagnosticsReply> => ipcRenderer.invoke("daw:audio-host:diagnostics"),
@@ -143,6 +202,7 @@ const desktopBridge = {
         commitTransaction: (transactionToken: string) => invokeNativeSession("daw:audio-host:session:commit-transaction", undefined, transactionToken),
         rollbackTransaction: (transactionToken: string) => invokeNativeSession("daw:audio-host:session:rollback-transaction", undefined, transactionToken),
         detachVst: (instanceId: string, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:detach-vst", instanceId, transactionToken),
+        captureVstState: (instanceId: string) => ipcRenderer.invoke("daw:audio-host:session:get-vst-state", instanceId),
         editor: (input: NativeVstEditorCommand): Promise<NativeVstEditorReply> => invokeNativeEditor(input, input.transactionToken),
         installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:install-asset", input, transactionToken),
         releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:release-asset", sessionAssetId, transactionToken),
@@ -205,6 +265,28 @@ const desktopBridge = {
           ipcRenderer.on("daw:audio-host:vst-parameter-edit", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:vst-parameter-edit", notify)
         },
+      },
+      offlineRender: {
+        start: async (
+          jobId: string,
+          plan: NativeOfflineRenderPlan,
+          listener: (chunk: NativeOfflinePcmChunk) => void,
+        ) => {
+          if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
+            return { ok: false as const, error: "The native offline render plan is invalid." }
+          }
+          const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+            const parsed = offlinePcmChunk(value)
+            if (parsed?.jobId === jobId) listener(parsed.chunk)
+          }
+          ipcRenderer.on("daw:audio-host:offline-pcm", notify)
+          try {
+            return await ipcRenderer.invoke("daw:audio-host:offline-render", { jobId, plan })
+          } finally {
+            ipcRenderer.removeListener("daw:audio-host:offline-pcm", notify)
+          }
+        },
+        cancel: (jobId: string) => ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId),
       },
       onVstEditorState: (listener: (payload: DesktopVstEditorState) => void) => {
         const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {

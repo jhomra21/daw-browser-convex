@@ -7,11 +7,11 @@ import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
 import {
-  isExternalEditorInteractiveTarget,
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
   nativeEditorCommandAvailable,
 } from "~/components/timeline/external-plugin-editor";
+import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
 import EffectShell from "~/components/effects/EffectShell";
 import { compileNativeExternalEditorPlan } from "~/lib/desktop/native-external-attachment-plan";
 
@@ -263,7 +263,8 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         if (
           event.button !== 0
           || !event.isPrimary
-          || isExternalEditorInteractiveTarget(event.target)
+          || isDeviceHeaderTarget(event.target)
+          || isDeviceInteractiveTarget(event.target)
           || !editorOpen()
         ) return;
         void editor("focus");

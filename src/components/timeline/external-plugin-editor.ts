@@ -14,30 +14,6 @@ export const nativeEditorAnchorFromElement = (element: HTMLElement): NativeEdito
   nativeEditorAnchorFromRect(element.getBoundingClientRect())
 )
 
-export const isExternalEditorInteractiveElement = (input: {
-  tagName: string
-  role?: string | null
-  contentEditable?: string | null
-}): boolean => (
-  /^(BUTTON|INPUT|SELECT|TEXTAREA)$/i.test(input.tagName)
-  || input.role === "button"
-  || (input.contentEditable !== null && input.contentEditable !== undefined && input.contentEditable !== "false")
-)
-
-export const isExternalEditorInteractiveTarget = (target: EventTarget | null): boolean => {
-  if (typeof Element === "undefined" || !(target instanceof Element)) return false
-  let element: Element | null = target
-  while (element) {
-    if (isExternalEditorInteractiveElement({
-      tagName: element.tagName,
-      role: element.getAttribute("role"),
-      contentEditable: element.getAttribute("contenteditable"),
-    })) return true
-    element = element.parentElement
-  }
-  return false
-}
-
 export const nativeEditorCommandAvailable = (
   bridgeAvailable: boolean,
   preflightSupportsEditor: boolean,

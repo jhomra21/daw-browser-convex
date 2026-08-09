@@ -435,6 +435,14 @@ bool IsTrustedLaunch(const WorkerLaunchEligibility& eligibility) {
     && *binaryHash == eligibility.binaryFingerprint && *bundleHash == eligibility.bundleFingerprint;
 }
 
+Steinberg::Vst::ProcessModes WorkerProcessModeToSteinberg(
+  const WorkerProcessSetup::Mode mode
+) {
+  return mode == WorkerProcessSetup::Mode::kOffline
+    ? Steinberg::Vst::kOffline
+    : Steinberg::Vst::kRealtime;
+}
+
 bool ValidSetup(const WorkerProcessSetup& setup) {
   return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= 384'000.0
     && setup.maximumBlockFrames > 0 && setup.maximumBlockFrames <= kMaximumWorkerFrames
@@ -671,7 +679,7 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto outputBuses = inspectBuses(Steinberg::Vst::kOutput);
   if (!inputBuses || !outputBuses || outputBuses->empty()) return std::nullopt;
   ProcessSetup setup{
-    Steinberg::Vst::kRealtime,
+    WorkerProcessModeToSteinberg(implementation_->setup.mode),
     Steinberg::Vst::kSample32,
     static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
     implementation_->setup.sampleRate,
@@ -769,7 +777,12 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
     }
     return channels == expectedChannels;
   };
-  ProcessSetup setup{Steinberg::Vst::kRealtime, Steinberg::Vst::kSample32, static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames), implementation_->setup.sampleRate};
+  ProcessSetup setup{
+    WorkerProcessModeToSteinberg(implementation_->setup.mode),
+    Steinberg::Vst::kSample32,
+    static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
+    implementation_->setup.sampleRate
+  };
   if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
   if (implementation_->controller) {
     // Some VST3 controllers only create their view before realtime processing
@@ -979,7 +992,7 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
     implementation_->processContext.state |= ProcessContext::kContTimeValid;
   }
   ProcessData data{};
-  data.processMode = Steinberg::Vst::kRealtime;
+  data.processMode = WorkerProcessModeToSteinberg(implementation_->setup.mode);
   data.symbolicSampleSize = Steinberg::Vst::kSample32;
   data.numSamples = static_cast<Steinberg::int32>(samples);
   data.numInputs = static_cast<Steinberg::int32>(implementation_->inputs.size());

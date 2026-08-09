@@ -39,6 +39,7 @@ struct StartupHeader {
   std::uint32_t maximumBlockFrames = 0;
   std::uint32_t inputChannels = 0;
   std::uint32_t outputChannels = 0;
+  std::uint32_t processMode = 0;
   std::uint32_t classIdBytes = 0;
   std::uint32_t bundlePathBytes = 0;
   std::uint32_t executablePathBytes = 0;
@@ -55,6 +56,11 @@ struct CommandFrame {
   std::uint32_t hasAnchor = 0;
   std::int32_t anchorX = 0;
   std::int32_t anchorY = 0;
+};
+
+struct ProcessResponseFrame {
+  std::uint64_t sequence = 0;
+  std::uint32_t success = 0;
 };
 
 struct EditorResponseFrame {
@@ -94,6 +100,9 @@ struct HelloHeader {
   std::uint32_t hasTailFrames = 0;
   std::uint32_t tailFrames = 0;
   std::uint32_t stateRevision = 0;
+  std::uint32_t supportsBypass = 0;
+  std::uint32_t supportsEditor = 0;
+  std::uint32_t supportsState = 0;
 };
 
 struct BusFrame {
@@ -234,6 +243,7 @@ bool WriteWorkerStartupRequest(
     .maximumBlockFrames = static_cast<std::uint32_t>(request.setup.maximumBlockFrames),
     .inputChannels = static_cast<std::uint32_t>(request.setup.inputChannels),
     .outputChannels = static_cast<std::uint32_t>(request.setup.outputChannels),
+    .processMode = static_cast<std::uint32_t>(request.setup.mode),
     .classIdBytes = static_cast<std::uint32_t>(request.classId.size()),
     .bundlePathBytes = static_cast<std::uint32_t>(request.eligibility.canonicalBundlePath.size()),
     .executablePathBytes = static_cast<std::uint32_t>(request.eligibility.canonicalExecutablePath.size()),
@@ -257,7 +267,9 @@ std::optional<WorkerStartupRequest> ReadWorkerStartupRequest(
     || header.codeSignVerified > 1 || header.quarantinePresent > 1 || header.classIdBytes > kMaximumClassIdBytes
     || header.bundlePathBytes > kMaximumPathBytes || header.executablePathBytes > kMaximumPathBytes
     || header.bundleFingerprintBytes > kMaximumFingerprintBytes || header.binaryFingerprintBytes > kMaximumFingerprintBytes
-    || header.stateBytes > kMaximumWorkerStateBytes || header.stateHashBytes > kMaximumFingerprintBytes) {
+    || header.stateBytes > kMaximumWorkerStateBytes || header.stateHashBytes > kMaximumFingerprintBytes
+    || (header.processMode != static_cast<std::uint32_t>(WorkerProcessSetup::Mode::kRealtime)
+      && header.processMode != static_cast<std::uint32_t>(WorkerProcessSetup::Mode::kOffline))) {
     return std::nullopt;
   }
   const std::array<std::uint32_t, 7> lengths{
@@ -298,6 +310,7 @@ std::optional<WorkerStartupRequest> ReadWorkerStartupRequest(
       .maximumBlockFrames = header.maximumBlockFrames,
       .inputChannels = header.inputChannels,
       .outputChannels = header.outputChannels,
+      .mode = static_cast<WorkerProcessSetup::Mode>(header.processMode),
     },
     .noPluginTestMode = header.noPluginTestMode != 0,
   };
@@ -345,6 +358,26 @@ std::optional<WorkerControlRequest> ReadWorkerControlCommand(const int fileDescr
     };
   }
   return std::nullopt;
+}
+
+bool WriteWorkerProcessResponse(
+  const int fileDescriptor,
+  const std::uint64_t sequence,
+  const bool success
+) {
+  if (fileDescriptor < 0 || sequence == 0) return false;
+  const ProcessResponseFrame frame{
+    .sequence = sequence,
+    .success = success ? 1U : 0U,
+  };
+  return WriteExactly(fileDescriptor, &frame, sizeof(frame));
+}
+
+std::optional<std::pair<std::uint64_t, bool>> ReadWorkerProcessResponse(const int fileDescriptor) {
+  ProcessResponseFrame frame{};
+  if (fileDescriptor < 0 || !ReadExactly(fileDescriptor, &frame, sizeof(frame))
+    || frame.sequence == 0 || frame.success > 1) return std::nullopt;
+  return std::pair{frame.sequence, frame.success != 0};
 }
 
 bool WriteWorkerEditorResponse(const int fileDescriptor, const WorkerEditorResponse& response) {
@@ -440,6 +473,9 @@ bool WriteWorkerHello(const int fileDescriptor, const WorkerHello& hello) {
     .hasTailFrames = hello.manifest.tailFrames ? 1U : 0U,
     .tailFrames = hello.manifest.tailFrames.value_or(0),
     .stateRevision = hello.manifest.stateRevision,
+    .supportsBypass = hello.manifest.supportsBypass ? 1U : 0U,
+    .supportsEditor = hello.manifest.supportsEditor ? 1U : 0U,
+    .supportsState = hello.manifest.supportsState ? 1U : 0U,
   };
   return WriteExactly(fileDescriptor, &header, sizeof(header))
     && WriteExactly(fileDescriptor, payload.data(), payload.size());
@@ -452,7 +488,8 @@ std::optional<WorkerHello> ReadWorkerHello(const int fileDescriptor) {
     || header.instanceIdBytes == 0 || header.instanceIdBytes > kMaximumInstanceIdBytes
     || header.artifactIdBytes == 0 || header.artifactIdBytes > kMaximumArtifactTextBytes
     || header.artifactVersionBytes == 0 || header.artifactVersionBytes > kMaximumArtifactTextBytes
-    || header.arm64 > 1 || header.hasTailFrames > 1 || header.inputBusCount > 32
+    || header.arm64 > 1 || header.hasTailFrames > 1 || header.supportsBypass > 1
+    || header.supportsEditor > 1 || header.supportsState > 1 || header.inputBusCount > 32
     || header.outputBusCount == 0 || header.outputBusCount > 32) {
     return std::nullopt;
   }
@@ -500,6 +537,9 @@ std::optional<WorkerHello> ReadWorkerHello(const int fileDescriptor) {
       .latencyFrames = header.latencyFrames,
       .tailFrames = header.hasTailFrames != 0 ? std::optional<std::uint32_t>(header.tailFrames) : std::nullopt,
       .stateRevision = header.stateRevision,
+      .supportsBypass = header.supportsBypass != 0,
+      .supportsEditor = header.supportsEditor != 0,
+      .supportsState = header.supportsState != 0,
     },
   };
   if (!IsValidWorkerHello(hello)) return std::nullopt;

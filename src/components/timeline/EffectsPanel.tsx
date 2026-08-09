@@ -4,6 +4,7 @@ import {
   Match,
   Switch,
   For,
+  type JSX,
   createEffect,
   createMemo,
   createSignal,
@@ -77,6 +78,14 @@ import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
 import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import type { MixedEffectOrderItem } from "~/lib/mixed-effect-order";
+import {
+  createEffectsPanelDeviceCollapse,
+  DeviceCollapseProvider,
+  safeDeviceContentId,
+  deviceCollapseIdentity,
+  type DeviceCollapseIdentity,
+} from "~/components/timeline/create-effects-panel-device-collapse";
+import { isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -164,6 +173,40 @@ type EffectsPanelInstrumentSectionProps = {
   synthAutomationDisplayParams?: SynthParams;
   onSelectSynthAutomationParameter?: (parameterId: string) => void;
   onManualSynthAutomationOverride?: (parameterId: string) => void;
+  deviceCollapse: ReturnType<typeof createEffectsPanelDeviceCollapse>;
+};
+
+const EffectsPanelDeviceBoundary: Component<{
+  identity: DeviceCollapseIdentity;
+  canWrite: boolean;
+  collapse: ReturnType<typeof createEffectsPanelDeviceCollapse>;
+  menuItems: () => TimelineContextMenuItem[];
+  children: JSX.Element;
+}> = (props) => {
+  const identity = () => props.identity;
+  const collapsed = () => props.collapse.isCollapsed(identity());
+  return (
+    <DeviceCollapseProvider
+      collapsed={collapsed}
+      toggle={() => props.collapse.toggle(identity())}
+      contentId={() => safeDeviceContentId(identity())}
+      canWrite={() => props.canWrite}
+    >
+      <TimelineContextMenu
+        items={() => [
+          ...props.menuItems(),
+          { kind: "separator" },
+          {
+            kind: "item",
+            label: collapsed() ? "Unfold device" : "Fold device",
+            onSelect: () => props.collapse.toggle(identity()),
+          },
+        ]}
+      >
+        {props.children}
+      </TimelineContextMenu>
+    </DeviceCollapseProvider>
+  );
 };
 
 const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProps> = (props) => (
@@ -172,90 +215,151 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
   >
     <Show when={props.instrument.state.arp.params()}>
       {(params) => (
-        <Arpeggiator
-          params={params()}
-          onChange={(updates) => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.arp.change(updates);
-          }}
-          onToggleEnabled={(enabled) => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.arp.toggle(enabled);
-          }}
-          onReset={() => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.arp.reset();
-          }}
-          disabled={!props.instrument.canWrite}
-        />
+        <EffectsPanelDeviceBoundary
+          identity={deviceCollapseIdentity.arp(props.targetId)}
+          canWrite={props.instrument.canWrite}
+          collapse={props.deviceCollapse}
+          menuItems={() => [
+            { kind: "label", label: "Arpeggiator" },
+            {
+              kind: "item",
+              label: params().enabled ? "Disable device" : "Enable device",
+              disabled: !props.instrument.canWrite,
+              onSelect: () => props.instrument.state.arp.toggle(!params().enabled),
+            },
+            {
+              kind: "item",
+              label: "Reset device",
+              disabled: !props.instrument.canWrite,
+              onSelect: props.instrument.state.arp.reset,
+            },
+          ]}
+        >
+          <Arpeggiator
+            params={params()}
+            onChange={(updates) => {
+              if (!props.instrument.canWrite) return;
+              props.instrument.state.arp.change(updates);
+            }}
+            onToggleEnabled={(enabled) => {
+              if (!props.instrument.canWrite) return;
+              props.instrument.state.arp.toggle(enabled);
+            }}
+            onReset={() => {
+              if (!props.instrument.canWrite) return;
+              props.instrument.state.arp.reset();
+            }}
+            disabled={!props.instrument.canWrite}
+          />
+        </EffectsPanelDeviceBoundary>
       )}
     </Show>
 
     <Show when={props.instrument.state.drumRack.params()}>
       {(params) => (
-        <DrumRack
-          params={params()}
-          targetId={props.targetId}
-          audioEngine={props.audioEngine}
+        <EffectsPanelDeviceBoundary
+          identity={deviceCollapseIdentity.instrument(props.instrument.state.activeInstrument()?.instanceId ?? "drum-rack")}
           canWrite={props.instrument.canWrite}
-          onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
-          onReset={props.instrument.state.drumRack.reset}
-          onUpdatePad={props.instrument.state.drumRack.updatePad}
-        />
+          collapse={props.deviceCollapse}
+          menuItems={() => [
+            { kind: "label", label: "Drum Rack" },
+            { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.drumRack.reset },
+          ]}
+        >
+          <DrumRack
+            params={params()}
+            targetId={props.targetId}
+            audioEngine={props.audioEngine}
+            canWrite={props.instrument.canWrite}
+            onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
+            onReset={props.instrument.state.drumRack.reset}
+            onUpdatePad={props.instrument.state.drumRack.updatePad}
+          />
+        </EffectsPanelDeviceBoundary>
       )}
     </Show>
     <Show when={props.instrument.state.sampler.params()}>
       {(params) => (
-        <Sampler
-          params={params()}
-          status={props.instrument.state.sampler.status()}
+        <EffectsPanelDeviceBoundary
+          identity={deviceCollapseIdentity.instrument(props.instrument.state.activeInstrument()?.instanceId ?? "sampler")}
           canWrite={props.instrument.canWrite}
-          onAddZone={props.instrument.state.sampler.addZone}
-          onRemoveZone={props.instrument.state.sampler.removeZone}
-          onReset={props.instrument.state.sampler.reset}
-          onRetryZone={props.instrument.state.sampler.retryZone}
-          onUpdate={props.instrument.state.sampler.update}
-          onUpdateZone={props.instrument.state.sampler.updateZone}
-        />
+          collapse={props.deviceCollapse}
+          menuItems={() => [
+            { kind: "label", label: "Sampler" },
+            { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.sampler.reset },
+          ]}
+        >
+          <Sampler
+            params={params()}
+            status={props.instrument.state.sampler.status()}
+            canWrite={props.instrument.canWrite}
+            onAddZone={props.instrument.state.sampler.addZone}
+            onRemoveZone={props.instrument.state.sampler.removeZone}
+            onReset={props.instrument.state.sampler.reset}
+            onRetryZone={props.instrument.state.sampler.retryZone}
+            onUpdate={props.instrument.state.sampler.update}
+            onUpdateZone={props.instrument.state.sampler.updateZone}
+          />
+        </EffectsPanelDeviceBoundary>
       )}
     </Show>
     <Show when={props.instrument.state.granular.params()}>
       {(params) => (
-        <Granular
-          params={params()}
-          status={props.instrument.state.granular.status()}
+        <EffectsPanelDeviceBoundary
+          identity={deviceCollapseIdentity.instrument(props.instrument.state.activeInstrument()?.instanceId ?? "granular")}
           canWrite={props.instrument.canWrite}
-          onReset={props.instrument.state.granular.reset}
-          onRetry={props.instrument.state.granular.retry}
-          onUpdate={props.instrument.state.granular.update}
-        />
+          collapse={props.deviceCollapse}
+          menuItems={() => [
+            { kind: "label", label: "Granular" },
+            { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.granular.reset },
+          ]}
+        >
+          <Granular
+            params={params()}
+            status={props.instrument.state.granular.status()}
+            canWrite={props.instrument.canWrite}
+            onReset={props.instrument.state.granular.reset}
+            onRetry={props.instrument.state.granular.retry}
+            onUpdate={props.instrument.state.granular.update}
+          />
+        </EffectsPanelDeviceBoundary>
       )}
     </Show>
 
     <Show when={props.instrument.state.synth.params()}>
       {(params) => (
-        <Synth
-          instanceId={props.instrument.state.synth.instanceId()}
-          params={props.synthAutomationDisplayParams ?? params()}
-          onChange={(updates) => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.synth.change(updates);
-          }}
-          onReset={() => {
-            if (!props.instrument.canWrite) return;
-            props.instrument.state.synth.reset();
-          }}
-          disabled={!props.instrument.canWrite}
-          automationRangesByParameterId={props.synthAutomationRangesByParameterId}
-          onAutomationParameterTouch={(parameterId) => {
-            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
-            if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
-          }}
-          onManualAutomationOverride={(parameterId) => {
-            const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
-            if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
-          }}
-        />
+        <EffectsPanelDeviceBoundary
+          identity={deviceCollapseIdentity.instrument(props.instrument.state.synth.instanceId() ?? "synth")}
+          canWrite={props.instrument.canWrite}
+          collapse={props.deviceCollapse}
+          menuItems={() => [
+            { kind: "label", label: "Synth" },
+            { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.synth.reset },
+          ]}
+        >
+          <Synth
+            instanceId={props.instrument.state.synth.instanceId()}
+            params={props.synthAutomationDisplayParams ?? params()}
+            onChange={(updates) => {
+              if (!props.instrument.canWrite) return;
+              props.instrument.state.synth.change(updates);
+            }}
+            onReset={() => {
+              if (!props.instrument.canWrite) return;
+              props.instrument.state.synth.reset();
+            }}
+            disabled={!props.instrument.canWrite}
+            automationRangesByParameterId={props.synthAutomationRangesByParameterId}
+            onAutomationParameterTouch={(parameterId) => {
+              const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+              if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
+            }}
+            onManualAutomationOverride={(parameterId) => {
+              const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+              if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
+            }}
+          />
+        </EffectsPanelDeviceBoundary>
       )}
     </Show>
   </div>
@@ -284,6 +388,7 @@ type EffectsPanelEffectCardsProps = {
   onExternalParameterChange: (instanceId: string, parameterId: number, value: number) => void;
   onExternalBypassChange: (instanceId: string, bypassed: boolean) => void;
   onMixedReorder: (order: readonly MixedEffectOrderItem[]) => void;
+  deviceCollapse: ReturnType<typeof createEffectsPanelDeviceCollapse>;
 };
 
 type EffectsPanelAudioEffectCardProps = {
@@ -566,6 +671,21 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
       canWrite: props.canWrite,
     });
   };
+  const externalProcessorContextMenuItems = (processor: ExternalProcessor): TimelineContextMenuItem[] => [
+    { kind: "label", label: processor.manifest.identity.name },
+    {
+      kind: "item",
+      label: processor.bypassed ? "Enable device" : "Disable device",
+      disabled: !props.canWrite,
+      onSelect: () => props.onExternalBypassChange(processor.instanceId, !processor.bypassed),
+    },
+    {
+      kind: "item",
+      label: "Delete device",
+      disabled: !props.canWrite,
+      onSelect: () => props.onRemoveExternalProcessor(processor.instanceId),
+    },
+  ];
   const selectedEffect = createMemo(() => {
     const current = selection();
     if (!current || current.targetId !== props.targetId) return;
@@ -585,7 +705,11 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
   });
   onCleanup(() => props.onElementChange?.(undefined));
   const handleKeyDown = (event: KeyboardEvent) => {
-    if ((event.key !== "Delete" && event.key !== "Backspace") || isEditableKeyboardTarget(event.target)) return;
+    if (
+      (event.key !== "Delete" && event.key !== "Backspace")
+      || isEditableKeyboardTarget(event.target)
+      || isDeviceInteractiveTarget(event.target)
+    ) return;
     const effect = selectedEffect();
     if (!effect || !props.canWrite) return;
     event.preventDefault();
@@ -614,35 +738,42 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         {(processor) => {
           let element: HTMLDivElement | undefined;
           return (
-            <div
-              data-external-instrument-id={processor().instanceId}
-              class="shrink-0"
-              ref={(node) => { element = node; }}
+            <EffectsPanelDeviceBoundary
+              identity={deviceCollapseIdentity.external(processor().instanceId)}
+              canWrite={props.canWrite}
+              collapse={props.deviceCollapse}
+              menuItems={() => externalProcessorContextMenuItems(processor())}
             >
-              <ExternalPluginCard
-                projectId={props.projectId}
-                processor={processor()}
-                enqueueParameter={props.enqueueParameter}
-                editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
-                targetId={props.targetId}
-                automationRanges={props.automationRangesByInstanceId?.get(processor().instanceId)}
-                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                onSelectAutomationParameter={props.onSelectAutomationParameter}
-                onManualAutomationOverride={props.onManualAutomationOverride}
-                autoOpen={props.autoOpenExternalProcessorId === processor().instanceId}
-                onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
-                canWrite={props.canWrite}
-                onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
-                onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
-                onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
-              />
-            </div>
+              <div
+                data-external-instrument-id={processor().instanceId}
+                class="shrink-0"
+                ref={(node) => { element = node; }}
+              >
+                <ExternalPluginCard
+                  projectId={props.projectId}
+                  processor={processor()}
+                  enqueueParameter={props.enqueueParameter}
+                  editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                  targetId={props.targetId}
+                  automationRanges={props.automationRangesByInstanceId?.get(processor().instanceId)}
+                  evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                  onSelectAutomationParameter={props.onSelectAutomationParameter}
+                  onManualAutomationOverride={props.onManualAutomationOverride}
+                  autoOpen={props.autoOpenExternalProcessorId === processor().instanceId}
+                  onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                  canWrite={props.canWrite}
+                  onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
+                  onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
+                  onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
+                />
+              </div>
+            </EffectsPanelDeviceBoundary>
           );
         }}
       </Show>
       <div
         class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
-        classList={{ "pointer-events-none opacity-60": !props.canWrite }}
+        classList={{ "opacity-60": !props.canWrite }}
         data-timeline-keyboard-local="true"
         onKeyDown={handleKeyDown}
         ref={(element) => {
@@ -669,28 +800,35 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                   class="touch-none transition-opacity"
                   ref={(node) => { element = node; }}
                   onPointerDown={(event) => {
-                    element?.focus({ preventScroll: true });
+                    if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
                     drag.onPointerDown(event);
                   }}
                   tabIndex={-1}
                 >
-                  <ExternalPluginCard
-                    projectId={props.projectId}
-                    processor={processor}
-                    enqueueParameter={props.enqueueParameter}
-                    editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
-                    targetId={props.targetId}
-                    automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
-                    evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                    onSelectAutomationParameter={props.onSelectAutomationParameter}
-                    onManualAutomationOverride={props.onManualAutomationOverride}
-                    autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
-                    onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                  <EffectsPanelDeviceBoundary
+                    identity={deviceCollapseIdentity.external(processor.instanceId)}
                     canWrite={props.canWrite}
-                    onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
-                    onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
-                    onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
-                  />
+                    collapse={props.deviceCollapse}
+                    menuItems={() => externalProcessorContextMenuItems(processor)}
+                  >
+                    <ExternalPluginCard
+                      projectId={props.projectId}
+                      processor={processor}
+                      enqueueParameter={props.enqueueParameter}
+                      editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                      targetId={props.targetId}
+                      automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
+                      evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                      onSelectAutomationParameter={props.onSelectAutomationParameter}
+                      onManualAutomationOverride={props.onManualAutomationOverride}
+                      autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
+                      onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                      canWrite={props.canWrite}
+                      onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
+                      onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
+                      onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
+                    />
+                  </EffectsPanelDeviceBoundary>
                 </div>
               );
             }
@@ -718,11 +856,16 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 tabIndex={-1}
                 onPointerDown={(event) => {
                   setSelection({ targetId: props.targetId, effectId: effect.id });
-                  element?.focus({ preventScroll: true });
+                  if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
                   drag.onPointerDown(event);
                 }}
               >
-                <TimelineContextMenu items={() => contextMenuItems(effect)}>
+                <EffectsPanelDeviceBoundary
+                  identity={deviceCollapseIdentity.audioEffect(effect.id)}
+                  canWrite={props.canWrite}
+                  collapse={props.deviceCollapse}
+                  menuItems={() => contextMenuItems(effect)}
+                >
                   <EffectsPanelAudioEffectCard
                     effect={effect}
                     audioEffects={props.audioEffects}
@@ -736,7 +879,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                     onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(parameterId, effect.id)}
                     onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(parameterId, effect.id)}
                   />
-                </TimelineContextMenu>
+                </EffectsPanelDeviceBoundary>
               </div>
             );
           }}
@@ -766,7 +909,14 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
             >
               <Show when={previewBuiltinEffect()}>
                 {(effect) => (
-                  <EffectsPanelAudioEffectCard effect={effect()} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                  <EffectsPanelDeviceBoundary
+                    identity={deviceCollapseIdentity.audioEffect(effect().id)}
+                    canWrite={props.canWrite}
+                    collapse={props.deviceCollapse}
+                    menuItems={() => contextMenuItems(effect())}
+                  >
+                    <EffectsPanelAudioEffectCard effect={effect()} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                  </EffectsPanelDeviceBoundary>
                 )}
               </Show>
             </div>
@@ -920,6 +1070,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;
+  const deviceCollapse = createEffectsPanelDeviceCollapse(() => props.projectId);
   const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
   createEffect(() => {
     const projectId = props.projectId;
@@ -1074,6 +1225,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         synthAutomationDisplayParams={synthAutomationDisplayParams()}
                         onSelectSynthAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(props.selectedFXTarget, parameterId)}
                         onManualSynthAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(props.selectedFXTarget, parameterId)}
+                        deviceCollapse={deviceCollapse}
                       />
                     </Show>
                     <EffectsPanelEffectCards
@@ -1099,6 +1251,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       onExternalParameterChange={updateExternalProcessorParameter}
                       onExternalBypassChange={updateExternalProcessorBypass}
                       onMixedReorder={reorderMixed}
+                      deviceCollapse={deviceCollapse}
                     />
                     <Show when={isCurrentTargetReadOnly()}>
                       <EffectsPanelReadOnlyNotice />

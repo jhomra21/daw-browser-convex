@@ -203,7 +203,7 @@ test('round trips the bounded native worker artifact and runtime hello contract'
   expect(decodeNativeVst3WorkerHello(encoded)).toEqual(workerHello())
   expect(JSON.parse(encoded)).toMatchObject({
     manifest: {
-      artifact: { id: 'daw-vst3-worker', version: '2' },
+      artifact: { id: 'daw-vst3-worker', version: '3' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
       transportAbiVersion: 5,

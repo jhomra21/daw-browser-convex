@@ -10,12 +10,13 @@
 #include <deque>
 #include <atomic>
 #include <vector>
+#include <utility>
 
 #include "daw/audio_core.h"
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 14;
+constexpr std::uint32_t kControlProtocolVersion = 15;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -81,6 +82,11 @@ enum class ControlType : std::uint32_t {
   kSpectrumSelection = 49,
   kSpectrumFrame = 50,
   kProcessorStatePatch = 51,
+  kOfflineConfigure = 52,
+  kOfflineStart = 53,
+  kOfflinePcmChunk = 54,
+  kOfflineComplete = 55,
+  kOfflineError = 56,
 };
 
 struct ControlFrame {
@@ -193,6 +199,9 @@ struct NativeVstAttachment {
   std::uint32_t transport_latency_frames = 0;
   bool playback_enabled = false;
   bool render_enabled = true;
+  std::vector<std::uint8_t> initial_state;
+  std::string initial_state_sha256;
+  std::vector<std::pair<std::uint32_t, double>> initial_parameter_values;
   NativeVstWorkerTransportConfig transport{};
 };
 
@@ -474,6 +483,7 @@ class AudioHost {
     std::optional<NativeVstEditorAnchor> anchor = std::nullopt);
   bool DetachVstReference(std::string_view instance_id);
   bool Start();
+  bool StartOffline();
   bool StartDiagnosticMode();
   void Stop();
   void Teardown();

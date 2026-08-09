@@ -1,5 +1,7 @@
 import "fake-indexeddb/auto"
 import { expect, test } from "bun:test"
+import { untrack } from "solid-js"
+import { createMutable, createStore } from "solid-js/store"
 import {
   AUDIO_EFFECT_CONTRACTS,
   automationTargetKey,
@@ -24,6 +26,7 @@ import { importLocalProject, LOCAL_PROJECT_SCHEMA_VERSION } from "~/lib/local-pr
 import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { externalProcessorSchema } from "@daw-browser/external-plugins"
+import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 
 const settings: TimelineExportInput = {
   range: { mode: "whole" },
@@ -269,6 +272,150 @@ test("persisted devices and automation survive absent and intentionally empty au
   expect(patchedAutomation.automationEnvelopes).toEqual([])
 })
 
+test("normalizes projected Solid EQ params at the export snapshot boundary", async () => {
+  const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()
+  const [projectedEq] = createStore({
+    ...defaults,
+    bands: defaults.bands.map((band) => ({
+      ...band,
+      onChange: () => undefined,
+    })),
+  })
+  const snapshot = await createExportRenderStateSnapshot({
+    projectId: "cloud-project-solid-eq",
+    userId: "user-1",
+    masterVolume: 1,
+    cloudRows: { effects: [], automationEnvelopes: [] },
+    effectsProjection: {
+      replaceAudioEffectTargets: [{
+        targetId: "track-solid-eq",
+        rows: [{
+          targetId: "track-solid-eq",
+          effect: "eq",
+          instanceId: "eq-solid",
+          index: 0,
+          params: projectedEq,
+        }],
+      }],
+      upsertDeviceRows: [],
+    },
+  })
+
+  expect(snapshot.fx.trackFx?.["track-solid-eq"]?.instances[0]?.params).toEqual(defaults)
+  expect(() => structuredClone(snapshot.fx)).not.toThrow()
+})
+
+test("detaches Solid-wrapped local runtime domains before export submission", async () => {
+  const defaults = AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()
+  const [tracks] = createStore([{
+    id: "track-solid-runtime",
+    name: "Solid runtime track",
+    volume: 1,
+    clips: [{
+      id: "clip-solid-runtime",
+      name: "Solid runtime clip",
+      color: "#fff",
+      startSec: 0,
+      duration: 1,
+      fades: {
+        fadeInSec: 0,
+        fadeOutSec: 0,
+        fadeInCurve: 0,
+        fadeOutCurve: 0,
+        onChange: () => undefined,
+      },
+    }],
+  }])
+  const [projectedEq] = createStore({
+    ...defaults,
+    bands: defaults.bands.map((band) => ({
+      ...band,
+      onChange: () => undefined,
+    })),
+  })
+  const routes = createMutable([{
+    sourceTrackId: "track-solid-runtime",
+    targetTrackId: "track-solid-runtime",
+    effectInstanceId: "eq-solid-runtime",
+  }])
+  const automation = createMutable([{
+    targetKey: "track:solid-runtime",
+    envelope: {
+      id: "automation-solid-runtime",
+      projectId: "cloud-solid-runtime",
+      target: { kind: "track", trackId: "track-solid-runtime" },
+      targetKey: "track:solid-runtime",
+      parameterId: "volume",
+      enabled: true,
+      points: [{
+        id: "point-solid-runtime",
+        timeSec: 0,
+        value: 1,
+        interpolation: "linear",
+      }],
+      updatedAt: 1,
+      onChange: () => undefined,
+    } satisfies AutomationEnvelope & { onChange: () => void },
+  }])
+  const [exportSettings] = createStore({
+    ...settings,
+    render: {
+      ...settings.render,
+      onChange: () => undefined,
+    },
+  })
+  const clip = untrack(() => tracks[0]?.clips[0])
+  if (!clip?.fades) throw new Error("Expected the reactive clip fades.")
+  expect(() => structuredClone(projectedEq)).toThrow()
+  expect(() => structuredClone(clip.fades)).toThrow()
+  expect(() => structuredClone(exportSettings)).toThrow()
+
+  const queue = createExportQueue(() => "job-solid-runtime")
+  const service = createTimelineExportService({
+    queue,
+    getTracks: () => tracks,
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => "cloud-solid-runtime",
+    getUserId: () => "user-1",
+    getCloudRenderRows: () => createMutable({ effects: [], automationEnvelopes: [] }),
+    getAutomationPatches: () => automation,
+    getEffectsExportSnapshot: () => ({
+      snapshotEffectsProjection: () => ({
+        replaceAudioEffectTargets: [{
+          targetId: "track-solid-runtime",
+          rows: [{
+            targetId: "track-solid-runtime",
+            effect: "eq",
+            instanceId: "eq-solid-runtime",
+            index: 0,
+            params: projectedEq,
+          }],
+        }],
+        upsertDeviceRows: [],
+      }),
+      snapshotSidechainRoutes: () => routes,
+      flushPending: async () => undefined,
+    }),
+    getSidechainRoutes: () => routes,
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+
+  const prepared = await service.prepareTimelineExport(exportSettings)
+  expect(() => structuredClone(prepared.snapshot.settings)).not.toThrow()
+  expect(() => structuredClone(prepared.snapshot.tracks)).not.toThrow()
+  expect(() => structuredClone(prepared.snapshot.sidechainRoutes)).not.toThrow()
+  expect(() => structuredClone(prepared.snapshot.renderStateSnapshot)).not.toThrow()
+  expect(prepared.snapshot.tracks[0]?.clips[0]?.fades).toEqual({
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    fadeInCurve: 0,
+    fadeOutCurve: 0,
+  })
+  expect(prepared.snapshot.renderStateSnapshot.fx.trackFx?.["track-solid-runtime"]?.instances[0]?.params).toEqual(defaults)
+  queue.dispose()
+})
+
 test("snapshot failure rejects before queue insertion or output target creation", async () => {
   const queue = createExportQueue(() => "job-1")
   let targetCreated = false
@@ -305,7 +452,7 @@ test("snapshot failure rejects before queue insertion or output target creation"
   queue.dispose()
 })
 
-test("native-only export fails closed before snapshot, queue, or output work for mixdown and stems", async () => {
+test("native desktop export rejects unavailable mixdown and unsupported stems before snapshot work", async () => {
   const queue = createExportQueue(() => "native-export")
   let trackReads = 0
   let effectsReads = 0
@@ -349,13 +496,61 @@ test("native-only export fails closed before snapshot, queue, or output work for
     stemSelection: "all-tracks",
     stemMode: "full-master-contribution",
   }, outputTargets)).rejects.toThrow(
-    "Native desktop export is unavailable until native offline rendering is implemented.",
+    "Native desktop stems are unavailable in Phase A; choose Main mixdown.",
   )
   expect(trackReads).toBe(0)
   expect(effectsReads).toBe(0)
   expect(outputTargetCreates).toBe(0)
   expect(queue.activeJob()).toBeUndefined()
   expect(service.status()).toBeUndefined()
+  queue.dispose()
+})
+
+test("native export preflight rejects oversized PCM before external state capture", async () => {
+  const queue = createExportQueue(() => "native-memory-limit")
+  let externalStateCaptureCalls = 0
+  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
+    / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
+  const service = createTimelineExportService({
+    queue,
+    nativeRendererRequired: true,
+    nativeOfflineRenderer: async () => {
+      throw new Error("unreachable")
+    },
+    getTracks: () => [{
+      id: "track-1",
+      name: "Track",
+      volume: 1,
+      clips: [{
+        id: "clip-1",
+        name: "Clip",
+        color: "#fff",
+        startSec: 0,
+        duration: totalFrames,
+        midi: { wave: "sine", notes: [] },
+      }],
+    }],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => undefined,
+    getUserId: () => undefined,
+    getCloudRenderRows: () => undefined,
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => undefined,
+    getSidechainRoutes: () => [],
+    getNativeOfflineExternalAttachments: async () => {
+      externalStateCaptureCalls += 1
+      return undefined
+    },
+    loadCapturedClipBuffer: async () => ({ status: "missing" as const }),
+  })
+
+  await expect(service.prepareTimelineExport({
+    ...settings,
+    range: { mode: "custom", startSec: 0, endSec: (totalFrames + 0.5) / 96_000 },
+    render: { ...settings.render, sampleRate: 96_000 },
+  })).rejects.toThrow("512 MiB in-memory PCM")
+  expect(externalStateCaptureCalls).toBe(0)
   queue.dispose()
 })
 

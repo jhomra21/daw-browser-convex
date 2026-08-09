@@ -1,0 +1,27 @@
+{
+  "scan_id": "scan-2026-08-09-005",
+  "scan_date": "2026-08-09T21:49:57Z",
+  "scan_type": "staged",
+  "commit_range": "4c2085a..staged-index",
+  "pr_number": null,
+  "threat_model_version": "1.0.0",
+  "findings": [],
+  "summary": {
+    "total_findings": 0,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0
+    },
+    "by_stride": {
+      "Spoofing": 0,
+      "Tampering": 0,
+      "Repudiation": 0,
+      "InfoDisclosure": 0,
+      "DoS": 0,
+      "ElevationOfPrivilege": 0
+    },
+    "files_analyzed": 86
+  }
+}

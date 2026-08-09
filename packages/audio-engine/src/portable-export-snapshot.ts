@@ -95,6 +95,7 @@ const createAsset = (sourceAssetKey: string, buffer: AudioBuffer): PortableExpor
 
 const collectAssets = (
   tracks: readonly Track<AudioBuffer>[],
+  fx: ExportFx | undefined,
   preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset>,
 ): {
   assets: readonly PortableExportAsset[]
@@ -104,6 +105,20 @@ const collectAssets = (
   const assets: PortableExportAsset[] = []
   const bySourceAssetKey = new Map<string, AudioAssetRef>()
   const reasons: string[] = []
+  const addAsset = (sourceAssetKey: string, buffer: AudioBuffer) => {
+    const existing = bySourceAssetKey.get(sourceAssetKey)
+    if (existing) {
+      if (existing.frameCount !== buffer.length
+        || existing.sampleRateHz !== buffer.sampleRate
+        || existing.channelCount !== buffer.numberOfChannels) {
+        reasons.push(`Source asset "${sourceAssetKey}" resolves to inconsistent decoded audio.`)
+      }
+      return
+    }
+    const exportAsset = createAsset(sourceAssetKey, buffer)
+    assets.push(exportAsset)
+    bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+  }
   for (const track of tracks) {
     for (const clip of track.clips) {
       if (clip.audioWarp?.enabled === true) {
@@ -114,18 +129,25 @@ const collectAssets = (
         continue
       }
       if (clip.midi || !clip.sourceAssetKey || !clip.buffer) continue
-      const existing = bySourceAssetKey.get(clip.sourceAssetKey)
-      if (existing) {
-        if (existing.frameCount !== clip.buffer.length
-          || existing.sampleRateHz !== clip.buffer.sampleRate
-          || existing.channelCount !== clip.buffer.numberOfChannels) {
-          reasons.push(`${clip.id}: source asset "${clip.sourceAssetKey}" resolves to inconsistent decoded audio.`)
-        }
-        continue
+      addAsset(clip.sourceAssetKey, clip.buffer)
+    }
+  }
+  for (const entry of Object.values(fx?.trackFx ?? {})) {
+    const instrument = entry.instrument
+    if (instrument?.kind === 'sampler' && entry.samplerBuffers) {
+      for (const zone of instrument.params.zones) {
+        const buffer = entry.samplerBuffers.get(zone.id)
+        if (buffer) addAsset(zone.sample.assetKey, buffer)
       }
-      const asset = createAsset(clip.sourceAssetKey, clip.buffer)
-      assets.push(asset)
-      bySourceAssetKey.set(clip.sourceAssetKey, asset.asset)
+    }
+    if (instrument?.kind === 'drum-rack' && entry.drumRackBuffers) {
+      for (const pad of instrument.params.pads) {
+        const buffer = pad.sample ? entry.drumRackBuffers.get(pad.id) : undefined
+        if (pad.sample && buffer) addAsset(pad.sample.assetKey, buffer)
+      }
+    }
+    if (instrument?.kind === 'granular' && entry.granularBuffer && instrument.params.zone) {
+      addAsset(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
     }
   }
   return { assets, bySourceAssetKey, reasons }
@@ -221,6 +243,7 @@ export const compilePortableExportSnapshot = (
   if (diagnostics.length > 0) return unsupported(reasons, diagnostics)
   const { assets, bySourceAssetKey, reasons: assetReasons } = collectAssets(
     input.tracks,
+    input.fx,
     preparedStretchAssets,
   )
   reasons.push(...assetReasons)

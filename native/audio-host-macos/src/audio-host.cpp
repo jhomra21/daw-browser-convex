@@ -202,6 +202,10 @@ struct NativeVstWorkerAttachment {
   };
   static constexpr std::size_t kActiveNoteCapacity = 256;
   NativeVstAttachment metadata;
+  bool offline = false;
+  bool offline_started = false;
+  bool offline_parameters_applied = false;
+  std::atomic<bool>* offline_failure = nullptr;
   struct WorkerNotificationSink* notification_sink = nullptr;
   daw::plugin_host::WorkerControlService worker;
   std::array<std::uint64_t, kMaximumNativeVstSlots> pending_sequences{};
@@ -457,7 +461,144 @@ struct NativeVstWorkerAttachment {
     }
   }
 
+  bool ProcessOffline(const daw::audio_core::NativeGraphNodeRender& render) {
+    const std::uint32_t input_channels = metadata.transport.input_channels;
+    const std::uint32_t output_channels = metadata.transport.output_channels;
+    if (!metadata.render_enabled) {
+      if (metadata.role == NativeVstRole::kInstrument) WriteFallback(render);
+      return true;
+    }
+    if (render.frame_count == 0 || render.channel_count != output_channels
+      || render.channel_count > 2 || output_channels > 2
+      || render.frame_count > metadata.transport.maximum_frames) {
+      WriteFallback(render);
+      return false;
+    }
+    if (input_channels > 0) {
+      for (std::uint32_t channel = 0; channel < input_channels; ++channel) {
+        std::memcpy(input.data() + channel * render.frame_count, render.planes[channel],
+          render.frame_count * sizeof(float));
+      }
+    }
+    std::size_t event_count = 0;
+    const auto initial_parameter_count = metadata.initial_parameter_values.size();
+    const auto maximum_events = std::min<std::size_t>(
+      daw::plugin_host::kMaximumWorkerEvents,
+      metadata.transport.maximum_events_per_block + initial_parameter_count
+    );
+    const bool discontinuity = !offline_started
+      || note_epoch.exchange(render.transport_epoch, std::memory_order_acq_rel) != render.transport_epoch;
+    offline_started = true;
+    if (!offline_parameters_applied) {
+      for (const auto& [parameter_id, parameter_value] : metadata.initial_parameter_values) {
+        if (event_count >= block_events.size()) return false;
+        block_events[event_count++] = {
+          .kind = daw::plugin_host::WorkerEventKind::kParameter,
+          .sampleOffset = 0,
+          .parameterId = parameter_id,
+          .parameterValue = parameter_value,
+        };
+      }
+      offline_parameters_applied = true;
+    }
+    if (!ProjectAutomation(
+      render.transport_frame,
+      render.frame_count,
+      std::span<daw::plugin_host::WorkerTransportEvent>(block_events.data(), block_events.size()),
+      event_count,
+      maximum_events
+    )) {
+      WriteFallback(render);
+      return false;
+    }
+    for (const auto& event : render.instrument_events) {
+      if (event.node_id != metadata.graph_node_id || event.epoch != render.transport_epoch
+        || event.frame_offset >= render.frame_count) continue;
+      std::uint8_t status = 0;
+      if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON
+        || event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOn)) status = 0x90;
+      else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF
+        || event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff)) status = 0x80;
+      else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) status = 0xB0;
+      else if (event.type == DAW_AUDIO_INSTRUMENT_EVENT_EXPRESSION) status = 0xB0;
+      else if (event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kTransportRelease)) {
+        if (!ReleaseArranged(event.frame_offset, event_count)) return false;
+        continue;
+      } else if (event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kAllSoundOff)) {
+        if (!AddMidi(event.frame_offset, 0xB0, event.channel, 123, 0, event_count)
+          || !AddMidi(event.frame_offset, 0xB0, event.channel, 120, 0, event_count)) return false;
+        continue;
+      } else continue;
+      if (!AddMidi(
+        event.frame_offset,
+        status,
+        event.channel,
+        status == 0xB0 ? (event.type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN ? 64 : 11) : event.note,
+        MidiValue(event.value),
+        event_count
+      )) return false;
+    }
+    if (event_count > maximum_events) return false;
+    std::stable_sort(
+      block_events.begin(),
+      block_events.begin() + static_cast<std::ptrdiff_t>(event_count),
+      [](const auto& left, const auto& right) { return left.sampleOffset < right.sampleOffset; }
+    );
+    const auto port = worker.callbackPort();
+    std::uint32_t slot = 0;
+    while (slot < metadata.transport.slot_count && slot < kMaximumNativeVstSlots
+      && port.health() != daw::plugin_host::WorkerHealth::kFaulted) {
+      const auto& candidate = port;
+      const auto sequence = next_sequence++;
+      if (candidate.CopyInput(slot, std::span<const float>(
+        input.data(), static_cast<std::size_t>(render.frame_count) * input_channels))
+        || input_channels == 0) {
+        const auto status = worker.ProcessOffline({
+          .slotIndex = slot,
+          .sequence = sequence,
+          .numSamples = render.frame_count,
+          .events = std::span<const daw::plugin_host::WorkerTransportEvent>(block_events.data(), event_count),
+          .context = {
+            .projectTimeSamples = render.project_time_samples,
+            .continuousTimeSamples = render.transport_frame,
+            .tempoBpm = render.tempo_bpm,
+            .projectTimeMusic = render.project_time_music,
+            .timeSignatureNumerator = render.time_signature_numerator,
+            .timeSignatureDenominator = render.time_signature_denominator,
+            .cycleStartMusic = render.cycle_start_music,
+            .cycleEndMusic = render.cycle_end_music,
+            .transportEpoch = render.transport_epoch,
+            .playing = render.transport_running,
+            .cycleActive = render.cycle_active,
+            .discontinuity = discontinuity,
+          },
+        }, std::chrono::seconds(5));
+        if (status != daw::plugin_host::WorkerSubmissionStatus::kAccepted) break;
+        const auto outputCopied = port.CopyCompletedOutput(
+          slot,
+          sequence,
+          std::span<float>(output.data(), output.size())
+        );
+        if (!outputCopied) break;
+        for (std::uint32_t channel = 0; channel < render.channel_count; ++channel) {
+          std::memcpy(render.planes[channel], output.data() + channel * render.frame_count,
+            render.frame_count * sizeof(float));
+        }
+        return true;
+      }
+      ++slot;
+    }
+    WriteFallback(render);
+    return false;
+  }
+
   void Process(const daw::audio_core::NativeGraphNodeRender& render) noexcept {
+    if (offline) {
+      if (!ProcessOffline(render) && offline_failure != nullptr) {
+        offline_failure->store(true, std::memory_order_release);
+      }
+      return;
+    }
     const std::uint32_t input_channels = metadata.transport.input_channels;
     const std::uint32_t output_channels = metadata.transport.output_channels;
     if (!metadata.render_enabled) {
@@ -912,7 +1053,7 @@ std::optional<ControlFrame> DecodeControlFrame(std::span<const std::uint8_t> byt
   const std::uint32_t length = ReadU32(bytes.data() + 12);
   if (length > kMaximumControlPayloadBytes || bytes.size() != kControlFrameHeaderBytes + length) return std::nullopt;
   if (type < static_cast<std::uint32_t>(ControlType::kHostHello)
-    || type > static_cast<std::uint32_t>(ControlType::kProcessorStatePatch)) return std::nullopt;
+    || type > static_cast<std::uint32_t>(ControlType::kOfflineError)) return std::nullopt;
   return ControlFrame{
     .type = static_cast<ControlType>(type),
     .payload = {bytes.begin() + static_cast<std::ptrdiff_t>(kControlFrameHeaderBytes), bytes.end()},
@@ -1141,6 +1282,7 @@ struct AudioHost::Impl {
   std::atomic<std::int64_t> recording_punch_start_frame = 0;
   std::atomic<std::uint64_t> recording_status_revision = 0;
   std::atomic<bool> recording_device_lost = false;
+  std::atomic<bool> offline_failure = false;
   std::array<std::array<float, DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES>,
     DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS> recording_monitor{};
   std::array<float*, DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS> recording_monitor_planes{};
@@ -1295,7 +1437,10 @@ struct AudioHost::Impl {
     recording_started.store(false, std::memory_order_release);
     return true;
   }
-  [[nodiscard]] bool StartNativeVstWorkers() {
+  [[nodiscard]] bool StartNativeVstWorkers(
+    const daw::plugin_host::WorkerProcessSetup::Mode mode
+  ) {
+    offline_failure.store(false, std::memory_order_release);
     const bool has_enabled_attachment = std::any_of(
       native_vst_attachments.begin(),
       native_vst_attachments.end(),
@@ -1308,7 +1453,17 @@ struct AudioHost::Impl {
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
       if (!attachment->metadata.playback_enabled) continue;
+      attachment->offline = mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline;
+      attachment->offline_started = false;
+      attachment->offline_parameters_applied = false;
       const auto& metadata = attachment->metadata;
+      const auto initial_state = metadata.initial_state_sha256.empty()
+        ? std::optional<daw::plugin_host::WorkerState>{}
+        : std::optional<daw::plugin_host::WorkerState>(
+          daw::plugin_host::WorkerState{
+            .bytes = metadata.initial_state,
+            .sha256 = metadata.initial_state_sha256,
+          });
       const daw::plugin_host::WorkerStartupRequest startup{
         .eligibility = {
           .canonicalBundlePath = metadata.canonical_bundle_path,
@@ -1326,14 +1481,19 @@ struct AudioHost::Impl {
           .maximumBlockFrames = metadata.transport.maximum_frames,
           .inputChannels = metadata.transport.input_channels,
           .outputChannels = metadata.transport.output_channels,
+          .mode = mode,
         },
+        .state = initial_state,
       };
       const daw::plugin_host::WorkerTransportRequest transport{
         .slotCount = metadata.transport.slot_count,
         .maximumFrames = metadata.transport.maximum_frames,
         .inputChannels = metadata.transport.input_channels,
         .outputChannels = metadata.transport.output_channels,
-        .maximumEventsPerBlock = metadata.transport.maximum_events_per_block,
+        .maximumEventsPerBlock = static_cast<std::uint32_t>(std::min<std::size_t>(
+          daw::plugin_host::kMaximumWorkerEvents,
+          metadata.transport.maximum_events_per_block + metadata.initial_parameter_values.size()
+        )),
       };
       const daw::plugin_host::WorkerHostConfiguration worker_configuration{
         .executable = *worker_executable,
@@ -1364,6 +1524,9 @@ struct AudioHost::Impl {
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
       attachment->worker.Stop();
+      attachment->offline = false;
+      attachment->offline_started = false;
+      attachment->offline_parameters_applied = false;
       attachment->pending_sequences.fill(0);
       attachment->pending_frames.fill(0);
       attachment->missed_callbacks.fill(0);
@@ -2769,6 +2932,7 @@ bool AudioHost::SetTransport(
   if (active_core == 0 || impl_->prepared_core != 0 || frame < 0 || epoch == 0
     || (bpm != 0.0 && (!std::isfinite(bpm) || bpm <= 0.0))
     || time_signature_numerator > 32 || time_signature_denominator > 32
+    || (time_signature_numerator == 0) != (time_signature_denominator == 0)
     || (cycle_active && (
       !std::isfinite(cycle_start_sec) || !std::isfinite(cycle_end_sec)
       || cycle_start_sec < 0.0 || cycle_end_sec <= cycle_start_sec
@@ -3249,6 +3413,7 @@ bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   auto worker_attachment = std::make_unique<NativeVstWorkerAttachment>();
   worker_attachment->metadata = normalized;
   worker_attachment->notification_sink = &impl_->worker_notifications;
+  worker_attachment->offline_failure = &impl_->offline_failure;
   impl_->native_vst_attachments.emplace(normalized.instance_id, std::move(worker_attachment));
   return true;
 }
@@ -3310,7 +3475,7 @@ bool AudioHost::DetachVstReference(const std::string_view instance_id) {
 bool AudioHost::Start() {
   if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kConfigured || impl_->config.device_uid.empty()
     || !impl_->graph_prepared || !impl_->transport_prepared) return false;
-  if (!impl_->StartNativeVstWorkers()) return false;
+  if (!impl_->StartNativeVstWorkers(daw::plugin_host::WorkerProcessSetup::Mode::kRealtime)) return false;
   // CoreAudio may invoke the IO callback synchronously while the device is
   // being started. Publish the running state before opening the device so
   // that the first callback is processed rather than counted as rejected.
@@ -3328,9 +3493,17 @@ bool AudioHost::Start() {
   return true;
 }
 
+bool AudioHost::StartOffline() {
+  if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kConfigured
+    || !impl_->graph_prepared || !impl_->transport_prepared) return false;
+  if (!impl_->StartNativeVstWorkers(daw::plugin_host::WorkerProcessSetup::Mode::kOffline)) return false;
+  impl_->state.store(LifecycleState::kRunning, std::memory_order_release);
+  return true;
+}
+
 bool AudioHost::StartDiagnosticMode() {
   if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kConfigured) return false;
-  if (!impl_->StartNativeVstWorkers()) return false;
+  if (!impl_->StartNativeVstWorkers(daw::plugin_host::WorkerProcessSetup::Mode::kRealtime)) return false;
   impl_->state.store(LifecycleState::kRunning, std::memory_order_release);
   return true;
 }
@@ -3684,6 +3857,19 @@ bool AudioHost::ProcessPlanar(
         RejectedBlockReason::kCoreProcess,
         callback_attempt,
         result,
+        frames,
+        impl_->config.channel_count,
+        processor_event_count,
+        instrument_event_count,
+        block.graph_revision
+      );
+      return false;
+    }
+    if (impl_->offline_failure.load(std::memory_order_acquire)) {
+      impl_->RejectBlock(
+        RejectedBlockReason::kCoreProcess,
+        callback_attempt,
+        DAW_AUDIO_CORE_INVALID_ARGUMENT,
         frames,
         impl_->config.channel_count,
         processor_event_count,

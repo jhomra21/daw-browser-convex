@@ -10,14 +10,23 @@ import type {
   NativeHostTransport,
   NativeScheduleProgress,
   NativeOutputDevice,
+  NativeOfflinePcmChunk,
+} from "@daw-browser/audio-engine/native-host-wire"
+import type {
+  NativeOfflineRenderPlan,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
   DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
 import type {
+  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuState,
+} from "@daw-browser/desktop-protocol/application-menu"
+import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
+import type { ExportAudioFormat } from "@daw-browser/shared"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
@@ -71,6 +80,10 @@ type NativeSessionBridge = {
   commitTransaction(transactionToken: string): Promise<NativeSessionReply>
   rollbackTransaction(transactionToken: string): Promise<NativeSessionReply>
   detachVst(instanceId: string, transactionToken?: string): Promise<NativeSessionReply>
+  captureVstState(instanceId: string): Promise<
+    | { ok: true; bytes: Uint8Array; sha256: string }
+    | { ok: false; error: string }
+  >
   editor(input: { projectId: string; instanceId: string; command: "open" | "close" | "focus" | "resize" | "status"; serializedPlan?: string; width?: number; height?: number; anchor?: NativeVstEditorAnchor; transactionToken?: string }): Promise<NativeVstEditorReply>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
@@ -113,6 +126,14 @@ type DesktopBridge = {
   setRequestHandler(next: unknown): void
   onPrepareToClose(next: unknown): void
   prepareToClose(): Promise<{ flushed: boolean }>
+  pickOutputFile(
+    requestId: string,
+    format: ExportAudioFormat,
+  ): Promise<{ canceled: true } | { canceled: false; file: { token: string; basename: string } }>
+  pickOutputDirectory(
+    requestId: string,
+  ): Promise<{ canceled: true } | { canceled: false; directory: { token: string; basename: string } }>
+  releaseExportOutput(requestId: string): Promise<void>
   readChunk(requestId: string, token: string): Promise<Uint8Array>
   beginWrite(requestId: string, token: string, relativePath?: string): Promise<{ writerId: string }>
   writeChunk(requestId: string, writerId: string, offset: number, chunk: Uint8Array): Promise<{ nextOffset: number }>
@@ -124,6 +145,14 @@ type DesktopBridge = {
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
     resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDeviceReply>
     session: NativeSessionBridge
+    offlineRender: {
+      start(
+        jobId: string,
+        plan: NativeOfflineRenderPlan,
+        onChunk: (chunk: NativeOfflinePcmChunk) => void,
+      ): Promise<{ ok: true } | { ok: false; error: string }>
+      cancel(jobId: string): Promise<{ accepted: boolean }>
+    }
     onVstEditorState(listener: (payload: DesktopVstEditorState) => void): () => void
     getLifecycle(): Promise<DesktopAudioLifecycle>
     onLifecycle(listener: (lifecycle: DesktopAudioLifecycle) => void): () => void
@@ -139,6 +168,10 @@ type DesktopBridge = {
     removeDirectory(directory: string): Promise<DesktopPluginCatalogReply>
     scan(): Promise<DesktopPluginCatalogReply>
     preflightInsertion(input: NativeVst3InsertionPreflightRequest): Promise<NativeVst3InsertionPreflightResult>
+  }
+  applicationMenu?: {
+    onCommand(listener: (command: DesktopApplicationMenuCommand) => void): () => void
+    setState(state: DesktopApplicationMenuState): void
   }
 }
 

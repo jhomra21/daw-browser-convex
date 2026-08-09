@@ -821,23 +821,23 @@ export function createEffectsPanelAudioDevice(
 
   const exportRowForRuntime = (targetId: string, instanceId: string, index: number, runtime: AudioEffectRuntimeInstance): ExportEffectRow => {
     const extras = { targetId, instanceId, index };
-    if (runtime.kind === "utility") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "autofilter") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "eq") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "gate") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "compressor") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "saturator") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "limiter") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "lofi") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "delay") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "reverb") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "chorus") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "flanger") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "phaser") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "tremolo") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "autopan") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    if (runtime.kind === "ensemble") return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
-    return { ...extras, effect: runtime.kind, params: structuredClone(runtime.params) };
+    if (runtime.kind === "utility") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "autofilter") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "eq") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "gate") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "compressor") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "saturator") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "limiter") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "lofi") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "delay") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "reverb") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "chorus") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "flanger") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "phaser") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "tremolo") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "autopan") return { ...extras, effect: runtime.kind, params: runtime.params };
+    if (runtime.kind === "ensemble") return { ...extras, effect: runtime.kind, params: runtime.params };
+    return { ...extras, effect: runtime.kind, params: runtime.params };
   };
   const snapshotExportProjection = (): ExportEffectsProjection => {
     const ownedTargetIds = new Set(optimisticOrdersByTarget.keys());

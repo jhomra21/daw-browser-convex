@@ -238,6 +238,13 @@ int main(int argc, char* argv[]) {
     daw::audio_host_macos::ControlType::kDeviceConfigure, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionCommit),
     daw::audio_host_macos::ControlType::kTransactionCommit, true));
+  const std::vector<std::uint8_t> malformed_state_request{0};
+  assert(IsAck(RoundTrip(
+    to_host[1],
+    from_host[0],
+    daw::audio_host_macos::ControlType::kVstStateGet,
+    malformed_state_request
+  ), daw::audio_host_macos::ControlType::kVstStateGet, false));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(1, false, 0)),
     daw::audio_host_macos::ControlType::kTransport, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(2, true, 0)),

@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, net as electronNet, powerMonitor, protocol, session, shell } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, Menu, net as electronNet, powerMonitor, protocol, session, shell } from "electron"
 import { createServer, type Socket } from "node:net"
 import { chmod, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import {
@@ -30,6 +30,10 @@ import {
   type DesktopRendererRequestV1,
   type DesktopTrustedRendererRequestV1,
 } from "@daw-browser/desktop-protocol"
+import {
+  desktopApplicationMenuStateSchema,
+  type DesktopApplicationMenuCommand,
+} from "@daw-browser/desktop-protocol/application-menu"
 import { controlErrorSchemaV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
@@ -45,9 +49,13 @@ import { createVst3ScannerSupervisor, packagedVst3ScannerPath } from "./vst3-sca
 import { catalogViewForRenderer } from "./vst3-attachment"
 import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import { packagedVst3WorkerPath } from "./vst3-preflight"
-import { coordinateNativeVst3Attachments } from "./native-vst3-coordinator"
+import {
+  coordinateNativeVst3Attachments,
+  resolveNativeVst3AttachmentPlan,
+} from "./native-vst3-coordinator"
 import {
   createNativeAudioHostSupervisor,
+  renderNativeOffline,
   probeNativeAudioOutputDevice,
   NativeAudioHostCommandError,
   nativeVstEditorOwnershipProbe,
@@ -68,11 +76,14 @@ import type {
   NativeHostTransport,
   NativeHostMeterBatch,
   NativeScheduleProgress,
+  NativeOfflineRenderPlan,
 } from "@daw-browser/audio-engine/native-host-wire"
 import {
   decodeNativeExternalAttachmentPlan,
+  nativeExternalAttachmentPlanSchema,
   nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
+import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   allowsTrustedAudioCapturePermission,
   allowsTrustedMidiPermission,
@@ -80,6 +91,7 @@ import {
 } from "./permission-policy"
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
+import { createApplicationMenuController } from "./application-menu"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -107,6 +119,20 @@ type PendingRendererRequest = {
   reject: (error: Error) => void
 }
 let window_: BrowserWindow | undefined
+const applicationMenuCommandChannel = "daw:application-menu:command"
+const applicationMenuStateChannel = "daw:application-menu:state"
+const applicationMenuController = createApplicationMenuController<Menu>({
+  platform: process.platform === "darwin"
+    ? "darwin"
+    : process.platform === "win32"
+      ? "win32"
+      : "linux",
+  sendCommand: (command: DesktopApplicationMenuCommand) => {
+    const target = window_?.webContents
+    if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
+    target.send(applicationMenuCommandChannel, command)
+  },
+})
 let generation = 0
 const rendererPending = new Map<string, PendingRendererRequest>()
 const preparationRegistry = createPreparationRegistry()
@@ -131,6 +157,10 @@ let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
 let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
+let offlineRenderJob: { jobId: string; controller: AbortController } | undefined
+const abortOfflineRenderJobs = () => {
+  offlineRenderJob?.controller.abort()
+}
 let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
 let audioLifecycle: {
   state: "suspended" | "recovering" | "ready" | "failed"
@@ -595,6 +625,18 @@ const handleSocket = (socket: Socket) => {
 }
 
 const registerIpc = () => {
+  const applicationMenuStateAllowed = (event: Electron.IpcMainEvent) => (
+    window_ !== undefined
+    && event.sender.id === window_.webContents.id
+    && event.senderFrame !== null
+    && event.senderFrame === event.sender.mainFrame
+    && sameAppOrigin(event.senderFrame.url)
+  )
+  ipcMain.on(applicationMenuStateChannel, (event, value: unknown) => {
+    if (!applicationMenuStateAllowed(event)) return
+    const parsed = desktopApplicationMenuStateSchema.safeParse(value)
+    if (parsed.success) applicationMenuController.setState(parsed.data)
+  })
   ipcMain.handle("daw:audio-host:lifecycle", (event) => {
     if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audioLifecycle.powerGeneration }
     return audioLifecycle
@@ -646,8 +688,20 @@ const registerIpc = () => {
     pending.resolve(parsed.data)
   })
   const scopeFor = (event: Electron.IpcMainInvokeEvent, value: unknown) => {
-    if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return undefined
-    if (typeof value !== "object" || value === null || !("requestId" in value) || typeof value.requestId !== "string") return undefined
+    if (
+      !window_
+      || event.sender.id !== window_.webContents.id
+      || !event.senderFrame
+      || event.senderFrame !== event.sender.mainFrame
+      || !sameAppOrigin(event.senderFrame.url)
+    ) return undefined
+    if (
+      typeof value !== "object"
+      || value === null
+      || !("requestId" in value)
+      || typeof value.requestId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.requestId)
+    ) return undefined
     return { requestId: value.requestId, rendererGeneration: generation }
   }
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
@@ -670,6 +724,76 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
+  const offlinePlan = (value: unknown): NativeOfflineRenderPlan | undefined => {
+    const parsed = nativeOfflineRenderPlanSchema.safeParse(value)
+    if (!parsed.success) return undefined
+    for (const state of parsed.data.capturedVstStates ?? []) {
+      if (createHash("sha256").update(state.bytes).digest("hex") !== state.sha256) return undefined
+    }
+    return parsed.data
+  }
+  ipcMain.handle("daw:audio-host:offline-render", async (event, value: unknown) => {
+    if (!audioHostAllowed(event) || !audioHostPath || typeof value !== "object" || value === null) {
+      return { ok: false as const, error: "The native offline renderer is unavailable." }
+    }
+    const jobId = Reflect.get(value, "jobId")
+    const plan = offlinePlan(Reflect.get(value, "plan"))
+    if (typeof jobId !== "string" || jobId.length === 0 || jobId.length > 128 || !plan) {
+      return { ok: false as const, error: "The native offline render plan is invalid." }
+    }
+    if (offlineRenderJob?.jobId === jobId) {
+      return { ok: false as const, error: "An offline render with this job ID is already active." }
+    }
+    if (offlineRenderJob) {
+      return { ok: false as const, error: "Only one native offline render may be active at a time." }
+    }
+    const controller = new AbortController()
+    const cancelOnDestroy = () => controller.abort()
+    event.sender.once("destroyed", cancelOnDestroy)
+    const job = { jobId, controller }
+    offlineRenderJob = job
+    try {
+      let vstAttachments: Awaited<ReturnType<typeof resolveNativeVst3AttachmentPlan>> | undefined
+      if (plan.externalAttachments) {
+        if (!pluginCatalogStore || !vst3WorkerPath) {
+          throw new Error("The trusted native VST3 catalog or worker is unavailable.")
+        }
+        vstAttachments = await resolveNativeVst3AttachmentPlan({
+          plan: plan.externalAttachments,
+          sampleRateHz: plan.sampleRateHz,
+          workerPath: vst3WorkerPath,
+          catalogStore: pluginCatalogStore,
+          capturedVstStates: new Map(
+            (plan.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
+          ),
+          signal: controller.signal,
+        })
+      }
+      await renderNativeOffline({
+        hostPath: audioHostPath,
+        plan,
+        vstAttachments,
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          if (!event.sender.isDestroyed()) event.sender.send("daw:audio-host:offline-pcm", { jobId, chunk })
+        },
+      })
+      return { ok: true as const }
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : "Native offline rendering failed." }
+    } finally {
+      event.sender.removeListener("destroyed", cancelOnDestroy)
+      if (offlineRenderJob === job) offlineRenderJob = undefined
+    }
+  })
+  ipcMain.handle("daw:audio-host:offline-cancel", (event, value: unknown) => {
+    if (!audioHostAllowed(event) || typeof value !== "string" || value.length === 0 || value.length > 128) {
+      return { accepted: false }
+    }
+    if (!offlineRenderJob || offlineRenderJob.jobId !== value) return { accepted: false }
+    offlineRenderJob.controller.abort()
+    return { accepted: true }
+  })
   ipcMain.handle("daw:audio-host:diagnostics", async (event) => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
       return {
@@ -942,6 +1066,25 @@ const registerIpc = () => {
       await supervisor.detachVst(envelope.value, envelope.transactionToken)
       activeEditorProjectBindings.remove(envelope.value, envelope.transactionToken)
       return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:get-vst-state", async (event, value: unknown) => {
+    const supervisor = sessionSupervisorFor(event)
+    if (
+      !supervisor
+      || typeof value !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    ) return { ok: false as const, error: "The native VST state request is invalid." }
+    try {
+      const state = await supervisor.getVstState(value)
+      if (
+        state.bytes.byteLength > 512 * 1024
+        || !/^[a-f0-9]{64}$/.test(state.sha256)
+        || createHash("sha256").update(state.bytes).digest("hex") !== state.sha256
+      ) return { ok: false as const, error: "The native VST state response is invalid." }
+      return { ok: true as const, bytes: state.bytes, sha256: state.sha256 }
     } catch (error) {
       return nativeSessionFailure(error)
     }
@@ -1296,6 +1439,47 @@ const registerIpc = () => {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host preflight failed." }
     }
   })
+  const outputPickerFormat = (value: unknown): "wav" | "mp3" | "ogg-opus" | "flac" | undefined => (
+    value === "wav" || value === "mp3" || value === "ogg-opus" || value === "flac" ? value : undefined
+  )
+  ipcMain.handle("daw:export:pick-output-file", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    const format = typeof value === "object" && value !== null && "format" in value
+      ? outputPickerFormat(value.format)
+      : undefined
+    if (
+      !scope
+      || typeof value !== "object"
+      || value === null
+      || !Object.keys(value).every((key) => key === "requestId" || key === "format")
+      || format === undefined
+    ) throw new Error("Invalid export output picker request.")
+    const selected = await fileCapabilities.pickOutputFile(scope, format)
+    if (selected.canceled) return selected
+    return { canceled: false as const, file: { token: selected.file.token, basename: selected.file.basename } }
+  })
+  ipcMain.handle("daw:export:pick-output-directory", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (
+      !scope
+      || typeof value !== "object"
+      || value === null
+      || !Object.keys(value).every((key) => key === "requestId")
+    ) throw new Error("Invalid export output picker request.")
+    const selected = await fileCapabilities.pickDirectory(scope)
+    if (selected.canceled) return selected
+    return { canceled: false as const, directory: { token: selected.directory.token, basename: selected.directory.basename } }
+  })
+  ipcMain.handle("daw:export:release-output", async (event, value: unknown) => {
+    const scope = scopeFor(event, value)
+    if (
+      !scope
+      || typeof value !== "object"
+      || value === null
+      || !Object.keys(value).every((key) => key === "requestId")
+    ) throw new Error("Invalid export output release request.")
+    await fileCapabilities.revokeRequest(scope)
+  })
   ipcMain.handle("daw:capability:readChunk", async (event, value: unknown) => {
     const scope = scopeFor(event, value)
     if (!scope || typeof value !== "object" || value === null || !("token" in value) || typeof value.token !== "string") throw new Error("Invalid capability request.")
@@ -1340,14 +1524,19 @@ const createWindow = () => {
     },
   })
   window_.webContents.on("did-start-navigation", () => {
+    abortOfflineRenderJobs()
+    applicationMenuController.reset()
     preparationRegistry.abortAll()
     settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
     generation += 1
     rejectRendererPending("Renderer reloaded.")
   })
   window_.webContents.on("render-process-gone", () => {
+    abortOfflineRenderJobs()
+    applicationMenuController.reset()
     preparationRegistry.abortAll()
     settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
+    generation += 1
     rejectRendererPending("Renderer crashed.")
   })
   window_.webContents.setWindowOpenHandler(({ url }) => {
@@ -1605,6 +1794,10 @@ else {
         isMainFrame: details.isMainFrame,
       }, sameAppOrigin))
     registerIpc()
+    applicationMenuController.install({
+      buildFromTemplate: (template) => Menu.buildFromTemplate(template),
+      setApplicationMenu: (menu) => Menu.setApplicationMenu(menu),
+    })
     await startSocket()
     createWindow()
   }).catch(() => app.quit())

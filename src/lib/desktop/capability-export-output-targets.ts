@@ -1,5 +1,10 @@
 import type { ExportFileSink, ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { StreamTargetChunk } from "mediabunny"
+import {
+  isLocalId,
+  type ExportAudioFormat,
+} from "@daw-browser/shared"
+import { saveCloudExport } from "~/lib/cloud-export"
 
 type CapabilityWriter = {
   requestId: string
@@ -86,7 +91,7 @@ export const createDesktopCapabilityExportOutputTargetFactory = (
       output.token,
       output.directory ? name : undefined,
     )
-    return createSink(bridge, { requestId, writerId, name: output.basename ?? name })
+    return createSink(bridge, { requestId, writerId, name: output.directory ? name : output.basename ?? name })
   }
   return {
     resourceLimits: desktopExportResourceLimits,
@@ -103,3 +108,76 @@ export const createDesktopCapabilityExportOutputTargetFactory = (
     },
   }
 }
+
+type DesktopRendererExportBridge = DesktopCapabilityBridge & {
+  pickOutputFile: (
+    requestId: string,
+    format: ExportAudioFormat,
+  ) => Promise<{ canceled: true } | { canceled: false; file: { token: string; basename: string } }>
+  pickOutputDirectory: (
+    requestId: string,
+  ) => Promise<{ canceled: true } | { canceled: false; directory: { token: string; basename: string } }>
+  releaseExportOutput: (requestId: string) => Promise<void>
+}
+
+const exportCanceled = () => new DOMException("The export was canceled.", "AbortError")
+
+export const createDesktopRendererExportOutputTargetFactory = (
+  bridge: DesktopRendererExportBridge,
+): ExportOutputTargetFactory => ({
+  resourceLimits: desktopExportResourceLimits,
+  async createMixdownTarget(input) {
+    if (!input.localProject) {
+      return {
+        openFile: async () => undefined,
+        saveBuffer: async ({ blob, fileName, format, durationSec, sampleRate, signal }) => {
+          if (!input.projectId || isLocalId("project", input.projectId)) throw new Error("Missing room")
+          const upload = await saveCloudExport({
+            projectId: input.projectId,
+            blob,
+            name: fileName,
+            format,
+            durationSec,
+            sampleRate,
+            signal,
+          })
+          return { destination: "cloud" as const, name: fileName, url: upload.url }
+        },
+      }
+    }
+    const requestId = crypto.randomUUID()
+    if (input.multiFormat) {
+      const selected = await bridge.pickOutputDirectory(requestId)
+      if (selected.canceled) {
+        await bridge.releaseExportOutput(requestId)
+        throw exportCanceled()
+      }
+      const target = createDesktopCapabilityExportOutputTargetFactory(bridge, requestId, {
+        token: selected.directory.token,
+        basename: selected.directory.basename,
+        directory: true,
+      })
+      return {
+        ...(await target.createMixdownTarget(input)),
+        dispose: async () => { await bridge.releaseExportOutput(requestId) },
+      }
+    }
+    const selected = await bridge.pickOutputFile(requestId, input.firstFormat)
+    if (selected.canceled) {
+      await bridge.releaseExportOutput(requestId)
+      throw exportCanceled()
+    }
+    const target = createDesktopCapabilityExportOutputTargetFactory(bridge, requestId, {
+      token: selected.file.token,
+      basename: selected.file.basename,
+      directory: false,
+    })
+    return {
+      ...(await target.createMixdownTarget(input)),
+      dispose: async () => { await bridge.releaseExportOutput(requestId) },
+    }
+  },
+  async createStemTarget() {
+    throw new Error("Desktop export stems are unavailable; choose Main mixdown.")
+  },
+})

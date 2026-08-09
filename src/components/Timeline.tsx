@@ -19,6 +19,7 @@ import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineViewport } from "~/hooks/useTimelineViewport";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
+import { useNavigate } from "@tanstack/solid-router";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
 import { convexClient, convexApi } from "~/lib/convex";
@@ -57,6 +58,9 @@ import { useTimelineIdentity } from "~/hooks/useTimelineIdentity";
 import { useTimelineLocalMix } from "~/hooks/useTimelineLocalMix";
 import { useTimelineMasterVolume } from "~/hooks/useTimelineMasterVolume";
 import { useTimelineProjectMix } from "~/hooks/useTimelineProjectMix";
+import { authClient } from "~/lib/auth-client";
+import { queryClient } from "~/lib/query-client";
+import { useDesktopApplicationMenu } from "~/hooks/useDesktopApplicationMenu";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
@@ -113,6 +117,7 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
+import { createDesktopNativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 
 type TimelineProps = {
@@ -125,8 +130,15 @@ type TimelineProps = {
 const Timeline: Component<TimelineProps> = (props) => {
   // Electron audio is native-only; browser Web Audio is never a desktop fallback.
   const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
+  const navigate = useNavigate();
   const exportQueue = createExportQueue();
   onCleanup(exportQueue.dispose);
+  const nativeOfflineBridge = requiresNativeAudio
+    ? window.dawDesktop?.audioHost?.offlineRender
+    : undefined;
+  const nativeOfflineRenderer = nativeOfflineBridge
+    ? createDesktopNativeOfflineRenderer(nativeOfflineBridge)
+    : undefined;
   const nativeVstParameterQueue = window.dawDesktop
     ? createNativeVstParameterQueue(async (bytes) => {
         const queue = window.dawDesktop?.audioHost?.session.queueVstParameterEvents;
@@ -392,8 +404,60 @@ const Timeline: Component<TimelineProps> = (props) => {
   const exportService = createTimelineExportService({
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
+    nativeOfflineRenderer,
+    getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
+      if (!capturedProjectId || !isLocalId("project", capturedProjectId)) return undefined
+      const processors = (await listLocalExternalProcessors(capturedProjectId))
+        .filter((processor) => !processor.bypassed)
+      if (processors.length === 0) return undefined
+      const playback = compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm,
+        timeSignature,
+        transport: {
+          state: "stopped",
+          playheadSec: 0,
+          loopEnabled: false,
+          loopStartSec: 0,
+          loopEndSec: 0,
+        },
+        tracks,
+        renderState,
+        sidechainRoutes,
+      })
+      if (!playback.supported) throw new Error(playback.reasons.join(" "))
+      const attachmentPlan = compileNativeExternalAttachmentPlan({
+        target: "native",
+        graph: playback.snapshot.mixer.graph,
+        processors,
+        workerTransport: {
+          slotCount: 2,
+          maximumFrames: 8_192,
+          maximumEventsPerBlock: 128,
+        },
+      })
+      if (!attachmentPlan.supported) throw new Error(attachmentPlan.reasons.join(" "))
+      const capturedVstStates = await Promise.all(attachmentPlan.plan.attachments
+        .filter((attachment) => !attachment.bypassed)
+        .map(async (attachment) => {
+          const result = await window.dawDesktop?.audioHost?.session.captureVstState(attachment.instanceId)
+          return result?.ok ? {
+            instanceId: attachment.instanceId,
+            bytes: result.bytes,
+            sha256: result.sha256,
+          } : undefined
+        }))
+      return {
+        plan: attachmentPlan.plan,
+        capturedVstStates: capturedVstStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
+      }
+    },
     getTracks: renderTracks,
     getBpm: bpm,
+    getTimeSignature: () => ({
+      numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
+      denominator: fullView.data?.project.timeSignatureDenominator ?? 4,
+    }),
     getMasterVolume: () => masterVolume.volume(),
     getProjectId: projectId,
     getUserId: userId,
@@ -1808,6 +1872,16 @@ const Timeline: Component<TimelineProps> = (props) => {
       onRenameProject: renameProject,
       onOpenExport: () => setExportOpen(true),
       onOpenDashboard: props.setDashboardParam,
+      onSignIn: () => navigate({ to: "/Login" }),
+      onLogout: async () => {
+        try {
+          await authClient.signOut();
+        } finally {
+          queryClient.setQueryData(["session"], null);
+          navigate({ to: "/Login" });
+        }
+      },
+      onAbout: () => navigate({ to: "/about" }),
       onShare: handleShare,
       onChooseProjectFolder: localProject.chooseProjectStorageFolder,
       onBackUpNow: localProject.backUpNow,
@@ -1861,6 +1935,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       void handleInsertSample(payload);
     },
   });
+
+  useDesktopApplicationMenu(transportProps);
 
   const dashboardTimelineModel = createMemo<DashboardTimelineModel>(() => ({
     projectMenu: transportProps().projectMenu,

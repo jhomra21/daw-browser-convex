@@ -10,6 +10,7 @@ export type ExportFileSink = {
 
 export type MixdownOutputTarget = {
   openFile: (fileName: string) => Promise<ExportFileSink | undefined>
+  dispose?: () => Promise<void>
   saveBuffer: (input: {
     blob: Blob
     fileName: string
@@ -35,6 +36,7 @@ export type ExportOutputTargetFactory = {
     projectId?: string
     localProject: boolean
     multiFormat: boolean
+    firstFormat: ExportAudioFormat
     firstFileName: string
     firstFileTypes: FilePickerAcceptType[]
   }) => Promise<MixdownOutputTarget>

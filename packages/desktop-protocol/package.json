@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./application-menu": "./src/application-menu.ts",
     "./socket": "./src/socket.ts",
     "./reply-chunks": "./src/reply-chunks.ts",
     "./native-audio-host": "./src/native-audio-host.ts"

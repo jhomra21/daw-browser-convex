@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -13,6 +13,7 @@ import {
   nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
   probeNativeAudioOutputDevice,
+  renderNativeOffline,
   runAudioHostDiagnostic,
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
@@ -29,6 +30,16 @@ const frame = (type, payload = Buffer.alloc(0)) => Buffer.concat([
   u32(0x44415748), u32(${nativeAudioHostProtocolVersion}), u32(type), u32(payload.length), payload,
 ])
 const string = (value) => Buffer.concat([u32(Buffer.byteLength(value)), Buffer.from(value)])
+const stringLe = (value) => {
+  const bytes = Buffer.alloc(4)
+  bytes.writeUInt32LE(Buffer.byteLength(value))
+  return Buffer.concat([bytes, Buffer.from(value)])
+}
+const u32Le = (value) => {
+  const bytes = Buffer.alloc(4)
+  bytes.writeUInt32LE(value)
+  return bytes
+}
 const u64 = (value) => {
   const bytes = Buffer.alloc(8)
   bytes.writeBigUInt64BE(BigInt(value))
@@ -42,7 +53,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v3"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v4"), u32(0), u32(1),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -51,6 +62,12 @@ const inputDevice = () => frame(35, Buffer.concat([
   u32(1), string("coreaudio:fixture-input"), string("Fixture Input"), u32(48000), u32(2), u32(512), u32(1),
 ]))
 const ack = (type, success = 1) => frame(13, Buffer.concat([u32(type), u32(success)]))
+const vstState = (instanceId = "11111111-1111-4111-8111-111111111111") => {
+  const state = Buffer.from([1, 2, 3])
+  return frame(27, Buffer.concat([
+    stringLe(instanceId), u32Le(state.length), u32Le(64), state, Buffer.from("a".repeat(64)),
+  ]))
+}
 const graphStatus = (code, requested, active, prepared, retired) => frame(40, Buffer.concat([
   u32(code), u32(requested), u32(active), u32(prepared), u32(retired), u64(4),
 ]))
@@ -152,6 +169,11 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(editorStatus())
     } else if (type === 43) {
       process.stdout.write(ack(type))
+    } else if (type === 26) {
+      if (process.env.MODE === "state-rejected") process.stdout.write(ack(type, 0))
+      else if (process.env.MODE === "state-malformed") process.stdout.write(frame(27, Buffer.from([1, 2, 3])))
+      else if (process.env.MODE === "state-mismatch") process.stdout.write(vstState("22222222-2222-4222-8222-222222222222"))
+      else process.stdout.write(vstState())
     } else if (type === 10 && vstPlaybackFlag(payload) !== 0) {
       process.exit(2)
     } else {
@@ -172,7 +194,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x0e,
+        0x00, 0x00, 0x00, 0x0f,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -180,8 +202,35 @@ describe("native audio host protocol", () => {
   })
 })
 
+test("propagates bounded offline renderer stderr and exit diagnostics", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-"))
+  const hostPath = path.join(directory, "host.mjs")
+  await writeFile(hostPath, '#!/bin/sh\necho "offline child failed to start" >&2\nexit 1\n')
+  await chmod(hostPath, 0o755)
+  try {
+    await expect(renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 2,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: true, frame: 0, transitionId: 1n },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+    })).rejects.toThrow("offline child failed to start")
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 const fixtureSupervisor = async (
-  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown",
+  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown",
   onSpawn?: () => void,
   supervisorOptions?: NativeAudioHostSupervisorOptions,
   onChild?: (child: ChildProcessWithoutNullStreams) => void,
@@ -227,6 +276,7 @@ const vstAttachment = (instanceId: string): ResolvedVst3Attachment => ({
     outputChannels: 2,
     maximumEventsPerBlock: 128,
   },
+  initialParameterValues: [{ id: 48, value: 0.592999 }],
 })
 
 test("uses an explicit development path and a fixed packaged CoreAudio host name", () => {
@@ -492,6 +542,42 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()
+  }
+})
+
+test("captures VST state and correlates the response identity", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    await fixture.supervisor.start()
+    await expect(fixture.supervisor.getVstState("11111111-1111-4111-8111-111111111111")).resolves.toEqual({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("keeps the host usable after VST state rejection or malformed response", async () => {
+  for (const mode of ["state-rejected", "state-malformed", "state-mismatch"] as const) {
+    const fixture = await fixtureSupervisor(mode)
+    try {
+      await fixture.supervisor.start()
+      await expect(fixture.supervisor.getVstState("11111111-1111-4111-8111-111111111111"))
+        .rejects.toBeInstanceOf(NativeAudioHostCommandError)
+      expect(fixture.supervisor.status().running).toBeTrue()
+      await expect(fixture.supervisor.configure({
+        deviceId: "coreaudio:fixture",
+        sampleRateHz: 48_000,
+        maxFramesPerBlock: 512,
+        channelCount: 2,
+        revision: 1,
+      })).resolves.toBeUndefined()
+    } finally {
+      await fixture.supervisor.teardown()
+      await fixture.dispose()
+    }
   }
 })
 

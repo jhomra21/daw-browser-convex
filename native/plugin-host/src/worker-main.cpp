@@ -317,6 +317,7 @@ int main(const int argc, char* argv[]) {
       continue;
     }
     bool failed = false;
+    std::uint64_t processedSequence = 0;
     for (std::size_t slotIndex = 0; slotIndex < transport->layout().bytes / transport->layout().slotBytes; ++slotIndex) {
       const auto slot = transport->slot(slotIndex);
       if (slot.status == daw::plugin_host::WorkerSlotStatus::kDropped) {
@@ -326,6 +327,7 @@ int main(const int argc, char* argv[]) {
       if (slot.status != daw::plugin_host::WorkerSlotStatus::kSubmitted) continue;
       const auto sequence = transport->BeginProcessing(slotIndex);
       if (!sequence) continue;
+      processedSequence = *sequence;
       try {
         if (startup->noPluginTestMode) {
           // CTest-only transport verification; regular launches always use Vst3Worker.
@@ -368,6 +370,18 @@ int main(const int argc, char* argv[]) {
         plugin.Dispose();
         return EXIT_FAILURE;
       }
+      if (startup->setup.mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline
+        && !daw::plugin_host::WriteWorkerProcessResponse(responseFileDescriptor, *sequence, true)) {
+        plugin.Dispose();
+        return EXIT_FAILURE;
+      }
+    }
+    if (startup->setup.mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline
+      && processedSequence == 0) {
+      transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
+      static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault}));
+      plugin.Dispose();
+      return EXIT_FAILURE;
     }
     publishNotifications();
     publishEditorFeedback();

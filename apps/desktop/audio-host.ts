@@ -3,7 +3,10 @@ import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
-import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
+import {
+  maxVst3WorkerEventsPerBlock,
+  maxVst3WorkerFrames,
+} from "@daw-browser/plugin-host-protocol"
 import {
   portableGraphContractHash,
   processorContractHash,
@@ -23,6 +26,7 @@ import {
   nativeAudioHostMaximumVstStringBytes as maximumVstStringBytes,
   nativeAudioHostProtocolVersion as protocolVersion,
   nativeAudioHostVstAttachFingerprintBytes as vstAttachFingerprintBytes,
+  nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
@@ -35,6 +39,8 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeHostPcmAsset,
+  NativeOfflineRenderPlan,
+  NativeOfflinePcmChunk,
   NativeHostTransport,
   NativeInputDevice,
 } from "@daw-browser/audio-engine/native-host-wire"
@@ -88,13 +94,20 @@ const {
   spectrumSelection: spectrumSelectionType,
   spectrumFrame: spectrumFrameType,
   processorStatePatch: processorStatePatchType,
+  offlineConfigure: offlineConfigureType,
+  offlineStart: offlineStartType,
+  offlinePcmChunk: offlinePcmChunkType,
+  offlineComplete: offlineCompleteType,
+  offlineError: offlineErrorType,
   scheduleWindow: scheduleWindowType,
   scheduleProgress: scheduleProgressType,
   vstScheduleAutomationEnable: vstScheduleAutomationEnableType,
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 const requiredHostCapabilities = 0x000003ff
-const nativeAudioHostArtifactId = "daw-audio-host-macos/v3"
+const nativeAudioHostArtifactId = "daw-audio-host-macos/v4"
+const maximumOfflineStderrBytes = 16 * 1024
+const maximumOfflineQueuedFrames = 4
 
 const deviceState = (value: number): AudioHostHello["deviceState"] | undefined => {
   if (value === 0) return "idle"
@@ -162,9 +175,12 @@ const serializeTransport = (input: NativeHostTransport) => {
   if (!unsigned32(input.epoch) || !Number.isSafeInteger(input.frame) || input.frame < 0
     || (input.bpm !== undefined && (!Number.isFinite(input.bpm) || input.bpm <= 0))
     || (input.timeSignatureNumerator !== undefined
-      && (!Number.isSafeInteger(input.timeSignatureNumerator) || input.timeSignatureNumerator <= 0))
+      && (!Number.isSafeInteger(input.timeSignatureNumerator)
+        || input.timeSignatureNumerator <= 0 || input.timeSignatureNumerator > 32))
     || (input.timeSignatureDenominator !== undefined
-      && (!Number.isSafeInteger(input.timeSignatureDenominator) || input.timeSignatureDenominator <= 0))
+      && (!Number.isSafeInteger(input.timeSignatureDenominator)
+        || input.timeSignatureDenominator <= 0 || input.timeSignatureDenominator > 32))
+    || ((input.timeSignatureNumerator === undefined) !== (input.timeSignatureDenominator === undefined))
     || (input.cycleActive !== undefined && typeof input.cycleActive !== "boolean")
     || (input.cycleStartSec !== undefined && (!Number.isFinite(input.cycleStartSec) || input.cycleStartSec < 0))
     || (input.cycleEndSec !== undefined && (!Number.isFinite(input.cycleEndSec) || input.cycleEndSec < 0))
@@ -275,6 +291,8 @@ export type ResolvedVst3Attachment = {
     outputChannels: number
     maximumEventsPerBlock: number
   }
+  initialParameterValues?: readonly { id: number; value: number }[]
+  initialState?: { bytes: Uint8Array; sha256: string }
   renderEnabled?: boolean
   workerEnabled?: boolean
 }
@@ -304,7 +322,7 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
       && (!unsigned32(input.declaredTailFrames) || input.declaredTailFrames > 100_000_000))
     || !unsigned32(input.transportLatencyFrames)
     || !unsigned32(input.workerTransport.slotCount) || input.workerTransport.slotCount === 0 || input.workerTransport.slotCount > 8
-    || !unsigned32(input.workerTransport.maximumFrames) || input.workerTransport.maximumFrames === 0 || input.workerTransport.maximumFrames > 8_192
+    || !unsigned32(input.workerTransport.maximumFrames) || input.workerTransport.maximumFrames === 0 || input.workerTransport.maximumFrames > maxVst3WorkerFrames
     || !unsigned32(input.workerTransport.inputChannels) || input.workerTransport.inputChannels > 64
     || (input.role === "instrument" && input.workerTransport.inputChannels !== 0)
     || (input.role === "effect" && input.workerTransport.inputChannels === 0)
@@ -319,6 +337,20 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     return undefined
   }
   const encodedStrings = [...strings, input.canonicalBundlePath, input.canonicalExecutablePath].map((value) => Buffer.from(value, "utf8"))
+  const stateBytes = input.initialState?.bytes ?? new Uint8Array()
+  const stateHash = input.initialState?.sha256 ?? ""
+  if (
+    stateBytes.byteLength > 512 * 1024
+    || (stateBytes.byteLength === 0 && stateHash !== "" && !/^[a-f0-9]{64}$/.test(stateHash))
+    || (stateBytes.byteLength > 0 && !/^[a-f0-9]{64}$/.test(stateHash))
+    || (input.initialParameterValues?.length ?? 0) > 2_048
+  ) return undefined
+  const parameterBytes = Buffer.alloc((input.initialParameterValues?.length ?? 0) * 12)
+  for (const [index, parameter] of (input.initialParameterValues ?? []).entries()) {
+    if (!unsigned32(parameter.id) || !Number.isFinite(parameter.value) || parameter.value < 0 || parameter.value > 1) return undefined
+    parameterBytes.writeUInt32BE(parameter.id, index * 12)
+    parameterBytes.writeDoubleBE(parameter.value, index * 12 + 4)
+  }
   return Buffer.concat([
     ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
     writeUnsigned32(input.stageIndex),
@@ -343,6 +375,12 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     writeUnsigned32(input.workerTransport.inputChannels),
     writeUnsigned32(input.workerTransport.outputChannels),
     writeUnsigned32(input.workerTransport.maximumEventsPerBlock),
+    writeUnsigned32(stateBytes.byteLength),
+    writeUnsigned32(Buffer.byteLength(stateHash)),
+    Buffer.from(stateBytes),
+    Buffer.from(stateHash),
+    writeUnsigned32(input.initialParameterValues?.length ?? 0),
+    parameterBytes,
   ])
 }
 
@@ -497,10 +535,252 @@ export class NativeAudioHostCommandError extends Error {
   readonly requestType: number
   readonly recoverable = true
 
-  constructor(requestType: number) {
-    super(`The native audio host rejected control request ${requestType}.`)
+  constructor(requestType: number, message = `The native audio host rejected control request ${requestType}.`) {
+    super(message)
     this.name = "NativeAudioHostCommandError"
     this.requestType = requestType
+  }
+}
+
+const encodeOfflineConfigure = (plan: NativeOfflineRenderPlan) => {
+  const output = Buffer.alloc(16)
+  output.writeUInt32BE(plan.sampleRateHz, 0)
+  output.writeUInt32BE(plan.blockFrames, 4)
+  output.writeUInt32BE(plan.channelCount, 8)
+  output.writeUInt32BE(1, 12)
+  return output
+}
+
+const encodeOfflineStart = (plan: NativeOfflineRenderPlan) => {
+  const output = Buffer.alloc(16)
+  output.writeBigUInt64BE(BigInt(plan.totalFrames), 0)
+  output.writeUInt32BE(plan.blockFrames, 8)
+  output.writeUInt32BE(plan.channelCount, 12)
+  return output
+}
+
+export const renderNativeOffline = async (input: {
+  hostPath: string
+  plan: NativeOfflineRenderPlan
+  vstAttachments?: readonly ResolvedVst3Attachment[]
+  signal: AbortSignal
+  onChunk: (chunk: NativeOfflinePcmChunk) => void
+}): Promise<void> => {
+  if (!nativeOfflineRenderPlanSchema.safeParse(input.plan).success || (
+    input.plan.version !== 1
+    || !unsigned32(input.plan.sampleRateHz)
+    || !unsigned32(input.plan.blockFrames)
+    || input.plan.blockFrames === 0
+    || (input.plan.channelCount !== 1 && input.plan.channelCount !== 2)
+    || !Number.isSafeInteger(input.plan.totalFrames)
+    || input.plan.totalFrames <= 0
+    || input.plan.graph.byteLength === 0
+    || input.plan.schedule.byteLength === 0
+  )) throw new Error("The native offline render plan is invalid.")
+  input.signal.throwIfAborted()
+  const child = spawn(input.hostPath, [], {
+    env: { PATH: "/usr/bin:/bin" },
+    stdio: ["pipe", "pipe", "pipe"],
+  })
+  let buffer = Buffer.alloc(0)
+  const frames: Buffer[] = []
+  let finished = false
+  let resolveFrame: ((frame: Buffer) => void) | undefined
+  let rejectFrame: ((error: Error) => void) | undefined
+  const terminate = () => {
+    if (!child.killed) child.kill()
+  }
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
+  let stderr = Buffer.alloc(0)
+  let stderrTruncated = false
+  const stderrText = () => {
+    const text = stderr.toString("utf8").trim()
+    return stderrTruncated ? `${text}\n[native stderr truncated]` : text
+  }
+  const withStderr = (message: string) => {
+    const diagnostic = stderrText()
+    return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
+  }
+  const fail = (error: Error) => {
+    if (finished) return
+    finished = true
+    const reject = rejectFrame
+    resolveFrame = undefined
+    rejectFrame = undefined
+    reject?.(error)
+    terminate()
+  }
+  const nextFrame = () => {
+    const queued = frames.shift()
+    if (queued) return Promise.resolve(queued)
+    return new Promise<Buffer>((resolve, reject) => {
+      resolveFrame = resolve
+      rejectFrame = reject
+    })
+  }
+  const onStdoutData = (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk])
+    while (buffer.byteLength >= headerBytes) {
+      const payloadBytes = buffer.readUInt32BE(12)
+      if (payloadBytes > maximumPayloadBytes) {
+        fail(new Error("The native offline renderer returned an oversized frame."))
+        return
+      }
+      if (buffer.byteLength < headerBytes + payloadBytes) return
+      const frame = buffer.subarray(0, headerBytes + payloadBytes)
+      buffer = buffer.subarray(frame.byteLength)
+      if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) {
+        fail(new Error("The native offline renderer returned an invalid frame."))
+        return
+      }
+      const resolve = resolveFrame
+      resolveFrame = undefined
+      rejectFrame = undefined
+      if (resolve) resolve(frame)
+      else if (frames.length < maximumOfflineQueuedFrames) frames.push(frame)
+      else fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
+    }
+  }
+  child.stdout.on("data", onStdoutData)
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (stderr.byteLength >= maximumOfflineStderrBytes) {
+      stderrTruncated = true
+      return
+    }
+    const remaining = maximumOfflineStderrBytes - stderr.byteLength
+    if (chunk.byteLength > remaining) {
+      stderr = Buffer.concat([stderr, chunk.subarray(0, remaining)])
+      stderrTruncated = true
+      return
+    }
+    stderr = Buffer.concat([stderr, chunk])
+  })
+  const onError = (error: Error) => fail(error)
+  const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+    if (!finished) {
+      fail(new Error(withStderr(
+        `The native offline renderer exited unexpectedly (code ${code ?? "null"}, signal ${signal ?? "null"}).`,
+      )))
+    }
+  }
+  child.on("error", onError)
+  child.on("close", onClose)
+  const abort = () => {
+    if (!finished) fail(new DOMException("Native offline rendering canceled.", "AbortError"))
+  }
+  input.signal.addEventListener("abort", abort, { once: true })
+  const send = (type: number, payload: Uint8Array | Buffer = Buffer.alloc(0)) => {
+    const frame = encodeNativeAudioHostControlFrame(type, payload)
+    if (!frame || !child.stdin.writable) throw new Error("The native offline renderer is unavailable.")
+    child.stdin.write(frame)
+  }
+  const waitFor = async (type: number, acknowledgedType?: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The native offline renderer command timed out.")), 10_000)
+    })
+    const receive = async () => {
+      while (true) {
+        const frame = await nextFrame()
+        const frameType = frame.readUInt32BE(8)
+        if (frameType === type && frameType !== ackType) return frame
+        if (frameType === offlinePcmChunkType) {
+          const payload = frame.subarray(headerBytes)
+          if (payload.byteLength < 16) throw new Error("The native offline renderer returned an invalid PCM chunk.")
+          const startFrame = Number(frame.readBigUInt64BE(headerBytes))
+          const frameCount = frame.readUInt32BE(headerBytes + 8)
+          const channelCount = frame.readUInt32BE(headerBytes + 12)
+          const sampleBytes = frameCount * channelCount * 4
+          if (
+            channelCount !== input.plan.channelCount
+            || frameCount === 0
+            || payload.byteLength !== 16 + sampleBytes
+            || startFrame + frameCount > input.plan.totalFrames
+          ) throw new Error("The native offline renderer returned an invalid PCM chunk.")
+          const samples = new Float32Array(frameCount * channelCount)
+          for (let index = 0; index < samples.length; index += 1) {
+            samples[index] = payload.readFloatBE(16 + index * Float32Array.BYTES_PER_ELEMENT)
+          }
+          const planes = Array.from({ length: channelCount }, (_, channel) => (
+            samples.subarray(channel * frameCount, (channel + 1) * frameCount)
+          ))
+          input.onChunk({ startFrame, frameCount, channelCount, planes })
+          continue
+        }
+        if (frameType === offlineErrorType) {
+          const payload = frame.subarray(headerBytes)
+          if (payload.byteLength < 4) throw new Error("The native offline renderer failed.")
+          const length = payload.readUInt32BE(0)
+          throw new Error(withStderr(payload.subarray(4, 4 + Math.min(length, 256)).toString("utf8")))
+        }
+        if (frameType === ackType) {
+          if (acknowledgedType === undefined) continue
+          if (frame.subarray(headerBytes).byteLength !== 8
+            || frame.readUInt32BE(headerBytes) !== acknowledgedType
+            || frame.readUInt32BE(headerBytes + 4) !== 1) {
+            throw new Error("The native offline renderer rejected a request.")
+          }
+          return frame
+        }
+        if (frameType === offlineCompleteType && type === offlineCompleteType) return frame
+      }
+    }
+    try {
+      return await Promise.race([receive(), timeout])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+  try {
+    send(hostHelloType)
+    const capabilities = readResponse(await waitFor(hostCapabilitiesType))
+    if (!capabilities || !isCompatibleAudioHostHello(capabilities)) {
+      throw new Error("The native offline renderer has an incompatible host contract.")
+    }
+    send(offlineConfigureType, encodeOfflineConfigure(input.plan))
+    await waitFor(ackType, offlineConfigureType)
+    for (const asset of input.plan.assets) {
+      const payload = serializeAssetInstall(asset)
+      if (!payload) throw new Error("The native offline asset is invalid.")
+      send(assetInstallType, payload)
+      await waitFor(ackType, assetInstallType)
+    }
+    for (const attachment of input.vstAttachments ?? []) {
+      const payload = serializeVstAttachment(attachment)
+      if (!payload) throw new Error("The native offline VST attachment is invalid.")
+      send(vstAttachType, payload)
+      await waitFor(ackType, vstAttachType)
+    }
+    send(graphSnapshotType, input.plan.graph)
+    await waitFor(ackType, graphSnapshotType)
+    if (input.plan.instrumentStates) {
+      send(instrumentStatesType, input.plan.instrumentStates)
+      await waitFor(ackType, instrumentStatesType)
+    }
+    const transport = serializeTransport(input.plan.transport)
+    if (!transport) throw new Error("The native offline transport is invalid.")
+    send(transportType, transport)
+    await waitFor(ackType, transportType)
+    for (const schedule of input.plan.scheduleWindows ?? [input.plan.schedule]) {
+      send(scheduleWindowType, schedule)
+      await waitFor(ackType, scheduleWindowType)
+    }
+    send(offlineStartType, encodeOfflineStart(input.plan))
+    await waitFor(ackType, offlineStartType)
+    await waitFor(offlineCompleteType)
+    finished = true
+  } finally {
+    finished = true
+    input.signal.removeEventListener("abort", abort)
+    child.stdout.removeListener("data", onStdoutData)
+    child.removeListener("error", onError)
+    child.removeListener("close", onClose)
+    terminate()
+    await Promise.race([
+      closed,
+      new Promise<void>((resolve) => setTimeout(resolve, 500)),
+    ])
+    child.stdout.removeAllListeners("data")
   }
 }
 
@@ -599,6 +879,9 @@ type PendingControl = {
   inputDeviceResolve?: (value: NativeInputDevice | null) => void
   graphRevisionResolve?: (value: NativeGraphRevisionStatus) => void
   editorResolve?: (value: NativeVstEditorStatus) => void
+  stateResolve?: (value: { bytes: Uint8Array; sha256: string }) => void
+  stateInstanceId?: string
+  stateCancelled?: boolean
 }
 
 type SpawnHost = (hostPath: string) => ChildProcessWithoutNullStreams
@@ -620,6 +903,7 @@ export type NativeAudioHostSupervisor = {
   commitTransaction(transactionToken: string): Promise<void>
   rollbackTransaction(transactionToken: string): Promise<void>
   attachVst(input: ResolvedVst3Attachment, transactionToken?: string): Promise<void>
+  getVstState(instanceId: string, transactionToken?: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; sha256: string }>
   detachVst(instanceId: string, transactionToken?: string): Promise<void>
   executeVstEditorCommand(input: { instanceId: string; command: NativeVstEditorCommand; width?: number; height?: number; anchor?: NativeVstEditorAnchor }, transactionToken?: string): Promise<NativeVstEditorStatus>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
@@ -705,6 +989,9 @@ export const createNativeAudioHostSupervisor = (
     resolve: () => void
     reject: (error: Error) => void
     editorResolve?: (status: NativeVstEditorStatus) => void
+    stateResolve?: (value: { bytes: Uint8Array; sha256: string }) => void
+    stateInstanceId?: string
+    stateCancelled?: boolean
   }
   const urgentSends: QueuedSend[] = []
   const normalSends: QueuedSend[] = []
@@ -1146,6 +1433,46 @@ export const createNativeAudioHostSupervisor = (
         pending = undefined
         dispatchNext()
         resolve(status)
+      } else if (frame.readUInt32BE(8) === vstStateType && pending?.stateResolve) {
+        const current = pending
+        const resolve = current.stateResolve
+        const payload = frame.subarray(headerBytes)
+        const rejectState = (message: string) => {
+          clearTimeout(current.deadline)
+          pending = undefined
+          dispatchNext()
+          current.reject(new NativeAudioHostCommandError(vstStateGetType, message))
+        }
+        if (payload.byteLength < 4) {
+          rejectState("The native audio host returned an invalid VST state response.")
+          continue
+        }
+        const instanceBytes = payload.readUInt32LE(0)
+        const instanceEnd = 4 + instanceBytes
+        if (instanceBytes === 0 || instanceBytes > maximumVstStringBytes || payload.byteLength < instanceEnd + 8) {
+          rejectState("The native audio host returned an invalid VST state response.")
+          continue
+        }
+        const instanceId = payload.subarray(4, instanceEnd).toString("utf8")
+        const stateBytes = payload.readUInt32LE(instanceEnd)
+        const hashBytes = payload.readUInt32LE(instanceEnd + 4)
+        const start = instanceEnd + 8
+        const sha256 = payload.subarray(start + stateBytes).toString("utf8")
+        if (
+          instanceId !== current.stateInstanceId
+          || hashBytes !== 64
+          || stateBytes > 512 * 1024
+          || payload.byteLength !== start + stateBytes + hashBytes
+          || !/^[a-f0-9]{64}$/.test(sha256)
+        ) {
+          rejectState("The native audio host returned an invalid VST state response.")
+          continue
+        }
+        const bytes = Uint8Array.from(payload.subarray(start, start + stateBytes))
+        clearTimeout(pending.deadline)
+        pending = undefined
+        dispatchNext()
+        if (!current.stateCancelled) resolve?.({ bytes, sha256 })
       } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.editorResolve) {
         const resolve = pending.editorResolve
         const status = decodeVstEditorStatus(frame)
@@ -1158,7 +1485,10 @@ export const createNativeAudioHostSupervisor = (
         frame.readUInt32BE(8) === ackType
         && frame.byteLength === headerBytes + 8
         && pending
-        && frame.readUInt32BE(headerBytes) === pending.expectedAckType
+        && (
+          (pending.expectedAckType !== undefined && frame.readUInt32BE(headerBytes) === pending.expectedAckType)
+          || (pending.stateResolve && frame.readUInt32BE(headerBytes) === vstStateGetType)
+        )
       ) {
         const current = pending
         const accepted = frame.readUInt32BE(headerBytes + 4)
@@ -1167,7 +1497,12 @@ export const createNativeAudioHostSupervisor = (
         pending = undefined
         dispatchNext()
         if (accepted === 1) current.resolve()
-        else current.reject(new NativeAudioHostCommandError(frame.readUInt32BE(headerBytes)))
+        else current.reject(new NativeAudioHostCommandError(
+          frame.readUInt32BE(headerBytes),
+          frame.readUInt32BE(headerBytes) === vstStateGetType
+            ? "The native audio host could not capture VST state."
+            : undefined,
+        ))
       } else return lost("The native audio host rejected a control request.")
     }
   }
@@ -1189,7 +1524,15 @@ export const createNativeAudioHostSupervisor = (
     }
     const current = child
     const deadline = setTimeout(() => lost("The native audio host control request timed out.", current), 2_000)
-    pending = next.editorResolve
+    pending = next.stateResolve
+      ? {
+        resolve: () => undefined,
+        reject: next.reject,
+        deadline,
+        stateResolve: next.stateResolve,
+        stateInstanceId: next.stateInstanceId,
+      }
+      : next.editorResolve
       ? { resolve: () => undefined, reject: next.reject, deadline, editorResolve: next.editorResolve }
       : { resolve: next.resolve, reject: next.reject, deadline, expectedAckType: next.type }
     current.stdin.write(frame)
@@ -1434,6 +1777,65 @@ export const createNativeAudioHostSupervisor = (
     },
     async attachVst(input, transactionToken) {
       await attachVst(input, transactionToken)
+    },
+    async getVstState(instanceId, transactionToken, signal) {
+      const payload = serializeVstDetach(instanceId)
+      if (!payload) throw new Error("The native VST state request is invalid.")
+      signal?.throwIfAborted()
+      await supervisor.start()
+      const current = child
+      if (!current) throw new Error("The native audio host is unavailable.")
+      signal?.throwIfAborted()
+      const owner = assertTransactionAccess(transactionToken)
+      if (owner) throw new Error("The native audio host transaction token is invalid.")
+      let queued: QueuedSend | undefined
+      const requestPromise = new Promise<{ bytes: Uint8Array; sha256: string }>((resolve, reject) => {
+        if (normalSends.length >= 32) {
+          reject(new Error("The native host request queue is full."))
+          return
+        }
+        queued = {
+          type: vstStateGetType,
+          payload,
+          allowDuringTeardown: false,
+          resolve: () => undefined,
+          reject,
+          stateResolve: resolve,
+          stateInstanceId: instanceId,
+        }
+        normalSends.push(queued)
+        dispatchNext()
+      })
+      if (!signal) return requestPromise
+      return new Promise((resolve, reject) => {
+        const abort = () => {
+          const abortError = new DOMException("Native VST state capture canceled.", "AbortError")
+          const queuedIndex = queued ? normalSends.indexOf(queued) : -1
+          if (queuedIndex >= 0) {
+            normalSends.splice(queuedIndex, 1)
+            queued?.reject(abortError)
+            dispatchNext()
+            reject(abortError)
+            return
+          }
+          if (pending?.stateResolve && pending.stateInstanceId === instanceId) {
+            pending.stateCancelled = true
+            pending.reject(abortError)
+          }
+          reject(abortError)
+        }
+        signal.addEventListener("abort", abort, { once: true })
+        requestPromise.then(
+          (value) => {
+            signal.removeEventListener("abort", abort)
+            resolve(value)
+          },
+          (error: Error) => {
+            signal.removeEventListener("abort", abort)
+            reject(error)
+          },
+        )
+      })
     },
     async detachVst(instanceId, transactionToken) {
       const payload = serializeVstDetach(instanceId)

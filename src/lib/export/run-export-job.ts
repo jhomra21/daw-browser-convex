@@ -1,11 +1,11 @@
 import type { AudioEffectRuntimeInstance, ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
-import { type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeCompressorParams,
+import { type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeArpeggiatorParams, normalizeCompressorParams,
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
-  normalizeEnsembleParamsEnvelope, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
+  normalizeEnsembleParamsEnvelope, normalizeEqParams, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
   normalizeLoFiParamsEnvelope, normalizePhaserParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams,
-  normalizeSpectralParamsEnvelope, normalizeTremoloParamsEnvelope, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
+  normalizeSpectralParamsEnvelope, normalizeSynthParams, normalizeTremoloParamsEnvelope, normalizeTrackInstrumentParams, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import type { convexApi } from '~/lib/convex'
@@ -28,6 +28,10 @@ import type { ExportEffectRow, ExportEffectsProjection } from '~/lib/export/expo
 import { listLocalExternalProcessors } from '~/lib/external-plugins'
 import { getLocalProject } from '~/lib/local-project-db'
 import { assertBrowserExportHasNoLiveExternalPlugins } from '@daw-browser/external-plugins'
+import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
+import type { NativeOfflineRenderer } from '~/lib/export/desktop-native-offline-renderer'
+import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
+import { nativeAudioHostMaximumInMemoryPcmBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
@@ -54,6 +58,8 @@ export type ExportProgress = {
   currentFormat?: ExportAudioFormat
   completedFormats?: number
   totalFormats?: number
+  renderedFrames?: number
+  totalRenderFrames?: number
   analysis?: ExportAnalysisReport
 }
 
@@ -61,6 +67,7 @@ type TimelineExportRequest = {
   nativeRendererRequired?: boolean
   getTracks: () => RuntimeTrack[]
   bpm: number
+  timeSignature?: { numerator: number; denominator: number }
   masterVolume: number
   range: ExportRange
   formats: readonly ExportAudioFormat[]
@@ -74,6 +81,7 @@ type TimelineExportRequest = {
   onProgress?: (progress: ExportProgress) => void
   outputTargets: ExportOutputTargetFactory
   renderStateSnapshot: ExportRenderStateSnapshot
+  nativeOfflineRenderer?: NativeOfflineRenderer
 }
 
 type StemExportSelection =
@@ -97,6 +105,12 @@ export const NATIVE_EXPORT_UNAVAILABLE_MESSAGE =
 export type ExportRenderStateSnapshot = {
   readonly fx: ExportFx
   readonly automationEnvelopes: readonly AutomationEnvelope[]
+  readonly nativeExternalAttachments?: NativeExternalAttachmentPlan
+  readonly capturedVstStates?: readonly {
+    instanceId: string
+    bytes: Uint8Array
+    sha256: string
+  }[]
 }
 
 export type ExportCloudRenderRowsSnapshot = Pick<
@@ -109,12 +123,200 @@ export type ExportAutomationPatch = {
   envelope: AutomationEnvelope | undefined
 }
 
+const cloneCloudEffectParams = (
+  type: string,
+  params: FunctionReturnType<typeof convexApi.effects.listByRoom>[number]['params'],
+): unknown => {
+  if (type === 'eq') return normalizeEqParams(params)
+  if (type === 'compressor') return normalizeCompressorParams(params)
+  if (type === 'saturator') return normalizeSaturatorParams(params)
+  if (type === 'delay') return normalizeDelayParams(params)
+  if (type === 'reverb') return normalizeReverbParams(params)
+  if (type === 'utility') return normalizeUtilityParamsEnvelope(params)
+  if (type === 'autofilter') return normalizeAutoFilterParamsEnvelope(params)
+  if (type === 'gate') return normalizeGateParamsEnvelope(params)
+  if (type === 'limiter') return normalizeLimiterParamsEnvelope(params)
+  if (type === 'lofi') return normalizeLoFiParamsEnvelope(params)
+  if (type === 'chorus') return normalizeChorusParamsEnvelope(params)
+  if (type === 'flanger') return normalizeFlangerParamsEnvelope(params)
+  if (type === 'phaser') return normalizePhaserParamsEnvelope(params)
+  if (type === 'tremolo') return normalizeTremoloParamsEnvelope(params)
+  if (type === 'autopan') return normalizeAutoPanParamsEnvelope(params)
+  if (type === 'ensemble') return normalizeEnsembleParamsEnvelope(params)
+  if (type === 'spectral') return normalizeSpectralParamsEnvelope(params)
+  if (type === 'arpeggiator') return normalizeArpeggiatorParams(params)
+  if (type === 'synth') return normalizeSynthParams(params)
+  if (type === 'instrument') {
+    const instrument = normalizeTrackInstrumentParams(params)
+    if (!instrument) throw new Error('Cloud export instrument parameters are invalid.')
+    return instrument
+  }
+  throw new Error(`Cloud export effect "${type}" is unsupported.`)
+}
+
+export const snapshotCloudRenderRows = (
+  rows: ExportCloudRenderRowsSnapshot | undefined,
+): ExportCloudRenderRowsSnapshot | undefined => rows
+  ? {
+    effects: rows.effects.map((row) => ({
+      _id: row._id,
+      _creationTime: row._creationTime,
+      projectId: row.projectId,
+      targetType: row.targetType,
+      ...(row.trackId === undefined ? {} : { trackId: row.trackId }),
+      index: row.index,
+      type: row.type,
+      ...(row.instanceId === undefined ? {} : { instanceId: row.instanceId }),
+      params: cloneCloudEffectParams(row.type, row.params),
+      createdAt: row.createdAt,
+    })),
+    automationEnvelopes: rows.automationEnvelopes.map((row) => ({
+      _id: row._id,
+      _creationTime: row._creationTime,
+      projectId: row.projectId,
+      targetKind: row.targetKind,
+      ...(row.trackId === undefined ? {} : { trackId: row.trackId }),
+      ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: row.effectInstanceId }),
+      targetKey: row.targetKey,
+      parameterId: row.parameterId,
+      enabled: row.enabled,
+      points: row.points.map((point) => ({
+        id: point.id,
+        timeSec: point.timeSec,
+        value: point.value,
+        interpolation: point.interpolation,
+      })),
+      updatedAt: row.updatedAt,
+    })),
+  }
+  : undefined
+
 type TrackFxMap = NonNullable<ExportFx['trackFx']>
 type TrackFxPatch = Partial<TrackFxMap[string]>
 type ExportEffectInstanceRow = AudioEffectRuntimeInstance & {
   targetId: string
   index?: number
 }
+
+const cloneAudioBufferMap = (buffers: ReadonlyMap<string, AudioBuffer> | undefined): ReadonlyMap<string, AudioBuffer> | undefined => {
+  if (!buffers) return undefined
+  const clone = new Map<string, AudioBuffer>()
+  for (const [key, buffer] of buffers) clone.set(key, buffer)
+  return clone
+}
+
+const cloneExportEffectInstance = (instance: AudioEffectRuntimeInstance): AudioEffectRuntimeInstance => {
+  if (instance.kind === 'eq') return { id: instance.id, kind: instance.kind, params: normalizeEqParams(instance.params) }
+  if (instance.kind === 'compressor') return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(instance.params) }
+  if (instance.kind === 'saturator') return { id: instance.id, kind: instance.kind, params: normalizeSaturatorParams(instance.params) }
+  if (instance.kind === 'delay') return { id: instance.id, kind: instance.kind, params: normalizeDelayParams(instance.params) }
+  if (instance.kind === 'reverb') return { id: instance.id, kind: instance.kind, params: normalizeReverbParams(instance.params) }
+  if (instance.kind === 'utility') return { id: instance.id, kind: instance.kind, params: normalizeUtilityParamsEnvelope(instance.params) }
+  if (instance.kind === 'autofilter') return { id: instance.id, kind: instance.kind, params: normalizeAutoFilterParamsEnvelope(instance.params) }
+  if (instance.kind === 'gate') return { id: instance.id, kind: instance.kind, params: normalizeGateParamsEnvelope(instance.params) }
+  if (instance.kind === 'limiter') return { id: instance.id, kind: instance.kind, params: normalizeLimiterParamsEnvelope(instance.params) }
+  if (instance.kind === 'lofi') return { id: instance.id, kind: instance.kind, params: normalizeLoFiParamsEnvelope(instance.params) }
+  if (instance.kind === 'chorus') return { id: instance.id, kind: instance.kind, params: normalizeChorusParamsEnvelope(instance.params) }
+  if (instance.kind === 'flanger') return { id: instance.id, kind: instance.kind, params: normalizeFlangerParamsEnvelope(instance.params) }
+  if (instance.kind === 'phaser') return { id: instance.id, kind: instance.kind, params: normalizePhaserParamsEnvelope(instance.params) }
+  if (instance.kind === 'tremolo') return { id: instance.id, kind: instance.kind, params: normalizeTremoloParamsEnvelope(instance.params) }
+  if (instance.kind === 'autopan') return { id: instance.id, kind: instance.kind, params: normalizeAutoPanParamsEnvelope(instance.params) }
+  if (instance.kind === 'ensemble') return { id: instance.id, kind: instance.kind, params: normalizeEnsembleParamsEnvelope(instance.params) }
+  return { id: instance.id, kind: instance.kind, params: normalizeSpectralParamsEnvelope(instance.params) }
+}
+
+const cloneExportFx = (fx: ExportFx): ExportFx => {
+  const trackFx = fx.trackFx
+    ? Object.fromEntries(Object.entries(fx.trackFx).map(([trackId, entry]) => {
+      const instrument = entry.instrument ? normalizeTrackInstrumentParams(entry.instrument) : undefined
+      if (entry.instrument && !instrument) throw new Error(`Track "${trackId}" has invalid instrument parameters.`)
+      return [
+        trackId,
+        {
+          instances: entry.instances.map(cloneExportEffectInstance),
+          ...(entry.arp ? { arp: normalizeArpeggiatorParams(entry.arp) } : {}),
+          ...(entry.synth ? { synth: normalizeSynthParams(entry.synth) } : {}),
+          ...(instrument ? { instrument } : {}),
+          ...(entry.drumRackBuffers ? { drumRackBuffers: cloneAudioBufferMap(entry.drumRackBuffers) } : {}),
+          ...(entry.samplerBuffers ? { samplerBuffers: cloneAudioBufferMap(entry.samplerBuffers) } : {}),
+          ...(entry.granularBuffer ? { granularBuffer: { assetKey: entry.granularBuffer.assetKey, buffer: entry.granularBuffer.buffer } } : {}),
+        },
+      ]
+    }))
+    : undefined
+  return {
+    ...(fx.masterVolume === undefined ? {} : { masterVolume: fx.masterVolume }),
+    masterFxInstances: fx.masterFxInstances.map(cloneExportEffectInstance),
+    ...(trackFx ? { trackFx } : {}),
+  }
+}
+
+const cloneAutomationEnvelope = (envelope: AutomationEnvelope): AutomationEnvelope => ({
+  id: envelope.id,
+  projectId: envelope.projectId,
+  target: envelope.target.kind === 'track'
+    ? {
+      kind: envelope.target.kind,
+      trackId: envelope.target.trackId,
+      ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+    }
+    : {
+      kind: envelope.target.kind,
+      ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+    },
+  targetKey: envelope.targetKey,
+  parameterId: envelope.parameterId,
+  enabled: envelope.enabled,
+  points: envelope.points.map((point) => ({
+    id: point.id,
+    timeSec: point.timeSec,
+    value: point.value,
+    interpolation: point.interpolation,
+  })),
+  updatedAt: envelope.updatedAt,
+})
+
+const cloneExportEffectRow = (row: ExportEffectRow): ExportEffectRow => {
+  const metadata = {
+    targetId: row.targetId,
+    ...(row.instanceId === undefined ? {} : { instanceId: row.instanceId }),
+    ...(row.index === undefined ? {} : { index: row.index }),
+  }
+  if (row.effect === 'eq') return { ...metadata, effect: row.effect, params: normalizeEqParams(row.params) }
+  if (row.effect === 'compressor') return { ...metadata, effect: row.effect, params: normalizeCompressorParams(row.params) }
+  if (row.effect === 'saturator') return { ...metadata, effect: row.effect, params: normalizeSaturatorParams(row.params) }
+  if (row.effect === 'delay') return { ...metadata, effect: row.effect, params: normalizeDelayParams(row.params) }
+  if (row.effect === 'reverb') return { ...metadata, effect: row.effect, params: normalizeReverbParams(row.params) }
+  if (row.effect === 'utility') return { ...metadata, effect: row.effect, params: normalizeUtilityParamsEnvelope(row.params) }
+  if (row.effect === 'autofilter') return { ...metadata, effect: row.effect, params: normalizeAutoFilterParamsEnvelope(row.params) }
+  if (row.effect === 'gate') return { ...metadata, effect: row.effect, params: normalizeGateParamsEnvelope(row.params) }
+  if (row.effect === 'limiter') return { ...metadata, effect: row.effect, params: normalizeLimiterParamsEnvelope(row.params) }
+  if (row.effect === 'lofi') return { ...metadata, effect: row.effect, params: normalizeLoFiParamsEnvelope(row.params) }
+  if (row.effect === 'chorus') return { ...metadata, effect: row.effect, params: normalizeChorusParamsEnvelope(row.params) }
+  if (row.effect === 'flanger') return { ...metadata, effect: row.effect, params: normalizeFlangerParamsEnvelope(row.params) }
+  if (row.effect === 'phaser') return { ...metadata, effect: row.effect, params: normalizePhaserParamsEnvelope(row.params) }
+  if (row.effect === 'tremolo') return { ...metadata, effect: row.effect, params: normalizeTremoloParamsEnvelope(row.params) }
+  if (row.effect === 'autopan') return { ...metadata, effect: row.effect, params: normalizeAutoPanParamsEnvelope(row.params) }
+  if (row.effect === 'ensemble') return { ...metadata, effect: row.effect, params: normalizeEnsembleParamsEnvelope(row.params) }
+  if (row.effect === 'spectral') return { ...metadata, effect: row.effect, params: normalizeSpectralParamsEnvelope(row.params) }
+  if (row.effect === 'arp') return { targetId: row.targetId, effect: row.effect, params: normalizeArpeggiatorParams(row.params) }
+  if (row.effect === 'synth') return { targetId: row.targetId, effect: row.effect, params: normalizeSynthParams(row.params) }
+  const instrument = normalizeTrackInstrumentParams(row.params)
+  if (!instrument) throw new Error(`Instrument effect "${row.targetId}" has invalid parameters.`)
+  return { targetId: row.targetId, effect: row.effect, params: instrument }
+}
+
+export const cloneExportEffectsProjection = (projection: ExportEffectsProjection | undefined): ExportEffectsProjection | undefined => (
+  projection
+    ? {
+      replaceAudioEffectTargets: projection.replaceAudioEffectTargets.map((replacement) => ({
+        targetId: replacement.targetId,
+        rows: replacement.rows.map(cloneExportEffectRow),
+      })),
+      upsertDeviceRows: projection.upsertDeviceRows.map(cloneExportEffectRow),
+    }
+    : undefined
+)
 
 const ensureTrackFxMap = (fx: ExportFx): TrackFxMap => {
   const trackFx = fx.trackFx ?? {}
@@ -203,7 +405,7 @@ const replaceExportEffectInstancesForTarget = (
   const instances: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     if (!isAudioEffectKind(row.effect) || !row.instanceId) continue
-    if (row.effect === 'eq') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: row.params })
+    if (row.effect === 'eq') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
     else if (row.effect === 'compressor') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
     else if (row.effect === 'saturator') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
     else if (row.effect === 'delay') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
@@ -226,7 +428,7 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffectRow[])
     if (kind) {
       if (!row.instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
       const id = row.instanceId
-      if (kind === 'eq') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: row.params })
+      if (kind === 'eq') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeEqParams(row.params) })
       if (kind === 'compressor') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeCompressorParams(row.params) })
       if (kind === 'saturator') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeSaturatorParams(row.params) })
       if (kind === 'delay') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: normalizeDelayParams(row.params) })
@@ -255,7 +457,7 @@ const applyRoomEffectRowsToFx = (fx: ExportFx, rows: readonly RoomEffectRow[]) =
       if (targetId && row.params) {
         if (!row.instanceId) throw new Error(`Audio effect "${row.type}" is missing an instance ID.`)
         const id = row.instanceId
-        if (row.type === 'eq') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: row.params })
+        if (row.type === 'eq') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeEqParams(row.params) })
         if (row.type === 'compressor') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeCompressorParams(row.params) })
         if (row.type === 'saturator') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeSaturatorParams(row.params) })
         if (row.type === 'delay') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeDelayParams(row.params) })
@@ -284,15 +486,15 @@ const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectR
   const instances: ExportEffectInstanceRow[] = []
   for (const row of rows) {
     if (isAudioEffectKind(row.effect) && row.instanceId) {
-      if (row.effect === 'eq') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: row.params })
+      if (row.effect === 'eq') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
       else if (row.effect === 'compressor') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
       else if (row.effect === 'saturator') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
       else if (row.effect === 'delay') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
       else if (row.effect === 'reverb') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
       else instances.push(createOwnedExportEffectRow(row.targetId, row.instanceId, row.effect, row.params, row.index))
     }
-    if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: structuredClone(row.params) })
-    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: structuredClone(row.params) })
+    if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: normalizeArpeggiatorParams(row.params) })
+    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: normalizeSynthParams(row.params) })
     if (row.effect === 'instrument') {
       const instrument = readInstrumentParamsFromEffectRow({ type: 'instrument', params: row.params })
       if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })
@@ -313,13 +515,13 @@ const applyAutomationPatches = (
   envelopes: readonly AutomationEnvelope[],
   patches: readonly ExportAutomationPatch[] | undefined,
 ) => {
-  if (!patches || patches.length === 0) return structuredClone(envelopes)
+  if (!patches || patches.length === 0) return envelopes.map(cloneAutomationEnvelope)
   const merged = new Map(envelopes.map((envelope) => [envelope.targetKey, envelope]))
   for (const patch of patches) {
-    if (patch.envelope) merged.set(patch.targetKey, structuredClone(patch.envelope))
+    if (patch.envelope) merged.set(patch.targetKey, cloneAutomationEnvelope(patch.envelope))
     else merged.delete(patch.targetKey)
   }
-  return Array.from(merged.values())
+  return Array.from(merged.values(), cloneAutomationEnvelope)
 }
 
 const throwIfExportAborted = (signal: AbortSignal) => {
@@ -378,7 +580,7 @@ const createExportFx = (masterVolume: number): ExportFx => ({
   masterVolume,
 })
 
-export type ExportExternalPluginPolicy = 'browser-export' | 'native-playback'
+export type ExportExternalPluginPolicy = 'browser-export' | 'native-playback' | 'native-offline'
 
 export const createExportRenderStateSnapshot = async (input: {
   projectId: string | undefined
@@ -409,7 +611,7 @@ export const createExportRenderStateSnapshot = async (input: {
     applyLocalEffectRowsToFx(fx, rows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
     return {
-      fx,
+      fx: cloneExportFx(fx),
       automationEnvelopes: applyAutomationPatches(rows.automationEnvelopes, automationPatches),
     }
   }
@@ -418,14 +620,14 @@ export const createExportRenderStateSnapshot = async (input: {
     applyRoomEffectRowsToFx(fx, cloudRows.effects)
     applyEffectsProjectionToFx(fx, effectsProjection)
     return {
-      fx,
+      fx: cloneExportFx(fx),
       automationEnvelopes: applyAutomationPatches(cloudRows.automationEnvelopes.flatMap((row) => {
         const envelope = automationEnvelopeFromRow(row)
         return envelope ? [envelope] : []
       }), automationPatches),
     }
   }
-  return { fx, automationEnvelopes: [] }
+  return { fx: cloneExportFx(fx), automationEnvelopes: [] }
 }
 
 async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
@@ -539,6 +741,7 @@ const reportStemFormatProgress = (
 export async function runTimelineExport(input: TimelineExportRequest): Promise<ExportOutcome> {
   const outputs: ExportOutput[] = []
   const localMetadataRows: LocalExportMetadataInput[] = []
+  let outputTarget: Awaited<ReturnType<ExportOutputTargetFactory["createMixdownTarget"]>> | undefined
   let localProjectId: string | undefined
   const saveCompletedLocalMetadata = async () => {
     if (!localProjectId) return
@@ -546,8 +749,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     localMetadataRows.length = 0
   }
   try {
-    if (input.nativeRendererRequired) {
-      return { type: 'error', message: NATIVE_EXPORT_UNAVAILABLE_MESSAGE, outputs }
+    if (input.nativeRendererRequired && !input.nativeOfflineRenderer) {
+      throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
     }
     input.onProgress?.({ phase: 'snapshot' })
     const formats = requireExportFormats(input.formats)
@@ -564,17 +767,12 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       encoding: input.encoding,
       stemCount: 1,
       resourceLimits: input.outputTargets.resourceLimits,
+      ...(input.nativeRendererRequired
+        ? { maximumInMemoryPcmBytes: nativeAudioHostMaximumInMemoryPcmBytes }
+        : {}),
     })
     const projectId = input.projectId
     localProjectId = projectId && isLocalId('project', projectId) ? projectId : undefined
-    const outputTarget = await input.outputTargets.createMixdownTarget({
-      projectId,
-      localProject: Boolean(localProjectId),
-      multiFormat,
-      firstFileName,
-      firstFileTypes: createSaveTypes(firstFormat),
-    })
-    throwIfExportAborted(input.signal)
     input.onProgress?.({ phase: 'source-range' })
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     input.onProgress?.({ phase: 'preroll' })
@@ -586,27 +784,61 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       endSec: sourceBounds.endSec + tailMaximumSec,
     }
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
-    const fx = structuredClone(input.renderStateSnapshot.fx)
-    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map((envelope) => structuredClone(envelope))
+    const fx = cloneExportFx(input.renderStateSnapshot.fx)
+    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map(cloneAutomationEnvelope)
     const [exportMixdown] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
       loadInstrumentExportBuffers(fx, input.signal),
     ])
     throwIfExportAborted(input.signal)
-    input.onProgress?.({ phase: 'rendering' })
-    const rendered = await exportMixdown.renderMixdown({
-      tracks: preloadTracks,
-      bpm: input.bpm,
-      range: renderRange,
-      sourceEndSec: sourceBounds.endSec,
-      sampleRate: input.render.sampleRate,
-      numberOfChannels: input.render.numberOfChannels,
-      fx,
-      automationEnvelopes,
-      sidechainRoutes: input.sidechainRoutes,
-      signal: input.signal,
+    const nativePlan = input.nativeRendererRequired
+      ? compileNativeOfflineRenderPlan({
+        tracks: preloadTracks,
+        fx,
+        automationEnvelopes,
+        sidechainRoutes: input.sidechainRoutes,
+        bpm: input.bpm,
+        timeSignature: input.timeSignature,
+        range: input.range,
+        sampleRateHz: input.render.sampleRate,
+        channelCount: input.render.numberOfChannels,
+        tailFrames: Math.ceil(tailMaximumSec * input.render.sampleRate),
+        externalAttachments: input.renderStateSnapshot.nativeExternalAttachments,
+        capturedVstStates: input.renderStateSnapshot.capturedVstStates,
+      })
+      : undefined
+    outputTarget = await input.outputTargets.createMixdownTarget({
+      projectId,
+      localProject: Boolean(localProjectId),
+      multiFormat,
+      firstFormat,
+      firstFileName,
+      firstFileTypes: createSaveTypes(firstFormat),
     })
+    throwIfExportAborted(input.signal)
+    input.onProgress?.({ phase: 'rendering' })
+    let rendered: AudioBuffer
+    if (nativePlan) {
+      const nativeRenderer = input.nativeOfflineRenderer
+      if (!nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
+      rendered = await nativeRenderer(nativePlan, input.signal, (renderedFrames, totalFrames) => {
+        input.onProgress?.({ phase: 'rendering', renderedFrames, totalRenderFrames: totalFrames })
+      })
+    } else {
+      rendered = await exportMixdown.renderMixdown({
+        tracks: preloadTracks,
+        bpm: input.bpm,
+        range: renderRange,
+        sourceEndSec: sourceBounds.endSec,
+        sampleRate: input.render.sampleRate,
+        numberOfChannels: input.render.numberOfChannels,
+        fx,
+        automationEnvelopes,
+        sidechainRoutes: input.sidechainRoutes,
+        signal: input.signal,
+      })
+    }
     throwIfExportAborted(input.signal)
     const processed = processRenderedExport({
       rendered,
@@ -715,6 +947,10 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     } catch {}
     if (isAbortError(err)) return { type: 'canceled', outputs }
     return { type: 'error', message: err instanceof Error ? err.message : 'Export failed', outputs }
+  } finally {
+    try {
+      await outputTarget?.dispose?.()
+    } catch {}
   }
 }
 
@@ -740,8 +976,8 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     })
     const outputTarget = await input.outputTargets.createStemTarget()
     throwIfExportAborted(input.signal)
-    const fx = structuredClone(input.renderStateSnapshot.fx)
-    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map((envelope) => structuredClone(envelope))
+    const fx = cloneExportFx(input.renderStateSnapshot.fx)
+    const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map(cloneAutomationEnvelope)
     const exportMixdown = await import('@daw-browser/audio-engine/export-mixdown')
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     const tailMaximumSec = getExportTailMaximumSec(input.render.tail)

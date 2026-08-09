@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 namespace daw::plugin_host {
 
@@ -42,6 +43,8 @@ struct WorkerControlRequest {
   std::optional<WorkerEditorAnchor> anchor;
 };
 [[nodiscard]] std::optional<WorkerControlRequest> ReadWorkerControlCommand(int fileDescriptor);
+[[nodiscard]] bool WriteWorkerProcessResponse(int fileDescriptor, std::uint64_t sequence, bool success);
+[[nodiscard]] std::optional<std::pair<std::uint64_t, bool>> ReadWorkerProcessResponse(int fileDescriptor);
 [[nodiscard]] bool WriteWorkerEditorResponse(int fileDescriptor, const WorkerEditorResponse& response);
 [[nodiscard]] std::optional<WorkerEditorResponse> ReadWorkerEditorResponse(int fileDescriptor);
 [[nodiscard]] bool WriteWorkerState(int fileDescriptor, const WorkerState& state);

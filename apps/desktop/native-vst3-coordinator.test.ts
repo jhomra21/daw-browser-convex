@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   encodeNativeExternalAttachmentPlan,
   nativeVst3PreflightProtocolVersion,
@@ -18,6 +19,7 @@ import {
   coordinateNativeVst3Attachments,
   createNativeVst3RevisionCoordinator,
   nativeVst3PlaybackDefaultStatus,
+  resolveNativeVst3AttachmentPlan,
   type NativeVst3RevisionHost,
   type NativeVst3WorkerRevisionNotification,
 } from "./native-vst3-coordinator"
@@ -81,6 +83,7 @@ const attachment = (input: {
   graphNodeId: string
   nativeGraphNodeId: string
   classId: string
+  parameterOverrides?: Record<string, number>
 }): NativeExternalAttachmentPlan["attachments"][number] => ({
   instanceId: input.instanceId,
   graphNodeId: input.graphNodeId,
@@ -109,6 +112,7 @@ const attachment = (input: {
   declaredTailFrames: 480,
   bypassed: false,
   stateRevision: 7,
+  ...(input.parameterOverrides === undefined ? {} : { parameterOverrides: input.parameterOverrides }),
 })
 
 const first = attachment({
@@ -130,6 +134,7 @@ const available = (
     role: "effect" | "instrument"
     inputBuses: typeof source.inputBuses
     outputBuses: typeof source.outputBuses
+    supportsState: boolean
   }> = {},
 ): NativeVst3PreflightResult => ({
   version: nativeVst3PreflightProtocolVersion,
@@ -155,6 +160,7 @@ const available = (
       latencyFrames: source.declaredLatencyFrames,
       tailFrames: source.declaredTailFrames,
       stateRevision: source.stateRevision,
+      supportsState: manifest.supportsState ?? false,
     },
   },
 })
@@ -162,6 +168,82 @@ const available = (
 const plan = (attachments: NativeExternalAttachmentPlan["attachments"]): string => encodeNativeExternalAttachmentPlan({
   version: 1,
   attachments,
+})
+
+test("exports stateless VST3 attachments with defaults and persisted parameters", async () => {
+  const parameterValue = 0.592999
+  const stateless = attachment({
+    instanceId: first.instanceId,
+    graphNodeId: first.graphNodeId,
+    nativeGraphNodeId: first.nativeGraphNodeId,
+    classId: first.catalogIdentity.classId,
+    parameterOverrides: { "48": parameterValue },
+  })
+  let stateReaderCalled = false
+  const resolved = await resolveNativeVst3AttachmentPlan({
+    plan: { version: 1, attachments: [stateless] },
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { reload: async () => catalog() },
+    stateReader: async () => {
+      stateReaderCalled = true
+      throw new Error("state capture must not be requested")
+    },
+    preflight: async () => available(stateless),
+  })
+  expect(stateReaderCalled).toBeFalse()
+  expect(resolved[0]).toMatchObject({
+    initialParameterValues: [{ id: 48, value: parameterValue }],
+  })
+  expect(resolved[0]).not.toHaveProperty("initialState")
+})
+
+test("requires and validates live state capture for stateful VST3 attachments", async () => {
+  const bytes = new Uint8Array([1, 2, 3])
+  const sha256 = createHash("sha256").update(bytes).digest("hex")
+  const stateful = attachment({
+    instanceId: first.instanceId,
+    graphNodeId: first.graphNodeId,
+    nativeGraphNodeId: first.nativeGraphNodeId,
+    classId: first.catalogIdentity.classId,
+  })
+  const calls: string[] = []
+  const resolved = await resolveNativeVst3AttachmentPlan({
+    plan: { version: 1, attachments: [stateful] },
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { reload: async () => catalog() },
+    stateReader: async (instanceId) => {
+      calls.push(instanceId)
+      return { bytes, sha256 }
+    },
+    preflight: async () => available(stateful, { supportsState: true }),
+  })
+  expect(calls).toEqual([stateful.instanceId])
+  expect(resolved[0]).toMatchObject({ initialState: { bytes, sha256 } })
+  await expect(resolveNativeVst3AttachmentPlan({
+    plan: { version: 1, attachments: [stateful] },
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { reload: async () => catalog() },
+    preflight: async () => available(stateful, { supportsState: true }),
+  })).rejects.toThrow("cannot be exported without state capture")
+  await expect(resolveNativeVst3AttachmentPlan({
+    plan: { version: 1, attachments: [stateful] },
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { reload: async () => catalog() },
+    stateReader: async () => ({ bytes, sha256: "0".repeat(64) }),
+    preflight: async () => available(stateful, { supportsState: true }),
+  })).rejects.toThrow("captured state is malformed")
+  await expect(resolveNativeVst3AttachmentPlan({
+    plan: { version: 1, attachments: [stateful] },
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { reload: async () => catalog() },
+    stateReader: async () => { throw new Error("live capture failed") },
+    preflight: async () => available(stateful, { supportsState: true }),
+  })).rejects.toThrow("state capture failed. live capture failed")
 })
 
 const host = (calls: string[]) => ({

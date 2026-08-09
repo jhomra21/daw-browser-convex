@@ -125,6 +125,10 @@ class WorkerControlService {
     std::uint32_t height = 0,
     std::optional<WorkerEditorAnchor> anchor = std::nullopt
   );
+  [[nodiscard]] WorkerSubmissionStatus ProcessOffline(
+    const WorkerSubmission& submission,
+    std::chrono::milliseconds timeout
+  );
   [[nodiscard]] WorkerCallbackPort callbackPort() noexcept;
 
  private:
@@ -148,7 +152,6 @@ class WorkerControlService {
   [[nodiscard]] bool PublishDiagnosticFromCallback(WorkerDiagnostic diagnostic) noexcept;
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadataFromCallback() const noexcept;
   [[nodiscard]] WorkerHealth ReadHealthFromCallback() const noexcept;
-  void BridgeCallbackActivity();
   void Run();
   void NotifyService() noexcept;
   void PublishFault() noexcept;
@@ -161,11 +164,8 @@ class WorkerControlService {
   std::atomic<WorkerHealth> health_{WorkerHealth::kStopped};
   std::atomic<bool> running_{false};
   std::atomic<std::uint64_t> wakeSequence_{0};
-  std::atomic<std::uint64_t> callbackActivitySequence_{0};
-  std::atomic<bool> callbackBridgeRunning_{false};
   std::atomic<DiagnosticListener> diagnosticListener_{nullptr};
   std::atomic<void*> diagnosticContext_{nullptr};
-  std::thread callbackBridgeThread_;
   std::thread thread_;
   std::mutex control_mutex_;
   std::mutex wake_mutex_;

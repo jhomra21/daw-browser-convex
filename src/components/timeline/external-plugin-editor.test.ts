@@ -1,8 +1,6 @@
 import { expect, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import {
-  isExternalEditorInteractiveElement,
-  isExternalEditorInteractiveTarget,
   nativeEditorAnchorFromRect,
   nativeEditorAvailabilityMessage,
   nativeEditorCommandAvailable,
@@ -41,13 +39,6 @@ test('reports a supported editor after preflight and live checks', () => {
 
 test('computes an editor anchor from the external card bounds', () => {
   expect(nativeEditorAnchorFromRect({ left: 10, top: 20, width: 80 })).toEqual({ x: 50, y: 20 })
-})
-
-test('recognizes interactive editor card targets', () => {
-  expect(isExternalEditorInteractiveElement({ tagName: "BUTTON" })).toBe(true)
-  expect(isExternalEditorInteractiveElement({ tagName: "SPAN" })).toBe(false)
-  expect(isExternalEditorInteractiveElement({ tagName: "DIV", role: "button" })).toBe(true)
-  expect(isExternalEditorInteractiveTarget(null)).toBe(false)
 })
 
 test('consumes an auto-open request only after issuing editor IPC', async () => {

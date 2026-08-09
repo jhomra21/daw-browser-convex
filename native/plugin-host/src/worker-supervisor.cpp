@@ -18,6 +18,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <poll.h>
 #include <unistd.h>
 #include <unordered_set>
 
@@ -116,7 +117,8 @@ bool IsValidSetup(const WorkerProcessSetup& setup) {
   return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= 384'000.0
     && setup.maximumBlockFrames > 0 && setup.maximumBlockFrames <= kMaximumWorkerFrames
     && setup.inputChannels <= kMaximumWorkerChannels && setup.outputChannels > 0
-    && setup.outputChannels <= kMaximumWorkerChannels;
+    && setup.outputChannels <= kMaximumWorkerChannels
+    && (setup.mode == WorkerProcessSetup::Mode::kRealtime || setup.mode == WorkerProcessSetup::Mode::kOffline);
 }
 
 bool IsUuid(const std::string& value) {
@@ -902,6 +904,23 @@ bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, con
     return false;
   }
   return true;
+}
+
+bool WorkerRuntime::WaitForOfflineCompletion(
+  const std::size_t slotIndex,
+  const std::uint64_t sequence,
+  const std::chrono::milliseconds timeout
+) {
+  if (!transport_ || !startup_ || startup_->setup.mode != WorkerProcessSetup::Mode::kOffline
+    || responseReadDescriptor_ < 0 || sequence == 0) return false;
+  pollfd descriptor{.fd = responseReadDescriptor_, .events = POLLIN, .revents = 0};
+  const auto result = poll(&descriptor, 1, static_cast<int>(timeout.count()));
+  if (result <= 0 || (descriptor.revents & POLLIN) == 0) return false;
+  const auto response = ReadWorkerProcessResponse(responseReadDescriptor_);
+  return response
+    && response->first == sequence
+    && response->second
+    && transport_->Read(slotIndex, sequence);
 }
 
 std::optional<WorkerEditorResponse> WorkerRuntime::ExecuteEditorCommand(

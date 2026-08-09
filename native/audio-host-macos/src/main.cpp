@@ -247,6 +247,60 @@ bool WriteRecordingBlock(const daw::audio_host_macos::RecordingBlock& block) {
   return WriteFrame(daw::audio_host_macos::ControlType::kRecordingBlock, payload);
 }
 
+bool WriteOfflineChunk(
+  const std::uint64_t start_frame,
+  const std::uint32_t frame_count,
+  const std::uint32_t channel_count,
+  const std::vector<std::vector<float>>& planes) {
+  const std::size_t sample_bytes = static_cast<std::size_t>(frame_count) * channel_count * sizeof(float);
+  if (planes.size() != channel_count
+    || sample_bytes > daw::audio_host_macos::kMaximumControlPayloadBytes - 16) return false;
+  std::vector<std::uint8_t> payload;
+  payload.reserve(16 + sample_bytes);
+  WriteU64(payload, start_frame);
+  WriteU32(payload, frame_count);
+  WriteU32(payload, channel_count);
+  for (const auto& plane : planes) {
+    if (plane.size() != frame_count) return false;
+    for (const auto sample : plane) WriteFloat(payload, sample);
+  }
+  return WriteFrame(daw::audio_host_macos::ControlType::kOfflinePcmChunk, payload);
+}
+
+bool RenderOffline(
+  daw::audio_host_macos::AudioHost& host,
+  const std::uint64_t total_frames,
+  const std::uint32_t block_frames,
+  const std::uint32_t channel_count) {
+  if (total_frames == 0 || block_frames == 0 || channel_count == 0) return false;
+  const auto process_channels = std::max(channel_count, 2U);
+  std::vector<std::vector<float>> input_planes(process_channels);
+  std::vector<std::vector<float>> output_planes(process_channels);
+  std::vector<const float*> inputs(process_channels);
+  std::vector<float*> outputs(process_channels);
+  std::uint64_t rendered = 0;
+  while (rendered < total_frames) {
+    const auto frames = static_cast<std::uint32_t>(
+      std::min<std::uint64_t>(block_frames, total_frames - rendered));
+    for (std::uint32_t channel = 0; channel < process_channels; ++channel) {
+      input_planes[channel].assign(frames, 0.0F);
+      output_planes[channel].assign(frames, 0.0F);
+      inputs[channel] = input_planes[channel].data();
+      outputs[channel] = output_planes[channel].data();
+    }
+    if (!host.ProcessPlanar(inputs, outputs, frames)) return false;
+    if (channel_count == 1) {
+      std::vector<float> mono(frames);
+      for (std::uint32_t frame = 0; frame < frames; ++frame) {
+        mono[frame] = 0.5F * (output_planes[0][frame] + output_planes[1][frame]);
+      }
+      if (!WriteOfflineChunk(rendered, frames, 1, {mono})) return false;
+    } else if (!WriteOfflineChunk(rendered, frames, channel_count, output_planes)) return false;
+    rendered += frames;
+  }
+  return true;
+}
+
 bool ReadString(const std::vector<std::uint8_t>& payload, std::size_t& offset, std::string& output) {
   if (offset + 4 > payload.size()) return false;
   const std::uint32_t length = ReadU32(payload.data() + offset);
@@ -276,6 +330,17 @@ bool Configure(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   if (!uid) return false;
   return host.Configure({
     .device_uid = *uid,
+    .sample_rate_hz = ReadU32(payload.data()),
+    .max_frames_per_block = ReadU32(payload.data() + 4),
+    .channel_count = std::max(ReadU32(payload.data() + 8), 2U),
+    .revision = ReadU32(payload.data() + 12),
+  });
+}
+
+bool ConfigureOffline(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
+  if (payload.size() != 16) return false;
+  return host.Configure({
+    .device_uid = "offline:render",
     .sample_rate_hz = ReadU32(payload.data()),
     .max_frames_per_block = ReadU32(payload.data() + 4),
     .channel_count = ReadU32(payload.data() + 8),
@@ -388,7 +453,7 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
     return false;
   }
   constexpr std::size_t fixed_attachment_bytes = 4 + 4 + 8 + 1 + 32 + 32 + 4 + 5 + 8 * 4;
-  if (payload.size() != offset + fixed_attachment_bytes) return false;
+  if (payload.size() < offset + fixed_attachment_bytes) return false;
   attachment.stage_index = ReadU32(payload.data() + offset);
   offset += 4;
   attachment.source_index = ReadU32(payload.data() + offset);
@@ -430,6 +495,33 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
     .output_channels = ReadU32(payload.data() + offset + 12),
     .maximum_events_per_block = ReadU32(payload.data() + offset + 16),
   };
+  offset += 5 * 4;
+  if (offset == payload.size()) return host.AttachNativeVst(attachment);
+  if (payload.size() < offset + 8) return false;
+  const auto state_bytes = ReadU32(payload.data() + offset);
+  const auto state_hash_bytes = ReadU32(payload.data() + offset + 4);
+  offset += 8;
+  if (state_bytes > daw::plugin_host::kMaximumWorkerStateBytes
+    || state_hash_bytes > 64
+    || (state_bytes > 0 && state_hash_bytes != 64)
+    || (state_bytes == 0 && state_hash_bytes != 0 && state_hash_bytes != 64)
+    || payload.size() < offset + state_bytes + state_hash_bytes + 4) return false;
+  attachment.initial_state.assign(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+    payload.begin() + static_cast<std::ptrdiff_t>(offset + state_bytes));
+  offset += state_bytes;
+  attachment.initial_state_sha256.assign(
+    reinterpret_cast<const char*>(payload.data() + offset), state_hash_bytes);
+  offset += state_hash_bytes;
+  const auto parameter_count = ReadU32(payload.data() + offset);
+  offset += 4;
+  if (parameter_count > 2'048 || payload.size() != offset + static_cast<std::size_t>(parameter_count) * 12) return false;
+  for (std::uint32_t index = 0; index < parameter_count; ++index) {
+    const auto parameter_id = ReadU32(payload.data() + offset);
+    const auto value = ReadDouble(payload.data() + offset + 4);
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return false;
+    attachment.initial_parameter_values.emplace_back(parameter_id, value);
+    offset += 12;
+  }
   return host.AttachNativeVst(attachment);
 }
 
@@ -617,7 +709,7 @@ int main() {
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v3");
+      WriteString(response, "daw-audio-host-macos/v4");
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       if (!WriteFrame(daw::audio_host_macos::ControlType::kHostCapabilities, response)) return EXIT_FAILURE;
@@ -688,6 +780,7 @@ int main() {
     bool accepted = false;
     switch (request->type) {
       case daw::audio_host_macos::ControlType::kDeviceConfigure: accepted = session && Configure(*session, payload); break;
+      case daw::audio_host_macos::ControlType::kOfflineConfigure: accepted = active_session && ConfigureOffline(*active_session, payload); break;
       case daw::audio_host_macos::ControlType::kGraphSnapshot:
         accepted = (session || active_session) && payload.size() > daw::audio_host_macos::kNativeGraphFrameHeaderBytes
           && ReadU64(payload.data()) <= std::numeric_limits<std::uint32_t>::max()
@@ -714,9 +807,9 @@ int main() {
         if (!WriteGraphRevisionStatus(active_session->RollbackGraphRevision(ReadU32(payload.data())))) return EXIT_FAILURE;
         continue;
       case daw::audio_host_macos::ControlType::kInstrumentStates:
-        accepted = session && session->ConfigureInstrumentStates(payload);
+        accepted = control_session && control_session->ConfigureInstrumentStates(payload);
         break;
-      case daw::audio_host_macos::ControlType::kAssetInstall: accepted = session && InstallAsset(*session, payload); break;
+      case daw::audio_host_macos::ControlType::kAssetInstall: accepted = control_session && InstallAsset(*control_session, payload); break;
       case daw::audio_host_macos::ControlType::kAssetRelease:
         accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));
         break;
@@ -770,7 +863,11 @@ int main() {
         break;
       case daw::audio_host_macos::ControlType::kVstStateGet: {
         const auto state = active_session ? active_session->GetNativeVstState(payload) : std::nullopt;
-        if (!state || !WriteFrame(daw::audio_host_macos::ControlType::kVstState, *state)) return EXIT_FAILURE;
+        if (!state) {
+          if (!WriteAck(request->type, false)) return EXIT_FAILURE;
+          continue;
+        }
+        if (!WriteFrame(daw::audio_host_macos::ControlType::kVstState, *state)) return EXIT_FAILURE;
         continue;
       }
       case daw::audio_host_macos::ControlType::kRecordingConfigure:
@@ -792,7 +889,9 @@ int main() {
       case daw::audio_host_macos::ControlType::kRecordingDeviceQuery:
         if (!WriteInputDeviceList(payload)) return EXIT_FAILURE;
         continue;
-      case daw::audio_host_macos::ControlType::kVstAttach: accepted = session && AttachVst(*session, payload); break;
+      case daw::audio_host_macos::ControlType::kVstAttach:
+        accepted = (session || active_session) && AttachVst(*(session ? session : active_session), payload);
+        break;
       case daw::audio_host_macos::ControlType::kVstDetach: {
         std::size_t offset = 0;
         std::string instanceId;
@@ -843,6 +942,10 @@ int main() {
         accepted = active_session && active_session->Start();
         break;
       }
+      case daw::audio_host_macos::ControlType::kOfflineStart:
+        if (payload.size() != 16 || !active_session) return EXIT_FAILURE;
+        accepted = active_session->StartOffline();
+        break;
       case daw::audio_host_macos::ControlType::kDiagnosticStart:
         if (!payload.empty()) return EXIT_FAILURE;
         accepted = active_session && active_session->StartDiagnosticMode();
@@ -862,5 +965,21 @@ int main() {
       default: return EXIT_FAILURE;
     }
     if (!WriteAck(request->type, accepted)) return EXIT_FAILURE;
+    if (request->type == daw::audio_host_macos::ControlType::kOfflineStart && accepted) {
+      const auto total_frames = ReadU64(payload.data());
+      const auto block_frames = ReadU32(payload.data() + 8);
+      const auto channel_count = ReadU32(payload.data() + 12);
+      const auto rendered = RenderOffline(*active_session, total_frames, block_frames, channel_count);
+      active_session->Stop();
+      if (!rendered) {
+        std::vector<std::uint8_t> error;
+        WriteString(error, "Native offline rendering failed.");
+        if (!WriteFrame(daw::audio_host_macos::ControlType::kOfflineError, error)) return EXIT_FAILURE;
+        continue;
+      }
+      std::vector<std::uint8_t> complete;
+      WriteU64(complete, total_frames);
+      if (!WriteFrame(daw::audio_host_macos::ControlType::kOfflineComplete, complete)) return EXIT_FAILURE;
+    }
   }
 }

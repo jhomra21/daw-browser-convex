@@ -58,7 +58,7 @@ const availablePreflight = async (
   requestId: "request-1",
   status: "available" as const,
   requirements: {
-    artifact: { id: "daw-vst3-worker" as const, version: "2" as const },
+    artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
     startupProtocolVersion: 1 as const,
     controlProtocolVersion: 2 as const,
     transportAbiVersion: 5 as const,
@@ -70,7 +70,7 @@ const availablePreflight = async (
     instanceId,
     manifest: {
       version: 1 as const,
-      artifact: { id: "daw-vst3-worker" as const, version: "2" as const },
+      artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
       startupProtocolVersion: 1 as const,
       controlProtocolVersion: 2 as const,
       transportAbiVersion: 5 as const,

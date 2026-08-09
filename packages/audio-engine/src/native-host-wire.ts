@@ -12,6 +12,7 @@ import {
   nativeAudioHostMaximumScheduleInstanceIdBytes,
   nativeAudioHostMaximumScheduleRecords,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 
 const graphEnvelopeVersion = 3
 const graphEnvelopeVersionExternalLatency = 4
@@ -128,6 +129,35 @@ export type NativeHostPcmAsset = {
   channelCount: number
   planarPcm: Uint8Array
   contentHashPrefix?: Uint8Array
+}
+
+export type NativeOfflineRenderPlan = {
+  /** Versioned, path-free snapshot for the separate device-independent renderer. */
+  version: 1
+  sampleRateHz: number
+  channelCount: 1 | 2
+  totalFrames: number
+  blockFrames: number
+  graph: Uint8Array
+  externalAttachments?: NativeExternalAttachmentPlan
+  instrumentStates?: Uint8Array
+  assets: readonly NativeHostPcmAsset[]
+  transport: NativeHostTransport
+  schedule: Uint8Array
+  /** Optional temporal windows. `schedule` remains the single-window compatibility form. */
+  scheduleWindows?: readonly Uint8Array[]
+  capturedVstStates?: readonly {
+    instanceId: string
+    bytes: Uint8Array
+    sha256: string
+  }[]
+}
+
+export type NativeOfflinePcmChunk = {
+  startFrame: number
+  frameCount: number
+  channelCount: number
+  planes: readonly Float32Array[]
 }
 
 export type NativeHostDiagnostics = {
@@ -763,15 +793,21 @@ export const serializeNativeSourceEvents = (
     view.setBigUint64(offset + 4, BigInt(event.sequence), true)
     writeId(view, offset + 12, event.sourceNodeId)
     view.setUint32(offset + 20, assetId, true)
-    view.setBigInt64(offset + 24, BigInt(event.startFrame), true)
-    view.setBigInt64(offset + 32, BigInt(event.stopFrame), true)
+    const startFrame = Math.max(0, event.startFrame)
+    const stopFrame = Math.max(startFrame + 1, event.stopFrame)
+    const fadeInStartFrame = Math.max(startFrame, event.fadeInStartFrame)
+    const fadeInEndFrame = Math.min(stopFrame, Math.max(fadeInStartFrame, event.fadeInEndFrame))
+    const fadeOutEndFrame = Math.min(stopFrame, Math.max(startFrame, event.fadeOutEndFrame))
+    const fadeOutStartFrame = Math.min(fadeOutEndFrame, Math.max(startFrame, event.fadeOutStartFrame))
+    view.setBigInt64(offset + 24, BigInt(startFrame), true)
+    view.setBigInt64(offset + 32, BigInt(stopFrame), true)
     view.setBigUint64(offset + 40, BigInt(event.sourceOffsetFrame), true)
     view.setBigUint64(offset + 48, BigInt(event.sourceFrameCount), true)
     view.setFloat32(offset + 56, event.gain, true)
-    view.setBigInt64(offset + 60, BigInt(event.fadeInStartFrame), true)
-    view.setBigInt64(offset + 68, BigInt(event.fadeInEndFrame), true)
-    view.setBigInt64(offset + 76, BigInt(event.fadeOutStartFrame), true)
-    view.setBigInt64(offset + 84, BigInt(event.fadeOutEndFrame), true)
+    view.setBigInt64(offset + 60, BigInt(fadeInStartFrame), true)
+    view.setBigInt64(offset + 68, BigInt(fadeInEndFrame), true)
+    view.setBigInt64(offset + 76, BigInt(fadeOutStartFrame), true)
+    view.setBigInt64(offset + 84, BigInt(fadeOutEndFrame), true)
     view.setFloat32(offset + 92, event.sourceOffsetFraction ?? 0, true)
     offset += 96
   }

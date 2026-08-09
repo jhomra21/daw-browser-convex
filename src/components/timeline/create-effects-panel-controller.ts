@@ -207,9 +207,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       for (const track of options.tracks()) {
         if (track.kind !== "instrument") continue;
         const instrumentParams = instrument.readDraftInstrumentForTarget(track.id);
-        if (instrumentParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "instrument", params: structuredClone(instrumentParams) });
+        if (instrumentParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "instrument", params: instrumentParams });
         const arpParams = instrument.arp.readDraftForTarget(track.id);
-        if (arpParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "arp", params: structuredClone(arpParams) });
+        if (arpParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "arp", params: arpParams });
       }
       return projection;
     },

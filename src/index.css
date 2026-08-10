@@ -278,10 +278,10 @@
 
 @layer utilities {
   .effect-shell[data-device-collapsed="true"] {
-    width: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
-    flex: 0 0 32px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    max-width: 26px !important;
+    flex: 0 0 26px !important;
   }
 
   .effect-shell-chevron-icon {

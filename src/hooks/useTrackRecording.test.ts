@@ -1,5 +1,6 @@
 import { createRoot } from "solid-js"
 import { expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 
 import { convexApi, convexClient } from "~/lib/convex"
 import { useTrackRecording } from "./useTrackRecording"
@@ -24,7 +25,6 @@ const audioPreferences = () => ({
   noiseSuppression: false,
   autoGainControl: false,
   nativePlaybackEnabled: true,
-  portableBrowserPlaybackEnabled: true,
 })
 
 const recordingPreferences = () => ({
@@ -41,6 +41,12 @@ const recordingPreferences = () => ({
 const flushLifecycle = async () => {
   for (let index = 0; index < 5; index += 1) await Promise.resolve()
 }
+
+test("keeps the Web Audio PCM recorder as the portable compatibility fallback", async () => {
+  const source = await readFile(new URL("./useTrackRecording.ts", import.meta.url), "utf8")
+  expect(source).toContain("if (!requiresNativeAudio && !engineCaptureActive && productionSupported) try")
+  expect(source).not.toContain("productionSupported && !portableRequested")
+})
 
 const createHarness = (
   initialLifecycle: DesktopAudioLifecycle,

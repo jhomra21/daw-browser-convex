@@ -1,3 +1,5 @@
+import { computePortableWasmSourceHash } from './portable-wasm-source-hash'
+
 const artifactPath = Bun.argv[2]
 const manifestPath = Bun.argv[3]
 
@@ -13,8 +15,16 @@ if (typeof manifest !== 'object' || manifest === null
   || !('fixedMemory' in manifest) || manifest.fixedMemory !== true
   || !('sizeBytes' in manifest) || typeof manifest.sizeBytes !== 'number'
   || !('maximumBytes' in manifest) || typeof manifest.maximumBytes !== 'number'
-  || !('sha256' in manifest) || typeof manifest.sha256 !== 'string') {
+  || !('sha256' in manifest) || typeof manifest.sha256 !== 'string'
+  || !('sourceHash' in manifest) || typeof manifest.sourceHash !== 'string'
+  || !/^[a-f0-9]{64}$/.test(manifest.sha256)
+  || !/^[a-f0-9]{64}$/.test(manifest.sourceHash)) {
   throw new Error(`Production Wasm manifest is invalid: ${manifestPath}`)
+}
+
+const sourceHash = await computePortableWasmSourceHash()
+if (sourceHash !== manifest.sourceHash) {
+  throw new Error(`Production Wasm source hash does not match the current audio-core sources: ${manifestPath}`)
 }
 
 const bytes = await Bun.file(artifactPath).arrayBuffer()

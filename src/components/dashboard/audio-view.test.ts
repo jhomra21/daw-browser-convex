@@ -6,7 +6,10 @@ test("uses the compile-time desktop build flag for native-only audio controls", 
 
   expect(source).toContain('const requiresNativeAudio = import.meta.env.VITE_DESKTOP === "true"')
   expect(source).not.toContain("window.dawDesktop?.audioHost")
-  expect(source).toContain('<Show when={requiresNativeAudio} fallback={')
+  expect(source).toContain('<Show when={!requiresNativeAudio} fallback={')
   expect(source).toContain("Native CoreAudio is required in the Electron app.")
   expect(source).toContain('<Show when={!requiresNativeAudio}>')
+  expect(source).toContain("Portable Wasm when supported; otherwise Web Audio.")
+  expect(source).not.toContain("portableBrowserPlaybackEnabled")
+  expect(source).not.toContain("setPortableBrowserPlaybackEnabled")
 })

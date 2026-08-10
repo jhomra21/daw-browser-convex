@@ -23,6 +23,15 @@ const waitFor = (messages, predicate, label) => new Promise((resolve, reject) =>
   window.addEventListener('portable-wasm-status', observer)
 })
 
+const readChannelDiagnostics = (analyser) => {
+  const output = new Float32Array(analyser.fftSize)
+  analyser.getFloatTimeDomainData(output)
+  return {
+    finite: output.every(Number.isFinite),
+    maximumAbsolute: Math.max(...output.map(Math.abs)),
+  }
+}
+
 const sourceNode = (id, bus) => ({
   id,
   kind: 'source',
@@ -160,10 +169,13 @@ const synthGraphSnapshot = {
 }
 
 window.runPortableWasmWorkletFixture = (async () => {
+  const requestedSampleRate = Number(new URL(window.location.href).searchParams.get('sampleRate') ?? 48_000)
+  assert(requestedSampleRate === 44_100 || requestedSampleRate === 48_000 || requestedSampleRate === 96_000, 'Unsupported fixture sample rate.')
   const manifest = await (await fetch('./audio-core/daw-audio-core.manifest.json')).json()
   const wasm = await (await fetch(manifest.wasmUrl)).arrayBuffer()
   const wasmModule = await WebAssembly.compile(wasm)
-  const context = new AudioContext({ sampleRate: 48_000 })
+  const context = new AudioContext({ sampleRate: requestedSampleRate })
+  assert(context.sampleRate === requestedSampleRate, `Chromium substituted ${context.sampleRate} Hz for requested ${requestedSampleRate} Hz.`)
   await context.audioWorklet.addModule('./audio-worklets/daw-portable-audio-core-processor-v2.js')
   const node = new AudioWorkletNode(context, 'daw-portable-audio-core-processor-v2', {
     numberOfInputs: 0,
@@ -192,10 +204,16 @@ window.runPortableWasmWorkletFixture = (async () => {
     console.error(`portable AudioWorklet processorerror ${JSON.stringify(details)}`)
     throw new Error(`The AudioWorklet processor crashed: ${JSON.stringify(details)}`)
   }
-  const analyser = context.createAnalyser()
-  analyser.fftSize = 128
-  node.connect(analyser)
-  analyser.connect(context.destination)
+  const splitter = context.createChannelSplitter(2)
+  const leftAnalyser = context.createAnalyser()
+  const rightAnalyser = context.createAnalyser()
+  leftAnalyser.fftSize = 128
+  rightAnalyser.fftSize = 128
+  node.connect(splitter)
+  splitter.connect(leftAnalyser, 0)
+  splitter.connect(rightAnalyser, 1)
+  leftAnalyser.connect(context.destination)
+  rightAnalyser.connect(context.destination)
 
   await context.resume()
   node.port.postMessage({
@@ -209,7 +227,7 @@ window.runPortableWasmWorkletFixture = (async () => {
   assert(initialization.type === 'ready', `The AudioWorklet initialization faulted with ${initialization.code}.`)
   node.port.postMessage({ version: protocolVersion, type: 'prepare-graph', requestId: 1, snapshot: graphSnapshot })
   const prepared = await waitFor(messages, (message) => message.type === 'graph-prepared' && message.requestId === 1, 'graph preparation')
-  assert(prepared.result === 'prepared', 'The portable graph was rejected.')
+  assert(prepared.result === 'prepared', `The portable graph was rejected: ${JSON.stringify(prepared)}`)
   node.port.postMessage({ version: protocolVersion, type: 'publish-graph', requestId: 2, revision: 1 })
   const published = await waitFor(messages, (message) => message.type === 'graph-published' && message.requestId === 2, 'graph publication')
   assert(published.result === 'published', 'The portable graph was not published.')
@@ -218,8 +236,8 @@ window.runPortableWasmWorkletFixture = (async () => {
     type: 'register-asset',
     requestId: 3,
     generation: 1,
-    asset: { version: 1, assetId: 'clip-a', frameCount: 48_000, sampleRateHz: 48_000, channelCount: 2 },
-    planes: [new Float32Array(48_000).fill(0.25), new Float32Array(48_000).fill(0.25)],
+      asset: { version: 1, assetId: 'clip-a', frameCount: requestedSampleRate, sampleRateHz: requestedSampleRate, channelCount: 2 },
+    planes: [new Float32Array(requestedSampleRate).fill(0.25), new Float32Array(requestedSampleRate).fill(-0.125)],
   })
   const registered = await waitFor(messages, (message) => message.type === 'asset-registered' && message.requestId === 3, 'asset registration')
   assert(registered.result === 'registered', 'The portable clip asset was rejected.')
@@ -246,14 +264,14 @@ window.runPortableWasmWorkletFixture = (async () => {
       sourceNodeId: 'source-a',
       assetId: 'clip-a',
       startFrame: 0,
-      stopFrame: 480_000,
+      stopFrame: requestedSampleRate * 10,
       sourceOffsetFrame: 0,
-      sourceFrameCount: 48_000,
+      sourceFrameCount: requestedSampleRate,
       gain: 1,
       fadeInStartFrame: 0,
       fadeInEndFrame: 0,
-      fadeOutStartFrame: 480_000,
-      fadeOutEndFrame: 480_000,
+      fadeOutStartFrame: requestedSampleRate * 8,
+      fadeOutEndFrame: requestedSampleRate * 9,
     }],
   })
   const scheduled = await waitFor(messages, (message) => message.type === 'sources-scheduled' && message.requestId === 5, 'clip scheduling')
@@ -271,15 +289,48 @@ window.runPortableWasmWorkletFixture = (async () => {
   await new Promise((resolve) => setTimeout(resolve, 50))
   node.port.postMessage({ version: protocolVersion, type: 'diagnostics' })
   const health = await waitFor(messages, (message) => message.type === 'health', 'AudioWorklet diagnostics')
-  const output = new Float32Array(analyser.fftSize)
-  analyser.getFloatTimeDomainData(output)
-
   const fault = messages.find((message) => message.type === 'fault')
   assert(!fault, `The worklet reported a fault: ${fault && fault.code}.`)
-  assert(health.framesProcessed >= output.length, 'The worklet did not process the rendered frames.')
-  assert(output.every(Number.isFinite), 'The worklet emitted non-finite audio.')
-  const maximumAbsoluteSample = Math.max(...output.map(Math.abs))
-  assert(Math.abs(maximumAbsoluteSample - 0.25) < 0.0001, 'The portable clip did not produce the expected output.')
+  const leftOutput = readChannelDiagnostics(leftAnalyser)
+  const rightOutput = readChannelDiagnostics(rightAnalyser)
+  assert(health.framesProcessed >= leftAnalyser.fftSize, 'The worklet did not process the rendered frames.')
+  assert(leftOutput.finite && rightOutput.finite, 'The worklet emitted non-finite audio.')
+  assert(Math.abs(leftOutput.maximumAbsolute - 0.25) < 0.0001, 'The portable left clip channel did not produce the expected output.')
+  assert(Math.abs(rightOutput.maximumAbsolute - 0.125) < 0.0001, 'The portable right clip channel did not produce the expected output.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 13,
+    epoch: 1,
+    running: false,
+    frame: 2_048,
+  })
+  const clipPaused = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 13, 'clip pause')
+  assert(clipPaused.result === 'applied', 'The portable clip did not pause.')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const pausedLeft = readChannelDiagnostics(leftAnalyser)
+  const pausedRight = readChannelDiagnostics(rightAnalyser)
+  assert(pausedLeft.maximumAbsolute < 0.0001 && pausedRight.maximumAbsolute < 0.0001, 'The portable clip did not become silent while paused.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 14,
+    epoch: 1,
+    running: true,
+    frame: 2_048,
+  })
+  const clipResumed = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 14, 'clip resume')
+  assert(clipResumed.result === 'applied', 'The portable clip did not resume in its existing epoch.')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const resumedLeft = readChannelDiagnostics(leftAnalyser)
+  const resumedRight = readChannelDiagnostics(rightAnalyser)
+  assert(resumedLeft.maximumAbsolute > 0.1 && resumedRight.maximumAbsolute > 0.05, 'The portable clip did not produce output after resume.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 15, epoch: 2, running: false, frame: 0 })
+  const newerEpoch = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 15, 'newer transport epoch')
+  assert(newerEpoch.result === 'applied', 'The newer transport epoch was rejected.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 16, epoch: 1, running: true, frame: 0 })
+  const staleEpoch = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 16, 'stale transport epoch')
+  assert(staleEpoch.result === 'rejected', 'The stale transport epoch was accepted.')
 
   node.port.postMessage({ version: protocolVersion, type: 'prepare-graph', requestId: 7, snapshot: synthGraphSnapshot })
   const synthPrepared = await waitFor(messages, (message) => message.type === 'graph-prepared' && message.requestId === 7, 'synth graph preparation')
@@ -297,12 +348,12 @@ window.runPortableWasmWorkletFixture = (async () => {
     schedule: {
       revision: 2,
       transportEpoch: 2,
-      sampleRateHz: 48_000,
+      sampleRateHz: requestedSampleRate,
       bpm: 120,
       timeOrigin: { timelineSec: 0, frame: 0 },
       events: [
         { frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'instrument-a' }, noteId: 1, pitch: 60, velocity: 0.8 },
-        { frame: 480_000, sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'instrument-a' }, noteId: 1, pitch: 60 },
+        { frame: Math.round(requestedSampleRate * 0.15), sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'instrument-a' }, noteId: 1, pitch: 60 },
       ],
     },
   })
@@ -312,9 +363,7 @@ window.runPortableWasmWorkletFixture = (async () => {
   const synthStarted = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 11, 'synth transport start')
   assert(synthStarted.result === 'applied', 'The portable synth transport did not start.')
   await new Promise((resolve) => setTimeout(resolve, 50))
-  const liveBefore = new Float32Array(analyser.fftSize)
-  analyser.getFloatTimeDomainData(liveBefore)
-  const maximumAbsoluteLiveBefore = Math.max(...liveBefore.map(Math.abs))
+  const liveBefore = readChannelDiagnostics(leftAnalyser)
   node.port.postMessage({
     version: protocolVersion,
     type: 'processor-events',
@@ -332,28 +381,45 @@ window.runPortableWasmWorkletFixture = (async () => {
   const liveApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 12, 'live processor update')
   assert(liveApplied.result === 'applied', `The portable live processor update was not applied: ${liveApplied.result}.`)
   await new Promise((resolve) => setTimeout(resolve, 50))
-  const liveAfter = new Float32Array(analyser.fftSize)
-  analyser.getFloatTimeDomainData(liveAfter)
-  const maximumAbsoluteLiveAfter = Math.max(...liveAfter.map(Math.abs))
-  assert(maximumAbsoluteLiveBefore > 0.1, `The portable live-control signal was not active before the update: ${maximumAbsoluteLiveBefore}.`)
-  assert(maximumAbsoluteLiveAfter > 0.01 && maximumAbsoluteLiveAfter < maximumAbsoluteLiveBefore * 0.5, `The portable live processor update did not change the ongoing signal: before=${maximumAbsoluteLiveBefore}, after=${maximumAbsoluteLiveAfter}.`)
-  const synthOutput = new Float32Array(analyser.fftSize)
-  analyser.getFloatTimeDomainData(synthOutput)
-  const maximumAbsoluteSynthTailSample = Math.max(...synthOutput.map(Math.abs))
+  const liveAfter = readChannelDiagnostics(leftAnalyser)
+  assert(liveBefore.maximumAbsolute > 0.1, `The portable live-control signal was not active before the update: ${liveBefore.maximumAbsolute}.`)
+  assert(liveAfter.maximumAbsolute > 0.01 && liveAfter.maximumAbsolute < liveBefore.maximumAbsolute * 0.5, `The portable live processor update did not change the ongoing signal: before=${liveBefore.maximumAbsolute}, after=${liveAfter.maximumAbsolute}.`)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  const synthTail = readChannelDiagnostics(leftAnalyser)
+  assert(synthTail.maximumAbsolute > 0.0001, 'The portable synth release tail was not rendered after note-off.')
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  const synthSilence = readChannelDiagnostics(leftAnalyser)
+  assert(synthSilence.maximumAbsolute < 0.0001, 'The portable synth release tail did not become silent.')
 
   node.port.postMessage({ version: protocolVersion, type: 'dispose' })
-  node.disconnect(analyser)
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  const disconnectedOutput = new Float32Array(analyser.fftSize)
-  analyser.getFloatTimeDomainData(disconnectedOutput)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const disposedLeft = readChannelDiagnostics(leftAnalyser)
+  const disposedRight = readChannelDiagnostics(rightAnalyser)
+  assert(disposedLeft.maximumAbsolute < 0.0001 && disposedRight.maximumAbsolute < 0.0001, 'The disposed worklet did not become silent while still connected.')
+  node.disconnect()
+  splitter.disconnect()
+  leftAnalyser.disconnect()
+  rightAnalyser.disconnect()
   await context.close()
   return {
     framesProcessed: health.framesProcessed,
-    maximumAbsoluteSample,
-    maximumAbsoluteSampleAfterDisconnect: Math.max(...disconnectedOutput.map(Math.abs)),
-    maximumAbsoluteLiveBefore,
-    maximumAbsoluteLiveAfter,
-    maximumAbsoluteSynthTailSample,
+    requestedSampleRate,
+    actualSampleRate: context.sampleRate,
+    channels: {
+      left: {
+        finite: leftOutput.finite,
+        maximumAbsolute: leftOutput.maximumAbsolute,
+        maximumAbsoluteAfterDispose: disposedLeft.maximumAbsolute,
+      },
+      right: {
+        finite: rightOutput.finite,
+        maximumAbsolute: rightOutput.maximumAbsolute,
+        maximumAbsoluteAfterDispose: disposedRight.maximumAbsolute,
+      },
+    },
+    maximumAbsoluteLiveBefore: liveBefore.maximumAbsolute,
+    maximumAbsoluteLiveAfter: liveAfter.maximumAbsolute,
+    maximumAbsoluteSynthTailSample: synthTail.maximumAbsolute,
     memoryBytes: health.memoryBytes,
     graphPrepare: health.graphPrepare,
   }

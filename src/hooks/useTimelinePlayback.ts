@@ -29,7 +29,6 @@ type NativePlaybackOptions = {
 }
 
 type PortableBrowserPlaybackOptions = {
-  enabled?: Accessor<boolean>
   projectGeneration?: Accessor<number>
   compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
   reportFault?: (message: string) => void
@@ -38,6 +37,7 @@ type PortableBrowserPlaybackOptions = {
 export type TimelinePlaybackRebuildIntent = {
   resumePlayback: boolean
   playheadSec: number
+  owner?: 'native' | 'portable-browser'
   projectId?: string
   projectGeneration?: number
 }
@@ -47,11 +47,13 @@ const PLAYHEAD_UI_UPDATE_INTERVAL_MS = 1000 / 30
 const LIVE_SCHEDULE_REFRESH_MARGIN_SEC = 5
 
 const audioBackendRolloutPolicy = {
-  version: 1,
-  defaultBackend: 'legacy',
+  version: 2,
+  browserDefaultBackend: 'portable-browser',
+  browserCompatibilityBackend: 'legacy',
   selection: 'startup-only',
+  preActivationFailure: 'compatibility-fallback',
   runtimeFailure: 'stop-and-mute',
-  portableBrowserRequiresOptIn: true,
+  portableBrowserRequiresOptIn: false,
   nativeRequiresOptIn: true,
 }
 
@@ -255,6 +257,7 @@ export function useTimelinePlayback(
     getAudioContext: () => audioEngine.getAudioContext?.() ?? null,
     getProjectGeneration: portableBrowserOptions?.projectGeneration,
     reportFault: (message) => {
+      audioEngine.onTransportPause()
       setActiveBackend('idle')
       if (!isPlaying()) return
       setIsPlaying(false)
@@ -262,6 +265,12 @@ export function useTimelinePlayback(
       portableBrowserOptions?.reportFault?.(message)
     },
   })
+  const disposePortableBrowserPlayback = () => {
+    if (portableBrowserPlayback.isActive() || portableBrowserPlayback.isPrepared()) {
+      audioEngine.onTransportPause()
+    }
+    return portableBrowserPlayback.dispose()
+  }
 
   const subscribeTrackLevels = (listener: Parameters<AudioEngine["subscribeTrackStereoLevels"]>[0]) => {
     const unsubscribeNative = nativePlayback.subscribeTrackMeters((levels) => {
@@ -628,11 +637,27 @@ export function useTimelinePlayback(
         setLastTracks(tracks)
         lastPublishedPlayheadSec = playheadSec()
         lastPlayheadUiUpdateMs = 0
+        if (backend === 'portable-browser') audioEngine.onTransportStart(playheadSec())
         setRafId(requestAnimationFrame(tick))
       }
+      const pendingNativePreview = nativePlayback.getPendingStart()
+      if (
+        !requiresNativeAudio
+        && pendingNativePreview?.mode === 'preview'
+        && !(activeBackend() === 'native' && nativePlayback.isPrepared())
+      ) {
+        await Promise.allSettled([
+          disposeNativePreview(),
+          pendingNativePreview.promise,
+        ])
+        if (!isCurrentPlayAttempt(token)) {
+          reportNativePlaySkip("Native preview disposal was superseded before portable playback could start.")
+          return
+        }
+      }
       const resumeNative = nativePlayback.isPrepared()
-      if (nativeLifecycleReady
-        && (requiresNativeAudio || resumeNative || nativeOptions?.enabled?.())) {
+      const resumePortableBrowser = portableBrowserPlayback.isPrepared()
+      if (requiresNativeAudio || resumeNative) {
         lastNativeFault = undefined
         playAttemptPhase = {
           token,
@@ -667,12 +692,11 @@ export function useTimelinePlayback(
       }
       if (requiresNativeAudio) return
       if (!isCurrentPlayAttempt(token)) return
-      const resumePortableBrowser = portableBrowserPlayback.isPrepared()
-      if (resumePortableBrowser || portableBrowserOptions?.enabled?.()) {
+      if (resumePortableBrowser) {
         playAttemptPhase = {
           token,
           backend: 'fallback',
-          state: resumePortableBrowser ? 'prepared' : 'startup',
+          state: 'prepared',
         }
         // Creating/resuming the browser context emits no legacy sources. It is
         // required before a portable AudioWorklet can be selected and prepared.
@@ -693,7 +717,56 @@ export function useTimelinePlayback(
           return
         }
         playAttemptPhase = undefined
-        if (resumePortableBrowser) return
+        return
+      }
+      if (!isCurrentPlayAttempt(token)) return
+      if (portableBrowserOptions) {
+        playAttemptPhase = {
+          token,
+          backend: 'fallback',
+          state: 'startup',
+        }
+        audioEngine.ensureAudio({ applyCachedTrackGains: false })
+        await audioEngine.resume()
+        if (!isCurrentPlayAttempt(token)) {
+          await disposePreparedBackends()
+          return
+        }
+        const portableStart = await portableBrowserPlayback.start(transport)
+        if (!isCurrentPlayAttempt(token)) {
+          await disposePreparedBackends()
+          return
+        }
+        if (portableStart === 'started') {
+          playAttemptPhase = { token, backend: 'fallback', state: 'active' }
+          commitPortableStart('portable-browser')
+          return
+        }
+        playAttemptPhase = undefined
+      }
+      if (!isCurrentPlayAttempt(token)) return
+      if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
+        lastNativeFault = undefined
+        playAttemptPhase = {
+          token,
+          backend: 'native',
+          state: 'startup',
+        }
+        const nativeStart = await nativePlayback.start({
+          ...transport,
+        })
+        if (!isCurrentPlayAttempt(token)) {
+          reportNativePlaySkip("Native playback start completed after the request was invalidated.")
+          await disposePreparedBackends()
+          return
+        }
+        if (nativeStart === 'started') {
+          playAttemptPhase = { token, backend: 'native', state: 'active' }
+          commitPortableStart('native')
+          return
+        }
+        playAttemptPhase = undefined
+        if (nativeStart === 'blocked') return
       }
       if (!isCurrentPlayAttempt(token)) return
       playAttemptPhase = { token, backend: 'fallback', state: 'startup' }
@@ -758,6 +831,9 @@ export function useTimelinePlayback(
           nativePlayback.pause(sec),
           portableBrowserPlayback.pause(sec),
         ]).then(() => undefined)
+      if (!requiresNativeAudio && portableBrowserPlayback.isActive()) {
+        audioEngine.onTransportPause()
+      }
       const trackedPause = { ownerToken, promise: pausePromise }
       pendingBackendPause = trackedPause
       try {
@@ -887,17 +963,7 @@ export function useTimelinePlayback(
       cancelRaf()
 
       let prepared = false
-      if (requiresNativeAudio || nativeOptions?.enabled?.()) {
-        const result = await nativePlayback.ensureLivePreview(sec)
-        if (!isCurrent()) {
-          await disposePreparedBackends()
-          return
-        }
-        if (result === "blocked") throw new Error("Native audio recovery is unavailable for the current project.")
-        prepared = result === "started"
-        if (prepared) setActiveBackend("native")
-      }
-      if (!requiresNativeAudio && !prepared && portableBrowserOptions?.enabled?.()) {
+      if (!requiresNativeAudio && portableBrowserOptions) {
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
         if (!isCurrent()) {
@@ -917,6 +983,16 @@ export function useTimelinePlayback(
         }
         prepared = result === "started"
         if (prepared) setActiveBackend("portable-browser")
+      }
+      if (!prepared && (requiresNativeAudio || nativeOptions?.enabled?.())) {
+        const result = await nativePlayback.ensureLivePreview(sec)
+        if (!isCurrent()) {
+          await disposePreparedBackends()
+          return
+        }
+        if (result === "blocked") throw new Error("Native audio recovery is unavailable for the current project.")
+        prepared = result === "started"
+        if (prepared) setActiveBackend("native")
       }
       if (!prepared && !requiresNativeAudio) prepareLegacyPaused()
       if (!prepared && requiresNativeAudio) {
@@ -972,6 +1048,23 @@ export function useTimelinePlayback(
       }
       return
     }
+    if (isPlaying() && (nativePlayback.isActive() || portableBrowserPlayback.isActive())) {
+      const owner = portableBrowserPlayback.isActive() ? 'portable-browser' : 'native'
+      void restartTimelineSchedule(tracks, {
+        rebuildBackend: true,
+        resumePlayback: true,
+        playheadSec: sec,
+        owner,
+        projectId: nativeOptions?.projectId?.(),
+        projectGeneration: nativeOptions?.projectGeneration?.()
+          ?? portableBrowserOptions?.projectGeneration?.(),
+      }).catch((error: unknown) => {
+        portableBrowserOptions?.reportFault?.(
+          error instanceof Error ? error.message : 'Playback could not seek while active.',
+        )
+      })
+      return
+    }
     if (!isPlaying()) {
       audioEngine.cancelAutomationSchedules()
       audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
@@ -982,7 +1075,7 @@ export function useTimelinePlayback(
       setIsPlaying(false)
       cancelRaf()
       void nativePlayback.dispose()
-      portableBrowserPlayback.dispose()
+      disposePortableBrowserPlayback()
       setActiveBackend('idle')
       return
     }
@@ -1004,7 +1097,7 @@ export function useTimelinePlayback(
       ? Promise.allSettled([nativePlayback.dispose()])
       : Promise.allSettled([
         nativePlayback.dispose(),
-        Promise.resolve(portableBrowserPlayback.dispose()),
+        Promise.resolve(disposePortableBrowserPlayback()),
       ])).then(() => {
       if (!untrack(isPlaying)) setActiveBackend('idle')
     })
@@ -1093,6 +1186,7 @@ export function useTimelinePlayback(
       playheadSec?: number
       projectId?: string
       projectGeneration?: number
+      owner?: 'native' | 'portable-browser'
     },
   ) => {
     if (options?.rebuildBackend) {
@@ -1100,12 +1194,14 @@ export function useTimelinePlayback(
       pendingRebuildTransportIntentToken = transportIntentToken
       const hasExplicitIntent = options.resumePlayback !== undefined
         || options.playheadSec !== undefined
+        || options.owner !== undefined
         || options.projectId !== undefined
         || options.projectGeneration !== undefined
       if (hasExplicitIntent) {
         pendingRebuildIntent = {
           resumePlayback: options.resumePlayback === true,
           playheadSec: options.playheadSec ?? lastPublishedPlayheadSec,
+          owner: options.owner,
           projectId: options.projectId,
           projectGeneration: options.projectGeneration,
         }
@@ -1140,7 +1236,7 @@ export function useTimelinePlayback(
       setIsPlaying(false)
       cancelRaf()
       void nativePlayback.dispose()
-      if (!requiresNativeAudio) portableBrowserPlayback.dispose()
+      if (!requiresNativeAudio) disposePortableBrowserPlayback()
       setActiveBackend('idle')
       return
     }
@@ -1193,6 +1289,12 @@ export function useTimelinePlayback(
     const resumeIntent = requestedIntent !== undefined
       ? requestedIntent.resumePlayback
       : pendingPlayIntent
+    const requestedOwner = requestedIntent?.owner
+      ?? (nativePlayback.isActive() || nativePlayback.isPrepared()
+        ? 'native'
+        : portableBrowserPlayback.isActive() || portableBrowserPlayback.isPrepared()
+          ? 'portable-browser'
+          : undefined)
     const pendingPreview = nativePlayback.getPendingStart()
     const pendingPreviewIntent = !pendingPlayIntent && pendingPreview?.mode === "preview"
     if (pendingPlay) {
@@ -1228,6 +1330,23 @@ export function useTimelinePlayback(
         || audioLifecycleState() === "suspended"
         || !isCurrentRequestedProject()
       ) return
+      if (requestedOwner === 'native' && !nativePlayback.isPrepared()) {
+        const nativePreview = await nativePlayback.ensureLivePreview(
+          requestedIntent?.playheadSec ?? lastPublishedPlayheadSec,
+        )
+        if (
+          intentToken !== transportIntentToken
+          || !mounted
+          || !isCurrentRequestedProject()
+        ) return
+        if (nativePreview !== 'started') {
+          if (requiresNativeAudio) throw new Error("The native playback graph could not be prepared.")
+          return
+        }
+      } else if (requestedOwner === 'portable-browser') {
+        await nativePlayback.dispose()
+        await pendingNativeDispose
+      }
       await handlePlay(tracks)
       if (
         intentToken !== transportIntentToken
@@ -1243,6 +1362,12 @@ export function useTimelinePlayback(
       return
     }
     if (!isPlaying()) {
+      const pausedIntentToken = transportIntentToken
+      const isCurrentPausedIntent = () => (
+        pausedIntentToken === transportIntentToken
+        && mounted
+        && isCurrentRequestedProject()
+      )
       const sec = requestedIntent?.playheadSec
         ?? (nativePlayback.isPrepared()
           ? nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec
@@ -1253,11 +1378,31 @@ export function useTimelinePlayback(
       const transport = {
         state: "paused" as const,
         playheadSec: sec,
-        loopEnabled: false,
-        loopStartSec: 0,
-        loopEndSec: 0,
+        loopEnabled: getLoopParams().isActive,
+        loopStartSec: getLoopParams().start,
+        loopEndSec: getLoopParams().end,
       }
-      if (nativePlayback.isPrepared()) {
+      const preparePausedCompatibility = async () => {
+        if (!isCurrentPausedIntent()) return
+        const nativeLifecycleReady = !hasAudioLifecycle || audioLifecycleState() === "ready"
+        if (nativeLifecycleReady && nativeOptions?.enabled?.()) {
+          const result = await nativePlayback.ensureLivePreview(sec)
+          if (!isCurrentPausedIntent()) {
+            await disposePreparedBackends()
+            return
+          }
+          if (result === "started") {
+            setActiveBackend("native")
+            return
+          }
+          if (result === "blocked") {
+            setActiveBackend("idle")
+            throw new Error("The native playback graph could not be prepared.")
+          }
+        }
+        prepareLegacyPaused()
+      }
+      if (requestedOwner === 'native' || nativePlayback.isPrepared()) {
         const result = await nativePlayback.rebuildPrepared(sec)
         if (result !== "started") {
           setActiveBackend("idle")
@@ -1283,19 +1428,19 @@ export function useTimelinePlayback(
         await audioEngine.resume()
         const result = await portableBrowserPlayback.rebuildPrepared(transport)
         if (result !== "started") {
-          setActiveBackend("idle")
-          throw new Error("The prepared portable playback graph could not be rebuilt.")
+          disposePortableBrowserPlayback()
+          await preparePausedCompatibility()
         }
-        setActiveBackend("portable-browser")
-      } else if (requestedIntent && portableBrowserOptions?.enabled?.()) {
+        else setActiveBackend("portable-browser")
+      } else if (requestedIntent && portableBrowserOptions) {
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
         const result = await portableBrowserPlayback.ensurePrepared(transport)
         if (result !== "started") {
-          setActiveBackend("idle")
-          throw new Error("The portable playback graph could not be prepared.")
+          disposePortableBrowserPlayback()
+          await preparePausedCompatibility()
         }
-        setActiveBackend("portable-browser")
+        else setActiveBackend("portable-browser")
       }
       return
     }
@@ -1318,6 +1463,21 @@ export function useTimelinePlayback(
       || audioLifecycleState() === "suspended"
       || !isCurrentRequestedProject()
     ) return
+    if (requestedOwner === 'native') {
+      const nativePreview = await nativePlayback.ensureLivePreview(sec)
+      if (
+        intentToken !== transportIntentToken
+        || !mounted
+        || !isCurrentRequestedProject()
+      ) return
+      if (nativePreview !== 'started') {
+        if (requiresNativeAudio) throw new Error("The native playback graph could not be prepared.")
+        return
+      }
+    } else if (requestedOwner === 'portable-browser') {
+      await nativePlayback.dispose()
+      await pendingNativeDispose
+    }
     rebuildStartingPlay = true
     await handlePlay(tracks)
     rebuildStartingPlay = false
@@ -1403,7 +1563,7 @@ export function useTimelinePlayback(
     cancelRaf()
     nativePreviewRequested = false
     void disposeNativePreview()
-    if (!requiresNativeAudio) portableBrowserPlayback.dispose()
+    if (!requiresNativeAudio) disposePortableBrowserPlayback()
     setActiveBackend('idle')
   })
 
@@ -1456,7 +1616,7 @@ export function useTimelinePlayback(
     removeAudioLifecycle?.()
     cancelRaf()
     void disposeNativePreview()
-    if (!requiresNativeAudio) portableBrowserPlayback.dispose()
+    if (!requiresNativeAudio) disposePortableBrowserPlayback()
     setActiveBackend('idle')
   })
 
@@ -1497,19 +1657,19 @@ export function useTimelinePlayback(
       ...audioBackendRolloutPolicy,
       activeBackend: activeBackend(),
       requestedNative: nativeOptions?.enabled?.() ?? false,
-      requestedPortableBrowser: portableBrowserOptions?.enabled?.() ?? false,
+      portableBrowserConfigured: portableBrowserOptions !== undefined,
     }),
     portableRecording: {
       start: portableBrowserPlayback.startRecording,
       stop: portableBrowserPlayback.stopRecording,
       cancel: portableBrowserPlayback.cancelRecording,
-      isActive: portableBrowserPlayback.isRecording,
+      isActive: portableBrowserPlayback.isActive,
     },
     nativeRecording: {
       start: nativePlayback.startRecording,
       stop: nativePlayback.stopRecording,
       cancel: nativePlayback.cancelRecording,
-      isActive: nativePlayback.isRecording,
+      isActive: nativePlayback.isActive,
       sampleRate: nativePlayback.sampleRate,
     },
     nativeLiveMidi: {

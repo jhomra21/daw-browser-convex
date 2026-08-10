@@ -3027,7 +3027,7 @@ bool valid_transport_state(const daw_audio_transport_state &state) {
       || (state.cycle_start_frame >= 0 && state.cycle_end_frame > state.cycle_start_frame));
 }
 
-std::int64_t project_time_frame(const Core &core) {
+[[maybe_unused]] std::int64_t project_time_frame(const Core &core) {
   if (core.transport.cycle_active == 0
     || core.transport.frame < core.transport.cycle_end_frame) return core.transport.frame;
   const auto length = core.transport.cycle_end_frame - core.transport.cycle_start_frame;
@@ -3036,7 +3036,7 @@ std::int64_t project_time_frame(const Core &core) {
     + (core.transport.frame - core.transport.cycle_start_frame) % length;
 }
 
-double project_time_music(const Core &core, const std::int64_t frame) {
+[[maybe_unused]] double project_time_music(const Core &core, const std::int64_t frame) {
   if (core.transport.tempo_bpm <= 0.0 || core.config.sample_rate_hz == 0) return 0.0;
   return static_cast<double>(frame) * core.transport.tempo_bpm
     / (60.0 * static_cast<double>(core.config.sample_rate_hz));
@@ -6234,7 +6234,17 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_set_transport(
   uint32_t running,
   int64_t frame) {
   if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
-  const daw_audio_transport_state state{.epoch = epoch, .running = running, .frame = frame};
+  const daw_audio_transport_state state{
+    .epoch = epoch,
+    .running = running,
+    .frame = frame,
+    .tempo_bpm = 0.0,
+    .time_signature_numerator = 0,
+    .time_signature_denominator = 0,
+    .cycle_active = 0,
+    .cycle_start_frame = 0,
+    .cycle_end_frame = 0,
+  };
   return daw_audio_core_set_transport(to_handle(wasm_graph_core), &state);
 }
 

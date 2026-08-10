@@ -1071,12 +1071,13 @@ test('starts and finalizes portable recording through acknowledged bounded adapt
   expect(controller.isRecording()).toBeFalse()
   expect(calls).toContain('recording-capture-cancel')
   expect(calls).toContain('writer-abort')
-  expect(faults).toContain('Portable recording device ended.')
+  expect(faults).toEqual([])
   expect(failures).toEqual(['Portable recording device ended.'])
 })
 
 test('preserves caller-owned recording streams when portable writer startup fails', async () => {
   const calls: string[] = []
+  const faults: string[] = []
   const session = createSession(calls, async () => undefined)
   const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
     readyState: 'live',
@@ -1102,6 +1103,7 @@ test('preserves caller-owned recording streams when portable writer startup fail
     getAudioContext: () => recordingContext,
     backend: { createPlaybackSession: async () => session },
     select: async () => selected,
+    reportFault: (message) => faults.push(message),
     createRecordingWriter: () => ({
       ready: Promise.reject(new Error('writer startup failed')),
       write: () => undefined,
@@ -1125,6 +1127,8 @@ test('preserves caller-owned recording streams when portable writer startup fail
     punchStartFrame: 0,
   })).rejects.toThrow('writer startup failed')
 
+  expect(controller.isActive()).toBeTrue()
+  expect(faults).toEqual([])
   expect(calls).not.toContain('track-stop')
   expect(calls).toContain('source-disconnect')
   expect(writerTerminations).toBe(1)

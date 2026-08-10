@@ -24,7 +24,6 @@ type Options = {
     reportFault?: (message: string) => void
   }
   portableBrowserPlayback?: {
-    enabled: Accessor<boolean>
     projectGeneration?: Accessor<number>
     compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
     reportFault?: (message: string) => void

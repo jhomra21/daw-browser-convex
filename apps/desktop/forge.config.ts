@@ -5,6 +5,7 @@ import { execFile } from "node:child_process"
 import { chmod, mkdir, open, readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
+import { computePortableWasmSourceHash } from "../../native/audio-core/scripts/portable-wasm-source-hash"
 import {
   nativeAudioHostArtifactName,
   nativeReleaseArtifactManifestName,
@@ -45,8 +46,14 @@ export const validatePortableWasmReleaseAssets = async (
     || !("sizeBytes" in manifest) || typeof manifest.sizeBytes !== "number"
     || !("maximumBytes" in manifest) || typeof manifest.maximumBytes !== "number"
     || !("sha256" in manifest) || typeof manifest.sha256 !== "string"
-    || !/^[a-f0-9]{64}$/.test(manifest.sha256)) {
+    || !("sourceHash" in manifest) || typeof manifest.sourceHash !== "string"
+    || !/^[a-f0-9]{64}$/.test(manifest.sha256)
+    || !/^[a-f0-9]{64}$/.test(manifest.sourceHash)) {
     throw new Error(`Required portable Wasm release asset is invalid: ${manifestPath}`)
+  }
+  const sourceHash = await computePortableWasmSourceHash()
+  if (manifest.sourceHash !== sourceHash) {
+    throw new Error(`Portable Wasm release asset source hash is stale: ${manifestPath}`)
   }
   const size = (await stat(wasmPath)).size
   if (size !== manifest.sizeBytes || size > manifest.maximumBytes) {

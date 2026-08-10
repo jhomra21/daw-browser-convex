@@ -272,29 +272,23 @@ export function DashboardAudioView() {
           </select>
         } />
         <DashboardRow label="Buffer size" value="Managed by the browser and operating system." />
-        <Show when={requiresNativeAudio} fallback={
-          <DashboardRow
-            label="Experimental portable browser playback"
-            value="Uses the Wasm AudioWorklet only for fully supported source-only sessions."
-            action={<input
-              type="checkbox"
-              checked={preferences.audio.preferences().portableBrowserPlaybackEnabled}
-              onChange={(event) => preferences.audio.setPortableBrowserPlaybackEnabled(event.currentTarget.checked)}
-            />}
-          />
-        }>
+        <Show when={!requiresNativeAudio} fallback={
           <DashboardRow label="Playback backend" value="Native CoreAudio is required in the Electron app." />
+        }>
+          <DashboardRow
+            label="Browser playback"
+            value="Portable Wasm when supported; otherwise Web Audio."
+          />
         </Show>
       </DashboardSection>
 
       <DashboardSection title="Recording">
         <Show when={!requiresNativeAudio}>
           <DashboardRow
-            label="Experimental portable recording"
-            value="Uses the portable Wasm recorder only while portable browser playback is active. Legacy recording remains the default."
+            label="Portable recording"
+            value="Portable Wasm when enabled, then Web Audio PCM, then compressed recording."
             action={<input
               type="checkbox"
-              disabled={!preferences.audio.preferences().portableBrowserPlaybackEnabled}
               checked={recording().portableEnabled}
               onChange={(event) => preferences.recording.setPortableEnabled(event.currentTarget.checked)}
             />}

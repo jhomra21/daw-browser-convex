@@ -823,7 +823,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
     }
 
-    if (!requiresNativeAudio && !engineCaptureActive && productionSupported && !portableRequested) try {
+    if (!requiresNativeAudio && !engineCaptureActive && productionSupported) try {
       resetRecordingDiagnostics()
       await audioEngine.resume()
       if (!isStartCurrent()) throw new Error('Audio lifecycle is suspended.')

@@ -14,7 +14,7 @@ test("patches supported native built-in commits and rebuilds unsupported commits
   expect(handler).toContain("isNativePlaybackPrepared()");
   expect(handler).toContain("isPortableBrowserPlaybackPrepared()");
   expect(handler).toContain("handleNativeBuiltInStatePatchResult(payload)");
-  expect(handler.match(/restartTimelineSchedule\(renderTracks\(\), \{ rebuildBackend: true \}\)/g))
+  expect(handler.match(/rebuildPlaybackBackend\(renderTracks\(\)\)/g))
     .toHaveLength(2);
 });
 
@@ -26,4 +26,22 @@ test("bypasses degraded external processors and excludes persisted degraded rows
   expect(source).toContain(
     `.filter((processor) => !processor.bypassed && processor.health.state !== "degraded");`,
   );
+});
+
+test("rebuilds prepared browser or native ownership with captured project intent", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  expect(source).toContain("projectGeneration: mountedProjectGeneration(),");
+  expect(source).toContain("if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
+  expect(source).toContain("rebuildBackend: true,");
+  expect(source).toContain("const rebuildPlaybackBackend =");
+  expect(source).toContain("nativePlaybackRevision += 1;");
+  expect(source).toContain("if (isPlaying()) restartTimelineSchedule(renderTracks()).catch");
+});
+
+test("keeps graph revisions stable during compilation and bumps them at structural rebuild boundaries", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  expect(source).toContain("let nativePlaybackRevision = 1;");
+  expect(source).toContain("revision: nativePlaybackRevision,");
+  expect(source).toContain("nativePlaybackRevision += 1;");
+  expect(source).not.toContain("revision: ++nativePlaybackRevision,");
 });

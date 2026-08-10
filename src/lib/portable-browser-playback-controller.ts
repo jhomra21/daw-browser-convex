@@ -204,7 +204,6 @@ export const createPortableBrowserPlaybackController = (input: {
     else if (session.phase === "cancelling") session.cancelled.reject(error)
     if (session.phase !== "configuring") session.onFailure?.(error)
     clearRecording(session)
-    input.reportFault?.(error.message)
   }
 
   const dispose = () => {
@@ -269,7 +268,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }
         const recordingSession = recording
         if (recordingSession) failRecording(recordingSession, error)
-        else input.reportFault?.(error.message)
+        input.reportFault?.(error.message)
         active = undefined
         activeProjectGeneration = undefined
         activeTransport = undefined

@@ -1,6 +1,6 @@
 import type { AudioRuntime, AudioRuntimeOptions } from './audio-runtime'
-import { createAudioEngineBackend } from './backends/legacy-web-audio-backend'
-import type { AudioAssetRef, PlanarPcm } from '../../audio-core-contract/src/index'
+import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec } from './audio-runtime'
+import { isPlanarPcmForAsset, type AudioAssetRef, type PlanarPcm } from '../../audio-core-contract/src/index'
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
@@ -80,7 +80,6 @@ const supportsSinkSelection = (context: AudioContext): context is SinkSelectable
   "setSinkId" in context && typeof context.setSinkId === "function"
 
 export class AudioEngine {
-  private backend = createAudioEngineBackend()
   private runtimeOptions: AudioRuntimeOptions
   private activeRuntimeOptions: AudioRuntimeOptions | null = null
   private runtimeListeners = new Set<() => void>()
@@ -192,6 +191,12 @@ export class AudioEngine {
   }>()
   private scheduledMidiMappingParams = new Map<string, Set<AutomationAudioBinding['param']>>()
   private transientMidiMappingTargets = new Map<string, { trackId: string; target: MidiMappingTarget }>()
+  private nextAssetSlot = 0
+  private assets = new Map<string, {
+    readonly handle: { slot: number; generation: number }
+    readonly projectGeneration: number
+    retainCount: number
+  }>()
   private midiTimestampConverter = createMidiTimestampConverter({
     context: () => this.audioCtx,
     performanceNow: () => performance.now(),
@@ -589,7 +594,7 @@ export class AudioEngine {
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
     if (!this.audioCtx) {
       this.midiTimestampConverter.reset()
-      this.runtime = this.backend.createRuntime(this.runtimeOptions)
+      this.runtime = createAudioRuntime(this.runtimeOptions)
       this.faultGeneration = this.runtimeFaultCounter.generation()
       this.activeRuntimeOptions = this.runtimeOptions
       this.audioCtx = this.runtime.ctx
@@ -1084,27 +1089,46 @@ export class AudioEngine {
 
   // Sum of output and base latency (seconds) if available; used for A/V visual alignment
   get outputLatencySec() {
-    return this.backend.getOutputLatencySec(this.runtime)
+    return getOutputLatencySec(this.runtime)
   }
 
   async decodeAudioData(arrayBuffer: ArrayBuffer) {
-    return this.backend.decodeAudioData(this.runtime, arrayBuffer)
+    return decodeAudioData(this.runtime, arrayBuffer)
   }
 
   registerAsset(asset: AudioAssetRef, pcm: PlanarPcm, projectGeneration: number): AudioAssetRegistration {
-    return this.backend.registerAsset(asset, pcm, projectGeneration)
+    if (!isPlanarPcmForAsset(asset, pcm)) return { status: 'invalid-pcm' }
+    const existing = this.assets.get(asset.assetId)
+    if (existing) {
+      if (existing.projectGeneration !== projectGeneration) return { status: 'stale-generation' }
+      existing.retainCount += 1
+      return { status: 'registered', handle: existing.handle }
+    }
+    const handle = { slot: this.nextAssetSlot, generation: 1 }
+    this.nextAssetSlot += 1
+    this.assets.set(asset.assetId, { handle, projectGeneration, retainCount: 1 })
+    return { status: 'registered', handle }
   }
 
   retainAsset(assetId: string, projectGeneration: number): AudioAssetRegistration {
-    return this.backend.retainAsset(assetId, projectGeneration)
+    const existing = this.assets.get(assetId)
+    if (!existing || existing.projectGeneration !== projectGeneration) return { status: 'stale-generation' }
+    existing.retainCount += 1
+    return { status: 'registered', handle: existing.handle }
   }
 
   releaseAsset(assetId: string, projectGeneration: number): AudioAssetRelease {
-    return this.backend.releaseAsset(assetId, projectGeneration)
+    const existing = this.assets.get(assetId)
+    if (!existing || existing.projectGeneration !== projectGeneration) return { status: 'stale-generation' }
+    existing.retainCount -= 1
+    if (existing.retainCount === 0) this.assets.delete(assetId)
+    return { status: 'released' }
   }
 
   retireAssetGeneration(projectGeneration: number) {
-    this.backend.retireAssetGeneration(projectGeneration)
+    for (const [assetId, asset] of this.assets) {
+      if (asset.projectGeneration === projectGeneration) this.assets.delete(assetId)
+    }
   }
 
   close() {
@@ -1122,7 +1146,7 @@ export class AudioEngine {
     this.midiTimestampConverter.reset()
     this.masterFx.close()
     this.audioCtx?.removeEventListener('statechange', this.runtimeStateChangeListener)
-    this.backend.closeRuntime(this.runtime)
+    closeAudioRuntime(this.runtime)
     this.masterGain = null
     this.destination = null
     this.audioCtx = null

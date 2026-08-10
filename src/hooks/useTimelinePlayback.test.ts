@@ -45,6 +45,91 @@ const flushMicrotasks = async () => {
   for (let index = 0; index < 20; index += 1) await Promise.resolve()
 }
 
+const withPortableAudioWorklet = async (run: () => Promise<void>) => {
+  const previousAudioContext = globalThis.AudioContext
+  const previousAudioWorkletNode = globalThis.AudioWorkletNode
+  const previousFetch = globalThis.fetch
+  const hadAudioContext = "AudioContext" in globalThis
+  const hadAudioWorkletNode = "AudioWorkletNode" in globalThis
+  class FakeAudioContext {
+    readonly sampleRate = 48_000
+    readonly destination = {}
+    readonly audioWorklet = { addModule: async () => undefined }
+  }
+  type FakePort = {
+    onmessage: ((event: { data: unknown }) => void) | null
+    postMessage: (message: Record<string, unknown>) => void
+    close: () => void
+  }
+  class FakeAudioWorkletNode {
+    readonly port: FakePort
+    constructor() {
+      this.port = {
+        onmessage: null,
+        postMessage: (message: Record<string, unknown>) => {
+          const requestId = message.requestId
+          const response = message.type === "initialize"
+            ? { version: 1, type: "ready", revision: 1 }
+            : message.type === "prepare-graph"
+              ? { version: 1, type: "graph-prepared", requestId, revision: message.snapshot && typeof message.snapshot === "object" && "revision" in message.snapshot ? message.snapshot.revision : 1, result: "prepared" }
+              : message.type === "publish-graph"
+                ? { version: 1, type: "graph-published", requestId, revision: message.revision, result: "published" }
+                : message.type === "transport"
+                  ? { version: 1, type: "transport-applied", requestId, epoch: message.epoch, result: "applied" }
+                  : message.type === "install-schedule"
+                    ? { version: 1, type: "schedule-installed", requestId, revision: message.revision, epoch: message.epoch, result: "installed" }
+                    : message.type === "schedule-sources"
+                      ? { version: 1, type: "sources-scheduled", requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
+                      : message.type === "register-asset"
+                        ? { version: 1, type: "asset-registered", requestId, generation: message.generation, assetId: message.asset && typeof message.asset === "object" && "assetId" in message.asset ? message.asset.assetId : "", result: "registered", handle: { slot: 0, generation: 1 } }
+                        : undefined
+          if (response) queueMicrotask(() => this.port.onmessage?.({ data: response }))
+        },
+        close: () => {},
+      }
+    }
+    onprocessorerror: (() => {}) | null = null
+    connect = () => {}
+    disconnect = () => {}
+  }
+  const manifest = await readFile(new URL("../../public/audio-core/daw-audio-core.manifest.json", import.meta.url), "utf8")
+  const wasm = await readFile(new URL("../../public/audio-core/daw-audio-core.wasm", import.meta.url))
+  Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: FakeAudioContext })
+  Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: FakeAudioWorkletNode })
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL) => (
+      String(input).endsWith(".manifest.json")
+        ? new Response(manifest, { status: 200 })
+        : new Response(wasm, { status: 200 })
+    ),
+  })
+  try {
+    await run()
+  } finally {
+    if (hadAudioContext) Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: previousAudioContext })
+    else Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: undefined })
+    if (hadAudioWorkletNode) Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: previousAudioWorkletNode })
+    else Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: undefined })
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: previousFetch })
+  }
+}
+
+test('keeps browser startup portable-first and runtime faults stop without fallback', async () => {
+  const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
+  expect(source).toContain("version: 2")
+  expect(source).toContain("browserDefaultBackend: 'portable-browser'")
+  expect(source).toContain("runtimeFailure: 'stop-and-mute'")
+  expect(source).toContain("portableBrowserConfigured: portableBrowserOptions !== undefined")
+  const portableStartup = source.indexOf('if (portableBrowserOptions) {')
+  const nativeFallback = source.indexOf('if (nativeLifecycleReady && nativeOptions?.enabled?.())', portableStartup)
+  const legacyStartup = source.indexOf("setActiveBackend('legacy')", nativeFallback)
+  expect(portableStartup).toBeGreaterThan(-1)
+  expect(nativeFallback).toBeGreaterThan(portableStartup)
+  expect(legacyStartup).toBeGreaterThan(nativeFallback)
+  expect(source).toContain('portableBrowserOptions?.reportFault?.(message)')
+})
+
 const createNativeHookBridge = (
   failure?: string | (() => string | undefined),
   lifecycle?: {
@@ -181,7 +266,9 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
     cancelAutomationSchedules: () => {
       transportEvents.push('cancelAutomationSchedules')
     },
-    onTransportPause: () => {},
+    onTransportPause: () => {
+      transportEvents.push('onTransportPause')
+    },
     onTransportSeek: () => {
       transportEvents.push('onTransportSeek')
     },
@@ -1002,7 +1089,6 @@ test('cancels delayed portable resume before it can start the portable backend',
         undefined,
         undefined,
         {
-          enabled: () => true,
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
             revision: 1,
             bpm: 120,
@@ -1061,6 +1147,70 @@ test('cancels delayed native startup and disposes the late backend', async () =>
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
   }
+})
+
+test('cancels an in-flight native preview before selecting portable playback', async () => {
+  await withPortableAudioWorklet(async () => {
+    const previousWindow = globalThis.window
+    const beginGate = Promise.withResolvers<{ ok: true }>()
+    const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { dawDesktop: { audioHost: fixture.audioHost } },
+    })
+    try {
+      await withFakeRaf(async () => {
+        const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+        const engine = {
+          ...fake.engine,
+          getAudioContext: () => new AudioContext(),
+        }
+        await createRoot(async (dispose) => {
+          const playback = useTimelinePlayback(
+            engine,
+            undefined,
+            {
+              enabled: () => true,
+              projectId: () => "project",
+              compileSnapshot: compileSnapshot,
+            },
+            { compileSnapshot },
+          )
+          const note = playback.nativeLiveMidi.start({ trackId: track.id, pitch: 60, velocity: 0.5 })
+          await flushMicrotasks()
+          expect(fixture.calls).toContain("begin")
+
+          const play = playback.handlePlay([track])
+          await flushMicrotasks()
+          expect(fixture.calls).toContain("stop")
+          expect(fixture.calls).toContain("teardown")
+
+          beginGate.resolve({ ok: true })
+          await play
+
+          expect(playback.isPlaying()).toBeTrue()
+          expect(playback.isPortableBrowserPlayback()).toBeTrue()
+          expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
+          expect(playback.isNativePlaybackPrepared()).toBeFalse()
+          expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
+          if (note) playback.nativeLiveMidi.stop(note)
+          dispose()
+        })
+      })
+    } finally {
+      Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+    }
+  })
 })
 
 test('rebuilds from the persisted generation when native insertion races delayed startup', async () => {
@@ -1122,6 +1272,270 @@ test('rebuilds from the persisted generation when native insertion races delayed
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
   }
+})
+
+test('keeps a paused portable session compatible when enabling a loop', async () => {
+  await withPortableAudioWorklet(async () => {
+    const [loopEnabled, setLoopEnabled] = createSignal(false)
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        getAudioContext: () => new AudioContext(),
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          engine,
+          {
+            loopEnabled,
+            loopStartSec: () => 0,
+            loopEndSec: () => 2,
+            getTracks: () => [track],
+          },
+          undefined,
+          { compileSnapshot },
+        )
+        await playback.handlePlay([track])
+        await playback.handlePause()
+        expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
+
+        setLoopEnabled(true)
+        await expect(playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          playheadSec: 0,
+        })).resolves.toBeUndefined()
+
+        expect(loopEnabled()).toBeTrue()
+        expect(playback.isPortableBrowserPlaybackPrepared()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.usesLegacyAudioEngine()).toBeTrue()
+        expect(loopEnabled()).toBeTrue()
+        dispose()
+      })
+    })
+  })
+})
+
+test('rebuilds active portable playback into compatibility playback for a loop', async () => {
+  await withPortableAudioWorklet(async () => {
+    const [loopEnabled, setLoopEnabled] = createSignal(false)
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        getAudioContext: () => new AudioContext(),
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          engine,
+          {
+            loopEnabled,
+            loopStartSec: () => 0,
+            loopEndSec: () => 2,
+            getTracks: () => [track],
+          },
+          undefined,
+          { compileSnapshot },
+        )
+        await playback.handlePlay([track])
+        expect(playback.isPortableBrowserPlayback()).toBeTrue()
+
+        setLoopEnabled(true)
+        await expect(playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: true,
+          playheadSec: 0,
+          owner: "portable-browser",
+        })).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.usesLegacyAudioEngine()).toBeTrue()
+        expect(loopEnabled()).toBeTrue()
+        dispose()
+      })
+    })
+  })
+})
+
+test('preserves an explicitly captured native owner across queued generation rebuilds', async () => {
+  await withPortableAudioWorklet(async () => {
+    const previousWindow = globalThis.window
+    const fixture = createNativeHookBridge()
+    const [projectGeneration, setProjectGeneration] = createSignal(1)
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { dawDesktop: { audioHost: fixture.audioHost } },
+    })
+    try {
+      await withFakeRaf(async () => {
+        const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+        const engine = {
+          ...fake.engine,
+          getAudioContext: () => new AudioContext(),
+        }
+        await createRoot(async (dispose) => {
+          const playback = useTimelinePlayback(
+            engine,
+            undefined,
+            {
+              enabled: () => true,
+              projectId: () => "project",
+              projectGeneration,
+              compileSnapshot,
+            },
+            {
+              projectGeneration,
+              compileSnapshot,
+            },
+          )
+          await flushMicrotasks()
+          await playback.handlePlay([track])
+          expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
+
+          setProjectGeneration(2)
+          await flushMicrotasks()
+          const first = playback.restartTimelineSchedule([track], {
+            rebuildBackend: true,
+            resumePlayback: true,
+            playheadSec: 1,
+            owner: "native",
+            projectId: "project",
+            projectGeneration: 2,
+          })
+          const second = playback.restartTimelineSchedule([track], {
+            rebuildBackend: true,
+            resumePlayback: true,
+            playheadSec: 2,
+            owner: "native",
+            projectId: "project",
+            projectGeneration: 2,
+          })
+          await Promise.all([first, second])
+
+          expect(playback.isPlaying()).toBeTrue()
+          expect(playback.backendDiagnostics().activeBackend).toBe("native")
+          expect(playback.isNativePlaybackPrepared()).toBeTrue()
+          expect(playback.isPortableBrowserPlaybackPrepared()).toBeFalse()
+          expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
+          expect(fixture.transportFrames.at(-1)).toBe(96_000)
+          dispose()
+        })
+      })
+    } finally {
+      Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+    }
+  })
+})
+
+test('pauses Web Audio transport before disposing portable playback on project generation change', async () => {
+  await withPortableAudioWorklet(async () => {
+    const [projectGeneration, setProjectGeneration] = createSignal(1)
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        getAudioContext: () => new AudioContext(),
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, undefined, {
+          projectGeneration,
+          compileSnapshot,
+        })
+        await playback.handlePlay([track])
+        expect(playback.isPortableBrowserPlayback()).toBeTrue()
+
+        fake.transportEvents.length = 0
+        setProjectGeneration(2)
+        await flushMicrotasks()
+        await playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: "portable-browser",
+          projectGeneration: 2,
+        })
+
+        expect(fake.transportEvents).toContain("onTransportPause")
+        dispose()
+      })
+    })
+  })
+})
+
+test('pauses Web Audio transport before disposing active portable playback on cleanup', async () => {
+  await withPortableAudioWorklet(async () => {
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
+      compileLivePlaybackSnapshot({
+        revision: 1,
+        bpm: 120,
+        transport,
+        tracks: [track],
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+        sidechainRoutes: [],
+      })
+    )
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const engine = {
+        ...fake.engine,
+        getAudioContext: () => new AudioContext(),
+      }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, undefined, { compileSnapshot })
+        await playback.handlePlay([track])
+        expect(playback.isPortableBrowserPlayback()).toBeTrue()
+
+        fake.transportEvents.length = 0
+        dispose()
+
+        expect(fake.transportEvents).toContain("onTransportPause")
+        expect(playback.isPortableBrowserPlaybackPrepared()).toBeFalse()
+      })
+    })
+  })
 })
 
 test('waits for lifecycle recovery before restarting an active native graph', async () => {
@@ -2075,15 +2489,17 @@ test('uses the committed native backend without scheduling Web Audio', async () 
         expect(calls.filter((call) => call === 'graph')).toHaveLength(2)
         expect(calls.slice(0, initialCalls.length)).toEqual(initialCalls)
         expect(playback.backendDiagnostics()).toEqual({
-          version: 1,
-          defaultBackend: 'legacy',
+          version: 2,
+          browserDefaultBackend: 'portable-browser',
+          browserCompatibilityBackend: 'legacy',
           selection: 'startup-only',
+          preActivationFailure: 'compatibility-fallback',
           runtimeFailure: 'stop-and-mute',
-          portableBrowserRequiresOptIn: true,
+          portableBrowserRequiresOptIn: false,
           nativeRequiresOptIn: true,
           activeBackend: 'native',
           requestedNative: true,
-          requestedPortableBrowser: false,
+          portableBrowserConfigured: false,
         })
         await playback.handlePlay([track])
         expect(calls.filter((call) => call === 'begin')).toHaveLength(2)

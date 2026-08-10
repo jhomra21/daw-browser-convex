@@ -14,6 +14,7 @@ import {
 } from './graph-parity-fixtures'
 import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
+import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
 
 const artifactUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
 const fixtureArtifactUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core-wasm-harness.wasm', import.meta.url)
@@ -40,6 +41,7 @@ type WasmArtifactManifest = {
   sizeBytes: number
   maximumBytes: number
   sha256: string
+  sourceHash: string
   wasmUrl: string
 }
 
@@ -55,6 +57,7 @@ const isWasmArtifactManifest = (value: unknown): value is WasmArtifactManifest =
   && 'sizeBytes' in value && typeof value.sizeBytes === 'number'
   && 'maximumBytes' in value && typeof value.maximumBytes === 'number'
   && 'sha256' in value && typeof value.sha256 === 'string'
+  && 'sourceHash' in value && typeof value.sourceHash === 'string'
   && 'wasmUrl' in value && typeof value.wasmUrl === 'string'
 
 type LegacyModulationPort = {
@@ -554,6 +557,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     memoryBytes: 184_549_376,
     sizeBytes: bytes.byteLength,
     sha256: hash,
+    sourceHash: await computePortableWasmSourceHash(),
     wasmUrl: '/audio-core/daw-audio-core.wasm',
   })
   expect(bytes.byteLength).toBeLessThanOrEqual(manifest.maximumBytes)

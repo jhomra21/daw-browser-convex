@@ -325,7 +325,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [effectsExportSnapshot, setEffectsExportSnapshot] =
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
-  let nativePlaybackRevision = 0;
+  let nativePlaybackRevision = 1;
   const markLiveExternalProcessorsDegraded = async (message: string) => {
     const currentProjectId = projectId();
     if (!isLocalId("project", currentProjectId)) return;
@@ -345,7 +345,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     const effects = effectsExportSnapshot();
     await effects?.flushPending();
     const result = compileLivePlaybackSnapshot({
-      revision: ++nativePlaybackRevision,
+      revision: nativePlaybackRevision,
       bpm: bpm(),
       timeSignature: {
         numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
@@ -558,8 +558,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         notify("Native playback stopped", message);
       },
     },
-    portableBrowserPlayback: {
-      enabled: () => !requiresNativeAudio && appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
+    portableBrowserPlayback: requiresNativeAudio ? undefined : {
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
       reportFault: (message) => notify("Portable browser playback stopped", message),
@@ -568,33 +567,61 @@ const Timeline: Component<TimelineProps> = (props) => {
   const captureStructuralPlaybackIntent = (): TimelinePlaybackRebuildIntent => ({
     resumePlayback: isPlaying(),
     playheadSec: playheadSec(),
+    owner: isNativePlaybackPrepared()
+      ? "native"
+      : isPortableBrowserPlaybackPrepared()
+        ? "portable-browser"
+        : undefined,
     projectId: projectId(),
+    projectGeneration: mountedProjectGeneration(),
   });
 
+  const rebuildPlaybackBackend = (
+    tracks: Track[],
+    intent?: TimelinePlaybackRebuildIntent,
+  ) => {
+    nativePlaybackRevision += 1;
+    return restartTimelineSchedule(tracks, {
+      rebuildBackend: true,
+      ...(intent ?? captureStructuralPlaybackIntent()),
+    });
+  };
+
   function rescheduleChangedClips(clipIds: string[]) {
-    if (clipIds.length === 0 || !isPlaying()) return;
-    try {
-      const enabled = loopEnabled();
-      const end = loopEndSec();
-      const lenOk = enabled && end > loopStartSec() + 1e-3;
-      playbackRescheduleChangedClips(
-        renderTracks(),
-        playheadSec(),
-        clipIds,
-        lenOk ? { endLimitSec: end } : undefined,
-      );
-      audioEngine.cancelAutomationSchedules();
-      audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-        ...(lenOk ? { horizonSec: end - playheadSec() } : {}),
-        tracks: renderTracks(),
+    if (clipIds.length === 0) return;
+    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
+      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
+        console.error("[Timeline] failed to rebuild prepared playback after clip edit", error);
       });
-    } catch {}
+      return;
+    }
+    if (!isPlaying()) return;
+    const enabled = loopEnabled();
+    const end = loopEndSec();
+    const lenOk = enabled && end > loopStartSec() + 1e-3;
+    playbackRescheduleChangedClips(
+      renderTracks(),
+      playheadSec(),
+      clipIds,
+      lenOk ? { endLimitSec: end } : undefined,
+    );
+    audioEngine.cancelAutomationSchedules();
+    audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
+      ...(lenOk ? { horizonSec: end - playheadSec() } : {}),
+      tracks: renderTracks(),
+    });
   }
 
   function rescheduleTimeline() {
-    try {
-      restartTimelineSchedule(renderTracks())
-    } catch {}
+    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
+      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
+        console.error("[Timeline] failed to rebuild prepared playback after structural edit", error);
+      });
+      return;
+    }
+    if (isPlaying()) restartTimelineSchedule(renderTracks()).catch((error: unknown) => {
+      console.error("[Timeline] failed to reschedule legacy playback", error);
+    });
   }
 
   const automation = useTimelineAutomationController({
@@ -845,7 +872,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (isNativePlaybackPrepared() && encodeNativeBuiltInStateCommit(payload, bpm())) {
       void handleNativeBuiltInStatePatchResult(payload).then((handled) => untrack(() => {
         if (!handled && (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())) {
-          return restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+          return rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
             notify(
               "Built-in effect update failed",
               error instanceof Error
@@ -859,7 +886,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void restartTimelineSchedule(renderTracks(), { rebuildBackend: true }).catch((error: unknown) => {
+      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
         notify(
           "Built-in effect update failed",
           error instanceof Error
@@ -1280,8 +1307,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requestTransportPlay: requestPlay,
     requestTransportStop: handleStop,
     portableRecording: {
-      enabled: () => !requiresNativeAudio && appPreferences.recording.preferences().portableEnabled
-        && appPreferences.audio.preferences().portableBrowserPlaybackEnabled,
+      enabled: () => !requiresNativeAudio && appPreferences.recording.preferences().portableEnabled,
       controller: portableRecording,
     },
     nativeRecording: {
@@ -1366,6 +1392,18 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     setLoopEnabled((prev) => !prev);
+    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
+      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
+        console.error("[Timeline] failed to reconcile loop playback", error);
+        audioEngine.onTransportPause();
+        audioEngine.stopAllSources();
+        setLoopEnabled(false);
+      });
+    } else if (isPlaying()) {
+      void restartTimelineSchedule(renderTracks()).catch((error: unknown) => {
+        console.error("[Timeline] failed to reschedule loop playback", error);
+      });
+    }
   };
   const openProject = async (nextProjectId: string) => {
     if (nextProjectId === projectId()) return;
@@ -1766,10 +1804,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         nativePlaybackEnabled,
       });
       try {
-        await restartTimelineSchedule(renderTracks(), {
-          rebuildBackend: true,
-          ...intent,
-        });
+        await rebuildPlaybackBackend(renderTracks(), intent);
         console.info("[native-vst3] rebuild succeeded", {
           instanceId: processor.instanceId,
           targetId: processor.targetId,
@@ -2037,10 +2072,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (processor.bypassed === previous.bypassed) return;
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
         if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
-        void restartTimelineSchedule(renderTracks(), {
-          rebuildBackend: true,
-          ...intent,
-        }).catch((error: unknown) => {
+        void rebuildPlaybackBackend(renderTracks(), intent).catch((error: unknown) => {
           notify(
             "Native playback rebuild failed",
             error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",
@@ -2050,10 +2082,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
         if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
-        void restartTimelineSchedule(renderTracks(), {
-          rebuildBackend: true,
-          ...intent,
-        }).catch((error: unknown) => {
+        void rebuildPlaybackBackend(renderTracks(), intent).catch((error: unknown) => {
           notify(
             "Native playback rebuild failed",
             error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",

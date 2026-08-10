@@ -22,6 +22,7 @@ import {
   writePackagedNativeReleaseArtifactManifest,
   writeNativeReleaseArtifactManifest,
 } from "./native-release-artifacts"
+import { computePortableWasmSourceHash } from "../../native/audio-core/scripts/portable-wasm-source-hash"
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 
@@ -210,6 +211,7 @@ test('requires generated portable Wasm assets to match their manifest hash', asy
     await writeFile(path.join(publicDirectory, "audio-core", "daw-audio-core.wasm"), "wasm")
     await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("daw-audio-core.manifest.json")
     const manifestPath = path.join(publicDirectory, "audio-core", "daw-audio-core.manifest.json")
+    const sourceHash = await computePortableWasmSourceHash()
     const manifest = {
       artifactKind: "production",
       buildType: "Release",
@@ -217,9 +219,12 @@ test('requires generated portable Wasm assets to match their manifest hash', asy
       sizeBytes: 4,
       maximumBytes: 4,
       sha256: hash("wrong"),
+      sourceHash,
     }
     await writeFile(manifestPath, JSON.stringify(manifest))
     await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("hash does not match")
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, sha256: hash("wasm"), sourceHash: hash("stale") }))
+    await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("source hash")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, maximumBytes: 3, sha256: hash("wasm") }))
     await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("size budget")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sha256: hash("wasm") }))

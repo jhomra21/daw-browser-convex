@@ -64,7 +64,6 @@ type AppPreferencesContextValue = {
     setNoiseSuppression: (enabled: boolean) => void
     setAutoGainControl: (enabled: boolean) => void
     setNativePlaybackEnabled: (enabled: boolean) => void
-    setPortableBrowserPlaybackEnabled: (enabled: boolean) => void
   }
   recording: {
     preferences: () => AppPreferences["recording"]
@@ -243,7 +242,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
           setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled),
           setNativePlaybackEnabled: (enabled) => setPreferences("audio", "nativePlaybackEnabled", enabled),
-          setPortableBrowserPlaybackEnabled: (enabled) => setPreferences("audio", "portableBrowserPlaybackEnabled", enabled)
         },
         recording: {
           preferences: () => preferences.recording,

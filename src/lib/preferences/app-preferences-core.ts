@@ -27,7 +27,6 @@ export type AudioPreferences = {
   noiseSuppression: boolean
   autoGainControl: boolean
   nativePlaybackEnabled: boolean
-  portableBrowserPlaybackEnabled: boolean
 }
 export type RecordingPreferences = RecordingInputPreferences & {
   portableEnabled: boolean
@@ -77,8 +76,7 @@ export const defaultAppPreferences: AppPreferences = {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
-    nativePlaybackEnabled: true,
-    portableBrowserPlaybackEnabled: false
+    nativePlaybackEnabled: true
   },
   recording: {
     portableEnabled: false,
@@ -251,9 +249,6 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
           ? defaultAppPreferences.audio.nativePlaybackEnabled
           : false)
         : defaultAppPreferences.audio.nativePlaybackEnabled,
-      portableBrowserPlaybackEnabled: (value.version === 6 || value.version === 7 || value.version === APP_PREFERENCES_VERSION)
-        ? parseBoolean(audio.portableBrowserPlaybackEnabled, defaultAppPreferences.audio.portableBrowserPlaybackEnabled)
-        : defaultAppPreferences.audio.portableBrowserPlaybackEnabled
     },
     recording: {
       portableEnabled: value.version === APP_PREFERENCES_VERSION

@@ -103,8 +103,7 @@ describe("normalizeAppPreferences", () => {
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: true,
-      nativePlaybackEnabled: true,
-      portableBrowserPlaybackEnabled: false
+      nativePlaybackEnabled: true
     })
   })
 
@@ -120,7 +119,6 @@ describe("normalizeAppPreferences", () => {
         noiseSuppression: true,
         autoGainControl: true,
         nativePlaybackEnabled: true,
-        portableBrowserPlaybackEnabled: false
       }
     })).toEqual({
       ...defaultAppPreferences,
@@ -132,18 +130,41 @@ describe("normalizeAppPreferences", () => {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
-        nativePlaybackEnabled: true,
-        portableBrowserPlaybackEnabled: false
+        nativePlaybackEnabled: true
       }
     })
   })
-  test("preserves portable browser playback through version 7 migration", () => {
+  test("ignores stale portable browser playback fields while preserving audio fields", () => {
     expect(normalizeAppPreferences({
       version: 7,
       audio: {
-        portableBrowserPlaybackEnabled: true
+        inputDeviceId: "mic",
+        sampleRate: 44100,
+        nativePlaybackEnabled: false,
+        portableBrowserPlaybackEnabled: true,
       }
-    }).audio.portableBrowserPlaybackEnabled).toBeTrue()
+    }).audio).toEqual({
+      ...defaultAppPreferences.audio,
+      inputDeviceId: "mic",
+      sampleRate: 44100,
+      nativePlaybackEnabled: false,
+    })
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: {
+        outputDeviceId: "speakers",
+        portableBrowserPlaybackEnabled: true,
+      },
+      recording: { portableEnabled: true },
+    }).audio).toEqual({
+      ...defaultAppPreferences.audio,
+      outputDeviceId: "speakers",
+    })
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: { portableBrowserPlaybackEnabled: true },
+      recording: { portableEnabled: true },
+    }).recording.portableEnabled).toBeTrue()
   })
 
   test("migrates every prior version to empty local MIDI input selections", () => {

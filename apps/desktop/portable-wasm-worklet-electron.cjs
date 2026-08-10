@@ -2,10 +2,11 @@ const { app, BrowserWindow, net, protocol, session } = require("electron")
 const { existsSync } = require("node:fs")
 const path = require("node:path")
 
-const fixtureRoot = process.argv.at(-1)
+const fixtureRoot = process.argv.at(-2)
+const sampleRate = Number(process.argv.at(-1))
 const audioDiagnostics = []
 
-if (!fixtureRoot || !existsSync(fixtureRoot)) {
+if (!fixtureRoot || !existsSync(fixtureRoot) || ![44100, 48000, 96000].includes(sampleRate)) {
   throw new Error("A portable Wasm worklet fixture directory is required.")
 }
 
@@ -66,7 +67,7 @@ app.whenReady().then(async () => {
   window.webContents.on("did-fail-load", (_event, _code, description, validatedUrl) => {
     process.stderr.write(`load failed: ${description} (${validatedUrl})\n`)
   })
-  await window.loadURL("daw-test://fixture/index.html")
+  await window.loadURL(`daw-test://fixture/index.html?sampleRate=${sampleRate}`)
   await window.webContents.debugger.sendCommand("WebAudio.enable")
   const result = await window.webContents.executeJavaScript(`(async () => {
     try {

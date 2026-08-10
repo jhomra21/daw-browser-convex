@@ -863,7 +863,9 @@ daw_audio_core_result prepare_graph_revision(
     const daw_audio_graph_node_descriptor node = request.nodes[index];
     if (node.id == 0 || !valid_graph_node_kind(node.kind) || !valid_graph_layout(node.input_layout)
       || !valid_graph_layout(node.output_layout) || !valid_instrument_descriptor(node) || !valid_mixer_state(node.mixer)
-      || (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE && node.input_bus >= core.config.max_channels)) {
+      || (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE
+        && node.input_bus != DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED
+        && node.input_bus >= core.config.max_channels)) {
       return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
     if (graph_node_index_linear(graph, node.id) >= 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -3881,7 +3883,9 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
           render_sample_instrument_frame(core, (*core.published_instruments)[node_index], node.instrument, &left, &right);
         }
       }
-      if (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE && node.input_bus < block.input_bus_count && block.inputs != nullptr) {
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE
+        && node.input_bus != DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED
+        && node.input_bus < block.input_bus_count && block.inputs != nullptr) {
         const float *source_left = block.inputs[node.input_bus * block.channel_count];
         const float *source_right = block.channel_count > 1 ? block.inputs[node.input_bus * block.channel_count + 1] : source_left;
         left = source_left == nullptr ? 0.0F : source_left[frame];

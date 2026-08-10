@@ -127,6 +127,103 @@ std::vector<std::uint8_t> GraphSnapshot(const bool instrument, const bool active
   return frame;
 }
 
+std::vector<std::uint8_t> MultipleSourceGraphSnapshot() {
+  constexpr std::uint32_t source_count = 6;
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
+  AppendLeU32(payload, 2);
+  AppendLeU32(payload, source_count + 1);
+  AppendLeU32(payload, source_count);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  const auto append_node = [&payload](
+    const std::uint64_t id,
+    const std::uint32_t kind,
+    const std::uint32_t input_bus,
+    const std::uint32_t latency
+  ) {
+    AppendLeU64(payload, id);
+    AppendLeU32(payload, kind);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, input_bus);
+    AppendLeU32(payload, latency);
+    for (std::size_t field = 0; field < 20; ++field) AppendLeU32(payload, 0);
+    AppendLeU64(payload, 0);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+  };
+  for (std::uint32_t index = 0; index < source_count; ++index) {
+    append_node(index + 1, DAW_AUDIO_GRAPH_NODE_SOURCE, DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED, 0);
+  }
+  append_node(source_count + 1, 6, 0, static_cast<std::uint32_t>(kFrames));
+  for (std::uint32_t index = 0; index < source_count; ++index) {
+    AppendLeU64(payload, source_count + 2 + index);
+    AppendLeU64(payload, index + 1);
+    AppendLeU64(payload, source_count + 1);
+    AppendLeU64(payload, 0);
+    AppendLeFloat(payload, 1.0F);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+  }
+  std::vector<std::uint8_t> frame;
+  AppendBeU64(frame, 2);
+  AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
+  frame.insert(frame.end(), payload.begin(), payload.end());
+  return frame;
+}
+
+void AssertMultipleSourceGraphPublishes() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = kSampleRate,
+    .max_frames_per_block = static_cast<std::uint32_t>(kFrames),
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  const std::array<float, 8> prepared_stretch_asset{0.0F, 0.25F, 0.5F, 0.75F, 0.0F, -0.25F, -0.5F, -0.75F};
+  assert(host.InstallAsset(1, 4, 44'100, 2, 0x0123'4567'89ab'cdefULL, prepared_stretch_asset));
+  const auto graph_status = host.PrepareGraphRevision(2, MultipleSourceGraphSnapshot());
+  assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  std::vector<std::uint8_t> source_event;
+  AppendLeU32(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 1.0F);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 0.0F);
+  assert(host.QueueSourceEvents(source_event));
+  assert(host.SetTransport(1, true, 0));
+  assert(host.StartDiagnosticMode());
+  std::array<float, kFrames> input_left{};
+  std::array<float, kFrames> input_right{};
+  std::array<float, kFrames> output_left{};
+  std::array<float, kFrames> output_right{};
+  input_left.fill(3.0F);
+  input_right.fill(-5.0F);
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, static_cast<std::uint32_t>(kFrames)));
+  assert(std::abs(output_left[0]) <= 1e-6F);
+  assert(std::abs(output_right[0]) <= 1e-6F);
+  assert(output_left[0] != input_left[0] && output_right[0] != input_right[0]);
+  host.Stop();
+}
+
 std::vector<std::uint8_t> InstrumentEvents() {
   std::vector<std::uint8_t> payload;
   AppendLeU32(payload, 2);
@@ -317,6 +414,7 @@ double DifferenceRms(const std::vector<float>& left, const std::vector<float>& r
 }  // namespace
 
 int main() {
+  AssertMultipleSourceGraphPublishes();
   if (!std::filesystem::is_regular_file(kExecutablePath)) {
     std::cout << "SKIP: installed ValhallaSupermassive VST3 is unavailable\n";
     return 0;

@@ -241,6 +241,85 @@ test("prefixes each native graph envelope with a big-endian revision and payload
   expect(view.getUint32(12, true)).toBe(3)
 })
 
+test("keeps portable playback source buses sequential", () => {
+  const sourceNodes: AudioCoreGraphSnapshot["nodes"] = Array.from(
+    { length: 6 },
+    (_, index): AudioCoreGraphSnapshot["nodes"][number] => ({
+      id: `track-${index}`,
+      kind: "source",
+      inputLayout: "stereo",
+      outputLayout: "stereo",
+      processorOrder: [],
+      latencyFrames: 0,
+    }),
+  )
+  const snapshot: AudioCoreGraphSnapshot = {
+    version: audioCoreContractVersion,
+    revision: 9,
+    contractHash: "contract",
+    masterNodeId: "master",
+    assets: [],
+    nodes: [
+      ...sourceNodes,
+      {
+        id: "master",
+        kind: "master",
+        inputLayout: "stereo",
+        outputLayout: "stereo",
+        processorOrder: [],
+        latencyFrames: 0,
+      },
+    ],
+    edges: [],
+  }
+  const bytes = encodePortableGraphEnvelope(snapshot)
+  const view = new DataView(bytes.buffer)
+
+  for (let index = 0; index < sourceNodes.length; index += 1) {
+    expect(view.getUint32(24 + index * 132 + 20, true)).toBe(index)
+  }
+  expect(view.getUint32(24 + sourceNodes.length * 132 + 20, true)).toBe(0)
+})
+
+test("serializes native playback sources as disconnected after the native frame header", () => {
+  const sourceNodes: AudioCoreGraphSnapshot["nodes"] = Array.from(
+    { length: 6 },
+    (_, index): AudioCoreGraphSnapshot["nodes"][number] => ({
+      id: `track-${index}`,
+      kind: "source",
+      inputLayout: "stereo",
+      outputLayout: "stereo",
+      processorOrder: [],
+      latencyFrames: 0,
+    }),
+  )
+  const snapshot: AudioCoreGraphSnapshot = {
+    version: audioCoreContractVersion,
+    revision: 9,
+    contractHash: "contract",
+    masterNodeId: "master",
+    assets: [],
+    nodes: [
+      ...sourceNodes,
+      {
+        id: "master",
+        kind: "master",
+        inputLayout: "stereo",
+        outputLayout: "stereo",
+        processorOrder: [],
+        latencyFrames: 0,
+      },
+    ],
+    edges: [],
+  }
+  const bytes = serializeNativeGraph(snapshot)
+  const view = new DataView(bytes.buffer)
+
+  for (let index = 0; index < sourceNodes.length; index += 1) {
+    expect(view.getUint32(12 + 24 + index * 132 + 20, true)).toBe(0xffff_ffff)
+  }
+})
+
 test("serializes external native latency separately from built-in node latency", () => {
   const snapshot: AudioCoreGraphSnapshot = {
     version: audioCoreContractVersion,
@@ -295,14 +374,17 @@ test("keeps the browser worklet graph envelope byte-for-byte equal to the native
     masterNodeId: "master",
     assets: [],
     nodes: [
-      {
-        id: "source",
-        kind: "source",
-        inputLayout: "stereo",
-        outputLayout: "stereo",
-        processorOrder: [],
-        latencyFrames: 0,
-      },
+      ...Array.from(
+        { length: 3 },
+        (_, index): AudioCoreGraphSnapshot["nodes"][number] => ({
+          id: `source-${index}`,
+          kind: "source",
+          inputLayout: "stereo",
+          outputLayout: "stereo",
+          processorOrder: [],
+          latencyFrames: 0,
+        }),
+      ),
       {
         id: "master",
         kind: "master",
@@ -315,7 +397,7 @@ test("keeps the browser worklet graph envelope byte-for-byte equal to the native
     edges: [{
       version: audioCoreContractVersion,
       id: "source-master",
-      fromNodeId: "source",
+      fromNodeId: "source-0",
       toNodeId: "master",
       gain: 0.75,
       kind: "output",

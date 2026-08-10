@@ -71,6 +71,23 @@ std::uint32_t ReadLeU32(const std::uint8_t* bytes) {
     | (static_cast<std::uint32_t>(bytes[3]) << 24U);
 }
 
+void LogGraphPrepareFailure(
+  const std::uint32_t revision,
+  const daw_audio_core_result result,
+  const daw_audio_core_handle core
+) {
+  const auto diagnostic = daw_audio_core_get_graph_validation_diagnostic(core);
+  std::fprintf(
+    stderr,
+    "[native-graph] prepare rejected {revision:%u,result:%u,diagnostic:%u,index:%u,actual:%u,limit:%u}\n",
+    revision,
+    static_cast<unsigned int>(result),
+    diagnostic.code,
+    diagnostic.index,
+    diagnostic.actual,
+    diagnostic.limit);
+}
+
 std::uint64_t ReadLeU64(const std::uint8_t* bytes) {
   std::uint64_t value = 0;
   for (std::size_t index = 0; index < 8; ++index) value |= static_cast<std::uint64_t>(bytes[index]) << (index * 8U);
@@ -1917,6 +1934,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
       && same_core_result != DAW_AUDIO_CORE_RETIREMENT_CAPACITY_EXCEEDED
       && same_core_result != DAW_AUDIO_CORE_CAPACITY_EXCEEDED) {
       impl_->prepared_continuity = GraphRevisionContinuity::kRejected;
+      LogGraphPrepareFailure(revision, same_core_result, active_core);
       return status(GraphRevisionStatusCode::kPrepareFailed);
     }
   }
@@ -1949,16 +1967,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
       static_cast<std::uint32_t>(payload.size()));
   if (prepare_result != DAW_AUDIO_CORE_OK) {
     impl_->prepared_continuity = GraphRevisionContinuity::kRejected;
-    const auto diagnostic = daw_audio_core_get_graph_validation_diagnostic(prepared_core);
-    std::fprintf(
-      stderr,
-      "[native-graph] prepare rejected {revision:%u,result:%u,diagnostic:%u,index:%u,actual:%u,limit:%u}\n",
-      revision,
-      static_cast<unsigned int>(prepare_result),
-      diagnostic.code,
-      diagnostic.index,
-      diagnostic.actual,
-      diagnostic.limit);
+    LogGraphPrepareFailure(revision, prepare_result, prepared_core);
     discard_prepared();
     return status(GraphRevisionStatusCode::kPrepareFailed);
   }
@@ -3770,11 +3779,11 @@ bool AudioHost::ProcessPlanar(
       const std::uint32_t write = lane.write.load(std::memory_order_acquire);
       while (read != write) {
         const auto& event = lane.events[read % Capacity];
-        if (event.scheduled && !impl_->applied_transport_running.load(std::memory_order_acquire)) break;
-        if (event.scheduled && event.instrument.epoch != applied_epoch) {
+        if (event.instrument.epoch != applied_epoch) {
           ++read;
           continue;
         }
+        if (event.scheduled && !impl_->applied_transport_running.load(std::memory_order_acquire)) break;
         if (event.scheduled && event.window_id > published_window) break;
         const auto event_frame = event.scheduled ? event.absolute_frame
           : static_cast<std::uint64_t>(event.instrument.frame_offset);

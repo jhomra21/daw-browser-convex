@@ -2,6 +2,10 @@ import {
   compileLiveNativeProjection,
 } from "@daw-browser/audio-engine/live-native-projection"
 import {
+  nativeAudioHostMaximumAssetFrames,
+  nativeAudioHostMaximumInstalledAssets,
+} from "@daw-browser/desktop-protocol/native-audio-host"
+import {
   mapNativeSessionAssets,
   serializeNativeGraph,
   serializeNativeProcessorStatePatch,
@@ -14,6 +18,11 @@ import {
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import {
+  isPortableStretchClip,
+  preparePortableStretchAssets,
+  type PortablePreparedStretchAsset,
+} from "@daw-browser/audio-engine/portable-stretch-preparation"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostTransport,
@@ -195,6 +204,47 @@ const planarBytes = (planes: readonly Float32Array[]) => {
   return output
 }
 
+const nativeStretchPreparationMaximumBytes =
+  nativeAudioHostMaximumInstalledAssets
+  * nativeAudioHostMaximumAssetFrames
+  * 2
+  * Float32Array.BYTES_PER_ELEMENT
+
+const nativeAssetCapacityError =
+  `Native playback exceeds the installed audio asset capacity of ${nativeAudioHostMaximumInstalledAssets} assets.`
+
+const countNonStretchNativeAssets = (snapshot: LivePlaybackSnapshot): number => {
+  const assetKeys = new Set<string>()
+  const addAsset = (assetKey: string, buffer: AudioBuffer | undefined) => {
+    if (buffer) assetKeys.add(assetKey)
+  }
+  for (const track of snapshot.tracks) {
+    for (const clip of track.clips) {
+      if (clip.audioWarp?.enabled === true) continue
+      if (clip.midi || !clip.sourceAssetKey) continue
+      addAsset(clip.sourceAssetKey, clip.buffer ?? undefined)
+    }
+  }
+  for (const entry of Object.values(snapshot.mixer.fx.trackFx ?? {})) {
+    const instrument = entry.instrument
+    if (instrument?.kind === "sampler" && entry.samplerBuffers) {
+      for (const zone of instrument.params.zones) {
+        addAsset(zone.sample.assetKey, entry.samplerBuffers.get(zone.id))
+      }
+    }
+    if (instrument?.kind === "drum-rack" && entry.drumRackBuffers) {
+      for (const pad of instrument.params.pads) {
+        const buffer = pad.sample ? entry.drumRackBuffers.get(pad.id) : undefined
+        if (pad.sample) addAsset(pad.sample.assetKey, buffer)
+      }
+    }
+    if (instrument?.kind === "granular" && entry.granularBuffer && instrument.params.zone) {
+      addAsset(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
+    }
+  }
+  return assetKeys.size
+}
+
 const nativeExternalLatencyFrames = (
   attachmentPlan: LivePlaybackSnapshot["nativeExternalAttachmentPlan"] | undefined,
 ) => {
@@ -241,7 +291,9 @@ export const createNativePlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
   getProjectId?: () => string
   getProjectGeneration?: () => number
+  createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
+  reportUnavailable?: boolean
   createRecordingWriter?: typeof createPortableRecordingWriter
 }) => {
   let active = false
@@ -262,6 +314,7 @@ export const createNativePlaybackController = (input: {
   let nextTransportTransitionId = 0n
   let installedAssetIds: readonly number[] = []
   let installedAssets: readonly NativeSessionAsset[] = []
+  let preparedStretchAssetsForSession: readonly PortablePreparedStretchAsset[] = []
   let preparedSnapshot: LivePlaybackSnapshot | undefined
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let unsubscribeMeters: (() => void) | undefined
@@ -304,6 +357,10 @@ export const createNativePlaybackController = (input: {
   let nativeSpectrumTarget: string | undefined
   let latestSpectrumSequence = 0n
   let latestScheduleProgress: NativeScheduleProgress | undefined
+  let stretchPreparationAbortController: AbortController | undefined
+  const resolveProjectGeneration = () => input.getProjectGeneration?.() ?? 0
+  const safePreparedProjectGeneration = (projectGeneration: number) =>
+    Number.isSafeInteger(projectGeneration) && projectGeneration > 0 ? projectGeneration : 1
   const processorSequenceWaiters = new Set<{
     revision: number
     epoch: number
@@ -459,10 +516,9 @@ export const createNativePlaybackController = (input: {
 
   const hasNativeHostConnectionLoss = () => {
     if (!nativeHostConnectionLost) return false
-    const projectGeneration = input.getProjectGeneration?.()
+    const projectGeneration = resolveProjectGeneration()
     if (
-      projectGeneration !== undefined
-      && nativeHostLossProjectGeneration !== undefined
+      nativeHostLossProjectGeneration !== undefined
       && projectGeneration !== nativeHostLossProjectGeneration
     ) {
       nativeHostConnectionLost = false
@@ -487,7 +543,7 @@ export const createNativePlaybackController = (input: {
 
   const markNativeHostConnectionLost = (reason?: string) => {
     nativeHostConnectionLost = true
-    nativeHostLossProjectGeneration = input.getProjectGeneration?.()
+    nativeHostLossProjectGeneration = resolveProjectGeneration()
     nativeHostLossReason = reason ?? nativeHostConnectionLossMessage()
   }
 
@@ -502,6 +558,8 @@ export const createNativePlaybackController = (input: {
     epoch: number
     sampleRateHz: number
     assets: readonly NativeSessionAsset[]
+    preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+    projectGeneration?: number
     startFrame: number
     graph?: AudioCoreGraphSnapshot
   }) => {
@@ -530,6 +588,8 @@ export const createNativePlaybackController = (input: {
         maximumVstEventsPerBlock: maxVst3WorkerFrames,
       },
       assets: options.assets,
+      preparedStretchAssets: options.preparedStretchAssets,
+      projectGeneration: options.projectGeneration,
       startFrame: options.startFrame,
       onFault: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
@@ -567,6 +627,8 @@ export const createNativePlaybackController = (input: {
       liveInstrumentEventTail = Promise.resolve()
       pendingStart = undefined
       pendingStartMode = undefined
+      stretchPreparationAbortController?.abort()
+      stretchPreparationAbortController = undefined
       const bridge = input.bridge
       const assetIds = installedAssetIds
       installedAssetIds = []
@@ -585,6 +647,7 @@ export const createNativePlaybackController = (input: {
       preparedSnapshot = undefined
       preparedGraph = undefined
       installedAssets = []
+      preparedStretchAssetsForSession = []
       sampleRate = 0
       maximumFramesPerBlock = 0
       transportFrame = 0
@@ -631,7 +694,7 @@ export const createNativePlaybackController = (input: {
       return "unavailable"
     }
     const cancelled = () => generation !== lifecycleGeneration
-      || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
+      || projectGeneration !== resolveProjectGeneration()
     if (prepared && preparedProjectGeneration === projectGeneration) {
       try {
         const previousCoordinator = scheduleCoordinator
@@ -651,6 +714,8 @@ export const createNativePlaybackController = (input: {
             epoch: transportEpoch,
             sampleRateHz: sampleRate,
             assets: installedAssets,
+            preparedStretchAssets: preparedStretchAssetsForSession,
+            projectGeneration: safePreparedProjectGeneration(projectGeneration),
             startFrame: frame,
             graph: preparedGraph,
           })
@@ -711,6 +776,7 @@ export const createNativePlaybackController = (input: {
       preparedSnapshot = undefined
       preparedGraph = undefined
       installedAssets = []
+      preparedStretchAssetsForSession = []
       sampleRate = 0
       maximumFramesPerBlock = 0
       await Promise.allSettled([
@@ -734,7 +800,10 @@ export const createNativePlaybackController = (input: {
       const { snapshot } = snapshotResult
       requiresNative = snapshot.requiresNativePlayback === true
       const unavailable = (message: string) => {
-        if (!requiresNative) return "unavailable" as const
+        if (!requiresNative) {
+          if (input.reportUnavailable && !cancelled()) reportFault(message)
+          return "unavailable" as const
+        }
         if (!cancelled()) reportFault(message)
         return "blocked" as const
       }
@@ -790,6 +859,40 @@ export const createNativePlaybackController = (input: {
       ))) {
         return unavailable("Native playback supports automation only for active VST3 parameters.")
       }
+      const hasStretchClips = snapshot.tracks.some((track) => track.clips.some(isPortableStretchClip))
+      preparedStretchAssetsForSession = []
+      let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
+      if (hasStretchClips) {
+        const remainingStretchAssetCapacity = nativeAudioHostMaximumInstalledAssets
+          - countNonStretchNativeAssets(snapshot)
+        if (remainingStretchAssetCapacity <= 0) return unavailable(nativeAssetCapacityError)
+        const createBuffer = input.createBuffer
+        if (!createBuffer) return unavailable("Native Stretch playback requires an AudioBuffer creation function.")
+        const preparationAbortController = new AbortController()
+        stretchPreparationAbortController = preparationAbortController
+        try {
+          const preparation = await preparePortableStretchAssets({
+            tracks: snapshot.tracks,
+            projectBpm: snapshot.bpm,
+            projectGeneration: safePreparedProjectGeneration(projectGeneration),
+            requiredSampleRateHz: deviceReply.device.nominalSampleRateHz,
+            maximumFrameCount: nativeAudioHostMaximumAssetFrames,
+            maximumAssetCount: remainingStretchAssetCapacity,
+            maximumPreparationBytes: nativeStretchPreparationMaximumBytes,
+            createBuffer,
+            signal: preparationAbortController.signal,
+          })
+          if (cancelled()) return "unavailable"
+          if (!preparation.supported) {
+            return unavailable(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(" "))
+          }
+          preparedStretchAssets = preparation.assets
+        } finally {
+          if (stretchPreparationAbortController === preparationAbortController) {
+            stretchPreparationAbortController = undefined
+          }
+        }
+      }
       const projection = compileLiveNativeProjection({
         tracks: snapshot.tracks,
         bpm: snapshot.bpm,
@@ -799,8 +902,13 @@ export const createNativePlaybackController = (input: {
         firstSequence: 1,
         fx: snapshot.mixer.fx,
         externalLatencyFrames: nativeExternalLatencyFrames(attachmentPlan),
+        projectGeneration: safePreparedProjectGeneration(projectGeneration),
+        preparedStretchAssets,
       })
       if (!projection.supported) return unavailable(projection.reasons.join(" "))
+      if (projection.assets.length > nativeAudioHostMaximumInstalledAssets) {
+        return unavailable(nativeAssetCapacityError)
+      }
       if (deviceReply.device.outputChannelCount < 2) return unavailable("The native audio output does not provide compatible stereo routing.")
       const assets = mapNativeSessionAssets(projection.graph.assets)
       const nativeGraph = projection.graph
@@ -872,6 +980,8 @@ export const createNativePlaybackController = (input: {
         epoch: transportEpoch,
         sampleRateHz: deviceReply.device.nominalSampleRateHz,
         assets,
+        preparedStretchAssets,
+        projectGeneration: safePreparedProjectGeneration(projectGeneration),
         startFrame: initialFrame,
         graph: nativeGraph,
       })
@@ -891,6 +1001,7 @@ export const createNativePlaybackController = (input: {
       transactionToken = undefined
       installedAssetIds = assets.map(({ sessionAssetId }) => sessionAssetId)
       installedAssets = assets
+      preparedStretchAssetsForSession = preparedStretchAssets
       preparedSnapshot = runtimeSnapshot
       preparedGraph = nativeGraph
       sampleRate = deviceReply.device.nominalSampleRateHz
@@ -956,7 +1067,7 @@ export const createNativePlaybackController = (input: {
       if (pendingStartMode === "play") return pendingStart
       const previewRequest = pendingStart
       const generation = lifecycleGeneration
-      const projectGeneration = input.getProjectGeneration?.() ?? 0
+      const projectGeneration = resolveProjectGeneration()
       const request = previewRequest.then((result) => result === "started"
         ? startAttempt(transport, generation, projectGeneration, true)
         : result)
@@ -971,7 +1082,7 @@ export const createNativePlaybackController = (input: {
       return request
     }
     const generation = lifecycleGeneration
-    const projectGeneration = input.getProjectGeneration?.() ?? 0
+    const projectGeneration = resolveProjectGeneration()
     const request = startAttempt(transport, generation, projectGeneration, true)
     pendingStart = request
     pendingStartMode = "play"
@@ -995,7 +1106,7 @@ export const createNativePlaybackController = (input: {
       return pendingStart
     }
     const generation = lifecycleGeneration
-    const projectGeneration = input.getProjectGeneration?.() ?? 0
+    const projectGeneration = resolveProjectGeneration()
     const request = startAttempt({
       state: "paused",
       playheadSec,
@@ -1043,6 +1154,10 @@ export const createNativePlaybackController = (input: {
         epoch: transportEpoch,
         sampleRateHz: sampleRate,
         assets: installedAssets,
+        preparedStretchAssets: preparedStretchAssetsForSession,
+        projectGeneration: preparedProjectGeneration === undefined
+          ? undefined
+          : safePreparedProjectGeneration(preparedProjectGeneration),
         startFrame: frame,
         graph: preparedGraph,
       })
@@ -1059,9 +1174,9 @@ export const createNativePlaybackController = (input: {
     await nextCoordinator?.waitForTransition(transitionId, false)
     if (transitionGeneration !== preparedTransportTransitionGeneration) return false
     if (releaseTransportNotes) {
-      const instrumentNodeIds = preparedSnapshot?.tracks
-        .filter((track) => track.kind === "instrument")
-        .map((track) => track.id) ?? []
+      const instrumentNodeIds = preparedGraph?.nodes
+        .filter((node) => node.kind === "instrument")
+        .map((node) => node.id) ?? []
       const releasePromises = instrumentNodeIds.map((nodeId) => {
         const sequence = nextLiveEventSequence++
         return queueLiveInstrumentEvent({
@@ -1570,6 +1685,11 @@ export const createNativePlaybackController = (input: {
     if (preparedSnapshot && !preparedSnapshot.tracks.some((track) => track.id === note.trackId)) {
       return undefined
     }
+    if (preparedGraph && !preparedGraph.nodes.some((node) => (
+      node.id === note.trackId && node.kind === "instrument"
+    ))) {
+      return undefined
+    }
     const noteId = nextLiveNoteId++
     const queueNoteOn = () => queueLiveInstrumentEvent({
         nodeId: note.trackId,
@@ -1609,6 +1729,9 @@ export const createNativePlaybackController = (input: {
         result !== "started"
         || readiness.force
         || !preparedSnapshot?.tracks.some((track) => track.id === note.trackId)
+        || !preparedGraph?.nodes.some((node) => (
+          node.id === note.trackId && node.kind === "instrument"
+        ))
       ) {
         liveNoteReadiness.delete(noteId)
         return

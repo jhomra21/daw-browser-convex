@@ -4,19 +4,47 @@ import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
-import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 
 class TestAudioBuffer implements AudioBuffer {
-  readonly duration = 1 / 48_000
-  readonly length = 1
-  readonly numberOfChannels = 2
-  readonly sampleRate = 48_000
-  copyFromChannel(destination: Float32Array) { destination.fill(0) }
-  copyToChannel() {}
-  getChannelData() { return new Float32Array(this.length) }
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels: number
+  readonly sampleRate: number
+
+  constructor(
+    private readonly channels: Float32Array<ArrayBuffer>[] = [
+      new Float32Array(1),
+      new Float32Array(1),
+    ],
+    sampleRate = 48_000,
+  ) {
+    this.length = channels[0]?.length ?? 0
+    this.numberOfChannels = channels.length
+    this.sampleRate = sampleRate
+    this.duration = this.length / sampleRate
+  }
+
+  copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const source = this.channels[channel]
+    if (!source) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source.subarray(offset, offset + destination.length))
+  }
+
+  copyToChannel(source: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const destination = this.channels[channel]
+    if (!destination) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source, offset)
+  }
+
+  getChannelData(channel: number) {
+    const samples = this.channels[channel]
+    if (!samples) throw new Error(`Missing channel ${channel}.`)
+    return samples
+  }
 }
 
 const sourceTrack = (volume = 0.8): RuntimeTrack => ({
@@ -41,6 +69,27 @@ const input = (track = sourceTrack()): LivePlaybackSnapshotInput => ({
   tracks: [track],
   renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
   sidechainRoutes: [],
+})
+
+const inputWithRawAssetsAndStretch = (rawAssetCount: number): LivePlaybackSnapshotInput => ({
+  ...input({
+    ...sourceTrack(),
+    clips: [
+      ...Array.from({ length: rawAssetCount }, (_, index) => ({
+        ...sourceTrack().clips[0]!,
+        id: `raw-clip-${index}`,
+        sourceAssetKey: `raw-source-${index}`,
+        buffer: new TestAudioBuffer(),
+      })),
+      {
+        ...sourceTrack().clips[0]!,
+        id: "stretch-clip",
+        sourceAssetKey: "stretch-source",
+        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+        buffer: new TestAudioBuffer(),
+      },
+    ],
+  }),
 })
 
 const instrumentTrack: RuntimeTrack = {
@@ -80,10 +129,24 @@ const nativeInstrumentInput = (): LivePlaybackSnapshotInput => ({
   },
 })
 
-const liveMidiInput = (): LivePlaybackSnapshotInput => input({
-  ...sourceTrack(),
-  id: "instrument",
-})
+const liveMidiInput = (): LivePlaybackSnapshotInput => {
+  const base = nativeInstrumentInput()
+  return {
+    ...base,
+    renderState: {
+      ...base.renderState,
+      fx: {
+        ...base.renderState.fx,
+        trackFx: {
+          instrument: {
+            instances: [],
+            synth: createDefaultSynthParams(),
+          },
+        },
+      },
+    },
+  }
+}
 
 const nativeAttachmentPlan: NativeExternalAttachmentPlan = {
   version: 1,
@@ -138,6 +201,7 @@ const createBridge = (
   serializeInstrumentRequests = false,
   requireStartedForSchedule = false,
   failureMessage = "failed",
+  sampleRateHz = 48_000,
 ) => {
   const calls: string[] = []
   const parameterPayloads: Uint8Array[] = []
@@ -146,6 +210,7 @@ const createBridge = (
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
+  const installedAssets: NativeHostPcmAsset[] = []
   const transports: Array<{ epoch: number; frame: number; running: boolean }> = []
   const spectrumNodeIds: Array<bigint | null> = []
   const spectrumSelections: Array<{ nodeId: bigint | null; sessionStarted: boolean }> = []
@@ -208,6 +273,7 @@ const createBridge = (
     instrumentPayloads,
     schedulePayloads,
     graphPayloads,
+    installedAssets,
     transports,
     spectrumNodeIds,
     spectrumSelections,
@@ -230,7 +296,7 @@ const createBridge = (
         device: {
           deviceId,
           name: "Default",
-          nominalSampleRateHz: 48_000,
+          nominalSampleRateHz: sampleRateHz,
           outputChannelCount: 2,
           maximumFramesPerBlock: 512,
           available: true,
@@ -241,7 +307,7 @@ const createBridge = (
         device: {
           deviceId,
           name: "Default Input",
-          nominalSampleRateHz: 48_000,
+          nominalSampleRateHz: sampleRateHz,
           inputChannelCount: 2,
           maximumFramesPerBlock: 512,
           available: true,
@@ -255,7 +321,13 @@ const createBridge = (
         },
         commitTransaction: reply("commit"),
         rollbackTransaction: reply("rollback"),
-        installAsset: reply("install"),
+        installAsset: async (asset: NativeHostPcmAsset) => {
+          calls.push("install")
+          installedAssets.push(asset)
+          return failure === "install"
+            ? { ok: false as const, error: failureMessage }
+            : { ok: true as const }
+        },
         releaseAsset: reply("release"),
         publishGraph: async (bytes: Uint8Array) => {
           calls.push("graph")
@@ -463,20 +535,23 @@ const createBridge = (
   }
 }
 
-const nativeInstrumentEventTypes = (payload: Uint8Array) => {
-  const view = new DataView(payload.buffer)
-  const count = view.getUint32(0, true)
-  return Array.from({ length: count }, (_, index) => view.getUint32(36 + index * 48, true))
-}
-
-const nativeLiveInstrumentEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+const decodeNativeInstrumentEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
   const view = new DataView(payload.buffer)
   const count = view.getUint32(0, true)
   return Array.from({ length: count }, (_, index) => ({
     nodeId: view.getBigUint64(4 + index * 48, true),
     type: view.getUint32(36 + index * 48, true),
-  })).filter(({ type }) => type === 101 || type === 102)
+  }))
 })
+
+const nativeInstrumentEventTypes = (payload: Uint8Array) =>
+  decodeNativeInstrumentEvents([payload]).map(({ type }) => type)
+
+const nativeLiveInstrumentEvents = (payloads: readonly Uint8Array[]) =>
+  decodeNativeInstrumentEvents(payloads).filter(({ type }) => type === 101 || type === 102)
+
+const nativeTransportReleaseEvents = (payloads: readonly Uint8Array[]) =>
+  decodeNativeInstrumentEvents(payloads).filter(({ type }) => type === 103)
 
 test("commits a supported native session before starting and tears it down deterministically", async () => {
   const fixture = createBridge()
@@ -492,6 +567,168 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+test("prepares enabled Stretch clips before publishing the native graph", async () => {
+  const fixture = createBridge(undefined, false, false, "failed", 48_000)
+  const faults: string[] = []
+  const stretchBuffer = new TestAudioBuffer([
+    new Float32Array(108_600),
+    new Float32Array(108_600),
+  ], 44_100)
+  const stretchTrack: RuntimeTrack = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      duration: 2.462585,
+      buffer: stretchBuffer,
+      sourceDurationSec: 2.462585,
+      sourceSampleRate: 44_100,
+      sourceChannelCount: 2,
+      audioWarp: { enabled: true, mode: "stretch", sourceBpm: 200 },
+    }],
+  }
+  const stretchInput = {
+    ...input(stretchTrack),
+    tracks: [
+      stretchTrack,
+      { id: "empty", name: "Empty", volume: 1, clips: [] },
+    ],
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectGeneration: () => 0,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(
+      Array.from({ length: channels }, () => new Float32Array(frames)),
+      sampleRate,
+    ),
+    reportFault: (message) => faults.push(message),
+    reportUnavailable: true,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...stretchInput,
+      transport,
+    }),
+  })
+
+  const result = await controller.start(stretchInput.transport)
+  expect(result).toBe("started")
+  expect(faults).toEqual([])
+  expect(fixture.calls).toContain("install")
+  expect(fixture.calls).toContain("graph")
+  expect(fixture.installedAssets).toHaveLength(1)
+  expect(fixture.installedAssets[0]).toMatchObject({
+    frameCount: Math.round(stretchBuffer.length * 48_000 / 44_100),
+    sampleRateHz: 48_000,
+    channelCount: 2,
+  })
+  await controller.dispose()
+})
+
+test("does not begin a native transaction when Stretch preparation fails", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const stretchTrack: RuntimeTrack = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+    }],
+  }
+  const compiled = compileLivePlaybackSnapshot(input(stretchTrack))
+  if (!compiled.supported) throw new Error(compiled.reasons.join(" "))
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectGeneration: () => 1,
+    createBuffer: () => {
+      throw new Error("buffer creation unavailable")
+    },
+    reportFault: (message) => faults.push(message),
+    compileSnapshot: async () => ({
+      supported: true as const,
+      snapshot: {
+        ...compiled.snapshot,
+        nativeExternalAttachmentPlan: nativeAttachmentPlan,
+        requiresNativePlayback: true,
+      },
+    }),
+  })
+
+  expect(await controller.start(compiled.snapshot.transport)).toBe("blocked")
+  expect(fixture.calls).toEqual([])
+  expect(faults[0]).toContain("portable Stretch preparation failed")
+})
+
+test("rejects Stretch before rendering when raw native assets consume capacity", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const snapshotInput = inputWithRawAssetsAndStretch(64)
+  let createBufferCalls = 0
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    createBuffer: () => {
+      createBufferCalls += 1
+      return new TestAudioBuffer()
+    },
+    reportFault: (message) => faults.push(message),
+    reportUnavailable: true,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...snapshotInput,
+      transport,
+    }),
+  })
+
+  expect(await controller.start(snapshotInput.transport)).toBe("unavailable")
+  expect(createBufferCalls).toBe(0)
+  expect(fixture.calls).toEqual([])
+  expect(faults[0]).toContain("installed audio asset capacity")
+})
+
+test("admits Stretch when one native asset slot remains", async () => {
+  const fixture = createBridge()
+  const snapshotInput = inputWithRawAssetsAndStretch(63)
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(
+      Array.from({ length: channels }, () => new Float32Array(frames)),
+      sampleRate,
+    ),
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...snapshotInput,
+      transport,
+    }),
+  })
+
+  expect(await controller.start(snapshotInput.transport)).toBe("started")
+  expect(fixture.installedAssets).toHaveLength(64)
+  await controller.dispose()
+})
+
+test("reports optional native unavailability when packaged playback has no fallback", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const stretchTrack: RuntimeTrack = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      audioWarp: { enabled: true, mode: "stretch", sourceBpm: 200 },
+    }],
+  }
+  const compiled = compileLivePlaybackSnapshot(input(stretchTrack))
+  if (!compiled.supported) throw new Error(compiled.reasons.join(" "))
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectGeneration: () => 0,
+    createBuffer: () => {
+      throw new Error("buffer creation unavailable")
+    },
+    reportFault: (message) => faults.push(message),
+    reportUnavailable: true,
+    compileSnapshot: async () => compiled,
+  })
+
+  expect(await controller.start(compiled.snapshot.transport)).toBe("unavailable")
+  expect(fixture.calls).toEqual([])
+  expect(faults).toEqual(["clip: portable Stretch preparation failed: buffer creation unavailable"])
 })
 
 test("rebuilds a fresh paused native session with a new transport epoch", async () => {
@@ -1137,7 +1374,7 @@ test("filters native spectrum frames by target, revision, epoch, and sequence", 
 
 test("retains the spectrum target while rebuilding the native session", async () => {
   const fixture = createBridge()
-  let projectGeneration = 1
+  let projectGeneration = 0
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
     getProjectGeneration: () => projectGeneration,
@@ -1150,8 +1387,16 @@ test("retains the spectrum target while rebuilding the native session", async ()
   expect(fixture.spectrumNodeIds).toContain(nativeGraphNodeId("track"))
 
   await controller.pause(0.5)
+  const beforeRebuild = {
+    begin: fixture.calls.filter((call) => call === "begin").length,
+    graph: fixture.calls.filter((call) => call === "graph").length,
+    install: fixture.calls.filter((call) => call === "install").length,
+  }
   projectGeneration += 1
   await expect(controller.start({ ...input().transport, playheadSec: 0.5 })).resolves.toBe("started")
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beforeRebuild.begin + 1)
+  expect(fixture.calls.filter((call) => call === "graph")).toHaveLength(beforeRebuild.graph + 1)
+  expect(fixture.calls.filter((call) => call === "install")).toHaveLength(beforeRebuild.install + 1)
   expect(fixture.spectrumNodeIds.at(-1)).toBe(nativeGraphNodeId("track"))
 
   fixture.emitSpectrumFrame({
@@ -1252,6 +1497,27 @@ test("does not claim live MIDI for a track absent from the prepared native graph
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  expect(controller.startLiveMidiNote({
+    trackId: "instrument",
+    pitch: 60,
+    velocity: 0.8,
+  })).toBeUndefined()
+  expect(fixture.instrumentPayloads).toHaveLength(0)
+  await controller.dispose()
+})
+
+test("does not claim live MIDI for an empty instrument track compiled as a source node", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...input(),
+      transport,
+      tracks: [{ ...instrumentTrack, clips: [] }],
+    }),
   })
 
   await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
@@ -1674,6 +1940,62 @@ test("omits arranged MIDI from paused native preview initialization", async () =
   expect(await controller.ensureLivePreview(0.5)).toBe("started")
   expect(fixture.instrumentPayloads).toHaveLength(1)
   expect(nativeInstrumentEventTypes(fixture.instrumentPayloads[0]!)).toEqual([5, 5, 5, 5, 5, 5, 5, 5])
+  await controller.dispose()
+})
+
+test("releases only instrument nodes from the prepared native graph", async () => {
+  const actualInstrumentTrack: RuntimeTrack = {
+    ...instrumentTrack,
+    id: "actual-instrument",
+  }
+  const emptyInstrumentTrack: RuntimeTrack = {
+    ...instrumentTrack,
+    id: "empty-instrument",
+    clips: [],
+  }
+  const snapshotInput: LivePlaybackSnapshotInput = {
+    ...input(),
+    tracks: [actualInstrumentTrack, emptyInstrumentTrack],
+    renderState: {
+      fx: {
+        masterVolume: 1,
+        masterFxInstances: [],
+        trackFx: {
+          "actual-instrument": {
+            instances: [],
+            instrument: {
+              kind: "synth",
+              instanceId: "synth:actual",
+              params: createDefaultSynthParams(),
+            },
+          },
+        },
+      },
+      automationEnvelopes: [],
+    },
+  }
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+
+  await expect(controller.start(snapshotInput.transport)).resolves.toBe("started")
+  const initialPayloadCount = fixture.instrumentPayloads.length
+  await controller.pause(0.5)
+
+  const releaseEvents = nativeTransportReleaseEvents(
+    fixture.instrumentPayloads.slice(initialPayloadCount),
+  )
+  expect(releaseEvents).toEqual([{
+    nodeId: nativeGraphNodeId("actual-instrument"),
+    type: 103,
+  }])
+  expect(releaseEvents).not.toContainEqual({
+    nodeId: nativeGraphNodeId("empty-instrument"),
+    type: 103,
+  })
+
   await controller.dispose()
 })
 

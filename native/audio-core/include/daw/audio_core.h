@@ -144,6 +144,10 @@ typedef enum daw_audio_graph_node_kind {
   DAW_AUDIO_GRAPH_NODE_INSTRUMENT = 5
 } daw_audio_graph_node_kind;
 
+/* Source nodes with this input bus do not consume physical process input.
+ * Explicit numeric buses, including bus zero, retain their normal behavior. */
+#define DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED UINT32_MAX
+
 typedef enum daw_audio_instrument_kind {
   DAW_AUDIO_INSTRUMENT_KIND_NONE = 0,
   DAW_AUDIO_INSTRUMENT_KIND_SYNTH = 1,

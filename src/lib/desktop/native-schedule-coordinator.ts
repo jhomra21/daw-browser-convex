@@ -12,6 +12,7 @@ import type {
 } from "@daw-browser/audio-engine/native-host-wire"
 import { compilePortableFrameScheduleWindow } from "~/lib/portable-frame-schedule"
 import { projectPortableClipEvents } from "@daw-browser/audio-engine/portable-clip-projector"
+import type { PortablePreparedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-preparation"
 import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-browser/shared"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
@@ -321,6 +322,8 @@ export const createNativeScheduleCoordinator = (input: {
   sampleRateHz: number
   capacity: NativeScheduleCapacity
   assets: readonly NativeSessionAsset[]
+  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  projectGeneration?: number
   startFrame: number
   onFault?: (error: Error) => void
   onHostLoss?: (error?: string) => void
@@ -374,6 +377,9 @@ export const createNativeScheduleCoordinator = (input: {
       channelCount: asset.buffer.numberOfChannels,
     },
   ]))
+  const preparedStretchAssets = new Map(
+    (input.preparedStretchAssets ?? []).map((asset) => [asset.clipId, asset]),
+  )
   const audioTracks = input.snapshot.tracks.filter((track) => track.kind !== "instrument")
 
   const failWaiters = (error: Error) => {
@@ -522,6 +528,9 @@ export const createNativeScheduleCoordinator = (input: {
           emitStartFrame: { start: slice.arrangementStartFrame, end: slice.arrangementEndFrame },
           allowInstruments: false,
           includeStableIdentity: true,
+          preparedStretchAssets,
+          projectGeneration: input.projectGeneration,
+          warpContext: "offline",
         })
       if (!projection.supported) throw new Error(projection.reasons.join(" "))
       for (const event of projection.events) {

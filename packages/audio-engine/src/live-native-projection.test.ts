@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import { compileLiveNativeProjection } from './live-native-projection'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -26,6 +27,31 @@ const clip: Clip<AudioBuffer> = {
   id: 'clip', name: 'clip', color: '#fff', startSec: 0, duration: 1, sourceAssetKey: 'source', buffer,
 }
 
+const preparedStretchAsset = (clipId: string): PortablePreparedStretchAsset => {
+  const assetId = `portable-stretch:1:${clipId}`
+  const planes = [new Float32Array([1, 0.5, 0, -0.5])]
+  return {
+    clipId,
+    sourceAssetKey: 'source',
+    sourceDurationSec: buffer.duration,
+    projectGeneration: 1,
+    projectAssetId: assetId,
+    portableAssetId: assetId,
+    asset: {
+      version: 1,
+      assetId,
+      frameCount: 4,
+      sampleRateHz: 48_000,
+      channelCount: 1,
+    },
+    pcm: { frameCount: 4, planes },
+    transferables: planes.map((plane) => plane.buffer),
+    timelineStartSec: 0,
+    timelineDurationSec: buffer.duration,
+    sourceStartSec: 0,
+  }
+}
+
 const track = (overrides: Partial<Track<AudioBuffer>> = {}): Track<AudioBuffer> => ({
   id: 'track', name: 'track', volume: 0.8, clips: [clip], ...overrides,
 })
@@ -42,6 +68,74 @@ test('projects deterministic copied PCM for supported source-only sessions', () 
     pcm: expect.objectContaining({ planes: [new Float32Array([0, 0.25, -0.5, 1])] }),
   })])
   expect(result.events).toHaveLength(1)
+})
+
+test('preserves external latency and route PDC in the native projection', () => {
+  const result = compileLiveNativeProjection({
+    tracks: [
+      track({ id: 'fast' }),
+      track({ id: 'slow' }),
+    ],
+    bpm: 120,
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    externalLatencyFrames: new Map([['fast', 512]]),
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.graph.nodes.find((node) => node.id === 'fast')).toMatchObject({
+    externalLatencyFrames: 512,
+    latencyFrames: 0,
+  })
+  expect(result.graph.edges.find((edge) => edge.fromNodeId === 'fast')).toMatchObject({
+    pdcDelayFrames: 0,
+  })
+  expect(result.graph.edges.find((edge) => edge.fromNodeId === 'slow')).toMatchObject({
+    pdcDelayFrames: 512,
+  })
+})
+
+test('projects prepared Stretch PCM instead of the raw source asset', () => {
+  const warpedClip = {
+    ...clip,
+    audioWarp: { enabled: true, mode: 'stretch' as const, sourceBpm: 120 },
+  }
+  const prepared = preparedStretchAsset(warpedClip.id)
+  const planes = prepared.pcm.planes
+  const result = compileLiveNativeProjection({
+    tracks: [track({ clips: [warpedClip] })],
+    bpm: 120,
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    projectGeneration: 1,
+    preparedStretchAssets: [prepared],
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets).toEqual([expect.objectContaining({
+    asset: expect.objectContaining({ assetId: prepared.asset.assetId }),
+    pcm: { frameCount: 4, planes },
+  })])
+  expect(result.assets.some(({ asset }) => asset.assetId === 'portable-export:source')).toBeFalse()
+  expect(result.events).toEqual([
+    expect.objectContaining({ assetId: prepared.asset.assetId }),
+  ])
+})
+
+test('keeps disabled Stretch warp on the raw source path', () => {
+  const result = compile([track({
+    clips: [{
+      ...clip,
+      audioWarp: { enabled: false, mode: 'stretch', sourceBpm: 120 },
+    }],
+  })])
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets[0]?.asset.assetId).toBe('portable-export:source')
+  expect(result.events[0]?.assetId).toBe('portable-export:source')
 })
 
 test('rejects unsupported MIDI source events without producing a partial session', () => {
@@ -189,8 +283,14 @@ test('projects native-owned reverb state instead of applying portable fixture ga
 })
 
 test('rejects instrument tracks without native instrument state', () => {
+  const midiClip = {
+    ...clip,
+    sourceAssetKey: undefined,
+    buffer: undefined,
+    midi: { wave: 'sine' as const, notes: [] },
+  }
   const result = compileLiveNativeProjection({
-    tracks: [track({ id: 'instrument', kind: 'instrument' })],
+    tracks: [track({ id: 'instrument', kind: 'instrument', clips: [midiClip] })],
     fx: {
       masterFxInstances: [{
         id: 'native-reverb',
@@ -232,4 +332,65 @@ test('retains empty audio tracks for graph topology without emitting source even
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.map((node) => node.id)).toEqual(['empty-audio', 'instrument', '$master'])
   expect(result.events).toHaveLength(0)
+})
+
+test('allows empty instrument tracks alongside prepared Stretch audio and mixer routing', () => {
+  const stretchClip = {
+    ...clip,
+    id: 'stretch-clip',
+    audioWarp: { enabled: true, mode: 'stretch' as const, sourceBpm: 120 },
+  }
+  const prepared = preparedStretchAsset(stretchClip.id)
+  const audioTracks = Array.from({ length: 6 }, (_, index) => track({
+    id: `audio-${index + 1}`,
+    kind: 'audio',
+    clips: index === 0 ? [stretchClip] : [],
+    outputTargetId: 'group',
+  }))
+  const emptyInstrumentTracks = Array.from({ length: 4 }, (_, index) => track({
+    id: `instrument-${index + 1}`,
+    kind: 'instrument',
+    clips: [],
+    outputTargetId: 'group',
+  }))
+  const result = compileLiveNativeProjection({
+    tracks: [
+      ...audioTracks,
+      ...emptyInstrumentTracks,
+      track({ id: 'group', kind: 'audio', channelRole: 'group', clips: [] }),
+      track({ id: 'return', kind: 'audio', channelRole: 'return', clips: [] }),
+    ],
+    fx: { masterFxInstances: [], trackFx: {} },
+    bpm: 120,
+    sampleRateHz: 48_000,
+    revision: 12,
+    epoch: 1,
+    firstSequence: 1,
+    projectGeneration: 1,
+    preparedStretchAssets: [prepared],
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.graph.nodes.map((node) => node.id)).toEqual([
+    'audio-1', 'audio-2', 'audio-3', 'audio-4', 'audio-5', 'audio-6',
+    'instrument-1', 'instrument-2', 'instrument-3', 'instrument-4',
+    'group', 'return', '$master',
+  ])
+  expect(result.graph.nodes.slice(6, 10).map((node) => node.kind)).toEqual([
+    'source', 'source', 'source', 'source',
+  ])
+  expect(result.graph.edges).toContainEqual(expect.objectContaining({
+    fromNodeId: 'instrument-1',
+    toNodeId: 'group',
+    kind: 'output',
+  }))
+  expect(result.assets).toEqual([expect.objectContaining({
+    asset: expect.objectContaining({ assetId: prepared.asset.assetId }),
+  })])
+  expect(result.events).toEqual([
+    expect.objectContaining({
+      sourceNodeId: 'audio-1',
+      assetId: prepared.asset.assetId,
+    }),
+  ])
 })

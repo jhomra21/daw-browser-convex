@@ -222,6 +222,11 @@ export function useTimelinePlayback(
     bridge: audioHostBridge,
     getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
+    reportUnavailable: import.meta.env.VITE_DESKTOP === "true",
+    createBuffer: (channels, frames, sampleRate) => (
+      audioEngine.getAudioContext?.()?.createBuffer(channels, frames, sampleRate)
+      ?? new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate })
+    ),
     compileSnapshot: nativeOptions?.compileSnapshot ?? (async () => ({
       supported: false,
       reasons: ['Native playback is not configured.'],
@@ -233,7 +238,10 @@ export function useTimelinePlayback(
         return
       }
       setActiveBackend('idle')
-      if (!isPlaying()) return
+      if (!isPlaying()) {
+        if (requiresNativeAudio) nativeOptions?.reportFault?.(message)
+        return
+      }
       setIsPlaying(false)
       cancelRaf()
       nativeOptions?.reportFault?.(message)
@@ -625,6 +633,7 @@ export function useTimelinePlayback(
       const resumeNative = nativePlayback.isPrepared()
       if (nativeLifecycleReady
         && (requiresNativeAudio || resumeNative || nativeOptions?.enabled?.())) {
+        lastNativeFault = undefined
         playAttemptPhase = {
           token,
           backend: 'native',
@@ -645,6 +654,7 @@ export function useTimelinePlayback(
         }
         playAttemptPhase = undefined
         if (requiresNativeAudio) {
+          if (lastNativeFault) return
           nativeOptions?.reportFault?.(
             nativeStart === "blocked"
               ? "Native audio playback is blocked for the current project."

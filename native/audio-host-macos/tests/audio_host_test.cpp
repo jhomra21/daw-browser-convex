@@ -1,5 +1,6 @@
 #include "daw/audio_host_macos.h"
 #include "daw/audio_host_event_scheduler.h"
+#include "daw/audio_core_native.h"
 #include "daw/audio_host_macos.h"
 
 #include <array>
@@ -183,6 +184,23 @@ std::vector<std::uint8_t> InstrumentStatePayload(const float output_gain) {
   AppendLeU32(payload, 0);
   const auto* bytes = reinterpret_cast<const std::uint8_t*>(&state);
   payload.insert(payload.end(), bytes, bytes + sizeof(state));
+  return payload;
+}
+
+std::vector<std::uint8_t> UrgentTransportRelease(const std::uint32_t epoch) {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU32(payload, epoch);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, static_cast<std::uint32_t>(
+    daw::audio_core::NativeInstrumentEventType::kTransportRelease
+  ));
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeFloat(payload, 0.0F);
   return payload;
 }
 
@@ -562,6 +580,36 @@ void TestOfflineStartProcessesWithoutDevice() {
   std::array<float, 4> output_right{};
   const std::array<float*, 2> output{output_left.data(), output_right.data()};
   assert(host.ProcessPlanar(input, output, 4));
+  host.Stop();
+}
+
+void TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareGraphRevision(1, InstrumentGraphSnapshot(1)).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.ConfigureInstrumentStates(InstrumentStatePayload(0.5F)));
+  assert(host.PublishGraphRevision(1).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  assert(host.SetTransport(1, true, 0));
+  assert(host.QueueInstrumentEvents(UrgentTransportRelease(1)));
+  assert(host.SetTransport(2, true, 0));
+  assert(host.StartOffline());
+
+  std::array<float, 4> input_left{};
+  std::array<float, 4> input_right{};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  assert(host.diagnostics().rejected_blocks == 0);
   host.Stop();
 }
 
@@ -1218,6 +1266,7 @@ int main() {
   TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();
+  TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance();
   TestPausedProcessDoesNotAdvanceTransportFrame();
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();
   TestNativeMeterQueueAggregatesPostGraphOutput();

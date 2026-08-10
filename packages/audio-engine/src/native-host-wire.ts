@@ -17,6 +17,7 @@ import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-prot
 const graphEnvelopeVersion = 3
 const graphEnvelopeVersionExternalLatency = 4
 const nativeGraphFrameHeaderBytes = 12
+const nativeDisconnectedSourceBus = 0xffff_ffff
 const maximumNativeAssetId = 0xffff_ffff
 const nativeTextEncoder = new TextEncoder()
 
@@ -294,7 +295,12 @@ export const nativeProcessorLayoutsForState = (
  * Only portable projections enter this boundary; file paths and Web Audio
  * objects never cross into the native host.
  */
-export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) => {
+type SourceBusPolicy = (sourceBus: number) => number
+
+const encodeGraphEnvelope = (
+  snapshot: AudioCoreGraphSnapshot,
+  sourceBusPolicy: SourceBusPolicy,
+) => {
   const processorLayouts = new Map<number, { input: 'mono' | 'stereo'; output: 'mono' | 'stereo' }>()
   const processors = snapshot.nodes.flatMap((node) => {
     let layout = node.inputLayout
@@ -328,7 +334,7 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
     view.setUint32(offset + 8, nodeKind(node.kind), true)
     view.setUint32(offset + 12, node.inputLayout === "mono" ? 1 : 2, true)
     view.setUint32(offset + 16, node.outputLayout === "mono" ? 1 : 2, true)
-    view.setUint32(offset + 20, node.kind === "source" ? sourceBus++ : 0, true)
+    view.setUint32(offset + 20, node.kind === "source" ? sourceBusPolicy(sourceBus++) : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
     const instrumentOffset = hasExtendedNode ? offset + 32 : offset + 28
     if (hasExtendedNode) {
@@ -384,8 +390,11 @@ export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
   return output
 }
 
+export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
+  encodeGraphEnvelope(snapshot, (sourceBus) => sourceBus)
+
 export const serializeNativeGraph = (snapshot: AudioCoreGraphSnapshot) => {
-  const output = encodePortableGraphEnvelope(snapshot)
+  const output = encodeGraphEnvelope(snapshot, () => nativeDisconnectedSourceBus)
   const frame = new Uint8Array(nativeGraphFrameHeaderBytes + output.byteLength)
   const frameView = new DataView(frame.buffer)
   frameView.setBigUint64(0, BigInt(snapshot.revision), false)

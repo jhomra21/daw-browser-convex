@@ -6,6 +6,7 @@ import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capa
 import type { ExportFx } from './export-types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
+import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
 export type LiveNativePcmAsset = {
   asset: { assetId: string; frameCount: number; sampleRateHz: number; channelCount: number }
@@ -30,6 +31,8 @@ export type LiveNativeProjectionInput = {
   firstSequence: number
   fx?: ExportFx
   externalLatencyFrames?: ExternalNodeLatencyFrames
+  projectGeneration?: number
+  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
 }
 
 export type LiveNativeCapabilityMatrix = {
@@ -107,7 +110,9 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
   const fx = normalizeNativeFx(input.fx)
   const tracks = input.tracks
   const instrumentReasons = tracks.flatMap((track) => (
-    track.kind === 'instrument' && !fx?.trackFx?.[track.id]?.instrument
+    track.kind === 'instrument'
+      && track.clips.length > 0
+      && !fx?.trackFx?.[track.id]?.instrument
       ? [`${track.id}: native instrument state is unavailable.`]
       : []
   ))
@@ -118,10 +123,12 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     range: { mode: 'whole' },
     fx,
     sidechainRoutes: undefined,
+    externalLatencyFrames: input.externalLatencyFrames,
+    projectGeneration: input.projectGeneration,
+    preparedStretchAssets: input.preparedStretchAssets,
     hasExternalPlugins: false,
     allowInstruments: true,
     capabilityTarget: 'native',
-    externalLatencyFrames: input.externalLatencyFrames,
   })
   if (!compiled.supported) return compiled
   return {

@@ -197,7 +197,7 @@ export default function EffectShell(props: EffectShellProps) {
               type="button"
               data-device-interactive="true"
               class={cn(
-                'flex min-h-6 min-w-6 shrink-0 items-center justify-center border-t border-border text-[10px] [writing-mode:vertical-rl] disabled:cursor-not-allowed disabled:opacity-50',
+                'flex min-h-6 min-w-6 shrink-0 items-center justify-center border-t border-border text-[10px] disabled:cursor-not-allowed disabled:opacity-50',
                 props.enabled
                   ? 'bg-cyan-500/10 text-cyan-300'
                   : 'bg-transparent text-muted-foreground',
@@ -206,7 +206,9 @@ export default function EffectShell(props: EffectShellProps) {
               aria-label={props.enabled ? `Disable ${props.title}` : `Enable ${props.title}`}
               onClick={() => onToggleEnabled(!props.enabled)}
             >
-              {props.enabled ? 'On' : 'Off'}
+              <span class="[writing-mode:vertical-rl] rotate-180">
+                {props.enabled ? 'On' : 'Off'}
+              </span>
             </button>
           )}
         </Show>

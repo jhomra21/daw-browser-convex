@@ -72,11 +72,10 @@ export const getEffectTiming = (
   }
   if (input.kind === 'reverb') {
     const normalized = normalizeReverbParams(input.params)
+    if (!normalized.enabled || normalized.wet === 0) return { latencyFrames: 0, tail: finite(0) }
     return {
       latencyFrames: 0,
-      tail: finite(normalized.enabled
-        ? (normalized.preDelayMs / 1000 + normalized.decaySec) * rate
-        : 0),
+      tail: finite((normalized.preDelayMs / 1000 + normalized.decaySec) * rate),
     }
   }
   if (input.kind === 'chorus' || input.kind === 'flanger') {

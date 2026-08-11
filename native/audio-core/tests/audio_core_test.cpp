@@ -741,12 +741,13 @@ void test_same_core_processor_state_patch_preserves_revision() {
   write_u32(28, DAW_AUDIO_UTILITY_MATRIX_STEREO);
   write_u32(32, 0);
   write_u32(36, 0);
+  const std::array<uint32_t, 3> targets{4, 1, 2};
   const daw_audio_processor_descriptor processor{
     .node_id = 2, .instance_id = 77, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
     .state_version = 1, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .latency_frames = 0, .tail_frames = 0, .parameter_count = 0,
-    .parameter_targets = nullptr, .state = state.data(),
+    .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(targets.size()),
+    .parameter_targets = targets.data(), .state = state.data(),
   };
   daw_audio_core_handle core = create_core(8, 2, 1);
   const daw_audio_graph_prepare_request request{
@@ -771,8 +772,8 @@ void test_same_core_processor_state_patch_preserves_revision() {
     .graph_revision = 9, .node_id = 2, .instance_id = 77, .kind = DAW_AUDIO_PROCESSOR_KIND_UTILITY,
     .state_version = 1, .state_size = static_cast<std::uint32_t>(state.size()), .bypassed = 0,
     .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-    .parameter_count = 0, .latency_frames = 0, .tail_frames = 96'960,
-    .parameter_targets = nullptr, .state = state.data(),
+    .parameter_count = static_cast<uint32_t>(targets.size()), .latency_frames = 0, .tail_frames = 96'960,
+    .parameter_targets = targets.data(), .state = state.data(),
   };
   expect(daw_audio_core_stage_processor_state_patch(core, &patch), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_stage_processor_state_patch(core, &patch), DAW_AUDIO_CORE_OK);
@@ -784,6 +785,11 @@ void test_same_core_processor_state_patch_preserves_revision() {
   output_left.fill(0.0F); output_right.fill(0.0F);
   expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
   assert(output_left[0] > 1.9F && output_left[0] < 2.1F);
+
+  const std::array<uint32_t, 3> different_targets{4, 1, 3};
+  daw_audio_processor_state_patch different_patch = patch;
+  different_patch.parameter_targets = different_targets.data();
+  expect(daw_audio_core_stage_processor_state_patch(core, &different_patch), DAW_AUDIO_CORE_STALE_REVISION);
 
   daw_audio_graph_prepare_request next_request = request;
   next_request.graph_revision = 10;
@@ -1038,6 +1044,35 @@ void test_processor_chain_prepare_and_dispatch() {
   mismatch_request.graph_revision = 2;
   mismatch_request.processors = &mismatched;
   expect(daw_audio_core_prepare_graph(core, &mismatch_request), DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID);
+  std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS + 1> oversized_targets{};
+  for (uint32_t index = 0; index < oversized_targets.size(); ++index) {
+    oversized_targets[index] = DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB;
+  }
+  daw_audio_processor_descriptor too_many_targets = processor;
+  too_many_targets.parameter_count = static_cast<uint32_t>(oversized_targets.size());
+  too_many_targets.parameter_targets = oversized_targets.data();
+  daw_audio_graph_prepare_request too_many_targets_request = request;
+  too_many_targets_request.graph_revision = 2;
+  too_many_targets_request.processors = &too_many_targets;
+  expect(daw_audio_core_prepare_graph(core, &too_many_targets_request), DAW_AUDIO_CORE_INVALID_ARGUMENT);
+  daw_audio_processor_descriptor null_targets = processor;
+  null_targets.parameter_count = 1;
+  null_targets.parameter_targets = nullptr;
+  daw_audio_graph_prepare_request null_targets_request = request;
+  null_targets_request.graph_revision = 2;
+  null_targets_request.processors = &null_targets;
+  expect(daw_audio_core_prepare_graph(core, &null_targets_request), DAW_AUDIO_CORE_INVALID_ARGUMENT);
+  const std::array<uint32_t, 2> duplicate_targets{
+    DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB,
+    DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB,
+  };
+  daw_audio_processor_descriptor duplicate_targets_descriptor = processor;
+  duplicate_targets_descriptor.parameter_count = static_cast<uint32_t>(duplicate_targets.size());
+  duplicate_targets_descriptor.parameter_targets = duplicate_targets.data();
+  daw_audio_graph_prepare_request duplicate_targets_request = request;
+  duplicate_targets_request.graph_revision = 2;
+  duplicate_targets_request.processors = &duplicate_targets_descriptor;
+  expect(daw_audio_core_prepare_graph(core, &duplicate_targets_request), DAW_AUDIO_CORE_INVALID_ARGUMENT);
   std::array<uint8_t, 32> saturator_state{};
   const auto write_saturator_u32 = [&saturator_state](uint32_t offset, uint32_t value) {
     saturator_state[offset] = static_cast<uint8_t>(value);
@@ -1069,6 +1104,64 @@ void test_processor_chain_prepare_and_dispatch() {
   saturator_request.graph_revision = 2;
   saturator_request.processors = &saturator;
   expect(daw_audio_core_prepare_graph(core, &saturator_request), DAW_AUDIO_CORE_OK);
+  std::array<uint8_t, 36> lofi_state{};
+  const auto write_lofi_u32 = [&lofi_state](uint32_t offset, uint32_t value) {
+    lofi_state[offset] = static_cast<uint8_t>(value);
+    lofi_state[offset + 1] = static_cast<uint8_t>(value >> 8u);
+    lofi_state[offset + 2] = static_cast<uint8_t>(value >> 16u);
+    lofi_state[offset + 3] = static_cast<uint8_t>(value >> 24u);
+  };
+  const auto write_lofi_f32 = [&lofi_state, &write_lofi_u32](uint32_t offset, float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    write_lofi_u32(offset, bits);
+  };
+  write_lofi_u32(0, 1);
+  write_lofi_u32(4, 12);
+  write_lofi_f32(8, 0.5F);
+  write_lofi_f32(12, 0.2F);
+  write_lofi_f32(16, -60.0F);
+  write_lofi_u32(20, DAW_AUDIO_LOFI_QUANTIZATION_ROUND);
+  write_lofi_u32(24, DAW_AUDIO_LOFI_DITHER_TRIANGULAR);
+  write_lofi_f32(28, 1.0F);
+  write_lofi_u32(32, 123);
+  const std::array<uint32_t, 5> lofi_targets{41, 42, 43, 44, 131};
+  const daw_audio_processor_descriptor lofi{
+    .node_id = 2, .instance_id = 44, .kind = DAW_AUDIO_PROCESSOR_KIND_LOFI,
+    .state_version = 1, .state_size = static_cast<uint32_t>(lofi_state.size()), .bypassed = 0,
+    .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .latency_frames = 0, .tail_frames = 0, .parameter_count = static_cast<uint32_t>(lofi_targets.size()),
+    .parameter_targets = lofi_targets.data(), .state = lofi_state.data(),
+  };
+  daw_audio_graph_prepare_request lofi_request = request;
+  lofi_request.graph_revision = 3;
+  lofi_request.processors = &lofi;
+  expect(daw_audio_core_prepare_graph(core, &lofi_request), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_publish(core, 3), DAW_AUDIO_CORE_OK);
+  const std::array<float, 1> lofi_input{0.25F};
+  const float *lofi_inputs[]{lofi_input.data(), lofi_input.data()};
+  std::array<float, 1> lofi_left{};
+  std::array<float, 1> lofi_right{};
+  float *lofi_outputs[]{lofi_left.data(), lofi_right.data()};
+  const daw_audio_processor_event nonintegral_bit_depth{
+    .processor_instance_id = 44, .parameter_target = 131, .frame_offset = 0, .value = 12.5F,
+  };
+  daw_audio_core_process_block lofi_process{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 1, .channel_count = 2,
+    .input_bus_count = 1, .inputs = lofi_inputs, .outputs = lofi_outputs, .graph_revision = 3,
+    .event_count = 1, .events = &nonintegral_bit_depth,
+  };
+  expect(daw_audio_core_process(core, &lofi_process), DAW_AUDIO_CORE_INVALID_ARGUMENT);
+  const daw_audio_processor_event out_of_range_bit_depth{
+    .processor_instance_id = 44, .parameter_target = 131, .frame_offset = 0, .value = 25.0F,
+  };
+  lofi_process.events = &out_of_range_bit_depth;
+  expect(daw_audio_core_process(core, &lofi_process), DAW_AUDIO_CORE_INVALID_ARGUMENT);
+  const daw_audio_processor_event valid_bit_depth{
+    .processor_instance_id = 44, .parameter_target = 131, .frame_offset = 0, .value = 16.0F,
+  };
+  lofi_process.events = &valid_bit_depth;
+  expect(daw_audio_core_process(core, &lofi_process), DAW_AUDIO_CORE_OK);
   daw_audio_core_destroy(core);
 }
 
@@ -1578,6 +1671,208 @@ void test_eight_delay_fallback_releases_retirement_slots_and_tails() {
   daw_audio_core_destroy(core);
 }
 
+void test_live_delay_and_reverb_retirement_materialization() {
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const daw_audio_graph_edge_descriptor edge{
+    .id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
+    .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
+  };
+  const auto write_u32 = [](uint8_t *state, uint32_t offset, uint32_t value) {
+    state[offset] = static_cast<uint8_t>(value);
+    state[offset + 1] = static_cast<uint8_t>(value >> 8u);
+    state[offset + 2] = static_cast<uint8_t>(value >> 16u);
+    state[offset + 3] = static_cast<uint8_t>(value >> 24u);
+  };
+  const auto write_f32 = [&write_u32](uint8_t *state, uint32_t offset, float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    write_u32(state, offset, bits);
+  };
+
+  const auto run_delay = [&](uint32_t live_target, float live_value, bool expect_late_tail) {
+    std::array<uint8_t, 32> state{};
+    write_u32(state.data(), 0, 1);
+    write_f32(state.data(), 4, 10.0F);
+    write_f32(state.data(), 8, 0.5F);
+    write_f32(state.data(), 12, 1.0F);
+    write_u32(state.data(), 16, 1);
+    write_u32(state.data(), 20, 1);
+    write_f32(state.data(), 24, 120.0F);
+    write_f32(state.data(), 28, 8000.0F);
+    const std::array<uint32_t, 5> targets{5, 6, 7, 8, 9};
+    daw_audio_processor_descriptor processor{
+      .node_id = 2, .instance_id = 501, .kind = DAW_AUDIO_PROCESSOR_KIND_DELAY,
+      .state_version = 1, .state_size = 32, .bypassed = 0,
+      .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .latency_frames = 0, .tail_frames = 1, .parameter_count = static_cast<uint32_t>(targets.size()),
+      .parameter_targets = targets.data(), .state = state.data(),
+    };
+    daw_audio_core_handle core = create_core(512, 2, 1);
+    const daw_audio_graph_prepare_request initial{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+      .processor_count = 1, .nodes = nodes.data(), .edges = &edge, .processors = &processor,
+    };
+    expect(daw_audio_core_prepare_graph(core, &initial), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+    std::array<float, 512> left{};
+    std::array<float, 512> right{};
+    left[0] = 1.0F;
+    const float *inputs[]{left.data(), right.data()};
+    std::array<float, 512> output_left{};
+    std::array<float, 512> output_right{};
+    float *outputs[]{output_left.data(), output_right.data()};
+    const std::array<uint32_t, 1> parameter_targets{live_target};
+    const std::array<float, 1> parameter_values{live_value};
+    const daw_audio_processor_parameter_block parameter_block{
+      .processor_instance_id = 501, .frame_count = 1, .parameter_count = 1,
+      .parameter_targets = parameter_targets.data(), .values = parameter_values.data(),
+    };
+    daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 512, .channel_count = 2,
+      .input_bus_count = 1, .inputs = inputs, .outputs = outputs, .graph_revision = 1,
+      .parameter_block_count = 1, .parameter_blocks = &parameter_block,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    const daw_audio_graph_prepare_request removal{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 2, .node_count = 2, .edge_count = 1,
+      .processor_count = 0, .nodes = nodes.data(), .edges = &edge, .processors = nullptr,
+    };
+    expect(daw_audio_core_prepare_graph(core, &removal), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_publish(core, 2), DAW_AUDIO_CORE_OK);
+    block.graph_revision = 2;
+    block.parameter_block_count = 0;
+    block.parameter_blocks = nullptr;
+    block.event_count = 0;
+    block.events = nullptr;
+    left.fill(0.0F);
+    right.fill(0.0F);
+    float late_peak = 0.0F;
+    for (uint32_t block_index = 0; block_index < 32; ++block_index) {
+      output_left.fill(0.0F);
+      output_right.fill(0.0F);
+      expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+      if (block_index >= 8) {
+        for (uint32_t frame = 0; frame < 512; ++frame) {
+          late_peak = std::max(late_peak, std::max(std::abs(output_left[frame]), std::abs(output_right[frame])));
+        }
+      }
+    }
+    if (expect_late_tail) assert(late_peak > 1e-5F);
+    else assert(late_peak <= 1e-6F);
+    daw_audio_core_destroy(core);
+  };
+
+  run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS, 100.0F, true);
+  run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET, 0.0F, false);
+
+  const auto run_reverb = [&](uint32_t live_target, float live_value, bool expect_late_tail) {
+    std::array<uint8_t, 72> state{};
+    write_u32(state.data(), 0, 1);
+    write_f32(state.data(), 4, 1.0F);
+    write_f32(state.data(), 8, 0.2F);
+    write_f32(state.data(), 12, 20.0F);
+    write_f32(state.data(), 16, 0.5F);
+    write_u32(state.data(), 20, 1);
+    write_f32(state.data(), 24, 5.0F);
+    write_f32(state.data(), 28, 0.3F);
+    write_f32(state.data(), 32, 0.5F);
+    write_f32(state.data(), 36, 1.0F);
+    write_f32(state.data(), 40, 0.5F);
+    write_f32(state.data(), 44, 0.75F);
+    write_f32(state.data(), 48, 0.8F);
+    write_f32(state.data(), 52, 20.0F);
+    write_f32(state.data(), 56, 20'000.0F);
+    write_f32(state.data(), 60, 20.0F);
+    write_f32(state.data(), 64, 20'000.0F);
+    write_f32(state.data(), 68, 1.0F);
+    const std::array<uint32_t, 16> targets{
+      10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
+    };
+    daw_audio_processor_descriptor processor{
+      .node_id = 2, .instance_id = 502, .kind = DAW_AUDIO_PROCESSOR_KIND_REVERB,
+      .state_version = 1, .state_size = 72, .bypassed = 0,
+      .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .latency_frames = 0, .tail_frames = 1, .parameter_count = static_cast<uint32_t>(targets.size()),
+      .parameter_targets = targets.data(), .state = state.data(),
+    };
+    daw_audio_core_handle core = create_core(512, 2, 1);
+    const daw_audio_graph_prepare_request initial{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 1, .node_count = 2, .edge_count = 1,
+      .processor_count = 1, .nodes = nodes.data(), .edges = &edge, .processors = &processor,
+    };
+    expect(daw_audio_core_prepare_graph(core, &initial), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+    std::array<float, 512> left{};
+    std::array<float, 512> right{};
+    left[0] = 1.0F;
+    const float *inputs[]{left.data(), right.data()};
+    std::array<float, 512> output_left{};
+    std::array<float, 512> output_right{};
+    float *outputs[]{output_left.data(), output_right.data()};
+    const std::array<uint32_t, 1> parameter_targets{live_target};
+    const std::array<float, 1> parameter_values{live_value};
+    const daw_audio_processor_parameter_block parameter_block{
+      .processor_instance_id = 502, .frame_count = 1, .parameter_count = 1,
+      .parameter_targets = parameter_targets.data(), .values = parameter_values.data(),
+    };
+    daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 512, .channel_count = 2,
+      .input_bus_count = 1, .inputs = inputs, .outputs = outputs, .graph_revision = 1,
+      .parameter_block_count = 1, .parameter_blocks = &parameter_block,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    const daw_audio_graph_prepare_request removal{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 2, .node_count = 2, .edge_count = 1,
+      .processor_count = 0, .nodes = nodes.data(), .edges = &edge, .processors = nullptr,
+    };
+    expect(daw_audio_core_prepare_graph(core, &removal), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_publish(core, 2), DAW_AUDIO_CORE_OK);
+    block.graph_revision = 2;
+    block.parameter_block_count = 0;
+    block.parameter_blocks = nullptr;
+    block.event_count = 0;
+    block.events = nullptr;
+    left.fill(0.0F);
+    right.fill(0.0F);
+    float late_peak = 0.0F;
+    for (uint32_t block_index = 0; block_index < 64; ++block_index) {
+      output_left.fill(0.0F);
+      output_right.fill(0.0F);
+      expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+      if (block_index >= 16) {
+        for (uint32_t frame = 0; frame < 512; ++frame) {
+          late_peak = std::max(late_peak, std::max(std::abs(output_left[frame]), std::abs(output_right[frame])));
+        }
+      }
+    }
+    if (expect_late_tail) assert(late_peak > 1e-8F);
+    else {
+      assert(late_peak <= 1e-6F);
+      std::array<daw_audio_processor_descriptor, 8> replacements{};
+      for (uint32_t index = 0; index < replacements.size(); ++index) {
+        replacements[index] = processor;
+        replacements[index].instance_id = 600 + index;
+      }
+      const daw_audio_graph_prepare_request replacement{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 3, .node_count = 2, .edge_count = 1,
+        .processor_count = static_cast<uint32_t>(replacements.size()), .nodes = nodes.data(), .edges = &edge,
+        .processors = replacements.data(),
+      };
+      expect(daw_audio_core_prepare_graph(core, &replacement), DAW_AUDIO_CORE_OK);
+      expect(daw_audio_core_publish(core, 3), DAW_AUDIO_CORE_OK);
+    }
+    daw_audio_core_destroy(core);
+  };
+
+  run_reverb(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DECAY_SEC, 2.0F, true);
+  run_reverb(DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET, 0.0F, false);
+}
+
 void test_portable_spectral_processor_characterization_and_capacity() {
   const std::array<daw_audio_graph_node_descriptor, 3> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
@@ -1956,6 +2251,17 @@ void test_sample_source_scheduling() {
   assert(std::abs(left_output[4] - 4.0F) <= 1e-6F);
   assert(std::abs(right_output[4] + 4.0F) <= 1e-6F);
   expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_ASSET_IN_USE);
+
+  const daw_audio_transport_state paused{.epoch = 1, .running = 0, .frame = 5};
+  expect(daw_audio_core_set_transport(core, &paused), DAW_AUDIO_CORE_OK);
+  left_output.fill(1.0F);
+  right_output.fill(-1.0F);
+  daw_audio_core_process_block paused_block = block;
+  paused_block.frame_count = 3;
+  expect(daw_audio_core_process(core, &paused_block), DAW_AUDIO_CORE_OK);
+  for (uint32_t frame = 0; frame < paused_block.frame_count; ++frame) {
+    assert(left_output[frame] == 0.0F && right_output[frame] == 0.0F);
+  }
 
   const daw_audio_transport_state seek{.epoch = 2, .running = 1, .frame = 0};
   expect(daw_audio_core_set_transport(core, &seek), DAW_AUDIO_CORE_OK);
@@ -3290,6 +3596,7 @@ int main() {
   test_portable_dynamics_processor_characterization();
   test_portable_delay_and_reverb_characterization();
   test_eight_delay_fallback_releases_retirement_slots_and_tails();
+  test_live_delay_and_reverb_retirement_materialization();
   test_portable_spectral_processor_characterization_and_capacity();
   test_abi_and_revision_rejection();
   test_same_core_prepared_graph_can_be_cancelled();

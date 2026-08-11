@@ -393,14 +393,18 @@ const parameterEnvelopeForTarget = (target: number, values: readonly number[]) =
   return output
 }
 
-const processorEventEnvelope = () => {
+const processorEventEnvelope = (
+  target = 2,
+  value = 0,
+  frameOffset = 0,
+) => {
   const output = new Uint8Array(24)
   const view = new DataView(output.buffer)
   view.setUint32(0, 1, true)
   view.setBigUint64(4, 11n, true)
-  view.setUint32(12, 2, true)
-  view.setUint32(16, 1, true)
-  view.setFloat32(20, 0, true)
+  view.setUint32(12, target, true)
+  view.setUint32(16, frameOffset, true)
+  view.setFloat32(20, value, true)
   return output
 }
 
@@ -791,6 +795,35 @@ const changedFromInput = (output: readonly Float32Array[], input: Float32Array, 
   output.some((plane, channel) => plane.some((sample, frame) =>
     Math.abs(sample - (input[channel * plane.length + frame] ?? 0)) > tolerance))
 
+const liveControlPair = (
+  fixture: PortableGraphParityFixture,
+  target: number,
+  value: number,
+  minimumDifference = 1e-6,
+): readonly PortableGraphParityFixture[] => {
+  const key = `${fixture.name}-live-control`
+  const maxFramesPerBlock = Math.max(fixture.maxFramesPerBlock, fixture.frames)
+  return [
+    { ...fixture, maxFramesPerBlock, blockPartitions: undefined, characterizationPairKey: key },
+    {
+      ...fixture,
+      name: `${fixture.name}-live-event`,
+      maxFramesPerBlock,
+      blockPartitions: undefined,
+      events: processorEventEnvelope(target, value, Math.min(1, fixture.frames - 1)),
+      legacyModulation: undefined,
+      legacyDynamics: undefined,
+      legacyDelay: undefined,
+      legacyReverb: undefined,
+      legacySpectral: undefined,
+      legacyTolerance: undefined,
+      legacyDifferenceMinimum: undefined,
+      characterizationPairKey: key,
+      characterizationPairDifferenceMinimum: minimumDifference,
+    },
+  ]
+}
+
 const bypassInput = stereo(sine(16, 1_000, 48_000), sine(16, 2_000, 48_000, 0.25))
 
 const variableBlockFixture = (frames: number): PortableGraphParityFixture => ({
@@ -885,6 +918,15 @@ const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
   return encodeEnsembleProcessorState(fixture.state)
 }
 
+const modulationParameterTargets = (kind: PortableModulationKind): readonly number[] => {
+  if (kind === 'chorus') return [74, 75, 76, 77, 78, 79]
+  if (kind === 'flanger') return [80, 81, 82, 83, 84, 85]
+  if (kind === 'phaser') return [86, 87, 88, 89, 90, 91]
+  if (kind === 'tremolo') return [92, 93, 94, 95]
+  if (kind === 'autopan') return [96, 97, 98, 99]
+  return [100, 101, 102, 103, 104]
+}
+
 const modulationStateWith = (
   fixture: PortableLegacyModulationFixture,
   overrides: { enabled?: boolean; phase?: number },
@@ -937,7 +979,7 @@ const modulationFixture = (
       instanceId: 11,
       kindId: definition.kindId,
       state: encodeModulationState(legacy),
-      parameterTargets: [],
+      parameterTargets: modulationParameterTargets(definition.kind),
       bypassed: options.bypassed,
     }),
     frames,
@@ -1012,6 +1054,27 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
       maxFramesPerBlock: 240,
       blockPartitions: [31, 89, 120, 240],
     }),
+    ...liveControlPair(
+      modulationFixture(
+        definition,
+        'live-control-baseline',
+        'fullBlockAutomation',
+        48_000,
+        stereo(sine(2_048, 440, 48_000), sine(2_048, 880, 48_000, 0.25)),
+      ),
+      modulationParameterTargets(definition.kind)[0] ?? 0,
+      definition.kind === 'chorus'
+        ? 20
+        : definition.kind === 'flanger'
+          ? 5
+          : definition.kind === 'phaser'
+            ? 2_000
+            : definition.kind === 'tremolo'
+              ? 8
+              : definition.kind === 'autopan'
+                ? 5
+                : 25,
+    ),
     modulationFixture(definition, 'sweep-96000', 'sampleRates', 96_000, sweepInput, {
       maxFramesPerBlock: 480,
       blockPartitions: [1, 63, 128, 288, 480],
@@ -1126,6 +1189,12 @@ const encodeDynamicsState = (fixture: PortableLegacyDynamicsFixture) => {
   return encodeLimiterProcessorState(fixture.state)
 }
 
+const dynamicsParameterTargets = (kind: PortableDynamicsKind): readonly number[] => {
+  if (kind === 'gate') return Array.from({ length: 11 }, (_, index) => 105 + index)
+  if (kind === 'compressor') return Array.from({ length: 11 }, (_, index) => 116 + index)
+  return [127, 128, 129, 130]
+}
+
 const dynamicsStateWithEnabled = (
   fixture: PortableLegacyDynamicsFixture,
   enabled: boolean,
@@ -1177,7 +1246,7 @@ const dynamicsFixture = (
       instanceId: 11,
       kindId: definition.kindId,
       state: encodeDynamicsState(legacy),
-      parameterTargets: [],
+      parameterTargets: dynamicsParameterTargets(definition.kind),
       latencyFrames,
       tailFrames: 0,
       bypassed: options.bypassed,
@@ -1328,6 +1397,14 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
       maxFramesPerBlock: 480,
       blockPartitions: [31, 89, 120, 240, 480, 480],
     }),
+    ...liveControlPair(
+      dynamicsFixture(definition, 'live-control-baseline', 'fullBlockAutomation', 48_000, sineInput, {
+        maxFramesPerBlock: 480,
+        blockPartitions: [31, 89, 120, 240, 480, 480],
+      }),
+      dynamicsParameterTargets(definition.kind)[0] ?? 0,
+      definition.kind === 'gate' ? -12 : definition.kind === 'compressor' ? -10 : -3,
+    ),
     dynamicsFixture(definition, 'sweep-96000', 'sampleRates', 96_000, sweepInput, {
       maxFramesPerBlock: 960,
       blockPartitions: [1, 63, 128, 288, 480, 960, 960],
@@ -1505,7 +1582,9 @@ const timeEffectFixture = (
       state: kind === 'delay'
         ? encodeDelayProcessorState(state)
         : encodeReverbProcessorState(state),
-      parameterTargets: kind === 'delay' ? [5, 6, 7, 8, 9] : [10, 11, 12, 13, 14],
+      parameterTargets: kind === 'delay'
+        ? [5, 6, 7, 8, 9]
+        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
       latencyFrames: 0,
       tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
       bypassed: options.bypassed,
@@ -1598,7 +1677,7 @@ const reverbCapacityFixture = (processorCount: number): PortableGraphParityFixtu
       instanceId: index + 11,
       kindId: 14,
       state: encodeReverbProcessorState(reverbState),
-      parameterTargets: [10, 11, 12, 13, 14],
+      parameterTargets: [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
     })),
   ),
   frames: 4,
@@ -1643,6 +1722,18 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     48_000,
     stereo(sine(1_200, 1_000, 48_000), sine(1_200, 2_000, 48_000, 0.25)),
     { maxFramesPerBlock: 480, blockPartitions: [31, 89, 120, 240, 480, 240] },
+  ),
+  ...liveControlPair(
+    timeEffectFixture(
+      'delay',
+      'live-control-baseline',
+      'fullBlockAutomation',
+      48_000,
+      stereo(sine(1_200, 1_000, 48_000), sine(1_200, 2_000, 48_000, 0.25)),
+      { maxFramesPerBlock: 480, blockPartitions: [31, 89, 120, 240, 480, 240] },
+    ),
+    5,
+    80,
   ),
   timeEffectFixture(
     'delay',
@@ -1825,6 +1916,23 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     48_000,
     stereo(sine(4_000, 1_000, 48_000), sine(4_000, 2_000, 48_000, 0.25)),
     { maxFramesPerBlock: 1_920, blockPartitions: [31, 89, 120, 240, 480, 960, 1_920, 160] },
+  ),
+  ...liveControlPair(
+    timeEffectFixture(
+      'reverb',
+      'live-control-baseline',
+      'fullBlockAutomation',
+      48_000,
+      stereo([1, ...Array.from({ length: 4_095 }, () => 0)], Array.from({ length: 4_096 }, () => 0)),
+      {
+        state: { ...reverbState, wet: 1 },
+        maxFramesPerBlock: 2_048,
+        blockPartitions: [1, 31, 127, 512, 1_024, 1_024, 377],
+      },
+    ),
+    132,
+    1,
+    1e-7,
   ),
   timeEffectFixture(
     'reverb',
@@ -2149,7 +2257,8 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
   })(),
 ]
 
-const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_000].map((sampleRateHz) => ({
+const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_000].flatMap((sampleRateHz) => {
+  const fixture: PortableGraphParityFixture = {
   name: `lofi-deterministic-stereo-${sampleRateHz}`,
   capability: 'sampleRates' as const,
   processorKind: 'lofi' as const,
@@ -2162,7 +2271,7 @@ const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_
     instanceId: 11,
     kindId: 17,
     state: encodeLoFiProcessorState(loFiState()),
-    parameterTargets: [41, 42, 43, 44],
+    parameterTargets: [41, 42, 43, 44, 131],
   }),
   frames: 64,
   blockPartitions: [1, 7, 3, 17, 2, 11, 23],
@@ -2176,7 +2285,9 @@ const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_
     && output[1] !== undefined
     && output[0].some((sample) => Math.abs(sample) > 1e-4)
     && output[1].some((sample) => Math.abs(sample) > 1e-4),
-}))
+  }
+  return liveControlPair(fixture, 131, 16)
+})
 
 const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
   {
@@ -2419,6 +2530,29 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     input: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0.25, Number.NaN, 0.5, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]),
     assertOutput: finite,
   },
+  ...liveControlPair({
+    name: 'saturator-live-control-baseline',
+    capability: 'fullBlockAutomation',
+    processorKind: 'saturator',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 64,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 2,
+      state: saturatorState(),
+      parameterTargets: [69, 70, 71, 72, 73],
+    }),
+    frames: 64,
+    blockPartitions: [1, 7, 16, 40],
+    input: stereo(sine(64, 440, 48_000), sine(64, 880, 48_000, 0.25)),
+    assertOutput: (output) => finite(output) && changedFromInput(output, stereo(
+      sine(64, 440, 48_000),
+      sine(64, 880, 48_000, 0.25),
+    )),
+  }, 69, 30),
   {
     name: 'saturator-rejects-undeclared-automation',
     capability: 'fullBlockAutomation',
@@ -2545,6 +2679,26 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     input: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0.25, Number.NaN, 0.5, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]),
     assertOutput: finite,
   },
+  ...liveControlPair({
+    name: 'eq-live-control-baseline',
+    capability: 'fullBlockAutomation',
+    processorKind: 'eq',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 64,
+    inputBusCount: 1,
+    channelCount: 2,
+    graph: processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: 3,
+      state: eqState(),
+      parameterTargets: Array.from({ length: 24 }, (_, index) => 45 + index),
+    }),
+    frames: 64,
+    blockPartitions: [1, 7, 16, 40],
+    input: stereo(sine(64, 440, 48_000), sine(64, 880, 48_000, 0.25)),
+    assertOutput: (output) => finite(output),
+  }, 45, 2_000),
   {
     name: 'eq-rejects-undeclared-automation',
     capability: 'fullBlockAutomation',

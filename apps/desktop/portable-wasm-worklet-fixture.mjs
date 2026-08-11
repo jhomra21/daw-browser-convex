@@ -63,6 +63,31 @@ const utilityProcessor = {
   bypassed: false,
 }
 
+const saturatorProcessor = {
+  id: 'saturator-a',
+  kind: 'saturator',
+  kindId: 2,
+  instanceId: 2,
+  stateVersion: 1,
+  state: (() => {
+    const state = new Uint8Array(32)
+    const view = new DataView(state.buffer)
+    view.setUint32(0, 1, true)
+    view.setFloat32(4, 18, true)
+    view.setUint32(8, 2, true)
+    view.setUint32(12, 1, true)
+    view.setFloat32(16, 2500, true)
+    view.setFloat32(20, 0.5, true)
+    view.setFloat32(24, -3, true)
+    view.setFloat32(28, 1, true)
+    return state
+  })(),
+  parameterTargets: [{ id: 'saturator.outputDb', target: 72 }],
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+}
+
 
 const graphSnapshot = {
   version: 1,
@@ -107,7 +132,7 @@ const synthGraphSnapshot = {
       kind: 'instrument',
       inputLayout: 'stereo',
       outputLayout: 'stereo',
-      processorOrder: [utilityProcessor],
+      processorOrder: [utilityProcessor, saturatorProcessor],
       instrument: {
         version: 1,
         kind: 'synth',
@@ -310,7 +335,10 @@ window.runPortableWasmWorkletFixture = (async () => {
   await new Promise((resolve) => setTimeout(resolve, 30))
   const pausedLeft = readChannelDiagnostics(leftAnalyser)
   const pausedRight = readChannelDiagnostics(rightAnalyser)
-  assert(pausedLeft.maximumAbsolute < 0.0001 && pausedRight.maximumAbsolute < 0.0001, 'The portable clip did not become silent while paused.')
+  assert(
+    pausedLeft.maximumAbsolute < 0.0001 && pausedRight.maximumAbsolute < 0.0001,
+    `The portable clip did not become silent while paused: left=${pausedLeft.maximumAbsolute}, right=${pausedRight.maximumAbsolute}.`,
+  )
   node.port.postMessage({
     version: protocolVersion,
     type: 'transport',
@@ -378,12 +406,31 @@ window.runPortableWasmWorkletFixture = (async () => {
       value: -12,
     }],
   })
-  const liveApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 12, 'live processor update')
-  assert(liveApplied.result === 'applied', `The portable live processor update was not applied: ${liveApplied.result}.`)
+  const utilityApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 12, 'Utility live processor update')
+  assert(utilityApplied.result === 'applied', `The portable Utility live processor update was not applied: ${utilityApplied.result}.`)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const liveAfterUtility = readChannelDiagnostics(leftAnalyser)
+  assert(liveBefore.maximumAbsolute > 0.1, `The portable live-control signal was not active before the update: ${liveBefore.maximumAbsolute}.`)
+  assert(liveAfterUtility.maximumAbsolute > 0.01 && liveAfterUtility.maximumAbsolute < liveBefore.maximumAbsolute * 0.95, `The portable Utility live processor update did not change the ongoing signal: before=${liveBefore.maximumAbsolute}, after=${liveAfterUtility.maximumAbsolute}.`)
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'processor-events',
+    requestId: 17,
+    revision: 2,
+    epoch: 2,
+    sequence: 2,
+    events: [{
+      processorInstanceId: 2,
+      parameterTarget: 72,
+      frameOffset: 0,
+      value: -18,
+    }],
+  })
+  const saturatorApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 17, 'Saturator live processor update')
+  assert(saturatorApplied.result === 'applied', `The portable Saturator live processor update was not applied: ${saturatorApplied.result}.`)
   await new Promise((resolve) => setTimeout(resolve, 50))
   const liveAfter = readChannelDiagnostics(leftAnalyser)
-  assert(liveBefore.maximumAbsolute > 0.1, `The portable live-control signal was not active before the update: ${liveBefore.maximumAbsolute}.`)
-  assert(liveAfter.maximumAbsolute > 0.01 && liveAfter.maximumAbsolute < liveBefore.maximumAbsolute * 0.5, `The portable live processor update did not change the ongoing signal: before=${liveBefore.maximumAbsolute}, after=${liveAfter.maximumAbsolute}.`)
+  assert(liveAfter.maximumAbsolute > 0.01 && liveAfter.maximumAbsolute < liveAfterUtility.maximumAbsolute * 0.5, `The portable Saturator live processor update did not change the ongoing signal: before=${liveAfterUtility.maximumAbsolute}, after=${liveAfter.maximumAbsolute}.`)
   await new Promise((resolve) => setTimeout(resolve, 150))
   const synthTail = readChannelDiagnostics(leftAnalyser)
   assert(synthTail.maximumAbsolute > 0.0001, 'The portable synth release tail was not rendered after note-off.')
@@ -418,6 +465,7 @@ window.runPortableWasmWorkletFixture = (async () => {
       },
     },
     maximumAbsoluteLiveBefore: liveBefore.maximumAbsolute,
+    maximumAbsoluteLiveAfterUtility: liveAfterUtility.maximumAbsolute,
     maximumAbsoluteLiveAfter: liveAfter.maximumAbsolute,
     maximumAbsoluteSynthTailSample: synthTail.maximumAbsolute,
     memoryBytes: health.memoryBytes,

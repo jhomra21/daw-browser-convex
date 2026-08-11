@@ -95,13 +95,13 @@
               "required": ["enabled", "driveDb", "curve", "color", "colorFrequencyHz", "colorAmount", "outputDb", "dryWet"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "driveDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 36 },
+                "driveDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 36, "portableParameter": true},
                 "curve": { "enum": ["soft", "medium", "hard", "clip"] },
                 "color": { "type": "boolean" },
-                "colorFrequencyHz": { "type": "number", "default": 1200, "minimum": 100, "maximum": 10000 },
-                "colorAmount": { "type": "number", "default": 0, "minimum": 0, "maximum": 1 },
-                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12 },
-                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 }
+                "colorFrequencyHz": { "type": "number", "default": 1200, "minimum": 100, "maximum": 10000, "portableParameter": true},
+                "colorAmount": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true},
+                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -153,12 +153,12 @@
               "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "delayMs": { "type": "number", "default": 12, "minimum": 5, "maximum": 30 },
-                "depthMs": { "type": "number", "default": 4, "minimum": 0, "maximum": 10 },
-                "rateHz": { "type": "number", "default": 0.8, "minimum": 0.01, "maximum": 20 },
-                "feedback": { "type": "number", "default": 0, "minimum": 0, "maximum": 0.5 },
-                "stereoPhase": { "type": "number", "default": 0.25, "minimum": -0.5, "maximum": 0.5 },
-                "mix": { "type": "number", "default": 0.35, "minimum": 0, "maximum": 1 }
+                "delayMs": { "type": "number", "default": 12, "minimum": 5, "maximum": 30, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 4, "minimum": 0, "maximum": 10, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.8, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0, "minimum": 0, "maximum": 0.5, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.25, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.35, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -173,12 +173,12 @@
               "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "delayMs": { "type": "number", "default": 1.5, "minimum": 0.1, "maximum": 10 },
-                "depthMs": { "type": "number", "default": 1, "minimum": 0, "maximum": 5 },
-                "rateHz": { "type": "number", "default": 0.2, "minimum": 0.01, "maximum": 20 },
-                "feedback": { "type": "number", "default": 0.35, "minimum": -0.95, "maximum": 0.95 },
-                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5 },
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 }
+                "delayMs": { "type": "number", "default": 1.5, "minimum": 0.1, "maximum": 10, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 1, "minimum": 0, "maximum": 5, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.2, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0.35, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -193,12 +193,12 @@
               "required": ["enabled", "stages", "centerHz", "depthOctaves", "rateHz", "feedback", "stereoPhase", "mix"],
               "properties": {
                 "enabled": { "type": "boolean" }, "stages": { "enum": [4, 6, 8, 12] },
-                "centerHz": { "type": "number", "default": 1000, "minimum": 100, "maximum": 8000 },
-                "depthOctaves": { "type": "number", "default": 3, "minimum": 0, "maximum": 5 },
-                "rateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 20 },
-                "feedback": { "type": "number", "default": 0.3, "minimum": -0.95, "maximum": 0.95 },
-                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5 },
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 }
+                "centerHz": { "type": "number", "default": 1000, "minimum": 100, "maximum": 8000, "portableParameter": true},
+                "depthOctaves": { "type": "number", "default": 3, "minimum": 0, "maximum": 5, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0.3, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -213,10 +213,10 @@
               "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
               "properties": {
                 "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
-                "rateHz": { "type": "number", "default": 4, "minimum": 0.01, "maximum": 20 },
-                "depth": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 },
-                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 },
-                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1 }
+                "rateHz": { "type": "number", "default": 4, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "depth": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -231,10 +231,10 @@
               "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
               "properties": {
                 "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
-                "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20 },
-                "depth": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 },
-                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 },
-                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1 }
+                "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "depth": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -249,11 +249,11 @@
               "required": ["enabled", "voices", "delayMs", "depthMs", "rateHz", "spread", "mix"],
               "properties": {
                 "enabled": { "type": "boolean" }, "voices": { "const": 3 },
-                "delayMs": { "type": "number", "default": 18, "minimum": 10, "maximum": 30 },
-                "depthMs": { "type": "number", "default": 6, "minimum": 1, "maximum": 12 },
-                "rateHz": { "type": "number", "default": 0.6, "minimum": 0.05, "maximum": 5 },
-                "spread": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 },
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 }
+                "delayMs": { "type": "number", "default": 18, "minimum": 10, "maximum": 30, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 6, "minimum": 1, "maximum": 12, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.6, "minimum": 0.05, "maximum": 5, "portableParameter": true},
+                "spread": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
               }
             }
           }
@@ -268,17 +268,17 @@
               "required": ["enabled", "mode", "thresholdDb", "ratio", "attackMs", "holdMs", "releaseMs", "hysteresisDb", "rangeDb", "lookaheadMs", "detector", "link", "sidechain"],
               "properties": {
                 "enabled": { "type": "boolean" }, "mode": { "enum": ["gate", "expander"] },
-                "thresholdDb": { "type": "number", "default": -40, "minimum": -80, "maximum": 0 },
-                "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 20 },
-                "attackMs": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 100 },
-                "holdMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 500 },
-                "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 2000 },
-                "hysteresisDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24 },
-                "rangeDb": { "type": "number", "default": -80, "minimum": -80, "maximum": 0 },
-                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 2 },
-                "detector": { "enum": ["peak", "rms"] }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 },
+                "thresholdDb": { "type": "number", "default": -40, "minimum": -80, "maximum": 0, "portableParameter": true},
+                "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 20, "portableParameter": true},
+                "attackMs": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 100, "portableParameter": true},
+                "holdMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 500, "portableParameter": true},
+                "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 2000, "portableParameter": true},
+                "hysteresisDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
+                "rangeDb": { "type": "number", "default": -80, "minimum": -80, "maximum": 0, "portableParameter": true},
+                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "detector": { "enum": ["peak", "rms"] }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
                 "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "frequencyHz", "q"], "properties": {
-                  "enabled": { "type": "boolean" }, "frequencyHz": { "type": "number", "default": 80, "minimum": 20, "maximum": 20000 }, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18 }
+                  "enabled": { "type": "boolean" }, "frequencyHz": { "type": "number", "default": 80, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
                 }}
               }
             }
@@ -293,13 +293,13 @@
               "type": "object", "additionalProperties": false,
               "required": ["enabled", "thresholdDb", "ratio", "attackMs", "releaseMs", "autoRelease", "makeupDb", "outputDb", "dryWet", "kneeDb", "lookaheadMs", "detectorMode", "dynamicsMode", "envelopeCurve", "sidechain"],
               "properties": {
-                "enabled": { "type": "boolean" }, "thresholdDb": { "type": "number", "default": -24, "minimum": -60, "maximum": 0 }, "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 100 },
-                "attackMs": { "type": "number", "default": 10, "minimum": 0.1, "maximum": 100 }, "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 1000 },
-                "autoRelease": { "type": "boolean" }, "makeupDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36 }, "outputDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36 },
-                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 }, "kneeDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24 },
-                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 10 }, "detectorMode": { "enum": ["peak", "rms"] }, "dynamicsMode": { "enum": ["compress", "expand"] }, "envelopeCurve": { "enum": ["log", "linear"] },
+                "enabled": { "type": "boolean" }, "thresholdDb": { "type": "number", "default": -24, "minimum": -60, "maximum": 0, "portableParameter": true}, "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 100, "portableParameter": true},
+                "attackMs": { "type": "number", "default": 10, "minimum": 0.1, "maximum": 100, "portableParameter": true}, "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 1000, "portableParameter": true},
+                "autoRelease": { "type": "boolean" }, "makeupDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true}, "outputDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true},
+                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "kneeDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
+                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 10, "portableParameter": true}, "detectorMode": { "enum": ["peak", "rms"] }, "dynamicsMode": { "enum": ["compress", "expand"] }, "envelopeCurve": { "enum": ["log", "linear"] },
                 "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "filterType", "frequencyHz", "q"], "properties": {
-                  "enabled": { "type": "boolean" }, "filterType": { "enum": ["lowpass", "highpass", "bandpass"] }, "frequencyHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 20000 }, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18 }
+                  "enabled": { "type": "boolean" }, "filterType": { "enum": ["lowpass", "highpass", "bandpass"] }, "frequencyHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
                 }}
               }
             }
@@ -311,7 +311,7 @@
           "properties": {
             "id": { "const": 12 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
             "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "ceilingDbtp", "releaseMs", "lookaheadMs", "link", "detectorOversampling"], "properties": {
-              "enabled": { "type": "boolean" }, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0 }, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000 }, "lookaheadMs": { "type": "number", "default": 5, "minimum": 1, "maximum": 5 }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 }, "detectorOversampling": { "const": 4 }
+              "enabled": { "type": "boolean" }, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0, "portableParameter": true, "portableParameterId": "ceiling"}, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true, "portableParameterId": "release"}, "lookaheadMs": { "type": "number", "default": 5, "minimum": 1, "maximum": 5, "portableParameter": true}, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "detectorOversampling": { "const": 4 }
             }}
           }
         },
@@ -322,7 +322,7 @@
             "id": { "const": 17 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 36 }, "tombstone": { "const": false },
             "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "bitDepth", "sampleRateRatio", "jitter", "noiseDb", "quantization", "dither", "mix", "seed"], "properties": {
               "enabled": { "type": "boolean" },
-              "bitDepth": { "type": "number", "default": 12, "minimum": 2, "maximum": 24 },
+              "bitDepth": { "type": "number", "default": 12, "minimum": 2, "maximum": 24, "portableParameter": true},
               "sampleRateRatio": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 1, "portableParameter": true },
               "jitter": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
               "noiseDb": { "type": "number", "default": -80, "minimum": -120, "maximum": -24, "portableParameter": true },
@@ -339,7 +339,7 @@
           "properties": {
             "id": { "const": 13 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 32 }, "tombstone": { "const": false },
             "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "delayMs", "feedback", "dryWet", "pingPong", "filterEnabled", "lowCutHz", "highCutHz"], "properties": {
-              "enabled": { "type": "boolean" }, "delayMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 3000, "portableParameter": true },
+              "enabled": { "type": "boolean" }, "delayMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 3000, "portableParameter": true, "portableParameterId": "timeMs" },
               "feedback": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 0.95, "portableParameter": true },
               "dryWet": { "type": "number", "default": 0.2, "minimum": 0, "maximum": 1, "portableParameter": true },
               "pingPong": { "type": "boolean" }, "filterEnabled": { "type": "boolean" },
@@ -355,20 +355,20 @@
             "id": { "const": 14 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 72 }, "tombstone": { "const": false },
             "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "wet", "decaySec", "preDelayMs", "reflections", "reflectionSpin", "reflectionModAmountMs", "reflectionModRateHz", "reflectionShape", "diffuse", "size", "diffusion", "density", "lowCutHz", "highCutHz", "diffusionLowCutHz", "diffusionHighCutHz", "stereoWidth"], "properties": {
               "enabled": { "type": "boolean" }, "wet": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
-              "decaySec": { "type": "number", "default": 2.2, "minimum": 0.05, "maximum": 12 },
+              "decaySec": { "type": "number", "default": 2.2, "minimum": 0.05, "maximum": 12, "portableParameter": true},
               "preDelayMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 250, "portableParameter": true },
-              "reflections": { "type": "number", "default": 0, "minimum": 0, "maximum": 1 },
-              "reflectionSpin": { "type": "boolean" }, "reflectionModAmountMs": { "type": "number", "default": 17.5, "minimum": 0, "maximum": 25 },
-              "reflectionModRateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 5 },
-              "reflectionShape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 },
-              "diffuse": { "type": "number", "default": 1, "minimum": 0, "maximum": 1 },
-              "size": { "type": "number", "default": 0.65, "minimum": 0, "maximum": 1 },
-              "diffusion": { "type": "number", "default": 0.75, "minimum": 0, "maximum": 1 },
-              "density": { "type": "number", "default": 0.8, "minimum": 0, "maximum": 1 },
+              "reflections": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "reflectionSpin": { "type": "boolean" }, "reflectionModAmountMs": { "type": "number", "default": 17.5, "minimum": 0, "maximum": 25, "portableParameter": true},
+              "reflectionModRateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 5, "portableParameter": true},
+              "reflectionShape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "diffuse": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "size": { "type": "number", "default": 0.65, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "diffusion": { "type": "number", "default": 0.75, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "density": { "type": "number", "default": 0.8, "minimum": 0, "maximum": 1, "portableParameter": true},
               "lowCutHz": { "type": "number", "default": 20, "minimum": 20, "maximum": 1200, "portableParameter": true },
               "highCutHz": { "type": "number", "default": 20000, "minimum": 1200, "maximum": 20000, "portableParameter": true },
-              "diffusionLowCutHz": { "type": "number", "default": 20, "minimum": 20, "maximum": 1200 },
-              "diffusionHighCutHz": { "type": "number", "default": 20000, "minimum": 1200, "maximum": 20000 },
+              "diffusionLowCutHz": { "type": "number", "default": 20, "minimum": 20, "maximum": 1200, "portableParameter": true},
+              "diffusionHighCutHz": { "type": "number", "default": 20000, "minimum": 1200, "maximum": 20000, "portableParameter": true},
               "stereoWidth": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true }
             }}
           }

@@ -11,6 +11,7 @@ const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
 const MAX_FAULTS = 4
 const MAX_INPUT_BUSES = 64
 const CHANNEL_COUNT = 2
+const MAX_PROCESSOR_PARAMETERS = 24
 
 const continuityResultForCoreResult = (result) => result === 3 || result === 14 ? 'capacity' : 'rejected'
 
@@ -313,7 +314,7 @@ export class DawPortableAudioCoreHost {
         || !Array.isArray(message.blocks) || message.blocks.length > 512
         || !message.blocks.every((block) => block && Number.isInteger(block.processorInstanceId) && block.processorInstanceId > 0
           && Number.isInteger(block.frameCount) && block.frameCount > 0 && block.frameCount <= this.maxFramesPerBlock
-          && Array.isArray(block.parameterTargets) && block.parameterTargets.length > 0 && block.parameterTargets.length <= 16
+          && Array.isArray(block.parameterTargets) && block.parameterTargets.length > 0 && block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS
           && block.parameterTargets.every((target) => Number.isInteger(target) && target > 0)
           && block.values instanceof Float32Array && block.values.length === block.parameterTargets.length * block.frameCount)) return this.fault('malformed-message')
       return this.replaceRenderEnvelope('parameter', parameterEnvelope(message.blocks))

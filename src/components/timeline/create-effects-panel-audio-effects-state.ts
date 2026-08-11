@@ -204,6 +204,10 @@ export function createEffectsPanelAudioDevice(
   currentTargetId: Accessor<string>,
   resolveTrackByTargetId: (targetId: string) => Track | undefined,
 ): EffectsPanelAudioDevice {
+  const currentProjectGeneration = () => context.projectGeneration?.() ?? 0;
+  const isCurrentProjectContext = (projectId: string | undefined, projectGeneration: number) => (
+    projectId === context.projectId() && projectGeneration === currentProjectGeneration()
+  );
   const localEq = createLocalEffectRows<EqParams>({
     projectId: context.projectId,
     targetId: currentTargetId,
@@ -283,7 +287,11 @@ export function createEffectsPanelAudioDevice(
     readQueryParams: (row) => row?.params ? descriptor.normalizeParams(row.params) : undefined,
     createInitialParams: () => descriptor.createDefaultParams(),
     serializeParams: descriptor.serializeParams,
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
+    createPersistContext: () => ({
+      projectId: context.projectId(),
+      userId: context.userId(),
+      projectGeneration: context.projectGeneration?.() ?? 0,
+    }),
     persistParams: (targetId, params, persistContext) => {
       if (!persistContext.projectId) return Promise.resolve();
       const instanceId = descriptor.instanceId(targetId);
@@ -326,6 +334,7 @@ export function createEffectsPanelAudioDevice(
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
     },
     onParamsCommitted: (targetId, previous, next, persistContext) => {
+      if (!isCurrentProjectContext(persistContext.projectId, persistContext.projectGeneration ?? 0)) return;
       if (previous === undefined) return;
       const instanceId = descriptor.instanceId(targetId);
       if (!instanceId) return;
@@ -592,6 +601,7 @@ export function createEffectsPanelAudioDevice(
   type EqInteraction = {
     targetId: string;
     instanceId: string;
+    projectId: string | undefined;
     generation: number;
     baseline: EqParams;
     latest: EqParams;
@@ -1104,11 +1114,22 @@ export function createEffectsPanelAudioDevice(
     if (areParamsForKindEqual(kind, current, next)) return;
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind });
     writeDraftParams(targetId, instanceId, kind, next);
-    if (context.usesLegacyAudioEngine?.() ?? true) {
-      void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
-    }
-    commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
-    void persistInstanceParams(targetId, persistedInstanceId, kind, next).catch(() => undefined);
+    const projectId = context.projectId();
+    const projectGeneration = currentProjectGeneration();
+    const apply = (context.usesLegacyAudioEngine?.() ?? true)
+      ? applyInstancesToEngine(targetId, currentOrderForTarget(targetId))
+      : Promise.resolve();
+    const write = Promise.all([
+      apply,
+      persistInstanceParams(targetId, persistedInstanceId, kind, next),
+    ])
+      .then(() => {
+        if (isCurrentProjectContext(projectId, projectGeneration)) {
+          commitInstanceParams(targetId, persistedInstanceId, kind, current, next);
+        }
+      })
+      .catch(() => undefined);
+    void write;
   };
   const updateEq = (updater: (prev: EqParams) => EqParams) => {
     const instance = orderedEffects().find((entry) => entry.kind === "eq");
@@ -1166,7 +1187,8 @@ export function createEffectsPanelAudioDevice(
     eqInteractions.set(instanceKey(targetId, instanceId), {
       targetId,
       instanceId,
-      generation: context.projectGeneration?.() ?? 0,
+      projectId: context.projectId(),
+      generation: currentProjectGeneration(),
       baseline,
       latest: baseline,
     });
@@ -1176,7 +1198,7 @@ export function createEffectsPanelAudioDevice(
     const targetId = currentTargetId();
     const key = instanceKey(targetId, instanceId);
     const interaction = eqInteractions.get(key);
-    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    if (!interaction || !isCurrentProjectContext(interaction.projectId, interaction.generation)) return;
     const current = normalizeEqParams(objectParamInput(paramsForInstance({ id: instanceId, kind: "eq" })));
     const next = normalizeEqParams(updater(current));
     if (areParamsForKindEqual("eq", current, next)) return;
@@ -1189,20 +1211,28 @@ export function createEffectsPanelAudioDevice(
     const targetId = currentTargetId();
     const key = instanceKey(targetId, instanceId);
     const interaction = eqInteractions.get(key);
-    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    if (!interaction || !isCurrentProjectContext(interaction.projectId, interaction.generation)) return;
     await flushEqPreview(key);
+    if (!isCurrentProjectContext(interaction.projectId, interaction.generation)) return;
     eqInteractions.delete(key);
     const next = normalizeEqParams(objectParamInput(paramsForInstance({ id: instanceId, kind: "eq" })));
     if (areParamsForKindEqual("eq", interaction.baseline, next)) return;
-    if (context.usesLegacyAudioEngine?.() ?? true) {
-      void applyInstancesToEngine(targetId, currentOrderForTarget(targetId)).catch(() => undefined);
-    }
+    const apply = (context.usesLegacyAudioEngine?.() ?? true)
+      ? applyInstancesToEngine(targetId, currentOrderForTarget(targetId))
+      : Promise.resolve();
     const persistedInstanceId = persistedInstanceIdForTarget(targetId, { id: instanceId, kind: "eq" });
     if (!(context.usesLegacyAudioEngine?.() ?? true)) {
       await context.onEffectParamsFlush?.(createEqCommitPayload(targetId, instanceId, interaction.baseline, next));
     }
-    const write = persistInstanceParams(targetId, persistedInstanceId, "eq", next)
-      .then(() => commitInstanceParams(targetId, persistedInstanceId, "eq", interaction.baseline, next))
+    const write = Promise.all([
+      apply,
+      persistInstanceParams(targetId, persistedInstanceId, "eq", next),
+    ])
+      .then(() => {
+        if (isCurrentProjectContext(interaction.projectId, interaction.generation)) {
+          commitInstanceParams(targetId, persistedInstanceId, "eq", interaction.baseline, next);
+        }
+      })
       .catch(() => undefined)
       .finally(() => pendingEqWrites.delete(write));
     pendingEqWrites.add(write);
@@ -1212,7 +1242,7 @@ export function createEffectsPanelAudioDevice(
     const targetId = currentTargetId();
     const key = instanceKey(targetId, instanceId);
     const interaction = eqInteractions.get(key);
-    if (!interaction || interaction.generation !== (context.projectGeneration?.() ?? 0)) return;
+    if (!interaction || !isCurrentProjectContext(interaction.projectId, interaction.generation)) return;
     const frame = pendingEqPreviewFrames.get(key);
     if (frame !== undefined) cancelAnimationFrame(frame);
     pendingEqPreviewFrames.delete(key);

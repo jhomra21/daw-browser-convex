@@ -165,7 +165,16 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
-  const [pendingExternalProcessorEditorId, setPendingExternalProcessorEditorId] = createSignal<string>();
+  type ExternalProcessorEditorRequest = {
+    instanceId: string;
+    projectId: string | undefined;
+    projectGeneration: number;
+    requestToken: number;
+    ready: boolean;
+  };
+  const [pendingExternalProcessorEditorRequest, setPendingExternalProcessorEditorRequest] =
+    createSignal<ExternalProcessorEditorRequest>();
+  let externalProcessorEditorRequestToken = 0;
   // Audio engine
   const audioEngine = getAudioEngine();
   const appPreferences = useAppPreferences();
@@ -828,12 +837,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     payload: EffectParamsCommitPayload,
   ): Promise<boolean> => {
     const result = await queueNativeBuiltInStatePatch({ payload, bpm: bpm() });
-    if (result.handled) return true;
-    notify(
-      "Built-in effect update failed",
-      result.error ?? "The native playback graph could not apply the built-in effect change.",
-    );
-    return false;
+    return result.handled;
   };
 
   const handleNativeBuiltInPreview = async (
@@ -870,31 +874,19 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
     if (usesLegacyAudioEngine()) return;
     if (isNativePlaybackPrepared() && encodeNativeBuiltInStateCommit(payload, bpm())) {
-      void handleNativeBuiltInStatePatchResult(payload).then((handled) => untrack(() => {
-        if (!handled && (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())) {
-          return rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
-            notify(
-              "Built-in effect update failed",
-              error instanceof Error
-                ? error.message
-                : "The active playback graph could not be rebuilt for the built-in effect change.",
-            );
-          });
-        }
-        return undefined;
-      }));
-      return;
+      if (await handleNativeBuiltInStatePatchResult(payload)) return;
     }
     if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
+      try {
+        await rebuildPlaybackBackend(renderTracks());
+      } catch (error: unknown) {
         notify(
           "Built-in effect update failed",
           error instanceof Error
             ? error.message
             : "The active playback graph could not be rebuilt for the built-in effect change.",
         );
-      });
-      return;
+      }
     }
   }
 
@@ -1795,6 +1787,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     onExternalPluginInserted: async (processor, playbackIntent) => {
       openEffectsForTarget(processor.targetId);
       const intent = playbackIntent ?? captureStructuralPlaybackIntent();
+      const request: ExternalProcessorEditorRequest = {
+        instanceId: processor.instanceId,
+        projectId: intent.projectId ?? projectId(),
+        projectGeneration: intent.projectGeneration ?? mountedProjectGeneration(),
+        requestToken: ++externalProcessorEditorRequestToken,
+        ready: false,
+      };
+      setPendingExternalProcessorEditorRequest(request);
       const nativePlaybackEnabled =
         appPreferences.audio.preferences().nativePlaybackEnabled;
       console.info("[native-vst3] external plugin inserted", {
@@ -1820,16 +1820,29 @@ const Timeline: Component<TimelineProps> = (props) => {
           "Native playback rebuild failed",
           message,
         );
+        if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
+          setPendingExternalProcessorEditorRequest();
+        }
         return;
       }
-      if (!intent.resumePlayback) {
-        setPendingExternalProcessorEditorId(processor.instanceId);
-        return;
+      const currentRequest = pendingExternalProcessorEditorRequest();
+      if (
+        currentRequest?.requestToken === request.requestToken
+        && currentRequest.projectId === projectId()
+        && currentRequest.projectGeneration === mountedProjectGeneration()
+      ) {
+        setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true });
       }
-      // When playback is active, wait until the new graph owns this attachment
-      // before routing the editor command to the active host.
-      setPendingExternalProcessorEditorId(processor.instanceId);
     },
+  });
+  createEffect(() => {
+    const request = pendingExternalProcessorEditorRequest();
+    if (
+      request
+      && (request.projectId !== projectId() || request.projectGeneration !== mountedProjectGeneration())
+    ) {
+      setPendingExternalProcessorEditorRequest();
+    }
   });
   const browserDropTargetLane = createMemo(() => {
     const target = timelineBrowser().devices.dragSession()?.target;
@@ -2057,10 +2070,18 @@ const Timeline: Component<TimelineProps> = (props) => {
       onLocalSaveFailed: localProject.setLocalSaveFailure,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       onExportSnapshotChange: setEffectsExportSnapshot,
-      autoOpenExternalProcessorId: pendingExternalProcessorEditorId(),
+      autoOpenExternalProcessorId: (() => {
+        const request = pendingExternalProcessorEditorRequest();
+        return request?.ready
+          && request.projectId === projectId()
+          && request.projectGeneration === mountedProjectGeneration()
+          ? request.instanceId
+          : undefined;
+      })(),
       onExternalProcessorAutoOpenHandled: (instanceId: string) => {
-        if (pendingExternalProcessorEditorId() === instanceId) {
-          setPendingExternalProcessorEditorId();
+        const request = pendingExternalProcessorEditorRequest();
+        if (request?.ready && request.instanceId === instanceId) {
+          setPendingExternalProcessorEditorRequest();
         }
       },
       captureStructuralPlaybackIntent,

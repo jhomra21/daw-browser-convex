@@ -11,6 +11,7 @@ const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
 const MAX_FAULTS = 4
 const MAX_INPUT_BUSES = 64
 const CHANNEL_COUNT = 2
+const MAX_PROCESSOR_PARAMETERS = 24
 const MAX_PROCESSOR_EVENTS = 256
 const continuityResultForCoreResult = (result) => result === 3 || result === 14 ? 'capacity' : 'rejected'
 
@@ -117,6 +118,9 @@ export class DawPortableAudioCoreHost {
     this.transportRunning = false
     this.transportFrame = 0
     this.transportProcessOrigin = 0
+    this.pendingTransportRequestId = 0
+    this.pendingTransportEpoch = 0
+    this.pendingTransportRendered = false
     this.liveProcessorSequence = 0
     this.schedule = null
     this.scheduleCursor = 0
@@ -348,7 +352,7 @@ export class DawPortableAudioCoreHost {
         || !Array.isArray(message.blocks) || message.blocks.length > 512
         || !message.blocks.every((block) => block && Number.isInteger(block.processorInstanceId) && block.processorInstanceId > 0
           && Number.isInteger(block.frameCount) && block.frameCount > 0 && block.frameCount <= this.maxFramesPerBlock
-          && Array.isArray(block.parameterTargets) && block.parameterTargets.length > 0 && block.parameterTargets.length <= 16
+          && Array.isArray(block.parameterTargets) && block.parameterTargets.length > 0 && block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS
           && block.parameterTargets.every((target) => Number.isInteger(target) && target > 0)
           && block.values instanceof Float32Array && block.values.length === block.parameterTargets.length * block.frameCount)) return this.fault('malformed-message')
       return this.replaceRenderEnvelope('parameter', parameterEnvelope(message.blocks))
@@ -416,7 +420,7 @@ export class DawPortableAudioCoreHost {
         || !Number.isSafeInteger(message.requestId) || message.requestId < 1
         || !Number.isSafeInteger(message.processorInstanceId) || message.processorInstanceId < 1
         || !Array.isArray(message.parameterTargets) || message.parameterTargets.length === 0
-        || message.parameterTargets.length > 16
+        || message.parameterTargets.length > MAX_PROCESSOR_PARAMETERS
         || !message.parameterTargets.every((target) => Number.isInteger(target) && target > 0)) {
         return this.fault('malformed-message')
       }
@@ -454,13 +458,16 @@ export class DawPortableAudioCoreHost {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
         return
       }
+      this.flushPendingTransport('rejected')
       this.transportEpoch = message.epoch
       this.transportRunning = message.running
       this.transportFrame = message.frame
       this.transportProcessOrigin = this.framesProcessed
       this.lastTransportPositionFrame = message.frame
       if (resetSchedule) this.resetScheduleCursors(message.frame)
-      this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'applied' })
+      this.pendingTransportRequestId = message.requestId
+      this.pendingTransportEpoch = message.epoch
+      this.pendingTransportRendered = false
       return
     }
     if (message.type === 'instrument-state') {
@@ -1543,12 +1550,28 @@ export class DawPortableAudioCoreHost {
     return true
   }
 
+  flushPendingTransport(result) {
+    if (this.pendingTransportRequestId === 0) return
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'transport-applied',
+      requestId: this.pendingTransportRequestId,
+      epoch: this.pendingTransportEpoch,
+      result,
+    })
+    this.pendingTransportRequestId = 0
+    this.pendingTransportEpoch = 0
+    this.pendingTransportRendered = false
+  }
+
   process(inputs, outputs) {
     const output = outputs[0]
     if (this.disposed) return false
     if (!output || output.length === 0 || !this.ready || !this.coreProcess) return true
+    if (this.pendingTransportRendered) this.flushPendingTransport('applied')
     const frames = output[0] ? output[0].length : 0
     if (frames > this.maxFramesPerBlock) {
+      this.flushPendingTransport('rejected')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
@@ -1587,12 +1610,14 @@ export class DawPortableAudioCoreHost {
       }
     }
     if (!this.prepareLiveProcessorEvents()) {
+      this.flushPendingTransport('rejected')
       this.fault('event-overflow')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
     const materialized = this.materializeSchedule(startFrame, frames)
     if (materialized === null) {
+      this.flushPendingTransport('rejected')
       this.resetScheduleCursors(startFrame)
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
@@ -1600,6 +1625,7 @@ export class DawPortableAudioCoreHost {
       return true
     }
     if (materialized && !this.mergeLiveProcessorEvents()) {
+      this.flushPendingTransport('rejected')
       this.resetScheduleCursors(startFrame)
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
@@ -1614,6 +1640,7 @@ export class DawPortableAudioCoreHost {
     const instrumentEventByteCount = materialized ? 4 + this.scheduleInstrumentEventCount * 48 : this.instrumentEventByteCount
     const result = this.coreProcess(frames, stagedInputBusCount, CHANNEL_COUNT, this.inputPointerOffset, this.outputPointerOffset, this.revision, this.parameterOffset, this.parameterByteCount, eventOffset, eventByteCount, instrumentEventOffset, instrumentEventByteCount)
     if (result !== 0) {
+      this.flushPendingTransport('rejected')
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
@@ -1631,6 +1658,7 @@ export class DawPortableAudioCoreHost {
         this.recordingCaptureActive && this.recordingMonitoring ? this.recordingMonitorPlanes[1][frame] : 0
       )
     }
+    if (this.pendingTransportRequestId !== 0) this.pendingTransportRendered = true
     this.framesProcessed += frames
     if (this.transportRunning) {
       const frame = this.currentTransportFrame()

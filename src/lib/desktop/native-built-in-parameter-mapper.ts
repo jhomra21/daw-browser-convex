@@ -193,6 +193,7 @@ const mapLoFi = (payload: EffectParamsCommitPayload<'lofi'> | EffectParamsCommit
   const to = payload.to.state
   return mapFields(
     [
+      { parameterId: 'lofi.bitDepth', from: from.bitDepth, to: to.bitDepth },
       { parameterId: 'lofi.sampleRateRatio', from: from.sampleRateRatio, to: to.sampleRateRatio },
       { parameterId: 'lofi.jitter', from: from.jitter, to: to.jitter },
       { parameterId: 'lofi.noiseDb', from: from.noiseDb, to: to.noiseDb },
@@ -200,7 +201,6 @@ const mapLoFi = (payload: EffectParamsCommitPayload<'lofi'> | EffectParamsCommit
     ],
     [
       { from: from.enabled, to: to.enabled },
-      { from: from.bitDepth, to: to.bitDepth },
       { from: from.quantization, to: to.quantization },
       { from: from.dither, to: to.dither },
       { from: from.seed, to: to.seed },
@@ -240,22 +240,180 @@ const mapReverb = (payload: EffectParamsCommitPayload<'reverb'> | EffectParamsCo
       { parameterId: 'reverb.lowCutHz', from: from.lowCutHz, to: to.lowCutHz },
       { parameterId: 'reverb.highCutHz', from: from.highCutHz, to: to.highCutHz },
       { parameterId: 'reverb.stereoWidth', from: from.stereoWidth, to: to.stereoWidth },
+      { parameterId: 'reverb.decaySec', from: from.decaySec, to: to.decaySec },
+      { parameterId: 'reverb.reflections', from: from.reflections, to: to.reflections },
+      { parameterId: 'reverb.reflectionModAmountMs', from: from.reflectionModAmountMs, to: to.reflectionModAmountMs },
+      { parameterId: 'reverb.reflectionModRateHz', from: from.reflectionModRateHz, to: to.reflectionModRateHz },
+      { parameterId: 'reverb.reflectionShape', from: from.reflectionShape, to: to.reflectionShape },
+      { parameterId: 'reverb.diffuse', from: from.diffuse, to: to.diffuse },
+      { parameterId: 'reverb.size', from: from.size, to: to.size },
+      { parameterId: 'reverb.diffusion', from: from.diffusion, to: to.diffusion },
+      { parameterId: 'reverb.density', from: from.density, to: to.density },
+      { parameterId: 'reverb.diffusionLowCutHz', from: from.diffusionLowCutHz, to: to.diffusionLowCutHz },
+      { parameterId: 'reverb.diffusionHighCutHz', from: from.diffusionHighCutHz, to: to.diffusionHighCutHz },
     ],
     [
       { from: from.enabled, to: to.enabled },
-      { from: from.decaySec, to: to.decaySec },
-      { from: from.reflections, to: to.reflections },
       { from: from.reflectionSpin, to: to.reflectionSpin },
-      { from: from.reflectionModAmountMs, to: to.reflectionModAmountMs },
-      { from: from.reflectionModRateHz, to: to.reflectionModRateHz },
-      { from: from.reflectionShape, to: to.reflectionShape },
-      { from: from.diffuse, to: to.diffuse },
-      { from: from.size, to: to.size },
-      { from: from.diffusion, to: to.diffusion },
-      { from: from.density, to: to.density },
-      { from: from.diffusionLowCutHz, to: to.diffusionLowCutHz },
-      { from: from.diffusionHighCutHz, to: to.diffusionHighCutHz },
     ],
+  )
+}
+
+const mapSaturator = (payload: EffectParamsCommitPayload<'saturator'> | EffectParamsCommitPayload<'master-saturator'>) => {
+  const from = payload.from
+  const to = payload.to
+  return mapFields(
+    [
+      { parameterId: 'saturator.driveDb', from: from.driveDb, to: to.driveDb },
+      { parameterId: 'saturator.colorFrequencyHz', from: from.colorFrequencyHz, to: to.colorFrequencyHz },
+      { parameterId: 'saturator.colorAmount', from: from.colorAmount, to: to.colorAmount },
+      { parameterId: 'saturator.outputDb', from: from.outputDb, to: to.outputDb },
+      { parameterId: 'saturator.dryWet', from: from.dryWet, to: to.dryWet },
+    ],
+    [
+      { from: from.enabled, to: to.enabled },
+      { from: from.curve, to: to.curve },
+      { from: from.color, to: to.color },
+    ],
+  )
+}
+
+const mapModulation = (
+  payload: EffectParamsCommitPayload<'chorus'> | EffectParamsCommitPayload<'master-chorus'>
+    | EffectParamsCommitPayload<'flanger'> | EffectParamsCommitPayload<'master-flanger'>,
+  prefix: 'chorus' | 'flanger',
+) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: `${prefix}.delayMs`, from: from.delayMs, to: to.delayMs },
+      { parameterId: `${prefix}.depthMs`, from: from.depthMs, to: to.depthMs },
+      { parameterId: `${prefix}.rateHz`, from: from.rateHz, to: to.rateHz },
+      { parameterId: `${prefix}.feedback`, from: from.feedback, to: to.feedback },
+      { parameterId: `${prefix}.stereoPhase`, from: from.stereoPhase, to: to.stereoPhase },
+      { parameterId: `${prefix}.mix`, from: from.mix, to: to.mix },
+    ],
+    [{ from: from.enabled, to: to.enabled }],
+  )
+}
+
+const mapPhaser = (payload: EffectParamsCommitPayload<'phaser'> | EffectParamsCommitPayload<'master-phaser'>) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: 'phaser.centerHz', from: from.centerHz, to: to.centerHz },
+      { parameterId: 'phaser.depthOctaves', from: from.depthOctaves, to: to.depthOctaves },
+      { parameterId: 'phaser.rateHz', from: from.rateHz, to: to.rateHz },
+      { parameterId: 'phaser.feedback', from: from.feedback, to: to.feedback },
+      { parameterId: 'phaser.stereoPhase', from: from.stereoPhase, to: to.stereoPhase },
+      { parameterId: 'phaser.mix', from: from.mix, to: to.mix },
+    ],
+    [{ from: from.enabled, to: to.enabled }, { from: from.stages, to: to.stages }],
+  )
+}
+
+const mapAmplitudeModulation = (
+  payload: EffectParamsCommitPayload<'tremolo'> | EffectParamsCommitPayload<'master-tremolo'>
+    | EffectParamsCommitPayload<'autopan'> | EffectParamsCommitPayload<'master-autopan'>,
+  prefix: 'tremolo' | 'autopan',
+) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: `${prefix}.rateHz`, from: from.rateHz, to: to.rateHz },
+      { parameterId: `${prefix}.depth`, from: from.depth, to: to.depth },
+      { parameterId: `${prefix}.shape`, from: from.shape, to: to.shape },
+      { parameterId: `${prefix}.phase`, from: from.phase, to: to.phase },
+    ],
+    [{ from: from.enabled, to: to.enabled }, { from: from.waveform, to: to.waveform }],
+  )
+}
+
+const mapEnsemble = (payload: EffectParamsCommitPayload<'ensemble'> | EffectParamsCommitPayload<'master-ensemble'>) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: 'ensemble.delayMs', from: from.delayMs, to: to.delayMs },
+      { parameterId: 'ensemble.depthMs', from: from.depthMs, to: to.depthMs },
+      { parameterId: 'ensemble.rateHz', from: from.rateHz, to: to.rateHz },
+      { parameterId: 'ensemble.spread', from: from.spread, to: to.spread },
+      { parameterId: 'ensemble.mix', from: from.mix, to: to.mix },
+    ],
+    [{ from: from.enabled, to: to.enabled }, { from: from.voices, to: to.voices }],
+  )
+}
+
+const mapGate = (payload: EffectParamsCommitPayload<'gate'> | EffectParamsCommitPayload<'master-gate'>) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: 'gate.thresholdDb', from: from.thresholdDb, to: to.thresholdDb },
+      { parameterId: 'gate.ratio', from: from.ratio, to: to.ratio },
+      { parameterId: 'gate.attackMs', from: from.attackMs, to: to.attackMs },
+      { parameterId: 'gate.holdMs', from: from.holdMs, to: to.holdMs },
+      { parameterId: 'gate.releaseMs', from: from.releaseMs, to: to.releaseMs },
+      { parameterId: 'gate.hysteresisDb', from: from.hysteresisDb, to: to.hysteresisDb },
+      { parameterId: 'gate.rangeDb', from: from.rangeDb, to: to.rangeDb },
+      { parameterId: 'gate.lookaheadMs', from: from.lookaheadMs, to: to.lookaheadMs },
+      { parameterId: 'gate.link', from: from.link, to: to.link },
+      { parameterId: 'gate.sidechain.frequencyHz', from: from.sidechain.frequencyHz, to: to.sidechain.frequencyHz },
+      { parameterId: 'gate.sidechain.q', from: from.sidechain.q, to: to.sidechain.q },
+    ],
+    [
+      { from: from.enabled, to: to.enabled },
+      { from: from.mode, to: to.mode },
+      { from: from.detector, to: to.detector },
+      { from: from.sidechain.enabled, to: to.sidechain.enabled },
+      { from: from.sidechain.filterType, to: to.sidechain.filterType },
+    ],
+  )
+}
+
+const mapCompressor = (payload: EffectParamsCommitPayload<'compressor'> | EffectParamsCommitPayload<'master-compressor'>) => {
+  const from = payload.from
+  const to = payload.to
+  return mapFields(
+    [
+      { parameterId: 'compressor.thresholdDb', from: from.thresholdDb, to: to.thresholdDb },
+      { parameterId: 'compressor.ratio', from: from.ratio, to: to.ratio },
+      { parameterId: 'compressor.attackMs', from: from.attackMs, to: to.attackMs },
+      { parameterId: 'compressor.releaseMs', from: from.releaseMs, to: to.releaseMs },
+      { parameterId: 'compressor.makeupDb', from: from.makeupDb, to: to.makeupDb },
+      { parameterId: 'compressor.outputDb', from: from.outputDb, to: to.outputDb },
+      { parameterId: 'compressor.dryWet', from: from.dryWet, to: to.dryWet },
+      { parameterId: 'compressor.kneeDb', from: from.kneeDb, to: to.kneeDb },
+      { parameterId: 'compressor.lookaheadMs', from: from.lookaheadMs, to: to.lookaheadMs },
+      { parameterId: 'compressor.sidechain.frequencyHz', from: from.sidechain.frequencyHz, to: to.sidechain.frequencyHz },
+      { parameterId: 'compressor.sidechain.q', from: from.sidechain.q, to: to.sidechain.q },
+    ],
+    [
+      { from: from.enabled, to: to.enabled },
+      { from: from.autoRelease, to: to.autoRelease },
+      { from: from.detectorMode, to: to.detectorMode },
+      { from: from.dynamicsMode, to: to.dynamicsMode },
+      { from: from.envelopeCurve, to: to.envelopeCurve },
+      { from: from.sidechain.enabled, to: to.sidechain.enabled },
+      { from: from.sidechain.filterType, to: to.sidechain.filterType },
+    ],
+  )
+}
+
+const mapLimiter = (payload: EffectParamsCommitPayload<'limiter'> | EffectParamsCommitPayload<'master-limiter'>) => {
+  const from = payload.from.state
+  const to = payload.to.state
+  return mapFields(
+    [
+      { parameterId: 'limiter.ceiling', from: from.ceilingDbtp, to: to.ceilingDbtp },
+      { parameterId: 'limiter.release', from: from.releaseMs, to: to.releaseMs },
+      { parameterId: 'limiter.lookaheadMs', from: from.lookaheadMs, to: to.lookaheadMs },
+      { parameterId: 'limiter.link', from: from.link, to: to.link },
+    ],
+    [{ from: from.enabled, to: to.enabled }, { from: from.detectorOversampling, to: to.detectorOversampling }],
   )
 }
 
@@ -345,6 +503,46 @@ export const mapNativeBuiltInParameterCommit = (
     case 'spectral':
     case 'master-spectral':
       values = mapSpectral(payload)
+      break
+    case 'saturator':
+    case 'master-saturator':
+      values = mapSaturator(payload)
+      break
+    case 'chorus':
+    case 'master-chorus':
+      values = mapModulation(payload, 'chorus')
+      break
+    case 'flanger':
+    case 'master-flanger':
+      values = mapModulation(payload, 'flanger')
+      break
+    case 'phaser':
+    case 'master-phaser':
+      values = mapPhaser(payload)
+      break
+    case 'tremolo':
+    case 'master-tremolo':
+      values = mapAmplitudeModulation(payload, 'tremolo')
+      break
+    case 'autopan':
+    case 'master-autopan':
+      values = mapAmplitudeModulation(payload, 'autopan')
+      break
+    case 'ensemble':
+    case 'master-ensemble':
+      values = mapEnsemble(payload)
+      break
+    case 'gate':
+    case 'master-gate':
+      values = mapGate(payload)
+      break
+    case 'compressor':
+    case 'master-compressor':
+      values = mapCompressor(payload)
+      break
+    case 'limiter':
+    case 'master-limiter':
+      values = mapLimiter(payload)
       break
     default:
       return undefined

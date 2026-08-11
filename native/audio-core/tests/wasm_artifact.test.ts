@@ -815,6 +815,110 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   }
 })
 
+test('the production Wasm graph bridge renders silence after a same-epoch pause', async () => {
+  const bytes = await Bun.file(artifactUrl).arrayBuffer()
+  const instance = await WebAssembly.instantiate(bytes)
+  const exports = instance.instance.exports
+  if (!(exports.memory instanceof WebAssembly.Memory)
+    || typeof exports.malloc !== 'function'
+    || typeof exports.free !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_publish !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_register_pcm_asset !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_schedule_sample_source !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_set_transport !== 'function'
+    || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function') {
+    throw new Error('The sample-source graph bridge exports are unavailable.')
+  }
+  expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 1, 2, 1)).toBe(0)
+
+  const graph = new Uint8Array(24 + 2 * 108 + 48)
+  const graphView = new DataView(graph.buffer)
+  graphView.setUint32(0, 2, true)
+  graphView.setUint32(4, 1, true)
+  graphView.setUint32(8, 2, true)
+  graphView.setUint32(12, 1, true)
+  graphView.setBigUint64(24, 1n, true)
+  graphView.setUint32(32, 1, true)
+  graphView.setUint32(36, 2, true)
+  graphView.setUint32(40, 2, true)
+  graphView.setBigUint64(132, 2n, true)
+  graphView.setUint32(140, 6, true)
+  graphView.setUint32(144, 2, true)
+  graphView.setUint32(148, 2, true)
+  graphView.setBigUint64(240, 3n, true)
+  graphView.setBigUint64(248, 1n, true)
+  graphView.setBigUint64(256, 2n, true)
+  graphView.setFloat32(272, 1, true)
+  graphView.setUint32(276, 3, true)
+
+  const assetFrames = 8
+  const processFrames = 4
+  const allocation = exports.malloc(
+    graph.byteLength
+    + assetFrames * 2 * Float32Array.BYTES_PER_ELEMENT
+    + 3 * BigUint64Array.BYTES_PER_ELEMENT
+    + processFrames * 2 * Float32Array.BYTES_PER_ELEMENT,
+  )
+  if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate pause regression buffers.')
+  try {
+    const graphOffset = allocation
+    const leftAssetOffset = graphOffset + graph.byteLength
+    const rightAssetOffset = leftAssetOffset + assetFrames * Float32Array.BYTES_PER_ELEMENT
+    const assetPointersOffset = rightAssetOffset + assetFrames * Float32Array.BYTES_PER_ELEMENT
+    const assetHandleOffset = assetPointersOffset + BigUint64Array.BYTES_PER_ELEMENT
+    const outputPointersOffset = assetHandleOffset + BigUint64Array.BYTES_PER_ELEMENT
+    const leftOutputOffset = outputPointersOffset + BigUint64Array.BYTES_PER_ELEMENT
+    const rightOutputOffset = leftOutputOffset + processFrames * Float32Array.BYTES_PER_ELEMENT
+    const view = new DataView(exports.memory.buffer)
+    new Uint8Array(exports.memory.buffer, graphOffset, graph.byteLength).set(graph)
+    new Float32Array(exports.memory.buffer, leftAssetOffset, assetFrames).fill(0.25)
+    new Float32Array(exports.memory.buffer, rightAssetOffset, assetFrames).fill(-0.125)
+    view.setUint32(assetPointersOffset, leftAssetOffset, true)
+    view.setUint32(assetPointersOffset + Uint32Array.BYTES_PER_ELEMENT, rightAssetOffset, true)
+    view.setUint32(outputPointersOffset, leftOutputOffset, true)
+    view.setUint32(outputPointersOffset + Uint32Array.BYTES_PER_ELEMENT, rightOutputOffset, true)
+
+    expect(exports.daw_audio_core_wasm_graph_prepare(graphOffset, graph.byteLength)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_publish(1)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_register_pcm_asset(
+      assetFrames, 48_000, 2, assetPointersOffset, assetHandleOffset,
+    )).toBe(0)
+    const asset = view.getBigUint64(assetHandleOffset, true)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_schedule_sample_source(
+      1, 1n, 1n, asset, 0n, 100n, 0n, BigInt(assetFrames), 1,
+      0n, 0n, 100n, 100n, 0,
+    )).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_process_planar(
+      processFrames, 0, 2, 0, outputPointersOffset, 1, 0, 0, 0, 0, 0, 0,
+    )).toBe(0)
+    expect(Array.from(new Float32Array(exports.memory.buffer, leftOutputOffset, processFrames))).toEqual(
+      Array.from(new Float32Array(processFrames).fill(0.25)),
+    )
+    expect(Array.from(new Float32Array(exports.memory.buffer, rightOutputOffset, processFrames))).toEqual(
+      Array.from(new Float32Array(processFrames).fill(-0.125)),
+    )
+
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 2n)).toBe(0)
+    new Float32Array(exports.memory.buffer, leftOutputOffset, processFrames).fill(1)
+    new Float32Array(exports.memory.buffer, rightOutputOffset, processFrames).fill(-1)
+    expect(exports.daw_audio_core_wasm_graph_process_planar(
+      processFrames, 0, 2, 0, outputPointersOffset, 1, 0, 0, 0, 0, 0, 0,
+    )).toBe(0)
+    expect(Array.from(new Float32Array(exports.memory.buffer, leftOutputOffset, processFrames))).toEqual(
+      Array.from(new Float32Array(processFrames)),
+    )
+    expect(Array.from(new Float32Array(exports.memory.buffer, rightOutputOffset, processFrames))).toEqual(
+      Array.from(new Float32Array(processFrames)),
+    )
+  } finally {
+    exports.free(allocation)
+  }
+})
+
 test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)

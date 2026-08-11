@@ -29,6 +29,7 @@ type WorkletDiagnostics = {
     }
   }
   maximumAbsoluteLiveBefore: number
+  maximumAbsoluteLiveAfterUtility: number
   maximumAbsoluteLiveAfter: number
   maximumAbsoluteSynthTailSample: number
   memoryBytes: number
@@ -60,6 +61,7 @@ const isWorkletDiagnostics = (value: unknown): value is WorkletDiagnostics =>
   && "maximumAbsoluteAfterDispose" in value.channels.left && typeof value.channels.left.maximumAbsoluteAfterDispose === "number"
   && "maximumAbsoluteAfterDispose" in value.channels.right && typeof value.channels.right.maximumAbsoluteAfterDispose === "number"
   && "maximumAbsoluteLiveBefore" in value && typeof value.maximumAbsoluteLiveBefore === "number"
+  && "maximumAbsoluteLiveAfterUtility" in value && typeof value.maximumAbsoluteLiveAfterUtility === "number"
   && "maximumAbsoluteLiveAfter" in value && typeof value.maximumAbsoluteLiveAfter === "number"
   && "maximumAbsoluteSynthTailSample" in value && typeof value.maximumAbsoluteSynthTailSample === "number"
   && "memoryBytes" in value && typeof value.memoryBytes === "number"
@@ -132,6 +134,10 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
       expect(output.channels.left.maximumAbsoluteAfterDispose).toBeLessThan(0.0001)
       expect(output.channels.right.maximumAbsoluteAfterDispose).toBeLessThan(0.0001)
       expect(output.maximumAbsoluteSynthTailSample).toBeGreaterThan(0.0001)
+      expect(output.maximumAbsoluteLiveAfterUtility).toBeGreaterThan(0.01)
+      expect(output.maximumAbsoluteLiveAfterUtility).toBeLessThan(output.maximumAbsoluteLiveBefore * 0.95)
+      expect(output.maximumAbsoluteLiveAfter).toBeGreaterThan(0.01)
+      expect(output.maximumAbsoluteLiveAfter).toBeLessThan(output.maximumAbsoluteLiveAfterUtility * 0.5)
       expect(output.memoryBytes).toBe(184_549_376)
       diagnosticsByRate.set(sampleRate, output)
     }

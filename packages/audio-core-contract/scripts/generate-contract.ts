@@ -49,7 +49,11 @@ const readParameters = (name: string, definition: Record<string, unknown>): Proc
       const fullId = prefix.length > 0 ? `${prefix}.${id}` : id
       if (property.portableParameter === true) {
         if (typeof property.default !== 'number' || typeof property.minimum !== 'number' || typeof property.maximum !== 'number') throw new Error(`Processor contract schema is missing numeric ${name} metadata for ${fullId}.`)
-        return [{ id: fullId, defaultValue: property.default, minValue: property.minimum, maxValue: property.maximum }]
+        const alias = property.portableParameterId
+        if (alias !== undefined && (typeof alias !== 'string' || alias.length === 0 || alias.includes('.'))) {
+          throw new Error(`Processor contract schema has invalid portableParameterId for ${name}.${fullId}.`)
+        }
+        return [{ id: prefix.length > 0 ? `${prefix}.${alias ?? id}` : alias ?? id, defaultValue: property.default, minValue: property.minimum, maxValue: property.maximum }]
       }
       const nested = property.properties
       return isRecord(nested) ? visit(nested, fullId) : []
@@ -77,6 +81,10 @@ const readProcessorRegistry = (schema: unknown): ProcessorMetadata[] => {
   }).sort((left, right) => left.id - right.id)
   for (let index = 1; index < processors.length; ++index) {
     if (processors[index - 1]?.id === processors[index]?.id) throw new Error(`Processor registry has duplicate id ${processors[index]?.id}.`)
+  }
+  for (const processor of processors) {
+    const ids = new Set(processor.parameters.map((parameter) => parameter.id))
+    if (ids.size !== processor.parameters.length) throw new Error(`Processor ${processor.name} has duplicate portable parameter ids.`)
   }
   if (processors.some((processor) => processor.tombstone && processor.parameters.length > 0)) {
     throw new Error('Tombstoned processors cannot declare parameters.')

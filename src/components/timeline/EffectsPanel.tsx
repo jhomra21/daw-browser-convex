@@ -644,25 +644,39 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
 
 const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props) => {
   type MixedCard =
-    | { kind: "builtin"; id: string; effect: AudioEffectInstance }
-    | { kind: "external"; id: string; processor: ExternalProcessor };
-  const mixedCards = createMemo<MixedCard[]>(() => {
+    | { kind: "builtin"; key: string; id: string; effect: AudioEffectInstance }
+    | { kind: "external"; key: string; id: string; processor: ExternalProcessor };
+  const model = createMemo<{ keys: string[]; byKey: Map<string, MixedCard> }>(() => {
     const builtinEffects = props.audioEffects.orderedEffects();
     const cards = [
-      ...builtinEffects.map((effect) => ({ kind: "builtin" as const, id: effect.id, effect })),
+      ...builtinEffects.map((effect) => ({
+        kind: "builtin" as const,
+        key: deviceCollapseIdentity.audioEffect(effect.id),
+        id: effect.id,
+        effect,
+      })),
       ...props.externalProcessors
         .filter((processor) => processor.manifest.role === "effect")
-        .map((processor) => ({ kind: "external" as const, id: processor.instanceId, processor })),
+        .map((processor) => ({
+          kind: "external" as const,
+          key: deviceCollapseIdentity.external(processor.instanceId),
+          id: processor.instanceId,
+          processor,
+        })),
     ];
     const indexForCard = (card: MixedCard) => card.kind === "builtin"
       ? props.audioEffects.effectIndexForTarget(props.targetId, card.id)
       : card.processor.index;
-    return cards
+    const ordered = cards
       .map((card) => ({ card, index: indexForCard(card) ?? Number.MAX_SAFE_INTEGER }))
-      .sort((left, right) => left.index - right.index || left.card.id.localeCompare(right.card.id))
+      .sort((left, right) => left.index - right.index || left.card.key.localeCompare(right.card.key))
       .map(({ card }) => card);
+    return {
+      keys: ordered.map((card) => card.key),
+      byKey: new Map(ordered.map((card) => [card.key, card])),
+    };
   });
-  const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview<MixedCard>>();
+  const [reorderPreview, setReorderPreview] = createSignal<EffectCardReorderPreview>();
   const [selection, setSelection] = createSignal<{ targetId: string; effectId: string }>();
   let effectCardsElement: HTMLDivElement | undefined;
   const contextMenuItems = (effect: AudioEffectInstance): TimelineContextMenuItem[] => {
@@ -717,18 +731,17 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     setSelection();
     void props.audioEffects.removeByInstanceFromTarget(props.targetId, effect).catch(() => undefined);
   };
-  const reorderMixedCards = (card: MixedCard, targetIndex: number) => {
-    const current = mixedCards();
-    const next = current.filter((entry) => entry.id !== card.id);
-    next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, card);
-    props.onMixedReorder(next.map((entry) => (
-      entry.kind === "builtin"
-        ? { kind: "builtin", instanceId: entry.effect.id }
-        : { kind: "external", instanceId: entry.processor.instanceId }
-    )));
+  const reorderMixedCards = (key: string, targetIndex: number) => {
+    const current = model();
+    const next = current.keys.filter((entry) => entry !== key);
+    next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, key);
+    props.onMixedReorder(next.flatMap((entry) => {
+      const card = current.byKey.get(entry);
+      return card ? [{ kind: card.kind, instanceId: card.id }] : [];
+    }));
   };
   const previewBuiltinEffect = () => {
-    const card = reorderPreview()?.effect;
+    const card = model().byKey.get(reorderPreview()?.key ?? "");
     return card?.kind === "builtin" ? card.effect : undefined;
   };
 
@@ -781,106 +794,117 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
           props.onElementChange?.(element);
         }}
       >
-        <For each={mixedCards()}>
-          {(card) => {
-            if (card.kind === "external") {
-              const processor = card.processor;
-              let element: HTMLDivElement | undefined;
-              const drag = createEffectCardReorderDrag({
-                effect: card,
-                orderedEffects: mixedCards,
-                canWrite: () => props.canWrite,
-                onReorder: reorderMixedCards,
-                onPreviewChange: setReorderPreview,
-              });
-              return (
-                <div
-                  data-external-effect-id={processor.instanceId}
-                  data-effect-id={processor.instanceId}
-                  class="touch-none transition-opacity"
-                  ref={(node) => { element = node; }}
-                  onPointerDown={(event) => {
-                    if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
-                    drag.onPointerDown(event);
-                  }}
-                  tabIndex={-1}
-                >
-                  <EffectsPanelDeviceBoundary
-                    identity={deviceCollapseIdentity.external(processor.instanceId)}
-                    canWrite={props.canWrite}
-                    collapse={props.deviceCollapse}
-                    menuItems={() => externalProcessorContextMenuItems(processor)}
-                  >
-                    <ExternalPluginCard
-                      projectId={props.projectId}
-                      processor={processor}
-                      enqueueParameter={props.enqueueParameter}
-                      editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
-                      targetId={props.targetId}
-                      automationRanges={props.automationRangesByInstanceId?.get(processor.instanceId)}
-                      evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                      onSelectAutomationParameter={props.onSelectAutomationParameter}
-                      onManualAutomationOverride={props.onManualAutomationOverride}
-                      autoOpen={props.autoOpenExternalProcessorId === processor.instanceId}
-                      onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
-                      canWrite={props.canWrite}
-                      onRemove={() => props.onRemoveExternalProcessor(processor.instanceId)}
-                      onBypassChange={(bypassed) => props.onExternalBypassChange(processor.instanceId, bypassed)}
-                      onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor.instanceId, parameterId, value)}
-                    />
-                  </EffectsPanelDeviceBoundary>
-                </div>
-              );
-            }
-            const effect = card.effect;
+        <For each={model().keys}>
+          {(key) => {
+            const card = createMemo(() => model().byKey.get(key));
+            const externalProcessor = createMemo(() => {
+              const value = card();
+              return value?.kind === "external" ? value.processor : undefined;
+            });
+            const builtinEffect = createMemo(() => {
+              const value = card();
+              return value?.kind === "builtin" ? value.effect : undefined;
+            });
             let element: HTMLDivElement | undefined;
             const drag = createEffectCardReorderDrag({
-              effect: card,
-              orderedEffects: mixedCards,
+              key,
+              orderedKeys: () => model().keys,
               canWrite: () => props.canWrite,
               onReorder: reorderMixedCards,
               onPreviewChange: setReorderPreview,
             });
             return (
-              <div
-                data-effect-kind={effect.kind}
-                data-effect-id={effect.id}
-                class="touch-none transition-opacity focus:outline-none"
-                classList={{
-                  "opacity-30": reorderPreview()?.effect === card,
-                  "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect.id,
-                }}
-                ref={(node) => {
-                  element = node
-                }}
-                tabIndex={-1}
-                onPointerDown={(event) => {
-                  setSelection({ targetId: props.targetId, effectId: effect.id });
-                  if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
-                  drag.onPointerDown(event);
-                }}
-              >
-                <EffectsPanelDeviceBoundary
-                  identity={deviceCollapseIdentity.audioEffect(effect.id)}
-                  canWrite={props.canWrite}
-                  collapse={props.deviceCollapse}
-                  menuItems={() => contextMenuItems(effect)}
-                >
-                  <EffectsPanelAudioEffectCard
-                    effect={effect}
-                    audioEffects={props.audioEffects}
-                    spectrum={props.spectrum}
-                    audioEngine={props.audioEngine}
-                    targetId={props.targetId}
-                    tracks={props.tracks}
-                    sidechainRoutes={props.sidechainRoutes}
-                    automationRangesByParameterId={props.automationRangesByInstanceId?.get(effect.id)}
-                    evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
-                    onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(parameterId, effect.id)}
-                    onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(parameterId, effect.id)}
-                  />
-                </EffectsPanelDeviceBoundary>
-              </div>
+              <Show when={card()}>
+                {(current) => (
+                  <Switch>
+                    <Match when={current().kind === "external"}>
+                      <Show when={externalProcessor()}>
+                        {(processor) => (
+                          <div
+                            data-external-effect-id={processor().instanceId}
+                            data-reorder-key={key}
+                            class="touch-none transition-opacity"
+                            ref={(node) => { element = node; }}
+                            onPointerDown={(event) => {
+                              if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
+                              drag.onPointerDown(event);
+                            }}
+                            tabIndex={-1}
+                          >
+                            <EffectsPanelDeviceBoundary
+                              identity={deviceCollapseIdentity.external(processor().instanceId)}
+                              canWrite={props.canWrite}
+                              collapse={props.deviceCollapse}
+                              menuItems={() => externalProcessorContextMenuItems(processor())}
+                            >
+                              <ExternalPluginCard
+                                projectId={props.projectId}
+                                processor={processor()}
+                                enqueueParameter={props.enqueueParameter}
+                                editorAnchor={() => element ? nativeEditorAnchorFromElement(element) : undefined}
+                                targetId={props.targetId}
+                                automationRanges={props.automationRangesByInstanceId?.get(processor().instanceId)}
+                                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                                onSelectAutomationParameter={props.onSelectAutomationParameter}
+                                onManualAutomationOverride={props.onManualAutomationOverride}
+                                autoOpen={props.autoOpenExternalProcessorId === processor().instanceId}
+                                onAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
+                                canWrite={props.canWrite}
+                                onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
+                                onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
+                                onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
+                              />
+                            </EffectsPanelDeviceBoundary>
+                          </div>
+                        )}
+                      </Show>
+                    </Match>
+                    <Match when={current().kind === "builtin"}>
+                      <Show when={builtinEffect()}>
+                        {(effect) => (
+                          <div
+                            data-effect-kind={effect().kind}
+                            data-reorder-key={key}
+                            class="touch-none transition-opacity focus:outline-none"
+                            classList={{
+                              "opacity-30": reorderPreview()?.key === key,
+                              "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect().id,
+                            }}
+                            ref={(node) => { element = node; }}
+                            tabIndex={-1}
+                            onPointerDown={(event) => {
+                              setSelection({ targetId: props.targetId, effectId: effect().id });
+                              if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
+                              drag.onPointerDown(event);
+                            }}
+                          >
+                            <EffectsPanelDeviceBoundary
+                              identity={deviceCollapseIdentity.audioEffect(effect().id)}
+                              canWrite={props.canWrite}
+                              collapse={props.deviceCollapse}
+                              menuItems={() => contextMenuItems(effect())}
+                            >
+                              <EffectsPanelAudioEffectCard
+                                effect={effect()}
+                                audioEffects={props.audioEffects}
+                                spectrum={props.spectrum}
+                                audioEngine={props.audioEngine}
+                                targetId={props.targetId}
+                                tracks={props.tracks}
+                                sidechainRoutes={props.sidechainRoutes}
+                                automationRangesByParameterId={props.automationRangesByInstanceId?.get(effect().id)}
+                                evaluatedValuesByTargetKey={props.evaluatedValuesByTargetKey}
+                                onSelectAutomationParameter={(parameterId) => props.onSelectAutomationParameter?.(parameterId, effect().id)}
+                                onManualAutomationOverride={(parameterId) => props.onManualAutomationOverride?.(parameterId, effect().id)}
+                              />
+                            </EffectsPanelDeviceBoundary>
+                          </div>
+                        )}
+                      </Show>
+                    </Match>
+                  </Switch>
+                )}
+              </Show>
             );
           }}
         </For>

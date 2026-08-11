@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createEqBandParameterId,
   createDefaultAutoPanParams,
+  createDefaultAutoFilterParams,
   createDefaultChorusParams,
   createDefaultCompressorParams,
   createDefaultDelayParams,
@@ -10,12 +11,14 @@ import {
   createDefaultFlangerParams,
   createDefaultGateParams,
   createDefaultLimiterParams,
+  createDefaultLoFiParams,
   createDefaultPhaserParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
   createDefaultSpectralParams,
   createDefaultSynthParams,
   createDefaultTremoloParams,
+  createDefaultUtilityParams,
 } from '@daw-browser/shared'
 import { createMixerRoutingPlan, createPortableGraphSnapshot } from './graph-contract'
 import { resolveMixerGraph } from './resolve-routing'
@@ -83,8 +86,13 @@ describe('mixer routing plan', () => {
     })
     const node = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
       .nodes.find((entry) => entry.id === 'delay-track')
-    expect(node?.processorOrder[0]?.parameterTargets.map((target) => target.id)).toContain('delay.timeMs')
-    expect(node?.processorOrder[0]?.parameterTargets.map((target) => target.id)).not.toContain('delay.delayMs')
+    expect(node?.processorOrder[0]?.parameterTargets).toEqual([
+      { id: 'delay.timeMs', target: 5 },
+      { id: 'delay.feedback', target: 6 },
+      { id: 'delay.dryWet', target: 7 },
+      { id: 'delay.lowCutHz', target: 8 },
+      { id: 'delay.highCutHz', target: 9 },
+    ])
   })
 
   test('projects the complete synth state through the portable session compiler', () => {
@@ -290,6 +298,13 @@ describe('mixer routing plan', () => {
         { id: createEqBandParameterId(band.id, 'q'), target: 47 + index * 3 },
       ]),
     )
+    expect(snapshot.nodes[0]?.processorOrder[0]?.parameterTargets).toEqual([
+      { id: 'saturator.driveDb', target: 69 },
+      { id: 'saturator.colorFrequencyHz', target: 70 },
+      { id: 'saturator.colorAmount', target: 71 },
+      { id: 'saturator.outputDb', target: 72 },
+      { id: 'saturator.dryWet', target: 73 },
+    ])
   })
 
   test('projects fixture-proven modulation state with exact zero latency and bounded tails', () => {
@@ -325,12 +340,34 @@ describe('mixer routing plan', () => {
       processor.tailFrames,
       processor.parameterTargets,
     ])).toEqual([
-      ['chorus', 4, 28, 0, 768, []],
-      ['flanger', 5, 28, 0, 1_080, []],
-      ['phaser', 6, 32, 0, 48, []],
-      ['tremolo', 7, 24, 0, 0, []],
-      ['autopan', 8, 24, 0, 0, []],
-      ['ensemble', 9, 28, 0, 1_152, []],
+      ['chorus', 4, 28, 0, 768, [
+        { id: 'chorus.delayMs', target: 74 }, { id: 'chorus.depthMs', target: 75 },
+        { id: 'chorus.rateHz', target: 76 }, { id: 'chorus.feedback', target: 77 },
+        { id: 'chorus.stereoPhase', target: 78 }, { id: 'chorus.mix', target: 79 },
+      ]],
+      ['flanger', 5, 28, 0, 1_080, [
+        { id: 'flanger.delayMs', target: 80 }, { id: 'flanger.depthMs', target: 81 },
+        { id: 'flanger.rateHz', target: 82 }, { id: 'flanger.feedback', target: 83 },
+        { id: 'flanger.stereoPhase', target: 84 }, { id: 'flanger.mix', target: 85 },
+      ]],
+      ['phaser', 6, 32, 0, 48, [
+        { id: 'phaser.centerHz', target: 86 }, { id: 'phaser.depthOctaves', target: 87 },
+        { id: 'phaser.rateHz', target: 88 }, { id: 'phaser.feedback', target: 89 },
+        { id: 'phaser.stereoPhase', target: 90 }, { id: 'phaser.mix', target: 91 },
+      ]],
+      ['tremolo', 7, 24, 0, 0, [
+        { id: 'tremolo.rateHz', target: 92 }, { id: 'tremolo.depth', target: 93 },
+        { id: 'tremolo.shape', target: 94 }, { id: 'tremolo.phase', target: 95 },
+      ]],
+      ['autopan', 8, 24, 0, 0, [
+        { id: 'autopan.rateHz', target: 96 }, { id: 'autopan.depth', target: 97 },
+        { id: 'autopan.shape', target: 98 }, { id: 'autopan.phase', target: 99 },
+      ]],
+      ['ensemble', 9, 28, 0, 1_152, [
+        { id: 'ensemble.delayMs', target: 100 }, { id: 'ensemble.depthMs', target: 101 },
+        { id: 'ensemble.rateHz', target: 102 }, { id: 'ensemble.spread', target: 103 },
+        { id: 'ensemble.mix', target: 104 },
+      ]],
     ])
   })
 
@@ -340,6 +377,7 @@ describe('mixer routing plan', () => {
       trackFx: {
         source: {
           instances: [
+            { id: 'utility', kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } },
             { id: 'gate', kind: 'gate', params: { version: 1, state: createDefaultGateParams() } },
             { id: 'compressor', kind: 'compressor', params: createDefaultCompressorParams() },
             { id: 'limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } },
@@ -348,10 +386,45 @@ describe('mixer routing plan', () => {
       },
     })
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder
-    expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames])).toEqual([
-      ['gate', 10, 60, 96],
-      ['compressor', 11, 72, 480],
-      ['limiter', 12, 24, 240],
+    expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
+      ['utility', 1, 40, 0, [
+        { id: 'utility.gainDb', target: 1 },
+        { id: 'utility.pan', target: 2 },
+        { id: 'utility.balance', target: 3 },
+        { id: 'utility.width', target: 4 },
+      ]],
+      ['gate', 10, 60, 96, [
+        { id: 'gate.thresholdDb', target: 105 },
+        { id: 'gate.ratio', target: 106 },
+        { id: 'gate.attackMs', target: 107 },
+        { id: 'gate.holdMs', target: 108 },
+        { id: 'gate.releaseMs', target: 109 },
+        { id: 'gate.hysteresisDb', target: 110 },
+        { id: 'gate.rangeDb', target: 111 },
+        { id: 'gate.lookaheadMs', target: 112 },
+        { id: 'gate.link', target: 113 },
+        { id: 'gate.sidechain.frequencyHz', target: 114 },
+        { id: 'gate.sidechain.q', target: 115 },
+      ]],
+      ['compressor', 11, 72, 480, [
+        { id: 'compressor.thresholdDb', target: 116 },
+        { id: 'compressor.ratio', target: 117 },
+        { id: 'compressor.attackMs', target: 118 },
+        { id: 'compressor.releaseMs', target: 119 },
+        { id: 'compressor.makeupDb', target: 120 },
+        { id: 'compressor.outputDb', target: 121 },
+        { id: 'compressor.dryWet', target: 122 },
+        { id: 'compressor.kneeDb', target: 123 },
+        { id: 'compressor.lookaheadMs', target: 124 },
+        { id: 'compressor.sidechain.frequencyHz', target: 125 },
+        { id: 'compressor.sidechain.q', target: 126 },
+      ]],
+      ['limiter', 12, 24, 240, [
+        { id: 'limiter.ceiling', target: 127 },
+        { id: 'limiter.release', target: 128 },
+        { id: 'limiter.lookaheadMs', target: 129 },
+        { id: 'limiter.link', target: 130 },
+      ]],
     ])
   })
 
@@ -394,12 +467,73 @@ describe('mixer routing plan', () => {
       },
     })
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000, bpm: 120 }).nodes[0]?.processorOrder
-    expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames])).toEqual([
-      ['delay', 13, 32, 0],
-      ['reverb', 14, 72, 0],
+    expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
+      ['delay', 13, 32, 0, [
+        { id: 'delay.timeMs', target: 5 },
+        { id: 'delay.feedback', target: 6 },
+        { id: 'delay.dryWet', target: 7 },
+        { id: 'delay.lowCutHz', target: 8 },
+        { id: 'delay.highCutHz', target: 9 },
+      ]],
+      ['reverb', 14, 72, 0, [
+        { id: 'reverb.wet', target: 10 },
+        { id: 'reverb.preDelayMs', target: 11 },
+        { id: 'reverb.lowCutHz', target: 12 },
+        { id: 'reverb.highCutHz', target: 13 },
+        { id: 'reverb.stereoWidth', target: 14 },
+        { id: 'reverb.decaySec', target: 132 },
+        { id: 'reverb.reflections', target: 133 },
+        { id: 'reverb.reflectionModAmountMs', target: 134 },
+        { id: 'reverb.reflectionModRateHz', target: 135 },
+        { id: 'reverb.reflectionShape', target: 136 },
+        { id: 'reverb.diffuse', target: 137 },
+        { id: 'reverb.size', target: 138 },
+        { id: 'reverb.diffusion', target: 139 },
+        { id: 'reverb.density', target: 140 },
+        { id: 'reverb.diffusionLowCutHz', target: 141 },
+        { id: 'reverb.diffusionHighCutHz', target: 142 },
+      ]],
     ])
     expect(processors?.[0]?.tailFrames).toBe(24_000 * 14)
     expect(processors?.[1]?.tailFrames).toBe(48_000 * 2.02)
+  })
+
+  test('projects exact AutoFilter and LoFi target arrays', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([{ id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 }]),
+      trackFx: {
+        source: {
+          instances: [
+            { id: 'autofilter', kind: 'autofilter', params: { version: 1, state: createDefaultAutoFilterParams() } },
+            { id: 'lofi', kind: 'lofi', params: { version: 1, state: createDefaultLoFiParams() } },
+          ],
+        },
+      },
+    })
+    const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
+      .nodes[0]?.processorOrder
+    expect(processors?.map((processor) => processor.parameterTargets)).toEqual([
+      [
+        { id: 'autofilter.frequencyHz', target: 30 },
+        { id: 'autofilter.resonance', target: 31 },
+        { id: 'autofilter.driveDb', target: 32 },
+        { id: 'autofilter.mix', target: 33 },
+        { id: 'autofilter.envelope.amountOctaves', target: 34 },
+        { id: 'autofilter.envelope.attackMs', target: 35 },
+        { id: 'autofilter.envelope.releaseMs', target: 36 },
+        { id: 'autofilter.lfo.rateHz', target: 37 },
+        { id: 'autofilter.lfo.depthOctaves', target: 38 },
+        { id: 'autofilter.lfo.phaseOffset', target: 39 },
+        { id: 'autofilter.lfo.stereoPhase', target: 40 },
+      ],
+      [
+        { id: 'lofi.sampleRateRatio', target: 41 },
+        { id: 'lofi.jitter', target: 42 },
+        { id: 'lofi.noiseDb', target: 43 },
+        { id: 'lofi.mix', target: 44 },
+        { id: 'lofi.bitDepth', target: 131 },
+      ],
+    ])
   })
 
   test('projects spectral state with bounded FFT timing and all generic controls', () => {
@@ -414,7 +548,19 @@ describe('mixer routing plan', () => {
     const processor = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder[0]
     expect(processor).toMatchObject({ kind: 'spectral', kindId: 15, latencyFrames: 512, tailFrames: 0 })
     expect(processor?.state.byteLength).toBe(60)
-    expect(processor?.parameterTargets).toHaveLength(11)
+    expect(processor?.parameterTargets).toEqual([
+      { id: 'spectral.freeze', target: 15 },
+      { id: 'spectral.gateThresholdDb', target: 16 },
+      { id: 'spectral.gateAttackMs', target: 17 },
+      { id: 'spectral.gateReleaseMs', target: 18 },
+      { id: 'spectral.morph', target: 19 },
+      { id: 'spectral.binShift', target: 20 },
+      { id: 'spectral.blur', target: 21 },
+      { id: 'spectral.harmonicPercussiveBalance', target: 22 },
+      { id: 'spectral.noiseReduction', target: 23 },
+      { id: 'spectral.profileLearn', target: 24 },
+      { id: 'spectral.mix', target: 25 },
+    ])
   })
 
 })

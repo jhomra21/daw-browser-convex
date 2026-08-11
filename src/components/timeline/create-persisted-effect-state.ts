@@ -11,6 +11,7 @@ import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pen
 type PersistedEffectContext = {
   projectId?: string
   userId?: string
+  projectGeneration?: number
 }
 
 type PersistedEffectStateOptions<TRow, TParams> = {

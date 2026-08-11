@@ -619,9 +619,9 @@ test('rejects unsupported graph features and unresolved schedule targets without
   })
   expect(automatedEffect).toMatchObject({ supported: false })
   if (automatedEffect.supported) throw new Error('Expected unsupported portable effect automation.')
-  expect(automatedEffect.reasons).toContain('portable-saturator: scheduled parameter "saturator.driveDb" is not portable.')
-  expect(automatedEffect.reasons).toContain('portable-eq: scheduled parameter "eq.band-1.gainDb" is not portable.')
-  expect(automatedEffect.reasons).toContain('portable-chorus: scheduled parameter "chorus.rateHz" is not portable.')
+  expect(automatedEffect.reasons).toEqual([
+    'portable-eq: scheduled parameter "eq.band-1.gainDb" is not portable.',
+  ])
 
   const unsupportedEffect = compilePreparedPortableSession({
     ...effectInput,

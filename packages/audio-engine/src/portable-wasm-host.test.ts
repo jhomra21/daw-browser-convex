@@ -1,7 +1,35 @@
 import { expect, test } from 'bun:test'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
+const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
 const wasmUrl = new URL('../../../native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
+
+const createTransportHost = async (
+  graphSetTransport: (epoch: number, running: number, frame: bigint) => number,
+) => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: unknown[] = []
+  const host = new DawPortableAudioCoreHost({
+    sampleRate: 48_000,
+    postMessage: (message: unknown) => messages.push(message),
+    close: () => undefined,
+  })
+  host.ready = true
+  host.revision = 1
+  host.maxFramesPerBlock = 8
+  host.inputPlanes = Array.from({ length: 128 }, () => new Float32Array(8))
+  host.leftOutput = new Float32Array(8)
+  host.rightOutput = new Float32Array(8)
+  host.eventOffset = 1
+  host.eventBufferView = new DataView(new ArrayBuffer(4))
+  host.graphSetTransport = graphSetTransport
+  host.coreProcess = () => {
+    host.leftOutput.fill(host.transportRunning ? 0.25 : 0)
+    host.rightOutput.fill(host.transportRunning ? -0.125 : 0)
+    return 0
+  }
+  return { host, messages }
+}
 
 test('the portable Wasm host exposes the same explicit API to worklet and Worker callers', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
@@ -35,6 +63,127 @@ test('the shared portable Wasm host has no AudioWorklet-only dependency', async 
   expect(source).toContain('constructor({ sampleRate, postMessage, close })')
   expect(source).toContain('initialize({ wasmBytes, wasmModule, contractHash, maxFramesPerBlock })')
   expect(source).toContain('wasmModule instanceof WebAssembly.Module')
+})
+
+test('portable Wasm hosts enforce the 24-parameter contract in every parameter validation path', async () => {
+  const v1 = await Bun.file(hostUrl).text()
+  const v2 = await Bun.file(hostV2Url).text()
+  expect(v1).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
+  expect(v1).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
+  expect(v2).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
+  expect(v2).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
+  expect(v2).toContain('message.parameterTargets.length > MAX_PROCESSOR_PARAMETERS')
+})
+
+test('the v2 host acknowledges transport only after its rendered quantum reaches the output', async () => {
+  const { host, messages } = await createTransportHost(() => 0)
+
+  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 2_048 })
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 1 }))
+
+  const firstOutput = [[new Float32Array(8), new Float32Array(8)]]
+  host.process([], firstOutput)
+  expect(Array.from(firstOutput[0][0])).toEqual(Array.from(new Float32Array(8)))
+  expect(Array.from(firstOutput[0][1])).toEqual(Array.from(new Float32Array(8)))
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 1 }))
+
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 1,
+    epoch: 1,
+    result: 'applied',
+  })
+
+  messages.length = 0
+  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 2_048 })
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 2 }))
+
+  const runningOutput = [[new Float32Array(8), new Float32Array(8)]]
+  host.process([], runningOutput)
+  expect(Array.from(runningOutput[0][0])).toEqual(Array.from(new Float32Array(8).fill(0.25)))
+  expect(Array.from(runningOutput[0][1])).toEqual(Array.from(new Float32Array(8).fill(-0.125)))
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 2 }))
+
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 2,
+    epoch: 1,
+    result: 'applied',
+  })
+})
+
+test('the v2 host lets the latest successful transport command supersede a pending acknowledgement', async () => {
+  const calls: [number, number, bigint][] = []
+  const { host, messages } = await createTransportHost((epoch, running, frame) => {
+    calls.push([epoch, running, frame])
+    return 0
+  })
+
+  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 0 })
+  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 128 })
+
+  expect(calls).toEqual([[1, 0, 0n], [1, 1, 128n]])
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 1,
+    epoch: 1,
+    result: 'rejected',
+  })
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 2 }))
+  expect(host.transportEpoch).toBe(1)
+  expect(host.transportRunning).toBe(true)
+  expect(host.transportFrame).toBe(128)
+  expect(host.pendingTransportRequestId).toBe(2)
+
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 2,
+    epoch: 1,
+    result: 'applied',
+  })
+})
+
+test('the v2 host preserves a pending transport when a newer core command fails', async () => {
+  let callCount = 0
+  const { host, messages } = await createTransportHost(() => {
+    callCount += 1
+    return callCount === 1 ? 0 : 1
+  })
+
+  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 64 })
+  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 2, running: true, frame: 256 })
+
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 2,
+    epoch: 2,
+    result: 'rejected',
+  })
+  expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 1 }))
+  expect(host.transportEpoch).toBe(1)
+  expect(host.transportRunning).toBe(false)
+  expect(host.transportFrame).toBe(64)
+  expect(host.pendingTransportRequestId).toBe(1)
+  expect(host.pendingTransportEpoch).toBe(1)
+
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  host.process([], [[new Float32Array(8), new Float32Array(8)]])
+  expect(messages).toContainEqual({
+    version: 1,
+    type: 'transport-applied',
+    requestId: 1,
+    epoch: 1,
+    result: 'applied',
+  })
 })
 
 test('the portable host captures bounded planar PCM only when explicitly configured', async () => {

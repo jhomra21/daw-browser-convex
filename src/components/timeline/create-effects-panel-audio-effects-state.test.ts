@@ -14,9 +14,27 @@ type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | P
 
 class SpyAudioEngine extends AudioEngine {
   readonly trackFxCalls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = [];
+  readonly masterFxCalls: AudioEffectRuntimeInstance[][] = [];
+  deferMasterFx = false;
+  private resolveMasterFx?: () => void;
 
   override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
     this.trackFxCalls.push({ trackId, instances });
+  }
+
+  override async setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
+    this.masterFxCalls.push(instances);
+    if (this.deferMasterFx) {
+      await new Promise<void>((resolve) => {
+        this.resolveMasterFx = resolve;
+      });
+    }
+    await super.setMasterFxInstances(instances);
+  }
+
+  releaseMasterFx() {
+    this.resolveMasterFx?.();
+    this.resolveMasterFx = undefined;
   }
 }
 
@@ -25,23 +43,28 @@ const createDevice = (
   options: {
     canWrite?: boolean;
     projectId?: string;
+    projectGeneration?: number;
+    targetId?: string;
     persistAudioEffectOrder?: PersistOrder;
     persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
     sidechainRoutes?: ExternalSidechainRoute[];
     onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   } = {},
 ) => {
-  const [currentTargetId, setCurrentTargetId] = createSignal("track-1");
+  const [currentTargetId, setCurrentTargetId] = createSignal(options.targetId ?? "track-1");
+  const [projectId, setProjectId] = createSignal(options.projectId);
+  const [projectGeneration, setProjectGeneration] = createSignal(options.projectGeneration ?? 0);
   const [canWriteCurrentTargetEffects, setCanWriteCurrentTargetEffects] = createSignal(options.canWrite ?? true);
   const [sidechainRoutes, setSidechainRoutes] = createSignal(options.sidechainRoutes ?? []);
   const device = createEffectsPanelAudioDevice(
     {
       audioEngine: () => engine,
-      projectId: () => options.projectId,
-      userId: () => options.projectId ? "user-1" : undefined,
+      projectId,
+      userId: () => projectId() ? "user-1" : undefined,
       roomEffects: () => [],
       sidechainRoutes,
       canWriteCurrentTargetEffects,
+      projectGeneration,
       persistAudioEffectOrder: options.persistAudioEffectOrder,
       persistSidechainRoute: options.persistSidechainRoute,
       onEffectParamsCommitted: options.onEffectParamsCommitted,
@@ -49,7 +72,14 @@ const createDevice = (
     currentTargetId,
     () => undefined,
   );
-  return { device, setCanWriteCurrentTargetEffects, setCurrentTargetId, setSidechainRoutes };
+  return {
+    device,
+    setCanWriteCurrentTargetEffects,
+    setCurrentTargetId,
+    setProjectGeneration,
+    setProjectId,
+    setSidechainRoutes,
+  };
 };
 
 describe("effects panel instance engine synchronization", () => {
@@ -74,6 +104,36 @@ describe("effects panel instance engine synchronization", () => {
         instanceId: inserted.id,
         to: { wet: 0.35 },
       });
+      dispose();
+    });
+  });
+
+  test("does not commit an async edit after the project generation changes", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const commits: EffectParamsCommitPayload[] = [];
+      const { device, setProjectGeneration, setProjectId } = createDevice(engine, {
+        projectId: "project:stale-effect-commit",
+        targetId: "master",
+        onEffectParamsCommitted: (payload) => commits.push(payload),
+      });
+      await device.addByKindToTarget("master", "delay");
+      const inserted = engine.masterFxCalls.at(-1)?.[0];
+      if (!inserted) throw new Error("Expected an inserted delay instance.");
+      await device.flushPending();
+      commits.length = 0;
+
+      engine.deferMasterFx = true;
+      device.delay.changeInstance(inserted.id, (params) => ({ ...params, feedback: 0.8 }));
+      const pending = device.flushPending();
+      await Promise.resolve();
+      setProjectId("project:other");
+      setProjectGeneration(1);
+      engine.releaseMasterFx();
+      await pending;
+      await Promise.resolve();
+      expect(engine.masterFxCalls.at(-1)?.[0]?.params).toMatchObject({ feedback: 0.8 });
+      expect(commits).toHaveLength(0);
       dispose();
     });
   });

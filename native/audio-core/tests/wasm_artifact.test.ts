@@ -552,7 +552,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
 
   expect(manifest).toMatchObject({
     artifactKind: 'production',
-    abiVersion: 2,
+    abiVersion: 3,
     buildType: 'Release',
     lto: true,
     fixedMemory: true,
@@ -642,7 +642,7 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     const block = input + 3 * Float32Array.BYTES_PER_ELEMENT
     const diagnostics = block + 48
     const view = new DataView(exports.memory.buffer)
-    view.setUint32(config, 2, true)
+    view.setUint32(config, 3, true)
     view.setUint32(config + 4, 3, true)
     view.setBigUint64(config + 8, 11n, true)
     view.setUint32(config + 16, 1, true)
@@ -815,7 +815,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   }
 })
 
-test('the production Wasm graph bridge renders silence after a same-epoch pause', async () => {
+test('the production Wasm graph bridge renders curved fades and silence after a same-epoch pause', async () => {
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
@@ -889,17 +889,19 @@ test('the production Wasm graph bridge renders silence after a same-epoch pause'
     expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 0n)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_schedule_sample_source(
       1, 1n, 1n, asset, 0n, 100n, 0n, BigInt(assetFrames), 1,
-      0n, 0n, 100n, 100n, 0,
+      0n, 4n, 100n, 100n, 0,
+      1, 0.25, 0, 0.5,
     )).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_process_planar(
       processFrames, 0, 2, 0, outputPointersOffset, 1, 0, 0, 0, 0, 0, 0,
     )).toBe(0)
+    const expectedFade = [0, 0.5980762, 0.8541020, 0.9686270]
     expect(Array.from(new Float32Array(exports.memory.buffer, leftOutputOffset, processFrames))).toEqual(
-      Array.from(new Float32Array(processFrames).fill(0.25)),
+      expectedFade.map((gain) => expect.closeTo(gain * 0.25, 5)),
     )
     expect(Array.from(new Float32Array(exports.memory.buffer, rightOutputOffset, processFrames))).toEqual(
-      Array.from(new Float32Array(processFrames).fill(-0.125)),
+      expectedFade.map((gain) => expect.closeTo(gain * -0.125, 5)),
     )
 
     expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 2n)).toBe(0)

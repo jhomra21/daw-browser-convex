@@ -280,10 +280,10 @@ export const compilePortableExportSnapshot = (
       ...event,
       startFrame,
       stopFrame,
-      fadeInStartFrame: Math.max(0, event.fadeInStartFrame - frameOffset),
-      fadeInEndFrame: Math.max(0, event.fadeInEndFrame - frameOffset),
-      fadeOutStartFrame: Math.min(frameCount, event.fadeOutStartFrame - frameOffset),
-      fadeOutEndFrame: Math.min(frameCount, event.fadeOutEndFrame - frameOffset),
+      fadeInStartFrame: event.fadeInStartFrame - frameOffset,
+      fadeInEndFrame: event.fadeInEndFrame - frameOffset,
+      fadeOutStartFrame: event.fadeOutStartFrame - frameOffset,
+      fadeOutEndFrame: event.fadeOutEndFrame - frameOffset,
     }]
   })
 

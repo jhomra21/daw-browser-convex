@@ -244,7 +244,7 @@ window.runPortableWasmWorkletFixture = (async () => {
   node.port.postMessage({
     version: protocolVersion,
     type: 'initialize',
-    abiVersion: 2,
+    abiVersion: 3,
     contractHash: manifest.contractHash,
     maxFramesPerBlock: 256,
   })

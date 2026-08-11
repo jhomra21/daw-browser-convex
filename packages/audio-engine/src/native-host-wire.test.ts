@@ -97,14 +97,45 @@ test("serializes source events using the session asset identifier", () => {
     fadeInEndFrame: 8,
     fadeOutStartFrame: 9,
     fadeOutEndFrame: 10,
+    fadeInCurve: 0.75,
+    fadeInCurvePosition: 0.25,
+    fadeOutCurve: -0.5,
+    fadeOutCurvePosition: 0.8,
   }], mapNativeSessionAssets([asset("a")]))
   const view = new DataView(bytes.buffer)
 
-  expect(bytes.byteLength).toBe(100)
+  expect(bytes.byteLength).toBe(116)
   expect(view.getUint32(0, true)).toBe(1)
   expect(view.getUint32(24, true)).toBe(1)
   expect(view.getBigInt64(28, true)).toBe(3n)
-  expect(view.getFloat32(96, true)).toBeCloseTo(0.25)
+  expect(view.getFloat32(100, true)).toBeCloseTo(0.75)
+  expect(view.getFloat32(104, true)).toBeCloseTo(0.25)
+  expect(view.getFloat32(108, true)).toBeCloseTo(-0.5)
+  expect(view.getFloat32(112, true)).toBeCloseTo(0.8)
+  expect(view.getBigInt64(64, true)).toBe(7n)
+})
+
+test("serializes absent native fade curves with defaults and keeps signed anchors", () => {
+  const bytes = serializeNativeSourceEvents([{
+    epoch: 1,
+    sequence: 2,
+    sourceNodeId: "source",
+    assetId: "a",
+    startFrame: 100,
+    stopFrame: 200,
+    sourceOffsetFrame: 5,
+    sourceFrameCount: 6,
+    gain: 1,
+    fadeInStartFrame: -20,
+    fadeInEndFrame: 120,
+    fadeOutStartFrame: 150,
+    fadeOutEndFrame: 240,
+  }], mapNativeSessionAssets([asset("a")]))
+  const view = new DataView(bytes.buffer)
+  expect(view.getBigInt64(64, true)).toBe(-20n)
+  expect(view.getBigInt64(72, true)).toBe(120n)
+  expect(view.getFloat32(100, true)).toBe(0)
+  expect(view.getFloat32(104, true)).toBe(0.5)
 })
 
 test("serializes bounded native VST parameter events with normalized values", () => {

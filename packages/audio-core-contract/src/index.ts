@@ -1062,6 +1062,10 @@ export type AudioCoreSampleSourceEventDto = {
   fadeInEndFrame: number
   fadeOutStartFrame: number
   fadeOutEndFrame: number
+  fadeInCurve?: number
+  fadeInCurvePosition?: number
+  fadeOutCurve?: number
+  fadeOutCurvePosition?: number
 }
 
 export type AudioCoreAssetDto = {

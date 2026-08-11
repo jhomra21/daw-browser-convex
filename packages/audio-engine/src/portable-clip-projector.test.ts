@@ -95,6 +95,56 @@ test('projects raw audio clips with source offsets and linear fades', () => {
   })
 })
 
+test('projects curved fades with canonical fields and preserves full anchors when spanning', () => {
+  const curved = clip({
+    fades: {
+      fadeInSec: 1,
+      fadeOutSec: 1,
+      fadeInCurve: 0.75,
+      fadeOutCurve: -0.5,
+      fadeInCurvePosition: 0.25,
+      fadeOutCurvePosition: 0.8,
+    },
+  })
+  expect(project([curved])).toMatchObject({
+    supported: true,
+    events: [{
+      fadeInStartFrame: 96_000,
+      fadeInEndFrame: 144_000,
+      fadeOutStartFrame: 240_000,
+      fadeOutEndFrame: 288_000,
+      fadeInCurve: 0.75,
+      fadeInCurvePosition: 0.25,
+      fadeOutCurve: -0.5,
+      fadeOutCurvePosition: 0.8,
+    }],
+  })
+  expect(projectPortableClipEvents({
+    tracks: [{ id: 'track-1', name: 'track-1', volume: 1, clips: [curved] }],
+    assets: new Map([['source-1', asset]]),
+    bpm: 120,
+    sampleRateHz: 48_000,
+    rangeStartSec: 0,
+    rangeEndSec: 10,
+    emitStartFrame: { start: 144_000, end: 192_000 },
+    epoch: 1,
+    firstSequence: 1,
+  })).toMatchObject({
+    supported: true,
+    events: [{
+      startFrame: 144_000,
+      fadeInStartFrame: 96_000,
+      fadeInEndFrame: 144_000,
+      fadeOutStartFrame: 240_000,
+      fadeOutEndFrame: 288_000,
+      fadeInCurve: 0.75,
+      fadeInCurvePosition: 0.25,
+      fadeOutCurve: -0.5,
+      fadeOutCurvePosition: 0.8,
+    }],
+  })
+})
+
 test('keeps source events invariant under mixer and routing changes', () => {
   const baseline = project([clip()])
   const mixed = project([clip()], {
@@ -298,7 +348,6 @@ test('reports unsupported project features without producing a partial schedule'
     supported: false,
     reasons: [
       'clip-1: realtime repitch warp is not supported by the portable core.',
-      'clip-2: curved fades are not supported.',
     ],
     diagnostics: [{
       code: 'warp-mode-unsupported',

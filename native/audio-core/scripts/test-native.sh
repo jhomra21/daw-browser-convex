@@ -6,8 +6,6 @@ if ! command -v cmake >/dev/null 2>&1; then
   exit 127
 fi
 
-if [ ! -f native/build/audio-core-debug/CTestTestfile.cmake ]; then
-  sh native/audio-core/scripts/build-native.sh
-fi
+sh native/audio-core/scripts/build-native.sh
 
 ctest --test-dir native/build/audio-core-debug --output-on-failure

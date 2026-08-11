@@ -784,14 +784,14 @@ export const nativeAssetIdentity = (asset: AudioAssetRef): NativeAssetIdentity =
 })
 
 export type NativeSourceEvent = Pick<AudioCoreSampleSourceEventDto,
-  "epoch" | "sequence" | "sourceNodeId" | "assetId" | "startFrame" | "stopFrame" | "sourceOffsetFrame" | "sourceOffsetFraction" | "sourceFrameCount" | "gain" | "fadeInStartFrame" | "fadeInEndFrame" | "fadeOutStartFrame" | "fadeOutEndFrame">
+  "epoch" | "sequence" | "sourceNodeId" | "assetId" | "startFrame" | "stopFrame" | "sourceOffsetFrame" | "sourceOffsetFraction" | "sourceFrameCount" | "gain" | "fadeInStartFrame" | "fadeInEndFrame" | "fadeOutStartFrame" | "fadeOutEndFrame" | "fadeInCurve" | "fadeInCurvePosition" | "fadeOutCurve" | "fadeOutCurvePosition">
 
 export const serializeNativeSourceEvents = (
   events: readonly NativeSourceEvent[],
   assets: readonly NativeSessionAsset[],
 ) => {
   const assetIds = new Map(assets.map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
-  const output = new Uint8Array(4 + events.length * 96)
+  const output = new Uint8Array(4 + events.length * 112)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
@@ -804,21 +804,33 @@ export const serializeNativeSourceEvents = (
     view.setUint32(offset + 20, assetId, true)
     const startFrame = Math.max(0, event.startFrame)
     const stopFrame = Math.max(startFrame + 1, event.stopFrame)
-    const fadeInStartFrame = Math.max(startFrame, event.fadeInStartFrame)
-    const fadeInEndFrame = Math.min(stopFrame, Math.max(fadeInStartFrame, event.fadeInEndFrame))
-    const fadeOutEndFrame = Math.min(stopFrame, Math.max(startFrame, event.fadeOutEndFrame))
-    const fadeOutStartFrame = Math.min(fadeOutEndFrame, Math.max(startFrame, event.fadeOutStartFrame))
+    if (!Number.isSafeInteger(event.fadeInStartFrame)
+      || !Number.isSafeInteger(event.fadeInEndFrame)
+      || !Number.isSafeInteger(event.fadeOutStartFrame)
+      || !Number.isSafeInteger(event.fadeOutEndFrame)
+      || event.fadeInStartFrame > event.fadeInEndFrame
+      || event.fadeOutStartFrame > event.fadeOutEndFrame
+      || (event.fadeInCurve !== undefined && (!Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1))
+      || (event.fadeInCurvePosition !== undefined && (!Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1))
+      || (event.fadeOutCurve !== undefined && (!Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1))
+      || (event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1))) {
+      throw new Error("Native source event is invalid.")
+    }
     view.setBigInt64(offset + 24, BigInt(startFrame), true)
     view.setBigInt64(offset + 32, BigInt(stopFrame), true)
     view.setBigUint64(offset + 40, BigInt(event.sourceOffsetFrame), true)
     view.setBigUint64(offset + 48, BigInt(event.sourceFrameCount), true)
     view.setFloat32(offset + 56, event.gain, true)
-    view.setBigInt64(offset + 60, BigInt(fadeInStartFrame), true)
-    view.setBigInt64(offset + 68, BigInt(fadeInEndFrame), true)
-    view.setBigInt64(offset + 76, BigInt(fadeOutStartFrame), true)
-    view.setBigInt64(offset + 84, BigInt(fadeOutEndFrame), true)
+    view.setBigInt64(offset + 60, BigInt(event.fadeInStartFrame), true)
+    view.setBigInt64(offset + 68, BigInt(event.fadeInEndFrame), true)
+    view.setBigInt64(offset + 76, BigInt(event.fadeOutStartFrame), true)
+    view.setBigInt64(offset + 84, BigInt(event.fadeOutEndFrame), true)
     view.setFloat32(offset + 92, event.sourceOffsetFraction ?? 0, true)
-    offset += 96
+    view.setFloat32(offset + 96, event.fadeInCurve ?? 0, true)
+    view.setFloat32(offset + 100, event.fadeInCurvePosition ?? 0.5, true)
+    view.setFloat32(offset + 104, event.fadeOutCurve ?? 0, true)
+    view.setFloat32(offset + 108, event.fadeOutCurvePosition ?? 0.5, true)
+    offset += 112
   }
   return output
 }

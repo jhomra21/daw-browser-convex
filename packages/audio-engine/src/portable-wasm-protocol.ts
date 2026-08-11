@@ -107,6 +107,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0
 
+const isBoundedFinite = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+
 const isAudioAssetRef = (value: unknown): value is AudioAssetRef => {
   if (!isRecord(value)) return false
   return value.version === audioCoreContractVersion
@@ -167,6 +170,10 @@ const isSampleSourceEvent = (value: unknown): value is AudioCoreSampleSourceEven
   && typeof value.fadeInEndFrame === 'number' && Number.isSafeInteger(value.fadeInEndFrame) && value.fadeInEndFrame >= value.fadeInStartFrame
   && typeof value.fadeOutStartFrame === 'number' && Number.isSafeInteger(value.fadeOutStartFrame)
   && typeof value.fadeOutEndFrame === 'number' && Number.isSafeInteger(value.fadeOutEndFrame) && value.fadeOutEndFrame >= value.fadeOutStartFrame
+  && (value.fadeInCurve === undefined || isBoundedFinite(value.fadeInCurve, -1, 1))
+  && (value.fadeInCurvePosition === undefined || isBoundedFinite(value.fadeInCurvePosition, 0, 1))
+  && (value.fadeOutCurve === undefined || isBoundedFinite(value.fadeOutCurve, -1, 1))
+  && (value.fadeOutCurvePosition === undefined || isBoundedFinite(value.fadeOutCurvePosition, 0, 1))
 
 const isParameterBlock = (value: unknown): value is PortableWasmParameterBlock =>
   isRecord(value)

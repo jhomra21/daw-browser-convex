@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#define DAW_AUDIO_CORE_ABI_VERSION 2u
+#define DAW_AUDIO_CORE_ABI_VERSION 3u
 #define DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE 8u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES 256u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS 24u
@@ -960,6 +960,10 @@ typedef struct daw_audio_sample_source_event {
   int64_t fade_out_start_frame;
   int64_t fade_out_end_frame;
   float source_offset_fraction;
+  float fade_in_curve;
+  float fade_in_curve_position;
+  float fade_out_curve;
+  float fade_out_curve_position;
 } daw_audio_sample_source_event;
 
 uint32_t daw_audio_core_get_abi_version(void);
@@ -1165,7 +1169,11 @@ daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_source(
   int64_t fade_in_end_frame,
   int64_t fade_out_start_frame,
   int64_t fade_out_end_frame,
-  float source_offset_fraction);
+  float source_offset_fraction,
+  float fade_in_curve,
+  float fade_in_curve_position,
+  float fade_out_curve,
+  float fade_out_curve_position);
 daw_audio_core_result daw_audio_core_wasm_graph_register_pcm_asset(
   uint32_t frame_count,
   uint32_t sample_rate_hz,

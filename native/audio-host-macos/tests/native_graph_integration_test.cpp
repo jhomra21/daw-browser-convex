@@ -206,6 +206,10 @@ void AssertMultipleSourceGraphPublishes() {
   AppendLeU64(source_event, 0);
   AppendLeU64(source_event, 4);
   AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 1.0F);
+  AppendLeFloat(source_event, 0.25F);
+  AppendLeFloat(source_event, -1.0F);
+  AppendLeFloat(source_event, 0.75F);
   assert(host.QueueSourceEvents(source_event));
   assert(host.SetTransport(1, true, 0));
   assert(host.StartDiagnosticMode());

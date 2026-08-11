@@ -1,7 +1,7 @@
 const PROTOCOL_VERSION = 1
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
-const ABI_VERSION = 2
+const ABI_VERSION = 3
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
 const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
@@ -931,14 +931,19 @@ export class DawPortableAudioCoreHost {
         || event.sourceFrameCount < 1 || typeof event.gain !== 'number' || !Number.isFinite(event.gain)
         || !Number.isSafeInteger(event.fadeInStartFrame) || !Number.isSafeInteger(event.fadeInEndFrame)
         || event.fadeInEndFrame < event.fadeInStartFrame || !Number.isSafeInteger(event.fadeOutStartFrame)
-        || !Number.isSafeInteger(event.fadeOutEndFrame) || event.fadeOutEndFrame < event.fadeOutStartFrame) {
+        || !Number.isSafeInteger(event.fadeOutEndFrame) || event.fadeOutEndFrame < event.fadeOutStartFrame
+        || event.fadeInCurve !== undefined && (typeof event.fadeInCurve !== 'number' || !Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1)
+        || event.fadeInCurvePosition !== undefined && (typeof event.fadeInCurvePosition !== 'number' || !Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
+        || event.fadeOutCurve !== undefined && (typeof event.fadeOutCurve !== 'number' || !Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
+        || event.fadeOutCurvePosition !== undefined && (typeof event.fadeOutCurvePosition !== 'number' || !Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
         return this.sourceScheduleResult(message, 'rejected')
       }
       const handle = this.assets.get(event.assetId).handle.value
       const result = this.sourceSchedule(message.epoch, BigInt(event.sequence), stableId(event.sourceNodeId), handle,
         BigInt(event.startFrame), BigInt(event.stopFrame), BigInt(event.sourceOffsetFrame), BigInt(event.sourceFrameCount), event.gain,
         BigInt(event.fadeInStartFrame), BigInt(event.fadeInEndFrame), BigInt(event.fadeOutStartFrame), BigInt(event.fadeOutEndFrame),
-        event.sourceOffsetFraction || 0)
+        event.sourceOffsetFraction || 0, event.fadeInCurve || 0, event.fadeInCurvePosition ?? 0.5,
+        event.fadeOutCurve || 0, event.fadeOutCurvePosition ?? 0.5)
       if (result !== 0) return this.sourceScheduleResult(message, 'rejected')
       previousSequence = event.sequence
     }

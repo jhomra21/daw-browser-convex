@@ -65,6 +65,67 @@ test('the shared portable Wasm host has no AudioWorklet-only dependency', async 
   expect(source).toContain('wasmModule instanceof WebAssembly.Module')
 })
 
+test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', async () => {
+  const event = {
+    version: 1,
+    epoch: 1,
+    sequence: 1,
+    sourceNodeId: 'source',
+    assetId: 'asset',
+    startFrame: 0,
+    stopFrame: 8,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 8,
+    gain: 1,
+    fadeInStartFrame: 0,
+    fadeInEndFrame: 4,
+    fadeOutStartFrame: 4,
+    fadeOutEndFrame: 8,
+    fadeInCurve: 0.75,
+    fadeInCurvePosition: 0.25,
+    fadeOutCurve: -0.5,
+    fadeOutCurvePosition: 0.8,
+  }
+  for (const hostUrlToUse of [hostUrl, hostV2Url]) {
+    const { DawPortableAudioCoreHost } = await import(hostUrlToUse.href)
+    const calls: unknown[][] = []
+    const messages: unknown[] = []
+    const host = new DawPortableAudioCoreHost({
+      sampleRate: 48_000,
+      postMessage: (message: unknown) => messages.push(message),
+      close: () => undefined,
+    })
+    host.ready = true
+    host.revision = 1
+    host.transportEpoch = 1
+    host.sourceSchedule = (...args: unknown[]) => {
+      calls.push(args)
+      return 0
+    }
+    host.assets = new Map([['asset', { handle: { value: 1n } }]])
+    host.scheduleSources({
+      version: 1,
+      type: 'schedule-sources',
+      requestId: 1,
+      revision: 1,
+      epoch: 1,
+      events: [event],
+    })
+    expect(calls[0]?.slice(-5)).toEqual([0, 0.75, 0.25, -0.5, 0.8])
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', result: 'scheduled' }))
+    calls.length = 0
+    host.scheduleSources({
+      version: 1,
+      type: 'schedule-sources',
+      requestId: 2,
+      revision: 1,
+      epoch: 1,
+      events: [{ ...event, sequence: 2, fadeInCurve: undefined, fadeInCurvePosition: undefined, fadeOutCurve: undefined, fadeOutCurvePosition: undefined }],
+    })
+    expect(calls[0]?.slice(-5)).toEqual([0, 0, 0.5, 0, 0.5])
+  }
+})
+
 test('portable Wasm hosts enforce the 24-parameter contract in every parameter validation path', async () => {
   const v1 = await Bun.file(hostUrl).text()
   const v2 = await Bun.file(hostV2Url).text()

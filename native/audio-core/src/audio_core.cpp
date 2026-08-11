@@ -92,6 +92,10 @@ struct SampleSource {
   int64_t fade_in_end_frame = 0;
   int64_t fade_out_start_frame = 0;
   int64_t fade_out_end_frame = 0;
+  float fade_in_curve = 0.0F;
+  float fade_in_curve_position = 0.5F;
+  float fade_out_curve = 0.0F;
+  float fade_out_curve_position = 0.5F;
   bool active = false;
 };
 
@@ -3215,7 +3219,15 @@ bool valid_sample_source_event(const daw_audio_sample_source_event &event) {
     && event.source_offset_fraction >= 0.0F
     && event.source_offset_fraction < 1.0F
     && event.fade_in_start_frame <= event.fade_in_end_frame
-    && event.fade_out_start_frame <= event.fade_out_end_frame;
+    && event.fade_out_start_frame <= event.fade_out_end_frame
+    && std::isfinite(event.fade_in_curve)
+    && event.fade_in_curve >= -1.0F && event.fade_in_curve <= 1.0F
+    && std::isfinite(event.fade_in_curve_position)
+    && event.fade_in_curve_position >= 0.0F && event.fade_in_curve_position <= 1.0F
+    && std::isfinite(event.fade_out_curve)
+    && event.fade_out_curve >= -1.0F && event.fade_out_curve <= 1.0F
+    && std::isfinite(event.fade_out_curve_position)
+    && event.fade_out_curve_position >= 0.0F && event.fade_out_curve_position <= 1.0F;
 }
 
 void clear_sample_sources(Core &core) {
@@ -3243,14 +3255,51 @@ float linear_fade_gain(int64_t frame, int64_t start, int64_t end, float before, 
   if (end <= start) return frame < end ? before : after;
   if (frame <= start) return before;
   if (frame >= end) return after;
-  return before + (after - before) * static_cast<float>(frame - start) / static_cast<float>(end - start);
+  const double normalized = (static_cast<double>(frame) - static_cast<double>(start))
+    / (static_cast<double>(end) - static_cast<double>(start));
+  return before + (after - before) * static_cast<float>(normalized);
+}
+
+float curved_fade_gain(
+  int64_t frame,
+  int64_t start,
+  int64_t end,
+  float before,
+  float after,
+  float curve,
+  float position) {
+  if (end <= start) return frame < end ? before : after;
+  if (frame <= start) return before;
+  if (frame >= end) return after;
+  if (curve == 0.0F) {
+    return linear_fade_gain(frame, start, end, before, after);
+  }
+  const double u = (static_cast<double>(frame) - static_cast<double>(start))
+    / (static_cast<double>(end) - static_cast<double>(start));
+  const double p = static_cast<double>(position);
+  const double c = static_cast<double>(curve);
+  const double linear_gain = static_cast<double>(before) + (static_cast<double>(after) - static_cast<double>(before)) * p;
+  const double control_gain = c >= 0.0
+    ? linear_gain + (1.0 - linear_gain) * c
+    : linear_gain + linear_gain * c;
+  const double discriminant = std::max(0.0, p * p + (1.0 - 2.0 * p) * u);
+  const double denominator = p + std::sqrt(discriminant);
+  double t = denominator > 0.0 ? u / denominator : 0.0;
+  t = std::min(1.0, std::max(0.0, t));
+  const double inverse = 1.0 - t;
+  const double gain = inverse * inverse * static_cast<double>(before)
+    + 2.0 * inverse * t * control_gain
+    + t * t * static_cast<double>(after);
+  return static_cast<float>(std::min(1.0, std::max(0.0, gain)));
 }
 
 float source_envelope_gain(const SampleSource &source, int64_t transport_frame) {
-  const float fade_in = linear_fade_gain(
-    transport_frame, source.fade_in_start_frame, source.fade_in_end_frame, 0.0F, 1.0F);
-  const float fade_out = linear_fade_gain(
-    transport_frame, source.fade_out_start_frame, source.fade_out_end_frame, 1.0F, 0.0F);
+  const float fade_in = curved_fade_gain(
+    transport_frame, source.fade_in_start_frame, source.fade_in_end_frame, 0.0F, 1.0F,
+    source.fade_in_curve, source.fade_in_curve_position);
+  const float fade_out = curved_fade_gain(
+    transport_frame, source.fade_out_start_frame, source.fade_out_end_frame, 1.0F, 0.0F,
+    source.fade_out_curve, source.fade_out_curve_position);
   return source.gain * fade_in * fade_out;
 }
 
@@ -6263,6 +6312,10 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     .fade_in_end_frame = event->fade_in_end_frame,
     .fade_out_start_frame = event->fade_out_start_frame,
     .fade_out_end_frame = event->fade_out_end_frame,
+    .fade_in_curve = event->fade_in_curve,
+    .fade_in_curve_position = event->fade_in_curve_position,
+    .fade_out_curve = event->fade_out_curve,
+    .fade_out_curve_position = event->fade_out_curve_position,
     .active = true,
   };
   core->last_event_sequence = event->sequence;
@@ -6600,7 +6653,11 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_sourc
   int64_t fade_in_end_frame,
   int64_t fade_out_start_frame,
   int64_t fade_out_end_frame,
-  float source_offset_fraction) {
+  float source_offset_fraction,
+  float fade_in_curve,
+  float fade_in_curve_position,
+  float fade_out_curve,
+  float fade_out_curve_position) {
   if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
   const daw_audio_sample_source_event event{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
@@ -6618,6 +6675,10 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_sourc
     .fade_out_start_frame = fade_out_start_frame,
     .fade_out_end_frame = fade_out_end_frame,
     .source_offset_fraction = source_offset_fraction,
+    .fade_in_curve = fade_in_curve,
+    .fade_in_curve_position = fade_in_curve_position,
+    .fade_out_curve = fade_out_curve,
+    .fade_out_curve_position = fade_out_curve_position,
   };
   return daw_audio_core_schedule_sample_source(to_handle(wasm_graph_core), &event);
 }

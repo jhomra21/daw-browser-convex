@@ -234,6 +234,36 @@ test('requires ordered source-targeted schedules in one transport epoch', () => 
     events: [event],
   })).toMatchObject({ type: 'schedule-sources', events: [event] })
   expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: 1, revision: 1, epoch: 2,
+    events: [{ ...event, fadeInCurve: 1.1 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: 1, revision: 1, epoch: 2,
+    events: [{ ...event, fadeInCurvePosition: -0.1 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: 1, revision: 1, epoch: 2,
+    events: [{ ...event, fadeOutCurve: -1.1 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: 1, revision: 1, epoch: 2,
+    events: [{ ...event, fadeOutCurvePosition: 1.1 }],
+  })).toBeNull()
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'schedule-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 2,
+    events: [{
+      ...event,
+      fadeInCurve: 1,
+      fadeInCurvePosition: 0,
+      fadeOutCurve: -1,
+      fadeOutCurvePosition: 1,
+    }],
+  })).not.toBeNull()
+  expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'schedule-sources',
     requestId: 1,

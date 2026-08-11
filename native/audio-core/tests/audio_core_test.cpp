@@ -2301,6 +2301,66 @@ void test_sample_source_scheduling() {
   daw_audio_core_destroy(core);
 }
 
+void test_sample_source_curved_fades() {
+  daw_audio_core_handle core = create_core(16, 1, 1);
+  publish(core, 1);
+  const std::array<float, 8> samples{1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F};
+  const float *planes[]{samples.data()};
+  const daw_audio_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .revision = 1,
+    .byte_length = 32,
+    .content_hash_prefix = 0,
+    .frame_count = 8,
+    .sample_rate_hz = 48000,
+    .channel_count = 1,
+    .planes = planes,
+  };
+  daw_audio_asset_handle asset = 0;
+  expect(daw_audio_core_create_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  const daw_audio_sample_source_event event{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .epoch = 1,
+    .sequence = 1,
+    .asset = asset,
+    .start_frame = 0,
+    .stop_frame = 8,
+    .source_offset_frame = 0,
+    .source_frame_count = 8,
+    .gain = 1.0F,
+    .fade_in_start_frame = 0,
+    .fade_in_end_frame = 4,
+    .fade_out_start_frame = 4,
+    .fade_out_end_frame = 8,
+    .fade_in_curve = 1.0F,
+    .fade_in_curve_position = 0.25F,
+    .fade_out_curve = -1.0F,
+    .fade_out_curve_position = 0.75F,
+  };
+  expect(daw_audio_core_schedule_sample_source(core, &event), DAW_AUDIO_CORE_OK);
+  std::array<float, 8> output{};
+  float *outputs[]{output.data()};
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .frame_count = 8,
+    .channel_count = 1,
+    .input_bus_count = 0,
+    .inputs = nullptr,
+    .outputs = outputs,
+  };
+  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  const std::array<float, 8> expected{
+    0.0F, 0.5980762F, 0.8541020F, 0.9686270F,
+    1.0F, 0.6771243F, 0.3819660F, 0.1339746F,
+  };
+  for (uint32_t frame = 0; frame < expected.size(); ++frame) {
+    assert(std::abs(output[frame] - expected[frame]) <= 1e-5F);
+  }
+  daw_audio_core_destroy(core);
+}
+
 void test_sample_source_partition_invariance_and_mono() {
   daw_audio_core_handle core = create_core(8, 2, 1);
   publish(core, 1);
@@ -3604,6 +3664,7 @@ int main() {
   test_variable_blocks_and_capacity();
   test_stale_asset_handles();
   test_sample_source_scheduling();
+  test_sample_source_curved_fades();
   test_sample_source_partition_invariance_and_mono();
   test_sample_source_fractional_rate_matrix_and_overlaps();
   test_sample_source_targets_published_graph_source();

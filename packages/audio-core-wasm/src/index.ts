@@ -1,7 +1,7 @@
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { processorContractHash } from '../../audio-core-contract/src/generated/processor-contract-metadata'
 
-export const audioCoreWasmAbiVersion = 2
+export const audioCoreWasmAbiVersion = 3
 export const audioCoreWasmArtifactVersion = 2
 
 export type AudioCoreWasmArtifactManifest = {

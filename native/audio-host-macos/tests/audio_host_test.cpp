@@ -473,7 +473,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x0f,
+    0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -845,13 +845,34 @@ void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
   assert(host.QueueParameterEvents(empty_events));
   assert(host.QueueInstrumentEvents(empty_events));
   assert(host.QueueSourceEvents(empty_events));
-  std::array<std::uint8_t, 96> source_before_install{};
+  std::array<std::uint8_t, 112> source_before_install{};
   source_before_install[0] = 1;
   source_before_install[24] = 1;
   assert(!host.QueueSourceEvents(source_before_install));
   const std::array<float, 8> samples{};
   assert(host.InstallAsset(1, 4, 48000, 2, 0, samples));
-  std::array<std::uint8_t, 188> mixed_source_events{};
+  std::vector<std::uint8_t> invalid_curve_source;
+  AppendLeU32(invalid_curve_source, 1);
+  AppendLeU32(invalid_curve_source, 1);
+  AppendLeU64(invalid_curve_source, 1);
+  AppendLeU64(invalid_curve_source, 0);
+  AppendLeU32(invalid_curve_source, 1);
+  AppendLeU64(invalid_curve_source, 0);
+  AppendLeU64(invalid_curve_source, 4);
+  AppendLeU64(invalid_curve_source, 0);
+  AppendLeU64(invalid_curve_source, 4);
+  AppendLeFloat(invalid_curve_source, 1.0F);
+  AppendLeU64(invalid_curve_source, 0);
+  AppendLeU64(invalid_curve_source, 0);
+  AppendLeU64(invalid_curve_source, 4);
+  AppendLeU64(invalid_curve_source, 4);
+  AppendLeFloat(invalid_curve_source, 0.0F);
+  AppendLeFloat(invalid_curve_source, NAN);
+  AppendLeFloat(invalid_curve_source, 0.5F);
+  AppendLeFloat(invalid_curve_source, 0.0F);
+  AppendLeFloat(invalid_curve_source, 0.5F);
+  assert(!host.QueueSourceEvents(invalid_curve_source));
+  std::array<std::uint8_t, 228> mixed_source_events{};
   mixed_source_events[0] = 2;
   mixed_source_events[24] = 1;
   mixed_source_events[116] = 2;

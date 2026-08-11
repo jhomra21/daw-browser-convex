@@ -125,7 +125,6 @@ const projectClip = (
   if (!asset) return { reason: `${clip.id}: source asset is not registered.` }
   if (asset.channelCount > 2) return { reason: `${clip.id}: only mono and stereo assets are supported.` }
   const fades = normalizeClipFades(clip.fades, clip.duration)
-  if (fades.fadeInCurve !== 0 || fades.fadeOutCurve !== 0) return { reason: `${clip.id}: curved fades are not supported.` }
   const map = getAudioClipTimeMap({
     clip,
     bufferDurationSec: preparedStretch?.sourceDurationSec ?? asset.frameCount / asset.sampleRateHz,
@@ -181,6 +180,14 @@ const projectClip = (
       fadeInEndFrame: frameAt(clip.startSec + fades.fadeInSec, input.sampleRateHz),
       fadeOutStartFrame: frameAt(clip.startSec + clip.duration - fades.fadeOutSec, input.sampleRateHz),
       fadeOutEndFrame: frameAt(clip.startSec + clip.duration - fades.fadeOutEndSec, input.sampleRateHz),
+      ...(fades.fadeInCurve === 0 ? {} : {
+        fadeInCurve: fades.fadeInCurve,
+        fadeInCurvePosition: fades.fadeInCurvePosition,
+      }),
+      ...(fades.fadeOutCurve === 0 ? {} : {
+        fadeOutCurve: fades.fadeOutCurve,
+        fadeOutCurvePosition: fades.fadeOutCurvePosition,
+      }),
     },
   }
 }

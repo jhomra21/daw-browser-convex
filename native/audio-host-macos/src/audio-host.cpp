@@ -93,6 +93,9 @@ std::uint64_t ReadLeU64(const std::uint8_t* bytes) {
   for (std::size_t index = 0; index < 8; ++index) value |= static_cast<std::uint64_t>(bytes[index]) << (index * 8U);
   return value;
 }
+std::int64_t ReadLeI64(const std::uint8_t* bytes) {
+  return static_cast<std::int64_t>(ReadLeU64(bytes));
+}
 
 float ReadLeFloat(const std::uint8_t* bytes) {
   const std::uint32_t bits = ReadLeU32(bytes);
@@ -206,6 +209,27 @@ bool ValidNativeInstrumentEvent(const daw_audio_instrument_event& event) {
       || event.type == static_cast<std::uint32_t>(daw::audio_core::NativeInstrumentEventType::kLiveNoteOff))
     && event.note_id == 0) return false;
   return true;
+}
+
+bool ValidNativeSampleSourceEvent(const daw_audio_sample_source_event& event) {
+  return event.epoch != 0
+    && event.sequence != 0
+    && event.asset != 0
+    && event.stop_frame > event.start_frame
+    && event.source_frame_count > 0
+    && std::isfinite(event.gain)
+    && std::isfinite(event.source_offset_fraction)
+    && event.source_offset_fraction >= 0.0F && event.source_offset_fraction < 1.0F
+    && event.fade_in_start_frame <= event.fade_in_end_frame
+    && event.fade_out_start_frame <= event.fade_out_end_frame
+    && std::isfinite(event.fade_in_curve)
+    && event.fade_in_curve >= -1.0F && event.fade_in_curve <= 1.0F
+    && std::isfinite(event.fade_in_curve_position)
+    && event.fade_in_curve_position >= 0.0F && event.fade_in_curve_position <= 1.0F
+    && std::isfinite(event.fade_out_curve)
+    && event.fade_out_curve >= -1.0F && event.fade_out_curve <= 1.0F
+    && std::isfinite(event.fade_out_curve_position)
+    && event.fade_out_curve_position >= 0.0F && event.fade_out_curve_position <= 1.0F;
 }
 
 using NativeVstAutomationSegment = NativeScheduleAutomationSegment;
@@ -2344,24 +2368,51 @@ bool AudioHost::QueueInstrumentEvents(const std::span<const std::uint8_t> payloa
 bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
   if (impl_->prepared_core != 0 || payload.size() < 4) return false;
   const std::uint32_t count = ReadLeU32(payload.data());
-  if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 96) return false;
+  if (count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS || payload.size() != 4 + static_cast<std::size_t>(count) * 112) return false;
   if (!impl_->HasCapacity(Impl::QueuedControlKind::kSource, count)) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
-    const auto* bytes = payload.data() + 4 + index * 96;
-    if (!impl_->assets.contains(ReadLeU32(bytes + 20))) return false;
+    const auto* bytes = payload.data() + 4 + index * 112;
+    const auto asset = impl_->assets.find(ReadLeU32(bytes + 20));
+    if (asset == impl_->assets.end()) return false;
+    const daw_audio_sample_source_event event{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+      .epoch = ReadLeU32(bytes),
+      .sequence = ReadLeU64(bytes + 4),
+      .source_node_id = ReadLeU64(bytes + 12),
+      .asset = asset->second.handle,
+      .start_frame = ReadLeI64(bytes + 24),
+      .stop_frame = ReadLeI64(bytes + 32),
+      .source_offset_frame = ReadLeU64(bytes + 40),
+      .source_frame_count = ReadLeU64(bytes + 48),
+      .gain = ReadLeFloat(bytes + 56),
+      .fade_in_start_frame = ReadLeI64(bytes + 60),
+      .fade_in_end_frame = ReadLeI64(bytes + 68),
+      .fade_out_start_frame = ReadLeI64(bytes + 76),
+      .fade_out_end_frame = ReadLeI64(bytes + 84),
+      .source_offset_fraction = ReadLeFloat(bytes + 92),
+      .fade_in_curve = ReadLeFloat(bytes + 96),
+      .fade_in_curve_position = ReadLeFloat(bytes + 100),
+      .fade_out_curve = ReadLeFloat(bytes + 104),
+      .fade_out_curve_position = ReadLeFloat(bytes + 108),
+    };
+    if (!ValidNativeSampleSourceEvent(event)
+      || event.source_offset_frame >= asset->second.frame_count
+      || event.source_frame_count > asset->second.frame_count - event.source_offset_frame) return false;
   }
   for (std::uint32_t index = 0; index < count; ++index) {
-    const auto* bytes = payload.data() + 4 + index * 96;
+    const auto* bytes = payload.data() + 4 + index * 112;
     const auto asset = impl_->assets.find(ReadLeU32(bytes + 20));
     Impl::QueuedControlEvent event{};
     event.kind = Impl::QueuedControlKind::kSource;
     event.source = {.abi_version = DAW_AUDIO_CORE_ABI_VERSION, .epoch = ReadLeU32(bytes), .sequence = ReadLeU64(bytes + 4),
-      .source_node_id = ReadLeU64(bytes + 12), .asset = asset->second.handle, .start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 24)),
-      .stop_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 32)), .source_offset_frame = ReadLeU64(bytes + 40),
+      .source_node_id = ReadLeU64(bytes + 12), .asset = asset->second.handle, .start_frame = ReadLeI64(bytes + 24),
+      .stop_frame = ReadLeI64(bytes + 32), .source_offset_frame = ReadLeU64(bytes + 40),
       .source_frame_count = ReadLeU64(bytes + 48), .gain = ReadLeFloat(bytes + 56),
-      .fade_in_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 60)), .fade_in_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 68)),
-      .fade_out_start_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 76)), .fade_out_end_frame = static_cast<std::int64_t>(ReadLeU64(bytes + 84)),
-      .source_offset_fraction = ReadLeFloat(bytes + 92)};
+      .fade_in_start_frame = ReadLeI64(bytes + 60), .fade_in_end_frame = ReadLeI64(bytes + 68),
+      .fade_out_start_frame = ReadLeI64(bytes + 76), .fade_out_end_frame = ReadLeI64(bytes + 84),
+      .source_offset_fraction = ReadLeFloat(bytes + 92),
+      .fade_in_curve = ReadLeFloat(bytes + 96), .fade_in_curve_position = ReadLeFloat(bytes + 100),
+      .fade_out_curve = ReadLeFloat(bytes + 104), .fade_out_curve_position = ReadLeFloat(bytes + 108)};
     if (!impl_->EnqueueControlEvent(event)) return false;
   }
   return true;
@@ -2569,21 +2620,29 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
   std::uint64_t previous_source_sequence = 0;
   bool has_previous_source = false;
   for (std::uint32_t index = 0; index < source_count; ++index) {
-    if (offset + 96 > payload.size()) return false;
+    if (offset + 112 > payload.size()) return false;
     const auto* bytes = payload.data() + offset;
     const auto source_start = ReadLeU64(bytes + 24);
     const auto source_sequence = ReadLeU64(bytes + 4);
     const auto source_stop = ReadLeU64(bytes + 32);
     const auto source_offset = ReadLeU64(bytes + 40);
     const auto source_frames = ReadLeU64(bytes + 48);
-    const auto fade_in_start = ReadLeU64(bytes + 60);
-    const auto fade_in_end = ReadLeU64(bytes + 68);
-    const auto fade_out_start = ReadLeU64(bytes + 76);
-    const auto fade_out_end = ReadLeU64(bytes + 84);
+    const auto fade_in_start = ReadLeI64(bytes + 60);
+    const auto fade_in_end = ReadLeI64(bytes + 68);
+    const auto fade_out_start = ReadLeI64(bytes + 76);
+    const auto fade_out_end = ReadLeI64(bytes + 84);
+    const auto fade_in_curve = ReadLeFloat(bytes + 96);
+    const auto fade_in_curve_position = ReadLeFloat(bytes + 100);
+    const auto fade_out_curve = ReadLeFloat(bytes + 104);
+    const auto fade_out_curve_position = ReadLeFloat(bytes + 108);
     if (source_start < start_frame || source_start >= end_frame || source_sequence == 0
       || source_stop <= source_start || source_stop > std::numeric_limits<std::int64_t>::max()
       || source_frames == 0 || source_offset > std::numeric_limits<std::uint64_t>::max() - source_frames
       || fade_in_start > fade_in_end || fade_out_start > fade_out_end
+      || !std::isfinite(fade_in_curve) || fade_in_curve < -1.0F || fade_in_curve > 1.0F
+      || !std::isfinite(fade_in_curve_position) || fade_in_curve_position < 0.0F || fade_in_curve_position > 1.0F
+      || !std::isfinite(fade_out_curve) || fade_out_curve < -1.0F || fade_out_curve > 1.0F
+      || !std::isfinite(fade_out_curve_position) || fade_out_curve_position < 0.0F || fade_out_curve_position > 1.0F
       || (has_previous_source && (source_start < previous_source_frame
         || (source_start == previous_source_frame && source_sequence <= previous_source_sequence)))) return false;
     const auto asset = impl_->assets.find(ReadLeU32(bytes + 20));
@@ -2604,17 +2663,21 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
       .source_offset_frame = source_offset,
       .source_frame_count = source_frames,
       .gain = ReadLeFloat(bytes + 56),
-      .fade_in_start_frame = static_cast<std::int64_t>(fade_in_start),
-      .fade_in_end_frame = static_cast<std::int64_t>(fade_in_end),
-      .fade_out_start_frame = static_cast<std::int64_t>(fade_out_start),
-      .fade_out_end_frame = static_cast<std::int64_t>(fade_out_end),
-      .source_offset_fraction = ReadLeFloat(bytes + 92)};
+      .fade_in_start_frame = fade_in_start,
+      .fade_in_end_frame = fade_in_end,
+      .fade_out_start_frame = fade_out_start,
+      .fade_out_end_frame = fade_out_end,
+      .source_offset_fraction = ReadLeFloat(bytes + 92),
+      .fade_in_curve = fade_in_curve,
+      .fade_in_curve_position = fade_in_curve_position,
+      .fade_out_curve = fade_out_curve,
+      .fade_out_curve_position = fade_out_curve_position};
     if (event.source.epoch != epoch || staging.record_count >= staging.events.size()) return false;
     staging.events[staging.record_count++] = event;
     previous_source_frame = source_start;
     previous_source_sequence = source_sequence;
     has_previous_source = true;
-    offset += 96;
+    offset += 112;
   }
   std::string previous_automation_instance;
   std::uint32_t previous_automation_parameter = 0;

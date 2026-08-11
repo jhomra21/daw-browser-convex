@@ -1534,6 +1534,15 @@ export function useTimelinePlayback(
       }
     }),
   )
+  const hasPendingAudioClipHydration = () => (loopOptions?.getTracks?.() ?? []).some((track) =>
+    track.clips.some((clip) => (
+      !clip.midi
+      && Boolean(clip.sourceAssetKey)
+      && !("buffer" in clip && clip.buffer)
+      && clip.mediaStatus !== "missing"
+      && clip.mediaStatus !== "permission-denied"
+    )),
+  )
   const disposeNativePreview = () => {
     nativeLifecycleToken += 1
     const request = pendingNativeDispose.then(() => nativePlayback.dispose())
@@ -1571,6 +1580,7 @@ export function useTimelinePlayback(
     const enabled = nativeOptions?.enabled?.() ?? false
     const projectGeneration = nativeOptions?.projectGeneration?.() ?? 0
     const trackFingerprint = readNativePreviewTrackFingerprint()
+    const pendingAudioHydration = hasPendingAudioClipHydration()
     const tracksChanged = nativePreviewTrackFingerprint !== undefined
       && trackFingerprint !== nativePreviewTrackFingerprint
     nativePreviewTrackFingerprint = trackFingerprint
@@ -1582,6 +1592,13 @@ export function useTimelinePlayback(
     }
     if (!enabled || (hasAudioLifecycle && audioLifecycleState() !== "ready")) {
       if (nativePreviewRequested) {
+        nativePreviewRequested = false
+        void disposeNativePreview()
+      }
+      return
+    }
+    if (pendingAudioHydration) {
+      if (nativePreviewRequested && !nativePlayback.hasLiveMidiTails()) {
         nativePreviewRequested = false
         void disposeNativePreview()
       }

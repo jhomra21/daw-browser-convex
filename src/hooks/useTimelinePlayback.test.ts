@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { createRoot, createSignal } from 'solid-js'
+import { isServer } from 'solid-js/web'
 
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
@@ -20,6 +21,38 @@ const track: Track = {
   volume: 1,
   clips: [],
 }
+
+class TestAudioBuffer implements AudioBuffer {
+  readonly duration = 4 / 48_000
+  readonly length = 4
+  readonly numberOfChannels = 1
+  readonly sampleRate = 48_000
+  private readonly channel = new Float32Array(4)
+  copyFromChannel(destination: Float32Array, _channelNumber: number, _bufferOffset?: number) {
+    destination.set(this.channel.subarray(0, destination.length))
+  }
+  copyToChannel(source: Float32Array, _channelNumber: number, _bufferOffset?: number) {
+    this.channel.set(source.subarray(0, this.channel.length))
+  }
+  getChannelData(_channel: number) {
+    return this.channel
+  }
+}
+
+const audioTrack = (buffer: AudioBuffer | null): Track<AudioBuffer> => ({
+  id: "track-audio",
+  name: "Audio",
+  volume: 1,
+  clips: [{
+    id: "clip-audio",
+    name: "Audio clip",
+    startSec: 0,
+    duration: 1,
+    color: "#fff",
+    sourceAssetKey: "asset-audio",
+    buffer,
+  }],
+})
 
 const withFakeRaf = async (run: (flushRaf: () => void) => Promise<void>) => {
   const callbacks: FrameRequestCallback[] = []
@@ -342,6 +375,104 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   expect(fingerprint).toContain("clips.map((clip)")
   expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
   expect(fingerprint).not.toContain("clip.id")
+})
+
+test('waits for audio clip hydration before native paused preview and retries after hydration', async () => {
+  const previousWindow = globalThis.window
+  const [tracks, setTracks] = createSignal([audioTrack(null)])
+  const hydratedTrack = audioTrack(new TestAudioBuffer())
+  const fixture = createNativeHookBridge()
+  const faults: string[] = []
+  const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => (
+    compileLivePlaybackSnapshot({
+      revision: 1,
+      bpm: 120,
+      transport,
+      tracks: tracks(),
+      renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+      sidechainRoutes: [],
+    })
+  )
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    let dispose = () => {}
+    const playback = createRoot((cleanup) => {
+      dispose = cleanup
+      return useTimelinePlayback(
+        createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine,
+        { getTracks: () => tracks() },
+        {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot,
+          reportFault: (message) => faults.push(message),
+        },
+      )
+    })
+    await flushMicrotasks()
+    expect(fixture.calls).not.toContain("begin")
+    expect(faults).toEqual([])
+    expect(playback.isNativePlaybackPrepared()).toBeFalse()
+
+    if (!isServer) {
+      setTracks(() => [hydratedTrack])
+      await flushMicrotasks()
+      expect(tracks()).toEqual([hydratedTrack])
+      expect(fixture.calls).toContain("begin")
+      expect(faults).toEqual([])
+      expect(playback.isNativePlaybackPrepared()).toBeTrue()
+    }
+    dispose()
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('reports unhydrated native audio when playback is explicitly requested', async () => {
+  const previousWindow = globalThis.window
+  const unhydratedTracks = [audioTrack(null)]
+  const fixture = createNativeHookBridge()
+  const faults: string[] = []
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(
+        createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine,
+        { getTracks: () => unhydratedTracks },
+        {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+            revision: 1,
+            bpm: 120,
+            transport,
+            tracks: unhydratedTracks,
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+            sidechainRoutes: [],
+          }),
+          reportFault: (message) => faults.push(message),
+        },
+      )
+      await flushMicrotasks()
+      expect(faults).toEqual([])
+
+      await playback.handlePlay(unhydratedTracks)
+      expect(fixture.calls).not.toContain("begin")
+      expect(faults).toEqual(['Audio clip "clip-audio" is not hydrated.'])
+      expect(playback.isPlaying()).toBeFalse()
+      dispose()
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
 })
 
 describe('useTimelinePlayback deferred stretch retries', () => {

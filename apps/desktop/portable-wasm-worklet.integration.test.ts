@@ -78,7 +78,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
     && typeof manifest.sourceHash === "string"
     ? manifest.sourceHash
     : undefined
-  if (sourceHash !== await computePortableWasmSourceHash()) {
+  if (sourceHash !== await computePortableWasmSourceHash(repositoryRoot)) {
     throw new Error("Portable Wasm manifest is stale for the current audio-core build inputs.")
   }
 

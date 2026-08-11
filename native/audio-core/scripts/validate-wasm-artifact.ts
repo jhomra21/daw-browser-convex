@@ -22,7 +22,7 @@ if (typeof manifest !== 'object' || manifest === null
   throw new Error(`Production Wasm manifest is invalid: ${manifestPath}`)
 }
 
-const sourceHash = await computePortableWasmSourceHash()
+const sourceHash = await computePortableWasmSourceHash(process.cwd())
 if (sourceHash !== manifest.sourceHash) {
   throw new Error(`Production Wasm source hash does not match the current audio-core sources: ${manifestPath}`)
 }

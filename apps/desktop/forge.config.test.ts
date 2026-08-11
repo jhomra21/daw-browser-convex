@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createHash } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -24,11 +25,27 @@ import {
 } from "./native-release-artifacts"
 import { computePortableWasmSourceHash } from "../../native/audio-core/scripts/portable-wasm-source-hash"
 
+const repositoryRoot = path.resolve(import.meta.dirname, "../..")
+
 const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 
 test('does not plan VST3 host artifacts without the explicit release gate', () => {
   expect(forgeConfig.packagerConfig?.asar).toBeTrue()
   expect(getPluginHostReleaseArtifactPlan({})).toEqual([])
+})
+
+test("loads the Forge config through Jiti in Node", () => {
+  const result = spawnSync(process.env.DAW_FORGE_NODE ?? "node", [
+    "-e",
+    'const path = require("node:path"); const { createJiti } = require("jiti"); const jiti = createJiti(path.resolve("forge-config-loader.cjs")); jiti.import("./forge.config.ts").then(() => console.log("loaded")).catch((error) => { console.error(error); process.exitCode = 1 })',
+  ], {
+    cwd: import.meta.dirname,
+    encoding: "utf8",
+  })
+  if (result.status !== 0) {
+    throw new Error(`Forge config Jiti subprocess failed:\n${result.stderr}`)
+  }
+  expect(result.stdout.trim()).toBe("loaded")
 })
 
 test('requires explicit scanner, worker, and CoreAudio host paths when native hosting is enabled', () => {
@@ -209,9 +226,9 @@ test('requires generated portable Wasm assets to match their manifest hash', asy
   try {
     await mkdir(path.join(publicDirectory, "audio-core"))
     await writeFile(path.join(publicDirectory, "audio-core", "daw-audio-core.wasm"), "wasm")
-    await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("daw-audio-core.manifest.json")
+    await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("daw-audio-core.manifest.json")
     const manifestPath = path.join(publicDirectory, "audio-core", "daw-audio-core.manifest.json")
-    const sourceHash = await computePortableWasmSourceHash()
+    const sourceHash = await computePortableWasmSourceHash(repositoryRoot)
     const manifest = {
       artifactKind: "production",
       buildType: "Release",
@@ -222,13 +239,13 @@ test('requires generated portable Wasm assets to match their manifest hash', asy
       sourceHash,
     }
     await writeFile(manifestPath, JSON.stringify(manifest))
-    await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("hash does not match")
+    await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("hash does not match")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sha256: hash("wasm"), sourceHash: hash("stale") }))
-    await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("source hash")
+    await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("source hash")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, maximumBytes: 3, sha256: hash("wasm") }))
-    await expect(validatePortableWasmReleaseAssets(publicDirectory)).rejects.toThrow("size budget")
+    await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).rejects.toThrow("size budget")
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sha256: hash("wasm") }))
-    await expect(validatePortableWasmReleaseAssets(publicDirectory)).resolves.toBeUndefined()
+    await expect(validatePortableWasmReleaseAssets(publicDirectory, repositoryRoot)).resolves.toBeUndefined()
   } finally {
     await rm(publicDirectory, { recursive: true, force: true })
   }

@@ -21,13 +21,17 @@ import {
 const run = promisify(execFile)
 type PluginHostReleaseArtifact = NativeReleaseArtifact
 
+const desktopDirectory = import.meta.dirname
+const repositoryRoot = path.resolve(desktopDirectory, "../..")
+
 const portableWasmReleaseAssetNames = [
   "daw-audio-core.wasm",
   "daw-audio-core.manifest.json",
 ] as const
 
 export const validatePortableWasmReleaseAssets = async (
-  publicDirectory = path.resolve(import.meta.dirname, "../../public"),
+  publicDirectory = path.join(repositoryRoot, "public"),
+  sourceRepositoryRoot = repositoryRoot,
 ): Promise<void> => {
   const [wasmName, manifestName] = portableWasmReleaseAssetNames
   const wasmPath = path.join(publicDirectory, "audio-core", wasmName)
@@ -51,7 +55,7 @@ export const validatePortableWasmReleaseAssets = async (
     || !/^[a-f0-9]{64}$/.test(manifest.sourceHash)) {
     throw new Error(`Required portable Wasm release asset is invalid: ${manifestPath}`)
   }
-  const sourceHash = await computePortableWasmSourceHash()
+  const sourceHash = await computePortableWasmSourceHash(sourceRepositoryRoot)
   if (manifest.sourceHash !== sourceHash) {
     throw new Error(`Portable Wasm release asset source hash is stale: ${manifestPath}`)
   }
@@ -124,7 +128,7 @@ const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | 
   return undefined
 }
 
-const entitlementsDirectory = path.join(import.meta.dirname, "entitlements")
+const entitlementsDirectory = path.join(desktopDirectory, "entitlements")
 const appEntitlements = path.join(entitlementsDirectory, "app.plist")
 const helperEntitlements = path.join(entitlementsDirectory, "helper.plist")
 const nativeEntitlements = path.join(entitlementsDirectory, "native.plist")
@@ -279,9 +283,9 @@ const verifySignedPackage = async (appPath: string) => {
 }
 const compileNativeFileCapabilityHelper = async () => {
   if (process.platform !== "darwin" && process.platform !== "linux") return
-  const nativeDirectory = path.join(import.meta.dirname, ".native")
+  const nativeDirectory = path.join(desktopDirectory, ".native")
   await mkdir(nativeDirectory, { recursive: true })
-  const source = path.join(import.meta.dirname, "native", "file-capability-helper.c")
+  const source = path.join(desktopDirectory, "native", "file-capability-helper.c")
   const output = path.join(nativeDirectory, "file-capability-helper")
   const platformDefinition = process.platform === "darwin" ? "-D_DARWIN_C_SOURCE" : "-D_GNU_SOURCE"
   await run("clang", ["-std=c17", "-Wall", "-Wextra", "-Werror", platformDefinition, source, "-o", output])
@@ -324,7 +328,7 @@ const config: ForgeConfig = {
     prePackage: async (_config, platform) => {
       if (platform === "darwin" && shouldRequireMacReleaseConfiguration()) requireMacReleaseConfiguration()
       await validatePluginHostReleaseArtifactPlan(pluginHostReleaseArtifacts)
-      await validatePortableWasmReleaseAssets()
+      await validatePortableWasmReleaseAssets(path.join(repositoryRoot, "public"), repositoryRoot)
       await compileNativeFileCapabilityHelper()
     },
     postPackage: async (_config, packageResult) => {

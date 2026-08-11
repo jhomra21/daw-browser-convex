@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import path from 'node:path'
 import {
   encodePortableGraphParityFixture,
   isPlanarImpulseFixtureInput,
@@ -16,6 +17,7 @@ import type { ReverbProcessorState } from '../../../packages/audio-core-contract
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
 import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
 
+const repositoryRoot = path.resolve(import.meta.dirname, '../../..')
 const artifactUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
 const fixtureArtifactUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core-wasm-harness.wasm', import.meta.url)
 const manifestUrl = new URL('../../build/audio-core-wasm/audio-core/daw-audio-core.manifest.json', import.meta.url)
@@ -557,7 +559,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     memoryBytes: 184_549_376,
     sizeBytes: bytes.byteLength,
     sha256: hash,
-    sourceHash: await computePortableWasmSourceHash(),
+    sourceHash: await computePortableWasmSourceHash(repositoryRoot),
     wasmUrl: '/audio-core/daw-audio-core.wasm',
   })
   expect(bytes.byteLength).toBeLessThanOrEqual(manifest.maximumBytes)

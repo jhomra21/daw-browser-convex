@@ -11,10 +11,8 @@ export const portableWasmBuildInputPaths = [
   'native/audio-core/src/wasm_entry.cpp',
 ] as const
 
-const defaultRepositoryRoot = path.resolve(import.meta.dir, '../../..')
-
 export const computePortableWasmSourceHash = async (
-  repositoryRoot = defaultRepositoryRoot,
+  repositoryRoot: string,
 ): Promise<string> => {
   const hash = createHash('sha256')
   for (const sourcePath of portableWasmBuildInputPaths) {
@@ -28,5 +26,5 @@ export const computePortableWasmSourceHash = async (
 }
 
 if (import.meta.main) {
-  console.log(await computePortableWasmSourceHash())
+  console.log(await computePortableWasmSourceHash(process.cwd()))
 }

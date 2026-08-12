@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { createDefaultReverbParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import {
+  createDefaultDrumRackParams,
+  createDefaultGranularParams,
+  createDefaultReverbParams,
+  createDefaultSamplerParams,
+  createDefaultSynthParams,
+  type TrackInstrumentParams,
+} from '@daw-browser/shared'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import { compileLiveNativeProjection } from './live-native-projection'
 
@@ -260,6 +267,41 @@ test('projects legacy synth state for native MIDI playback', () => {
     kind: 'instrument',
     instrument: { kind: 'synth', outputLayout: 'stereo' },
   })
+})
+
+test('projects empty sampled instruments for native MIDI playback', () => {
+  const midiClip = {
+    ...clip,
+    id: 'empty-sampled-midi',
+    sourceAssetKey: undefined,
+    buffer: undefined,
+    midi: { wave: 'sawtooth' as const, notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
+  }
+  const instruments: readonly TrackInstrumentParams[] = [
+    { kind: 'sampler', instanceId: 'sampler:empty', params: createDefaultSamplerParams() },
+    { kind: 'drum-rack', instanceId: 'drums:empty', params: createDefaultDrumRackParams() },
+    { kind: 'granular', instanceId: 'granular:empty', params: createDefaultGranularParams() },
+  ]
+  for (const instrument of instruments) {
+    const result = compileLiveNativeProjection({
+      tracks: [track({ kind: 'instrument', clips: [midiClip] })],
+      fx: {
+        masterFxInstances: [],
+        trackFx: { track: { instances: [], instrument } },
+      },
+      bpm: 120,
+      sampleRateHz: 48_000,
+      revision: 1,
+      epoch: 1,
+      firstSequence: 1,
+    })
+    if (!result.supported) throw new Error(result.reasons.join('\n'))
+    expect(result.graph.nodes.find((node) => node.id === 'track')).toMatchObject({
+      kind: 'instrument',
+      instrument: { kind: instrument.kind, outputLayout: 'stereo' },
+    })
+    expect(result.events).toHaveLength(0)
+  }
 })
 
 test('projects native-owned reverb state instead of applying portable fixture gating', () => {

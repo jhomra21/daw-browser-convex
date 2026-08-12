@@ -212,6 +212,65 @@ test("serializes native synth state with its bounded ABI payload", () => {
   expect(view.getFloat32(28 + 152, true)).toBeCloseTo(-0.25)
 })
 
+test("serializes empty sampled instruments without staged assets", () => {
+  const base = {
+    version: 1 as const,
+    voiceCapacity: 4,
+    outputLayout: "stereo" as const,
+    ampAttackMs: 1,
+    ampDecayMs: 10,
+    ampSustain: 1,
+    ampReleaseMs: 20,
+    filterEnabled: true,
+    filterMode: "lowpass" as const,
+    filterCutoffHz: 20_000,
+    filterResonance: 0.707,
+    filterEnvelopeAmount: 0,
+    filterAttackMs: 1,
+    filterDecayMs: 10,
+    filterSustain: 0,
+    filterReleaseMs: 20,
+    lfoEnabled: false,
+    lfoRateHz: 5,
+    lfoPitchCents: 0,
+    lfoFilterHz: 0,
+    lfoAmplitude: 0,
+    lfoPan: 0,
+    retrigger: true,
+    zones: [],
+  }
+  const bytes = serializeNativeInstrumentStates([
+    { nodeId: "sampler", state: { ...base, kind: "sampler" } },
+    { nodeId: "drums", state: { ...base, kind: "drum-rack" } },
+    {
+      nodeId: "granular",
+      state: {
+        version: 1,
+        kind: "granular",
+        voiceCapacity: 2,
+        outputLayout: "stereo",
+        assetId: "",
+        seed: 1,
+        maxGrains: 2,
+        windowShape: "hann",
+        freeze: false,
+        grainSizeMs: 5,
+        densityHz: 1,
+        position: 0,
+        spray: 0,
+        pitchSemitones: 0,
+        reverseProbability: 0,
+        stereoSpread: 0,
+      },
+    },
+  ], [])
+  const view = new DataView(bytes.buffer)
+  expect(view.getUint32(0, true)).toBe(3)
+  expect(view.getUint32(16, true)).toBe(88)
+  expect(view.getUint32(20, true)).toBe(0)
+  expect(view.getBigUint64(4 + 24 + 88 + 24 + 88 + 24 + 4, true)).toBe(0n)
+})
+
 test("serializes bounded native schedule ownership events", () => {
   const bytes = serializeNativeScheduleWindow({
     revision: 4,

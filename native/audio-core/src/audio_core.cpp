@@ -662,7 +662,7 @@ bool valid_synth_state(const daw_audio_synth_state &state) {
 }
 
 bool valid_sampler_state(const daw_audio_sampler_state &state) {
-  return state.version == 1 && state.zone_count > 0 && state.zone_count <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
+  return state.version == 1 && state.zone_count <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
     && std::isfinite(state.amp_attack_ms) && state.amp_attack_ms >= 0.0F && state.amp_attack_ms <= 10000.0F
     && std::isfinite(state.amp_decay_ms) && state.amp_decay_ms >= 0.0F && state.amp_decay_ms <= 10000.0F
     && std::isfinite(state.amp_sustain) && state.amp_sustain >= 0.0F && state.amp_sustain <= 1.0F
@@ -685,7 +685,7 @@ bool valid_sampler_state(const daw_audio_sampler_state &state) {
 }
 
 bool valid_granular_state(Core &core, const daw_audio_granular_state &state) {
-  return state.version == 1 && find_asset(&core, state.asset) != nullptr && state.seed != 0
+  return state.version == 1 && (state.asset == 0 || find_asset(&core, state.asset) != nullptr) && state.seed != 0
     && state.max_grains > 0 && state.max_grains <= DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS
     && state.window_shape <= DAW_AUDIO_GRANULAR_WINDOW_GAUSSIAN && state.freeze <= 1
     && std::isfinite(state.grain_size_ms) && state.grain_size_ms >= 5.0F && state.grain_size_ms <= 1000.0F
@@ -6229,7 +6229,7 @@ extern "C" daw_audio_core_result daw_audio_core_configure_sampler(
   const daw_audio_sampler_state *state,
   const daw_audio_sample_zone *zones) {
   Core *core = to_core(core_handle);
-  if (core == nullptr || state == nullptr || zones == nullptr || !valid_sampler_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (core == nullptr || state == nullptr || (state->zone_count > 0 && zones == nullptr) || !valid_sampler_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   const GraphRevision &graph = configuration_graph(*core);
   const int32_t node_index = graph_node_index(graph, node_id);
   if (node_index < 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;

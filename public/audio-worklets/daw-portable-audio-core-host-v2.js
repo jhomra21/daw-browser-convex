@@ -1164,13 +1164,13 @@ export class DawPortableAudioCoreHost {
       return result
     }
     if (state.kind === 'granular') {
-      const asset = this.assets.get(state.assetId)
-      if (!asset || !this.granularConfigure) return false
+      const asset = state.assetId === '' ? undefined : this.assets.get(state.assetId)
+      if ((state.assetId !== '' && !asset) || !this.granularConfigure) return false
       const allocation = this.malloc(60)
       if (!allocation) return false
       const view = new DataView(this.memory.buffer, allocation, 60)
       view.setUint32(0, 1, true)
-      view.setBigUint64(4, asset.handle.value, true)
+      view.setBigUint64(4, asset?.handle.value ?? 0n, true)
       view.setUint32(12, state.seed, true)
       view.setUint32(16, state.maxGrains, true)
       view.setUint32(20, state.windowShape === 'hann' ? 0 : state.windowShape === 'tukey' ? 1 : 2, true)
@@ -1181,7 +1181,7 @@ export class DawPortableAudioCoreHost {
       this.free(allocation)
       return result
     }
-    if (!this.samplerConfigure || !Array.isArray(state.zones) || state.zones.length === 0 || state.zones.length > 32) return false
+    if (!this.samplerConfigure || !Array.isArray(state.zones) || state.zones.length > 32) return false
     const allocation = this.malloc(88 + state.zones.length * 80)
     if (!allocation) return false
     const view = new DataView(this.memory.buffer, allocation, 88 + state.zones.length * 80)

@@ -2049,13 +2049,12 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
         result = daw_audio_core_configure_synth(core, node_id, &state);
       } else if ((kind == 2 || kind == 3) && state_size == sizeof(daw_audio_sampler_state)
         && zones_size % sizeof(daw_audio_sample_zone) == 0
-        && zones_size / sizeof(daw_audio_sample_zone) > 0
         && zones_size / sizeof(daw_audio_sample_zone) <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES) {
         daw_audio_sampler_state state{};
         std::memcpy(&state, state_bytes, sizeof(state));
         std::vector<daw_audio_sample_zone> zones(zones_size / sizeof(daw_audio_sample_zone));
-        std::memcpy(zones.data(), zones_bytes, zones_size);
-        result = daw_audio_core_configure_sampler(core, node_id, &state, zones.data());
+        if (zones_size > 0) std::memcpy(zones.data(), zones_bytes, zones_size);
+        result = daw_audio_core_configure_sampler(core, node_id, &state, zones.empty() ? nullptr : zones.data());
       } else if (kind == 4 && state_size == sizeof(daw_audio_granular_state) && zones_size == 0) {
         daw_audio_granular_state state{};
         std::memcpy(&state, state_bytes, sizeof(state));

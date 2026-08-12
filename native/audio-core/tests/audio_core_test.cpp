@@ -3430,6 +3430,10 @@ void test_sampler_and_drum_rack_asset_voices() {
     .amp_release_ms = 1.0F, .filter_enabled = 0, .filter_mode = DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS,
     .filter_cutoff_hz = 20000.0F, .filter_resonance = 0.7F, .retrigger = 1,
   };
+  daw_audio_sampler_state empty_sampler = sampler;
+  empty_sampler.zone_count = 0;
+  expect(daw_audio_core_configure_sampler(core, 1, &empty_sampler, nullptr), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_configure_sampler(core, 2, &empty_sampler, nullptr), DAW_AUDIO_CORE_OK);
   const daw_audio_sample_zone sampler_zone{
     .asset = asset, .key_low = 60, .key_high = 60, .velocity_low = 1, .velocity_high = 127,
     .root_note = 60, .tune_cents = 0.0F, .gain = 1.0F, .pan = 0.0F, .round_robin_group = 0,
@@ -3500,6 +3504,24 @@ void test_granular_asset_seed_freeze_and_note_ownership() {
   };
   daw_audio_asset_handle asset = 0;
   expect(daw_audio_core_create_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+  const daw_audio_granular_state empty_granular{
+    .version = 1, .asset = 0, .seed = 77, .max_grains = 2, .window_shape = DAW_AUDIO_GRANULAR_WINDOW_HANN,
+    .freeze = 0, .grain_size_ms = 5.0F, .density_hz = 200.0F, .position = 0.5F, .spray = 1.0F,
+    .pitch_semitones = 0.0F, .reverse_probability = 0.5F, .stereo_spread = 0.5F,
+  };
+  expect(daw_audio_core_configure_granular(core, 1, &empty_granular), DAW_AUDIO_CORE_OK);
+  const daw_audio_transport_state silent_transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &silent_transport), DAW_AUDIO_CORE_OK);
+  std::array<float, 8> silent_left{};
+  std::array<float, 8> silent_right{};
+  float *silent_outputs[]{silent_left.data(), silent_right.data()};
+  const daw_audio_core_process_block silent_block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 8, .channel_count = 2, .outputs = silent_outputs,
+    .graph_revision = 1, .transport_epoch = 1,
+  };
+  expect(daw_audio_core_process(core, &silent_block), DAW_AUDIO_CORE_OK);
+  assert(std::all_of(silent_left.begin(), silent_left.end(), [](float value) { return std::isfinite(value) && value == 0.0F; }));
+  assert(std::all_of(silent_right.begin(), silent_right.end(), [](float value) { return std::isfinite(value) && value == 0.0F; }));
   const daw_audio_granular_state granular{
     .version = 1, .asset = asset, .seed = 77, .max_grains = 2, .window_shape = DAW_AUDIO_GRANULAR_WINDOW_HANN,
     .freeze = 1, .grain_size_ms = 5.0F, .density_hz = 200.0F, .position = 0.5F, .spray = 1.0F,

@@ -305,7 +305,8 @@ export type AudioCoreSynthState = {
 
 /**
  * Fixed granular ABI state. `assetId` is an immutable decoded-asset identity;
- * native and Wasm allocate their own bounded grain storage from this state.
+ * the empty string explicitly represents an unassigned silent instrument.
+ * Native and Wasm allocate their own bounded grain storage from this state.
  */
 export type AudioCoreGranularState = {
   version: typeof audioCoreContractVersion
@@ -431,7 +432,7 @@ const isAudioCoreSamplerState = (value: unknown, kind: 'sampler' | 'drum-rack'):
   && isBoundedFloat(value.lfoFilterHz, -20000, 20000)
   && isBoundedFloat(value.lfoAmplitude, 0, 1)
   && isBoundedFloat(value.lfoPan, 0, 1)
-  && typeof value.retrigger === 'boolean' && Array.isArray(value.zones) && value.zones.length > 0
+  && typeof value.retrigger === 'boolean' && Array.isArray(value.zones)
   && value.zones.length <= audioCoreMaxSampleZones && value.zones.every((zone) => isAudioCoreSampleZone(zone, kind === 'drum-rack'))
 
 export const isAudioCoreSamplerInstrumentState = (value: unknown): value is AudioCoreSamplerState =>
@@ -513,7 +514,7 @@ export const encodeAudioCoreInstrumentState = (
     const output = new Uint8Array(60)
     const view = new DataView(output.buffer)
     view.setUint32(0, state.version, true)
-    view.setBigUint64(4, resolveAssetHandle(state.assetId), true)
+    view.setBigUint64(4, state.assetId === '' ? 0n : resolveAssetHandle(state.assetId), true)
     view.setUint32(12, state.seed, true)
     view.setUint32(16, state.maxGrains, true)
     view.setUint32(20, state.windowShape === 'hann' ? 0 : state.windowShape === 'tukey' ? 1 : 2, true)
@@ -566,7 +567,7 @@ export const isAudioCoreGranularState = (value: unknown): value is AudioCoreGran
   && value.kind === 'granular'
   && typeof value.voiceCapacity === 'number' && Number.isSafeInteger(value.voiceCapacity) && value.voiceCapacity >= 1 && value.voiceCapacity <= audioCoreMaxInstrumentVoices
   && value.outputLayout === 'stereo'
-  && typeof value.assetId === 'string' && value.assetId.length > 0
+  && typeof value.assetId === 'string'
   && typeof value.seed === 'number' && Number.isSafeInteger(value.seed) && value.seed > 0 && value.seed <= 0xffffffff
   && typeof value.maxGrains === 'number' && Number.isSafeInteger(value.maxGrains) && value.maxGrains >= 1 && value.maxGrains <= audioCoreMaxGranularGrains
   && (value.windowShape === 'hann' || value.windowShape === 'tukey' || value.windowShape === 'gaussian')

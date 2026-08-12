@@ -146,6 +146,69 @@ test('sample instrument codecs resolve asset identities only at the ABI boundary
   expect(new DataView(binary.zones.buffer).getBigUint64(0, true)).toBe(0x100000001n)
 })
 
+test('empty sampled instrument states use silent portable sentinels', () => {
+  const base = {
+    version: 1 as const,
+    voiceCapacity: 4,
+    outputLayout: 'stereo' as const,
+    ampAttackMs: 1,
+    ampDecayMs: 10,
+    ampSustain: 1,
+    ampReleaseMs: 20,
+    filterEnabled: true,
+    filterMode: 'lowpass' as const,
+    filterCutoffHz: 20_000,
+    filterResonance: 0.707,
+    filterEnvelopeAmount: 0,
+    filterAttackMs: 1,
+    filterDecayMs: 10,
+    filterSustain: 0,
+    filterReleaseMs: 20,
+    lfoEnabled: false,
+    lfoRateHz: 5,
+    lfoPitchCents: 0,
+    lfoFilterHz: 0,
+    lfoAmplitude: 0,
+    lfoPan: 0,
+    retrigger: true,
+    zones: [],
+  }
+  const sampler = { ...base, kind: 'sampler' as const }
+  const drums = { ...base, kind: 'drum-rack' as const }
+  expect(isAudioCoreSamplerInstrumentState(sampler)).toBe(true)
+  expect(isAudioCoreDrumRackState(drums)).toBe(true)
+  expect(encodeAudioCoreInstrumentState(sampler, () => {
+    throw new Error('empty sampler should not resolve an asset')
+  }).zones?.byteLength).toBe(0)
+  expect(encodeAudioCoreInstrumentState(drums, () => {
+    throw new Error('empty drum rack should not resolve an asset')
+  }).zones?.byteLength).toBe(0)
+
+  const granular = {
+    version: 1 as const,
+    kind: 'granular' as const,
+    voiceCapacity: 2,
+    outputLayout: 'stereo' as const,
+    assetId: '',
+    seed: 1,
+    maxGrains: 2,
+    windowShape: 'hann' as const,
+    freeze: false,
+    grainSizeMs: 5,
+    densityHz: 1,
+    position: 0,
+    spray: 0,
+    pitchSemitones: 0,
+    reverseProbability: 0,
+    stereoSpread: 0,
+  }
+  expect(isAudioCoreGranularState(granular)).toBe(true)
+  const binary = encodeAudioCoreInstrumentState(granular, () => {
+    throw new Error('empty granular should not resolve an asset')
+  })
+  expect(new DataView(binary.state.buffer).getBigUint64(4, true)).toBe(0n)
+})
+
 test('synth instrument codec emits the fixed native default profile', () => {
   const binary = encodeAudioCoreInstrumentState({
     version: 1,

@@ -216,10 +216,9 @@ export const compilePortableSamplerConfiguration = (
   input: SamplerParams,
   registryInput: PortableAssetRegistryInput | undefined,
 ): PortableSamplerConfiguration => {
-  const registry = indexPortableAssets(registryInput)
-  if (registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   const params = normalizeSamplerParams(input)
-  if (params.zones.length === 0) throw new Error('Sampler has no portable zones.')
+  const registry = indexPortableAssets(registryInput)
+  if (params.zones.length > 0 && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   if (params.zones.length > 32) throw new Error('Sampler exceeds the portable zone limit.')
   return {
     nodeId,
@@ -260,14 +259,17 @@ export const compilePortableDrumRackConfiguration = (
   input: DrumRackParams,
   registryInput: PortableAssetRegistryInput | undefined,
 ): PortableDrumRackConfiguration => {
-  const registry = indexPortableAssets(registryInput)
-  if (registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   const params = normalizeDrumRackParams(input)
-  const zones: AudioCoreSampleZone[] = params.pads.flatMap((pad) => {
-    if (pad.mute || !pad.sample) return []
-    const asset = assetForSample(registry, pad.sample)
+  const registry = indexPortableAssets(registryInput)
+  if (params.pads.some((pad) => pad.sample) && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
+  const validatedPads = params.pads.flatMap((pad) => {
+    if (!pad.sample) return []
+    return [{ pad, sample: pad.sample, asset: assetForSample(registry, pad.sample) }]
+  })
+  const zones: AudioCoreSampleZone[] = validatedPads.flatMap(({ pad, sample, asset }) => {
+    if (pad.mute) return []
     const startFrame = frameAt(pad.startSec, asset.decoded.sampleRateHz)
-    const endFrame = Math.min(asset.decoded.frameCount, frameAt(pad.endSec ?? pad.sample.source.durationSec, asset.decoded.sampleRateHz))
+    const endFrame = Math.min(asset.decoded.frameCount, frameAt(pad.endSec ?? sample.source.durationSec, asset.decoded.sampleRateHz))
     if (endFrame <= startFrame) throw new Error(`${pad.id}: browser sample bounds resolve to an empty portable range.`)
     return [{
       assetId: asset.portableAssetId,
@@ -290,7 +292,6 @@ export const compilePortableDrumRackConfiguration = (
       chokeGroup: pad.chokeGroup,
     }]
   })
-  if (zones.length === 0) throw new Error('Drum rack has no portable pads.')
   if (zones.length > 32) throw new Error('Drum rack exceeds the portable zone limit.')
   return {
     nodeId,
@@ -331,11 +332,10 @@ export const compilePortableGranularConfiguration = (
   input: GranularParams,
   registryInput: PortableAssetRegistryInput | undefined,
 ): PortableGranularConfiguration => {
-  const registry = indexPortableAssets(registryInput)
-  if (registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   const params = normalizeGranularParams(input)
-  if (!params.zone) throw new Error('Granular instrument has no portable sample zone.')
-  const asset = assetForSample(registry, params.zone.sample)
+  const registry = indexPortableAssets(registryInput)
+  if (params.zone && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
+  const asset = params.zone ? assetForSample(registry, params.zone.sample) : undefined
   return {
     nodeId,
     instanceId,
@@ -344,7 +344,7 @@ export const compilePortableGranularConfiguration = (
       kind: 'granular',
       voiceCapacity: 2,
       outputLayout: 'stereo',
-      assetId: asset.portableAssetId,
+      assetId: asset?.portableAssetId ?? '',
       seed: params.seed,
       maxGrains: params.maxGrains,
       windowShape: params.windowShape,

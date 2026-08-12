@@ -175,6 +175,56 @@ test('compiles browser drum transpose and 6ms choke state into exact-key portabl
   })
 })
 
+test('validates muted drum pad assets without emitting muted zones', () => {
+  const params = createDefaultDrumRackParams()
+  const pad = params.pads[0]
+  if (!pad) throw new Error('Expected default drum pad.')
+  const mutedPad = { ...pad, mute: true, sample }
+
+  expect(compilePortableDrumRackConfiguration(
+    'track-a',
+    'drums:a',
+    { ...params, pads: [mutedPad] },
+    assets,
+  ).state.zones).toEqual([])
+  expect(() => compilePortableDrumRackConfiguration(
+    'track-a',
+    'drums:a',
+    { ...params, pads: [{ ...mutedPad, sample: { ...sample, assetKey: 'missing' } }] },
+    assets,
+  )).toThrow('not registered')
+  expect(() => compilePortableDrumRackConfiguration(
+    'track-a',
+    'drums:a',
+    { ...params, pads: [mutedPad] },
+    { ...assets, assets: [{ ...assets.assets[0]!, projectGeneration: 6 }] },
+  )).toThrow('stale')
+})
+
+test('compiles empty sampled instruments as silent portable configurations', () => {
+  const sampler = compilePortableSamplerConfiguration(
+    'track-sampler',
+    'sampler:empty',
+    createDefaultSamplerParams(),
+    undefined,
+  )
+  const drums = compilePortableDrumRackConfiguration(
+    'track-drums',
+    'drums:empty',
+    createDefaultDrumRackParams(),
+    undefined,
+  )
+  const granular = compilePortableGranularConfiguration(
+    'track-granular',
+    'granular:empty',
+    createDefaultGranularParams(),
+    undefined,
+  )
+  expect(sampler.state.zones).toEqual([])
+  expect(drums.state.zones).toEqual([])
+  expect(granular.state.assetId).toBe('')
+})
+
 test('compiles fixture-proven granular controls and rejects absent or stale assets', () => {
   const asset = assets.assets[0]
   if (!asset) throw new Error('Expected registered portable asset.')

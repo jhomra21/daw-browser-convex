@@ -72,6 +72,26 @@ describe('AudioEngine granular live MIDI ownership', () => {
     expect(cleared).toContain(closingCleanup.timer)
   })
 
+  test('gated granular release stops without changing ordinary release behavior', () => {
+    const engine = new AudioEngine(
+      { latencyHint: 'interactive' },
+      {
+        schedule: (_callback) => {
+          const timer = setTimeout(() => {}, 60_000)
+          return timer
+        },
+        clear: (timer) => clearTimeout(timer),
+      },
+    )
+    const stopped: string[] = []
+    const scheduled: Array<{ trackId: string; when: number; durationSec: number; liveId: string }> = []
+    installGranularRuntime(engine, stopped, scheduled)
+    const handle = engine.startLiveMidiNote({ trackId: 'track-1', pitch: 60, velocity: 1, when: 11 })
+    if (!handle) throw new Error('Expected a live granular handle.')
+    engine.releaseLiveMidiNote(handle, 11, false, true)
+    expect(stopped).toEqual(['live-granular:1'])
+  })
+
   test('removes sampler and drum one-shot ownership when their sources end', () => {
     const samplerEngine = new AudioEngine()
     const samplerStops: number[] = []

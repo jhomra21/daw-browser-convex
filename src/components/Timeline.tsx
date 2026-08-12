@@ -935,6 +935,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requiresNativeAudio,
     tracks: renderTracks,
     projectId,
+    bpm,
     isPlaying,
     playheadSec,
     selection,

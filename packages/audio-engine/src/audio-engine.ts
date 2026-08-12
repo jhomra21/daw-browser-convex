@@ -4,7 +4,7 @@ import { isPlanarPcmForAsset, type AudioAssetRef, type PlanarPcm } from '../../a
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
-import { automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AutomationEnvelope, type MidiMappingTarget, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
+import { arpeggiatorParamsEqual, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AutomationEnvelope, type MidiMappingTarget, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
 import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackMeterFrameListener, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
@@ -182,6 +182,7 @@ export class AudioEngine {
   private recordingStartReserved = false
   private nextLiveMidiNoteId = 1
   private liveMidiNotes = new Map<number, LiveMidiNote>()
+  private arpeggiatorListeners = new Set<(trackId: string) => void>()
   private liveNoteCleanupScheduler: LiveNoteCleanupScheduler
   private transientMidiMappingBaselines = new Map<string, {
     values: Map<AutomationAudioBinding['param'], number>
@@ -548,7 +549,7 @@ export class AudioEngine {
     return { id }
   }
 
-  releaseLiveMidiNote(handle: LiveMidiNoteHandle, when: number, force = false) {
+  releaseLiveMidiNote(handle: LiveMidiNoteHandle, when: number, force = false, gate = false) {
     const note = this.liveMidiNotes.get(handle.id)
     if (!note) return
     if (note.synthNoteInstanceId !== undefined) {
@@ -560,9 +561,9 @@ export class AudioEngine {
         force,
         note.synthGeneration,
       )
-    } else if (force) {
+    } else if (force || (gate && note.instrumentKind === 'granular')) {
       this.removeLiveMidiNote(handle.id)
-      note.stop?.(when, true)
+      note.stop?.(when, force)
     } else if (note.instrumentKind === 'sampler' && note.stop?.(when) === true) {
       this.removeLiveMidiNote(handle.id)
     }
@@ -656,11 +657,28 @@ export class AudioEngine {
   }
 
   setTrackArpeggiator(trackId: string, params: ArpParams) {
+    if (arpeggiatorParamsEqual(this.instrumentRuntime.getTrackArpeggiator(trackId), params)) return
     this.instrumentRuntime.setTrackArpeggiator(trackId, params)
+    for (const listener of this.arpeggiatorListeners) listener(trackId)
+  }
+
+  getTrackArpeggiator(trackId: string): ArpParams | undefined {
+    return this.instrumentRuntime.getTrackArpeggiator(trackId)
   }
 
   clearTrackArpeggiator(trackId: string) {
+    if (this.instrumentRuntime.getTrackArpeggiator(trackId) === undefined) return
     this.instrumentRuntime.clearTrackArpeggiator(trackId)
+    for (const listener of this.arpeggiatorListeners) listener(trackId)
+  }
+
+  subscribeArpeggiator(listener: (trackId: string) => void) {
+    this.arpeggiatorListeners.add(listener)
+    return () => this.arpeggiatorListeners.delete(listener)
+  }
+
+  getBpm() {
+    return this.clock.getBpm()
   }
 
   clearTrackSynth(trackId: string) {
@@ -1139,6 +1157,7 @@ export class AudioEngine {
     this.mixerRuntime.clear()
     this.metering.close()
     this.instrumentRuntime.clear()
+    this.arpeggiatorListeners.clear()
     this.automationEnvelopes = []
     this.transientMidiMappingBaselines.clear()
     this.scheduledMidiMappingParams.clear()

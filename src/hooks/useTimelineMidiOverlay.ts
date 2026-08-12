@@ -16,6 +16,7 @@ import { createLiveMidiRouter } from '~/lib/midi/live-midi-router'
 import { shouldUseNativeLiveMidi } from '~/lib/midi/live-midi-backend'
 import { projectMidiProjectTracks, subscribeMidiProjectProjection } from '~/lib/midi/editor-persistence'
 import { createDesktopAudioLifecycleReconciler } from '~/lib/desktop-audio-lifecycle'
+import { createLiveMidiArpeggiator, type LiveMidiArpeggiatorRelease } from '~/lib/midi/live-midi-arpeggiator'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-playback-controller'
@@ -25,6 +26,7 @@ type UseTimelineMidiOverlayOptions = {
   requiresNativeAudio?: boolean
   tracks: Accessor<Track[]>
   projectId: Accessor<string>
+  bpm: Accessor<number>
   isPlaying: Accessor<boolean>
   playheadSec: Accessor<number>
   selection: TimelineSelectionController
@@ -58,8 +60,7 @@ type UseTimelineMidiOverlayReturn = {
 }
 
 type LiveNote =
-  | { handle: NativeLiveMidiNoteHandle; backend: "native" }
-  | { handle: LiveMidiNoteHandle; backend: "browser" }
+  | { handle: number }
 
 function readMidiBounds(value: unknown): TimelineMidiBounds | null {
   if (!value || typeof value !== 'object') return null
@@ -87,7 +88,6 @@ export function useTimelineMidiOverlay(
     clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
   )
   const activeLiveNotes = new Map<number, LiveNote>()
-  const nativeHardwareLiveNotes = new WeakMap<LiveMidiNoteHandle, NativeLiveMidiNoteHandle>()
   const activeMappingTargets = new Map<string, {
     sourceId: string
     trackId: string
@@ -97,6 +97,7 @@ export function useTimelineMidiOverlay(
   let midiCardPersistTimer: number | null = null
   const auditionReleaseTimers = new Map<number, ReturnType<typeof setTimeout>>()
   let nativeUnavailableReported = false
+  let liveTargetKey: string | undefined
   const projectedTracks = createMemo(() => {
     projectionRevision()
     return projectMidiProjectTracks(options.projectId(), options.tracks())
@@ -192,34 +193,71 @@ export function useTimelineMidiOverlay(
     }
   }
 
-  const liveNoteId = (entry: LiveNote) => (
-    entry.backend === "native" ? entry.handle.noteId : entry.handle.id
-  )
-
-  const stopLiveNote = (pitch: number, expectedNoteId?: number) => {
+  type LiveBackendHandle =
+    | { backend: 'native'; handle: NativeLiveMidiNoteHandle }
+    | { backend: 'browser'; handle: LiveMidiNoteHandle }
+  const liveArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
+    getConfig: () => {
+      const trackId = resolveTargetTrackId()
+      return {
+        trackId,
+        params: trackId ? options.audioEngine.getTrackArpeggiator(trackId) : undefined,
+        bpm: options.bpm(),
+      }
+    },
+    start: (note) => {
+      if (nativeMidiReady && options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
+        const handle = options.nativeLiveMidi.start(note)
+        if (handle) return { backend: 'native', handle }
+      }
+      if (requiresNativeAudio) {
+        reportNativeUnavailable()
+        return undefined
+      }
+      options.audioEngine.ensureAudio()
+      void options.audioEngine.resume().catch(() => undefined)
+      const handle = options.audioEngine.startLiveMidiNote({
+        ...note,
+        when: note.when ?? options.audioEngine.currentTime,
+      })
+      return handle ? { backend: 'browser', handle } : undefined
+    },
+    stop: (handle, release: LiveMidiArpeggiatorRelease = {}) => {
+      const force = release.force === true
+      if (handle.backend === 'native') {
+        options.nativeLiveMidi?.stop(handle.handle, force)
+        return
+      }
+      if (!requiresNativeAudio) options.audioEngine.releaseLiveMidiNote(
+        handle.handle,
+        release.when ?? options.audioEngine.currentTime,
+        force,
+        release.reason === 'gate',
+      )
+    },
+  })
+  const stopLiveNote = (pitch: number, force = false) => {
     try {
       const entry = activeLiveNotes.get(pitch)
       if (!entry) return
-      const noteId = liveNoteId(entry)
-      if (expectedNoteId !== undefined && noteId !== expectedNoteId) return
       activeLiveNotes.delete(pitch)
-      const timer = auditionReleaseTimers.get(noteId)
+      const timer = auditionReleaseTimers.get(entry.handle)
       if (timer !== undefined) {
         clearTimeout(timer)
-        auditionReleaseTimers.delete(noteId)
+        auditionReleaseTimers.delete(entry.handle)
       }
-      if (entry.backend === "native") {
-        options.nativeLiveMidi?.stop(entry.handle)
-      } else if (!requiresNativeAudio) {
-        options.audioEngine.releaseLiveMidiNote(entry.handle, options.audioEngine.currentTime)
-      }
+      liveArpeggiator.noteOff(entry.handle, force)
     } catch {}
   }
 
-  const stopAllLiveNotes = () => {
+  const forceStopAllLiveNotes = () => {
     for (const pitch of Array.from(activeLiveNotes.keys())) {
-      stopLiveNote(pitch)
+      stopLiveNote(pitch, true)
     }
+    for (const timer of auditionReleaseTimers.values()) clearTimeout(timer)
+    auditionReleaseTimers.clear()
+    hardwareRouter.panic()
+    liveArpeggiator.panic()
   }
 
   const reportNativeUnavailable = () => {
@@ -229,9 +267,7 @@ export function useTimelineMidiOverlay(
   }
 
   const stopNativeLiveNotes = () => {
-    for (const [pitch, note] of activeLiveNotes) {
-      if (note.backend === "native") stopLiveNote(pitch)
-    }
+    forceStopAllLiveNotes()
   }
   const closeMidiEditor = () => setMidiEditorClipId(null)
 
@@ -267,21 +303,28 @@ export function useTimelineMidiOverlay(
           reportNativeUnavailable()
           return
         }
-        stopLiveNote(pitch)
-        const handle = options.nativeLiveMidi.start({ trackId, pitch, velocity })
-        if (!handle) {
+        stopLiveNote(pitch, true)
+        const sourceId = liveArpeggiator.noteOn(pitch, velocity)
+        if (sourceId === undefined) {
           reportNativeUnavailable()
           return
         }
-        activeLiveNotes.set(pitch, { handle, backend: "native" })
+        activeLiveNotes.set(pitch, { handle: sourceId })
         // UI audition notes have no sustained pointer lifecycle; this bounded
         // one-shot note-off prevents a successful native preview from hanging.
-        const timer = setTimeout(() => stopLiveNote(pitch, handle.noteId), Math.max(0, durSec * 1000))
-        auditionReleaseTimers.set(handle.noteId, timer)
+        const timer = setTimeout(() => stopLiveNote(pitch, true), Math.max(0, durSec * 1000))
+        auditionReleaseTimers.set(sourceId, timer)
         return
       }
       options.audioEngine.ensureAudio()
       void options.audioEngine.resume().catch(() => undefined)
+      const sourceId = liveArpeggiator.noteOn(pitch, velocity)
+      if (sourceId !== undefined) {
+        activeLiveNotes.set(pitch, { handle: sourceId })
+        const timer = setTimeout(() => stopLiveNote(pitch, true), Math.max(0, durSec * 1000))
+        auditionReleaseTimers.set(sourceId, timer)
+        return
+      }
       if (options.audioEngine.getTrackInstrumentKind(trackId) === 'synth') {
         options.audioEngine.previewSynthNote(trackId, pitch, velocity, durSec)
         return
@@ -294,28 +337,8 @@ export function useTimelineMidiOverlay(
     try {
       if (midiSuspended) return
       if (activeLiveNotes.has(pitch)) return
-      const trackId = resolveTargetTrackId()
-      if (!trackId) return
-      if (nativeMidiReady && options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
-        const handle = options.nativeLiveMidi.start({ trackId, pitch, velocity })
-        if (handle) {
-          activeLiveNotes.set(pitch, { handle, backend: "native" })
-          return
-        }
-      }
-      if (requiresNativeAudio) {
-        reportNativeUnavailable()
-        return
-      }
-      options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
-      const handle = options.audioEngine.startLiveMidiNote({
-        trackId,
-        pitch,
-        velocity,
-        when: options.audioEngine.currentTime,
-      })
-      if (handle) activeLiveNotes.set(pitch, { handle, backend: "browser" })
+      const sourceId = liveArpeggiator.noteOn(pitch, velocity)
+      if (sourceId !== undefined) activeLiveNotes.set(pitch, { handle: sourceId })
     } catch {}
   }
 
@@ -389,46 +412,16 @@ export function useTimelineMidiOverlay(
       try {
         const trackId = resolveTargetTrackId()
         if (!trackId) return undefined
-        if (nativeMidiReady && options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
-          const handle = options.nativeLiveMidi.start({
-            trackId,
-            pitch: event.note,
-            velocity: event.velocity,
-          })
-          if (handle) {
-            const routerHandle: LiveMidiNoteHandle = { id: handle.noteId }
-            nativeHardwareLiveNotes.set(routerHandle, handle)
-            return routerHandle
-          }
-        }
-        if (requiresNativeAudio) {
-          reportNativeUnavailable()
-          return undefined
-        }
-        options.audioEngine.ensureAudio()
-        void options.audioEngine.resume().catch(() => undefined)
         const times = options.audioEngine.midiEventTimes(event.timeStamp)
-        return times
-          ? options.audioEngine.startLiveMidiNote({
-              trackId,
-              pitch: event.note,
-              velocity: event.velocity,
-              when: times.scheduledContextTime,
-            })
-          : undefined
+        const sourceId = liveArpeggiator.noteOn(event.note, event.velocity, times?.scheduledContextTime)
+        return sourceId === undefined ? undefined : { id: sourceId }
       } catch {
         return undefined
       }
     },
     releaseNote: (handle, timeStamp, force) => {
-      const nativeHandle = nativeHardwareLiveNotes.get(handle)
-      if (nativeHandle) {
-        options.nativeLiveMidi?.stop(nativeHandle, force)
-        return
-      }
-      if (requiresNativeAudio) return
       const times = options.audioEngine.midiEventTimes(timeStamp)
-      options.audioEngine.releaseLiveMidiNote(handle, times?.scheduledContextTime ?? 0, force)
+      liveArpeggiator.noteOff(handle.id, force, times?.scheduledContextTime)
     },
     applyExpression: (event) => {
       const trackId = resolveTargetTrackId()
@@ -449,7 +442,7 @@ export function useTimelineMidiOverlay(
       for (const mapping of index.match(sourceEvent)) {
         const value = midiMappingValue(mapping, sourceEvent)
         if (value === undefined) continue
-          options.audioEngine.writeTransientMidiMapping(
+        options.audioEngine.writeTransientMidiMapping(
           trackId,
           mapping.target,
           value,
@@ -470,16 +463,33 @@ export function useTimelineMidiOverlay(
     },
   })
   const removeNativeLiveMidiReset = options.nativeLiveMidi?.subscribeReset?.(() => {
-    stopAllLiveNotes()
-    hardwareRouter.panic()
+    forceStopAllLiveNotes()
   })
 
   createEffect(() => {
-    options.projectId()
-    options.selection.selectedTrackId()
-    options.selection.selectedFXTarget()
-    midiEditorClipId()
+    const targetKey = [
+      options.projectId(),
+      options.selection.selectedTrackId(),
+      options.selection.selectedFXTarget(),
+      midiEditorClipId(),
+      resolveTargetTrackId(),
+    ].join('\u0000')
+    if (liveTargetKey !== undefined && liveTargetKey !== targetKey) {
+      forceStopAllLiveNotes()
+    }
+    liveTargetKey = targetKey
+    liveArpeggiator.configure()
     restoreLiveMappings()
+  })
+
+  onCleanup(options.audioEngine.subscribeArpeggiator((trackId) => {
+    if (untrack(resolveTargetTrackId) !== trackId) return
+    liveArpeggiator.configure()
+  }))
+
+  createEffect(() => {
+    options.bpm()
+    liveArpeggiator.configure()
   })
 
   createEffect(() => {
@@ -528,6 +538,7 @@ export function useTimelineMidiOverlay(
     const onVisibilityChange = () => {
       if (document.hidden) {
         hardwareRouter.panic()
+        liveArpeggiator.panic()
         restoreLiveMappings()
       }
     }
@@ -536,9 +547,8 @@ export function useTimelineMidiOverlay(
         if (lifecycle.state === "suspended") {
           midiSuspended = true
           nativeMidiReady = false
-          hardwareRouter.panic()
+          forceStopAllLiveNotes()
           restoreLiveMappings()
-          stopAllLiveNotes()
           if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
         } else {
           midiSuspended = false
@@ -553,7 +563,7 @@ export function useTimelineMidiOverlay(
       unsubscribeReset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       removeAudioLifecycle?.()
-      hardwareRouter.panic()
+      forceStopAllLiveNotes()
       restoreLiveMappings()
       if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
     })
@@ -565,10 +575,9 @@ export function useTimelineMidiOverlay(
       midiCardPersistTimer = null
     }
     removeNativeLiveMidiReset?.()
-    stopAllLiveNotes()
+    forceStopAllLiveNotes()
     for (const timer of auditionReleaseTimers.values()) clearTimeout(timer)
     auditionReleaseTimers.clear()
-    hardwareRouter.panic()
     restoreLiveMappings()
     if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
   })

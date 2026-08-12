@@ -167,6 +167,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     setTrackArpeggiator: (trackId: string, params: ArpParams) => {
       arpeggiators.set(trackId, params)
     },
+    getTrackArpeggiator: (trackId: string) => arpeggiators.get(trackId),
     clearTrackArpeggiator: (trackId: string) => {
       arpeggiators.delete(trackId)
     },

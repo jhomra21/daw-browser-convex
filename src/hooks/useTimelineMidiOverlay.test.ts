@@ -22,15 +22,11 @@ test("keeps browser live MIDI as the fallback when native is unavailable", () =>
   expect(shouldUseNativeLiveMidi(undefined)).toBeFalse()
 })
 
-test("falls through to browser live MIDI when native start is synchronously unavailable", async () => {
+test("routes all live MIDI through the shared arpeggiator before backend dispatch", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
-  const nativeStart = source.slice(
-    source.indexOf("const startLiveNote"),
-    source.indexOf("  createEffect(() =>", source.indexOf("const startLiveNote")),
-  )
-  expect(nativeStart).toContain("if (handle) {")
-  expect(nativeStart).toContain("options.audioEngine.startLiveMidiNote")
-  expect(nativeStart).not.toContain("if (handle) activeLiveNotes.set(pitch, { handle, backend: \"native\" })\n        return")
+  expect(source).toContain("createLiveMidiArpeggiator")
+  expect(source).toContain("liveArpeggiator.noteOn")
+  expect(source).toContain("liveArpeggiator.noteOff")
 })
 
 test("replaces same-pitch native auditions without stale timer release", async () => {
@@ -39,36 +35,22 @@ test("replaces same-pitch native auditions without stale timer release", async (
     source.indexOf("const auditionNote"),
     source.indexOf("const startLiveNote", source.indexOf("const auditionNote")),
   )
-  expect(audition.indexOf("stopLiveNote(pitch)")).toBeLessThan(audition.indexOf("nativeLiveMidi.start"))
-  expect(audition).toContain("auditionReleaseTimers.set(handle.noteId, timer)")
-  expect(audition).toContain("stopLiveNote(pitch, handle.noteId)")
-  expect(source).toContain("const timer = auditionReleaseTimers.get(noteId)")
+  expect(audition.indexOf("stopLiveNote(pitch)")).toBeLessThan(audition.indexOf("liveArpeggiator.noteOn"))
+  expect(audition).toContain("auditionReleaseTimers.set(sourceId, timer)")
+  expect(audition).toContain("stopLiveNote(pitch, true)")
+  expect(source).toContain("const timer = auditionReleaseTimers.get(entry.handle)")
   expect(source).toContain("for (const timer of auditionReleaseTimers.values()) clearTimeout(timer)")
 })
 
 test("native-required MIDI ingress never calls the browser audio engine", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
-  const keyboard = source.slice(
-    source.indexOf("const startLiveNote"),
-    source.indexOf("  createEffect(() =>", source.indexOf("const startLiveNote")),
-  )
-  const hardware = source.slice(
-    source.indexOf("startNote: (event)"),
-    source.indexOf("    releaseNote:", source.indexOf("startNote: (event)")),
-  )
   const audition = source.slice(
     source.indexOf("const auditionNote"),
     source.indexOf("const startLiveNote", source.indexOf("const auditionNote")),
   )
-  expect(keyboard).toContain("if (requiresNativeAudio)")
-  expect(keyboard).toContain("return")
-  expect(keyboard.indexOf("if (requiresNativeAudio)")).toBeLessThan(keyboard.indexOf("options.audioEngine.startLiveMidiNote"))
-  expect(hardware).toContain("if (requiresNativeAudio)")
-  expect(hardware).toContain("return undefined")
-  expect(hardware).toContain("options.audioEngine.startLiveMidiNote")
-  expect(hardware.indexOf("if (requiresNativeAudio)")).toBeLessThan(hardware.indexOf("options.audioEngine.startLiveMidiNote"))
-  expect(audition).toContain("if (requiresNativeAudio)")
-  expect(audition).toContain("return")
+  expect(source).toContain("if (requiresNativeAudio)")
+  expect(source).toContain("reportNativeUnavailable")
+  expect(source).toContain("options.audioEngine.startLiveMidiNote")
   expect(audition.indexOf("if (requiresNativeAudio)")).toBeLessThan(audition.indexOf("options.audioEngine.ensureAudio"))
 })
 
@@ -78,9 +60,7 @@ test("hardware MIDI falls through when native readiness or handle is unavailable
     source.indexOf("startNote: (event)"),
     source.indexOf("    releaseNote:", source.indexOf("startNote: (event)")),
   )
-  expect(hardwareStart).toContain("nativeMidiReady")
-  expect(hardwareStart).toContain("if (handle) {")
-  expect(hardwareStart).toContain("options.audioEngine.startLiveMidiNote")
+  expect(hardwareStart).toContain("liveArpeggiator.noteOn")
 })
 
 test("only suspended lifecycle blocks MIDI and lifecycle readiness gates native MIDI", async () => {
@@ -93,7 +73,7 @@ test("only suspended lifecycle blocks MIDI and lifecycle readiness gates native 
 test("keeps editor close separate from live-note safety cleanup", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
   expect(source).not.toContain("if (!midiEditorClipId())")
-  expect(source).toContain("stopAllLiveNotes()")
+  expect(source).toContain("forceStopAllLiveNotes()")
 })
 
 test("reconciles router-owned held notes when native preview ownership is rebuilt", async () => {
@@ -102,6 +82,30 @@ test("reconciles router-owned held notes when native preview ownership is rebuil
     source.indexOf("removeNativeLiveMidiReset ="),
     source.indexOf("  const closeMidiEditor", source.indexOf("removeNativeLiveMidiReset =")),
   )
-  expect(reset).toContain("stopAllLiveNotes()")
-  expect(reset).toContain("hardwareRouter.panic()")
+  expect(reset).toContain("forceStopAllLiveNotes()")
+})
+
+test("resets live ownership on target and arpeggiator configuration changes", async () => {
+  const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
+  expect(source).toContain("options.projectId()")
+  expect(source).toContain("resolveTargetTrackId()")
+  expect(source).toContain("liveArpeggiator.panic()")
+  expect(source).toContain("options.audioEngine.subscribeArpeggiator")
+  expect(source).toContain("liveArpeggiator.configure()")
+})
+
+test("scopes arpeggiator notifications and force-cleans lifecycle ownership", async () => {
+  const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
+  expect(source).toContain("subscribeArpeggiator((trackId)")
+  expect(source).toContain("if (untrack(resolveTargetTrackId) !== trackId) return")
+  expect(source).toContain("forceStopAllLiveNotes()")
+  expect(source).toContain("if (lifecycle.state === \"suspended\")")
+})
+
+test("retains held live sources for same-target arp and BPM changes", async () => {
+  const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
+  expect(source).toContain("liveArpeggiator.configure()")
+  expect(source).toContain("options.bpm()")
+  expect(source).toContain("if (liveTargetKey !== undefined && liveTargetKey !== targetKey)")
+  expect(source).not.toContain("forceStopAllLiveNotes()\n    liveArpeggiator.configure()")
 })

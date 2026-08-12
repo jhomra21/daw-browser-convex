@@ -1,16 +1,6 @@
-import { DELAY_MAX_DELAY_TIME_SEC, evaluateSaturatorCurvePoint, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
-
-function createSeededRandom(seed: number) {
-  let state = (seed >>> 0) || 1
-  return () => {
-    state = (state + 0x6D2B79F5) | 0
-    let t = Math.imul(state ^ (state >>> 15), state | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
@@ -160,8 +150,7 @@ export function applyArpeggiatorToNotes(
 ): MidiNote[] {
   if (!params.enabled || notes.length === 0) return notes
 
-  const rateMap: Record<string, number> = { '1/4': 1, '1/8': 0.5, '1/16': 0.25, '1/32': 0.125 }
-  const stepBeats = rateMap[params.rate] ?? 0.25
+  const stepBeats = arpeggiatorStepBeats(params.rate)
   const chordThreshold = 0.02
   const sorted = notes.slice().sort((left, right) => left.beat - right.beat)
   const chords: Array<{ beat: number; endBeat: number; pitches: number[]; ids: string[]; velocity: number }> = []
@@ -188,42 +177,8 @@ export function applyArpeggiatorToNotes(
     const basePitches = chord.pitches.slice().sort((left, right) => left - right)
     if (basePitches.length === 0) continue
 
-    const expandedPitches: number[] = []
-    const octaves = Math.max(1, Math.floor(params.octaves || 1))
-    for (let octave = 0; octave < octaves; octave++) {
-      for (const pitch of basePitches) expandedPitches.push(pitch + octave * 12)
-    }
-    if (expandedPitches.length === 0) continue
-
-    let sequence: number[] = []
-    switch (params.pattern) {
-      case 'up':
-        sequence = expandedPitches
-        break
-      case 'down':
-        sequence = expandedPitches.slice().reverse()
-        break
-      case 'updown':
-        sequence = [...expandedPitches, ...expandedPitches.slice(0, -1).reverse()]
-        break
-      case 'random': {
-        sequence = expandedPitches.slice()
-        if (sequence.length > 1) {
-          const signature = chord.pitches.reduce((acc, pitch, index) => {
-            const mixed = (acc ^ ((pitch + index * 131) >>> 0)) >>> 0
-            return ((mixed << 5) - mixed) >>> 0
-          }, Math.floor(chord.beat * 10_000) >>> 0)
-          const random = createSeededRandom(signature || 1)
-          for (let index = sequence.length - 1; index > 0; index--) {
-            const swapIndex = Math.floor(random() * (index + 1))
-            ;[sequence[index], sequence[swapIndex]] = [sequence[swapIndex], sequence[index]]
-          }
-        }
-        break
-      }
-      default:
-        sequence = expandedPitches
-    }
+    const sequence = arpeggiatorSequence(basePitches, params, chord.beat)
+    if (sequence.length === 0) continue
 
     const endBeat = params.hold ? clipDurationBeats : chord.endBeat
     const gate = Math.max(0, params.gate)

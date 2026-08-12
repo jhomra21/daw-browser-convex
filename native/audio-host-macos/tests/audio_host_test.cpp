@@ -187,6 +187,60 @@ std::vector<std::uint8_t> InstrumentStatePayload(const float output_gain) {
   return payload;
 }
 
+std::vector<std::uint8_t> EmptyGranularStatePayload() {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU32(payload, DAW_AUDIO_INSTRUMENT_KIND_GRANULAR);
+  AppendLeU32(payload, 60);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 0);
+  AppendLeU32(payload, 1);
+  AppendLeU32(payload, 16);
+  AppendLeU32(payload, DAW_AUDIO_GRANULAR_WINDOW_HANN);
+  AppendLeU32(payload, 0);
+  AppendLeFloat(payload, 100.0F);
+  AppendLeFloat(payload, 10.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeFloat(payload, 0.0F);
+  AppendLeU32(payload, 0);
+  return payload;
+}
+
+std::vector<std::uint8_t> EmptyGranularGraphSnapshot(const std::uint32_t revision) {
+  auto frame = InstrumentGraphSnapshot(revision);
+  constexpr std::size_t instrument_offset = 64;
+  WriteLeU32(frame, instrument_offset, DAW_AUDIO_INSTRUMENT_KIND_GRANULAR);
+  WriteLeU32(frame, instrument_offset + 4, 1);
+  WriteLeU32(frame, instrument_offset + 8, 2);
+  WriteLeU32(frame, instrument_offset + 12, 0);
+  for (std::size_t index = 0; index < DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS; ++index) {
+    WriteLeU32(frame, instrument_offset + 16 + index * 4, 0);
+  }
+  return frame;
+}
+
+void TestEmptyGranularInstrumentState() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareGraphRevision(2, EmptyGranularGraphSnapshot(2)).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.ConfigureInstrumentStates(EmptyGranularStatePayload()));
+  assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  host.Stop();
+}
+
 std::vector<std::uint8_t> UrgentTransportRelease(const std::uint32_t epoch) {
   std::vector<std::uint8_t> payload;
   AppendLeU32(payload, 1);
@@ -1287,6 +1341,7 @@ int main() {
   TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();
+  TestEmptyGranularInstrumentState();
   TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance();
   TestPausedProcessDoesNotAdvanceTransportFrame();
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();

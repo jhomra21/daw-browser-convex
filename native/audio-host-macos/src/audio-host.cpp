@@ -32,6 +32,7 @@ constexpr std::size_t kMaximumNativeVstAttachments = 64;
 constexpr std::uint32_t kMaximumNativeVstFrames = 8'192;
 constexpr std::uint32_t kMaximumNativeVstChannels = 64;
 constexpr std::uint32_t kMaximumNativeVstSlots = 8;
+constexpr std::size_t kGranularStateWireBytes = 60;
 constexpr std::uint32_t kNativeVstMissLimit = 3;
 constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
@@ -2055,9 +2056,21 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
         std::vector<daw_audio_sample_zone> zones(zones_size / sizeof(daw_audio_sample_zone));
         if (zones_size > 0) std::memcpy(zones.data(), zones_bytes, zones_size);
         result = daw_audio_core_configure_sampler(core, node_id, &state, zones.empty() ? nullptr : zones.data());
-      } else if (kind == 4 && state_size == sizeof(daw_audio_granular_state) && zones_size == 0) {
+      } else if (kind == 4 && state_size == kGranularStateWireBytes && zones_size == 0) {
         daw_audio_granular_state state{};
-        std::memcpy(&state, state_bytes, sizeof(state));
+        state.version = ReadLeU32(state_bytes);
+        state.asset = ReadLeU64(state_bytes + 4);
+        state.seed = ReadLeU32(state_bytes + 12);
+        state.max_grains = ReadLeU32(state_bytes + 16);
+        state.window_shape = ReadLeU32(state_bytes + 20);
+        state.freeze = ReadLeU32(state_bytes + 24);
+        state.grain_size_ms = ReadLeFloat(state_bytes + 28);
+        state.density_hz = ReadLeFloat(state_bytes + 32);
+        state.position = ReadLeFloat(state_bytes + 36);
+        state.spray = ReadLeFloat(state_bytes + 40);
+        state.pitch_semitones = ReadLeFloat(state_bytes + 44);
+        state.reverse_probability = ReadLeFloat(state_bytes + 48);
+        state.stereo_spread = ReadLeFloat(state_bytes + 52);
         result = daw_audio_core_configure_granular(core, node_id, &state);
       }
       if (result != DAW_AUDIO_CORE_OK) return false;

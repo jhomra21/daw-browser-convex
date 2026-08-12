@@ -70,6 +70,20 @@ test('projects deterministic copied PCM for supported source-only sessions', () 
   expect(result.events).toHaveLength(1)
 })
 
+test('skips source-exhausted clips without rejecting the native projection', () => {
+  const result = compile([track({
+    clips: [
+      { ...clip, id: 'exhausted', bufferOffsetSec: 1 },
+      { ...clip, id: 'playable' },
+    ],
+  })])
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.events).toHaveLength(1)
+  expect(result.events[0]?.sourceNodeId).toBe('track')
+  expect(result.events[0]?.sequence).toBe(1)
+})
+
 test('preserves external latency and route PDC in the native projection', () => {
   const result = compileLiveNativeProjection({
     tracks: [

@@ -1626,7 +1626,7 @@ export function useTimelinePlayback(
     if (recoveryAttempt) recoveryAttempt.cancelled = true
     for (const waiter of lifecycleReadyWaiters) {
       clearTimeout(waiter.timer)
-      waiter.reject(new Error("Timeline playback was disposed."))
+      waiter.resolve()
     }
     lifecycleReadyWaiters.clear()
     unsubscribeStretchRenderState()

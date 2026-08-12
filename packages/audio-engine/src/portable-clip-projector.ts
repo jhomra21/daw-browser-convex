@@ -66,6 +66,8 @@ const projectClip = (
 ): {
   event: PortableProjectedSourceEvent
 } | {
+  skipped: true
+} | {
   reason: string
   diagnostic?: PortableStretchDiagnostic
 } => {
@@ -132,7 +134,7 @@ const projectClip = (
     rangeStartSec: input.rangeStartSec,
     rangeEndSec: input.rangeEndSec,
   })
-  if (!map) return { reason: `${clip.id}: has no playable audio in the requested range.` }
+  if (!map) return { skipped: true }
   if (map.mode !== 'raw' && !preparedStretch) return { reason: `${clip.id}: non-raw playback is not supported.` }
   const sourceOffsetSec = preparedStretch === undefined
     ? map.sourceStartSec
@@ -216,8 +218,9 @@ export const projectPortableClipEvents = (input: PortableClipProject): PortableC
       if ('reason' in result) {
         reasons.push(result.reason)
         if (result.diagnostic) diagnostics.push(result.diagnostic)
-      }
-      else {
+      } else if ('skipped' in result) {
+        continue
+      } else {
         const emitRange = input.emitStartFrame
         if (emitRange === undefined) {
           events.push(result.event)

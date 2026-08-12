@@ -478,6 +478,34 @@ test('projects nonzero playhead windows and adjacent windows without losing sour
   })
 })
 
+test('keeps rolling source windows supported when older clips are out of range', () => {
+  const base = sourceSessionInput([{
+    ...sourceTrack(),
+    clips: [
+      { ...sourceTrack().clips[0]!, id: 'old', startSec: 0 },
+      { ...sourceTrack().clips[0]!, id: 'playable', startSec: 3 },
+    ],
+  }])
+  const result = compilePreparedPortableSession({
+    ...base,
+    schedule: {
+      ...base.schedule,
+      timeOrigin: { timelineSec: 2.5, frame: 120_000 },
+    },
+    sourceRangeEndSec: 3.5,
+  })
+
+  expect(result).toMatchObject({ supported: true })
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.sources).toHaveLength(1)
+  expect(result.sources[0]).toMatchObject({
+    sourceIdentity: 'source:5:audio:8:playable',
+    sequence: 1,
+    startFrame: 144_000,
+    stopFrame: 168_000,
+  })
+})
+
 test('atomically assembles a deterministic fixture-proven portable live session', () => {
   const input = portableSessionInput()
   const prepared = compilePreparedPortableSession(input)

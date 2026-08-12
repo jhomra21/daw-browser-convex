@@ -1709,6 +1709,49 @@ test('waits for lifecycle recovery before restarting an active native graph', as
   }
 })
 
+test('resolves a pending rebuild when intentional teardown cancels lifecycle readiness', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge(undefined, {
+    initial: { state: "suspended", powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: false }),
+  })
+  const faults: string[] = []
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    let dispose = () => {}
+    const playback = createRoot((cleanup) => {
+      dispose = cleanup
+      return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+        requiresNativeAudio: true,
+        enabled: () => true,
+        projectId: () => "project",
+        compileSnapshot: nativeRequiredSnapshot,
+        reportFault: (message) => faults.push(message),
+      })
+    })
+    await flushMicrotasks()
+
+    const rebuild = playback.restartTimelineSchedule([track], {
+      rebuildBackend: true,
+      resumePlayback: true,
+      playheadSec: 0,
+      owner: "native",
+      projectId: "project",
+    })
+    await flushMicrotasks()
+    dispose()
+
+    await expect(rebuild).resolves.toBeUndefined()
+    expect(faults).toEqual([])
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
 test('resumes an explicitly captured structural rebuild after project generation invalidation', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()

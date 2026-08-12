@@ -186,6 +186,55 @@ test('uses the existing timeline time map for a scheduling range', () => {
   })
 })
 
+test('skips clips outside the requested range without consuming source sequences', () => {
+  const outside = clip({ id: 'outside', startSec: 0, duration: 1 })
+  const inRange = clip({ id: 'in-range', startSec: 3, duration: 1 })
+  expect(projectPortableClipEvents({
+    tracks: [{
+      id: 'track-1',
+      name: 'track-1',
+      volume: 1,
+      clips: [outside, inRange],
+    }],
+    assets: new Map([['source-1', asset]]),
+    bpm: 120,
+    sampleRateHz: 48_000,
+    rangeStartSec: 3,
+    rangeEndSec: 4,
+    epoch: 1,
+    firstSequence: 9,
+  })).toMatchObject({
+    supported: true,
+    events: [{
+      sequence: 9,
+      sourceNodeId: 'track-1',
+      startFrame: 144_000,
+      stopFrame: 192_000,
+    }],
+  })
+})
+
+test('supports a schedule with no clips in the requested range', () => {
+  expect(projectPortableClipEvents({
+    tracks: [{
+      id: 'track-1',
+      name: 'track-1',
+      volume: 1,
+      clips: [clip({ startSec: 0, duration: 1 })],
+    }],
+    assets: new Map([['source-1', asset]]),
+    bpm: 120,
+    sampleRateHz: 48_000,
+    rangeStartSec: 3,
+    rangeEndSec: 4,
+    epoch: 1,
+    firstSequence: 9,
+  })).toEqual({
+    supported: true,
+    events: [],
+  })
+})
+
 test('projects a spanning clip from the requested window boundary', () => {
   expect(projectPortableClipEvents({
     tracks: [{

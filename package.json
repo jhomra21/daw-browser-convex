@@ -28,6 +28,7 @@
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.40.0",
+    "@oxlint/plugins": "1.78.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/router-plugin": "^1.164.0",
     "@tanstack/solid-router-devtools": "^1.163.3",
@@ -38,7 +39,7 @@
     "eslint-plugin-solid": "0.14.5",
     "fake-indexeddb": "^6.2.5",
     "knip": "^6.1.0",
-    "oxlint": "1.74.0",
+    "oxlint": "1.78.0",
     "solid-devtools": "^0.34.5",
     "tailwindcss": "^4.2.1",
     "typescript": "^6.0.2",

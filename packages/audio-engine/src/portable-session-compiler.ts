@@ -174,10 +174,10 @@ const samplerZone = (
     asset.decoded.frameCount,
     frameAt(zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz),
   )
-  const loopStartFrame = zone.playbackMode === 'forward-loop'
+  const loopStartFrame = zone.playbackMode !== 'one-shot'
     ? frameAt(zone.loopStartSec ?? zone.startSec, asset.decoded.sampleRateHz)
     : 0
-  const loopEndFrame = zone.playbackMode === 'forward-loop'
+  const loopEndFrame = zone.playbackMode !== 'one-shot'
     ? Math.min(asset.decoded.frameCount, frameAt(zone.loopEndSec ?? zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz))
     : 0
   if (endFrame <= startFrame || loopEndFrame > 0 && loopEndFrame <= loopStartFrame) {
@@ -277,8 +277,8 @@ export const compilePortableDrumRackConfiguration = (
       keyHigh: pad.note,
       velocityLow: 1,
       velocityHigh: 127,
-      rootNote: pad.note - pad.transpose,
-      tuneCents: 0,
+      rootNote: pad.note,
+      tuneCents: pad.transpose * 100,
       gain: pad.gain,
       pan: pad.pan,
       roundRobinGroup: 0,
@@ -615,6 +615,12 @@ const targetReasons = (
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]))
   const target = event.target
   const noteEvent = event.type === 'note-on' || event.type === 'note-off'
+  if (!noteEvent && target.kind === 'parameter' && (
+    target.parameterId.startsWith('synth-instrument:')
+    || target.parameterId.startsWith('instrument:')
+  )) {
+    return [`${target.trackId}: scheduled instrument parameter "${target.parameterId}" is not portable.`]
+  }
   if (noteEvent && target.kind !== 'instrument') {
     return ['Portable note events must target an instrument node.']
   }

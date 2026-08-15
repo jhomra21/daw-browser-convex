@@ -72,6 +72,25 @@ test("serializes native processor batches with revision, epoch, and sequence ide
   expect(view.getBigUint64(20, true)).toBe(11n)
 })
 
+test("rejects processor payloads above the native audio-core capacity", () => {
+  expect(() => serializeNativeProcessorEvents(
+    Array.from({ length: 257 }, () => ({
+      processorInstanceId: 11,
+      parameterTarget: 2,
+      frameOffset: 0,
+      value: 0.75,
+    })),
+  )).toThrow()
+})
+
+test("rejects processor event fields that would truncate at the uint32 wire boundary", () => {
+  const event = { processorInstanceId: 11, parameterTarget: 0xffff_ffff, frameOffset: 0xffff_ffff, value: 0.75 }
+  expect(serializeNativeProcessorEvents([event], { revision: 1, epoch: 1, sequence: Number.MAX_SAFE_INTEGER })).toBeInstanceOf(Uint8Array)
+  expect(() => serializeNativeProcessorEvents([{ ...event, parameterTarget: 0x1_0000_0000 }])).toThrow()
+  expect(() => serializeNativeProcessorEvents([{ ...event, frameOffset: 0x1_0000_0000 }])).toThrow()
+  expect(() => serializeNativeProcessorEvents([event], { revision: 1, epoch: 1, sequence: Number.MAX_SAFE_INTEGER + 1 })).toThrow()
+})
+
 test("maps unique portable assets into deterministic session-local uint32 identifiers", () => {
   const mapped = mapNativeSessionAssets([asset("z"), asset("a"), asset("z")])
 

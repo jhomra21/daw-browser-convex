@@ -28,6 +28,20 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<unknown>
   clearAfterPersistRemove?: (context: PersistedEffectContext) => boolean
   createPersistContext?: () => PersistedEffectContext
+  onParamsApplied?: (targetId: string, previous: TParams | undefined, next: TParams) => void
+  onApplyCompleted?: (
+    targetId: string,
+    previous: TParams | undefined,
+    next: TParams,
+    context?: PersistedEffectContext,
+  ) => void
+  onEngineStateChanged?: (
+    targetId: string,
+    previous: TParams | undefined,
+    next: TParams,
+    source: 'remote',
+    context?: PersistedEffectContext,
+  ) => void
   onPersistError?: (error: unknown) => void
   onParamsCommitted?: (
     targetId: string,
@@ -36,6 +50,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
     context: PersistedEffectContext,
   ) => void
   onQueryRow?: (targetId: string, row: TRow) => void
+  isRemote?: () => boolean
   isMissingRowLoaded?: () => boolean
   debounceMs?: number
   remoteOverwriteAfterMs?: number
@@ -63,6 +78,12 @@ type PendingParamsCommit<TParams> = {
   serialized: string
 }
 
+type PendingRemoteApply<TParams> = {
+  targetId: string
+  next: TParams | undefined
+  serialized: string | undefined
+}
+
 export function createPersistedEffectState<TRow, TParams>(
   options: PersistedEffectStateOptions<TRow, TParams>,
 ): PersistedEffectState<TParams> {
@@ -76,9 +97,11 @@ export function createPersistedEffectState<TRow, TParams>(
   const targetByKey = new Map<string, string>()
   const pendingCommitByTarget = new Map<string, PendingParamsCommit<TParams>>()
   const pendingApplyByTarget = new Map<string, Promise<void>>()
+  const pendingRemoteApplyByTarget = new Map<string, PendingRemoteApply<TParams>>()
   const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
   const appliedEngineStateByTarget = new Map<string, string | undefined>()
+  const appliedEngineParamsByTarget = new Map<string, TParams | undefined>()
 
   function keyForTarget(targetId: string) {
     const scopeId = options.scopeId?.()
@@ -95,7 +118,7 @@ export function createPersistedEffectState<TRow, TParams>(
     persistContextByTarget.delete(key)
     targetByKey.delete(key)
     pendingCommitByTarget.delete(key)
-    pendingApplyByTarget.delete(key)
+    pendingRemoteApplyByTarget.delete(key)
     lastLocalEdit.delete(key)
     setDraftByTarget((prev) => {
       if (!(key in prev)) return prev
@@ -121,6 +144,7 @@ export function createPersistedEffectState<TRow, TParams>(
       saveTimers.delete(key)
     }
     targetByKey.delete(key)
+    pendingRemoteApplyByTarget.delete(key)
     lastLocalEdit.delete(key)
     setDraftByTarget((prev) => {
       if (!(key in prev)) return prev
@@ -264,6 +288,7 @@ export function createPersistedEffectState<TRow, TParams>(
     const key = keyForTarget(targetId)
     const serializedNext = options.serializeParams(next)
     if (previous !== undefined && options.serializeParams(previous) === serializedNext) return
+    pendingRemoteApplyByTarget.delete(key)
     const pendingCommit = pendingCommitByTarget.get(key)
     lastLocalEdit.set(key, Date.now())
     const context = options.createPersistContext?.() ?? {}
@@ -281,18 +306,128 @@ export function createPersistedEffectState<TRow, TParams>(
       next,
       serialized: serializedNext,
     })
-    const apply = Promise.resolve(options.applyToEngine(targetId, next))
+    const previousApply = pendingApplyByTarget.get(key)
+    const runApply = () => options.applyToEngine(targetId, next)
+    const apply = previousApply
+      ? previousApply.then(runApply, runApply)
+      : Promise.resolve(runApply())
+    options.onParamsApplied?.(targetId, previous, next)
     pendingApplyByTarget.set(key, apply)
     void apply
       .then(() => {
         if (pendingApplyByTarget.get(key) !== apply) return
         pendingApplyByTarget.delete(key)
+        pendingRemoteApplyByTarget.delete(key)
+        appliedEngineStateByTarget.set(key, serializedNext)
+        appliedEngineParamsByTarget.set(key, next)
         persistOrSchedule(targetId, key, next)
+        options.onApplyCompleted?.(targetId, previous, next, persistContextByTarget.get(key))
       })
       .catch((error: unknown) => {
         if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
         options.onPersistError?.(error)
       })
+  }
+
+  function applyLocalClearToEngine(targetId: string) {
+    const key = keyForTarget(targetId)
+    pendingRemoteApplyByTarget.delete(key)
+    const previousApply = pendingApplyByTarget.get(key)
+    const runClear = () => options.clearFromEngine?.(targetId)
+    const apply = previousApply
+      ? previousApply.then(runClear, runClear)
+      : Promise.resolve(runClear())
+    pendingApplyByTarget.set(key, apply)
+    void apply.then(() => {
+      if (pendingApplyByTarget.get(key) !== apply) return
+      pendingApplyByTarget.delete(key)
+      appliedEngineStateByTarget.set(key, undefined)
+      appliedEngineParamsByTarget.set(key, undefined)
+    }).catch((error: unknown) => {
+      if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
+      options.onPersistError?.(error)
+    })
+  }
+
+  function applyRemoteToEngine(targetId: string, next: TParams | undefined, capturedKey = keyForTarget(targetId)) {
+    const key = capturedKey
+    if (options.scopeId && key !== keyForTarget(targetId)) return
+    if (draftByTarget()[key] || deletedByTarget()[key]) return
+    const serialized = next === undefined ? undefined : options.serializeParams(next)
+    if (
+      appliedEngineStateByTarget.has(key)
+      && appliedEngineStateByTarget.get(key) === serialized
+    ) return
+    if (pendingApplyByTarget.has(key)) {
+      pendingRemoteApplyByTarget.set(key, { targetId, next, serialized })
+      return
+    }
+    const applyContext = options.createPersistContext?.()
+    const previous = appliedEngineParamsByTarget.get(key)
+    const applied = next === undefined
+      ? options.clearFromEngine?.(targetId)
+      : options.applyToEngine(targetId, next)
+    const apply = Promise.resolve(applied)
+    pendingApplyByTarget.set(key, apply)
+    void apply.then(() => {
+      if (pendingApplyByTarget.get(key) !== apply) return
+      if (options.scopeId && key !== keyForTarget(targetId)) {
+        pendingApplyByTarget.delete(key)
+        pendingRemoteApplyByTarget.delete(key)
+        return
+      }
+      pendingApplyByTarget.delete(key)
+      const queued = pendingRemoteApplyByTarget.get(key)
+      pendingRemoteApplyByTarget.delete(key)
+      appliedEngineStateByTarget.set(key, serialized)
+      appliedEngineParamsByTarget.set(key, next)
+
+      const remoteSnapshot = untrack(() => remoteByTarget())
+      const currentRemote = queued ?? (key in remoteSnapshot
+        ? {
+            targetId,
+            next: remoteSnapshot[key],
+            serialized: remoteSnapshot[key] === undefined
+              ? undefined
+              : options.serializeParams(remoteSnapshot[key]),
+          }
+        : undefined)
+      const shouldReplay = (
+        currentRemote !== undefined
+        && !draftByTarget()[key]
+        && !deletedByTarget()[key]
+        && currentRemote.serialized !== serialized
+      )
+      if (shouldReplay) {
+        applyRemoteToEngine(targetId, currentRemote.next, key)
+        return
+      }
+      if (currentRemote?.serialized === serialized && next !== undefined) {
+        options.onEngineStateChanged?.(targetId, previous, next, 'remote', applyContext)
+      }
+    }).catch((error: unknown) => {
+      if (pendingApplyByTarget.get(key) !== apply) return
+      pendingApplyByTarget.delete(key)
+      pendingRemoteApplyByTarget.delete(key)
+      options.onPersistError?.(error)
+      const remoteSnapshot = untrack(() => remoteByTarget())
+      const currentRemote = key in remoteSnapshot
+        ? {
+            next: remoteSnapshot[key],
+            serialized: remoteSnapshot[key] === undefined
+              ? undefined
+              : options.serializeParams(remoteSnapshot[key]),
+          }
+        : undefined
+      if (
+        currentRemote !== undefined
+        && !draftByTarget()[key]
+        && !deletedByTarget()[key]
+        && currentRemote.serialized !== serialized
+      ) {
+        applyRemoteToEngine(targetId, currentRemote.next, key)
+      }
+    })
   }
 
   function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
@@ -329,7 +464,10 @@ export function createPersistedEffectState<TRow, TParams>(
     }
 
     const draft = draftByTarget()[key]
-    if (!draft) return
+    if (!draft) {
+      if (nextParams && (options.isRemote?.() ?? true)) applyRemoteToEngine(targetId, nextParams)
+      return
+    }
 
     const nextSerialized = nextParams ? options.serializeParams(nextParams) : undefined
     const draftSerialized = options.serializeParams(draft)
@@ -343,6 +481,7 @@ export function createPersistedEffectState<TRow, TParams>(
     const lastEdit = lastLocalEdit.get(key) ?? 0
     if (Date.now() - lastEdit >= overwriteAfterMs) {
       clearDraft(targetId, key)
+      if (nextParams && (options.isRemote?.() ?? true)) applyRemoteToEngine(targetId, nextParams)
     }
   }
 
@@ -366,26 +505,28 @@ export function createPersistedEffectState<TRow, TParams>(
     if (!targetId) return
     const next = params()
     if (!next) {
-      if (appliedEngineStateByTarget.get(targetId) === undefined && appliedEngineStateByTarget.has(targetId)) return
-      options.clearFromEngine?.(targetId)
-      appliedEngineStateByTarget.set(targetId, undefined)
+      const key = keyForTarget(targetId)
+      if (deletedByTarget()[key]) {
+        applyLocalClearToEngine(targetId)
+        return
+      }
+      applyRemoteToEngine(targetId, undefined)
       return
     }
-    const serialized = options.serializeParams(next)
-    if (appliedEngineStateByTarget.get(targetId) === serialized) return
-    options.applyToEngine(targetId, next)
-    appliedEngineStateByTarget.set(targetId, serialized)
+    applyRemoteToEngine(targetId, next)
   })
 
   const flushPending = async (projectId?: string) => {
-    await Promise.all(
-      [...pendingApplyByTarget.entries()]
+    while (true) {
+      const pendingApplies = [...pendingApplyByTarget.entries()]
         .filter(([key]) => {
           if (!projectId) return true
           return persistContextByTarget.get(key)?.projectId === projectId
         })
-        .map(([, apply]) => apply),
-    )
+        .map(([, apply]) => apply)
+      if (pendingApplies.length === 0) break
+      await Promise.all(pendingApplies)
+    }
     for (const [key, timer] of Array.from(saveTimers.entries())) {
       const context = persistContextByTarget.get(key)
       if (projectId && context?.projectId !== projectId) continue
@@ -411,6 +552,7 @@ export function createPersistedEffectState<TRow, TParams>(
 
   onCleanup(() => {
     void flushPending().finally(() => {
+      pendingRemoteApplyByTarget.clear()
       for (const unregister of registeredFlushers.values()) unregister()
       registeredFlushers.clear()
     })
@@ -431,6 +573,7 @@ export function createPersistedEffectState<TRow, TParams>(
       clearTimeout(timer)
       saveTimers.delete(key)
     }
+    pendingRemoteApplyByTarget.delete(key)
     setDraftByTarget((prev) => {
       if (!(key in prev)) return prev
       const next = { ...prev }

@@ -1,4 +1,5 @@
 import type { AudioEffectRuntimeInstance, ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
+import { decodeEncodedAudioData } from '@daw-browser/audio-engine/audio-engine'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
 import { type AutomationEnvelope, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isLocalId, isLossyExportAudioFormat, normalizeArpeggiatorParams, normalizeCompressorParams,
@@ -630,52 +631,66 @@ export const createExportRenderStateSnapshot = async (input: {
   return { fx: cloneExportFx(fx), automationEnvelopes: [] }
 }
 
-async function loadInstrumentExportBuffers(fx: ExportFx, signal: AbortSignal, allowedTrackIds?: ReadonlySet<string>): Promise<void> {
+export async function loadInstrumentExportBuffers(
+  fx: ExportFx,
+  signal: AbortSignal,
+  allowedTrackIds?: ReadonlySet<string>,
+  projectId?: string,
+): Promise<void> {
   const trackFx = fx.trackFx
   if (!trackFx) return
   const jobs: Array<{
     url: string
+    targetSampleRate?: number
     install: (buffer: AudioBuffer) => void
   }> = []
   for (const [trackId, entry] of Object.entries(trackFx)) {
     if (allowedTrackIds && !allowedTrackIds.has(trackId)) continue
-    const buffers = new Map<string, AudioBuffer>()
     if (entry.instrument?.kind === 'drum-rack') {
+      const buffers = new Map(entry.drumRackBuffers ?? [])
       entry.drumRackBuffers = buffers
       for (const pad of entry.instrument.params.pads) {
         const sample = pad.sample
-        if (sample) jobs.push({ url: sample.url, install: (buffer) => buffers.set(pad.id, buffer) })
+        if (sample && !buffers.has(pad.id)) {
+          jobs.push({ url: sample.url, targetSampleRate: sample.source.sampleRate, install: (buffer) => buffers.set(pad.id, buffer) })
+        }
       }
     }
     if (entry.instrument?.kind === 'sampler') {
+      const buffers = new Map(entry.samplerBuffers ?? [])
       entry.samplerBuffers = buffers
       for (const zone of entry.instrument.params.zones) {
-        jobs.push({ url: zone.sample.url, install: (buffer) => buffers.set(zone.id, buffer) })
+        if (!buffers.has(zone.id)) {
+          jobs.push({ url: zone.sample.url, targetSampleRate: zone.sample.source.sampleRate, install: (buffer) => buffers.set(zone.id, buffer) })
+        }
       }
     }
-    if (entry.instrument?.kind === 'granular' && entry.instrument.params.zone) {
+    if (entry.instrument?.kind === 'granular') {
       const zone = entry.instrument.params.zone
-      jobs.push({
-        url: zone.sample.url,
-        install: (buffer) => {
-          entry.granularBuffer = { assetKey: zone.sample.assetKey, buffer }
-        },
-      })
+      if (!zone) {
+        entry.granularBuffer = undefined
+      } else if (entry.granularBuffer?.assetKey !== zone.sample.assetKey) {
+        jobs.push({
+          url: zone.sample.url,
+          targetSampleRate: zone.sample.source.sampleRate,
+          install: (buffer) => {
+            entry.granularBuffer = { assetKey: zone.sample.assetKey, buffer }
+          },
+        })
+      }
     }
   }
   if (jobs.length === 0) return
-  const ctx = new AudioContext()
-  const loader = createSampleBufferLoader()
-  try {
-    await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
-      throwIfExportAborted(signal)
-      const buffer = await loader.load(job.url, (data) => ctx.decodeAudioData(data), signal)
-      if (!buffer) throw new Error(`Failed to preload export sample ${job.url}`)
-      job.install(buffer)
+  const loader = createSampleBufferLoader(projectId ? { projectId: () => projectId } : {})
+  await runWithConcurrency(jobs, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
+    throwIfExportAborted(signal)
+    const buffer = await loader.load(job.url, decodeEncodedAudioData, {
+      targetSampleRate: job.targetSampleRate,
+      signal,
     })
-  } finally {
-    await ctx.close().catch(() => undefined)
-  }
+    if (!buffer) throw new Error(`Failed to preload export sample ${job.url}`)
+    job.install(buffer)
+  })
   throwIfExportAborted(signal)
 }
 
@@ -772,7 +787,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         : {}),
     })
     const projectId = input.projectId
-    localProjectId = projectId && isLocalId('project', projectId) ? projectId : undefined
+    const localProject = projectId ? await getLocalProject(projectId) : undefined
+    localProjectId = projectId && (isLocalId('project', projectId) || localProject !== undefined) ? projectId : undefined
     input.onProgress?.({ phase: 'source-range' })
     const sourceBounds = getExportRangeBounds(preloadTracks, input.range)
     input.onProgress?.({ phase: 'preroll' })
@@ -789,7 +805,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const [exportMixdown] = await Promise.all([
       mixdownModule,
       ensureBuffersForRange({ ...input, tracks: preloadTracks }),
-      loadInstrumentExportBuffers(fx, input.signal),
+      loadInstrumentExportBuffers(fx, input.signal, undefined, localProjectId),
     ])
     throwIfExportAborted(input.signal)
     const nativePlan = input.nativeRendererRequired
@@ -1003,9 +1019,19 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       for (const id of scope.trackIds ?? []) preloadTrackIds.add(id)
     }
     const preloadAssetTracks = preloadTracks.filter((track) => preloadTrackIds.has(track.id))
+    const localProject = input.projectId ? await getLocalProject(input.projectId) : undefined
+    const localProjectId = input.projectId
+      && (isLocalId('project', input.projectId) || localProject !== undefined)
+      ? input.projectId
+      : undefined
     await Promise.all([
       ensureBuffersForRange({ ...input, tracks: preloadAssetTracks, range: input.range }),
-      loadInstrumentExportBuffers(fx, input.signal, preloadTrackIds),
+      loadInstrumentExportBuffers(
+        fx,
+        input.signal,
+        preloadTrackIds,
+        localProjectId,
+      ),
     ])
     throwIfExportAborted(input.signal)
     const tracks = preloadTracks

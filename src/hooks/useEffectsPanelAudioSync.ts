@@ -10,7 +10,8 @@ import {
   type EqParams,
   type ReverbParams,
   type SaturatorParams,
-  type TrackInstrumentParams,isLocalId
+  type TrackInstrumentParams,
+  isLocalId,
 } from "@daw-browser/shared";
 import type { AudioEffectRuntimeInstance, AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { convexApi } from "~/lib/convex";
@@ -31,6 +32,8 @@ type UseEffectsPanelAudioSyncOptions = {
   audioEngine: Accessor<AudioEngine>;
   usesLegacyAudioEngine?: Accessor<boolean>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
+  roomEffectsStatus: Accessor<"pending" | "error" | "success">;
+  roomEffectsError: Accessor<unknown>;
   localDraftEffects?: {
     eq?: (targetId: string) => EqParams | undefined;
     compressor?: (targetId: string) => CompressorParams | undefined;
@@ -41,6 +44,7 @@ type UseEffectsPanelAudioSyncOptions = {
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
   };
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
+  drumRackBufferSync?: ReturnType<typeof createDrumRackBufferSync>;
   spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
 };
 
@@ -49,6 +53,7 @@ type SyncedEffectRow = RoomEffectRow | LocalEffectRow;
 
 type UseEffectsPanelAudioSyncReturn = {
   spectrum: Accessor<SpectrumFrame | null>;
+  flushPending: () => Promise<void>;
 };
 
 type SpectrumProvider = (
@@ -100,9 +105,267 @@ export const createSpectrumSubscriptionOwner = (
   return { update, dispose };
 };
 
+type PendingWork = Promise<unknown>;
+
+type EffectsPanelReadinessOptions = {
+  loadLocalEffects: (projectId: string) => Promise<LocalEffectRow[]>;
+  currentProjectId: Accessor<string | undefined>;
+  onLocalEffectsLoaded?: (projectId: string, rows: LocalEffectRow[]) => void;
+};
+
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessOptions) => {
+  type ProjectState = {
+    generation: number;
+    localLoad?: Promise<void>;
+    localError?: unknown;
+    localLoaded: boolean;
+    rowsProcessed: boolean;
+    remoteStatus: "pending" | "error" | "success";
+    remoteDataDefined: boolean;
+    remoteError?: unknown;
+  };
+
+  const states = new Map<string, ProjectState>();
+  const waiters = new Set<() => void>();
+  let disposed = false;
+
+  const stateFor = (projectId: string) => {
+    const existing = states.get(projectId);
+    if (existing) return existing;
+    const state: ProjectState = {
+      generation: 0,
+      localLoaded: false,
+      rowsProcessed: false,
+      remoteStatus: "pending",
+      remoteDataDefined: false,
+    };
+    states.set(projectId, state);
+    return state;
+  };
+
+  const notify = () => {
+    for (const waiter of waiters) waiter();
+    waiters.clear();
+  };
+
+  const waitForChange = () => new Promise<void>((resolve) => {
+    waiters.add(resolve);
+  });
+
+  const ensureLocalLoad = (projectId: string) => {
+    const state = stateFor(projectId);
+    if (state.localLoad) return;
+    void startLocalLoad(projectId, () => options.loadLocalEffects(projectId), () => undefined);
+  };
+
+  const startLocalLoad = <T>(
+    projectId: string,
+    load: () => Promise<T>,
+    onSuccess: (rows: T) => void,
+    force = false,
+  ) => {
+    const state = stateFor(projectId);
+    if (!force && state.localLoad) return state.localLoad;
+    state.generation += 1;
+    state.localLoaded = false;
+    state.localError = undefined;
+    state.rowsProcessed = false;
+    const generation = state.generation;
+    const loadPromise = load().then((rows) => {
+      if (state.generation !== generation) return;
+      state.localLoaded = true;
+      onSuccess(rows);
+      if (Array.isArray(rows) && options.currentProjectId() === projectId) {
+        options.onLocalEffectsLoaded?.(projectId, rows);
+      }
+      notify();
+    }).catch((error: unknown) => {
+      if (state.generation !== generation) return;
+      state.localError = error;
+      notify();
+    });
+    state.localLoad = loadPromise;
+    return loadPromise;
+  };
+
+  const updateRemote = (
+    projectId: string,
+    rows: SyncedEffectRow[] | undefined,
+    status: "pending" | "error" | "success",
+    error: unknown,
+  ) => {
+    const state = stateFor(projectId);
+    state.remoteStatus = status;
+    state.remoteDataDefined = rows !== undefined;
+    state.remoteError = error;
+    if (status !== "success" || rows === undefined) state.rowsProcessed = false;
+    notify();
+  };
+
+  const markRowsProcessed = (projectId: string) => {
+    const state = stateFor(projectId);
+    if (isLocalId("project", projectId)) {
+      if (!state.localLoaded || state.localError) return;
+    } else if (state.remoteStatus !== "success" || !state.remoteDataDefined) {
+      return;
+    }
+    state.rowsProcessed = true;
+    notify();
+  };
+
+  const flushPending = async (projectId: string | undefined) => {
+    if (disposed || !projectId) return;
+    const assertCurrentProject = () => {
+      if (options.currentProjectId() !== projectId) {
+        throw new Error(`Project changed while waiting for effects readiness for project "${projectId}".`);
+      }
+    };
+    const state = stateFor(projectId);
+    if (isLocalId("project", projectId)) ensureLocalLoad(projectId);
+    while (!disposed) {
+      assertCurrentProject();
+      const generation = state.generation;
+      if (isLocalId("project", projectId)) {
+        if (state.localLoad) await Promise.race([state.localLoad, waitForChange()]);
+        assertCurrentProject();
+        if (state.generation !== generation) continue;
+        if (state.localError) {
+          throw new Error(`Failed to load local effects for project "${projectId}": ${errorMessage(state.localError)}`);
+        }
+        if (!state.localLoaded || !state.rowsProcessed) {
+          await waitForChange();
+          assertCurrentProject();
+          continue;
+        }
+      } else {
+        if (state.remoteStatus === "error") {
+          throw new Error(`Failed to load remote effects for project "${projectId}": ${errorMessage(state.remoteError)}`);
+        }
+        if (
+          state.remoteStatus !== "success"
+          || !state.remoteDataDefined
+          || !state.rowsProcessed
+        ) {
+          await waitForChange();
+          assertCurrentProject();
+          continue;
+        }
+      }
+      return;
+    }
+  };
+
+  const dispose = () => {
+    disposed = true;
+    states.clear();
+    notify();
+  };
+
+  return {
+    dispose,
+    flushPending,
+    markRowsProcessed,
+    projectChanged: notify,
+    startLocalLoad,
+    updateRemote,
+  };
+};
+
+export const createPendingWorkOwner = () => {
+  const pendingByProject = new Map<string, Set<PendingWork>>();
+  let disposed = false;
+
+  const track = (projectId: string | undefined, work: PendingWork | void) => {
+    if (disposed || !projectId || !work) return;
+    const pending = Promise.resolve(work).catch(() => undefined);
+    const projectPending = pendingByProject.get(projectId) ?? new Set<PendingWork>();
+    projectPending.add(pending);
+    pendingByProject.set(projectId, projectPending);
+    void pending.then(() => {
+      projectPending.delete(pending);
+      if (projectPending.size === 0 && pendingByProject.get(projectId) === projectPending) {
+        pendingByProject.delete(projectId);
+      }
+    });
+  };
+
+  const flushPending = async (projectId: string | undefined) => {
+    if (disposed || !projectId) return;
+    while (true) {
+      const projectPending = pendingByProject.get(projectId);
+      if (!projectPending || projectPending.size === 0) return;
+      await Promise.all([...projectPending]);
+    }
+  };
+
+  const dispose = () => {
+    disposed = true;
+    pendingByProject.clear();
+  };
+
+  return { dispose, flushPending, track };
+};
+
 type SyncedAudioEffectInstanceRow = AudioEffectRuntimeInstance & {
   targetId: string;
   index?: number;
+};
+
+type SampledInstrumentWorkRegistrationOptions = {
+  projectId: string;
+  tracks: readonly Track[];
+  instruments: ReadonlyMap<string, TrackInstrumentParams>;
+  clearSamplerTrack: (trackId: Track["id"]) => void;
+  clearDrumRackTrack: (trackId: Track["id"]) => void;
+  syncSamplerTrack: (
+    trackId: Track["id"],
+    params: Extract<TrackInstrumentParams, { kind: "sampler" }>["params"],
+    instanceId?: string,
+  ) => PendingWork | void;
+  syncGranularTrack: (
+    trackId: Track["id"],
+    params: Extract<TrackInstrumentParams, { kind: "granular" }>["params"],
+    instanceId?: string,
+  ) => PendingWork | void;
+  syncDrumRackTrack: (
+    trackId: Track["id"],
+    params: Extract<TrackInstrumentParams, { kind: "drum-rack" }>["params"],
+    instanceId?: string,
+  ) => PendingWork | void;
+  trackPendingWork: (projectId: string, work: PendingWork | void) => void;
+};
+
+export const registerSampledInstrumentWork = (
+  options: SampledInstrumentWorkRegistrationOptions,
+) => {
+  for (const track of options.tracks) {
+    if (track.kind !== "instrument") continue;
+    const instrument = options.instruments.get(track.id);
+    if (instrument?.kind === "drum-rack") {
+      options.clearSamplerTrack(track.id);
+      options.trackPendingWork(
+        options.projectId,
+        options.syncDrumRackTrack(track.id, instrument.params, instrument.instanceId),
+      );
+    } else if (instrument?.kind === "sampler") {
+      options.clearDrumRackTrack(track.id);
+      options.trackPendingWork(
+        options.projectId,
+        options.syncSamplerTrack(track.id, instrument.params, instrument.instanceId),
+      );
+    } else if (instrument?.kind === "granular") {
+      options.clearDrumRackTrack(track.id);
+      options.trackPendingWork(
+        options.projectId,
+        options.syncGranularTrack(track.id, instrument.params, instrument.instanceId),
+      );
+    } else {
+      options.clearDrumRackTrack(track.id);
+      options.clearSamplerTrack(track.id);
+    }
+  }
 };
 
 const createSyncedAudioEffectInstanceRow = (
@@ -190,34 +453,56 @@ export function useEffectsPanelAudioSync(
   options: UseEffectsPanelAudioSyncOptions,
 ): UseEffectsPanelAudioSyncReturn {
   const [localEffects, setLocalEffects] = createSignal<LocalEffectRow[] | undefined>(undefined);
+  const readinessOwner = createEffectsPanelReadinessOwner({
+    loadLocalEffects: listLocalEffects,
+    currentProjectId: options.projectId,
+    onLocalEffectsLoaded: (_projectId, rows) => setLocalEffects(rows),
+  });
+  onCleanup(readinessOwner.dispose);
 
   createEffect(on(options.projectId, (projectId) => {
+    readinessOwner.projectChanged();
     if (!projectId || !isLocalId("project", projectId)) {
       setLocalEffects(undefined);
       return;
     }
     const isCurrentProject = () => options.projectId() === projectId;
-    const reloadLocalEffects = () => listLocalEffects(projectId).then((rows) => {
-      if (isCurrentProject()) {
-        setLocalEffects(rows);
-      }
-    }).catch(() => {
-      if (isCurrentProject()) {
-        setLocalEffects([]);
-      }
-    });
-    void reloadLocalEffects();
+    const reloadLocalEffects = (force = false) => readinessOwner.startLocalLoad(
+      projectId,
+      () => listLocalEffects(projectId).catch((error: unknown) => {
+        if (isCurrentProject()) setLocalEffects([]);
+        throw error;
+      }),
+      (rows) => {
+        if (isCurrentProject()) setLocalEffects(rows);
+      },
+      force,
+    );
+    void reloadLocalEffects(true);
     const unsubscribe = subscribeToLocalProjectChanges(projectId, () => {
-      void reloadLocalEffects();
+      void reloadLocalEffects(true);
     })
     onCleanup(unsubscribe)
   }));
 
+  createEffect(() => {
+    const projectId = options.projectId();
+    if (!projectId || isLocalId("project", projectId)) return;
+    readinessOwner.updateRemote(
+      projectId,
+      options.roomEffects(),
+      options.roomEffectsStatus(),
+      options.roomEffectsError(),
+    );
+  });
+
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
-  const drumRackBufferSync = createDrumRackBufferSync();
+  const drumRackBufferSync = options.drumRackBufferSync ?? createDrumRackBufferSync();
   const samplerBufferSync = options.samplerBufferSync;
-  onCleanup(drumRackBufferSync.dispose);
+  const pendingWorkOwner = createPendingWorkOwner();
+  onCleanup(pendingWorkOwner.dispose);
+  if (!options.drumRackBufferSync) onCleanup(drumRackBufferSync.dispose);
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -247,7 +532,7 @@ export function useEffectsPanelAudioSync(
 
   createEffect(() => {
     const audioEngine = options.audioEngine();
-    if (options.usesLegacyAudioEngine && !options.usesLegacyAudioEngine()) return;
+    const usesLegacyAudioEngine = options.usesLegacyAudioEngine?.() ?? true;
     const projectId = options.projectId();
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
       ? localEffects()
@@ -256,7 +541,7 @@ export function useEffectsPanelAudioSync(
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map((track) => track.id));
     if (effects === undefined) {
-      if (projectId && syncedProjectId !== projectId) {
+      if (usesLegacyAudioEngine && projectId && syncedProjectId !== projectId) {
         clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
         clearSyncedMasterState(audioEngine);
         syncedTrackIds = new Set(currentTrackIds);
@@ -293,7 +578,11 @@ export function useEffectsPanelAudioSync(
       if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
     }
 
-    void audioEngine.setMasterFxInstances(effectInstances.master).catch(() => undefined);
+    const effectiveInstrumentByTrackId = new Map(instrumentByTrackId);
+    for (const track of tracks) {
+      const draftInstrument = options.localDraftEffects?.instrument?.(track.id);
+      if (draftInstrument) effectiveInstrumentByTrackId.set(track.id, draftInstrument);
+    }
 
     const staleTrackIds = new Set<Track["id"]>();
     for (const trackId of syncedTrackIds) {
@@ -301,6 +590,31 @@ export function useEffectsPanelAudioSync(
         staleTrackIds.add(trackId);
       }
     }
+    for (const trackId of staleTrackIds) {
+      drumRackBufferSync.clearTrack(trackId);
+      samplerBufferSync.clearTrack(trackId);
+    }
+
+    registerSampledInstrumentWork({
+      projectId,
+      tracks,
+      instruments: effectiveInstrumentByTrackId,
+      clearSamplerTrack: (trackId) => samplerBufferSync.clearTrack(trackId),
+      clearDrumRackTrack: (trackId) => drumRackBufferSync.clearTrack(trackId),
+      syncSamplerTrack: (trackId, params, instanceId) => samplerBufferSync.syncTrack(audioEngine, trackId, params, instanceId),
+      syncGranularTrack: (trackId, params, instanceId) => samplerBufferSync.syncGranularTrack(audioEngine, trackId, params, instanceId),
+      syncDrumRackTrack: (trackId, params, instanceId) => drumRackBufferSync.syncTrack(audioEngine, trackId, params, instanceId),
+      trackPendingWork: (currentProjectId, work) => pendingWorkOwner.track(currentProjectId, work),
+    });
+
+    if (!usesLegacyAudioEngine) {
+      syncedTrackIds = new Set(currentTrackIds);
+      syncedProjectId = projectId;
+      readinessOwner.markRowsProcessed(projectId);
+      return;
+    }
+
+    void audioEngine.setMasterFxInstances(effectInstances.master).catch(() => undefined);
     clearSyncedTrackState(audioEngine, staleTrackIds);
 
     for (const track of tracks) {
@@ -309,21 +623,8 @@ export function useEffectsPanelAudioSync(
       if (track.kind === "instrument") {
         const instrument = options.localDraftEffects?.instrument?.(track.id) ?? instrumentByTrackId.get(track.id);
         if (instrument?.kind === "synth") {
-          drumRackBufferSync.clearTrack(track.id);
-          samplerBufferSync.clearTrack(track.id);
           audioEngine.setTrackInstrument(track.id, { instrument });
-        } else if (instrument?.kind === "drum-rack") {
-          samplerBufferSync.clearTrack(track.id);
-          drumRackBufferSync.syncTrack(audioEngine, track.id, instrument.params);
-        } else if (instrument?.kind === "sampler") {
-          drumRackBufferSync.clearTrack(track.id);
-          samplerBufferSync.syncTrack(audioEngine, track.id, instrument.params, instrument.instanceId);
-        } else if (instrument?.kind === "granular") {
-          drumRackBufferSync.clearTrack(track.id);
-          samplerBufferSync.syncGranularTrack(audioEngine, track.id, instrument.params, instrument.instanceId);
-        } else {
-          drumRackBufferSync.clearTrack(track.id);
-          samplerBufferSync.clearTrack(track.id);
+        } else if (!instrument) {
           audioEngine.clearTrackInstrument(track.id);
         }
         const arp = options.localDraftEffects?.arp?.(track.id) ?? arpByTrackId.get(track.id);
@@ -340,6 +641,7 @@ export function useEffectsPanelAudioSync(
 
     syncedTrackIds = new Set(currentTrackIds);
     syncedProjectId = projectId;
+    readinessOwner.markRowsProcessed(projectId);
   });
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);
@@ -352,6 +654,11 @@ export function useEffectsPanelAudioSync(
   onCleanup(spectrumSubscription.dispose);
 
   return {
+    flushPending: async () => {
+      const projectId = options.projectId();
+      await readinessOwner.flushPending(projectId);
+      await pendingWorkOwner.flushPending(projectId);
+    },
     spectrum,
   };
 }

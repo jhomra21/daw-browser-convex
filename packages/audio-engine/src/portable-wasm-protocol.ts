@@ -1,6 +1,7 @@
 import type { AudioAssetRef, AudioCoreGraphSnapshot, AudioCoreInstrumentState, AudioCoreProcessorStateEnvelope, AudioCoreSampleSourceEventDto, UtilityProcessorState } from '../../audio-core-contract/src/index'
 import {
   audioCoreContractVersion,
+  audioCoreMaxGraphProcessors,
   audioCoreMaxProcessorParameterTargets,
   audioCoreMaxProcessorsPerNode,
   decodeAudioCoreProcessorStateEnvelope,
@@ -324,6 +325,10 @@ const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapsho
     || value.nodes.length > portableWasmMaxGraphNodes
     || value.edges.length > portableWasmMaxGraphEdges
     || value.assets.length > portableWasmMaxAssets) return false
+  const processorCount = value.nodes.reduce((total, node) => (
+    total + (isRecord(node) && Array.isArray(node.processorOrder) ? node.processorOrder.length : 0)
+  ), 0)
+  if (processorCount > audioCoreMaxGraphProcessors) return false
   const processorInstanceIds = new Set<number>()
   const processorIds = new Set<string>()
   const processorNodeIds = new Map<string, string>()

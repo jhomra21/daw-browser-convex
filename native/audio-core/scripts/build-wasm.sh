@@ -27,7 +27,7 @@ artifact_hash=$(shasum -a 256 "$artifact" | cut -d ' ' -f 1)
 artifact_size=$(wc -c < "$artifact" | tr -d ' ')
 
 cat > "$artifact_manifest" <<EOF
-{"version":2,"artifactKind":"production","abiVersion":3,"contractVersion":1,"contractHash":"$contract_hash","buildType":"Release","lto":true,"fixedMemory":true,"memoryBytes":184549376,"sizeBytes":$artifact_size,"maximumBytes":$maximum_bytes,"sha256":"$artifact_hash","sourceHash":"$source_hash","wasmUrl":"/audio-core/daw-audio-core.wasm"}
+{"version":2,"artifactKind":"production","abiVersion":3,"contractVersion":1,"contractHash":"$contract_hash","buildType":"Release","lto":true,"fixedMemory":true,"memoryBytes":268435456,"sizeBytes":$artifact_size,"maximumBytes":$maximum_bytes,"sha256":"$artifact_hash","sourceHash":"$source_hash","wasmUrl":"/audio-core/daw-audio-core.wasm"}
 EOF
 
 bun native/audio-core/scripts/validate-wasm-artifact.ts "$artifact" "$artifact_manifest"

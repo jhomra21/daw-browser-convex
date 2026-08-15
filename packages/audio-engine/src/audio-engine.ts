@@ -38,6 +38,7 @@ const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
 export { canFallbackToRepitchStretch, isStretchQualityWarning }
+export { decodeEncodedAudioData } from './audio-runtime'
 export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, GateMeterFrame, MasterStereoLevelsListener, SpectrumFrame, TrackMeterFrame, TrackMeterFrameBatch, TrackStereoLevels, TrackStereoLevelsBatch }
 export type { RecordingEpoch, RecordingMonitorMode, RecordingRuntimeStatus, StartRecordingCaptureOptions } from './recording/recording-runtime'
 export type AudioRuntimeSnapshot = {
@@ -1110,8 +1111,8 @@ export class AudioEngine {
     return getOutputLatencySec(this.runtime)
   }
 
-  async decodeAudioData(arrayBuffer: ArrayBuffer) {
-    return decodeAudioData(this.runtime, arrayBuffer)
+  async decodeAudioData(arrayBuffer: ArrayBuffer, targetSampleRate?: number) {
+    return decodeAudioData(this.runtime, arrayBuffer, targetSampleRate)
   }
 
   registerAsset(asset: AudioAssetRef, pcm: PlanarPcm, projectGeneration: number): AudioAssetRegistration {

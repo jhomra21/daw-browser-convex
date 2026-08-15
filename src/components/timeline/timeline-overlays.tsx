@@ -46,7 +46,7 @@ type TimelineOverlaysProps = {
     canWrite: boolean
     close: () => void
     changeBounds: (next: TimelineMidiBounds) => void
-    auditionNote: (pitch: number, velocity?: number, durSec?: number) => void
+    auditionNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
     keyboard: {
       isActive: (pitch: number) => boolean
     }

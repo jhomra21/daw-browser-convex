@@ -33,5 +33,5 @@ export const portableWasmCapabilityMatrix = Object.freeze({
   sampleRatesHz: Object.freeze([44100, 48000, 96000]),
   maxInputBuses: 2,
   maxChannels: 2,
-  maxReverbProcessors: 8,
+  maxReverbProcessors: 32,
 })

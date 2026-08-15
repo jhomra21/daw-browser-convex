@@ -11,6 +11,9 @@ import {
   nativeAudioHostMaximumScheduleChunks,
   nativeAudioHostMaximumScheduleInstanceIdBytes,
   nativeAudioHostMaximumScheduleRecords,
+  nativeAudioHostMaximumInstrumentEvents,
+  nativeAudioHostMaximumProcessorEvents,
+  nativeAudioHostMaximumSourceEvents,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 
@@ -463,6 +466,14 @@ export const serializeNativeProcessorEvents = (
   batch?: NativeProcessorEventBatch,
 ) => {
   const headerBytes = batch ? 20 : 4
+  if (
+    events.length > nativeAudioHostMaximumProcessorEvents
+    || (batch && (
+      !Number.isSafeInteger(batch.revision) || batch.revision <= 0 || batch.revision > 0xffff_ffff
+      || !Number.isSafeInteger(batch.epoch) || batch.epoch <= 0 || batch.epoch > 0xffff_ffff
+      || !Number.isSafeInteger(batch.sequence) || batch.sequence <= 0 || batch.sequence > 0xffff_ffff_ffff_ffff
+    ))
+  ) throw new Error("Native processor event payload exceeds its bounds.")
   const output = new Uint8Array(headerBytes + events.length * 20)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
@@ -473,6 +484,12 @@ export const serializeNativeProcessorEvents = (
   }
   let offset = headerBytes
   for (const event of events) {
+    if (
+      !Number.isSafeInteger(event.processorInstanceId) || event.processorInstanceId <= 0
+      || !Number.isSafeInteger(event.parameterTarget) || event.parameterTarget <= 0 || event.parameterTarget > 0xffff_ffff
+      || !Number.isSafeInteger(event.frameOffset) || event.frameOffset < 0 || event.frameOffset > 0xffff_ffff
+      || !Number.isFinite(event.value)
+    ) throw new Error("Native processor event is invalid.")
     view.setBigUint64(offset, BigInt(event.processorInstanceId), true)
     view.setUint32(offset + 8, event.parameterTarget, true)
     view.setUint32(offset + 12, event.frameOffset, true)
@@ -520,7 +537,7 @@ export const serializeNativeVstParameterEvents = (
 export const serializeNativeInstrumentEvents = (epoch: number, events: readonly NativeInstrumentEvent[]) => {
   // Immediate native live events use a block-relative frameOffset. Scheduled
   // events carry their absolute frame in the schedule-window envelope.
-  if (!Number.isInteger(epoch) || epoch <= 0 || epoch > 0xffff_ffff || events.length > 2_048) {
+  if (!Number.isInteger(epoch) || epoch <= 0 || epoch > 0xffff_ffff || events.length > nativeAudioHostMaximumInstrumentEvents) {
     throw new Error("Native instrument event payload exceeds its bounds.")
   }
   const output = new Uint8Array(4 + events.length * 48)
@@ -603,7 +620,7 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   const windowId = window.windowId ?? 1
   const chunkIndex = window.chunkIndex ?? 0
   const chunkCount = window.chunkCount ?? 1
-  const endsSchedule = window.endsSchedule ?? true
+  const endsSchedule = window.endsSchedule ?? (chunkIndex === chunkCount - 1)
   if (
     !Number.isSafeInteger(window.revision) || window.revision <= 0 || window.revision > 0xffff_ffff
     || !Number.isSafeInteger(window.epoch) || window.epoch <= 0 || window.epoch > 0xffff_ffff
@@ -616,8 +633,8 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
     || chunkIndex >= chunkCount
     || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length
       > nativeAudioHostMaximumScheduleRecords
-    || instrumentEvents.length > 256
-    || sampleSourceEvents.length > 256
+    || instrumentEvents.length > nativeAudioHostMaximumInstrumentEvents
+    || sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents
     || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments
     || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame)
     || sampleSourceEvents.some((event) => event.startFrame < window.startFrame || event.startFrame >= window.endFrame)
@@ -790,6 +807,9 @@ export const serializeNativeSourceEvents = (
   events: readonly NativeSourceEvent[],
   assets: readonly NativeSessionAsset[],
 ) => {
+  if (events.length > nativeAudioHostMaximumSourceEvents) {
+    throw new Error("Native source event payload exceeds its bounds.")
+  }
   const assetIds = new Map(assets.map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
   const output = new Uint8Array(4 + events.length * 112)
   const view = new DataView(output.buffer)
@@ -798,12 +818,22 @@ export const serializeNativeSourceEvents = (
   for (const event of events) {
     const assetId = assetIds.get(event.assetId)
     if (assetId === undefined) throw new Error(`Native session asset is missing: ${event.assetId}`)
+    if (
+      !Number.isSafeInteger(event.epoch) || event.epoch <= 0 || event.epoch > 0xffff_ffff
+      || !Number.isSafeInteger(event.sequence) || event.sequence <= 0
+      || !Number.isSafeInteger(event.startFrame)
+      || !Number.isSafeInteger(event.stopFrame)
+      || event.stopFrame <= event.startFrame
+      || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0
+      || !Number.isSafeInteger(event.sourceFrameCount) || event.sourceFrameCount <= 0
+      || !Number.isFinite(event.gain)
+      || !Number.isFinite(event.sourceOffsetFraction ?? 0)
+      || (event.sourceOffsetFraction ?? 0) < 0 || (event.sourceOffsetFraction ?? 0) >= 1
+    ) throw new Error("Native source event is invalid.")
     view.setUint32(offset, event.epoch, true)
     view.setBigUint64(offset + 4, BigInt(event.sequence), true)
     writeId(view, offset + 12, event.sourceNodeId)
     view.setUint32(offset + 20, assetId, true)
-    const startFrame = Math.max(0, event.startFrame)
-    const stopFrame = Math.max(startFrame + 1, event.stopFrame)
     if (!Number.isSafeInteger(event.fadeInStartFrame)
       || !Number.isSafeInteger(event.fadeInEndFrame)
       || !Number.isSafeInteger(event.fadeOutStartFrame)
@@ -816,8 +846,8 @@ export const serializeNativeSourceEvents = (
       || (event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1))) {
       throw new Error("Native source event is invalid.")
     }
-    view.setBigInt64(offset + 24, BigInt(startFrame), true)
-    view.setBigInt64(offset + 32, BigInt(stopFrame), true)
+    view.setBigInt64(offset + 24, BigInt(event.startFrame), true)
+    view.setBigInt64(offset + 32, BigInt(event.stopFrame), true)
     view.setBigUint64(offset + 40, BigInt(event.sourceOffsetFrame), true)
     view.setBigUint64(offset + 48, BigInt(event.sourceFrameCount), true)
     view.setFloat32(offset + 56, event.gain, true)

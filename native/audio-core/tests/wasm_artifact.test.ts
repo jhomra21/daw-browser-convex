@@ -556,7 +556,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     buildType: 'Release',
     lto: true,
     fixedMemory: true,
-    memoryBytes: 184_549_376,
+    memoryBytes: 268_435_456,
     sizeBytes: bytes.byteLength,
     sha256: hash,
     sourceHash: await computePortableWasmSourceHash(repositoryRoot),
@@ -586,6 +586,19 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   expect(() => exports.memory.grow(1)).toThrow()
   expect(exports.daw_audio_core_get_abi_version()).toBe(manifest.abiVersion)
   expect(exports.daw_audio_core_wasm_utility_initialize(48_000, 1)).toBe(0)
+
+  const headroomExports = (await WebAssembly.instantiate(bytes)).instance.exports
+  if (typeof headroomExports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
+    || typeof headroomExports.malloc !== 'function'
+    || typeof headroomExports.free !== 'function') {
+    throw new Error('The Wasm artifact does not expose the headroom regression ABI.')
+  }
+  expect(headroomExports.daw_audio_core_wasm_graph_initialize_planar(48_000, 128, 2, 2, 64)).toBe(0)
+  const postInitializeAsset = headroomExports.malloc(16_000_000)
+  if (typeof postInitializeAsset !== 'number' || postInitializeAsset === 0) {
+    throw new Error('The fixed-memory Wasm artifact could not allocate ordinary PCM asset headroom after graph initialization.')
+  }
+  headroomExports.free(postInitializeAsset)
 
   const inputBytes = Float32Array.BYTES_PER_ELEMENT * 4
   const stateBytes = 40
@@ -957,7 +970,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   graphView.setBigUint64(256, 2n, true)
   graphView.setFloat32(272, 1, true)
   graphView.setUint32(276, 3, true)
-  const allocation = exports.malloc(graph.byteLength + 4 * 4 + 4 + 8 + 44 + 72 + 8 * 4 + 52)
+  const allocation = exports.malloc(graph.byteLength + 4 * 4 + 4 + 8 + 88 + 80 + 8 * 4 + 52)
   if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate sampler bridge fixture.')
   try {
     const graphOffset = allocation
@@ -965,8 +978,8 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
     const planesOffset = sampleOffset + 4 * 4
     const assetOffset = planesOffset + 4
     const stateOffset = assetOffset + 8
-    const zoneOffset = stateOffset + 44
-    const pointersOffset = zoneOffset + 72
+    const zoneOffset = stateOffset + 88
+    const pointersOffset = zoneOffset + 80
     const eventsOffset = pointersOffset + 8 * 4
     new Uint8Array(exports.memory.buffer, graphOffset, graph.byteLength).set(graph)
     const view = new DataView(exports.memory.buffer)
@@ -987,6 +1000,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
     view.setFloat32(stateOffset + 32, 20_000, true)
     view.setFloat32(stateOffset + 36, 0.7, true)
     view.setUint32(stateOffset + 40, 1, true)
+    view.setFloat32(stateOffset + 64, 0.01, true)
     view.setBigUint64(zoneOffset, asset, true)
     view.setUint32(zoneOffset + 8, 36, true)
     view.setUint32(zoneOffset + 12, 36, true)
@@ -1320,7 +1334,7 @@ test('the backend capability matrix is covered by executable graph fixtures', ()
   )].sort())
   expect(portableWasmCapabilityMatrix.maxInputBuses).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.inputBusCount)))
   expect(portableWasmCapabilityMatrix.maxChannels).toBe(Math.max(...portableGraphParityFixtures.map((fixture) => fixture.channelCount)))
-  expect(portableWasmCapabilityMatrix.maxReverbProcessors).toBe(8)
+  expect(portableWasmCapabilityMatrix.maxReverbProcessors).toBe(32)
 })
 
 test('the reverb impulse characterization inspects each planar channel', () => {

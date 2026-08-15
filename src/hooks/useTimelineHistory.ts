@@ -66,6 +66,7 @@ type HistoryScopeContext = {
   tracks: Track[]
   pendingRun: Promise<void>
   pendingLocalHistorySave: Promise<void>
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
   unregisterLocalHistoryFlusher?: () => void
   hydratedFromLocalDb?: boolean
   pendingLocalHistoryState?: PersistedHistory
@@ -91,7 +92,6 @@ const mergeLocalHistoryState = (
 export function useTimelineHistory(
   options: UseTimelineHistoryOptions,
 ): UseTimelineHistoryReturn {
-  const drumRackBufferSync = createDrumRackBufferSync()
   const scopeContexts = new Map<string, HistoryScopeContext>()
 
   const readCurrentScope = () => readOptimisticGrantScope({
@@ -150,6 +150,10 @@ export function useTimelineHistory(
       tracks: [],
       pendingRun: Promise.resolve(),
       pendingLocalHistorySave: Promise.resolve(),
+      drumRackBufferSync: createDrumRackBufferSync({
+        projectId: () => scope.projectId,
+        isCurrentProject: () => readCurrentScopeKey() === scopeKey,
+      }),
     }
     scopeContexts.set(scopeKey, context)
     if (localProject) {
@@ -360,8 +364,9 @@ export function useTimelineHistory(
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,
+          isCurrentScope: () => readCurrentScopeKey() === scopeKey,
           replayInstanceEffectParams: options.replayInstanceEffectParams,
-          drumRackBufferSync,
+          drumRackBufferSync: context.drumRackBufferSync,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,
@@ -407,7 +412,10 @@ export function useTimelineHistory(
   })
 
   onCleanup(() => {
-    for (const context of scopeContexts.values()) context.unregisterLocalHistoryFlusher?.()
+    for (const context of scopeContexts.values()) {
+      context.unregisterLocalHistoryFlusher?.()
+      context.drumRackBufferSync.dispose()
+    }
   })
 
   return {

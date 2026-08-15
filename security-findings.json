@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-08-12-015",
-  "scan_date": "2026-08-12T15:39:18Z",
+  "scan_id": "scan-2026-08-15-003",
+  "scan_date": "2026-08-15T16:20:05Z",
   "scan_type": "working",
-  "commit_range": "10444f7..working-tree",
+  "commit_range": "7eb5ae7ef2aaab4106cc4c389d73aa12fad38e6f..working-tree",
   "pr_number": null,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 11
+    "files_analyzed": 98
   }
 }

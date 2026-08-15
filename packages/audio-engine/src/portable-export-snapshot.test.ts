@@ -14,6 +14,7 @@ import {
   createDefaultSaturatorParams,
   createDefaultSynthParams,
   createDefaultTremoloParams,
+  createDefaultUtilityParams,
 } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
@@ -420,5 +421,38 @@ test('reports portable support rejections without emitting a partial snapshot', 
       clipId: 'warped',
       message: 'warped: repitch warp is not supported by portable export.',
     }],
+  })
+})
+
+test('rejects graphs that exceed aggregate audio-core processor capacity', () => {
+  const tracks = Array.from({ length: 17 }, (_, index) => track([], {
+    id: `track-${index}`,
+    name: `Track ${index}`,
+  }))
+  const result = compilePortableExportSnapshot({
+    tracks,
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx: {
+      masterVolume: 1,
+      masterFxInstances: [],
+      trackFx: Object.fromEntries(tracks.map((sourceTrack) => [sourceTrack.id, {
+        instances: Array.from({ length: 31 }, (_, index) => ({
+          id: `${sourceTrack.id}:utility-${index}`,
+          kind: 'utility' satisfies 'utility',
+          params: { version: 1, state: createDefaultUtilityParams() },
+        })),
+      }])),
+    },
+  })
+
+  expect(result).toEqual({
+    supported: false,
+    reasons: ['The portable core supports at most 512 aggregate graph processors.'],
+    diagnostics: [],
   })
 })

@@ -6,6 +6,7 @@ import { isServer } from 'solid-js/web'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { createDefaultDrumRackParams } from '@daw-browser/shared'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
@@ -150,6 +151,7 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
 
 test('keeps browser startup portable-first and runtime faults stop without fallback', async () => {
   const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
+  const timelineSource = await readFile(new URL('../components/Timeline.tsx', import.meta.url), 'utf8')
   expect(source).toContain("version: 2")
   expect(source).toContain("browserDefaultBackend: 'portable-browser'")
   expect(source).toContain("runtimeFailure: 'stop-and-mute'")
@@ -161,6 +163,9 @@ test('keeps browser startup portable-first and runtime faults stop without fallb
   expect(nativeFallback).toBeGreaterThan(portableStartup)
   expect(legacyStartup).toBeGreaterThan(nativeFallback)
   expect(source).toContain('portableBrowserOptions?.reportFault?.(message)')
+  expect(source).toContain('isPreparingPlayback: () => (playAttempt !== undefined && !isPlaying())')
+  expect(source).toContain('portableBrowserPlayback.isPreparing()')
+  expect(timelineSource).toContain('&& !isPreparingPlayback()) return;')
 })
 
 const createNativeHookBridge = (
@@ -1902,6 +1907,79 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
   }
 })
 
+test('preserves the latest instrument override across an active structural rebuild', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge()
+  const compileContexts: Array<unknown> = []
+  const instrumentA = {
+    kind: 'drum-rack' as const,
+    instanceId: 'instrument-a',
+    params: createDefaultDrumRackParams(),
+  }
+  const instrumentB = {
+    kind: 'drum-rack' as const,
+    instanceId: 'instrument-b',
+    params: createDefaultDrumRackParams(),
+  }
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: async (transport, context) => {
+            compileContexts.push(context)
+            return nativeRequiredSnapshot(transport)
+          },
+        })
+        await playback.handlePlay([track])
+        fixture.calls.length = 0
+        fixture.setBeginGate(beginGate.promise)
+
+        const first = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: "native",
+          projectId: "project",
+          instrumentOverride: { targetId: track.id, instrument: instrumentA },
+        })
+        await flushMicrotasks()
+        expect(playback.isStructuralRebuildInProgress()).toBeTrue()
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+
+        const second = playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: "native",
+          projectId: "project",
+          instrumentOverride: { targetId: track.id, instrument: instrumentB },
+        })
+        await flushMicrotasks()
+        beginGate.resolve({ ok: true })
+        await Promise.all([first, second])
+
+        expect(compileContexts).toContainEqual({ instrumentOverride: { targetId: track.id, instrument: instrumentA } })
+        expect(compileContexts.at(-1)).toEqual({
+          instrumentOverride: { targetId: track.id, instrument: instrumentB },
+        })
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(playback.isPlaying()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
 test('does not restart after pause wins an active native rebuild', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<{ ok: true }>()
@@ -2029,7 +2107,9 @@ test('does not resume a structural rebuild after switching projects', async () =
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
         expect(fixture.transportStates.filter((running) => running)).toHaveLength(0)
+        expect(fixture.calls.filter((call) => call === "teardown").length).toBeGreaterThan(0)
         dispose()
       })
     })
@@ -2162,6 +2242,56 @@ test('serializes a delayed native pause before immediate play', async () => {
         expect(fixture.transportStates.filter((running) => running)).toHaveLength(1)
         expect(playback.isPlaying()).toBeTrue()
         expect(playback.backendDiagnostics().activeBackend).toBe("native")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('serializes play behind an in-flight stop teardown', async () => {
+  const previousWindow = globalThis.window
+  const stopGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, stopGate.promise)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        await playback.handlePlay([track])
+        fixture.armTransportGate()
+        fixture.calls.length = 0
+        fake.transportEvents.length = 0
+
+        const stop = playback.handleStop()
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+
+        expect(fixture.calls.filter((call) => call === "transport")).toHaveLength(1)
+        expect(fixture.calls).not.toContain("begin")
+        expect(playback.isPlaying()).toBeFalse()
+
+        stopGate.resolve({ ok: true })
+        await Promise.all([stop, play])
+
+        const teardownIndex = fixture.calls.lastIndexOf("teardown")
+        const beginIndex = fixture.calls.lastIndexOf("begin")
+        expect(teardownIndex).toBeGreaterThan(-1)
+        expect(beginIndex).toBeGreaterThan(teardownIndex)
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlayback()).toBeTrue()
+        expect(fake.transportEvents).not.toContain("onTransportStop")
         dispose()
       })
     })
@@ -2791,6 +2921,66 @@ test('preserves a prepared native preview across a paused native seek', async ()
   }
 })
 
+test('reconciles a paused seek superseded by native preview fingerprint disposal', async () => {
+  const previousWindow = globalThis.window
+  const transportGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, transportGate.promise)
+  const [tracks, setTracks] = createSignal([track])
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const changedTrack: Track = {
+        ...track,
+        kind: 'instrument',
+      }
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          fake.engine,
+          { getTracks: () => tracks() },
+          {
+            requiresNativeAudio: true,
+            enabled: () => true,
+            compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: tracks(),
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+              sidechainRoutes: [],
+            }),
+            reportFault: (message) => faults.push(message),
+          },
+        )
+
+        await playback.handlePlay(tracks())
+        await playback.handlePause()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+
+        fixture.armTransportGate()
+        playback.setPlayhead(4, tracks())
+        await flushMicrotasks()
+
+        setTracks([changedTrack])
+        await flushMicrotasks()
+        transportGate.resolve({ ok: true })
+        await flushMicrotasks()
+
+        expect(faults).toEqual([])
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(fixture.transportFrames.at(-1)).toBe(192_000)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
 test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []
@@ -2896,6 +3086,218 @@ test('rebuilds a prepared native backend while paused', async () => {
         expect(playback.backendDiagnostics().activeBackend).toBe('native')
         expect(calls.filter((call) => call === 'begin')).toHaveLength(2)
         expect(calls.filter((call) => call === 'graph')).toHaveLength(2)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('re-establishes paused native preview after structural fingerprint disposal', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const [tracks, setTracks] = createSignal([track])
+  const instrument: Track = { ...track, kind: 'instrument' }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          engine,
+          { getTracks: () => tracks() },
+          {
+            requiresNativeAudio: true,
+            enabled: () => true,
+            projectId: () => 'project',
+            compileSnapshot: async (transport, context) => compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: tracks(),
+              renderState: {
+                fx: {
+                  masterVolume: 1,
+                  masterFxInstances: [],
+                  trackFx: context?.instrumentOverride
+                    ? {
+                        [context.instrumentOverride.targetId]: {
+                          instances: [],
+                          instrument: context.instrumentOverride.instrument,
+                        },
+                      }
+                    : {},
+                },
+                automationEnvelopes: [],
+              },
+              sidechainRoutes: [],
+            }),
+          },
+        )
+        await playback.handlePlay(tracks())
+        await playback.handlePause()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        const beginsBefore = fixture.calls.filter((call) => call === 'begin').length
+
+        setTracks([instrument])
+        const rebuild = playback.restartTimelineSchedule([instrument], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          instrumentOverride: {
+            targetId: instrument.id,
+            instrument: {
+              kind: 'drum-rack',
+              instanceId: 'instrument-instance',
+              params: createDefaultDrumRackParams(),
+            },
+          },
+        })
+        await expect(rebuild).resolves.toBeUndefined()
+        await flushMicrotasks()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(fixture.calls.filter((call) => call === 'begin').length).toBeGreaterThan(beginsBefore)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('structural rebuild owns paused preview while reactive tracks change', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge()
+  const [tracks, setTracks] = createSignal([track])
+  const instrument: Track = { ...track, kind: 'instrument' }
+  const compileContexts: Array<unknown> = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          engine,
+          { getTracks: () => tracks() },
+          {
+            requiresNativeAudio: true,
+            enabled: () => true,
+            projectId: () => 'project',
+            compileSnapshot: async (transport, context) => {
+              compileContexts.push(context)
+              return nativeRequiredSnapshot(transport)
+            },
+          },
+        )
+        await playback.handlePlay(tracks())
+        await playback.handlePause()
+        fixture.calls.length = 0
+        fixture.setBeginGate(beginGate.promise)
+
+        setTracks([instrument])
+        const rebuild = playback.restartTimelineSchedule([instrument], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          instrumentOverride: {
+            targetId: instrument.id,
+            instrument: {
+              kind: 'drum-rack',
+              instanceId: 'instrument-instance',
+              params: createDefaultDrumRackParams(),
+            },
+          },
+        })
+        await flushMicrotasks()
+        beginGate.resolve({ ok: true })
+        await expect(rebuild).resolves.toBeUndefined()
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(compileContexts.at(-1)).toEqual({
+          instrumentOverride: {
+            targetId: instrument.id,
+            instrument: {
+              kind: 'drum-rack',
+              instanceId: 'instrument-instance',
+              params: createDefaultDrumRackParams(),
+            },
+          },
+        })
+        expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(1)
+        expect(fixture.calls.slice(fixture.calls.lastIndexOf('begin') + 1)).not.toContain('teardown')
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('serializes stop teardown before a paused structural insertion', async () => {
+  const previousWindow = globalThis.window
+  const stopGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, stopGate.promise)
+  const faults: string[] = []
+  const instrument: Track = { ...track, kind: 'instrument' }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => 'project',
+          compileSnapshot: nativeRequiredSnapshot,
+          reportFault: (message) => faults.push(message),
+        })
+        await playback.handlePlay([track])
+        fixture.armTransportGate()
+        fixture.calls.length = 0
+
+        const stop = playback.handleStop()
+        await flushMicrotasks()
+        const rebuild = playback.restartTimelineSchedule([instrument], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          instrumentOverride: {
+            targetId: instrument.id,
+            instrument: {
+              kind: 'drum-rack',
+              instanceId: 'instrument-instance',
+              params: createDefaultDrumRackParams(),
+            },
+          },
+        })
+        await flushMicrotasks()
+        stopGate.resolve({ ok: true })
+        await Promise.all([stop, rebuild])
+
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(faults).toEqual([])
+        expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(1)
+        const teardownIndex = fixture.calls.lastIndexOf('teardown')
+        const beginIndex = fixture.calls.lastIndexOf('begin')
+        expect(teardownIndex).toBeGreaterThan(-1)
+        expect(beginIndex).toBeGreaterThan(teardownIndex)
         dispose()
       })
     })

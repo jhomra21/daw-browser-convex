@@ -52,6 +52,7 @@ export type Deps = {
   userId: string
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   audioEngine: AudioEngine
+  isCurrentScope?: () => boolean
   replayInstanceEffectParams?: <Effect extends EffectType>(payload: {
     targetId: string
     effect: Effect
@@ -357,6 +358,7 @@ function readEffectTrackId(entry: EffectParamsEntry, deps: Deps) {
 }
 
 function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetId: string, direction: HistoryDirection) {
+  if (deps.isCurrentScope && !deps.isCurrentScope()) return
   try {
     const replayParams = pickDirectionalValue(direction, entry.data.from, entry.data.to)
     if (entry.data.instanceId && deps.replayInstanceEffectParams?.({
@@ -394,7 +396,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'instrument': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         if (params.kind === 'synth') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
-        else if (params.kind === 'drum-rack' && deps.drumRackBufferSync) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, params.params)
+        else if (params.kind === 'drum-rack' && deps.drumRackBufferSync) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, params.params, params.instanceId)
         else if (params.kind === 'drum-rack') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
         else if (params.kind === 'sampler') deps.audioEngine.setTrackSampler(targetId, params.params, undefined, params.instanceId)
         else void deps.audioEngine.setTrackGranular(targetId, params.params, undefined, params.instanceId)

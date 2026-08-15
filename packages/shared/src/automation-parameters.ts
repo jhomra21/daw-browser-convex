@@ -47,6 +47,8 @@ export type AutomationParameterDescriptor = {
   max: number
   defaultValue: number
   scale: 'linear' | 'log'
+  interpolation?: 'linear' | 'hold'
+  valueKind?: 'continuous' | 'integer'
   unit?: 'db' | 'hz' | 'percent' | 'seconds' | 'milliseconds' | 'semitones' | 'cents' | 'octaves'
 }
 
@@ -93,6 +95,14 @@ export type AutomationTargetParameterOption = AutomationParameterOption & Automa
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
+export const normalizeAutomationValue = (
+  value: number,
+  descriptor: AutomationParameterDescriptor,
+) => {
+  const clamped = clamp(value, descriptor.min, descriptor.max)
+  return descriptor.valueKind === 'integer' ? Math.round(clamped) : clamped
+}
+
 export const externalAutomationParameterId = (instanceId: string, parameterId: number) => (
   `vst3:${instanceId}:${parameterId}`
 )
@@ -138,7 +148,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'limiter.ceiling', label: 'Limiter Ceiling', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: -12, max: 0, defaultValue: -1, scale: 'linear', unit: 'db' },
   { id: 'limiter.release', label: 'Limiter Release', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 20, max: 1000, defaultValue: 100, scale: 'linear' },
   { id: 'limiter.link', label: 'Limiter Link', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear' },
-  { id: 'lofi.bitDepth', label: 'LoFi Bit Depth', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 2, max: 24, defaultValue: 12, scale: 'linear' },
+  { id: 'lofi.bitDepth', label: 'LoFi Bit Depth', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 2, max: 24, defaultValue: 12, scale: 'linear', interpolation: 'hold', valueKind: 'integer' },
   { id: 'lofi.sampleRateRatio', label: 'LoFi Sample Rate', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 0.01, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
   { id: 'lofi.jitter', label: 'LoFi Jitter', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
   { id: 'lofi.noiseDb', label: 'LoFi Noise', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: -120, max: -24, defaultValue: -80, scale: 'linear', unit: 'db' },
@@ -459,8 +469,10 @@ export const normalizeAutomationPoints = (
     byTime.set(timeSec, {
       id: point.id,
       timeSec,
-      value: clamp(point.value, descriptor.min, descriptor.max),
-      interpolation: isAutomationInterpolation(point.interpolation) ? point.interpolation : 'linear',
+      value: normalizeAutomationValue(point.value, descriptor),
+      interpolation: descriptor.interpolation === 'hold'
+        ? 'hold'
+        : isAutomationInterpolation(point.interpolation) ? point.interpolation : 'linear',
     })
   }
   return [...byTime.values()].sort((a, b) => a.timeSec - b.timeSec || a.id.localeCompare(b.id))
@@ -515,9 +527,10 @@ export const evaluatedAutomationValuesByTargetKey = (
   for (const envelope of envelopes) {
     if (!envelope.enabled || overriddenTargetKeys.has(envelope.targetKey)) continue
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+    const points = descriptor ? normalizeAutomationPoints([...envelope.points], descriptor) : envelope.points
     values.set(
       envelope.targetKey,
-      valueAtAutomationTime(envelope.points, timeSec, descriptor?.defaultValue ?? 0),
+      valueAtAutomationTime(points, timeSec, descriptor?.defaultValue ?? 0),
     )
   }
   return values

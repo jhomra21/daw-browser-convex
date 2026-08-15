@@ -16,7 +16,7 @@ import { portableWasmProtocolVersion, type PortableWasmStatusMessage } from "@da
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
-import type { LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
+import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type {
   LiveProcessorControl,
@@ -135,7 +135,7 @@ type PortableRecordingSession = {
  * a fault after activation disconnects the portable node without fallback.
  */
 export const createPortableBrowserPlaybackController = (input: {
-  compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+  compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   getAudioContext: () => AudioContext | null
   scheduleHorizonSec?: number
   getProjectGeneration?: () => number
@@ -235,6 +235,7 @@ export const createPortableBrowserPlaybackController = (input: {
     runTransport: boolean,
     nextEpoch: number,
     sourceFirstSequence: number,
+    compileContext?: LivePlaybackCompileContext,
   ): Promise<PreparedRuntime | undefined> => {
     const context = input.getAudioContext()
     if (!context) return undefined
@@ -245,7 +246,7 @@ export const createPortableBrowserPlaybackController = (input: {
     let unsubscribeSessionFault: (() => void) | undefined
     const sessionFault: { error?: Error } = {}
     try {
-      const compilation = await input.compileSnapshot(transport)
+      const compilation = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
       if (!compilation.supported || compilation.snapshot.transport.loopEnabled) return undefined
       const prepared = preparedSession(
@@ -358,6 +359,7 @@ export const createPortableBrowserPlaybackController = (input: {
     generation: number,
     projectGeneration: number,
     runTransport: boolean,
+    compileContext?: LivePlaybackCompileContext,
   ): Promise<PortableStartResult> => {
     const context = input.getAudioContext()
     if (!context) return "unavailable"
@@ -407,6 +409,7 @@ export const createPortableBrowserPlaybackController = (input: {
       runTransport,
       nextEpoch,
       1,
+      compileContext,
     )
     if (!runtime || cancelled()) return "unavailable"
     commitRuntime(runtime, runTransport)
@@ -649,7 +652,7 @@ export const createPortableBrowserPlaybackController = (input: {
     return request
   }
 
-  const start = (transport: LivePlaybackTransport): Promise<PortableStartResult> => {
+  const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
     if (playing) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -657,7 +660,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const generation = lifecycleGeneration
       const projectGeneration = input.getProjectGeneration?.() ?? 0
       const request = previewRequest.then((result) => result === "started"
-        ? startAttempt(transport, generation, projectGeneration, true)
+        ? startAttempt(transport, generation, projectGeneration, true, compileContext)
         : result)
       pendingStart = request
       pendingStartMode = "play"
@@ -671,7 +674,7 @@ export const createPortableBrowserPlaybackController = (input: {
     }
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
-    const request = startAttempt(transport, generation, projectGeneration, true)
+    const request = startAttempt(transport, generation, projectGeneration, true, compileContext)
     pendingStart = request
     pendingStartMode = "play"
     void request.finally(() => {
@@ -683,14 +686,14 @@ export const createPortableBrowserPlaybackController = (input: {
     return request
   }
 
-  const ensurePrepared = (transport: LivePlaybackTransport): Promise<PortableStartResult> => {
+  const ensurePrepared = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
     if (pendingStart) return pendingStart
     if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {
       return Promise.resolve("started")
     }
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
-    const request = startAttempt(transport, generation, projectGeneration, false)
+    const request = startAttempt(transport, generation, projectGeneration, false, compileContext)
     pendingStart = request
     pendingStartMode = "preview"
     void request.finally(() => {
@@ -702,10 +705,10 @@ export const createPortableBrowserPlaybackController = (input: {
     return request
   }
 
-  const rebuildPrepared = async (transport: LivePlaybackTransport): Promise<PortableStartResult> => {
+  const rebuildPrepared = async (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
     if (!active) return "unavailable"
     dispose()
-    return ensurePrepared(transport)
+    return ensurePrepared(transport, compileContext)
   }
 
   const pause = async (playheadSec: number) => {
@@ -992,6 +995,7 @@ export const createPortableBrowserPlaybackController = (input: {
     cancelRecording,
     isActive: () => playing,
     isPrepared: () => active !== undefined,
+    isPreparing: () => pendingStart !== undefined,
     liveProcessorControl,
     reenableProcessorAutomation,
     isRecording: () => recording !== undefined,

@@ -13,7 +13,7 @@ import {
   untrack,
 } from "solid-js";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
-import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, automationEnvelopeValueRange, automationTargetKey, isLocalId, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams, normalizeSpectralParamsEnvelope, normalizeUtilityParamsEnvelope, type AudioEffectInstance, type AudioEffectKind, type AutomationEnvelope, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
 import Delay from "~/components/effects/Delay";
 import Compressor from "~/components/effects/Compressor";
@@ -110,10 +110,12 @@ type EffectsPanelProps = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams) => void;
   usesLegacyAudioEngine?: () => boolean;
   projectGeneration?: () => number;
   onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void;
   onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
+  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
   onLocalSaveFailed?: (message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
@@ -168,6 +170,8 @@ type EffectsPanelInstrumentSectionProps = {
   };
   audioEngine: AudioEngine;
   targetId: string;
+  projectId?: string;
+  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   synthAutomationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
   synthAutomationParameterIds?: ReadonlyMap<string, string>;
   synthAutomationDisplayParams?: SynthParams;
@@ -269,7 +273,9 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
           <DrumRack
             params={params()}
             targetId={props.targetId}
+            projectId={props.projectId}
             audioEngine={props.audioEngine}
+            onPreviewNote={props.onPreviewNote}
             canWrite={props.instrument.canWrite}
             onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
             onReset={props.instrument.state.drumRack.reset}
@@ -1082,6 +1088,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onSelectClip: (trackId, clipId, startSec) => props.onSelectClip?.(trackId, clipId, startSec),
     insertLocalClip: (trackId, clip) => props.insertLocalClip?.(trackId, clip),
     onEffectParamsCommitted: (payload, projectId) => props.onEffectParamsCommitted?.(payload, projectId),
+    onStructuralPlaybackChange: (targetId, next) => props.onStructuralPlaybackChange?.(targetId, next),
     usesLegacyAudioEngine: () => props.usesLegacyAudioEngine?.() ?? true,
     projectGeneration: () => props.projectGeneration?.() ?? 0,
     onEffectParamsPreview: (payload) => props.onEffectParamsPreview?.(payload),
@@ -1244,6 +1251,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                         }}
                         audioEngine={props.audioEngine}
                         targetId={props.selectedFXTarget}
+                        projectId={props.projectId}
+                        onPreviewNote={props.onPreviewNote}
                         synthAutomationRangesByParameterId={synthAutomation().ranges}
                         synthAutomationParameterIds={synthAutomation().parameterIds}
                         synthAutomationDisplayParams={synthAutomationDisplayParams()}

@@ -28,6 +28,7 @@ import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 
 const assets: PortableAssetRegistryInput = {
   projectGeneration: 7,
@@ -68,6 +69,10 @@ const samplerZone: SamplerZone = {
   crossfadeSec: 0,
   chokeGroup: 4,
 }
+
+test('accepts the fixture-proven portable Reverb capacity and rejects the next processor', () => {
+  expect(portableWasmCapabilityMatrix.maxReverbProcessors).toBe(32)
+})
 
 test('compiles normalized browser synth controls into the portable synth ABI profile', () => {
   const compiled = compilePortableSynthConfiguration('track-a', 'instrument:a', {
@@ -167,11 +172,31 @@ test('compiles browser drum transpose and 6ms choke state into exact-key portabl
       assetId: 'asset:kick:7',
       keyLow: 36,
       keyHigh: 36,
-      rootNote: 24,
+      rootNote: 36,
+      tuneCents: 1200,
       startFrame: 12_000,
       endFrame: 24_000,
       chokeGroup: 2,
     }],
+  })
+})
+
+test('compiles crossfade loops with the same loop bounds as forward loops', () => {
+  const state = compilePortableSamplerConfiguration(
+    'track-a',
+    'sampler:crossfade',
+    {
+      ...createDefaultSamplerParams(),
+      zones: [{ ...samplerZone, playbackMode: 'crossfade-loop', crossfadeSec: 0.1 }],
+    },
+    assets,
+  ).state
+
+  expect(state.zones[0]).toMatchObject({
+    playbackMode: 'crossfade-loop',
+    loopStartFrame: 9_600,
+    loopEndFrame: 28_800,
+    crossfadeFrameCount: 4_800,
   })
 })
 

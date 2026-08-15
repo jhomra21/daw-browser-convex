@@ -33,7 +33,7 @@ const portableWasmParityFixtureCoverage = {
   sampleRatesHz: [44_100, 48_000, 96_000],
   maxInputBuses: 2,
   maxChannels: 2,
-  maxReverbProcessors: 8,
+  maxReverbProcessors: 32,
 } satisfies PortableWasmCapabilityMatrix
 
 export const portableWasmCapabilityMatrix: PortableWasmCapabilityMatrix = {

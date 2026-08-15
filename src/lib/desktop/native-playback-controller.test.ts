@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
 
 import { createNativePlaybackController } from "./native-playback-controller"
-import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
+import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { automationTargetKey, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultDrumRackParams, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -567,6 +567,39 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+test("forwards compile context when promoting a pending preview to play", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  const contexts: unknown[] = []
+  let compilation = 0
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport, context) => {
+      contexts.push(context)
+      compilation += 1
+      if (compilation === 1) await previewGate.promise
+      return compileLivePlaybackSnapshot({ ...input(), transport })
+    },
+  })
+  const compileContext = {
+    instrumentOverride: {
+      targetId: "track-1",
+      instrument: {
+        kind: "drum-rack",
+        instanceId: "drum-rack:replacement",
+        params: createDefaultDrumRackParams(),
+      },
+    },
+  } satisfies LivePlaybackCompileContext
+
+  const preview = controller.ensureLivePreview(0)
+  const play = controller.start(input().transport, compileContext)
+  previewGate.resolve()
+  await expect(preview).resolves.toBe("started")
+  await expect(play).resolves.toBe("started")
+  expect(contexts).toEqual([undefined, compileContext])
 })
 
 test("prepares enabled Stretch clips before publishing the native graph", async () => {

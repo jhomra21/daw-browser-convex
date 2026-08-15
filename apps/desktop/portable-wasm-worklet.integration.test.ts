@@ -138,7 +138,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
       expect(output.maximumAbsoluteLiveAfterUtility).toBeLessThan(output.maximumAbsoluteLiveBefore * 0.95)
       expect(output.maximumAbsoluteLiveAfter).toBeGreaterThan(0.01)
       expect(output.maximumAbsoluteLiveAfter).toBeLessThan(output.maximumAbsoluteLiveAfterUtility * 0.5)
-      expect(output.memoryBytes).toBe(184_549_376)
+      expect(output.memoryBytes).toBe(268_435_456)
       diagnosticsByRate.set(sampleRate, output)
     }
     const exact48 = diagnosticsByRate.get(48_000)

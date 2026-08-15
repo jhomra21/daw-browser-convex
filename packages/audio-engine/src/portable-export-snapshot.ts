@@ -1,5 +1,6 @@
 import {
   audioCoreContractVersion,
+  audioCoreMaxGraphProcessors,
   type AudioAssetRef,
   type AudioCoreGraphSnapshot,
   type AudioCoreSampleSourceEventDto,
@@ -333,6 +334,17 @@ export const compilePortableExportSnapshot = (
       ? graphWithInstruments(baseGraph, instrumentConfigurations(instrumentCompilation))
       : { graph: baseGraph, reasons: [] as readonly string[] }
     if (!instrumentGraph.graph) return unsupported([...reasons, ...instrumentGraph.reasons], diagnostics)
+    const processorCount = instrumentGraph.graph.nodes.reduce(
+      (total, node) => total + node.processorOrder.length,
+      0,
+    )
+    if (processorCount > audioCoreMaxGraphProcessors) {
+      const targetLabel = capabilityTarget === 'native' ? 'native audio core' : 'portable core'
+      return unsupported([
+        ...reasons,
+        `The ${targetLabel} supports at most ${audioCoreMaxGraphProcessors} aggregate graph processors.`,
+      ], diagnostics)
+    }
     return {
       supported: true,
       graph: instrumentGraph.graph,

@@ -536,6 +536,36 @@ describe('mixer routing plan', () => {
     ])
   })
 
+  test('projects a full seventeen-processor master chain', () => {
+    const graph = resolveMixerGraph({
+      masterVolume: 1,
+      channels: createMixerChannels([{ id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 }]),
+      masterFxInstances: [
+          { id: 'utility-1', kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } },
+          { id: 'saturator-1', kind: 'saturator', params: createDefaultSaturatorParams() },
+          { id: 'eq-1', kind: 'eq', params: createDefaultEqParams() },
+          { id: 'chorus-1', kind: 'chorus', params: { version: 1, state: createDefaultChorusParams() } },
+          { id: 'flanger-1', kind: 'flanger', params: { version: 1, state: createDefaultFlangerParams() } },
+          { id: 'phaser-1', kind: 'phaser', params: { version: 1, state: createDefaultPhaserParams() } },
+          { id: 'tremolo-1', kind: 'tremolo', params: { version: 1, state: createDefaultTremoloParams() } },
+          { id: 'autopan-1', kind: 'autopan', params: { version: 1, state: createDefaultAutoPanParams() } },
+          { id: 'ensemble-1', kind: 'ensemble', params: { version: 1, state: createDefaultEnsembleParams() } },
+          { id: 'gate-1', kind: 'gate', params: { version: 1, state: createDefaultGateParams() } },
+          { id: 'compressor-1', kind: 'compressor', params: createDefaultCompressorParams() },
+          { id: 'limiter-1', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } },
+          { id: 'lofi-1', kind: 'lofi', params: { version: 1, state: createDefaultLoFiParams() } },
+          { id: 'delay-1', kind: 'delay', params: createDefaultDelayParams() },
+          { id: 'reverb-1', kind: 'reverb', params: createDefaultReverbParams() },
+          { id: 'autofilter-1', kind: 'autofilter', params: { version: 1, state: createDefaultAutoFilterParams() } },
+          { id: 'spectral-1', kind: 'spectral', params: { version: 1, state: createDefaultSpectralParams() } },
+      ],
+    })
+
+    const master = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
+      .nodes.find((node) => node.id === MASTER_ROUTE_TARGET)
+    expect(master?.processorOrder).toHaveLength(17)
+  })
+
   test('projects spectral state with bounded FFT timing and all generic controls', () => {
     const graph = resolveMixerGraph({
       channels: createMixerChannels([{ id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 }]),

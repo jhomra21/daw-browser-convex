@@ -174,7 +174,7 @@ type Props = {
     canWrite: boolean;
     close: () => void;
     changeBounds: (bounds: TimelineMidiBounds) => void;
-    auditionNote: (note: number, velocity?: number) => void;
+    auditionNote: (trackId: string, note: number, velocity?: number, durSec?: number) => void;
     keyboard: {
       isActive: (pitch: number) => boolean;
     };

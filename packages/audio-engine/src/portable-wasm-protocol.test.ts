@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage } from './portable-wasm-protocol'
-import { audioCoreContractVersion, audioCoreMaxProcessorParameterTargets, encodeAudioCoreProcessorStateEnvelope, encodeEqProcessorState, encodeSaturatorProcessorState, encodeUtilityProcessorState, type UtilityProcessorState } from '../../audio-core-contract/src/index'
+import { audioCoreContractVersion, audioCoreMaxGraphProcessors, audioCoreMaxProcessorParameterTargets, audioCoreMaxProcessorsPerNode, encodeAudioCoreProcessorStateEnvelope, encodeEqProcessorState, encodeSaturatorProcessorState, encodeUtilityProcessorState, type UtilityProcessorState } from '../../audio-core-contract/src/index'
 
 const utilityState: UtilityProcessorState = {
   enabled: true,
@@ -465,6 +465,39 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       })),
       masterNodeId: 'master-0',
     },
+  })).toBeNull()
+  const aggregateCapacitySnapshot = {
+    ...snapshot,
+    masterNodeId: 'node-0',
+    nodes: Array.from(
+      { length: Math.ceil((audioCoreMaxGraphProcessors + 1) / audioCoreMaxProcessorsPerNode) },
+      (_, nodeIndex) => ({
+        ...snapshot.nodes[0],
+        id: `node-${nodeIndex}`,
+        processorOrder: Array.from(
+          {
+            length: Math.min(
+              audioCoreMaxProcessorsPerNode,
+              audioCoreMaxGraphProcessors + 1 - nodeIndex * audioCoreMaxProcessorsPerNode,
+            ),
+          },
+          (_, processorIndex) => {
+            const instanceId = nodeIndex * audioCoreMaxProcessorsPerNode + processorIndex + 1
+            return {
+              ...snapshot.nodes[0].processorOrder[0],
+              id: `utility-${instanceId}`,
+              instanceId,
+            }
+          },
+        ),
+      }),
+    ),
+  }
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'prepare-graph',
+    requestId: 1,
+    snapshot: aggregateCapacitySnapshot,
   })).toBeNull()
   const saturatorState = encodeSaturatorProcessorState({
     enabled: true, driveDb: 6, curve: 'soft', color: false,

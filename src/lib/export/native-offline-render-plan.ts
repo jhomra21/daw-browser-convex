@@ -25,6 +25,22 @@ import {
   nativeAudioHostMaximumScheduleRecords,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 
+export const nativeExternalLatencyFrames = (
+  attachments: NativeExternalAttachmentPlan | undefined,
+) => {
+  const latencyByNode = new Map<string, number>()
+  for (const attachment of attachments?.attachments ?? []) {
+    if (attachment.bypassed) continue
+    const latency = attachment.declaredLatencyFrames + attachment.workerTransport.maximumFrames
+    const previous = latencyByNode.get(attachment.graphNodeId) ?? 0
+    if (!Number.isSafeInteger(previous + latency)) {
+      throw new Error(`Native VST3 latency exceeds the supported graph range for "${attachment.graphNodeId}".`)
+    }
+    latencyByNode.set(attachment.graphNodeId, previous + latency)
+  }
+  return latencyByNode
+}
+
 const planarBytes = (planes: readonly Float32Array[]) => {
   const output = new Uint8Array(planes.reduce((total, plane) => total + plane.byteLength, 0))
   let offset = 0
@@ -93,15 +109,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   const externalAttachments = input.externalAttachments
     ? nativeExternalAttachmentPlanSchema.parse(input.externalAttachments)
     : undefined
-  const externalLatencyFrames = new Map<string, number>()
-  for (const attachment of externalAttachments?.attachments ?? []) {
-    if (attachment.bypassed) continue
-    const latency = attachment.declaredLatencyFrames
-    externalLatencyFrames.set(
-      attachment.graphNodeId,
-      (externalLatencyFrames.get(attachment.graphNodeId) ?? 0) + latency,
-    )
-  }
+  const externalLatencyFrames = nativeExternalLatencyFrames(externalAttachments)
   const snapshot = compilePortableExportSnapshot({
     tracks: input.tracks,
     bpm: input.bpm,

@@ -1,7 +1,7 @@
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
-import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
+import { isLocalId, type AutomationEnvelope, type TrackInstrumentParams } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import EffectsPanel from '~/components/timeline/EffectsPanel'
@@ -55,10 +55,12 @@ export type TimelinePanelsProps = {
     onClose: () => void
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
+    onStructuralPlaybackChange?: (targetId: Track['id'], next: TrackInstrumentParams) => void
     usesLegacyAudioEngine?: () => boolean
     projectGeneration?: () => number
     onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void
     onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>
+    onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
     onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
@@ -167,10 +169,12 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onSelectClip={props.effectsPanel.onSelectClip}
         insertLocalClip={props.effectsPanel.insertLocalClip}
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+        onStructuralPlaybackChange={props.effectsPanel.onStructuralPlaybackChange}
         usesLegacyAudioEngine={props.effectsPanel.usesLegacyAudioEngine}
         projectGeneration={props.effectsPanel.projectGeneration}
         onEffectParamsPreview={props.effectsPanel.onEffectParamsPreview}
         onEffectParamsFlush={props.effectsPanel.onEffectParamsFlush}
+        onPreviewNote={props.effectsPanel.onPreviewNote}
         onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}

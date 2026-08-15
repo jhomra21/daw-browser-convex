@@ -1,6 +1,7 @@
 import {
   compileLiveNativeProjection,
 } from "@daw-browser/audio-engine/live-native-projection"
+import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
   nativeAudioHostMaximumAssetFrames,
   nativeAudioHostMaximumInstalledAssets,
@@ -37,6 +38,7 @@ import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type { LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
+import type { LivePlaybackCompileContext } from "~/lib/live-playback-snapshot"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { DesktopBridge } from "~/types/desktop-bridge"
@@ -245,22 +247,6 @@ const countNonStretchNativeAssets = (snapshot: LivePlaybackSnapshot): number => 
   return assetKeys.size
 }
 
-const nativeExternalLatencyFrames = (
-  attachmentPlan: LivePlaybackSnapshot["nativeExternalAttachmentPlan"] | undefined,
-) => {
-  const latencyByNode = new Map<string, number>()
-  for (const attachment of attachmentPlan?.attachments ?? []) {
-    if (attachment.bypassed) continue
-    const latency = attachment.declaredLatencyFrames + attachment.workerTransport.maximumFrames
-    const previous = latencyByNode.get(attachment.graphNodeId) ?? 0
-    if (!Number.isSafeInteger(previous + latency)) {
-      throw new Error(`Native VST3 latency exceeds the supported graph range for "${attachment.graphNodeId}".`)
-    }
-    latencyByNode.set(attachment.graphNodeId, previous + latency)
-  }
-  return latencyByNode
-}
-
 const nativeVstParameterEventsForSnapshot = (
   snapshot: LivePlaybackSnapshot,
   includeCurrent = true,
@@ -288,7 +274,7 @@ const nativeVstParameterEventsForSnapshot = (
  */
 export const createNativePlaybackController = (input: {
   bridge: NativePlaybackBridge | undefined
-  compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+  compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   getProjectId?: () => string
   getProjectGeneration?: () => number
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
@@ -686,6 +672,7 @@ export const createNativePlaybackController = (input: {
     generation: number,
     projectGeneration: number,
     runTransport: boolean,
+    compileContext?: LivePlaybackCompileContext,
   ): Promise<NativeStartResult> => {
     const bridge = input.bridge
     if (!bridge) return "unavailable"
@@ -698,9 +685,9 @@ export const createNativePlaybackController = (input: {
     if (prepared && preparedProjectGeneration === projectGeneration) {
       try {
         const previousCoordinator = scheduleCoordinator
-        const refreshed = previousCoordinator && preparedSnapshot
+        const refreshed = previousCoordinator && preparedSnapshot && !compileContext
           ? { supported: true as const, snapshot: { ...preparedSnapshot, transport } }
-          : await input.compileSnapshot(transport)
+          : await input.compileSnapshot(transport, compileContext)
         if (!refreshed.supported || refreshed.snapshot.revision !== preparedSnapshot?.revision) {
           preparedProjectGeneration = undefined
         } else {
@@ -789,7 +776,7 @@ export const createNativePlaybackController = (input: {
     let transactionToken: string | undefined
     let requiresNative = false
     try {
-      const snapshotResult = await input.compileSnapshot(transport)
+      const snapshotResult = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return "unavailable"
       if (!snapshotResult.supported) {
         const message = snapshotResult.reasons.join(" ") || "The project cannot be compiled for native playback."
@@ -849,10 +836,9 @@ export const createNativePlaybackController = (input: {
       const runtimeSnapshot = attachmentPlan
         ? { ...snapshot, nativeExternalAttachmentPlan: attachmentPlan }
         : snapshot
-      if (
-        snapshot.mixer.fx.masterVolume !== 1
-        || snapshot.mixer.sidechainRoutes.length > 0
-      ) return unavailable("The native VST3 graph cannot activate with the current master gain or sidechain routing.")
+      if (snapshot.mixer.sidechainRoutes.length > 0) {
+        return unavailable("The native VST3 graph cannot activate with the current sidechain routing.")
+      }
       if (snapshot.requiresNativePlayback && !attachmentPlan) return unavailable("The active VST3 attachment plan is unavailable.")
       if (snapshot.mixer.automationEnvelopes.some((envelope) => (
         envelope.enabled && parseExternalAutomationParameterId(envelope.parameterId) === null
@@ -901,7 +887,7 @@ export const createNativePlaybackController = (input: {
         epoch: transportEpoch,
         firstSequence: 1,
         fx: snapshot.mixer.fx,
-        externalLatencyFrames: nativeExternalLatencyFrames(attachmentPlan),
+        externalLatencyFrames: nativeOfflineExternalLatencyFrames(attachmentPlan),
         projectGeneration: safePreparedProjectGeneration(projectGeneration),
         preparedStretchAssets,
       })
@@ -1057,7 +1043,7 @@ export const createNativePlaybackController = (input: {
     }
   }
 
-  const start = (transport: LivePlaybackTransport): Promise<NativeStartResult> => {
+  const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
     if (hasNativeHostConnectionLoss()) {
       reportBlockedByNativeHostConnectionLoss()
       return Promise.resolve("unavailable")
@@ -1069,7 +1055,7 @@ export const createNativePlaybackController = (input: {
       const generation = lifecycleGeneration
       const projectGeneration = resolveProjectGeneration()
       const request = previewRequest.then((result) => result === "started"
-        ? startAttempt(transport, generation, projectGeneration, true)
+        ? startAttempt(transport, generation, projectGeneration, true, compileContext)
         : result)
       pendingStart = request
       pendingStartMode = "play"
@@ -1083,7 +1069,7 @@ export const createNativePlaybackController = (input: {
     }
     const generation = lifecycleGeneration
     const projectGeneration = resolveProjectGeneration()
-    const request = startAttempt(transport, generation, projectGeneration, true)
+    const request = startAttempt(transport, generation, projectGeneration, true, compileContext)
     pendingStart = request
     pendingStartMode = "play"
     void request.finally(() => {
@@ -1095,7 +1081,7 @@ export const createNativePlaybackController = (input: {
     return request
   }
 
-  const ensureLivePreview = (playheadSec: number): Promise<NativeStartResult> => {
+  const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
     if (!input.bridge) return Promise.resolve("unavailable")
     if (hasNativeHostConnectionLoss()) {
       reportBlockedByNativeHostConnectionLoss()
@@ -1113,7 +1099,7 @@ export const createNativePlaybackController = (input: {
       loopEnabled: false,
       loopStartSec: 0,
       loopEndSec: 0,
-    }, generation, projectGeneration, false)
+    }, generation, projectGeneration, false, compileContext)
     pendingStart = request
     pendingStartMode = "preview"
     void request.finally(() => {
@@ -1125,10 +1111,10 @@ export const createNativePlaybackController = (input: {
     return request
   }
 
-  const rebuildPrepared = async (playheadSec: number): Promise<NativeStartResult> => {
+  const rebuildPrepared = async (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
     if (!prepared) return "unavailable"
     await dispose()
-    return ensureLivePreview(playheadSec)
+    return ensureLivePreview(playheadSec, compileContext)
   }
 
   let preparedTransportTransition = Promise.resolve()

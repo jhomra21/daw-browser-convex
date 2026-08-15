@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 
 import { shouldUseNativeLiveMidi } from "~/lib/midi/live-midi-backend"
+import { createAuditionReleaseTimerOwnership } from "~/lib/audition-release-timer-ownership"
 
 const nativeLiveMidi = (active: boolean, available: boolean) => ({
   isActive: () => active,
@@ -29,17 +30,65 @@ test("routes all live MIDI through the shared arpeggiator before backend dispatc
   expect(source).toContain("liveArpeggiator.noteOff")
 })
 
-test("replaces same-pitch native auditions without stale timer release", async () => {
-  const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
-  const audition = source.slice(
-    source.indexOf("const auditionNote"),
-    source.indexOf("const startLiveNote", source.indexOf("const auditionNote")),
-  )
-  expect(audition.indexOf("stopLiveNote(pitch)")).toBeLessThan(audition.indexOf("liveArpeggiator.noteOn"))
-  expect(audition).toContain("auditionReleaseTimers.set(sourceId, timer)")
-  expect(audition).toContain("stopLiveNote(pitch, true)")
-  expect(source).toContain("const timer = auditionReleaseTimers.get(entry.handle)")
-  expect(source).toContain("for (const timer of auditionReleaseTimers.values()) clearTimeout(timer)")
+test("owns audition release timers by pitch when source IDs collide", () => {
+  const callbacks = new Map<number, () => void>()
+  const cleared: number[] = []
+  let nextTimer = 1
+  const ownership = createAuditionReleaseTimerOwnership({
+    schedule: (callback) => {
+      const timer = nextTimer
+      nextTimer += 1
+      callbacks.set(timer, callback)
+      return timer
+    },
+    clear: (timer) => {
+      cleared.push(timer)
+      callbacks.delete(timer)
+    },
+  })
+  const releases: string[] = []
+  const firstArpeggiator = { noteOff: (handle: number) => releases.push(`first:${handle}`) }
+  const secondArpeggiator = { noteOff: (handle: number) => releases.push(`second:${handle}`) }
+  ownership.schedule(60, 100, () => firstArpeggiator.noteOff(1))
+  ownership.schedule(64, 200, () => secondArpeggiator.noteOff(1))
+
+  callbacks.get(1)?.()
+  expect(releases).toEqual(["first:1"])
+  expect(ownership.has(60)).toBeFalse()
+  expect(ownership.has(64)).toBeTrue()
+
+  callbacks.get(2)?.()
+  expect(releases).toEqual(["first:1", "second:1"])
+  expect(ownership.size()).toBe(0)
+  expect(cleared).toEqual([])
+})
+
+test("replacing an audition pitch cancels its prior bounded release", () => {
+  const callbacks = new Map<number, () => void>()
+  const cleared: number[] = []
+  let nextTimer = 1
+  const ownership = createAuditionReleaseTimerOwnership({
+    schedule: (callback) => {
+      const timer = nextTimer
+      nextTimer += 1
+      callbacks.set(timer, callback)
+      return timer
+    },
+    clear: (timer) => {
+      cleared.push(timer)
+      callbacks.delete(timer)
+    },
+  })
+  const releases: string[] = []
+  ownership.schedule(60, 100, () => releases.push("first"))
+  ownership.cancel(60)
+  ownership.schedule(60, 100, () => releases.push("second"))
+  callbacks.get(1)?.()
+  expect(releases).toEqual([])
+  callbacks.get(2)?.()
+  expect(releases).toEqual(["second"])
+  expect(cleared).toEqual([1])
+  expect(ownership.size()).toBe(0)
 })
 
 test("native-required MIDI ingress never calls the browser audio engine", async () => {

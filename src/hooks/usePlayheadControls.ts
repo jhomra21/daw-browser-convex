@@ -4,7 +4,7 @@ import { clientXToSec } from '~/lib/timeline-utils'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
-import type { LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
+import type { LivePlaybackCompileContext, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 
 type Options = {
   audioEngine: AudioEngine
@@ -20,12 +20,12 @@ type Options = {
     enabled: Accessor<boolean>
     projectId?: Accessor<string>
     projectGeneration?: Accessor<number>
-    compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+    compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
     reportFault?: (message: string) => void
   }
   portableBrowserPlayback?: {
     projectGeneration?: Accessor<number>
-    compileSnapshot: (transport: LivePlaybackTransport) => Promise<LivePlaybackSnapshotCompilation>
+    compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
     reportFault?: (message: string) => void
   }
 }

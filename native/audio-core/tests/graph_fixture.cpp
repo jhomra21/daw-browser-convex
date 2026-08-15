@@ -1,8 +1,9 @@
 #include "graph_fixture.h"
 
 #include <array>
-#include <cstring>
 #include <limits>
+
+#include "daw/audio_core_instrument_wire.h"
 
 namespace {
 
@@ -130,19 +131,30 @@ bool decode_instrument_states(const uint8_t *bytes, size_t byte_count) {
       || !read_u32_at(bytes, byte_count, &offset, &state_bytes) || !read_u32_at(bytes, byte_count, &offset, &zone_bytes)
       || !read_bytes(bytes, byte_count, &offset, state_bytes, &state) || !read_bytes(bytes, byte_count, &offset, zone_bytes, &zones)) return false;
     daw_audio_core_result result = DAW_AUDIO_CORE_INVALID_ARGUMENT;
-    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH && state_bytes == sizeof(daw_audio_synth_state) && zone_bytes == 0) {
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH && zone_bytes == 0) {
       daw_audio_synth_state decoded{};
-      std::memcpy(&decoded, state, sizeof(decoded));
-      result = daw_audio_core_wasm_graph_configure_synth(node_id, &decoded);
-    } else if ((kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK)
-      && state_bytes == sizeof(daw_audio_sampler_state) && zone_bytes > 0
-      && zone_bytes % sizeof(daw_audio_sample_zone) == 0) {
+      if (daw::audio_core_wire::DecodeSynthState(
+        std::span<const uint8_t>(state, state_bytes), &decoded)) {
+        result = daw_audio_core_wasm_graph_configure_synth(node_id, &decoded);
+      }
+    } else if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) {
       daw_audio_sampler_state decoded{};
-      std::memcpy(&decoded, state, sizeof(decoded));
-      if (zone_bytes != decoded.zone_count * sizeof(daw_audio_sample_zone)) return false;
+      if (!daw::audio_core_wire::DecodeSamplerState(
+        std::span<const uint8_t>(state, state_bytes), &decoded)
+        || decoded.zone_count > DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
+        || zone_bytes != decoded.zone_count * daw::audio_core_wire::kSampleZoneBytes) return false;
       std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> decoded_zones{};
-      std::memcpy(decoded_zones.data(), zones, zone_bytes);
-      result = daw_audio_core_wasm_graph_configure_sampler(node_id, &decoded, decoded_zones.data());
+      for (uint32_t zone = 0; zone < decoded.zone_count; ++zone) {
+        if (!daw::audio_core_wire::DecodeSampleZone(
+          std::span<const uint8_t>(
+            zones + static_cast<size_t>(zone) * daw::audio_core_wire::kSampleZoneBytes,
+            daw::audio_core_wire::kSampleZoneBytes
+          ),
+          &decoded_zones[zone]
+        )) return false;
+      }
+      result = daw_audio_core_wasm_graph_configure_sampler(
+        node_id, &decoded, decoded.zone_count == 0 ? nullptr : decoded_zones.data());
     } else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR && state_bytes == 60 && zone_bytes == 0) {
       daw_audio_granular_state decoded{
         .version = read_u32(state, 0),

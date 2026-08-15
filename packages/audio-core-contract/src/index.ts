@@ -249,12 +249,12 @@ export type AudioCoreMixerState = {
 }
 
 export const synthParameterRegistry = [
-  { id: 'synth.outputGain', target: 1, minValue: 0, maxValue: 2, tombstone: false },
+  { id: 'synth.outputGain', target: 1, minValue: 0, maxValue: 1.5, tombstone: false },
   { id: 'synth.outputPan', target: 2, minValue: -1, maxValue: 1, tombstone: false },
   { id: 'synth.filterCutoffHz', target: 3, minValue: 20, maxValue: 20_000, tombstone: false },
-  { id: 'synth.filterResonance', target: 4, minValue: 0, maxValue: 30, tombstone: false },
-  { id: 'synth.ampAttackMs', target: 5, minValue: 0, maxValue: 10_000, tombstone: false },
-  { id: 'synth.ampDecayMs', target: 6, minValue: 0, maxValue: 10_000, tombstone: false },
+  { id: 'synth.filterResonance', target: 4, minValue: 0.0001, maxValue: 30, tombstone: false },
+  { id: 'synth.ampAttackMs', target: 5, minValue: 0, maxValue: 60_000, tombstone: false },
+  { id: 'synth.ampDecayMs', target: 6, minValue: 0, maxValue: 60_000, tombstone: false },
   { id: 'synth.ampSustain', target: 7, minValue: 0, maxValue: 1, tombstone: false },
   { id: 'synth.ampReleaseMs', target: 8, minValue: 0, maxValue: 60_000, tombstone: false },
   { id: 'synth.reserved', target: 9, minValue: 0, maxValue: 0, tombstone: true },
@@ -417,10 +417,10 @@ const isAudioCoreSamplerState = (value: unknown, kind: 'sampler' | 'drum-rack'):
   && value.version === audioCoreContractVersion && value.kind === kind
   && isPositiveSafeInteger(value.voiceCapacity) && value.voiceCapacity <= audioCoreMaxInstrumentVoices
   && value.outputLayout === 'stereo'
-  && isBoundedFloat(value.ampAttackMs, 0, 10000) && isBoundedFloat(value.ampDecayMs, 0, 10000)
-  && isBoundedFloat(value.ampSustain, 0, 1) && isBoundedFloat(value.ampReleaseMs, 0, 10000)
+  && isBoundedFloat(value.ampAttackMs, 0, 60000) && isBoundedFloat(value.ampDecayMs, 0, 60000)
+  && isBoundedFloat(value.ampSustain, 0, 1) && isBoundedFloat(value.ampReleaseMs, 0, 60000)
   && typeof value.filterEnabled === 'boolean' && (value.filterMode === 'lowpass' || value.filterMode === 'highpass' || value.filterMode === 'bandpass' || value.filterMode === 'notch')
-  && isBoundedFloat(value.filterCutoffHz, 20, 20000) && isBoundedFloat(value.filterResonance, 0.05, 30)
+  && isBoundedFloat(value.filterCutoffHz, 20, 20000) && isBoundedFloat(value.filterResonance, 0.0001, 30)
   && isBoundedFloat(value.filterEnvelopeAmount, -1, 1)
   && isBoundedFloat(value.filterAttackMs, 0, 60000)
   && isBoundedFloat(value.filterDecayMs, 0, 60000)
@@ -588,7 +588,7 @@ const isAudioCoreSynthOscillator = (
   && typeof value.enabled === 'boolean'
   && typeof value.waveform === 'number' && [0, 1, 2, 3].includes(value.waveform)
   && isBoundedFloat(value.level, 0, 1)
-  && typeof value.octave === 'number' && Number.isInteger(value.octave) && value.octave >= -8 && value.octave <= 8
+  && typeof value.octave === 'number' && Number.isInteger(value.octave) && value.octave >= -3 && value.octave <= 3
   && typeof value.semitone === 'number' && Number.isInteger(value.semitone) && value.semitone >= -12 && value.semitone <= 12
   && isBoundedFloat(value.detuneCents, -100, 100)
 )
@@ -614,25 +614,25 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
     || typeof value.noiseEnabled !== 'boolean' || !isFiniteNumber(value.noiseLevel)
     || typeof value.filterEnabled !== 'boolean' || typeof value.filterMode !== 'number' || ![0, 1, 2, 3].includes(value.filterMode)
     || !isBoundedFloat(value.filterCutoffHz, 20, 20_000)
-    || !isBoundedFloat(value.filterResonance, 0.05, 30)
-    || !isBoundedFloat(value.filterKeyTracking, -1, 1)
-    || !isBoundedFloat(value.filterEnvelopeAmountOctaves, -8, 8)
-    || !isBoundedFloat(value.filterAttackMs, 0, 10_000)
-    || !isBoundedFloat(value.filterDecayMs, 0, 10_000)
+    || !isBoundedFloat(value.filterResonance, 0.0001, 30)
+    || !isBoundedFloat(value.filterKeyTracking, 0, 1)
+    || !isBoundedFloat(value.filterEnvelopeAmountOctaves, -6, 6)
+    || !isBoundedFloat(value.filterAttackMs, 0, 60_000)
+    || !isBoundedFloat(value.filterDecayMs, 0, 60_000)
     || !isBoundedFloat(value.filterSustain, 0, 1)
-    || !isBoundedFloat(value.filterReleaseMs, 0, 10_000)
-    || !isBoundedFloat(value.ampAttackMs, 0, 10_000)
-    || !isBoundedFloat(value.ampDecayMs, 0, 10_000)
+    || !isBoundedFloat(value.filterReleaseMs, 0, 60_000)
+    || !isBoundedFloat(value.ampAttackMs, 0, 60_000)
+    || !isBoundedFloat(value.ampDecayMs, 0, 60_000)
     || !isBoundedFloat(value.ampSustain, 0, 1)
     || !isBoundedFloat(value.ampReleaseMs, 0, 60_000)
     || typeof value.lfoEnabled !== 'boolean'
     || typeof value.lfoWaveform !== 'number' || ![0, 1, 2, 3].includes(value.lfoWaveform)
-    || !isBoundedFloat(value.lfoRateHz, 0, 1_000)
-    || !isBoundedFloat(value.lfoPitchCents, -4_800, 4_800)
-    || !isBoundedFloat(value.lfoFilterOctaves, -8, 8)
-    || !isBoundedFloat(value.lfoAmplitude, -1, 1)
-    || !isBoundedFloat(value.lfoPan, -1, 1)
-    || !isBoundedFloat(value.outputGain, 0, 2)
+    || !isBoundedFloat(value.lfoRateHz, 0.01, 100)
+    || !isBoundedFloat(value.lfoPitchCents, -1_200, 1_200)
+    || !isBoundedFloat(value.lfoFilterOctaves, -6, 6)
+    || !isBoundedFloat(value.lfoAmplitude, 0, 1)
+    || !isBoundedFloat(value.lfoPan, 0, 1)
+    || !isBoundedFloat(value.outputGain, 0, 1.5)
     || !isBoundedFloat(value.outputPan, -1, 1))) return false
   if (complete && Array.isArray(oscillators) && !oscillators.every((oscillator) => (
     isAudioCoreSynthOscillator(oscillator)
@@ -679,7 +679,8 @@ export type AudioCoreProcessorParameterTarget = {
   target: number
 }
 
-export const audioCoreMaxProcessorsPerNode = 8
+export const audioCoreMaxProcessorsPerNode = 32
+export const audioCoreMaxGraphProcessors = 512
 export const audioCoreMaxProcessorStateBytes = 256
 export const audioCoreMaxProcessorParameterTargets = 24
 export const audioCoreProcessorStateEnvelopeBytes = 40

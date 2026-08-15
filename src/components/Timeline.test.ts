@@ -10,6 +10,9 @@ test("patches supported native built-in commits and rebuilds unsupported commits
   const handler = source.slice(handlerStart, handlerEnd);
 
   expect(handler).toContain("pushEffectParamsHistory(payload, committedProjectId);");
+  expect(handler).toContain('if (payload.effect === "instrument") return;');
+  expect(handler.indexOf('if (payload.effect === "instrument") return;'))
+    .toBeGreaterThan(handler.indexOf("pushEffectParamsHistory(payload, committedProjectId);"));
   expect(handler).toContain("encodeNativeBuiltInStateCommit(payload, bpm())");
   expect(handler).toContain("isNativePlaybackPrepared()");
   expect(handler).toContain("isPortableBrowserPlaybackPrepared()");
@@ -52,6 +55,8 @@ test("rebuilds prepared browser or native ownership with captured project intent
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
   expect(source).toContain("projectGeneration: mountedProjectGeneration(),");
   expect(source).toContain("if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
+  expect(source).toContain("&& !isStructuralRebuildInProgress()");
+  expect(source).toContain("&& !isPreparingPlayback()) return;");
   expect(source).toContain("rebuildBackend: true,");
   expect(source).toContain("const rebuildPlaybackBackend =");
   expect(source).toContain("nativePlaybackRevision += 1;");

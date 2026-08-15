@@ -2,6 +2,7 @@
 #include "daw/native-schedule-state.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
+#include "daw/audio_core_instrument_wire.h"
 #include "worker-control-protocol.h"
 #include "worker-control-service.h"
 #include "worker-supervisor.h"
@@ -172,7 +173,7 @@ bool ValidNativeVstAttachment(const NativeVstAttachment& attachment) {
     || std::all_of(attachment.binary_fingerprint.begin(), attachment.binary_fingerprint.end(), [](const auto value) { return value == 0; })) {
     return false;
   }
-  if (attachment.stage_index >= DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE) return false;
+  if (attachment.stage_index >= DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u) return false;
   if (instrument && attachment.source_index != 0) return false;
   return instrument
     ? attachment.transport.input_channels == 0
@@ -2044,18 +2045,38 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
       const auto* zones_bytes = payload.data() + offset;
       offset += zones_size;
       daw_audio_core_result result = DAW_AUDIO_CORE_INVALID_ARGUMENT;
-      if (kind == 1 && state_size == sizeof(daw_audio_synth_state) && zones_size == 0) {
+      if (kind == 1 && zones_size == 0) {
         daw_audio_synth_state state{};
-        std::memcpy(&state, state_bytes, sizeof(state));
-        result = daw_audio_core_configure_synth(core, node_id, &state);
-      } else if ((kind == 2 || kind == 3) && state_size == sizeof(daw_audio_sampler_state)
-        && zones_size % sizeof(daw_audio_sample_zone) == 0
-        && zones_size / sizeof(daw_audio_sample_zone) <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES) {
+        if (daw::audio_core_wire::DecodeSynthState(
+          std::span<const std::uint8_t>(state_bytes, state_size), &state)) {
+          result = daw_audio_core_configure_synth(core, node_id, &state);
+        }
+      } else if ((kind == 2 || kind == 3)
+        && zones_size <= kMaximumControlPayloadBytes) {
         daw_audio_sampler_state state{};
-        std::memcpy(&state, state_bytes, sizeof(state));
-        std::vector<daw_audio_sample_zone> zones(zones_size / sizeof(daw_audio_sample_zone));
-        if (zones_size > 0) std::memcpy(zones.data(), zones_bytes, zones_size);
-        result = daw_audio_core_configure_sampler(core, node_id, &state, zones.empty() ? nullptr : zones.data());
+        if (!daw::audio_core_wire::DecodeSamplerState(
+          std::span<const std::uint8_t>(state_bytes, state_size), &state)
+          || state.zone_count > DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
+          || zones_size != static_cast<std::size_t>(state.zone_count)
+            * daw::audio_core_wire::kSampleZoneBytes) {
+          return false;
+        }
+        std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
+        bool decoded = true;
+        for (std::uint32_t zone = 0; zone < state.zone_count; ++zone) {
+          decoded = daw::audio_core_wire::DecodeSampleZone(
+            std::span<const std::uint8_t>(
+              zones_bytes + static_cast<std::size_t>(zone) * daw::audio_core_wire::kSampleZoneBytes,
+              daw::audio_core_wire::kSampleZoneBytes
+            ),
+            &zones[zone]
+          );
+          if (!decoded) break;
+        }
+        if (decoded) {
+          result = daw_audio_core_configure_sampler(
+            core, node_id, &state, state.zone_count == 0 ? nullptr : zones.data());
+        }
       } else if (kind == 4 && state_size == kGranularStateWireBytes && zones_size == 0) {
         daw_audio_granular_state state{};
         state.version = ReadLeU32(state_bytes);

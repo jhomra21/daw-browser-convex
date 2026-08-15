@@ -41,7 +41,7 @@ export class LocalAssetWriteError extends Error {
   }
 }
 
-type LocalAssetBytesResult =
+export type LocalAssetBytesResult =
   | { status: 'ready'; file: File }
   | { status: 'missing' }
   | { status: 'permission-denied' }

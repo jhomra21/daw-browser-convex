@@ -6,6 +6,7 @@ import {
   AUDIO_EFFECT_CONTRACTS,
   automationTargetKey,
   createDefaultArpeggiatorParams,
+  createDefaultSamplerParams,
   createDefaultSynthParams,
   resolveClipSampleUrl,
   type AutomationEnvelope,
@@ -16,7 +17,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 
 import { createExportQueue } from "~/lib/export/export-queue"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
-import { createExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import { createExportRenderStateSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import { createTimelineExportService, type TimelineExportInput } from "~/lib/export/timeline-export-service"
 import { createCapturedClipMediaLoader } from "~/hooks/useClipBuffers"
 import { setLocalAutomationEnvelope } from "~/lib/local-automation"
@@ -416,6 +417,97 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
   queue.dispose()
 })
 
+test("uses one hydrated sampled render state for native planning and queued rendering", async () => {
+  const trackId = "track-hydrated-sampler"
+  const buffer = new TestAudioBuffer()
+  const instrument: TrackInstrumentParams = {
+    kind: "sampler",
+    instanceId: "sampler-hydrated",
+    params: createDefaultSamplerParams(),
+  }
+  let hydrationCalls = 0
+  let nativeRenderState: ExportRenderStateSnapshot | undefined
+  let queuedRenderState: ExportRenderStateSnapshot | undefined
+  const queue = createExportQueue(() => "job-hydrated-sampler")
+  const service = createTimelineExportService({
+    queue,
+    nativeRendererRequired: true,
+    nativeOfflineRenderer: async () => buffer,
+    runTimelineExport: async (input) => {
+      queuedRenderState = input.renderStateSnapshot
+      return { type: "success", outputs: [] }
+    },
+    getTracks: () => [{
+      id: trackId,
+      name: "Hydrated sampler",
+      volume: 1,
+      clips: [],
+    }],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => "project:hydrated-sampler",
+    getUserId: () => "user-1",
+    getCloudRenderRows: () => undefined,
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => ({
+      snapshotEffectsProjection: () => ({
+        replaceAudioEffectTargets: [],
+        upsertDeviceRows: [],
+      }),
+      snapshotSidechainRoutes: () => [],
+      flushPending: async () => undefined,
+      hydrateInstrumentBuffers: (snapshot) => {
+        hydrationCalls += 1
+        const trackFx = snapshot.fx.trackFx ?? {}
+        const existing = trackFx[trackId] ?? { instances: [] }
+        return {
+          ...snapshot,
+          fx: {
+            ...snapshot.fx,
+            trackFx: {
+              ...trackFx,
+              [trackId]: {
+                ...existing,
+                instrument,
+                samplerBuffers: new Map([["zone-hydrated", buffer]]),
+              },
+            },
+          },
+        }
+      },
+    }),
+    getSidechainRoutes: () => [],
+    getNativeOfflineExternalAttachments: async ({ renderState }) => {
+      nativeRenderState = renderState
+      return undefined
+    },
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+
+  const prepared = await service.prepareTimelineExport(settings)
+  const preparedBuffers = prepared.snapshot.renderStateSnapshot.fx.trackFx?.[trackId]?.samplerBuffers
+  expect(hydrationCalls).toBe(1)
+  expect(preparedBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(nativeRenderState).toBe(prepared.snapshot.renderStateSnapshot)
+
+  const submitted = service.submitPreparedTimelineExport(prepared, {
+    async createMixdownTarget() {
+      return {
+        openFile: async () => undefined,
+        saveBuffer: async () => ({ destination: "local", name: "hydrated.wav" }),
+      }
+    },
+    async createStemTarget() {
+      throw new Error("unexpected stem target")
+    },
+  })
+  expect((await submitted.completion).type).toBe("success")
+  expect(queuedRenderState).toBe(prepared.snapshot.renderStateSnapshot)
+  expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(hydrationCalls).toBe(1)
+  queue.dispose()
+})
+
 test("snapshot failure rejects before queue insertion or output target creation", async () => {
   const queue = createExportQueue(() => "job-1")
   let targetCreated = false
@@ -584,7 +676,7 @@ test("restarts export capture through successive project switches during MIDI fl
   queue.dispose()
 })
 
-test("prepares every mutable export field before flushing effect persistence", async () => {
+test("captures effects projection and routes after flushing effect persistence", async () => {
   const projectId = "cloud-project"
   const trackId = "track-pre-flush"
   let tracks: RuntimeTrack[] = [{ id: trackId, name: "before", volume: 0.5, clips: [] }]
@@ -643,15 +735,47 @@ test("prepares every mutable export field before flushing effect persistence", a
 
   const prepared = await service.prepareTimelineExport(settings)
   expect(prepared.snapshot.tracks[0]?.name).toBe("before")
-  expect(prepared.snapshot.bpm).toBe(120)
-  expect(prepared.snapshot.masterVolume).toBe(0.5)
-  expect(prepared.snapshot.sidechainRoutes).toHaveLength(1)
-  expect(prepared.snapshot.renderStateSnapshot.fx.trackFx?.[trackId]?.instances).toEqual([
-    expect.objectContaining({ id: "utility-before" }),
-  ])
+  expect(prepared.snapshot.bpm).toBe(90)
+  expect(prepared.snapshot.masterVolume).toBe(1)
+  expect(prepared.snapshot.sidechainRoutes).toHaveLength(0)
+  expect(prepared.snapshot.renderStateSnapshot.fx.trackFx?.[trackId]?.instances).toEqual([])
   expect(prepared.snapshot.renderStateSnapshot.automationEnvelopes).toEqual([
-    expect.objectContaining({ id: "before" }),
+    expect.objectContaining({ id: "after" }),
   ])
+  queue.dispose()
+})
+
+test("rejects when effects flushing switches projects before capturing remaining domains", async () => {
+  let projectId = "project-before"
+  let queued = false
+  const queue = createExportQueue(() => {
+    queued = true
+    return "job-project-race"
+  })
+  const service = createTimelineExportService({
+    queue,
+    getTracks: () => [{ id: "track-before", name: "before", volume: 1, clips: [] }],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => projectId,
+    getUserId: () => "user-1",
+    getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => ({
+      snapshotEffectsProjection: () => ({ replaceAudioEffectTargets: [], upsertDeviceRows: [] }),
+      snapshotSidechainRoutes: () => [],
+      flushPending: async () => {
+        projectId = "project-after"
+      },
+    }),
+    getSidechainRoutes: () => [],
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+
+  await expect(service.prepareTimelineExport(settings)).rejects.toThrow(
+    "Project changed while preparing export.",
+  )
+  expect(queued).toBe(false)
   queue.dispose()
 })
 

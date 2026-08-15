@@ -4,6 +4,8 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { AutomationEnvelope } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import type { TrackInstrumentParams } from "@daw-browser/shared"
 
 export type LivePlaybackTransport = {
   state: "playing" | "paused" | "stopped"
@@ -11,6 +13,13 @@ export type LivePlaybackTransport = {
   loopEnabled: boolean
   loopStartSec: number
   loopEndSec: number
+}
+
+export type LivePlaybackCompileContext = {
+  instrumentOverride?: {
+    targetId: string
+    instrument: TrackInstrumentParams
+  }
 }
 
 export type LivePlaybackTimeSignature = {
@@ -50,6 +59,48 @@ export type LivePlaybackSnapshotInput = {
   sidechainRoutes: readonly ExternalSidechainRoute[]
 }
 
+const addInstrumentAssets = (
+  assetsById: Map<string, AudioBuffer>,
+  fx: ExportFx["trackFx"],
+) => {
+  const add = (assetId: string, buffer: AudioBuffer) => {
+    const previous = assetsById.get(assetId)
+    if (previous && (
+      previous.length !== buffer.length
+      || previous.sampleRate !== buffer.sampleRate
+      || previous.numberOfChannels !== buffer.numberOfChannels
+    )) throw new Error(`Audio asset "${assetId}" resolves inconsistently.`)
+    assetsById.set(assetId, buffer)
+  }
+  for (const entry of Object.values(fx ?? {})) {
+    const instrument = entry.instrument
+    if (instrument?.kind === "sampler") {
+      for (const zone of instrument.params.zones) {
+        const buffer = entry.samplerBuffers?.get(zone.id)
+        if (!buffer) throw new Error(`Sampler zone "${zone.id}" is missing its authoritative audio buffer.`)
+        add(zone.sample.assetKey, buffer)
+      }
+    }
+    if (instrument?.kind === "drum-rack") {
+      for (const pad of instrument.params.pads) {
+        if (!pad.sample) continue
+        const buffer = entry.drumRackBuffers?.get(pad.id)
+        if (!buffer) throw new Error(`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`)
+        add(pad.sample.assetKey, buffer)
+      }
+    }
+    if (instrument?.kind === "granular" && instrument.params.zone) {
+      if (!entry.granularBuffer) {
+        throw new Error(`Granular zone "${instrument.params.zone.id}" is missing its authoritative audio buffer.`)
+      }
+      if (entry.granularBuffer.assetKey !== instrument.params.zone.sample.assetKey) {
+        throw new Error(`Audio asset "${instrument.params.zone.sample.assetKey}" resolves inconsistently.`)
+      }
+      add(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
+    }
+  }
+}
+
 export type LivePlaybackSnapshotCompilation =
   | { supported: true; snapshot: LivePlaybackSnapshot }
   | { supported: false; reasons: readonly string[] }
@@ -69,6 +120,42 @@ const snapshotTracks = (tracks: readonly RuntimeTrack[]): RuntimeTrack[] => trac
     }),
   }
 })
+
+type LiveTrackFxMap = NonNullable<ExportFx["trackFx"]>
+type LiveTrackFxEntry = LiveTrackFxMap[string]
+
+const cloneAudioBufferMap = (buffers: ReadonlyMap<string, AudioBuffer>): Map<string, AudioBuffer> => {
+  const clone = new Map<string, AudioBuffer>()
+  for (const [key, buffer] of buffers) clone.set(key, buffer)
+  return clone
+}
+
+const cloneLiveTrackFxEntry = (entry: LiveTrackFxEntry): LiveTrackFxEntry => {
+  const { drumRackBuffers, samplerBuffers, granularBuffer, ...serializableEntry } = entry
+  return {
+    ...structuredClone(serializableEntry),
+    ...(drumRackBuffers === undefined ? {} : { drumRackBuffers: cloneAudioBufferMap(drumRackBuffers) }),
+    ...(samplerBuffers === undefined ? {} : { samplerBuffers: cloneAudioBufferMap(samplerBuffers) }),
+    ...(granularBuffer === undefined ? {} : {
+      granularBuffer: {
+        assetKey: granularBuffer.assetKey,
+        buffer: granularBuffer.buffer,
+      },
+    }),
+  }
+}
+
+const cloneLiveFx = (fx: ExportFx): ExportFx => {
+  const { trackFx, ...serializableFx } = fx
+  return {
+    ...structuredClone(serializableFx),
+    ...(trackFx === undefined ? {} : {
+      trackFx: Object.fromEntries(
+        Object.entries(trackFx).map(([trackId, entry]) => [trackId, cloneLiveTrackFxEntry(entry)]),
+      ),
+    }),
+  }
+}
 
 /**
  * Timeline owns this portable playback input. The caller supplies the already
@@ -121,7 +208,12 @@ export const compileLivePlaybackSnapshot = (
   if (reasons.length > 0) return invalid(reasons)
 
   const tracks = snapshotTracks(input.tracks)
-  const fx = structuredClone(input.renderState.fx)
+  const fx = cloneLiveFx(input.renderState.fx)
+  try {
+    addInstrumentAssets(assetsById, fx.trackFx)
+  } catch (error) {
+    return invalid([error instanceof Error ? error.message : "Instrument audio assets resolve inconsistently."])
+  }
   const sidechainRoutes = structuredClone(input.sidechainRoutes)
   return {
     supported: true,

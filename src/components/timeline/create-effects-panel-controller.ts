@@ -9,17 +9,42 @@ import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/componen
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
 import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
+import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
+import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job";
 
 export type EffectsPanelExportSnapshot = {
   flushPending: () => Promise<void>
   snapshotEffectsProjection: () => ExportEffectsProjection
+  hydrateInstrumentBuffers?: (renderState: ExportRenderStateSnapshot) => ExportRenderStateSnapshot
   snapshotSidechainRoutes: () => ExternalSidechainRoute[]
 }
+
+export const hydrateInstrumentBuffers = (
+  renderState: ExportRenderStateSnapshot,
+  snapshotInstrumentBuffers: EffectsPanelInstrumentDevice["snapshotInstrumentBuffers"],
+): ExportRenderStateSnapshot => {
+  const trackFx = renderState.fx.trackFx;
+  if (!trackFx) return renderState;
+  const hydratedTrackFx = Object.fromEntries(Object.entries(trackFx).map(([trackId, entry]) => {
+    const activeInstrument = entry.instrument;
+    if (!activeInstrument) return [trackId, entry];
+    const { samplerBuffers: _samplerBuffers, drumRackBuffers: _drumRackBuffers, granularBuffer: _granularBuffer, ...entryWithoutBuffers } = entry;
+    const runtimeBuffers = snapshotInstrumentBuffers(trackId, activeInstrument);
+    return [trackId, runtimeBuffers ? { ...entryWithoutBuffers, ...runtimeBuffers } : entryWithoutBuffers];
+  }));
+  return {
+    ...renderState,
+    fx: {
+      ...renderState.fx,
+      trackFx: hydratedTrackFx,
+    },
+  };
+};
 
 type EffectsPanelControllerOptions = {
   isOpen: Accessor<boolean>;
@@ -36,6 +61,7 @@ type EffectsPanelControllerOptions = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams) => void;
   usesLegacyAudioEngine?: Accessor<boolean>;
   projectGeneration?: Accessor<number>;
   onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void;
@@ -81,8 +107,10 @@ const deviceInsertActionsEqual = (
 );
 
 export function createEffectsPanelController(options: EffectsPanelControllerOptions) {
-  const samplerBufferSync = createSamplerBufferSync();
+  const samplerBufferSync = createSamplerBufferSync({ projectId: options.projectId });
+  const drumRackBufferSync = createDrumRackBufferSync({ projectId: options.projectId });
   onCleanup(samplerBufferSync.dispose);
+  onCleanup(drumRackBufferSync.dispose);
   const target = useEffectsPanelTarget({
     selectedFXTarget: options.selectedFXTarget,
     tracks: options.tracks,
@@ -117,8 +145,11 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       onSelectClip: options.onSelectClip,
       insertLocalClip: options.insertLocalClip,
       onEffectParamsCommitted: options.onEffectParamsCommitted,
+      onStructuralPlaybackChange: options.onStructuralPlaybackChange,
+      projectGeneration: options.projectGeneration,
       onLocalSaveFailed: options.onLocalSaveFailed,
       samplerBufferSync,
+      drumRackBufferSync,
     },
     currentTargetId,
     currentTrack,
@@ -149,7 +180,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     resolveTrackByTargetId,
   );
 
-  const { spectrum } = useEffectsPanelAudioSync({
+  const { flushPending: flushSampledInstrumentWork, spectrum } = useEffectsPanelAudioSync({
     isOpen: options.isOpen,
     projectId: options.projectId,
     currentTargetId,
@@ -158,6 +189,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     audioEngine: options.audioEngine,
     usesLegacyAudioEngine: options.usesLegacyAudioEngine,
     roomEffects: () => roomEffectsQuery.data,
+    roomEffectsStatus: () => roomEffectsQuery.status,
+    roomEffectsError: () => roomEffectsQuery.error,
     localDraftEffects: {
       eq: audioEffects.eq.readDraftForTarget,
       compressor: audioEffects.compressor.readDraftForTarget,
@@ -168,6 +201,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
       arp: instrument.arp.readDraftForTarget,
     },
     samplerBufferSync,
+    drumRackBufferSync,
     spectrumProvider: options.spectrumProvider,
   });
 
@@ -198,6 +232,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     await Promise.all([
       audioEffects.flushPending(),
       instrument.flushPending(),
+      flushSampledInstrumentWork(),
     ]);
   };
   const exportSnapshot: EffectsPanelExportSnapshot = {
@@ -212,6 +247,9 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
         if (arpParams) projection.upsertDeviceRows.push({ targetId: track.id, effect: "arp", params: arpParams });
       }
       return projection;
+    },
+    hydrateInstrumentBuffers: (renderState) => {
+      return hydrateInstrumentBuffers(renderState, instrument.snapshotInstrumentBuffers);
     },
     snapshotSidechainRoutes: audioEffects.snapshotSidechainRoutes,
   };

@@ -1,4 +1,4 @@
-import { resolveClipSampleUrl, type ExportAudioFormat } from "@daw-browser/shared"
+import { isLocalId, resolveClipSampleUrl, type ExportAudioFormat } from "@daw-browser/shared"
 import type { ExportRange } from "@daw-browser/audio-engine/export-range"
 import type { StemMode } from "@daw-browser/audio-engine/export-mixdown"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
@@ -15,6 +15,7 @@ import type { NativeOfflineRenderer } from "~/lib/export/desktop-native-offline-
 import { snapshotAutomationPatches, snapshotExportSettings, snapshotSidechainRoutes, snapshotTimelineTracks } from "~/lib/export/timeline-export-snapshot"
 import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
+import { getLocalProject } from "~/lib/local-project-db"
 
 type TimelineExportDependencies = {
   queue: ExportQueue
@@ -34,6 +35,7 @@ type TimelineExportDependencies = {
   nativeOfflineRenderer?: NativeOfflineRenderer
   getNativeOfflineExternalAttachments?: (input: {
     projectId: string | undefined
+    localProject: boolean
     tracks: readonly RuntimeTrack[]
     renderState: ExportRenderStateSnapshot
     bpm: number
@@ -175,6 +177,10 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       })
     }
     const effectsSnapshot = dependencies.getEffectsExportSnapshot()
+    await effectsSnapshot?.flushPending()
+    if (dependencies.getProjectId() !== projectId) {
+      throw new Error("Project changed while preparing export.")
+    }
     const userId = dependencies.getUserId()
     const bpm = dependencies.getBpm()
     const timeSignature = dependencies.getTimeSignature?.() ?? { numerator: 4, denominator: 4 }
@@ -185,7 +191,6 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       : undefined
     const automationPatches = snapshotAutomationPatches(dependencies.getAutomationPatches())
     const sidechainRoutes = snapshotSidechainRoutes(effectsSnapshot?.snapshotSidechainRoutes() ?? dependencies.getSidechainRoutes())
-    await effectsSnapshot?.flushPending()
     const renderStateSnapshot = await createExportRenderStateSnapshot({
       projectId,
       userId,
@@ -195,11 +200,16 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       effectsProjection,
       automationPatches,
     })
+    const hydratedRenderStateSnapshot = effectsSnapshot?.hydrateInstrumentBuffers?.(renderStateSnapshot) ?? renderStateSnapshot
+    const localProject = projectId
+      ? isLocalId("project", projectId) || await getLocalProject(projectId) !== undefined
+      : false
     const nativeExternalAttachments = dependencies.nativeRendererRequired
       ? await dependencies.getNativeOfflineExternalAttachments?.({
         projectId: projectId ?? "",
+        localProject,
         tracks: capturedTracks,
-        renderState: renderStateSnapshot,
+        renderState: hydratedRenderStateSnapshot,
         bpm,
         timeSignature,
         sidechainRoutes,
@@ -214,15 +224,15 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       projectId,
       userId,
       sidechainRoutes,
-      renderStateSnapshot: {
-        ...renderStateSnapshot,
-        ...(nativeExternalAttachments ? {
+      renderStateSnapshot: nativeExternalAttachments
+        ? {
+          ...hydratedRenderStateSnapshot,
           nativeExternalAttachments: nativeExternalAttachments.plan,
           ...(nativeExternalAttachments.capturedVstStates
             ? { capturedVstStates: nativeExternalAttachments.capturedVstStates }
             : {}),
-        } : {}),
-      },
+        }
+        : hydratedRenderStateSnapshot,
       snapshotClips,
     }
   }
@@ -251,6 +261,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
         projectId: snapshot.projectId,
         sampleUrl: resolveClipSampleUrl(detached),
         sourceAssetKey: detached.sourceAssetKey,
+        targetSampleRate: detached.sourceSampleRate,
       }, loadSignal)
       if (result.status !== "ready") throw new Error(`Audio media for clip "${clip.id}" is ${result.status}.`)
       detached.buffer = result.buffer

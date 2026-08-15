@@ -553,7 +553,6 @@ async function createOfflineGranularTrack(input: {
   installedBuffer: GranularInstalledBuffer | undefined
   resourceObserver?: ResourceObserver
 }) {
-  if (!input.installedBuffer) throw new Error('Granular export requires a preloaded sample.')
   const runtime = await createGranularRuntime({
     context: input.ctx,
     destination: input.destination,
@@ -561,7 +560,7 @@ async function createOfflineGranularTrack(input: {
     resourceObserver: input.resourceObserver,
   })
   try {
-    await runtime.installSample(input.installedBuffer)
+    if (input.installedBuffer) await runtime.installSample(input.installedBuffer)
     runtime.resetSeed(input.instrument.params.seed)
     runtime.setFrozen(input.instrument.params.freeze)
     return runtime

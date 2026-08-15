@@ -98,7 +98,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         id: 'automation-start-extension',
         timeSec: 0,
         value: valueAtAutomationTime(ordered, 0, desc.defaultValue),
-        interpolation: 'linear',
+        interpolation: desc.interpolation ?? 'linear',
       })
     }
     if (last && last.timeSec < props.durationSec) {
@@ -106,7 +106,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
         id: 'automation-end-extension',
         timeSec: props.durationSec,
         value: last.value,
-        interpolation: 'linear',
+        interpolation: desc.interpolation ?? 'linear',
       })
     }
     return next
@@ -154,7 +154,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
       id: crypto.randomUUID(),
       timeSec,
       value: yToValue(clientY - rect.top),
-      interpolation: 'linear',
+      interpolation: descriptor()?.interpolation ?? 'linear',
     }
   }
 

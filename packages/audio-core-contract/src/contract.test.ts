@@ -146,6 +146,38 @@ test('sample instrument codecs resolve asset identities only at the ABI boundary
   expect(new DataView(binary.zones.buffer).getBigUint64(0, true)).toBe(0x100000001n)
 })
 
+test('accepts the shared minimum filter resonance and rejects values below it', () => {
+  const state = {
+    version: 1 as const,
+    kind: 'sampler' as const,
+    voiceCapacity: 1,
+    outputLayout: 'stereo' as const,
+    ampAttackMs: 0,
+    ampDecayMs: 0,
+    ampSustain: 1,
+    ampReleaseMs: 0,
+    filterEnabled: true,
+    filterMode: 'lowpass' as const,
+    filterCutoffHz: 20,
+    filterResonance: 0.0001,
+    filterEnvelopeAmount: 0,
+    filterAttackMs: 0,
+    filterDecayMs: 0,
+    filterSustain: 1,
+    filterReleaseMs: 0,
+    lfoEnabled: false,
+    lfoRateHz: 0.01,
+    lfoPitchCents: 0,
+    lfoFilterHz: 0,
+    lfoAmplitude: 0,
+    lfoPan: 0,
+    retrigger: true,
+    zones: [],
+  }
+  expect(isAudioCoreSamplerInstrumentState(state)).toBe(true)
+  expect(isAudioCoreSamplerInstrumentState({ ...state, filterResonance: 0.00009 })).toBe(false)
+})
+
 test('empty sampled instrument states use silent portable sentinels', () => {
   const base = {
     version: 1 as const,

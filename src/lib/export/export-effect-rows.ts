@@ -46,3 +46,15 @@ export type ExportEffectsProjection = {
   }>
   upsertDeviceRows: ExportEffectRow[]
 }
+
+export const withInstrumentOverride = (
+  projection: ExportEffectsProjection,
+  targetId: string,
+  instrument: TrackInstrumentParams,
+): ExportEffectsProjection => ({
+  replaceAudioEffectTargets: projection.replaceAudioEffectTargets,
+  upsertDeviceRows: [
+    ...projection.upsertDeviceRows,
+    { targetId, effect: "instrument", params: instrument },
+  ],
+})

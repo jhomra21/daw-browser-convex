@@ -1,5 +1,9 @@
-import type { AutomationEnvelope } from '@daw-browser/shared'
-import { valueAtAutomationTime } from '@daw-browser/shared'
+import {
+  getAutomationParameterDescriptor,
+  normalizeAutomationPoints,
+  valueAtAutomationTime,
+  type AutomationEnvelope,
+} from '@daw-browser/shared'
 
 export type AutomationAudioBinding = {
   param: {
@@ -28,11 +32,13 @@ export const getAutomationEnvelopeSchedulePlan = (
   window: AutomationScheduleWindow,
   fallbackValue: number,
 ): readonly AutomationSchedulePoint[] => {
-  const startValue = valueAtAutomationTime(envelope.points, window.startLimitSec, fallbackValue)
-  const endBoundaryPoint = envelope.points.find((point) => point.timeSec === window.endLimitSec)
-  const nextAfterEndIndex = envelope.points.findIndex((point) => point.timeSec > window.endLimitSec)
-  const nextAfterEnd = nextAfterEndIndex === -1 ? undefined : envelope.points[nextAfterEndIndex]
-  const previousBeforeEnd = nextAfterEndIndex <= 0 ? undefined : envelope.points[nextAfterEndIndex - 1]
+  const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+  const points = descriptor ? normalizeAutomationPoints(envelope.points, descriptor) : envelope.points
+  const startValue = valueAtAutomationTime(points, window.startLimitSec, fallbackValue)
+  const endBoundaryPoint = points.find((point) => point.timeSec === window.endLimitSec)
+  const nextAfterEndIndex = points.findIndex((point) => point.timeSec > window.endLimitSec)
+  const nextAfterEnd = nextAfterEndIndex === -1 ? undefined : points[nextAfterEndIndex]
+  const previousBeforeEnd = nextAfterEndIndex <= 0 ? undefined : points[nextAfterEndIndex - 1]
   const shouldRampToWindowEnd = Boolean(
     !endBoundaryPoint
       && nextAfterEnd
@@ -40,30 +46,30 @@ export const getAutomationEnvelopeSchedulePlan = (
       && previousBeforeEnd.timeSec < window.endLimitSec
       && previousBeforeEnd.interpolation === 'linear',
   )
-  const points: AutomationSchedulePoint[] = [{
+  const schedulePoints: AutomationSchedulePoint[] = [{
     timeSec: window.startLimitSec,
     value: startValue,
     kind: 'set',
   }]
-  for (let index = 0; index < envelope.points.length; index += 1) {
-    const point = envelope.points[index]
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]
     if (!point || point.timeSec <= window.startLimitSec) continue
     if (point.timeSec > window.endLimitSec) break
-    const previous = envelope.points[index - 1]
-    points.push({
+    const previous = points[index - 1]
+    schedulePoints.push({
       timeSec: point.timeSec,
       value: point.value,
       kind: !previous || previous.interpolation === 'hold' ? 'set' : 'ramp',
     })
   }
   if (shouldRampToWindowEnd) {
-    points.push({
+    schedulePoints.push({
       timeSec: window.endLimitSec,
-      value: valueAtAutomationTime(envelope.points, window.endLimitSec, fallbackValue),
+      value: valueAtAutomationTime(points, window.endLimitSec, fallbackValue),
       kind: 'ramp',
     })
   }
-  return points
+  return schedulePoints
 }
 
 export function scheduleAutomationEnvelope(
@@ -98,7 +104,9 @@ export function applyAutomationEnvelopeAtTime(
   audioCtxTime: number,
   fallbackValue: number,
 ) {
-  const value = valueAtAutomationTime(envelope.points, timelineSec, fallbackValue)
+  const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+  const points = descriptor ? normalizeAutomationPoints(envelope.points, descriptor) : envelope.points
+  const value = valueAtAutomationTime(points, timelineSec, fallbackValue)
   for (const binding of bindings) {
     binding.param.cancelScheduledValues(audioCtxTime)
     binding.param.setValueAtTime(binding.valueToAudioValue(value), audioCtxTime)

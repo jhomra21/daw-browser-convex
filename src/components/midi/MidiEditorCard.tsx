@@ -31,7 +31,7 @@ type MidiEditorCardProps = {
   userId?: string
   canWrite: boolean
   // Optional: preview note when adding/dragging
-  onAuditionNote?: (pitch: number, velocity?: number, durSec?: number) => void
+  onAuditionNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
   // Local-only: current room id for per-room persistence
   projectId?: string
   midiKeyboard: {
@@ -183,7 +183,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
       const length = lastCreatedNoteLength() || note.length
       const nextNote = { ...note, length }
       setNotes(prev => [...prev, nextNote])
-      props.onAuditionNote?.(nextNote.pitch, nextNote.velocity, grid().noteDurationSeconds(nextNote.length, 0.5))
+      if (props.trackId) props.onAuditionNote?.(props.trackId, nextNote.pitch, nextNote.velocity, grid().noteDurationSeconds(nextNote.length, 0.5))
       persistence.saveSoon({ kind: 'insert', note: nextNote })
     }
   }
@@ -231,7 +231,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     try { target.setPointerCapture(e.pointerId) } catch {}
     // Audition on drag start
     const dur = Math.max(0.05, grid().noteDurationSeconds(n.length, 0.6))
-    props.onAuditionNote?.(n.pitch, n.velocity ?? 0.9, dur)
+    if (props.trackId) props.onAuditionNote?.(props.trackId, n.pitch, n.velocity ?? 0.9, dur)
   }
   const onNotePointerMove = (e: PointerEvent) => {
     const drag = dragNote
@@ -263,7 +263,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     drag.draft = next
     setNotes(prev => grid().replaceNoteById(prev, drag.noteId, next))
     if (drag.drag.mode === 'move' && note.pitch !== next.pitch) {
-      props.onAuditionNote?.(next.pitch, next.velocity ?? 0.9, grid().noteDurationSeconds(next.length, 0.25))
+      if (props.trackId) props.onAuditionNote?.(props.trackId, next.pitch, next.velocity ?? 0.9, grid().noteDurationSeconds(next.length, 0.25))
     }
   }
   const onNotePointerUp = (_e: PointerEvent) => {
@@ -580,7 +580,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                 )}
                 onPointerDown={(event) => {
                   stopEditorEvent(event)
-                  props.onAuditionNote?.(pitch, 0.9, grid().noteDurationSeconds(1, 0.6))
+                  if (props.trackId) props.onAuditionNote?.(props.trackId, pitch, 0.9, grid().noteDurationSeconds(1, 0.6))
                 }}
                 aria-label={`Audition ${grid().noteName(pitch)}`}
               >

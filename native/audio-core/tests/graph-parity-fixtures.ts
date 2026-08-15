@@ -1682,10 +1682,10 @@ const reverbCapacityFixture = (processorCount: number): PortableGraphParityFixtu
   ),
   frames: 4,
   input: new Float32Array(8).fill(0.25),
-  expectedResult: processorCount === 9 ? 'reject' : undefined,
+  expectedResult: processorCount === 33 ? 'reject' : undefined,
   knownGapIds: [],
   portableEligible: true,
-  assertOutput: processorCount === 9 ? () => false : finite,
+  assertOutput: processorCount === 33 ? () => false : finite,
 })
 
 const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
@@ -1896,8 +1896,8 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     }
     return fixture
   })(),
-  reverbCapacityFixture(8),
-  reverbCapacityFixture(9),
+  reverbCapacityFixture(32),
+  reverbCapacityFixture(33),
   timeEffectFixture(
     'reverb',
     'step-44100',

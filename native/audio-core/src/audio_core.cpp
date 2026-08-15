@@ -23,15 +23,15 @@ constexpr uint32_t kMaximumAssets = 64;
 constexpr uint32_t kMaximumSampleSources = 256;
 constexpr uint32_t kMaximumGraphNodes = 64;
 constexpr uint32_t kMaximumGraphEdges = 256;
-constexpr uint32_t kMaximumGraphProcessors = kMaximumGraphNodes * DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumGraphProcessors = 512;
 constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
 constexpr uint32_t kMaximumModulationDelayFrames = 4132;
 constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
-constexpr uint32_t kMaximumDelayProcessors = 8;
-constexpr uint32_t kMaximumReverbProcessors = 8;
+constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumRetirementLanes = 8;
 constexpr uint32_t kMaximumRetirementSeconds = 30;
-constexpr uint32_t kMaximumSpectralProcessors = 8;
+constexpr uint32_t kMaximumSpectralProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 constexpr uint32_t kMaximumNativeGraphStagesPerNode = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u;
 #endif
@@ -613,18 +613,18 @@ constexpr daw_audio_synth_state default_synth_state() {
   return {
     .version = 1, .seed = 0xA341316CU,
     .oscillators = {
-      {.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, .level = 0.5F, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
-      {.enabled = 0, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 0.5F, .octave = 0, .semitone = 0, .detune_cents = 0.0F},
+      {.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, .level = 0.7F, .octave = 0, .semitone = 0, .detune_cents = -7.0F},
+      {.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH, .level = 0.45F, .octave = 0, .semitone = 0, .detune_cents = 7.0F},
     },
-    .noise_enabled = 0, .noise_level = 0.0F,
+    .noise_enabled = 0, .noise_level = 0.25F,
     .filter_enabled = 1, .filter_mode = DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS,
-    .filter_cutoff_hz = 20000.0F, .filter_resonance = 0.707F, .filter_key_tracking = 0.0F,
-    .filter_envelope_amount_octaves = 0.0F, .filter_attack_ms = 1.0F, .filter_decay_ms = 1.0F,
-    .filter_sustain = 1.0F, .filter_release_ms = 10.0F,
-    .amp_attack_ms = 1.0F, .amp_decay_ms = 1.0F, .amp_sustain = 1.0F, .amp_release_ms = 10.0F,
-    .lfo_enabled = 0, .lfo_waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .lfo_rate_hz = 1.0F,
+    .filter_cutoff_hz = 12000.0F, .filter_resonance = 0.7F, .filter_key_tracking = 0.0F,
+    .filter_envelope_amount_octaves = 0.0F, .filter_attack_ms = 5.0F, .filter_decay_ms = 150.0F,
+    .filter_sustain = 0.0F, .filter_release_ms = 150.0F,
+    .amp_attack_ms = 5.0F, .amp_decay_ms = 100.0F, .amp_sustain = 0.8F, .amp_release_ms = 120.0F,
+    .lfo_enabled = 0, .lfo_waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .lfo_rate_hz = 5.0F,
     .lfo_pitch_cents = 0.0F, .lfo_filter_octaves = 0.0F, .lfo_amplitude = 0.0F, .lfo_pan = 0.0F,
-    .output_gain = 1.0F, .output_pan = 0.0F,
+    .output_gain = 0.8F, .output_pan = 0.0F,
   };
 }
 
@@ -634,49 +634,49 @@ bool valid_synth_state(const daw_audio_synth_state &state) {
     || state.lfo_waveform > DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE
     || !std::isfinite(state.noise_level) || state.noise_level < 0.0F || state.noise_level > 1.0F
     || !std::isfinite(state.filter_cutoff_hz) || state.filter_cutoff_hz < 20.0F || state.filter_cutoff_hz > 20000.0F
-    || !std::isfinite(state.filter_resonance) || state.filter_resonance < 0.05F || state.filter_resonance > 30.0F
+    || !std::isfinite(state.filter_resonance) || state.filter_resonance < 0.0001F || state.filter_resonance > 30.0F
     || !std::isfinite(state.filter_key_tracking) || state.filter_key_tracking < 0.0F || state.filter_key_tracking > 1.0F
-    || !std::isfinite(state.filter_envelope_amount_octaves) || state.filter_envelope_amount_octaves < -8.0F || state.filter_envelope_amount_octaves > 8.0F
-    || !std::isfinite(state.filter_attack_ms) || state.filter_attack_ms < 0.0F || state.filter_attack_ms > 10000.0F
-    || !std::isfinite(state.filter_decay_ms) || state.filter_decay_ms < 0.0F || state.filter_decay_ms > 10000.0F
+    || !std::isfinite(state.filter_envelope_amount_octaves) || state.filter_envelope_amount_octaves < -6.0F || state.filter_envelope_amount_octaves > 6.0F
+    || !std::isfinite(state.filter_attack_ms) || state.filter_attack_ms < 0.0F || state.filter_attack_ms > 60000.0F
+    || !std::isfinite(state.filter_decay_ms) || state.filter_decay_ms < 0.0F || state.filter_decay_ms > 60000.0F
     || !std::isfinite(state.filter_sustain) || state.filter_sustain < 0.0F || state.filter_sustain > 1.0F
-    || !std::isfinite(state.filter_release_ms) || state.filter_release_ms < 0.0F || state.filter_release_ms > 10000.0F
-    || !std::isfinite(state.amp_attack_ms) || state.amp_attack_ms < 0.0F || state.amp_attack_ms > 10000.0F
-    || !std::isfinite(state.amp_decay_ms) || state.amp_decay_ms < 0.0F || state.amp_decay_ms > 10000.0F
+    || !std::isfinite(state.filter_release_ms) || state.filter_release_ms < 0.0F || state.filter_release_ms > 60000.0F
+    || !std::isfinite(state.amp_attack_ms) || state.amp_attack_ms < 0.0F || state.amp_attack_ms > 60000.0F
+    || !std::isfinite(state.amp_decay_ms) || state.amp_decay_ms < 0.0F || state.amp_decay_ms > 60000.0F
     || !std::isfinite(state.amp_sustain) || state.amp_sustain < 0.0F || state.amp_sustain > 1.0F
     || !std::isfinite(state.amp_release_ms) || state.amp_release_ms < 0.0F || state.amp_release_ms > 60000.0F
     || !std::isfinite(state.lfo_rate_hz) || state.lfo_rate_hz < 0.01F || state.lfo_rate_hz > 100.0F
-    || !std::isfinite(state.lfo_pitch_cents) || state.lfo_pitch_cents < -2400.0F || state.lfo_pitch_cents > 2400.0F
-    || !std::isfinite(state.lfo_filter_octaves) || state.lfo_filter_octaves < -8.0F || state.lfo_filter_octaves > 8.0F
+    || !std::isfinite(state.lfo_pitch_cents) || state.lfo_pitch_cents < -1200.0F || state.lfo_pitch_cents > 1200.0F
+    || !std::isfinite(state.lfo_filter_octaves) || state.lfo_filter_octaves < -6.0F || state.lfo_filter_octaves > 6.0F
     || !std::isfinite(state.lfo_amplitude) || state.lfo_amplitude < 0.0F || state.lfo_amplitude > 1.0F
-    || !std::isfinite(state.lfo_pan) || state.lfo_pan < -1.0F || state.lfo_pan > 1.0F
-    || !std::isfinite(state.output_gain) || state.output_gain < 0.0F || state.output_gain > 2.0F
+    || !std::isfinite(state.lfo_pan) || state.lfo_pan < 0.0F || state.lfo_pan > 1.0F
+    || !std::isfinite(state.output_gain) || state.output_gain < 0.0F || state.output_gain > 1.5F
     || !std::isfinite(state.output_pan) || state.output_pan < -1.0F || state.output_pan > 1.0F) return false;
   for (const daw_audio_synth_oscillator_state &oscillator : state.oscillators) {
     if (oscillator.enabled > 1 || oscillator.waveform > DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE
       || !std::isfinite(oscillator.level) || oscillator.level < 0.0F || oscillator.level > 1.0F
-      || oscillator.octave < -4 || oscillator.octave > 4 || oscillator.semitone < -24 || oscillator.semitone > 24
-      || !std::isfinite(oscillator.detune_cents) || oscillator.detune_cents < -2400.0F || oscillator.detune_cents > 2400.0F) return false;
+      || oscillator.octave < -3 || oscillator.octave > 3 || oscillator.semitone < -12 || oscillator.semitone > 12
+      || !std::isfinite(oscillator.detune_cents) || oscillator.detune_cents < -100.0F || oscillator.detune_cents > 100.0F) return false;
   }
   return true;
 }
 
 bool valid_sampler_state(const daw_audio_sampler_state &state) {
   return state.version == 1 && state.zone_count <= DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
-    && std::isfinite(state.amp_attack_ms) && state.amp_attack_ms >= 0.0F && state.amp_attack_ms <= 10000.0F
-    && std::isfinite(state.amp_decay_ms) && state.amp_decay_ms >= 0.0F && state.amp_decay_ms <= 10000.0F
+    && std::isfinite(state.amp_attack_ms) && state.amp_attack_ms >= 0.0F && state.amp_attack_ms <= 60000.0F
+    && std::isfinite(state.amp_decay_ms) && state.amp_decay_ms >= 0.0F && state.amp_decay_ms <= 60000.0F
     && std::isfinite(state.amp_sustain) && state.amp_sustain >= 0.0F && state.amp_sustain <= 1.0F
     && std::isfinite(state.amp_release_ms) && state.amp_release_ms >= 0.0F && state.amp_release_ms <= 60000.0F
     && state.filter_enabled <= 1 && state.filter_mode <= DAW_AUDIO_SYNTH_FILTER_MODE_NOTCH
     && std::isfinite(state.filter_cutoff_hz) && state.filter_cutoff_hz >= 20.0F && state.filter_cutoff_hz <= 20000.0F
-    && std::isfinite(state.filter_resonance) && state.filter_resonance >= 0.05F && state.filter_resonance <= 30.0F
+    && std::isfinite(state.filter_resonance) && state.filter_resonance >= 0.0001F && state.filter_resonance <= 30.0F
     && std::isfinite(state.filter_envelope_amount) && state.filter_envelope_amount >= -1.0F && state.filter_envelope_amount <= 1.0F
     && std::isfinite(state.filter_attack_ms) && state.filter_attack_ms >= 0.0F && state.filter_attack_ms <= 60000.0F
     && std::isfinite(state.filter_decay_ms) && state.filter_decay_ms >= 0.0F && state.filter_decay_ms <= 60000.0F
     && std::isfinite(state.filter_sustain) && state.filter_sustain >= 0.0F && state.filter_sustain <= 1.0F
     && std::isfinite(state.filter_release_ms) && state.filter_release_ms >= 0.0F && state.filter_release_ms <= 60000.0F
     && state.lfo_enabled <= 1
-    && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.0F && state.lfo_rate_hz <= 100.0F
+    && std::isfinite(state.lfo_rate_hz) && state.lfo_rate_hz >= 0.01F && state.lfo_rate_hz <= 100.0F
     && std::isfinite(state.lfo_pitch_cents) && state.lfo_pitch_cents >= -2400.0F && state.lfo_pitch_cents <= 2400.0F
     && std::isfinite(state.lfo_filter_hz) && state.lfo_filter_hz >= -20000.0F && state.lfo_filter_hz <= 20000.0F
     && std::isfinite(state.lfo_amplitude) && state.lfo_amplitude >= 0.0F && state.lfo_amplitude <= 1.0F
@@ -3613,12 +3613,12 @@ bool instrument_declares_target(const daw_audio_instrument_state_descriptor &des
 
 bool set_synth_parameter(InstrumentNodeState &instrument, uint32_t target, float value) {
   if (!std::isfinite(value)) return false;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN && value >= 0.0F && value <= 2.0F) instrument.synth.output_gain = value;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN && value >= 0.0F && value <= 1.5F) instrument.synth.output_gain = value;
   else if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN && value >= -1.0F && value <= 1.0F) instrument.synth.output_pan = value;
   else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ && value >= 20.0F && value <= 20000.0F) instrument.synth.filter_cutoff_hz = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE && value >= 0.05F && value <= 30.0F) instrument.synth.filter_resonance = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS && value >= 0.0F && value <= 10000.0F) instrument.synth.amp_attack_ms = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS && value >= 0.0F && value <= 10000.0F) instrument.synth.amp_decay_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE && value >= 0.0001F && value <= 30.0F) instrument.synth.filter_resonance = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_attack_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_decay_ms = value;
   else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN && value >= 0.0F && value <= 1.0F) instrument.synth.amp_sustain = value;
   else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_release_ms = value;
   else return false;

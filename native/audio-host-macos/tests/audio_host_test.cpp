@@ -1,8 +1,7 @@
 #include "daw/audio_host_macos.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
-#include "daw/audio_host_macos.h"
-
+#include "daw/audio_core_instrument_wire.h"
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -187,6 +186,39 @@ std::vector<std::uint8_t> InstrumentStatePayload(const float output_gain) {
   return payload;
 }
 
+std::vector<std::uint8_t> PackedSynthStatePayload(const float output_gain) {
+  std::vector<std::uint8_t> state(daw::audio_core_wire::kSynthStateBytes);
+  WriteLeU32(state, 0, 1);
+  WriteLeU32(state, 4, 1);
+  WriteLeU32(state, 8, 1);
+  WriteLeU32(state, 12, DAW_AUDIO_SYNTH_WAVEFORM_SAWTOOTH);
+  WriteLeU32(state, 56, 1);
+  WriteLeU32(state, 64, 1);
+  WriteLeU32(state, 68, DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS);
+  const auto write_float = [&state](const std::size_t offset, const float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    WriteLeU32(state, offset, bits);
+  };
+  write_float(60, 0.1F);
+  write_float(72, 1000.0F);
+  write_float(76, 0.7F);
+  write_float(80, 0.5F);
+  write_float(96, 0.5F);
+  write_float(112, 0.5F);
+  write_float(128, 1.0F);
+  write_float(148, output_gain);
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, 1);
+  AppendLeU64(payload, 1);
+  AppendLeU32(payload, DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  AppendLeU32(payload, static_cast<std::uint32_t>(state.size()));
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  payload.insert(payload.end(), state.begin(), state.end());
+  return payload;
+}
+
 std::vector<std::uint8_t> EmptyGranularStatePayload() {
   std::vector<std::uint8_t> payload;
   AppendLeU32(payload, 1);
@@ -238,6 +270,27 @@ void TestEmptyGranularInstrumentState() {
     == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.ConfigureInstrumentStates(EmptyGranularStatePayload()));
   assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  host.Stop();
+}
+
+void TestPackedInstrumentStatePayloadBounds() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareGraphRevision(1, InstrumentGraphSnapshot(1)).code
+    == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(host.ConfigureInstrumentStates(PackedSynthStatePayload(0.75F)));
+  auto truncated = PackedSynthStatePayload(0.75F);
+  truncated.pop_back();
+  assert(!host.ConfigureInstrumentStates(truncated));
+  auto oversized = PackedSynthStatePayload(0.75F);
+  WriteLeU32(oversized, 20, 1);
+  assert(!host.ConfigureInstrumentStates(oversized));
   host.Stop();
 }
 
@@ -1342,6 +1395,7 @@ int main() {
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();
   TestEmptyGranularInstrumentState();
+  TestPackedInstrumentStatePayloadBounds();
   TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance();
   TestPausedProcessDoesNotAdvanceTransportFrame();
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();

@@ -9,6 +9,7 @@ apps/desktop/.native
 .vinxi
 app.config.timestamp_*.js
 *.tsbuildinfo
+/main.js
 
 # Environment
 .env*

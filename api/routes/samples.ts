@@ -5,6 +5,7 @@ import { fetchFallbackDefaultSample, listDefaultSamples } from '../default-sampl
 import { hashFile } from '../hash-file'
 import { requireProjectRoleContextForApi } from '../project-access'
 import { controlErrorSchemaV1 } from '@daw-browser/control'
+import { z } from 'zod'
 
 const maxUploadBytes = 10 * 1024 * 1024
 const trustedDesktopSampleOrigins = new Set([
@@ -28,12 +29,14 @@ const browserIdempotencyKey = async (assetKey: string) => {
   return `browser-${suffix}`
 }
 
-const sampleUploadErrorStatus = (error: unknown) => {
-  const candidates = [
-    error,
-    typeof error === 'object' && error !== null && 'data' in error ? error.data : undefined,
-    typeof error === 'object' && error !== null && 'errorData' in error ? error.errorData : undefined,
-  ]
+const uploadErrorEnvelopeSchema = z.object({
+  data: z.json().optional(),
+  errorData: z.json().optional(),
+}).passthrough()
+
+const sampleUploadErrorStatus = (error: Error | z.infer<typeof uploadErrorEnvelopeSchema>) => {
+  const envelope = uploadErrorEnvelopeSchema.safeParse(error)
+  const candidates = [error, envelope.success ? envelope.data.data : undefined, envelope.success ? envelope.data.errorData : undefined]
   for (const candidate of candidates) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
     if (parsed.success && parsed.data.code === 'idempotency-conflict') return 409
@@ -119,11 +122,12 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
     try {
       const form = await c.req.formData()
       const projectId = form.get('projectId')?.toString()
-      const clientAssetKey = form.get('assetKey')
+      const clientAssetKeyResult = z.string().min(1).safeParse(form.get('assetKey'))
       const file = form.get('file')
-      if (!projectId || typeof clientAssetKey !== 'string' || !clientAssetKey || !(file instanceof File) || file.size < 1 || file.size > maxUploadBytes) {
+      if (!projectId || !clientAssetKeyResult.success || !(file instanceof File) || file.size < 1 || file.size > maxUploadBytes) {
         return c.json({ error: 'Invalid sample upload' }, 400)
       }
+      const clientAssetKey = clientAssetKeyResult.data
       const access = await requireProjectRoleContext(c, projectId, ['owner', 'editor'])
       if (!access) return c.json({ error: 'Forbidden' }, 403)
       const contentSha256 = await hashFile(file)
@@ -160,7 +164,9 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
         url: `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(result.asset.id)}`,
       }, 201)
     } catch (error) {
-      return c.json({ error: error instanceof Error ? error.message : 'Sample upload failed' }, sampleUploadErrorStatus(error))
+      const parsedError = z.union([z.instanceof(Error), uploadErrorEnvelopeSchema]).safeParse(error)
+      const uploadError = parsedError.success ? parsedError.data : new Error('Sample upload failed')
+      return c.json({ error: uploadError instanceof Error ? uploadError.message : 'Sample upload failed' }, sampleUploadErrorStatus(uploadError))
     }
   })
 

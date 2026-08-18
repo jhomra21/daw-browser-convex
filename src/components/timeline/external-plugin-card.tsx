@@ -32,7 +32,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
   const [expanded, setExpanded] = createSignal(visibleParameters().length <= 8);
   const normalizedValue = (parameter: PluginParameterDescriptor) => {
     const value = props.processor.parameterOverrides[String(parameter.id)];
-    return typeof value === "number" && Number.isFinite(value)
+    return value !== undefined && Number.isFinite(value)
       ? Math.min(1, Math.max(0, value))
       : Math.min(1, Math.max(0, parameter.defaultValue));
   };
@@ -136,9 +136,9 @@ export type ExternalPluginCardProps = {
 };
 
 export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) => {
-  const sanitizeNativeVst3DiagnosticError = (error: unknown) => {
-    const message = error instanceof Error
-      ? error.message
+  const sanitizeNativeVst3DiagnosticError = (cause: unknown) => {
+    const message = cause instanceof Error
+      ? cause.message
       : "The native VST3 editor session could not be started.";
     return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256);
   };
@@ -198,13 +198,8 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         projectId: props.projectId,
         instanceId: props.processor.instanceId,
         command,
-        ...(serializedPlan === undefined ? {} : { serializedPlan }),
-        ...(command === "open" || command === "focus"
-          ? (() => {
-            const anchor = props.editorAnchor?.();
-            return anchor === undefined ? {} : { anchor };
-          })()
-          : {}),
+        serializedPlan,
+        anchor: command === "open" || command === "focus" ? props.editorAnchor?.() : undefined,
       });
       if (!result.ok) {
         setEditorMessage(result.error);

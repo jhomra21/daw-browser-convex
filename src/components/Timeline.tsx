@@ -88,7 +88,7 @@ import {
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
-import { listLocalExternalProcessors, setLocalExternalProcessor } from "~/lib/external-plugins";
+import { listLocalExternalProcessors } from "~/lib/external-plugins";
 import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
@@ -159,10 +159,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<string | null>(null);
   const [provisionalMidiClipId, setProvisionalMidiClipId] =
     createSignal<string | null>(null);
-  const recordingStopRef: {
+  type RecordingStopOwner = {
     stop: () => Promise<void>;
     activeTrackId: () => string | null;
-  } = { stop: async () => {}, activeTrackId: () => null };
+  };
+  const recordingStopRef: RecordingStopOwner = { stop: async () => {}, activeTrackId: () => null };
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
@@ -337,21 +338,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
   let nativePlaybackRevision = 1;
-  const markLiveExternalProcessorsDegraded = async (message: string) => {
-    const currentProjectId = projectId();
-    if (!isLocalId("project", currentProjectId)) return;
-    const updatedAt = Date.now();
-    const reason = `Native VST3 playback failed; the plug-in was bypassed to prevent browser processing. ${message}`.slice(0, 512);
-    const processors = await listLocalExternalProcessors(currentProjectId);
-    await Promise.all(processors
-      .filter((processor) => !processor.bypassed)
-      .map((processor) => setLocalExternalProcessor(currentProjectId, {
-        ...processor,
-        bypassed: true,
-        health: { state: "degraded", reason, updatedAt },
-        updatedAt,
-      })));
-  };
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
     context?: LivePlaybackCompileContext,
@@ -607,7 +593,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     const rebuild = restartTimelineSchedule(tracks, {
       rebuildBackend: true,
       ...(intent ?? captureStructuralPlaybackIntent()),
-      ...(instrumentOverride ? { instrumentOverride } : {}),
+      instrumentOverride: instrumentOverride ? instrumentOverride : undefined,
     });
     return rebuild;
   };
@@ -615,8 +601,8 @@ const Timeline: Component<TimelineProps> = (props) => {
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
     if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
-        console.error("[Timeline] failed to rebuild prepared playback after clip edit", error);
+      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
+        console.error("[Timeline] failed to rebuild prepared playback after clip edit", cause);
       });
       return;
     }
@@ -632,20 +618,20 @@ const Timeline: Component<TimelineProps> = (props) => {
     );
     audioEngine.cancelAutomationSchedules();
     audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-      ...(lenOk ? { horizonSec: end - playheadSec() } : {}),
+      horizonSec: lenOk ? end - playheadSec() : undefined,
       tracks: renderTracks(),
     });
   }
 
   function rescheduleTimeline() {
     if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
-        console.error("[Timeline] failed to rebuild prepared playback after structural edit", error);
+      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
+        console.error("[Timeline] failed to rebuild prepared playback after structural edit", cause);
       });
       return;
     }
-    if (isPlaying()) restartTimelineSchedule(renderTracks()).catch((error: unknown) => {
-      console.error("[Timeline] failed to reschedule legacy playback", error);
+    if (isPlaying()) restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
+      console.error("[Timeline] failed to reschedule legacy playback", cause);
     });
   }
 
@@ -1403,15 +1389,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
     setLoopEnabled((prev) => !prev);
     if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((error: unknown) => {
-        console.error("[Timeline] failed to reconcile loop playback", error);
+      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
+        console.error("[Timeline] failed to reconcile loop playback", cause);
         audioEngine.onTransportPause();
         audioEngine.stopAllSources();
         setLoopEnabled(false);
       });
     } else if (isPlaying()) {
-      void restartTimelineSchedule(renderTracks()).catch((error: unknown) => {
-        console.error("[Timeline] failed to reschedule loop playback", error);
+      void restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
+        console.error("[Timeline] failed to reschedule loop playback", cause);
       });
     }
   };
@@ -2081,11 +2067,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           && !isPreparingPlayback()) return;
         const tracks = renderTracks();
         const rebuild = rebuildPlaybackBackend(tracks, undefined, { targetId, instrument });
-        void rebuild.catch((error: unknown) => {
+        void rebuild.catch((cause: unknown) => {
           notify(
             "Native playback rebuild failed",
-            error instanceof Error
-              ? error.message
+            cause instanceof Error
+              ? cause.message
               : "The active playback graph could not be rebuilt for the instrument insertion.",
           );
         });
@@ -2127,20 +2113,20 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (processor.bypassed === previous.bypassed) return;
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
         if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
-        void rebuildPlaybackBackend(renderTracks(), intent).catch((error: unknown) => {
+        void rebuildPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
           notify(
             "Native playback rebuild failed",
-            error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",
+            cause instanceof Error ? cause.message : "The active native playback graph could not be rebuilt.",
           );
         });
       },
       onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
         if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
-        void rebuildPlaybackBackend(renderTracks(), intent).catch((error: unknown) => {
+        void rebuildPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
           notify(
             "Native playback rebuild failed",
-            error instanceof Error ? error.message : "The active native playback graph could not be rebuilt.",
+            cause instanceof Error ? cause.message : "The active native playback graph could not be rebuilt.",
           );
         });
       },

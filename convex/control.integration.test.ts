@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { canonicalRecoveryPayloadV1, controlCapabilitiesV1, hashRecoveryPayloadSyncV1, parseCapturedRecoveryPayload, parseControlPreviewRequestV1, parseRecoveryPayload, planControlRequestV1, projectSnapshotSchemaV1 } from "@daw-browser/control";
+import { canonicalRecoveryPayloadV1, controlCapabilitiesV1, hashRecoveryPayloadSyncV1, parseCapturedRecoveryPayload, parseControlPreviewRequestV1, parseRecoveryPayload, planControlRequestV1, projectSnapshotSchemaV1, type ControlActionV1 } from "@daw-browser/control";
 import {
   automationTargetKey,
   createDefaultSynthParams,
@@ -749,7 +749,7 @@ test("restores effect, instrument, arpeggiator, automation, and sidechain payloa
     });
     return { utility, compressor, instrument, arpeggiator };
   });
-  const ref = (id: Id<"tracks"> | Id<"effects">): { source: "persisted"; id: string } => ({ source: "persisted", id: String(id) });
+  const ref = (id: Id<"tracks"> | Id<"effects">) => ({ source: "persisted" satisfies "persisted", id: String(id) });
   const destructive = [
     { kind: "effect.remove", target: { kind: "track", track: ref(target) }, effect: ref(ids.utility), effectKind: "utility" },
     { kind: "instrument.remove", target: { kind: "track", track: ref(target) } },
@@ -1293,7 +1293,10 @@ test("recovery locks appended tracks whose indices would shift before writes", a
   const descriptor = deletion.recoveries[0];
   if (!descriptor) throw new Error("Expected recovery descriptor.");
   const appended = await addTrack(t, { name: "Appended", index: 1, lockedBy: "other-user" });
-  const action = { kind: "recovery.restore", recovery: { id: descriptor.id } };
+  const action = {
+    kind: "recovery.restore",
+    recovery: { id: descriptor.id },
+  } satisfies ControlActionV1;
   const before = await t.run(async (ctx) => ({
     tracks: await ctx.db.query("tracks").collect(),
     approvals: await ctx.db.query("controlApprovals").collect(),
@@ -1335,7 +1338,10 @@ test("track recovery restores canonical contiguous order matching its preview", 
   if (!descriptor) throw new Error("Expected recovery descriptor.");
   await addTrack(t, { name: "Appended one", index: 2 });
   await addTrack(t, { name: "Appended two", index: 3 });
-  const action = { kind: "recovery.restore", recovery: { id: descriptor.id } };
+  const action = {
+    kind: "recovery.restore",
+    recovery: { id: descriptor.id },
+  } satisfies ControlActionV1;
   await t.withIdentity({ subject: owner }).query(api.control.previewV1, {
     request: { version: "v1", projectId, actions: [action] },
   });

@@ -32,7 +32,11 @@ import {
   type LoFiParamsEnvelope,
   type PhaserParamsEnvelope,
   type TremoloParamsEnvelope,
-  type UtilityParamsEnvelope,isLocalId
+  type UtilityParamsEnvelope,
+  isJsonObject,
+  isLocalId,
+  type JsonObject,
+  type JsonValue,
 } from "@daw-browser/shared";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
@@ -62,8 +66,8 @@ type PersistedAudioEffectDescriptor<Params> = {
   instanceId: (targetId: string) => string | undefined;
   persistLocal: (projectId: string, targetId: string, params: Params, instanceId: string) => Promise<void>;
   removeLocal: (projectId: string, targetId: string, instanceId: string) => Promise<void>;
-  publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params, instanceId: string) => Promise<unknown>;
-  publishMasterParams: (projectId: string, userId: string, params: Params, instanceId: string) => Promise<unknown>;
+  publishTrackParams: (projectId: string, userId: string, trackId: string, params: Params, instanceId: string) => Promise<void>;
+  publishMasterParams: (projectId: string, userId: string, params: Params, instanceId: string) => Promise<void>;
   commitTrackParams: (trackId: string, instanceId: string, previous: Params, next: Params, projectId?: string) => void;
   commitMasterParams: (instanceId: string, previous: Params, next: Params, projectId?: string) => void;
 };
@@ -74,13 +78,13 @@ type EffectsPanelAudioEffectsContext = {
   userId: Accessor<string | undefined>;
   roomEffects: Accessor<RoomEffectRow[] | undefined>;
   sidechainRoutes?: Accessor<ExternalSidechainRoute[]>;
-  persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
+  persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<void>;
   canWriteCurrentTargetEffects: Accessor<boolean>;
   usesLegacyAudioEngine?: Accessor<boolean>;
   projectGeneration?: Accessor<number>;
   onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
   onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
-  persistAudioEffectOrder?: (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
+  persistAudioEffectOrder?: (targetId: string, order: AudioEffectInstance[]) => void | Promise<void>;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   onLocalSaveFailed?: (message: string) => void;
 };
@@ -239,7 +243,7 @@ export function createEffectsPanelAudioDevice(
     normalize: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams,
   });
   const isLocalProject = localEq.isLocalProject;
-  const [localAllEffects, setLocalAllEffects] = createSignal<LocalEffectRow[] | undefined>();
+  const [localAllEffects, setLocalAllEffects] = createSignal<LocalEffectRow<JsonValue>[] | undefined>();
 
   createEffect(() => {
     const projectId = context.projectId();
@@ -268,11 +272,13 @@ export function createEffectsPanelAudioDevice(
     });
   };
 
-  const publishEffectOperation = (
+  const publishEffectOperation = async (
     projectId: string,
     userId: string,
     operation: SharedTimelineOperation,
-  ) => publishDurableSharedTimelineOperation({ projectId, userId, operation });
+  ) => {
+    await publishDurableSharedTimelineOperation({ projectId, userId, operation });
+  };
 
   function createAudioEffectState<Params>(descriptor: PersistedAudioEffectDescriptor<Params>) {
     return createPersistedEffectState<RoomEffectRow | LocalEffectRow<Params> | undefined, Params>({
@@ -476,10 +482,13 @@ export function createEffectsPanelAudioDevice(
   const pendingSidechainWrites = new Set<Promise<void>>();
   let sidechainAttempt = 0;
 
-  const objectParamInput = (params: unknown): object => (params && typeof params === "object" ? params : {});
+  type EffectParamsInput = RoomEffectRow["params"] | AudioEffectParams | null | undefined;
+  const objectParamInput = (cause: EffectParamsInput): JsonObject => (
+    isJsonObject(cause) ? cause : {}
+  );
 
-  const normalizeParamsForKind = (kind: AudioEffectKind, params: unknown): AudioEffectParams => {
-    const input = objectParamInput(params);
+  const normalizeParamsForKind = (kind: AudioEffectKind, cause: EffectParamsInput): AudioEffectParams => {
+    const input = objectParamInput(cause);
     if (kind === "utility") return normalizeUtilityParamsEnvelope(input);
     if (kind === "autofilter") return AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input);
     if (kind === "gate") return normalizeGateParamsEnvelope(input);
@@ -1028,10 +1037,10 @@ export function createEffectsPanelAudioDevice(
       : context.audioEngine().setTrackFxInstances(targetId, instances);
   }
 
-  const persistInstanceParams = async (targetId: string, instanceId: string, kind: AudioEffectKind, params: unknown) => {
+  const persistInstanceParams = async (targetId: string, instanceId: string, kind: AudioEffectKind, cause: EffectParamsInput) => {
     const projectId = context.projectId();
     if (!projectId) return;
-    const input = objectParamInput(params);
+    const input = objectParamInput(cause);
     if (isLocalId("project", projectId)) {
       if (kind === "utility") {
         await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeUtilityParamsEnvelope(input), { instanceId });
@@ -1159,8 +1168,8 @@ export function createEffectsPanelAudioDevice(
         await context.onEffectParamsPreview?.(latest);
       }
     };
-    if (typeof requestAnimationFrame === "function") {
-      pendingEqPreviewFrames.set(key, requestAnimationFrame(flush));
+    if (globalThis.requestAnimationFrame) {
+      pendingEqPreviewFrames.set(key, globalThis.requestAnimationFrame(flush));
     } else {
       void flush();
     }

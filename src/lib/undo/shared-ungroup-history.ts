@@ -3,9 +3,15 @@ import {
   automationTargetKey,
   normalizeSharedUngroupRestoreAutomation,
   normalizeSharedUngroupRestoreEffects,
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
   type SharedUngroupRestoreAutomation,
   type SharedUngroupRestoreEffect,
   type AutomationEnvelope,
+  type JsonObject,
+  type JsonValue,
 } from '@daw-browser/shared'
 
 import { buildTrackUngroupHistoryEntry } from './builders'
@@ -33,32 +39,30 @@ type SharedUngroupResult = {
   sidechainRoutes: ExternalSidechainRoute[]
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+const isRecord = (value: JsonValue): value is JsonObject => isJsonObject(value)
 
-const readSendTap = (value: unknown): 'pre-fx' | 'pre-fader' | 'post-fader' | undefined => (
+const readSendTap = (value: JsonValue): 'pre-fx' | 'pre-fader' | 'post-fader' | undefined => (
   value === 'pre-fx' || value === 'pre-fader' || value === 'post-fader' ? value : undefined
 )
 
-export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | null => {
+export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult | null => {
   if (!isRecord(value) || value.status !== 'applied' || !isRecord(value.group) || !Array.isArray(value.children)) return null
   const group = value.group
   if (
-    (group.name !== undefined && typeof group.name !== 'string')
-    || typeof group.index !== 'number'
-    || typeof group.volume !== 'number'
-    || typeof group.muted !== 'boolean'
-    || typeof group.soloed !== 'boolean'
+    (group.name !== undefined && !isJsonString(group.name))
+    || !isJsonNumber(group.index)
+    || !isJsonNumber(group.volume)
+    || !isJsonBoolean(group.muted)
+    || !isJsonBoolean(group.soloed)
     || !Array.isArray(group.sends)
   ) return null
   const children = value.children.flatMap((child) => (
-    isRecord(child) && typeof child.trackId === 'string'
-      ? [{ trackId: child.trackId, nextOutputTargetId: typeof child.nextOutputTargetId === 'string' ? child.nextOutputTargetId : undefined }]
+    isRecord(child) && isJsonString(child.trackId)
+      ? [{ trackId: child.trackId, nextOutputTargetId: isJsonString(child.nextOutputTargetId) ? child.nextOutputTargetId : undefined }]
       : []
   ))
   const sends = group.sends.flatMap((send) => (
-    isRecord(send) && typeof send.targetId === 'string' && typeof send.amount === 'number'
+    isRecord(send) && isJsonString(send.targetId) && isJsonNumber(send.amount)
       && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
       ? [{ targetId: send.targetId, amount: send.amount, tap: readSendTap(send.tap) }]
       : []
@@ -69,9 +73,9 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   if (!Array.isArray(sidechainRouteInput)) return null
   const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
     isRecord(route)
-    && typeof route.sourceTrackId === 'string'
-    && typeof route.targetTrackId === 'string'
-    && typeof route.effectInstanceId === 'string'
+    && isJsonString(route.sourceTrackId)
+    && isJsonString(route.targetTrackId)
+    && isJsonString(route.effectInstanceId)
     && route.sourceTrackId.length > 0
     && route.targetTrackId.length > 0
     && route.effectInstanceId.length > 0
@@ -93,17 +97,17 @@ export const readSharedUngroupResult = (value: unknown): SharedUngroupResult | n
   return {
     status: 'applied',
     group: {
-      name: typeof group.name === 'string' ? group.name : undefined,
-      historyRef: typeof group.historyRef === 'string' ? group.historyRef : undefined,
+      name: isJsonString(group.name) ? group.name : undefined,
+      historyRef: isJsonString(group.historyRef) ? group.historyRef : undefined,
       index: group.index,
-      kind: typeof group.kind === 'string' ? group.kind : undefined,
-      parentGroupId: typeof group.parentGroupId === 'string' ? group.parentGroupId : undefined,
-      collapsed: typeof group.collapsed === 'boolean' ? group.collapsed : undefined,
-      color: typeof group.color === 'string' ? group.color : undefined,
+      kind: isJsonString(group.kind) ? group.kind : undefined,
+      parentGroupId: isJsonString(group.parentGroupId) ? group.parentGroupId : undefined,
+      collapsed: isJsonBoolean(group.collapsed) ? group.collapsed : undefined,
+      color: isJsonString(group.color) ? group.color : undefined,
       volume: group.volume,
       muted: group.muted,
       soloed: group.soloed,
-      outputTargetId: typeof group.outputTargetId === 'string' ? group.outputTargetId : undefined,
+      outputTargetId: isJsonString(group.outputTargetId) ? group.outputTargetId : undefined,
       sends,
     },
     children,

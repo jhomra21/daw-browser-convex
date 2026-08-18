@@ -3,6 +3,7 @@ import type { FunctionReturnType } from "convex/server";
 import {
   AUDIO_EFFECT_CONTRACTS,
   isAudioEffectKind,
+  isJsonObject,
   type AudioEffectKind,
   type CompressorParams,
   type ArpeggiatorParams,
@@ -11,7 +12,11 @@ import {
   type ReverbParams,
   type SaturatorParams,
   type TrackInstrumentParams,
+  type JsonObject,
+  type JsonValue,
   isLocalId,
+  arpeggiatorParamsSchema,
+  normalizeArpeggiatorParams,
 } from "@daw-browser/shared";
 import type { AudioEffectRuntimeInstance, AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { convexApi } from "~/lib/convex";
@@ -49,7 +54,7 @@ type UseEffectsPanelAudioSyncOptions = {
 };
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
-type SyncedEffectRow = RoomEffectRow | LocalEffectRow;
+type SyncedEffectRow = RoomEffectRow | LocalEffectRow<JsonValue>;
 
 type UseEffectsPanelAudioSyncReturn = {
   spectrum: Accessor<SpectrumFrame | null>;
@@ -105,26 +110,27 @@ export const createSpectrumSubscriptionOwner = (
   return { update, dispose };
 };
 
-type PendingWork = Promise<unknown>;
+type PendingWork = Promise<void>;
 
 type EffectsPanelReadinessOptions = {
-  loadLocalEffects: (projectId: string) => Promise<LocalEffectRow[]>;
+  loadLocalEffects: (projectId: string) => Promise<LocalEffectRow<JsonValue>[]>;
   currentProjectId: Accessor<string | undefined>;
-  onLocalEffectsLoaded?: (projectId: string, rows: LocalEffectRow[]) => void;
+  onLocalEffectsLoaded?: (projectId: string, rows: LocalEffectRow<JsonValue>[]) => void;
 };
 
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+const toError = (cause: unknown) => cause instanceof Error ? cause : new Error(String(cause));
+const errorMessage = (error: Error | undefined) => error?.message ?? "Unknown effects readiness failure.";
 
 export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessOptions) => {
   type ProjectState = {
     generation: number;
     localLoad?: Promise<void>;
-    localError?: unknown;
+    localError?: Error;
     localLoaded: boolean;
     rowsProcessed: boolean;
     remoteStatus: "pending" | "error" | "success";
     remoteDataDefined: boolean;
-    remoteError?: unknown;
+    remoteError?: Error;
   };
 
   const states = new Map<string, ProjectState>();
@@ -181,9 +187,9 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
         options.onLocalEffectsLoaded?.(projectId, rows);
       }
       notify();
-    }).catch((error: unknown) => {
+    }).catch((cause: unknown) => {
       if (state.generation !== generation) return;
-      state.localError = error;
+      state.localError = toError(cause);
       notify();
     });
     state.localLoad = loadPromise;
@@ -194,12 +200,12 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     projectId: string,
     rows: SyncedEffectRow[] | undefined,
     status: "pending" | "error" | "success",
-    error: unknown,
+    cause: unknown,
   ) => {
     const state = stateFor(projectId);
     state.remoteStatus = status;
     state.remoteDataDefined = rows !== undefined;
-    state.remoteError = error;
+    state.remoteError = toError(cause);
     if (status !== "success" || rows === undefined) state.rowsProcessed = false;
     notify();
   };
@@ -296,7 +302,7 @@ export const createPendingWorkOwner = () => {
     while (true) {
       const projectPending = pendingByProject.get(projectId);
       if (!projectPending || projectPending.size === 0) return;
-      await Promise.all([...projectPending]);
+      await Promise.all(projectPending);
     }
   };
 
@@ -371,13 +377,13 @@ export const registerSampledInstrumentWork = (
 const createSyncedAudioEffectInstanceRow = (
   targetId: string,
   kind: AudioEffectKind,
-  params: unknown,
+  cause: SyncedEffectRow["params"],
   instanceId?: string,
   index?: number
 ): SyncedAudioEffectInstanceRow => {
   if (!instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
   const id = instanceId;
-  const input = params && typeof params === "object" ? params : {};
+  const input: JsonObject = isJsonObject(cause) ? cause : {};
   if (kind === "utility") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(input), index };
   if (kind === "autofilter") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), index };
   if (kind === "eq") return { targetId, id, kind, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(input), index };
@@ -452,7 +458,7 @@ const collectSyncedAudioEffectInstances = (effects: SyncedEffectRow[]) => {
 export function useEffectsPanelAudioSync(
   options: UseEffectsPanelAudioSyncOptions,
 ): UseEffectsPanelAudioSyncReturn {
-  const [localEffects, setLocalEffects] = createSignal<LocalEffectRow[] | undefined>(undefined);
+  const [localEffects, setLocalEffects] = createSignal<LocalEffectRow<JsonValue>[] | undefined>(undefined);
   const readinessOwner = createEffectsPanelReadinessOwner({
     loadLocalEffects: listLocalEffects,
     currentProjectId: options.projectId,
@@ -469,9 +475,9 @@ export function useEffectsPanelAudioSync(
     const isCurrentProject = () => options.projectId() === projectId;
     const reloadLocalEffects = (force = false) => readinessOwner.startLocalLoad(
       projectId,
-      () => listLocalEffects(projectId).catch((error: unknown) => {
+      () => listLocalEffects(projectId).catch((cause: unknown) => {
         if (isCurrentProject()) setLocalEffects([]);
-        throw error;
+        throw cause;
       }),
       (rows) => {
         if (isCurrentProject()) setLocalEffects(rows);
@@ -564,7 +570,10 @@ export function useEffectsPanelAudioSync(
           continue;
         }
         if (row.effect === "arp") {
-          arpByTrackId.set(row.targetId, row.params);
+          const parsed = arpeggiatorParamsSchema.safeParse(row.params);
+          if (parsed.success) {
+            arpByTrackId.set(row.targetId, normalizeArpeggiatorParams(parsed.data));
+          }
           continue;
         }
         continue;
@@ -575,7 +584,9 @@ export function useEffectsPanelAudioSync(
         const instrument = readInstrumentParamsFromEffectRow(row);
         if (instrument) instrumentByTrackId.set(trackId, instrument);
       }
-      if (row.type === "arpeggiator" && row.params) arpByTrackId.set(trackId, row.params);
+      if (row.type === "arpeggiator" && row.params) {
+        arpByTrackId.set(trackId, normalizeArpeggiatorParams(row.params));
+      }
     }
 
     const effectiveInstrumentByTrackId = new Map(instrumentByTrackId);

@@ -830,7 +830,7 @@ export const createNativeScheduleCoordinator = (input: {
     const { marker, operation, release } = beginRefill(refillFrame)
     void operation.then(() => {
       refillFailureCount = 0
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       if (disposed || scheduleComplete || refillFaulted) return
       const fault = error instanceof Error ? error : new Error("Native schedule refill failed.")
       refillFailureCount += 1

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
+import type { CallToolRequest, InitializeRequest, ListToolsRequest } from "@modelcontextprotocol/sdk/spec.types.js"
 import { controlCapabilitiesV1 } from "@daw-browser/control"
 import { ControlApiError } from "@daw-browser/control-sdk"
 import { createControlMcpServer, type ControlService } from "./index"
@@ -37,7 +38,10 @@ const service = (overrides: Partial<ControlService> = {}): ControlService => ({
   ...overrides,
 })
 
-const call = (name: string, arguments_: Record<string, unknown>) => ({
+type TestRequest = CallToolRequest | InitializeRequest | ListToolsRequest
+type ToolArguments = NonNullable<CallToolRequest["params"]["arguments"]>
+
+const call = (name: string, arguments_: ToolArguments): CallToolRequest => ({
   jsonrpc: "2.0",
   id: 1,
   method: "tools/call",
@@ -76,7 +80,7 @@ const hostTools: HostToolService = {
 }
 
 const request = async (
-  body: unknown,
+  body: TestRequest,
   options: {
     service?: ControlService
     write?: boolean
@@ -92,10 +96,13 @@ const request = async (
   const selectedHostTools = options.hostTools ?? (options.host ? hostTools : undefined)
   const server = createControlMcpServer(options.service ?? service(), {
     authorize: options.authorize ?? ((scope) => scope === "control:read" || options.write === true),
-    ...(selectedHostTools ? { hostTools: selectedHostTools } : {}),
-    ...(options.hostFactory ? { hostService: options.hostFactory } : {}),
-    ...(selectedHostService ? { hostService: async () => ({ service: selectedHostService, close: () => undefined }) } : {}),
-    ...(options.cloudService ? { cloudService: options.cloudService } : {}),
+    hostTools: selectedHostTools ? selectedHostTools : undefined,
+    hostService: options.hostFactory
+      ? options.hostFactory
+      : selectedHostService
+        ? async () => ({ service: selectedHostService, close: () => undefined })
+        : undefined,
+    cloudService: options.cloudService ? options.cloudService : undefined,
   })
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -574,8 +581,8 @@ describe("control MCP tools", () => {
   test("preserves host control errors and safely hides host transport failures", async () => {
     const controlFailure = { version: "v1", code: "validation", message: "Invalid action.", actionIndex: 0 }
     let closeCount = 0
-    const factory = (failure: unknown) => async () => ({
-      service: service({ preview: async () => { throw failure } }),
+    const factory = (cause: unknown) => async () => ({
+      service: service({ preview: async () => { throw cause } }),
       close: () => { closeCount += 1 },
     })
     const arguments_ = { target: "host", version: "v1", projectId: "project-1", actions: [{ kind: "project.rename", name: "Next" }] }

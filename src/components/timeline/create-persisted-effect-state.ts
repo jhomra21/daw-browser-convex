@@ -24,8 +24,8 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   serializeParams: (params: TParams) => string
   applyToEngine: (targetId: string, params: TParams) => void | Promise<void>
   clearFromEngine?: (targetId: string) => void
-  persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<unknown>
-  persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<unknown>
+  persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<void>
+  persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<void>
   clearAfterPersistRemove?: (context: PersistedEffectContext) => boolean
   createPersistContext?: () => PersistedEffectContext
   onParamsApplied?: (targetId: string, previous: TParams | undefined, next: TParams) => void
@@ -42,7 +42,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
     source: 'remote',
     context?: PersistedEffectContext,
   ) => void
-  onPersistError?: (error: unknown) => void
+  onPersistError?: (cause: unknown) => void
   onParamsCommitted?: (
     targetId: string,
     previous: TParams | undefined,
@@ -191,14 +191,14 @@ export function createPersistedEffectState<TRow, TParams>(
             persistContextByTarget.delete(key)
           }
         },
-        (error) => {
+        (cause) => {
           if (persistAttemptByTarget.get(key) !== attempt) return
           const current = untrack(() => draftByTarget()[key])
           if (!current) return
           if (options.serializeParams(current) !== serialized) return
-          options.onPersistError?.(error)
+          options.onPersistError?.(cause)
           persistAttemptByTarget.delete(key)
-          throw error
+          throw cause
         },
       )
       .then(() => undefined)
@@ -233,14 +233,14 @@ export function createPersistedEffectState<TRow, TParams>(
             clearDeleted(key)
           }
         },
-        (error) => {
+        (cause) => {
           if (persistAttemptByTarget.get(key) !== attempt) return
-          options.onPersistError?.(error)
+          options.onPersistError?.(cause)
           persistAttemptByTarget.delete(key)
           persistContextByTarget.delete(key)
           targetByKey.delete(key)
           clearDeleted(key)
-          throw error
+          throw cause
         },
       )
       .then(() => undefined)
@@ -323,9 +323,9 @@ export function createPersistedEffectState<TRow, TParams>(
         persistOrSchedule(targetId, key, next)
         options.onApplyCompleted?.(targetId, previous, next, persistContextByTarget.get(key))
       })
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
-        options.onPersistError?.(error)
+        options.onPersistError?.(cause)
       })
   }
 
@@ -343,9 +343,9 @@ export function createPersistedEffectState<TRow, TParams>(
       pendingApplyByTarget.delete(key)
       appliedEngineStateByTarget.set(key, undefined)
       appliedEngineParamsByTarget.set(key, undefined)
-    }).catch((error: unknown) => {
+    }).catch((cause: unknown) => {
       if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
-      options.onPersistError?.(error)
+      options.onPersistError?.(cause)
     })
   }
 
@@ -392,10 +392,10 @@ export function createPersistedEffectState<TRow, TParams>(
               : options.serializeParams(remoteSnapshot[key]),
           }
         : undefined)
+      const hasLocalState = untrack(() => Boolean(draftByTarget()[key] || deletedByTarget()[key]))
       const shouldReplay = (
         currentRemote !== undefined
-        && !draftByTarget()[key]
-        && !deletedByTarget()[key]
+        && !hasLocalState
         && currentRemote.serialized !== serialized
       )
       if (shouldReplay) {
@@ -405,11 +405,11 @@ export function createPersistedEffectState<TRow, TParams>(
       if (currentRemote?.serialized === serialized && next !== undefined) {
         options.onEngineStateChanged?.(targetId, previous, next, 'remote', applyContext)
       }
-    }).catch((error: unknown) => {
+    }).catch((cause: unknown) => {
       if (pendingApplyByTarget.get(key) !== apply) return
       pendingApplyByTarget.delete(key)
       pendingRemoteApplyByTarget.delete(key)
-      options.onPersistError?.(error)
+      options.onPersistError?.(cause)
       const remoteSnapshot = untrack(() => remoteByTarget())
       const currentRemote = key in remoteSnapshot
         ? {
@@ -419,10 +419,10 @@ export function createPersistedEffectState<TRow, TParams>(
               : options.serializeParams(remoteSnapshot[key]),
           }
         : undefined
+      const hasLocalState = untrack(() => Boolean(draftByTarget()[key] || deletedByTarget()[key]))
       if (
         currentRemote !== undefined
-        && !draftByTarget()[key]
-        && !deletedByTarget()[key]
+        && !hasLocalState
         && currentRemote.serialized !== serialized
       ) {
         applyRemoteToEngine(targetId, currentRemote.next, key)

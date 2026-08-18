@@ -8,6 +8,7 @@ import { resolveWorkletModuleUrl, resolvePortableWasmManifestUrl } from './workl
 import {
   portableExportWorkerProtocolVersion,
   type PortableExportWorkerRequest,
+  type PortableExportWorkerResponse,
   type PortableExportWorkerSnapshot,
 } from './portable-export-worker-protocol'
 
@@ -23,7 +24,7 @@ export type PortableExportWorkerRenderRequest = {
 }
 
 export type PortableExportWorkerLike = {
-  onmessage: ((event: MessageEvent<unknown>) => void) | null
+  onmessage: ((event: MessageEvent<PortableExportWorkerResponse>) => void) | null
   onerror: ((event: ErrorEvent) => void) | null
   postMessage: (message: PortableExportWorkerRequest, transfer: Transferable[]) => void
   terminate: () => void
@@ -48,22 +49,6 @@ const createPortableExportWorkerLike = (): PortableExportWorkerLike => {
     terminate: () => worker.terminate(),
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const isChunk = (value: Record<string, unknown>): value is Record<string, unknown> & {
-  type: 'chunk'
-  jobId: number
-  index: number
-  pcm: PlanarPcm
-} => value.type === 'chunk'
-  && typeof value.jobId === 'number'
-  && typeof value.index === 'number'
-  && isRecord(value.pcm)
-  && typeof value.pcm.frameCount === 'number'
-  && Array.isArray(value.pcm.planes)
-  && value.pcm.planes.every((plane) => plane instanceof Float32Array)
 
 /**
  * Thin client boundary for the static dedicated Worker. It owns no export
@@ -91,16 +76,14 @@ export class PortableExportWorker {
     worker.onerror = () => this.fail(new Error('Portable export Worker failed.'))
   }
 
-  private onMessage(value: unknown) {
-    if (!isRecord(value) || value.version !== portableExportWorkerProtocolVersion || !this.active) return
+  private onMessage(value: PortableExportWorkerResponse) {
+    if (value.version !== portableExportWorkerProtocolVersion || value.type === 'disposed' || !this.active) return
     if (value.jobId !== this.active.jobId) return
-    if (isChunk(value)) {
+    if (value.type === 'chunk') {
       this.active.request.onChunk(value.index, value.pcm)
       return
     }
-    if (value.type === 'progress'
-      && typeof value.completedFrames === 'number'
-      && typeof value.totalFrames === 'number') {
+    if (value.type === 'progress') {
       this.active.request.onProgress?.(value.completedFrames, value.totalFrames)
       return
     }
@@ -114,7 +97,7 @@ export class PortableExportWorker {
       this.fail(new DOMException('Portable export was cancelled.', 'AbortError'))
       return
     }
-    if (value.type === 'error' && typeof value.message === 'string') this.fail(new Error(value.message))
+    if (value.type === 'error') this.fail(new Error(value.message))
   }
 
   private fail(error: Error) {

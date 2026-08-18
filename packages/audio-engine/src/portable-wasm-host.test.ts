@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import type { PortableWasmStatusMessage } from './portable-wasm-protocol'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
@@ -8,10 +9,10 @@ const createTransportHost = async (
   graphSetTransport: (epoch: number, running: number, frame: bigint) => number,
 ) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
-  const messages: unknown[] = []
+  const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
   host.ready = true
@@ -33,19 +34,19 @@ const createTransportHost = async (
 
 test('the portable Wasm host exposes the same explicit API to worklet and Worker callers', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const statuses: unknown[] = []
+  const statuses: PortableWasmStatusMessage[] = []
   const createHost = () => new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => statuses.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => statuses.push(message),
     close: () => {},
   })
   const workletHost = createHost()
   const workerHost = createHost()
 
-  expect(typeof workletHost.initialize).toBe('function')
-  expect(typeof workerHost.initialize).toBe('function')
-  expect(typeof(workletHost.handleMessage)).toBe('function')
-  expect(typeof(workerHost.process)).toBe('function')
+  expect(workletHost.initialize).toBeInstanceOf(Function)
+  expect(workerHost.initialize).toBeInstanceOf(Function)
+  expect(workletHost.handleMessage).toBeInstanceOf(Function)
+  expect(workerHost.process).toBeInstanceOf(Function)
   expect(await workerHost.initialize({
     wasmBytes: new ArrayBuffer(0),
     contractHash: 'test-contract',
@@ -89,10 +90,10 @@ test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', as
   for (const hostUrlToUse of [hostUrl, hostV2Url]) {
     const { DawPortableAudioCoreHost } = await import(hostUrlToUse.href)
     const calls: unknown[][] = []
-    const messages: unknown[] = []
+    const messages: PortableWasmStatusMessage[] = []
     const host = new DawPortableAudioCoreHost({
       sampleRate: 48_000,
-      postMessage: (message: unknown) => messages.push(message),
+      postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
       close: () => undefined,
     })
     host.ready = true
@@ -249,10 +250,10 @@ test('the v2 host preserves a pending transport when a newer core command fails'
 
 test('the portable host captures bounded planar PCM only when explicitly configured', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const messages: unknown[] = []
+  const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
@@ -293,10 +294,10 @@ test('the portable host captures bounded planar PCM only when explicitly configu
 
 test('the actual portable Wasm host renders built-in effects without native hooks', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const messages: unknown[] = []
+  const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
@@ -392,10 +393,10 @@ test('the actual portable Wasm host renders built-in effects without native hook
 
 test('the portable host drains one block per acknowledgement before finalizing', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const messages: unknown[] = []
+  const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
@@ -417,16 +418,14 @@ test('the portable host drains one block per acknowledgement before finalizing',
     host.process([[new Float32Array(128)]], [[new Float32Array(128), new Float32Array(128)]])
   }
   host.handleMessage({ version: 1, type: 'recording-capture-finalize', stopFrame: 128 })
-  expect(messages.filter((message) => typeof message === 'object' && message !== null
-    && 'type' in message && message.type === 'recording-capture-block')).toHaveLength(1)
+  expect(messages.filter((message) => message.type === 'recording-capture-block')).toHaveLength(1)
   expect(messages).not.toContainEqual(expect.objectContaining({
     type: 'recording-capture-applied',
     action: 'finalized',
   }))
 
   host.handleMessage({ version: 1, type: 'recording-capture-drain' })
-  expect(messages.filter((message) => typeof message === 'object' && message !== null
-    && 'type' in message && message.type === 'recording-capture-block')).toHaveLength(2)
+  expect(messages.filter((message) => message.type === 'recording-capture-block')).toHaveLength(2)
   expect(messages).toContainEqual(expect.objectContaining({
     type: 'recording-capture-applied',
     action: 'finalized',
@@ -435,10 +434,10 @@ test('the portable host drains one block per acknowledgement before finalizing',
 
 test('installed schedules advance bounded cursors across half-open blocks and seeks', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const messages: unknown[] = []
+  const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
   host.ready = true

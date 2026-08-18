@@ -47,7 +47,7 @@ const Granular: Component<GranularProps> = (props) => {
           <label>Reverse <input type="number" min="0" max="1" step="0.01" value={props.params.reverseProbability} onChange={(event) => props.onUpdate({ reverseProbability: Number(event.currentTarget.value) })} /></label>
           <label>Spread <input type="number" min="0" max="1" step="0.01" value={props.params.stereoSpread} onChange={(event) => props.onUpdate({ stereoSpread: Number(event.currentTarget.value) })} /></label>
           <label>Seed <input type="number" min="1" max="2147483647" value={props.params.seed} onChange={(event) => props.onUpdate({ seed: Number(event.currentTarget.value) })} /></label>
-          <label>Window <select value={props.params.windowShape} onChange={(event) => props.onUpdate({ windowShape: event.currentTarget.value === "tukey" ? "tukey" : event.currentTarget.value === "gaussian" ? "gaussian" : "hann" })}><option value="hann">Hann</option><option value="tukey">Tukey</option><option value="gaussian">Gaussian</option></select></label>
+          <label>Window <select value={props.params["windowShape"]} onChange={(event) => props.onUpdate({ ["windowShape"]: event.currentTarget.value === "tukey" ? "tukey" : event.currentTarget.value === "gaussian" ? "gaussian" : "hann" })}><option value="hann">Hann</option><option value="tukey">Tukey</option><option value="gaussian">Gaussian</option></select></label>
           <label class="flex items-center gap-1"><input type="checkbox" checked={props.params.freeze} onChange={(event) => props.onUpdate({ freeze: event.currentTarget.checked })} /> Freeze</label>
         </div>
       </div>

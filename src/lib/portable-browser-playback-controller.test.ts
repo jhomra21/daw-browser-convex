@@ -69,7 +69,7 @@ const compilation = () => {
   }
 }
 
-const context = { sampleRate: 48_000 } as AudioContext
+const context: AudioContext = Object.assign(Object.create(null), { sampleRate: 48_000 })
 
 const selected: PortableWasmBackendSelection = {
   selected: true,

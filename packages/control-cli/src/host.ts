@@ -20,6 +20,7 @@ import {
   type HostErrorV1,
   type HostErrorV2,
   type DesktopOperationV1,
+  type DesktopJsonValue,
   type DesktopProtocolVersion,
 } from "@daw-browser/desktop-protocol"
 import { controlErrorSchemaV1, type ControlErrorV1 } from "@daw-browser/control"
@@ -136,8 +137,8 @@ const readHostRegistration = async (paths?: HostPaths) => {
 type HostClient = {
   protocolVersion: DesktopProtocolVersion
   capabilities: () => Set<DesktopOperationV1>
-  request: (operation: DesktopOperationV1, input: unknown, deadlineMs?: number) => Promise<unknown>
-  requestV2: (operation: "control.capabilities" | "control.snapshot", input: unknown, deadlineMs?: number) => Promise<unknown>
+  request: (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs?: number) => Promise<DesktopJsonValue>
+  requestV2: (operation: "control.capabilities" | "control.snapshot", input: DesktopJsonValue, deadlineMs?: number) => Promise<DesktopJsonValue>
   close: () => void
 }
 
@@ -151,9 +152,9 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   const socket = connect(registration.address)
   type PendingRequest = {
     operation: DesktopOperationV1
-    input: unknown
+    input: DesktopJsonValue
     mode: "normal" | "chunks" | undefined
-    resolve: (value: unknown) => void
+    resolve: (value: DesktopJsonValue) => void
     reject: (error: Error) => void
     timeout: ReturnType<typeof setTimeout>
     reassembler: ReturnType<typeof createDesktopReplyReassembler>
@@ -196,8 +197,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     closeConnection(new Error("Desktop host handshake deadline exceeded."))
   }, options.handshakeDeadlineMs ?? 5_000)
 
-  const rejectInvalidReply = (id: string, request: PendingRequest, error: unknown, fallback: string) => {
-    const failure = error instanceof Error ? error : new Error(fallback)
+  const rejectInvalidReply = (id: string, request: PendingRequest, failure: Error) => {
     disposeRequest(id, request)
     request.reject(failure)
     closeConnection(failure)
@@ -206,7 +206,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   const settleReply = (
     id: string,
     request: PendingRequest,
-    reply: { result?: unknown; error?: unknown },
+    reply: { result?: DesktopJsonValue; error?: DesktopJsonValue },
   ) => {
     disposeRequest(id, request)
     try {
@@ -219,6 +219,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
           request.reject(new DesktopHostError((protocolVersion === desktopProtocolVersionV2 ? hostErrorSchemaV2 : hostErrorSchemaV1).parse(parsedError)))
         }
       } else {
+        if (reply.result === undefined) throw new Error("Desktop host reply is missing a result.")
         request.resolve(parseDesktopResult(request.operation, reply.result, request.input, protocolVersion))
       }
     } catch (error) {
@@ -256,12 +257,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
       return
     }
     if (payloadByteLength > maxDesktopReplyFrameBytes) {
-      rejectInvalidReply(
-        frame.id,
-        request,
-        new Error("Desktop reply exceeds the frame size limit."),
-        "Desktop reply exceeds the frame size limit.",
-      )
+      rejectInvalidReply(frame.id, request, new Error("Desktop reply exceeds the frame size limit."))
       return
     }
     if (frame.type === "replyChunk") {
@@ -272,12 +268,12 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
         if (!reply) return
         settleReply(frame.id, request, reply)
       } catch (error) {
-        rejectInvalidReply(frame.id, request, error, "Invalid desktop reply chunk.")
+        rejectInvalidReply(frame.id, request, error instanceof Error ? error : new Error("Invalid desktop reply chunk."))
       }
       return
     }
     if (request.mode === "chunks") {
-      rejectInvalidReply(frame.id, request, new Error("Mixed desktop reply framing."), "Mixed desktop reply framing.")
+      rejectInvalidReply(frame.id, request, new Error("Mixed desktop reply framing."))
       return
     }
     request.mode = "normal"
@@ -309,7 +305,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   })
   await hello
   if (closed || socket.destroyed) throw new Error("Desktop host connection closed.")
-  const request = (operation: DesktopOperationV1, input: unknown, deadlineMs = 10_000): Promise<unknown> => {
+  const request = (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs = 10_000): Promise<DesktopJsonValue> => {
     if (closed || socket.destroyed) return Promise.reject(new Error("Desktop host connection closed."))
     if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
     const id = randomBytes(16).toString("hex")

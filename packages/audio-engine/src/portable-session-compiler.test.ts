@@ -258,7 +258,7 @@ test('compiles fixture-proven granular controls and rejects absent or stale asse
     zone: samplerZone,
     seed: 77,
     maxGrains: 2,
-    windowShape: 'gaussian',
+    'windowShape': 'gaussian',
     freeze: true,
     grainSizeMs: 5,
     densityHz: 200,
@@ -273,7 +273,7 @@ test('compiles fixture-proven granular controls and rejects absent or stale asse
     assetId: 'asset:kick:7',
     seed: 77,
     maxGrains: 2,
-    windowShape: 'gaussian',
+    'windowShape': 'gaussian',
     freeze: true,
     pitchSemitones: 12,
   })

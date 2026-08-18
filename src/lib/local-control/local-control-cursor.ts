@@ -1,4 +1,6 @@
 import { canonicalJson } from '@daw-browser/control'
+import { isJsonObject, isJsonNumber, isJsonString, type JsonValue } from '@daw-browser/shared'
+import { z } from 'zod'
 
 type LocalControlCursor = {
   version: 1
@@ -11,17 +13,13 @@ type LocalControlCursor = {
 const maxCursorBytes = 2_048
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const isCursor = (value: unknown): value is LocalControlCursor => {
-  if (!isRecord(value)) return false
+const isCursor = (value: JsonValue): value is JsonValue & LocalControlCursor => {
+  if (!isJsonObject(value)) return false
   const row = value
   return row.version === 1
     && (row.kind === 'history' || row.kind === 'recoveries')
-    && typeof row.createdAt === 'number' && Number.isInteger(row.createdAt) && row.createdAt >= 0
-    && typeof row.id === 'string' && row.id.length > 0
+    && isJsonNumber(row.createdAt) && Number.isInteger(row.createdAt) && row.createdAt >= 0
+    && isJsonString(row.id) && row.id.length > 0
     && (row.terminal === undefined || row.terminal === true)
     && Object.keys(row).every((key) => (
       key === 'version' || key === 'kind' || key === 'createdAt' || key === 'id' || key === 'terminal'
@@ -56,7 +54,7 @@ export const parseLocalControlCursor = (
     if (encoder.encode(value).byteLength > maxCursorBytes) throw new Error('Invalid cursor.')
     const text = decoder.decode(decodeBase64url(value))
     if (encoder.encode(text).byteLength > maxCursorBytes) throw new Error('Invalid cursor.')
-    const parsed: unknown = JSON.parse(text)
+    const parsed = z.json().parse(JSON.parse(text))
     if (!isCursor(parsed) || parsed.kind !== kind || canonicalJson(parsed) !== text) {
       throw new Error('Invalid cursor.')
     }

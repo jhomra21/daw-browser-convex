@@ -6,7 +6,15 @@ import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import type { convexApi, convexClient } from '~/lib/convex'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { AUDIO_EFFECT_ORDER, assert, assertDefined, trackCreationCollapsed, type AutomationEnvelope } from '@daw-browser/shared'
+import {
+  AUDIO_EFFECT_ORDER,
+  assert,
+  assertDefined,
+  isJsonObject,
+  isJsonString,
+  trackCreationCollapsed,
+  type AutomationEnvelope,
+} from '@daw-browser/shared'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
@@ -502,15 +510,12 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
         throw new Error('Cloud clip deletion recovery is still pending.')
       }
       const recoveryIds = readQueuedClipDeletionRecoveryIds(deps.projectId, deps.userId, operationId)
-      if (typeof flushed.result === 'object' && flushed.result !== null && 'recoveries' in flushed.result && Array.isArray(flushed.result.recoveries)) {
+      if (isJsonObject(flushed.result) && Array.isArray(flushed.result.recoveries)) {
         for (const recovery of flushed.result.recoveries) {
           if (
-            typeof recovery === 'object'
-            && recovery !== null
-            && 'sourceClipId' in recovery
-            && 'recoveryId' in recovery
-            && typeof recovery.sourceClipId === 'string'
-            && typeof recovery.recoveryId === 'string'
+            isJsonObject(recovery)
+            && isJsonString(recovery.sourceClipId)
+            && isJsonString(recovery.recoveryId)
           ) recoveryIds.set(recovery.sourceClipId, recovery.recoveryId)
         }
       }
@@ -548,7 +553,7 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
         })
         if (
           (result.status !== 'applied' && result.status !== 'noop')
-          || typeof result.clipId !== 'string'
+          || !isJsonString(result.clipId)
         ) {
           throw new Error('Failed to restore deleted cloud clip.')
         }

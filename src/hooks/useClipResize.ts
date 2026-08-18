@@ -212,14 +212,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           leftPadSec: timing.leftPadSec,
           bufferOffsetSec: timing.bufferOffsetSec,
           audioWarp: timing.audioWarp,
-          ...(resizeOrigFades ? {
-            fades: transformClipFadesForDuration(
+          fades: resizeOrigFades ? transformClipFadesForDuration(
               resizeOrigFades,
               resizeOrigDuration,
               newDuration,
               Math.max(0, newStart - resizeOrigStart),
-            ),
-          } : {}),
+            ) : undefined,
         })
       }
     } else {
@@ -261,9 +259,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
       setDraftClipTiming(clip.id, {
         duration: newDuration,
-        ...(resizeOrigFades ? {
-          fades: transformClipFadesForDuration(resizeOrigFades, resizeOrigDuration, newDuration),
-        } : {}),
+        fades: resizeOrigFades ? transformClipFadesForDuration(resizeOrigFades, resizeOrigDuration, newDuration) : undefined,
       })
     }
   }

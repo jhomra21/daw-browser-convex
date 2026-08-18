@@ -108,7 +108,7 @@ const main = async (): Promise<void> => {
 }
 
 if (import.meta.main) {
-  await main().catch((error: unknown) => {
+  await main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

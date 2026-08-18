@@ -1,3 +1,4 @@
+import { isJsonNumber, type JsonValue } from './json-value'
 import { z } from 'zod'
 
 const finiteNumberSchema = z.number().finite()
@@ -70,7 +71,7 @@ const midiMappingSchema = z.object({
   outputMax: finiteNumberSchema,
 }).strict()
 
-const midiClipShape = z.object({
+const midiClipContract = z.object({
   wave: midiWaveSchema,
   gain: finiteNumberSchema.min(0).max(2).optional(),
   inputChannel: midiChannelSchema.optional(),
@@ -81,13 +82,13 @@ const midiClipShape = z.object({
   polyPressure: z.array(midiPolyPressureEventSchema).optional(),
   mappings: z.array(midiMappingSchema).optional(),
 }).strict()
-const legacyMidiClipShape = midiClipShape.extend({
+const legacyMidiClipContract = midiClipContract.extend({
   wave: legacyMidiWaveSchema,
   gain: finiteNumberSchema.optional(),
   notes: z.array(legacyMidiNoteSchema),
 }).strict()
 
-const midiEventArrays = (midi: z.infer<typeof midiClipShape>) => [
+const midiEventArrays = (midi: z.infer<typeof midiClipContract>) => [
   midi.notes,
   midi.cc ?? [],
   midi.pitchBends ?? [],
@@ -106,8 +107,8 @@ const duplicateIds = (ids: readonly (string | undefined)[]) => {
   return [...duplicates]
 }
 
-export const midiClipReadSchema = legacyMidiClipShape
-export const midiClipSchema = midiClipShape.superRefine((midi, context) => {
+export const midiClipReadSchema = legacyMidiClipContract
+export const midiClipSchema = midiClipContract.superRefine((midi, context) => {
   const arrays = midiEventArrays(midi)
   if (arrays.some((events) => events.length > MAX_MIDI_EVENTS_PER_ARRAY)) {
     context.addIssue({ code: 'custom', message: `MIDI event arrays support at most ${MAX_MIDI_EVENTS_PER_ARRAY} events.` })
@@ -133,7 +134,7 @@ export type MidiPitchBendEvent = z.infer<typeof midiPitchBendEventSchema>
 export type MidiChannelPressureEvent = z.infer<typeof midiChannelPressureEventSchema>
 export type MidiPolyPressureEvent = z.infer<typeof midiPolyPressureEventSchema>
 export type MidiMapping = z.infer<typeof midiMappingSchema>
-export type StrictMidiClip = z.infer<typeof midiClipShape>
+export type StrictMidiClip = z.infer<typeof midiClipContract>
 export type MidiClip = z.infer<typeof midiClipReadSchema>
 export type LegacyMidiClip = MidiClip
 export type NormalizedMidiClip = Omit<StrictMidiClip, 'notes' | 'cc' | 'pitchBends' | 'channelPressure' | 'polyPressure' | 'mappings'> & {
@@ -153,7 +154,11 @@ export type NormalizedLegacyMidiClip = Omit<LegacyMidiClip, 'notes' | 'cc' | 'pi
   mappings: MidiMapping[]
 }
 
-type LegacyMidiEvent = Record<string, unknown> & { id?: string; channel?: number }
+type LegacyMidiEvent = {
+  [key: string]: string | number | boolean | null | undefined
+  id?: string
+  channel?: number
+}
 
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
 const legacyTuple = (event: LegacyMidiEvent) => JSON.stringify(
@@ -200,8 +205,8 @@ const normalizeEvents = <Event extends LegacyMidiEvent>(
 const byBeat = <Event extends { beat: number }>(left: Event, right: Event) => left.beat - right.beat
 
 const normalizeMidi = (
-  value: unknown,
-  parse: (value: unknown) => LegacyMidiClip,
+  value: JsonValue,
+  parse: (value: JsonValue) => LegacyMidiClip,
 ): NormalizedLegacyMidiClip => {
   const parsed = parse(value)
   const reservedIds = new Set(
@@ -222,8 +227,8 @@ const normalizeMidi = (
   }
   return {
     wave: parsed.wave,
-    ...(parsed.gain === undefined ? {} : { gain: parsed.gain }),
-    ...(parsed.inputChannel === undefined ? {} : { inputChannel: parsed.inputChannel }),
+    gain: parsed.gain,
+    inputChannel: parsed.inputChannel,
     notes,
     cc,
     pitchBends,
@@ -233,13 +238,13 @@ const normalizeMidi = (
   }
 }
 
-export const normalizeMidiClip = (value: unknown): NormalizedMidiClip => {
+export const normalizeMidiClip = (value: JsonValue): NormalizedMidiClip => {
   const parsed = midiClipSchema.parse(value)
   const normalized = normalizeMidi(parsed, (input) => midiClipSchema.parse(input))
   return {
     wave: parsed.wave,
-    ...(parsed.gain === undefined ? {} : { gain: parsed.gain }),
-    ...(parsed.inputChannel === undefined ? {} : { inputChannel: parsed.inputChannel }),
+    gain: parsed.gain,
+    inputChannel: parsed.inputChannel,
     notes: normalized.notes,
     cc: normalized.cc,
     pitchBends: normalized.pitchBends,
@@ -248,7 +253,7 @@ export const normalizeMidiClip = (value: unknown): NormalizedMidiClip => {
     mappings: normalized.mappings,
   }
 }
-export const normalizeLegacyMidiClip = (value: unknown): NormalizedLegacyMidiClip => normalizeMidi(value, (input) => midiClipReadSchema.parse(input))
+export const normalizeLegacyMidiClip = (value: JsonValue): NormalizedLegacyMidiClip => normalizeMidi(value, (input) => midiClipReadSchema.parse(input))
 
 /**
  * Produces a valid new-clip MIDI payload from a readable historical payload.
@@ -258,12 +263,8 @@ export const normalizeLegacyMidiClip = (value: unknown): NormalizedLegacyMidiCli
 export const sanitizeLegacyMidiClipForCreate = (value: LegacyMidiClip): StrictMidiClip => {
   let midi = midiClipSchema.parse({
     wave: midiWaveSchema.safeParse(value.wave).success ? value.wave : 'sine',
-    ...(typeof value.gain === 'number' && Number.isFinite(value.gain) && value.gain >= 0 && value.gain <= 2
-      ? { gain: value.gain }
-      : {}),
-    ...(typeof value.inputChannel === 'number' && Number.isInteger(value.inputChannel) && value.inputChannel >= 1 && value.inputChannel <= 16
-      ? { inputChannel: value.inputChannel }
-      : {}),
+    gain: isJsonNumber(value.gain) && Number.isFinite(value.gain) && value.gain >= 0 && value.gain <= 2 ? value.gain : undefined,
+    inputChannel: isJsonNumber(value.inputChannel) && Number.isInteger(value.inputChannel) && value.inputChannel >= 1 && value.inputChannel <= 16 ? value.inputChannel : undefined,
     notes: [],
   })
   const append = (patch: Partial<StrictMidiClip>) => {

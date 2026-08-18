@@ -29,7 +29,7 @@ export type SamplerAutomationDescriptor = {
 
 const defaults = createDefaultSamplerParams()
 
-export const SAMPLER_AUTOMATION_DESCRIPTORS: Readonly<Record<SamplerAutomationParameterId, SamplerAutomationDescriptor>> = {
+export const SAMPLER_AUTOMATION_DESCRIPTORS = {
   'output.gain': { defaultValue: 1, min: 0, max: 4, unit: 'ratio', rate: 'a-rate' },
   'output.pan': { defaultValue: 0, min: -1, max: 1, unit: 'ratio', rate: 'a-rate' },
   'amp.attack': { defaultValue: defaults.ampEnvelope.attackSec, min: 0, max: 60, unit: 'seconds', rate: 'note' },
@@ -44,7 +44,7 @@ export const SAMPLER_AUTOMATION_DESCRIPTORS: Readonly<Record<SamplerAutomationPa
   'lfo.filterDepth': { defaultValue: defaults.lfo.filterHz, min: -20_000, max: 20_000, unit: 'hz', rate: 'a-rate' },
   'lfo.ampDepth': { defaultValue: defaults.lfo.amp, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
   'lfo.panDepth': { defaultValue: defaults.lfo.pan, min: 0, max: 1, unit: 'ratio', rate: 'a-rate' },
-}
+} satisfies Readonly<Record<SamplerAutomationParameterId, SamplerAutomationDescriptor>>
 
 export type InstrumentAutomationKey = {
   kind: 'instrument'

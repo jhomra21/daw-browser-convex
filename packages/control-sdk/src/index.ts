@@ -2,11 +2,14 @@ import {
   canonicalJson,
   controlCapabilitiesSchemaV1,
   controlCapabilitiesSchemaV2,
+  controlCommitRequestSchemaV1,
   controlCommitResultSchemaV1,
+  controlApprovalRequestSchemaV1,
   controlApprovalResultSchemaV1,
   controlErrorSchemaV1,
   controlHistoryResultSchemaV1,
   controlRecoveriesResultSchemaV1,
+  controlPreviewRequestSchemaV1,
   controlPreviewResultSchemaV1,
   parseControlCommitRequestV1,
   parseControlApprovalRequestV1,
@@ -67,7 +70,7 @@ export class ControlApiError extends Error {
     this.name = "ControlApiError"
     this.data = Object.freeze({
       ...error,
-      ...(error.details === undefined ? {} : { details: Object.freeze({ ...error.details }) }),
+      details: error.details === undefined ? undefined : Object.freeze({ ...error.details }),
     })
     this.status = status
     this.code = this.data.code
@@ -84,7 +87,7 @@ export class ControlTransportError extends Error {
 }
 
 const readToken = async (accessToken: ControlAccessToken) => (
-  typeof accessToken === "function" ? await accessToken() : accessToken
+  accessToken instanceof Function ? await accessToken() : accessToken
 )
 
 export const normalizeControlOrigin = (value: string) => {
@@ -114,7 +117,7 @@ const controlUrl = (origin: string, pathname: string, version = "v1") => {
   return root
 }
 
-const parseResponseBody = async (response: Response): Promise<unknown> => {
+const parseResponseBody = async (response: Response) => {
   try {
     return await response.json()
   } catch {
@@ -124,7 +127,7 @@ const parseResponseBody = async (response: Response): Promise<unknown> => {
 
 const response = async <Value>(
   request: () => Promise<Response>,
-  schema: { parse: (value: unknown) => Value },
+  schema: { parse: (value: Awaited<ReturnType<Response["json"]>>) => Value },
 ): Promise<Value> => {
   let received: Response
   try {
@@ -152,20 +155,19 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
 
   const request = async <Value>(
     pathname: string,
-    schema: { parse: (value: unknown) => Value },
+    schema: { parse: (value: Awaited<ReturnType<Response["json"]>>) => Value },
     init?: { method?: "GET" | "POST"; body?: string },
     version = "v1",
   ) => {
     const token = await readToken(options.accessToken)
     if (!token) throw new ControlTransportError("An access token is required.")
+    const headers = new Headers({ Authorization: `Bearer ${token}` })
+    if (init?.body !== undefined) headers.set("Content-Type", "application/json")
     return response(
       () => requestFetch(controlUrl(baseUrl, pathname, version), {
         method: init?.method ?? "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
-        ...(init?.body === undefined ? {} : { body: init.body }),
+        headers,
+        body: init?.body === undefined ? undefined : init.body,
         credentials: "omit",
       }),
       schema,
@@ -188,43 +190,47 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
       return request(`/projects/${encodeURIComponent(query.projectId)}/snapshot`, projectSnapshotSchemaV2, undefined, "v2")
     },
     preview: (input: ControlPreviewRequestV1): Promise<ControlPreviewResultV1> => {
-      const requestBody = parseControlPreviewRequestV1(input)
+      const requestBody = controlPreviewRequestSchemaV1.parse(
+        parseControlPreviewRequestV1(JSON.parse(JSON.stringify(input))),
+      )
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/preview`,
         controlPreviewResultSchemaV1,
-        { method: "POST", body: canonicalJson(requestBody) },
+        { method: "POST", body: canonicalJson(JSON.parse(JSON.stringify(requestBody))) },
       )
     },
     commit: (input: ControlCommitRequestV1): Promise<ControlCommitResultV1> => {
-      const requestBody = parseControlCommitRequestV1(input)
+      const requestBody = controlCommitRequestSchemaV1.parse(
+        parseControlCommitRequestV1(JSON.parse(JSON.stringify(input))),
+      )
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/commit`,
         controlCommitResultSchemaV1,
-        { method: "POST", body: canonicalJson(requestBody) },
+        { method: "POST", body: canonicalJson(JSON.parse(JSON.stringify(requestBody))) },
       )
     },
     requestApproval: (input: ControlApprovalRequestV1): Promise<ControlApprovalResultV1> => {
-      const requestBody = parseControlApprovalRequestV1(input)
+      const requestBody = controlApprovalRequestSchemaV1.parse(
+        parseControlApprovalRequestV1(JSON.parse(JSON.stringify(input))),
+      )
       return request(
         `/projects/${encodeURIComponent(requestBody.projectId)}/approvals`,
         controlApprovalResultSchemaV1,
-        { method: "POST", body: canonicalJson(requestBody) },
+        { method: "POST", body: canonicalJson(JSON.parse(JSON.stringify(requestBody))) },
       )
     },
     history: (input: ControlHistoryQueryV1): Promise<ControlHistoryResultV1> => {
       const query = parseControlHistoryQueryV1(input)
-      const url = `/projects/${encodeURIComponent(query.projectId)}/history?${new URLSearchParams({
-        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
-        limit: String(query.limit),
-      }).toString()}`
+      const search = new URLSearchParams({ limit: String(query.limit) })
+      if (query.cursor !== undefined) search.set("cursor", query.cursor)
+      const url = `/projects/${encodeURIComponent(query.projectId)}/history?${search.toString()}`
       return request(url, controlHistoryResultSchemaV1)
     },
     recoveries: (input: ControlRecoveriesQueryV1): Promise<ControlRecoveriesResultV1> => {
       const query = parseControlRecoveriesQueryV1(input)
-      const url = `/projects/${encodeURIComponent(query.projectId)}/recoveries?${new URLSearchParams({
-        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
-        limit: String(query.limit),
-      }).toString()}`
+      const search = new URLSearchParams({ limit: String(query.limit) })
+      if (query.cursor !== undefined) search.set("cursor", query.cursor)
+      const url = `/projects/${encodeURIComponent(query.projectId)}/recoveries?${search.toString()}`
       return request(url, controlRecoveriesResultSchemaV1)
     },
   }

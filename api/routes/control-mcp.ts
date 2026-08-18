@@ -1,9 +1,11 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
+import { z } from "zod"
 import {
   controlCapabilitiesV1,
   controlCapabilitiesV2,
   controlLimitsV1,
 } from "@daw-browser/control"
+import { isJsonObject, type JsonValue } from "@daw-browser/shared"
 import {
   createControlMcpServer,
   type ControlService,
@@ -57,7 +59,7 @@ const contentTypeIsJson = (request: Request) => (
   request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() === "application/json"
 )
 
-type ParsedMcpBody = { value: unknown } | { response: Response }
+type ParsedMcpBody = { value: JsonValue } | { response: Response }
 
 const parseMcpBody = async (request: Request): Promise<ParsedMcpBody> => {
   if (!contentTypeIsJson(request)) {
@@ -72,24 +74,20 @@ const parseMcpBody = async (request: Request): Promise<ParsedMcpBody> => {
     return { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
   }
   try {
-    return { value: JSON.parse(new TextDecoder().decode(bytes)) }
+    return { value: z.json().parse(JSON.parse(new TextDecoder().decode(bytes))) }
   } catch {
     return { response: new Response("Malformed MCP JSON body.", { status: 400, headers: noStore }) }
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-)
-
-const requiresWriteScope = (value: unknown) => {
+const requiresWriteScope = (value: JsonValue) => {
   const requests = Array.isArray(value) ? value : [value]
   return requests.some((request) => (
-    isRecord(request)
+    isJsonObject(request)
     && request.method === "tools/call"
-    && isRecord(request.params)
+    && isJsonObject(request.params)
     && (request.params.name === "control_preview" || request.params.name === "control_commit" || request.params.name === "control_request_approval")
-    && (!isRecord(request.params.arguments) || request.params.arguments.target !== "host")
+    && (!isJsonObject(request.params.arguments) || request.params.arguments.target !== "host")
   ))
 }
 

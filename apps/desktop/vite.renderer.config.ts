@@ -27,9 +27,7 @@ export default defineConfig(({ mode }) => {
     plugins: [tanstackRouter({ target: "solid", autoCodeSplitting: false }), solidPlugin(), tailwindcss()],
     define: {
       "import.meta.env.VITE_DESKTOP": JSON.stringify("true"),
-      ...(apiBaseUrl
-        ? { "import.meta.env.VITE_API_BASE_URL": JSON.stringify(apiBaseUrl) }
-        : {}),
+      "import.meta.env.VITE_API_BASE_URL": apiBaseUrl ? JSON.stringify(apiBaseUrl) : undefined,
     },
     build: {
       target: "esnext",

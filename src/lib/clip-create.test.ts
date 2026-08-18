@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
+import { isJsonString } from '@daw-browser/shared'
+import type { LocalProjectStoredValue } from './local-project-db'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import { buildClipCreateSnapshot, buildClipHistorySnapshot, createUploadedAudioClip } from './clip-create'
 import { buildDuplicateClipCreateItems } from './clip-drag-session'
@@ -76,7 +78,9 @@ const clipBufferWriter = {
   removeBuffer: () => undefined,
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
+const isStoredObject = (
+  value: LocalProjectStoredValue,
+): value is { readonly [key: string]: LocalProjectStoredValue } => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 )
 
@@ -144,7 +148,7 @@ test('carries the persisted operation receipt when an uploaded clip is queued', 
 
   const rows = await (await openLocalProjectDb('project-queued-receipt')).getAll('syncState')
   const queued = rows.find((row) => row.key.startsWith('shared-outbox:'))
-  if (!queued || !isRecord(queued.value) || !isRecord(queued.value.payload) || !isRecord(queued.value.payload.clipPayload)) {
+  if (!queued || !isStoredObject(queued.value) || !isStoredObject(queued.value.payload) || !isStoredObject(queued.value.payload.clipPayload)) {
     throw new Error('Queued clip receipt was not persisted.')
   }
   expect(queued.value.payload.clipPayload.operationId).toBe(error.operationId)
@@ -198,7 +202,7 @@ test('rolls back and does not queue uploaded clip creates with null server resul
           kind: 'clips.create',
           payload,
         })
-        return typeof result === 'string' ? result : null
+        return isJsonString(result) ? result : null
       },
       insertLocalClip: () => undefined,
       removeLocalClips: (clipIds) => removedClipIds.push([...clipIds]),

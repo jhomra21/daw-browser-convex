@@ -13,7 +13,7 @@ function createCompressorEntry(toThresholdDb: number, instanceId?: string): Hist
     data: {
       trackRef: 'track-ref-1',
       effect: 'compressor',
-      ...(instanceId ? { instanceId } : {}),
+      instanceId: instanceId ? instanceId : undefined,
       from: { ...compressorParams, thresholdDb: -24 },
       to: { ...compressorParams, thresholdDb: toThresholdDb },
     },

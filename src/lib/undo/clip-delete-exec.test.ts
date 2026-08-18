@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test'
 
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
+import { isJsonObject, isJsonString, type JsonValue } from '@daw-browser/shared'
+type PublishedRequest = { value: JsonValue }
+
 import type { Track } from '@daw-browser/timeline-core/types'
 import { convexApi, convexClient } from '~/lib/convex'
 import { saveHistory } from '~/lib/timeline-storage'
@@ -95,12 +98,12 @@ test('legacy persisted cloud clip deletes recreate through the strict sanitized 
     },
   }
   const inserted: Track['clips'] = []
-  let published: unknown
+  const published: PublishedRequest = { value: null }
   const originalFetch = globalThis.fetch
   const replayFetch: typeof globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      published = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
+      published.value = JSON.parse(init?.body ? await new Response(init.body).text() : 'null')
       return new Response(JSON.stringify('restored-clip-1'), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -112,7 +115,7 @@ test('legacy persisted cloud clip deletes recreate through the strict sanitized 
     globalThis.fetch = originalFetch
   }
 
-  expect(published).toMatchObject({
+  expect(published.value).toMatchObject({
     kind: 'clips.create',
     payload: {
       trackId: 'track-1',
@@ -121,19 +124,13 @@ test('legacy persisted cloud clip deletes recreate through the strict sanitized 
     },
   })
   if (
-    !published
-    || typeof published !== 'object'
-    || !('payload' in published)
-    || typeof published.payload !== 'object'
-    || published.payload === null
-    || !('midi' in published.payload)
-    || typeof published.payload.midi !== 'object'
-    || published.payload.midi === null
-    || !('notes' in published.payload.midi)
-    || !Array.isArray(published.payload.midi.notes)
+    !isJsonObject(published.value)
+    || !isJsonObject(published.value.payload)
+    || !isJsonObject(published.value.payload.midi)
+    || !Array.isArray(published.value.payload.midi.notes)
   ) throw new Error('Expected sanitized MIDI create operation.')
-  expect(published.payload.midi.notes).toHaveLength(500)
-  expect(published.payload.midi).not.toHaveProperty('gain')
+  expect(published.value.payload.midi.notes).toHaveLength(500)
+  expect(published.value.payload.midi).not.toHaveProperty('gain')
   expect(inserted[0]?.id).toBe('restored-clip-1')
 })
 
@@ -172,8 +169,8 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
   const previousWindow = globalThis.window
   const previousLocalStorage = globalThis.localStorage
   const storage = new MemoryStorage()
-  const originalMutation = Reflect.get(convexClient, 'mutation')
-  const mutationCalls: unknown[] = []
+  const originalMutation = convexClient.mutation
+  const mutationCalls: JsonValue[] = []
   Reflect.set(globalThis, 'window', {
     localStorage: storage,
     addEventListener: () => undefined,
@@ -182,8 +179,10 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
     clearTimeout: globalThis.clearTimeout,
   })
   Reflect.set(globalThis, 'localStorage', storage)
-  Reflect.set(convexClient, 'mutation', async (_reference: unknown, args: unknown) => {
-    mutationCalls.push(args)
+  Reflect.set(convexClient, 'mutation', async (...arguments_: Parameters<typeof convexClient.mutation>) => {
+    const [, args] = arguments_
+    const persistedArgs: JsonValue = JSON.parse(JSON.stringify(args))
+    mutationCalls.push(persistedArgs)
     return { status: 'applied', clipId: 'restored-clip-1' }
   })
   saveHistory({ projectId, userId: 'user-1' }, { undo: [persistedEntry], redo: [] })
@@ -215,17 +214,17 @@ test('retries a response-lost clip deletion with its original operation ID', asy
       recreatedClips: [{ clipRef: 'clip-ref-1', clipId: 'clip-1' }],
     },
   }
-  const originalMutation = Reflect.get(convexClient, 'mutation')
+  const originalMutation = convexClient.mutation
   const operationIds: string[] = []
   let responseLost = true
-  Reflect.set(convexClient, 'mutation', async (_reference: unknown, args: unknown) => {
+  Reflect.set(convexClient, 'mutation', async (...arguments_: Parameters<typeof convexClient.mutation>) => {
+    const [, args] = arguments_
+    const persistedArgs: JsonValue = JSON.parse(JSON.stringify(args))
     if (
-      !args
-      || typeof args !== 'object'
-      || !('operationId' in args)
-      || typeof args.operationId !== 'string'
+      !isJsonObject(persistedArgs)
+      || !isJsonString(persistedArgs.operationId)
     ) throw new Error('Expected delete operation ID.')
-    operationIds.push(args.operationId)
+    operationIds.push(persistedArgs.operationId)
     if (responseLost) throw new Error('Response lost after deletion.')
     return {
       removedClipIds: ['clip-1'],

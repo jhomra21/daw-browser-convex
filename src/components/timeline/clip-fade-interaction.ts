@@ -32,15 +32,16 @@ const clamp = (value: number, minimum: number, maximum: number) => (
 
 type FadeHoverRegionTarget = {
   closest: (selector: string) => {
-    getAttribute: (qualifiedName: string) => string | null
+    getAttribute: (attribute: string) => string | null
   } | null
 }
 
-const isFadeHoverRegionTarget = (target: unknown): target is FadeHoverRegionTarget => (
-  typeof target === 'object'
-  && target !== null
-  && 'closest' in target
-  && typeof target.closest === 'function'
+const isFadeHoverRegionTarget = (
+  target: EventTarget | FadeHoverRegionTarget | null,
+): target is FadeHoverRegionTarget => (
+  target !== null
+  && "closest" in target
+  && typeof target.closest === "function"
 )
 
 export const canStartFadeInteraction = (start: FadeInteractionStart) => (
@@ -53,7 +54,7 @@ export const canStartFadeInteraction = (start: FadeInteractionStart) => (
 
 export const relatedTargetStaysWithinFadeHoverRegion = (
   side: ClipFadeSide,
-  relatedTarget: unknown,
+  relatedTarget: EventTarget | FadeHoverRegionTarget | null,
 ) => (
   isFadeHoverRegionTarget(relatedTarget)
   && relatedTarget.closest('[data-fade-hover-side]')?.getAttribute('data-fade-hover-side') === side

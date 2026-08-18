@@ -22,11 +22,19 @@ import {
   type AudioCoreGraphSnapshot,
   type AudioCoreMixerState,
   type AudioCoreInstrumentState,
+  type AudioCoreSynthState,
+  synthParameterRegistry,
 } from '../../../audio-core-contract/src/index'
 import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
-import { createEqBandParameterId, normalizeDelayParams, normalizeLoFiParamsEnvelope, normalizeReverbParams } from '@daw-browser/shared'
+import {
+  createEqBandParameterId,
+  normalizeDelayParams,
+  normalizeLoFiParamsEnvelope,
+  normalizeReverbParams,
+  normalizeSynthParams,
+  type SynthParamsInput,
+} from '@daw-browser/shared'
 import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
-import { compilePortableSynthConfiguration } from '../portable-session-compiler'
 import { getMixerChannelRole } from './channels'
 import {
   MASTER_ROUTE_TARGET,
@@ -117,17 +125,65 @@ const toPortableMixerState = (
   ],
 })
 
+const waveform = (value: 'sine' | 'square' | 'sawtooth' | 'triangle'): 0 | 1 | 2 | 3 =>
+  value === 'square' ? 1 : value === 'sawtooth' ? 2 : value === 'triangle' ? 3 : 0
+
+const filterMode = (value: 'lowpass' | 'highpass' | 'bandpass' | 'notch'): 0 | 1 | 2 | 3 =>
+  value === 'highpass' ? 1 : value === 'bandpass' ? 2 : value === 'notch' ? 3 : 0
+
+export const compilePortableSynthState = (input: SynthParamsInput): AudioCoreSynthState => {
+  const params = normalizeSynthParams(input)
+  return {
+    version: audioCoreContractVersion,
+    kind: 'synth',
+    voiceCapacity: Math.min(32, params.polyphony),
+    outputLayout: 'stereo',
+    parameterTargets: synthParameterRegistry
+      .filter((entry) => !entry.tombstone)
+      .map(({ id, target }) => ({ id, target })),
+    oscillators: params.oscillators.map((oscillator) => ({
+      enabled: oscillator.enabled,
+      waveform: waveform(oscillator.wave),
+      level: oscillator.level,
+      octave: oscillator.octave,
+      semitone: oscillator.semitone,
+      detuneCents: oscillator.detuneCents,
+    })),
+    noiseEnabled: params.noise.enabled,
+    noiseLevel: params.noise.level,
+    filterEnabled: params.filter.enabled,
+    filterMode: filterMode(params.filter.mode),
+    filterCutoffHz: params.filter.frequencyHz,
+    filterResonance: params.filter.q,
+    filterKeyTracking: params.filter.keyTracking,
+    filterEnvelopeAmountOctaves: params.filter.envelopeAmountOctaves,
+    filterAttackMs: params.filter.envelope.attackSec * 1000,
+    filterDecayMs: params.filter.envelope.decaySec * 1000,
+    filterSustain: params.filter.envelope.sustain,
+    filterReleaseMs: params.filter.envelope.releaseSec * 1000,
+    ampAttackMs: params.ampEnvelope.attackSec * 1000,
+    ampDecayMs: params.ampEnvelope.decaySec * 1000,
+    ampSustain: params.ampEnvelope.sustain,
+    ampReleaseMs: params.ampEnvelope.releaseSec * 1000,
+    lfoEnabled: params.lfo.enabled,
+    lfoWaveform: waveform(params.lfo.wave),
+    lfoRateHz: params.lfo.frequencyHz,
+    lfoPitchCents: params.lfo.pitchCents,
+    lfoFilterOctaves: params.lfo.filterOctaves,
+    lfoAmplitude: params.lfo.amp,
+    lfoPan: params.lfo.pan,
+    outputGain: params.gain,
+    outputPan: params.pan,
+  }
+}
+
 const toPortableInstrument = (
   instrument: NonNullable<NonNullable<ResolvedMixerGraph['channels'][number]['fx']>['instrument']>,
 ): AudioCoreInstrumentState => {
   if (instrument.kind !== 'synth') {
     throw new Error(`Native instrument "${instrument.kind}" is not supported by the portable graph.`)
   }
-  return compilePortableSynthConfiguration(
-    instrument.instanceId,
-    instrument.instanceId,
-    instrument.params,
-  ).state
+  return compilePortableSynthState(instrument.params)
 }
 
 export const resolvePortableDelayMs = (
@@ -149,13 +205,13 @@ const toPortableProcessor = (
   bpm: number,
 ): AudioCoreGraphProcessorDto => {
   const timing = getEffectTiming(instance, sampleRate, bpm)
-  const common: Pick<AudioCoreGraphProcessorDto, 'id' | 'instanceId' | 'stateVersion' | 'latencyFrames' | 'tailFrames'> = {
+  const common: Pick<AudioCoreGraphProcessorDto, 'id' | 'instanceId' | 'stateVersion' | 'latencyFrames' | 'tailFrames' | 'tailKind'> = {
     id: instance.id,
     instanceId: processorInstanceId(instance.id),
     stateVersion: audioCoreContractVersion,
     latencyFrames: timing.latencyFrames,
     tailFrames: timing.tail.kind === 'finite' ? timing.tail.frames : 0,
-    ...(timing.tail.kind === 'unbounded' ? { tailKind: 'unbounded' as const } : {}),
+    tailKind: timing.tail.kind === 'unbounded' ? 'unbounded' : undefined,
   }
   if (instance.kind === 'utility') {
     return {
@@ -467,13 +523,9 @@ export const createPortableGraphSnapshot = ({
       inputLayout: entry.inputLayout,
       outputLayout: entry.outputLayout,
       processorOrder: (entry.fx?.instances ?? []).map((instance) => toPortableProcessor(instance, sampleRate, bpm)),
-      ...(externalLatencyFrames.has(entry.channel.id)
-        ? { externalLatencyFrames: externalLatencyFrames.get(entry.channel.id) ?? 0 }
-        : {}),
+      externalLatencyFrames: externalLatencyFrames.has(entry.channel.id) ? externalLatencyFrames.get(entry.channel.id) ?? 0 : undefined,
       latencyFrames: getEffectChainTiming(entry.fx?.instances ?? [], sampleRate, bpm).latencyFrames,
-      ...(includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument
-        ? { instrument: toPortableInstrument(entry.fx.instrument) }
-        : {}),
+      instrument: includeInstruments && entry.channel.kind === 'instrument' && entry.fx?.instrument ? toPortableInstrument(entry.fx.instrument) : undefined,
       mixer: toPortableMixerState(entry.channel.id, entry.gain, !!entry.channel.muted),
     }
   })

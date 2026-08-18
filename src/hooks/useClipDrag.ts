@@ -36,6 +36,8 @@ type ClipDragHandlers = {
   isDragging: () => boolean
 }
 
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
 type ClipDragOptions = {
   placementTracks: Accessor<Track[]>
   trackLayout: Accessor<TimelineTrackLayoutRow[]>
@@ -523,7 +525,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           historyPush: options.historyPush,
           createManyCloudClips: async (items, operationId) => {
             const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
-            return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+            return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
           },
           selection,
         })

@@ -103,6 +103,10 @@ export type RenderedStem = {
   metadata: StemRecombinationMetadata
 }
 
+export type StemRenderSession = {
+  renderStem: (stem: StemDefinition) => Promise<RenderedStem>
+}
+
 type PreparedExportRange = {
   startSec: number
   endSec: number
@@ -246,12 +250,18 @@ const portableSnapshotRange = (range: PreparedExportRange): ExportRange => ({
   endSec: range.sourceEndSec,
 })
 
+const supportsPortableExport = (
+  environment: typeof globalThis,
+): environment is typeof globalThis & { Worker: typeof Worker; AudioBuffer: typeof AudioBuffer } =>
+  typeof environment.Worker === 'function'
+  && typeof environment.AudioBuffer === 'function'
+
 const selectPortableMixdown = async (
   req: ExportRequest,
   prepared: PreparedExportRender,
   loadArtifact: (manifestUrl: string) => Promise<AudioCoreWasmArtifactResult> = loadAudioCoreWasmArtifact,
 ): Promise<PortableMixdownSelection> => {
-  if (typeof Worker === 'undefined' || typeof AudioBuffer === 'undefined') return { selected: false }
+  if (!supportsPortableExport(globalThis)) return { selected: false }
   if (prepared.automationEnvelopes.length > 0 || prepared.sidechainRoutes.length > 0 || req.cueTrackIds?.length) {
     return { selected: false }
   }
@@ -866,7 +876,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
     prepared.bpm,
     prepared.sidechainRoutes,
     options.detectorOnlyTrackIds,
-  ).catch((error: unknown) => {
+  ).catch((error) => {
     releaseContext()
     throw error
   })
@@ -907,7 +917,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         rangeEndSec: prepared.range.sourceEndSec,
       })) {
         const bindings = mixerNodes.resolveTrackAutomationBindings(
-          { trackId: track.id, ...(event.target.effectInstanceId === undefined ? {} : { effectInstanceId: event.target.effectInstanceId }) },
+          { trackId: track.id, effectInstanceId: event.target.effectInstanceId },
           event.target.parameterId,
         )
         const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
@@ -1118,9 +1128,7 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
     : renderSourceIsolatedMixdownFromPrepared(prepared)
 }
 
-export function createStemRenderSession(req: ExportRequest): {
-  renderStem: (stem: StemDefinition) => Promise<RenderedStem>
-} {
+export function createStemRenderSession(req: ExportRequest): StemRenderSession {
   const prepared = prepareExportRender(req)
   return {
     async renderStem(stem) {

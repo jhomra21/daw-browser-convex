@@ -85,7 +85,7 @@ const sanitizeNewClipCreateItem = (item: BatchClipCreateItem): BatchClipCreateIt
   ...item,
   clip: {
     ...item.clip,
-    ...(item.clip.midi ? { midi: sanitizeLegacyMidiClipForCreate(item.clip.midi) } : {}),
+    midi: item.clip.midi ? sanitizeLegacyMidiClipForCreate(item.clip.midi) : undefined,
   },
 })
 
@@ -472,7 +472,7 @@ export function pushClipCreateHistory(input: {
   clipId: string
   clip: ClipCreateSnapshot
 }) {
-  if (!input.projectId || typeof input.historyPush !== 'function') return
+  if (!input.projectId || !input.historyPush) return
 
   input.historyPush(buildClipCreateHistoryEntry({
     projectId: input.projectId,

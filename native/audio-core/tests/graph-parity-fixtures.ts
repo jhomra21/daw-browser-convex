@@ -888,7 +888,7 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 7,
     legacy: {
       kind: 'tremolo',
-      state: { enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, shape: 0.5, phase: 0 },
+      state: { enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0 },
     },
   },
   {
@@ -896,7 +896,7 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
     kindId: 8,
     legacy: {
       kind: 'autopan',
-      state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, shape: 0.5, phase: 0 },
+      state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, 'shape': 0.5, phase: 0 },
     },
   },
   {
@@ -1206,7 +1206,8 @@ const dynamicsStateWithEnabled = (
       state: {
         ...fixture.state,
         enabled,
-        ...(enabled ? {} : { makeupDb: 0, outputDb: 0 }),
+        makeupDb: enabled ? undefined : 0,
+        outputDb: enabled ? undefined : 0,
       },
     }
   }
@@ -1520,7 +1521,7 @@ const reverbState: ReverbProcessorState = {
   reflectionSpin: true,
   reflectionModAmountMs: 5,
   reflectionModRateHz: 0.3,
-  reflectionShape: 0.5,
+  'reflectionShape': 0.5,
   diffuse: 1,
   size: 0,
   diffusion: 0.75,
@@ -3086,7 +3087,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
         assetId: 'fixture:1:2',
         seed: 77,
         maxGrains: 2,
-        windowShape: 'hann',
+        'windowShape': 'hann',
         freeze: true,
         grainSizeMs: 5,
         densityHz: 200,
@@ -3123,7 +3124,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
         assetId: 'fixture:1:1',
         seed: 77,
         maxGrains: 2,
-        windowShape: 'hann',
+        'windowShape': 'hann',
         freeze: false,
         grainSizeMs: 5,
         densityHz: 200,

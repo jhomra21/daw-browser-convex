@@ -5,7 +5,7 @@ import {
   desktopReplyChunkSchemaV1, desktopReplyChunkSchemaV2,
   maxDesktopReplyBytes, maxDesktopReplyFrameBytes, maxDesktopReplyPayloadBytes,
   maxDesktopReplyChunks,
-  parseDesktopReplyError, parseDesktopResult, type DesktopOperationV1, type DesktopProtocolVersion,
+  parseDesktopReplyError, parseDesktopResult, type DesktopJsonValue, type DesktopOperationV1, type DesktopProtocolVersion,
 } from "./index"
 import { desktopFrameHeaderBytes, encodeDesktopFrame } from "./socket"
 
@@ -17,29 +17,35 @@ export type DesktopReplyChunkV1 = z.infer<typeof desktopReplyChunkSchemaV1>
 export type DesktopReplyChunkV2 = z.infer<typeof desktopReplyChunkSchemaV2>
 type DesktopReplyChunk = DesktopReplyChunkV1 | DesktopReplyChunkV2
 type DesktopReply = z.infer<typeof desktopReplySchemaV1> | z.infer<typeof desktopReplySchemaV2>
+const isByteLengthNumber = (value: number | { byteLength: number }): value is number => typeof value === "number"
 
 export const assertDesktopReplyAggregateByteLength = (
   value: number | { byteLength: number },
   limit = maxDesktopReplyBytes,
 ): number => {
-  const byteLength = typeof value === "number" ? value : value.byteLength
+  const byteLength = isByteLengthNumber(value) ? value : value.byteLength
   if (!Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > limit) {
     throw new Error("Desktop reply exceeds aggregate size limit.")
   }
   return byteLength
 }
 
-const assertReply = (operation: DesktopOperationV1, input: unknown, reply: unknown, protocolVersion: DesktopProtocolVersion) => {
+const assertReply = (
+  operation: DesktopOperationV1,
+  input: DesktopJsonValue,
+  reply: DesktopJsonValue,
+  protocolVersion: DesktopProtocolVersion,
+) => {
   const parsed = (protocolVersion === desktopProtocolVersionV2 ? desktopReplySchemaV2 : desktopReplySchemaV1).parse(reply)
   if (parsed.error !== undefined) parseDesktopReplyError(operation, parsed.error, protocolVersion)
-  else parseDesktopResult(operation, parsed.result, input, protocolVersion)
+  else if (parsed.result !== undefined) parseDesktopResult(operation, parsed.result, input, protocolVersion)
   return parsed
 }
 
 export const serializeDesktopReply = (
   operation: DesktopOperationV1,
-  input: unknown,
-  reply?: unknown,
+  input: DesktopJsonValue,
+  reply?: DesktopJsonValue,
   protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
 ): Array<DesktopReply | DesktopReplyChunk> => {
   const parsed = assertReply(operation, reply === undefined ? {} : input, reply ?? input, protocolVersion)
@@ -87,7 +93,7 @@ export const serializeDesktopReply = (
 export const createDesktopReplyReassembler = (
   id: string,
   operation: DesktopOperationV1,
-  input: unknown = {},
+  input: DesktopJsonValue = {},
   protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
 ) => {
   let next = 0
@@ -96,7 +102,7 @@ export const createDesktopReplyReassembler = (
   let received = 0
   const clear = () => { next = 0; metadata = undefined; parts.length = 0; received = 0 }
   return {
-    push(value: unknown, encodedFrameByteLength?: number) {
+    push(value: DesktopJsonValue, encodedFrameByteLength?: number) {
       try {
         const frame = (protocolVersion === desktopProtocolVersionV2 ? desktopReplyChunkSchemaV2 : desktopReplyChunkSchemaV1).parse(value)
         const frameByteLength = encodedFrameByteLength ?? encodeDesktopFrame(frame).byteLength

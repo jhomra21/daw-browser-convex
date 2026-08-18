@@ -74,11 +74,11 @@ const assetView = (asset: {
   mimeType: asset.mimeType,
   sizeBytes: asset.sizeBytes,
   contentSha256: asset.contentSha256,
-  ...(asset.duration === undefined ? {} : { durationSec: asset.duration }),
-  ...(asset.duration === undefined ? {} : { duration: asset.duration }),
-  ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
-  ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
-  ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+  durationSec: asset.duration,
+  duration: asset.duration,
+  sampleRate: asset.sampleRate,
+  channelCount: asset.channelCount,
+  folderId: asset.folderId,
   createdAt: asset.createdAt,
   updatedAt: asset.updatedAt,
   ownerUserId: "",
@@ -96,10 +96,10 @@ const controlAssetView = (asset: {
   mimeType: asset.mimeType,
   sizeBytes: asset.sizeBytes,
   contentSha256: asset.contentSha256,
-  ...(asset.duration === undefined ? {} : { durationSec: asset.duration }),
-  ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
-  ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
-  ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+  durationSec: asset.duration,
+  sampleRate: asset.sampleRate,
+  channelCount: asset.channelCount,
+  folderId: asset.folderId,
   createdAt: asset.createdAt,
   updatedAt: asset.updatedAt,
 });
@@ -162,7 +162,7 @@ export const beginUpload = mutation({
       name,
       mimeType,
       sizeBytes: input.sizeBytes,
-      ...(input.folderId === undefined ? {} : { folderId: input.folderId }),
+      folderId: input.folderId,
     });
     if (input.folderId && !await readFolder(ctx, input.projectId, input.folderId)) fail("not-found", "Asset folder not found.");
     const prior = await ctx.db.query("assetUploadReceipts")
@@ -193,7 +193,7 @@ export const beginUpload = mutation({
     await ctx.db.insert("assetUploadReceipts", {
       projectId: input.projectId, actorUserId: userId, idempotencyKey: input.idempotencyKey,
       contentSha256, semanticDigest, assetKey, r2Key, status: "pending", mimeType, sizeBytes: input.sizeBytes, name,
-      ...(input.folderId === undefined ? {} : { folderId: input.folderId }),
+      folderId: input.folderId,
       createdAt: now, updatedAt: now, attempts: 1,
     });
     return { status: "pending" as const, assetKey, r2Key };
@@ -214,7 +214,8 @@ export const finalizeUpload = mutation({
     const existing = await findSampleRow(ctx, { projectId: input.projectId, assetKey: receipt.assetKey });
     if (receipt.status === "completed" && existing) return { asset: controlAssetView(existing), idempotencyReplay: true };
     if (receipt.status !== "pending") fail("validation", "Upload receipt is not pending.");
-    if (await hasR2DeleteRow(ctx, { projectId: input.projectId, r2Key: receipt.r2Key })) {
+    const uploadedObjectStorageKey = receipt.r2Key;
+    if (await hasR2DeleteRow(ctx, { projectId: input.projectId, r2Key: uploadedObjectStorageKey })) {
       fail("validation", "Upload object cleanup is pending.");
     }
     if (receipt.folderId && !await readFolder(ctx, input.projectId, receipt.folderId)) {
@@ -226,7 +227,7 @@ export const finalizeUpload = mutation({
     const rowId = await insertSampleRow(ctx, {
       projectId: input.projectId, assetKey: receipt.assetKey, sourceKind: "upload", ownerUserId: userId,
       name: receipt.name, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, contentSha256: receipt.contentSha256,
-      r2Key: receipt.r2Key, ...(receipt.folderId === undefined ? {} : { folderId: receipt.folderId }),
+      r2Key: uploadedObjectStorageKey, folderId: receipt.folderId,
     });
     const asset = await ctx.db.get(rowId);
     if (asset === null) throw new Error("Asset finalization failed.");

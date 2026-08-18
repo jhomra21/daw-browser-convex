@@ -1,5 +1,5 @@
 import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
-import { buildClipCreatePayload, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
+import { buildClipCreatePayload, isJsonString, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
@@ -107,7 +107,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     if (!projectId || !userId) return null
     const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId, trackId, clip }))
     const result = await publishDurableSharedTimelineOperation({ projectId, userId, operation, throwQueued: true })
-    return typeof result === 'string' ? result : null
+    return isJsonString(result) ? result : null
   }
 
   const trackRefFor = (trackId: TrackId) =>
@@ -283,7 +283,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
             kind: 'clips.create',
             payload,
           })
-          return typeof result === 'string' ? result : null
+          return isJsonString(result) ? result : null
         },
         insertLocalClip: context.clips.insertLocalClip,
         removeLocalClips: context.clips.removeLocalClips,

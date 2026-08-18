@@ -24,6 +24,7 @@ const originalAuthPath = process.env.DAW_CONTROL_AUTH_PATH
 const directories: string[] = []
 const servers: ReturnType<typeof createServer>[] = []
 const sockets = new Set<Socket>()
+type RawDesktopFrame = Parameters<typeof desktopFrameSchema.parse>[0]
 
 const hostStatus = {
   project: { id: "project-1", kind: "local" },
@@ -38,7 +39,7 @@ const temporaryDirectory = async () => {
   return directory
 }
 
-const writeRawFrame = (socket: Socket, value: unknown) => {
+const writeRawFrame = (socket: Socket, value: RawDesktopFrame) => {
   const payload = Buffer.from(JSON.stringify(value))
   const frame = Buffer.alloc(payload.byteLength + 4)
   frame.writeUInt32BE(payload.byteLength)
@@ -46,7 +47,7 @@ const writeRawFrame = (socket: Socket, value: unknown) => {
   socket.write(frame)
 }
 
-const writePaddedRawFrame = (socket: Socket, value: unknown, payloadByteLength: number) => {
+const writePaddedRawFrame = (socket: Socket, value: RawDesktopFrame, payloadByteLength: number) => {
   const json = Buffer.from(JSON.stringify(value))
   const payload = Buffer.alloc(payloadByteLength, 0x20)
   json.copy(payload)
@@ -56,7 +57,7 @@ const writePaddedRawFrame = (socket: Socket, value: unknown, payloadByteLength: 
   socket.write(frame)
 }
 
-const writeFrame = (socket: Socket, value: unknown) => {
+const writeFrame = (socket: Socket, value: RawDesktopFrame) => {
   socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse(value)))
 }
 
@@ -174,7 +175,7 @@ const createV2HostFixture = async (
 const replyChunks = (
   operation: DesktopOperationV1,
   id: string,
-  reply: unknown,
+  reply: RawDesktopFrame,
 ) => {
   const bytes = Buffer.from(JSON.stringify(reply))
   const split = Math.ceil(bytes.byteLength / 2)
@@ -385,7 +386,7 @@ describe("desktop host client", () => {
       }
     })
     const client = await createHostClient({ paths: fixture.paths })
-    const error = await client.request("host.status", {}).catch((failure: unknown) => failure)
+    const error = await client.request("host.status", {}).catch((failure) => failure)
     expect(error).toBeInstanceOf(Error)
     expect(error).not.toBeInstanceOf(DesktopControlError)
     expect(error).toHaveProperty("message", "Host unavailable.")
@@ -418,7 +419,7 @@ describe("desktop host client", () => {
     })
     const client = await createHostClient({ paths: fixture.paths })
     for (const expected of errors) {
-      const error = await client.request("control.capabilities", {}).catch((failure: unknown) => failure)
+      const error = await client.request("control.capabilities", {}).catch((failure) => failure)
       expect(error).toBeInstanceOf(DesktopControlError)
       if (!(error instanceof DesktopControlError)) throw new Error("Expected DesktopControlError.")
       expect(error.data).toEqual(expected)

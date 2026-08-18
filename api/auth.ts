@@ -11,13 +11,8 @@ import {
   getControlOAuthResource,
 } from "./control-oauth";
 
-type AuthDatabaseBinding = {
-  prepare?: unknown;
-};
-
 function hasAuthEnvBindings(env: Env): boolean {
-  const database = env?.daw_convex_auth as AuthDatabaseBinding | undefined;
-  return Boolean(database) && typeof database?.prepare === "function" && Boolean(env?.daw_convex_auth_kv);
+  return Boolean(env?.daw_convex_auth) && Boolean(env?.daw_convex_auth_kv);
 }
 
 function buildAuth(env: Env) {
@@ -43,7 +38,7 @@ function buildAuth(env: Env) {
         return await env.daw_convex_auth_kv.get(key);
       },
       set: async (key: string, value: string, ttl?: number) => {
-        const minTtl = typeof ttl === "number" ? Math.max(60, Math.ceil(ttl)) : undefined;
+        const minTtl = ttl === undefined ? undefined : Math.max(60, Math.ceil(ttl));
         const options = minTtl ? { expirationTtl: minTtl } : undefined;
         await env.daw_convex_auth_kv.put(key, value, options);
       },

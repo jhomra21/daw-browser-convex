@@ -6,6 +6,12 @@ const originalAudioWorkletNode = globalThis.AudioWorkletNode
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
 
+type TestMeterPort = {
+  onmessage: ((event: { data: object }) => void) | null
+  postMessage: () => void
+  close: () => void
+}
+
 afterEach(() => {
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: originalAudioWorkletNode })
   Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: originalRequestAnimationFrame })
@@ -44,7 +50,7 @@ describe('meter worklet messages', () => {
 describe('meter worklet lifecycle', () => {
   test('releases nodes, subscriptions, and scheduled flushes on idempotent close', async () => {
     class FakeAudioWorkletNode {
-      port = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: () => {}, close: () => {} }
+      port: TestMeterPort = { onmessage: null, postMessage: () => {}, close: () => {} }
       onprocessorerror: (() => void) | null = null
       disconnect = () => {}
     }
@@ -84,8 +90,8 @@ describe('meter worklet lifecycle', () => {
     const nodes: FakeAudioWorkletNode[] = []
     let flush = () => {}
     class FakeAudioWorkletNode {
-      port = {
-        onmessage: null as ((event: { data: unknown }) => void) | null,
+      port: TestMeterPort = {
+        onmessage: null,
         postMessage: () => {},
         close: () => {},
       }
@@ -142,8 +148,8 @@ describe('meter worklet lifecycle', () => {
     let flush = () => {}
     const nodes: FakeAudioWorkletNode[] = []
     class FakeAudioWorkletNode {
-      port = {
-        onmessage: null as ((event: { data: unknown }) => void) | null,
+      port: TestMeterPort = {
+        onmessage: null,
         postMessage: () => {},
         close: () => {},
       }

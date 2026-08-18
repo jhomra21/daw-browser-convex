@@ -1,4 +1,5 @@
 import { computePortableWasmSourceHash } from './portable-wasm-source-hash'
+import { z } from 'zod'
 
 const artifactPath = Bun.argv[2]
 const manifestPath = Bun.argv[3]
@@ -7,20 +8,20 @@ if (!artifactPath || !manifestPath) {
   throw new Error('Usage: bun validate-wasm-artifact.ts <artifact.wasm> <artifact.manifest.json>')
 }
 
-const manifest: unknown = await Bun.file(manifestPath).json()
-if (typeof manifest !== 'object' || manifest === null
-  || !('artifactKind' in manifest) || manifest.artifactKind !== 'production'
-  || !('buildType' in manifest) || manifest.buildType !== 'Release'
-  || !('lto' in manifest) || manifest.lto !== true
-  || !('fixedMemory' in manifest) || manifest.fixedMemory !== true
-  || !('sizeBytes' in manifest) || typeof manifest.sizeBytes !== 'number'
-  || !('maximumBytes' in manifest) || typeof manifest.maximumBytes !== 'number'
-  || !('sha256' in manifest) || typeof manifest.sha256 !== 'string'
-  || !('sourceHash' in manifest) || typeof manifest.sourceHash !== 'string'
-  || !/^[a-f0-9]{64}$/.test(manifest.sha256)
-  || !/^[a-f0-9]{64}$/.test(manifest.sourceHash)) {
-  throw new Error(`Production Wasm manifest is invalid: ${manifestPath}`)
-}
+const manifestSchema = z.object({
+  artifactKind: z.literal('production'),
+  buildType: z.literal('Release'),
+  lto: z.literal(true),
+  fixedMemory: z.literal(true),
+  sizeBytes: z.number(),
+  maximumBytes: z.number(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).passthrough()
+
+const manifestResult = manifestSchema.safeParse(await Bun.file(manifestPath).json())
+if (!manifestResult.success) throw new Error(`Production Wasm manifest is invalid: ${manifestPath}`)
+const manifest = manifestResult.data
 
 const sourceHash = await computePortableWasmSourceHash(process.cwd())
 if (sourceHash !== manifest.sourceHash) {

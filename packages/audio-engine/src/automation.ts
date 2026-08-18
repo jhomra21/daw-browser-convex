@@ -8,9 +8,9 @@ import {
 export type AutomationAudioBinding = {
   param: {
     value?: number
-    cancelScheduledValues: (startTime: number) => unknown
-    linearRampToValueAtTime: (value: number, endTime: number) => unknown
-    setValueAtTime: (value: number, startTime: number) => unknown
+    cancelScheduledValues: (startTime: number) => void
+    linearRampToValueAtTime: (value: number, endTime: number) => void
+    setValueAtTime: (value: number, startTime: number) => void
   }
   valueToAudioValue: (value: number) => number
 }

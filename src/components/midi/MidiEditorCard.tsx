@@ -74,7 +74,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
     props.trackId,
   ).filter((option) => isMidiMappingTargetSupported({
     parameterId: option.parameterId,
-    ...(option.effectInstanceId === undefined ? {} : { effectInstanceId: option.effectInstanceId }),
+    effectInstanceId: option.effectInstanceId,
   })))
 
   const cardDrag = useDrag({
@@ -354,12 +354,12 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
 
   const sourceForKind = (mapping: MidiMapping, kind: MidiMapping['source']['kind']): MidiMapping['source'] => {
     const channel = mapping.source.channel
-    if (kind === 'cc') return { kind, controller: mapping.source.kind === 'cc' ? mapping.source.controller : 1, ...(channel === undefined ? {} : { channel }) }
+    if (kind === 'cc') return { kind, controller: mapping.source.kind === 'cc' ? mapping.source.controller : 1, channel }
     if (kind === 'poly-pressure') {
       const pitch = mapping.source.kind === 'poly-pressure' ? mapping.source.pitch : undefined
-      return { kind, ...(channel === undefined ? {} : { channel }), ...(pitch === undefined ? {} : { pitch }) }
+      return { kind, channel, pitch }
     }
-    return { kind, ...(channel === undefined ? {} : { channel }) }
+    return { kind, channel }
   }
 
   const mappingSourceKind = (value: string): MidiMapping['source']['kind'] | undefined => (
@@ -401,7 +401,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
           const selectedTargetKey = midiMappingTargetKey(mapping.target)
           const available = createMemo(() => mappingTargets().some((option) => midiMappingTargetKey({
             parameterId: option.parameterId,
-            ...(option.effectInstanceId === undefined ? {} : { effectInstanceId: option.effectInstanceId }),
+            effectInstanceId: option.effectInstanceId,
           }) === selectedTargetKey))
           return (
             <div class="flex shrink-0 flex-wrap items-center gap-1 border-l border-border pl-2">
@@ -441,7 +441,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                       source: {
                         kind: 'cc',
                         controller: boundedMidiValue(event.currentTarget.value),
-                        ...(mapping.source.channel === undefined ? {} : { channel: mapping.source.channel }),
+                        channel: mapping.source.channel,
                       },
                     },
                   })}
@@ -495,7 +495,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                 onChange={(event) => {
                   const option = mappingTargets().find((candidate) => midiMappingTargetKey({
                     parameterId: candidate.parameterId,
-                    ...(candidate.effectInstanceId === undefined ? {} : { effectInstanceId: candidate.effectInstanceId }),
+                    effectInstanceId: candidate.effectInstanceId,
                   }) === event.currentTarget.value)
                   if (!option) return
                   persistence.saveSoon({
@@ -504,7 +504,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                     changes: {
                       target: {
                         parameterId: option.parameterId,
-                        ...(option.effectInstanceId === undefined ? {} : { effectInstanceId: option.effectInstanceId }),
+                        effectInstanceId: option.effectInstanceId,
                       },
                     },
                   })
@@ -515,7 +515,7 @@ const MidiEditorCard: Component<MidiEditorCardProps> = (props) => {
                   {(option) => (
                     <option value={midiMappingTargetKey({
                       parameterId: option.parameterId,
-                      ...(option.effectInstanceId === undefined ? {} : { effectInstanceId: option.effectInstanceId }),
+                      effectInstanceId: option.effectInstanceId,
                     })}>
                       {option.device}: {option.label}
                     </option>

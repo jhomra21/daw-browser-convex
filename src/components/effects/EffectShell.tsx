@@ -63,13 +63,7 @@ export default function EffectShell(props: EffectShellProps) {
       x: event.clientX,
       y: event.clientY,
       pointerType: event.pointerType,
-      deviceId: devicePointerIdentity({
-        pointerType: event.pointerType,
-        persistentDeviceId: (() => {
-          const value = Reflect.get(event, 'persistentDeviceId')
-          return typeof value === 'string' ? value : undefined
-        })(),
-      }),
+      deviceId: devicePointerIdentity(event),
     })
     lastTouchTap = result.next
     if (!result.recognized) return

@@ -3,6 +3,7 @@ import { query, type DatabaseReader } from "./_generated/server";
 import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
 import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
+import { z } from "zod";
 import { getProjectRow } from "./projectRows";
 
 type RoomSummary = {
@@ -159,17 +160,22 @@ export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
 export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Authentication required.");
+  const parsedIdentity = z.object({
+    subject: z.string(),
+    issuer: z.string(),
+    tokenIdentifier: z.string(),
+    dawControlActorIssuer: z.string().optional(),
+    dawControlActorTokenIdentifier: z.string().optional(),
+    dawWorker: z.boolean().optional(),
+  }).safeParse(identity);
+  if (!parsedIdentity.success) throw new Error("Authentication claims are invalid.");
   return {
-    subject: identity.subject,
-    issuer: identity.issuer,
-    tokenIdentifier: identity.tokenIdentifier,
-    ...(typeof identity.dawControlActorIssuer === "string"
-      ? { dawControlActorIssuer: identity.dawControlActorIssuer }
-      : {}),
-    ...(typeof identity.dawControlActorTokenIdentifier === "string"
-      ? { dawControlActorTokenIdentifier: identity.dawControlActorTokenIdentifier }
-      : {}),
-    ...(identity.dawWorker === true ? { dawWorker: true } : {}),
+    subject: parsedIdentity.data.subject,
+    issuer: parsedIdentity.data.issuer,
+    tokenIdentifier: parsedIdentity.data.tokenIdentifier,
+    dawControlActorIssuer: parsedIdentity.data.dawControlActorIssuer,
+    dawControlActorTokenIdentifier: parsedIdentity.data.dawControlActorTokenIdentifier,
+    dawWorker: parsedIdentity.data.dawWorker === true ? true : undefined,
   };
 }
 

@@ -2,8 +2,9 @@ import type { ExportAudioFormat } from "@daw-browser/shared"
 import { getExportRangeBounds, type ExportRange } from "@daw-browser/audio-engine/export-range"
 import { getExportTailMaximumSec } from "@daw-browser/audio-engine/export-fidelity"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
+import type {
+  nativeAudioHostMaximumInMemoryPcmBytes} from "@daw-browser/desktop-protocol/native-audio-host";
 import {
-  nativeAudioHostMaximumInMemoryPcmBytes,
   nativeOfflineRenderPcmBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 

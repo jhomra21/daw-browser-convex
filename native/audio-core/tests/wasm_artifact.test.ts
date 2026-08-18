@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import path from 'node:path'
+import { z } from 'zod'
 import {
   encodePortableGraphParityFixture,
   isPlanarImpulseFixtureInput,
@@ -15,6 +16,7 @@ import {
 } from './graph-parity-fixtures'
 import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
+import type { JsonValue } from '../../../packages/shared/src/json-value'
 import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../../..')
@@ -33,44 +35,35 @@ const legacyDynamicsWorkletUrls = {
   limiter: new URL('../../../public/audio-worklets/daw-limiter-processor-v1.js', import.meta.url),
 } satisfies Record<PortableDynamicsKind, URL>
 
-type WasmArtifactManifest = {
-  artifactKind: string
-  abiVersion: number
-  buildType: string
-  lto: boolean
-  fixedMemory: boolean
-  memoryBytes: number
-  sizeBytes: number
-  maximumBytes: number
-  sha256: string
-  sourceHash: string
-  wasmUrl: string
-}
+const wasmArtifactManifestSchema = z.object({
+  artifactKind: z.string(),
+  abiVersion: z.number(),
+  buildType: z.string(),
+  lto: z.boolean(),
+  fixedMemory: z.boolean(),
+  memoryBytes: z.number(),
+  sizeBytes: z.number(),
+  maximumBytes: z.number(),
+  sha256: z.string(),
+  sourceHash: z.string(),
+  wasmUrl: z.string(),
+}).passthrough()
 
-const isWasmArtifactManifest = (value: unknown): value is WasmArtifactManifest =>
-  typeof value === 'object'
-  && value !== null
-  && 'artifactKind' in value && typeof value.artifactKind === 'string'
-  && 'abiVersion' in value && typeof value.abiVersion === 'number'
-  && 'buildType' in value && typeof value.buildType === 'string'
-  && 'lto' in value && typeof value.lto === 'boolean'
-  && 'fixedMemory' in value && typeof value.fixedMemory === 'boolean'
-  && 'memoryBytes' in value && typeof value.memoryBytes === 'number'
-  && 'sizeBytes' in value && typeof value.sizeBytes === 'number'
-  && 'maximumBytes' in value && typeof value.maximumBytes === 'number'
-  && 'sha256' in value && typeof value.sha256 === 'string'
-  && 'sourceHash' in value && typeof value.sourceHash === 'string'
-  && 'wasmUrl' in value && typeof value.wasmUrl === 'string'
+type WasmFunctionExport = (...arguments_: (number | bigint)[]) => number
+
+const isWasmFunctionExport = (
+  value: WebAssembly.ExportValue | undefined,
+): value is WasmFunctionExport => typeof value === 'function'
 
 type LegacyModulationPort = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  postMessage: (message: unknown) => void
+  onmessage: ((event: { data: JsonValue }) => void) | null
+  postMessage: (message: JsonValue) => void
   close: () => void
 }
 
 type LegacyModulationProcessor = {
   port: LegacyModulationPort
-  process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters?: object) => boolean
+  process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters?: Record<string, Float32Array>) => boolean
 }
 
 type LegacyModulationProcessorConstructor = new (
@@ -83,7 +76,7 @@ type LegacyReverbProcessor = {
 }
 
 type LegacyReverbProcessorConstructor = new (
-  options?: { processorOptions?: unknown },
+  options?: { processorOptions?: JsonValue },
 ) => LegacyReverbProcessor
 
 const renderLegacyReverbFixture = async (
@@ -540,9 +533,7 @@ test('the production Wasm artifact omits native and fixture-only exports', async
 
 test('the fixed-memory Wasm artifact matches the Utility fixture vector', async () => {
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
-  const unknownManifest = await Bun.file(manifestUrl).json()
-  if (!isWasmArtifactManifest(unknownManifest)) throw new Error('The Wasm artifact manifest is invalid.')
-  const manifest = unknownManifest
+  const manifest = wasmArtifactManifestSchema.parse(await Bun.file(manifestUrl).json())
   const hash = Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
     (byte) => byte.toString(16).padStart(2, '0'),
@@ -567,18 +558,18 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   expect(await Bun.file(publicManifestUrl).json()).toEqual(manifest)
   expect(exports.memory).toBeInstanceOf(WebAssembly.Memory)
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_get_abi_version !== 'function'
-    || typeof exports.daw_audio_core_wasm_utility_initialize !== 'function'
-    || typeof exports.daw_audio_core_wasm_utility_process !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_initialize !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_publish !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_schedule_sample_source !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_get_abi_version)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_utility_initialize)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_utility_process)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize_planar)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_sample_source)) {
     throw new Error('The Wasm artifact does not expose the stable portable C ABI.')
   }
 
@@ -588,14 +579,14 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   expect(exports.daw_audio_core_wasm_utility_initialize(48_000, 1)).toBe(0)
 
   const headroomExports = (await WebAssembly.instantiate(bytes)).instance.exports
-  if (typeof headroomExports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
-    || typeof headroomExports.malloc !== 'function'
-    || typeof headroomExports.free !== 'function') {
+  if (!isWasmFunctionExport(headroomExports.daw_audio_core_wasm_graph_initialize_planar)
+    || !isWasmFunctionExport(headroomExports.malloc)
+    || !isWasmFunctionExport(headroomExports.free)) {
     throw new Error('The Wasm artifact does not expose the headroom regression ABI.')
   }
   expect(headroomExports.daw_audio_core_wasm_graph_initialize_planar(48_000, 128, 2, 2, 64)).toBe(0)
   const postInitializeAsset = headroomExports.malloc(16_000_000)
-  if (typeof postInitializeAsset !== 'number' || postInitializeAsset === 0) {
+  if (postInitializeAsset === 0) {
     throw new Error('The fixed-memory Wasm artifact could not allocate ordinary PCM asset headroom after graph initialization.')
   }
   headroomExports.free(postInitializeAsset)
@@ -603,7 +594,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   const inputBytes = Float32Array.BYTES_PER_ELEMENT * 4
   const stateBytes = 40
   const allocation = exports.malloc(inputBytes + stateBytes)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('The Wasm artifact could not allocate its fixture buffers.')
+  if (allocation === 0) throw new Error('The Wasm artifact could not allocate its fixture buffers.')
   try {
     const memory = new DataView(exports.memory.buffer)
     const leftInput = allocation
@@ -637,17 +628,17 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_wasm_recording_capture_initialize !== 'function'
-    || typeof exports.daw_audio_core_wasm_recording_capture_process !== 'function'
-    || typeof exports.daw_audio_core_wasm_recording_capture_dequeue !== 'function'
-    || typeof exports.daw_audio_core_wasm_recording_capture_finalize !== 'function'
-    || typeof exports.daw_audio_core_wasm_recording_capture_get_diagnostics !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_initialize)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_process)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_dequeue)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_finalize)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_get_diagnostics)) {
     throw new Error('The recording capture Wasm bridge exports are unavailable.')
   }
   const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 48 + 64)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate recording capture fixture.')
+  if (allocation === 0) throw new Error('Could not allocate recording capture fixture.')
   try {
     const config = allocation
     const pointers = config + 56
@@ -688,12 +679,12 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_initialize !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_publish !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process !== 'function') throw new Error('The graph bridge exports are unavailable.')
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process)) throw new Error('The graph bridge exports are unavailable.')
   expect(exports.daw_audio_core_wasm_graph_initialize(48_000, 4, 1)).toBe(0)
   const graph = new Uint8Array(24 + 2 * 28 + 48 + 48 + 40)
   const view = new DataView(graph.buffer)
@@ -733,7 +724,7 @@ test('the Wasm graph bridge matches the portable processor envelope contract', a
   view.setFloat32(processor + 68, 0, true)
   view.setFloat32(processor + 72, 1, true)
   const allocation = exports.malloc(graph.byteLength + Float32Array.BYTES_PER_ELEMENT * 8)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('The Wasm graph bridge could not allocate fixture buffers.')
+  if (allocation === 0) throw new Error('The Wasm graph bridge could not allocate fixture buffers.')
   try {
     new Uint8Array(exports.memory.buffer, allocation, graph.byteLength).set(graph)
     expect(exports.daw_audio_core_wasm_graph_prepare(allocation, graph.byteLength - 1)).toBe(1)
@@ -759,13 +750,13 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_publish !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_set_transport !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function') throw new Error('The planar graph bridge exports are unavailable.')
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize_planar)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_set_transport)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) throw new Error('The planar graph bridge exports are unavailable.')
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 2, 2, 1)).toBe(0)
 
   const graph = new Uint8Array(24 + 2 * 108 + 48)
@@ -796,7 +787,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
   graphView.setUint32(edge + 36, 3, true)
 
   const allocation = exports.malloc(graph.byteLength + 8 * 4 + 4 * Float32Array.BYTES_PER_ELEMENT + 4 + 48)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('The planar graph bridge could not allocate fixture buffers.')
+  if (allocation === 0) throw new Error('The planar graph bridge could not allocate fixture buffers.')
   try {
     new Uint8Array(exports.memory.buffer, allocation, graph.byteLength).set(graph)
     expect(exports.daw_audio_core_wasm_graph_prepare(allocation, graph.byteLength)).toBe(0)
@@ -833,15 +824,15 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_initialize_planar !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_publish !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_register_pcm_asset !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_schedule_sample_source !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_set_transport !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize_planar)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_register_pcm_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_sample_source)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_set_transport)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
     throw new Error('The sample-source graph bridge exports are unavailable.')
   }
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 1, 2, 1)).toBe(0)
@@ -874,7 +865,7 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
     + 3 * BigUint64Array.BYTES_PER_ELEMENT
     + processFrames * 2 * Float32Array.BYTES_PER_ELEMENT,
   )
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate pause regression buffers.')
+  if (allocation === 0) throw new Error('Could not allocate pause regression buffers.')
   try {
     const graphOffset = allocation
     const leftAssetOffset = graphOffset + graph.byteLength
@@ -939,11 +930,11 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_register_pcm_asset !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_configure_sampler !== 'function'
-    || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_register_pcm_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_sampler)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
     throw new Error('The sampler graph bridge exports are unavailable.')
   }
   expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 4, 1, 2, 1)).toBe(0)
@@ -971,7 +962,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
   graphView.setFloat32(272, 1, true)
   graphView.setUint32(276, 3, true)
   const allocation = exports.malloc(graph.byteLength + 4 * 4 + 4 + 8 + 88 + 80 + 8 * 4 + 52)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate sampler bridge fixture.')
+  if (allocation === 0) throw new Error('Could not allocate sampler bridge fixture.')
   try {
     const graphOffset = allocation
     const sampleOffset = graphOffset + graph.byteLength
@@ -1034,8 +1025,8 @@ test('the Wasm graph bridge exports the fixed granular configuration ABI', async
   const bytes = await Bun.file(artifactUrl).arrayBuffer()
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
-  expect(typeof exports.daw_audio_core_wasm_graph_configure_synth).toBe('function')
-  expect(typeof exports.daw_audio_core_wasm_graph_configure_granular).toBe('function')
+  expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_synth)).toBe(true)
+  expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_granular)).toBe(true)
 })
 
 test('the shared graph fixtures execute through the bounded Wasm runner', async () => {
@@ -1043,10 +1034,10 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_graph_fixture_protocol_version !== 'function'
-    || typeof exports.daw_audio_core_run_graph_fixture !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_graph_fixture_protocol_version)
+    || !isWasmFunctionExport(exports.daw_audio_core_run_graph_fixture)) {
     throw new Error('The shared graph fixture runner exports are unavailable.')
   }
   expect(exports.daw_audio_core_graph_fixture_protocol_version()).toBe(3)
@@ -1057,7 +1048,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
     const pointerBytes = fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
     const outputBytes = fixture.channelCount * fixture.frames * Float32Array.BYTES_PER_ELEMENT
     const allocation = exports.malloc(fixtureBytes.byteLength + pointerBytes + outputBytes)
-    if (typeof allocation !== 'number' || allocation === 0) throw new Error(`Could not allocate ${fixture.name}.`)
+    if (allocation === 0) throw new Error(`Could not allocate ${fixture.name}.`)
     try {
       const fixtureOffset = allocation
       const pointersOffset = fixtureOffset + fixtureBytes.byteLength
@@ -1279,14 +1270,14 @@ test('the shared graph fixture runner rejects excess asset definitions on both t
   const instance = await WebAssembly.instantiate(bytes)
   const exports = instance.instance.exports
   if (!(exports.memory instanceof WebAssembly.Memory)
-    || typeof exports.malloc !== 'function'
-    || typeof exports.free !== 'function'
-    || typeof exports.daw_audio_core_run_graph_fixture !== 'function') {
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_run_graph_fixture)) {
     throw new Error('The shared graph fixture runner exports are unavailable.')
   }
   const allocation = exports.malloc(fixtureBytes.byteLength + fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT
     + fixture.channelCount * fixture.frames * Float32Array.BYTES_PER_ELEMENT)
-  if (typeof allocation !== 'number' || allocation === 0) throw new Error('Could not allocate malformed fixture.')
+  if (allocation === 0) throw new Error('Could not allocate malformed fixture.')
   try {
     const pointersOffset = allocation + fixtureBytes.byteLength
     const outputOffset = pointersOffset + fixture.channelCount * Uint32Array.BYTES_PER_ELEMENT

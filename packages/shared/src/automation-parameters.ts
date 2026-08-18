@@ -209,7 +209,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'spectral.mix', label: 'Spectral Mix', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
-const descriptorsByEffectKind: Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]> = {
+const descriptorsByEffectKind = {
   utility: effectDescriptors.filter((descriptor) => descriptor.owner === 'utility'),
   eq: [],
   autofilter: effectDescriptors.filter((descriptor) => descriptor.owner === 'autofilter'),
@@ -227,7 +227,7 @@ const descriptorsByEffectKind: Record<AudioEffectKind | 'spectral', AutomationPa
   autopan: effectDescriptors.filter((descriptor) => descriptor.owner === 'autopan'),
   ensemble: effectDescriptors.filter((descriptor) => descriptor.owner === 'ensemble'),
   spectral: effectDescriptors.filter((descriptor) => descriptor.owner === 'spectral'),
-}
+} satisfies Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]>
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },

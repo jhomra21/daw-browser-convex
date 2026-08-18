@@ -48,7 +48,7 @@ export type LocalAssetBytesResult =
 
 const ASSETS_DIRECTORY_NAME = 'assets'
 const MAX_ASSET_EXTENSION_LENGTH = 16
-const isPermissionError = (error: unknown) => (
+const isPermissionError = (error: Error) => (
   error instanceof DOMException
   && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
 )
@@ -148,7 +148,7 @@ export const removeLocalAssetFileUnlocked = async (
     if (error instanceof DOMException && error.name === 'NotFoundError') {
       return { status: 'already-missing' }
     }
-    if (isPermissionError(error)) return { status: 'permission-unavailable' }
+    if (isPermissionError(error instanceof Error ? error : new Error())) return { status: 'permission-unavailable' }
     return { status: 'retryable-failure' }
   }
 }
@@ -290,7 +290,7 @@ export const readLocalAssetBytes = async (
     const fileHandle = await assetsDir.getFileHandle(row.storagePath)
     return { status: 'ready', file: await fileHandle.getFile() }
   } catch (error) {
-    if (isPermissionError(error)) return { status: 'permission-denied' }
+    if (isPermissionError(error instanceof Error ? error : new Error())) return { status: 'permission-denied' }
     return { status: 'missing' }
   }
 }

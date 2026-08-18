@@ -21,7 +21,8 @@ import {
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
 
-const envelope = <State>(state: State): { version: 1; state: State } => ({ version: 1, state })
+type StateEnvelope<State> = { version: 1; state: State }
+const envelope = <State>(state: State): StateEnvelope<State> => ({ version: 1, state })
 
 test('maps changed nested built-in values and filters unchanged fields', () => {
   const from = envelope(createDefaultAutoFilterParams())
@@ -121,7 +122,7 @@ test('maps every continuous target for every live built-in family', () => {
         to: {
           ...reverbFrom, wet: 0.4, preDelayMs: 30, lowCutHz: 80, highCutHz: 16_000, stereoWidth: 1.5,
           decaySec: 3, reflections: 0.7, reflectionModAmountMs: 8, reflectionModRateHz: 1,
-          reflectionShape: 0.6, diffuse: 0.8, size: 0.5, diffusion: 0.9, density: 0.6,
+          ["reflectionShape"]: 0.6, diffuse: 0.8, size: 0.5, diffusion: 0.9, density: 0.6,
           diffusionLowCutHz: 120, diffusionHighCutHz: 18_000,
         },
       } satisfies EffectParamsCommitPayload<'reverb'>,
@@ -173,7 +174,7 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'tremolo', instanceId: 'tremolo-1',
         from: envelope(tremoloFrom),
-        to: envelope({ ...tremoloFrom, rateHz: 8, depth: 0.8, shape: 0.25, phase: 0.5 }),
+        to: envelope({ ...tremoloFrom, rateHz: 8, depth: 0.8, ["shape"]: 0.25, phase: 0.5 }),
       } satisfies EffectParamsCommitPayload<'tremolo'>,
       expected: [['tremolo.rateHz', 8], ['tremolo.depth', 0.8], ['tremolo.shape', 0.25], ['tremolo.phase', 0.5]],
     },
@@ -182,7 +183,7 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'autopan', instanceId: 'autopan-1',
         from: envelope(autoPanFrom),
-        to: envelope({ ...autoPanFrom, rateHz: 5, depth: 0.75, shape: 0.2, phase: 0.4 }),
+        to: envelope({ ...autoPanFrom, rateHz: 5, depth: 0.75, ["shape"]: 0.2, phase: 0.4 }),
       } satisfies EffectParamsCommitPayload<'autopan'>,
       expected: [['autopan.rateHz', 5], ['autopan.depth', 0.75], ['autopan.shape', 0.2], ['autopan.phase', 0.4]],
     },

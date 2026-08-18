@@ -112,7 +112,7 @@ const attachment = (input: {
   declaredTailFrames: 480,
   bypassed: false,
   stateRevision: 7,
-  ...(input.parameterOverrides === undefined ? {} : { parameterOverrides: input.parameterOverrides }),
+  parameterOverrides: input.parameterOverrides,
 })
 
 const first = attachment({

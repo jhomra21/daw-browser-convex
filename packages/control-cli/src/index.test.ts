@@ -123,7 +123,7 @@ const controlResults = {
     continueCursor: "end",
     isDone: true,
   }),
-} satisfies Record<(typeof allControlOperations)[number], unknown>
+}
 
 const controlResultFor = (operation: DesktopOperationV1) => {
   if (operation === "control.capabilities") return controlResults[operation]
@@ -357,7 +357,7 @@ describe("canonical CLI target routing", () => {
         cloudRequests.push({
           url: `${url.pathname}${url.search}`,
           method: init?.method ?? "GET",
-          body: typeof init?.body === "string" ? init.body : undefined,
+          body: init?.body === undefined ? undefined : String(init.body),
         })
         const operation = url.pathname.endsWith("/capabilities") ? "control.capabilities"
           : url.pathname.endsWith("/snapshot") ? "control.snapshot"
@@ -416,10 +416,10 @@ describe("canonical CLI target routing", () => {
       { url: "/api/control/v1/projects/project-1/approvals", method: "POST", body: canonicalJson({ version: "v1", projectId: "project-1", actions: [action] }) },
       { url: "/api/control/v1/projects/project-1/commit", method: "POST", body: canonicalJson({ version: "v1", projectId: "project-1", actions: [action], idempotencyKey: "request-1" }) },
       { url: "/api/control/v1/projects/project-1/commit", method: "POST", body: canonicalJson({ version: "v1", projectId: "project-1", actions: [action], idempotencyKey: "request-1" }) },
-      { url: "/api/control/v1/projects/project-1/history?cursor=cursor-1&limit=2", method: "GET", body: undefined },
-      { url: "/api/control/v1/projects/project-1/history?cursor=cursor-1&limit=2", method: "GET", body: undefined },
-      { url: "/api/control/v1/projects/project-1/recoveries?cursor=cursor-1&limit=2", method: "GET", body: undefined },
-      { url: "/api/control/v1/projects/project-1/recoveries?cursor=cursor-1&limit=2", method: "GET", body: undefined },
+      { url: "/api/control/v1/projects/project-1/history?limit=2&cursor=cursor-1", method: "GET", body: undefined },
+      { url: "/api/control/v1/projects/project-1/history?limit=2&cursor=cursor-1", method: "GET", body: undefined },
+      { url: "/api/control/v1/projects/project-1/recoveries?limit=2&cursor=cursor-1", method: "GET", body: undefined },
+      { url: "/api/control/v1/projects/project-1/recoveries?limit=2&cursor=cursor-1", method: "GET", body: undefined },
     ])
   })
 

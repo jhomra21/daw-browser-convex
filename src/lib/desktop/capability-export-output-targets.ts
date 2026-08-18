@@ -5,6 +5,7 @@ import {
   type ExportAudioFormat,
 } from "@daw-browser/shared"
 import { saveCloudExport } from "~/lib/cloud-export"
+import { z } from "zod"
 
 type CapabilityWriter = {
   requestId: string
@@ -20,6 +21,11 @@ type DesktopCapabilityBridge = {
 }
 
 const maximumCapabilityChunkBytes = 1024 * 1024
+const capabilityCommitErrorSchema = z.object({
+  code: z.string().optional(),
+  message: z.string().optional(),
+}).passthrough()
+
 export const desktopExportResourceLimits = {
   maximumFiles: 1_024,
   maximumBytes: 8 * 1024 * 1024 * 1024,
@@ -44,9 +50,14 @@ const createSink = (bridge: DesktopCapabilityBridge, writer: CapabilityWriter): 
       settled = true
       return { byteLength: result.byteLength }
     } catch (error) {
-      const code = error && typeof error === "object" ? Reflect.get(error, "code") : undefined
-      const message = error instanceof Error ? error.message : ""
-      if (code === "commit-indeterminate" || message.includes("indeterminate terminal state")) settled = true
+      const parsed = capabilityCommitErrorSchema.safeParse(error)
+      if (
+        parsed.success
+        && (
+          parsed.data.code === "commit-indeterminate"
+          || parsed.data.message?.includes("indeterminate terminal state") === true
+        )
+      ) settled = true
       throw error
     }
   }

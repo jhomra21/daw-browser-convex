@@ -1,5 +1,6 @@
 import { api as convexApi } from '../convex/_generated/api'
 import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '@daw-browser/shared'
+import { z } from 'zod'
 import type { createAuthenticatedConvexClient } from './convex-auth'
 
 type AuthenticatedConvexClient = Awaited<ReturnType<typeof createAuthenticatedConvexClient>>
@@ -58,27 +59,31 @@ export class TimelineOperationTargetError extends Error {
   }
 }
 
-const bulkClipDeleteErrorDetails = (error: unknown) => {
-  const isErrorRecord = (value: unknown): value is {
-    message?: unknown
-    code?: unknown
-    cause?: unknown
-  } => typeof value === 'object' && value !== null
+const bulkClipDeleteErrorSchema = z.object({
+  message: z.string().optional(),
+  code: z.string().optional(),
+  cause: z.unknown().optional(),
+})
+
+const bulkClipDeleteErrorDetails = (error: Error) => {
   const details: Array<{ message?: string; code?: string }> = []
-  const visited = new Set<unknown>()
-  let current: unknown = error
-  while (isErrorRecord(current) && !visited.has(current)) {
+  const visited = new Set<object>()
+  let currentCause: object = error
+  while (true) {
+    const parsed = bulkClipDeleteErrorSchema.safeParse(currentCause)
+    if (!parsed.success) break
+    const current = parsed.data
+    if (visited.has(current)) break
     visited.add(current)
-    details.push({
-      ...(typeof current.message === 'string' ? { message: current.message } : {}),
-      ...(typeof current.code === 'string' ? { code: current.code } : {}),
-    })
-    current = current.cause
+    details.push(current)
+    const nextCause = z.object({}).passthrough().safeParse(current.cause)
+    if (!nextCause.success) break
+    currentCause = nextCause.data
   }
   return details
 }
 
-export const classifyBulkClipDeleteError = (error: unknown): TimelineOperationTargetError | undefined => {
+export const classifyBulkClipDeleteError = (error: Error): TimelineOperationTargetError | undefined => {
   const details = bulkClipDeleteErrorDetails(error)
   const message = details.map((detail) => detail.message).find((value): value is string => value !== undefined)
   const protectedCode = details.some((detail) => (
@@ -141,7 +146,7 @@ const verifyTimelineOperationTargets = async (
 export const executeTimelineOperation = async (
   context: TimelineOperationContext,
   operation: SharedTimelineOperation,
-): Promise<unknown> => {
+) => {
   if (operation.kind !== 'clips.removeMany') {
     await verifyTimelineOperationTargets(context, operation)
   }
@@ -181,7 +186,10 @@ export const executeTimelineOperation = async (
           operationId: operation.payload.operationId,
         })
       } catch (error) {
-        const classified = classifyBulkClipDeleteError(error)
+        const caughtError = z.instanceof(Error).safeParse(error)
+        const classified = caughtError.success
+          ? classifyBulkClipDeleteError(caughtError.data)
+          : undefined
         if (classified) throw classified
         throw error
       }

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process"
 import { constants, existsSync } from "node:fs"
 import { open, type FileHandle } from "node:fs/promises"
 import path from "node:path"
+import type { DesktopJsonValue } from "@daw-browser/desktop-protocol"
+import { z } from "zod"
 
 const maximumReplyBytes = 4 * 1024
 const maximumErrorBytes = 4 * 1024
@@ -22,6 +24,8 @@ type InvocationResult = {
   stdout: string
   exitCode: number
 }
+
+type NativeHelperJsonObject = { [key: string]: DesktopJsonValue }
 
 export type FileIdentity = {
   device: string
@@ -84,34 +88,43 @@ const isNativeHelperErrorCode = (value: string): value is NativeHelperErrorCode 
     || value === "target-changed"
 }
 
-const readIdentityPart = (value: unknown, name: string) => {
-  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
+const readIdentityPart = (value: DesktopJsonValue | undefined, name: string) => {
+  const parsed = z.string().regex(/^(0|[1-9][0-9]*)$/).safeParse(value)
+  if (!parsed.success) {
     throw new Error(`Native file helper returned an invalid ${name}.`)
   }
-  return value
+  return parsed.data
 }
 
-const readIdentity = (device: unknown, inode: unknown, name: string): FileIdentity => {
+const readIdentity = (
+  device: DesktopJsonValue | undefined,
+  inode: DesktopJsonValue | undefined,
+  name: string,
+): FileIdentity => {
   return {
     device: readIdentityPart(device, `${name} device`),
     inode: readIdentityPart(inode, `${name} inode`),
   }
 }
 
-const exactKeys = (value: object, keys: string[]) => {
+const exactKeys = <Value extends object>(value: Value, keys: string[]) => {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
-const parseObject = (result: InvocationResult) => {
-  let value: unknown
+const isJsonObject = (value: DesktopJsonValue): value is NativeHelperJsonObject => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+)
+
+const parseObject = (result: InvocationResult): NativeHelperJsonObject => {
+  let value: DesktopJsonValue
   try {
     value = JSON.parse(result.stdout)
   } catch {
     throw new Error("Native file helper returned invalid JSON.")
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isJsonObject(value)) {
     throw new Error("Native file helper returned an invalid reply.")
   }
   return value
@@ -131,17 +144,18 @@ const expectedExitCode = (code: NativeHelperErrorCode) => {
   }
 }
 
-const parseFailure = (value: object, exitCode: number) => {
+const parseFailure = <Value extends object>(value: Value, exitCode: number) => {
   if (!exactKeys(value, ["ok", "code"]) || !("ok" in value) || value.ok !== false || !("code" in value)) {
     throw new Error("Native file helper returned an invalid failure.")
   }
-  if (typeof value.code !== "string" || !isNativeHelperErrorCode(value.code)) {
+  const code = "code" in value ? z.string().safeParse(value.code) : undefined
+  if (!code?.success || !isNativeHelperErrorCode(code.data)) {
     throw new Error("Native file helper returned an unknown failure.")
   }
-  if (exitCode !== expectedExitCode(value.code)) {
+  if (exitCode !== expectedExitCode(code.data)) {
     throw new Error("Native file helper returned a mismatched failure code.")
   }
-  throw new NativeFileCapabilityError(value.code)
+  throw new NativeFileCapabilityError(code.data)
 }
 
 const parseEmptySuccess = (result: InvocationResult) => {
@@ -176,12 +190,17 @@ const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
     || !("ok" in value)
     || value.ok !== true
     || !("basename" in value)
-    || typeof value.basename !== "string"
-    || value.basename.length === 0
-    || value.basename.length > 255
-    || value.basename === "."
-    || value.basename === ".."
-    || value.basename.includes("/")
+  ) {
+    throw new Error("Native file helper returned an invalid file reply.")
+  }
+  const basename = z.string().safeParse(value.basename)
+  if (
+    !basename.success
+    || basename.data.length === 0
+    || basename.data.length > 255
+    || basename.data === "."
+    || basename.data === ".."
+    || basename.data.includes("/")
   ) {
     throw new Error("Native file helper returned an invalid file reply.")
   }
@@ -191,12 +210,11 @@ const parseFileSuccess = (invocation: InvocationResult): OutputFileGrant => {
       "parentIno" in value ? value.parentIno : undefined,
       "parent",
     ),
-    basename: value.basename,
+    basename: basename.data,
   }
   if (!("file" in value) || value.file === null) return grant
   if (
-    typeof value.file !== "object"
-    || Array.isArray(value.file)
+    !isJsonObject(value.file)
     || !exactKeys(value.file, ["dev", "ino"])
   ) {
     throw new Error("Native file helper returned an invalid target identity.")
@@ -258,7 +276,7 @@ const invoke = (
   let settled = false
   let spawned = false
   let timeout: ReturnType<typeof setTimeout> | undefined
-  const rejectTransport = (error: unknown) => {
+  const rejectTransport = (error: Error) => {
     reject(indeterminateAfterSpawn && spawned
       ? new NativeFileCapabilityError("commit-indeterminate")
       : error)
@@ -272,7 +290,9 @@ const invoke = (
   }
   const abort = () => {
     child.kill()
-    finish(() => rejectTransport(signal?.reason ?? new Error("Native helper aborted.")))
+    finish(() => rejectTransport(
+      signal?.reason instanceof Error ? signal.reason : new Error("Native helper aborted."),
+    ))
   }
   child.once("spawn", () => {
     spawned = true

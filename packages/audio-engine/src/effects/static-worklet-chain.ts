@@ -1,6 +1,11 @@
 import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
   OWNED_PROCESSOR_PARAMETER_IDS,
+  type JsonValue,
   type OwnedProcessorKind,
+  type SpectralParams,
 } from '@daw-browser/shared'
 import { loadWorkletModule } from '../worklet-loader'
 import { autoFilterWorklet, gateWorklet, limiterWorklet, loFiWorklet, modulationWorklet, resolveWorkletModuleUrl, spectralWorklet, utilityWorklet } from '../worklet-manifest'
@@ -32,7 +37,11 @@ const isModulationKind = (kind: StaticWorkletKind) =>
 
 const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : kind === 'spectral' ? spectralWorklet : modulationWorklet
 
-type StaticWorkletParams = unknown
+type StaticWorkletParams = Parameters<typeof normalizeOwnedProcessorAudioState>[1]
+type NormalizedOwnedState = ReturnType<typeof normalizeOwnedProcessorAudioState>
+
+const isSpectralState = (state: NormalizedOwnedState): state is NormalizedOwnedState & SpectralParams =>
+  'fftSize' in state && 'overlap' in state
 
 export async function createStaticWorkletNodeChain(
   ctx: BaseAudioContext,
@@ -43,8 +52,9 @@ export async function createStaticWorkletNodeChain(
   const asset = manifest(kind)
   await loadWorkletModule(ctx, resolveWorkletModuleUrl(asset.modulePath))
   const normalizedState = normalizeOwnedProcessorAudioState(kind, params)
-  const fftSize = kind === 'spectral' ? Reflect.get(normalizedState, 'fftSize') : undefined
-  const overlap = kind === 'spectral' ? Reflect.get(normalizedState, 'overlap') : undefined
+  const spectralState = kind === 'spectral' && isSpectralState(normalizedState) ? normalizedState : undefined
+  const fftSize = spectralState?.fftSize
+  const overlap = spectralState?.overlap
   const node = new AudioWorkletNode(ctx, asset.processorName, {
     numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
     numberOfOutputs: 1,
@@ -102,9 +112,9 @@ export function applyStaticWorkletNodeParams(
   const normalizedState = normalizeOwnedProcessorAudioState(chain.kind, params)
   const stateKey = JSON.stringify(normalizedState)
   if (chain.normalizedStateKey === stateKey) return
-  if (chain.kind === 'spectral') {
-    const fftSize = Reflect.get(normalizedState, 'fftSize')
-    const overlap = Reflect.get(normalizedState, 'overlap')
+  if (chain.kind === 'spectral' && isSpectralState(normalizedState)) {
+    const fftSize = normalizedState.fftSize
+    const overlap = normalizedState.overlap
     if (chain.spectralTopology?.fftSize !== fftSize || chain.spectralTopology?.overlap !== overlap) {
       chain.node.port.postMessage({ type: 'reconfigure', version: 1, fftSize, overlap })
       chain.spectralTopology = { fftSize, overlap }
@@ -122,7 +132,7 @@ export function applyStaticWorkletNodeParams(
   chain.normalizedStateKey = stateKey
   for (const { parameterId, value } of ownedProcessorAudioParamValuesFromState(chain.kind, normalizedState)) {
     const param = chain.node.parameters.get(parameterId)
-    if (param && typeof value === 'number') param.value = value
+    if (param && isJsonNumber(value)) param.value = value
   }
 }
 
@@ -141,15 +151,15 @@ export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) 
   disconnectAudioNodes([chain.node])
 }
 
-function readGateMeterFrame(data: unknown): GateMeterFrame | null {
-  if (typeof data !== 'object' || data === null || !('type' in data) || data.type !== 'meter') return null
-  if (!('gainReductionDb' in data) || typeof data.gainReductionDb !== 'number' || !Number.isFinite(data.gainReductionDb)) return null
+function readGateMeterFrame(data: JsonValue): GateMeterFrame | null {
+  if (!isJsonObject(data) || data.type !== 'meter') return null
+  if (!isJsonNumber(data.gainReductionDb) || !Number.isFinite(data.gainReductionDb)) return null
   return { gainReductionDb: data.gainReductionDb }
 }
 
-function readStaticWorkletFault(data: unknown): string | null {
-  if (typeof data !== 'object' || data === null || !('type' in data) || data.type !== 'fault') return null
-  if (!('version' in data) || data.version !== 1 || !('code' in data) || typeof data.code !== 'string' || data.code.length === 0) {
+function readStaticWorkletFault(data: JsonValue): string | null {
+  if (!isJsonObject(data) || data.type !== 'fault') return null
+  if (data.version !== 1 || !isJsonString(data.code) || data.code.length === 0) {
     return 'malformed-fault'
   }
   return data.code

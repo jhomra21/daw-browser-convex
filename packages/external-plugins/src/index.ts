@@ -12,6 +12,14 @@ const finite = z.number().finite()
 
 export const externalPluginEntityKind = 'external-plugin'
 
+export type ExternalPluginJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ExternalPluginJsonValue[]
+  | { [key: string]: ExternalPluginJsonValue }
+
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/)
 
 export const vstLaunchReferenceSchema = z.object({
@@ -30,7 +38,7 @@ export type VstLaunchReference = z.infer<typeof vstLaunchReferenceSchema>
 /* Legacy scanner rows can contain a local discovery path. Convert only their
  * portable identity and state metadata before a project is persisted, shared,
  * or archived; native catalog resolution remains a trusted desktop concern. */
-export const migrateVstLaunchReference = (value: unknown): VstLaunchReference => {
+export const migrateVstLaunchReference = (value: ExternalPluginJsonValue): VstLaunchReference => {
   const legacy = z.object({
     classId: z.string().min(1).max(128),
     vendor: z.string().min(1).max(256),
@@ -50,8 +58,8 @@ export const migrateVstLaunchReference = (value: unknown): VstLaunchReference =>
     bundleFingerprint: legacy.bundleFingerprint ?? legacy.binaryFingerprint,
     binaryFingerprint: legacy.binaryFingerprint,
     scannerCatalogVersion: legacy.scannerCatalogVersion ?? legacy.scannerProtocolVersion ?? 1,
-    ...(legacy.stateHash === undefined ? {} : { stateHash: legacy.stateHash }),
-    ...(legacy.state === undefined ? {} : { state: legacy.state }),
+    stateHash: legacy.stateHash,
+    state: legacy.state,
   })
 }
 
@@ -85,7 +93,7 @@ const canonicalExternalProcessor = (processor: ExternalProcessor): ExternalProce
     : processor
 )
 
-export const parseExternalProcessorValue = (value: unknown): ExternalProcessorParseResult => {
+export const parseExternalProcessorValue = (value: ExternalPluginJsonValue): ExternalProcessorParseResult => {
   const current = externalProcessorSchema.safeParse(value)
   if (current.success) {
     const data = canonicalExternalProcessor(current.data)

@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 import { canonicalRecoveryPayloadV1, hashRecoveryPayloadSyncV1 } from '@daw-browser/control'
+import type { JsonValue } from '@daw-browser/shared'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { createLocalControlService, LocalControlServiceError } from './local-control-service'
@@ -112,13 +113,14 @@ test('previews, approves, and commits restore-then-delete asset recovery with a 
   const recovery = initialCommit.recoveries[0]
   if (!recovery) throw new Error('Expected asset recovery.')
 
+  const actions: JsonValue[] = [
+    { kind: 'recovery.restore', recovery: { id: recovery.id } },
+    { kind: 'asset.delete', asset: { source: 'persisted', id: 'restore-then-delete' } },
+  ]
   const request = {
     version: 'v1' as const,
     projectId: project.id,
-    actions: [
-      { kind: 'recovery.restore' as const, recovery: { id: recovery.id } },
-      { kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'restore-then-delete' } },
-    ],
+    actions,
   }
   expect((await service.preview(request)).applied).toBe(true)
   const approval = await service.requestApproval(request)
@@ -377,13 +379,14 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
 
   const oldestRecovery = (await db.getAll('controlRecoveries'))[0]
   if (!oldestRecovery) throw new Error('Expected protected recovery.')
+  const balancedActions: JsonValue[] = [
+    { kind: 'asset.delete', asset: { source: 'persisted', id: 'protected-128' } },
+    { kind: 'recovery.restore', recovery: { id: oldestRecovery.id } },
+  ]
   const balancedRequest = {
     version: 'v1' as const,
     projectId: project.id,
-    actions: [
-      { kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'protected-128' } },
-      { kind: 'recovery.restore' as const, recovery: { id: oldestRecovery.id } },
-    ],
+    actions: balancedActions,
   }
   const balancedApproval = await service.requestApproval(balancedRequest)
   await expect(service.commit({

@@ -6,7 +6,7 @@ type FakeMessage = { data: number[]; timeStamp: number }
 const createInput = (
   id: string,
   state: "connected" | "disconnected" = "connected",
-  close: () => Promise<unknown> = async () => {},
+  close: () => Promise<object> = async () => ({}),
 ) => {
   const listeners = new Set<(event: FakeMessage) => void>()
   let closeCount = 0

@@ -2,6 +2,7 @@ import { type Component, For, Show, createSignal, createEffect, onCleanup } from
 import { convexApi, convexClient, useConvexQuery } from '~/lib/convex'
 import { useSessionQuery } from '~/lib/session'
 import { cn } from '~/lib/utils'
+import type { FunctionReturnType } from 'convex/server'
 
 export type SharedChatProps = {
   isOpen: boolean
@@ -12,21 +13,14 @@ export type SharedChatProps = {
 }
 
 // One row per message from Convex
-type MessageRow = {
-  _id: string
-  projectId: string
-  senderUserId: string
-  content: string
-  createdAt: number
-  senderName?: string
-}
+type MessageRow = FunctionReturnType<typeof convexApi.sharedChat.listLatest>[number]
 
 const RATE_LIMIT_MAX = 5
 const RATE_LIMIT_WINDOW_MS = 10_000
 
 const SharedChat: Component<SharedChatProps> = (props) => {
   const session = useSessionQuery()
-  const displayName = () => (session.data?.user as any)?.name as string | undefined
+  const displayName = () => session.data?.user.name
 
   // Client-side rate limiter state (timestamps in ms of recent sends)
   let recentSends: number[] = []
@@ -39,13 +33,13 @@ const SharedChat: Component<SharedChatProps> = (props) => {
 
   // Real-time latest messages for the room (bounded)
   const messagesQ = useConvexQuery(
-    (convexApi as any).sharedChat.listLatest,
-    () => props.projectId && props.userId ? ({ projectId: props.projectId, limit: 200 } as any) : null,
+    convexApi.sharedChat.listLatest,
+    () => props.projectId && props.userId ? { projectId: props.projectId, limit: 200 } : null,
     () => ['shared-chat', props.projectId, props.userId]
   )
 
   const messages = (): MessageRow[] => {
-    return Array.isArray(messagesQ.data) ? messagesQ.data as MessageRow[] : []
+    return Array.isArray(messagesQ.data) ? messagesQ.data : []
   }
 
   // Focus input when opened
@@ -101,11 +95,11 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     }
 
     try {
-      await convexClient.mutation((convexApi as any).sharedChat.send, {
+      await convexClient.mutation(convexApi.sharedChat.send, {
         projectId: rid,
         content,
         senderName: displayName(),
-      } as any)
+      })
       recentSends.push(Date.now())
       setInput('')
       // Scroll will be driven by subscription update

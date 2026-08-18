@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto'
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from '@daw-browser/shared'
 import { createRoot, createSignal } from 'solid-js'
+import { z } from 'zod'
 import { createMidiTrackRecordingController } from '~/lib/midi/midi-recording-controller'
 import type { MidiInputEvent, MidiSourceReset } from '~/lib/midi/midi-input'
 import { createLocalProject } from '~/lib/local-project-db'
@@ -14,7 +16,7 @@ import { settlePopstateProjectTransition } from './useTimelineProjectRoute'
 type RecordedOperation = {
   projectId: string
   kind: string
-  payload: Record<string, unknown>
+  payload: JsonObject
 }
 
 const track = (): Track => ({
@@ -50,10 +52,11 @@ const flush = async () => {
 
 const originalFetch = globalThis.fetch
 const originalWindow = globalThis.window
+let runMidiRecordingHeartbeat: (() => void) | undefined
 
 const createHarness = (input: {
   projectId?: string
-  bpm?: number | (() => number)
+  bpm?: () => number
   loopEnabled?: boolean
   requestAccess?: () => Promise<void>
   requestTransportPlay?: () => Promise<void>
@@ -88,7 +91,7 @@ const createHarness = (input: {
       projectId: () => input.projectId ?? 'cloud-project',
       userId: () => 'user-1',
       playheadSec: () => 0,
-      bpm: () => typeof input.bpm === 'function' ? input.bpm() : input.bpm ?? 120,
+      bpm: () => input.bpm?.() ?? 120,
       loopEnabled: () => input.loopEnabled ?? false,
       recordArmTrackId: () => 'instrument-track',
       setTrackLock: (trackId, lockedBy) => { locks.push({ trackId, locker: lockedBy }) },
@@ -161,16 +164,13 @@ beforeEach(() => {
       removeEventListener: () => {},
     },
   })
-  Object.defineProperty(globalThis, '__midiRecordingHeartbeat', {
-    configurable: true,
-    value: () => heartbeat?.(),
-  })
+  runMidiRecordingHeartbeat = () => heartbeat?.()
 })
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
   Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
-  Reflect.deleteProperty(globalThis, '__midiRecordingHeartbeat')
+  runMidiRecordingHeartbeat = undefined
 })
 
 const setFetch = (
@@ -180,8 +180,8 @@ const setFetch = (
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null
-      if (!body || typeof body.kind !== 'string' || typeof body.payload !== 'object' || body.payload === null) {
+      const body = z.json().parse(JSON.parse(z.string().parse(init?.body)))
+      if (!isJsonObject(body) || !isJsonString(body.kind) || !isJsonObject(body.payload)) {
         throw new Error('Expected a timeline operation request.')
       }
       const operation = {
@@ -195,7 +195,7 @@ const setFetch = (
   })
 }
 
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
+const json = (value: JsonValue, status = 200) => new Response(JSON.stringify(value), { status })
 
 describe('useMidiTrackRecording transactions', () => {
   test('holds a project transition until a MIDI recording permission startup settles', async () => {
@@ -260,7 +260,7 @@ describe('useMidiTrackRecording transactions', () => {
     const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
     const repository = createLocalTimelineRepository(project.id)
     await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
-    const recording = createHarness({ projectId: project.id, bpm: 120 })
+    const recording = createHarness({ projectId: project.id, bpm: () => 120 })
 
     await expect(recording.controller.startRecording()).resolves.toBe(true)
     recording.emit(noteOn('keyboard', 0))
@@ -396,8 +396,8 @@ describe('useMidiTrackRecording transactions', () => {
 
     await recording.controller.startRecording()
     recording.emit(noteOn('keyboard', 0))
-    const heartbeat = Reflect.get(globalThis, '__midiRecordingHeartbeat')
-    if (typeof heartbeat !== 'function') throw new Error('Heartbeat was not registered.')
+    const heartbeat = runMidiRecordingHeartbeat
+    if (!heartbeat) throw new Error('Heartbeat was not registered.')
     heartbeat()
     await flush()
     if (!finishHeartbeat) throw new Error('Heartbeat did not begin.')

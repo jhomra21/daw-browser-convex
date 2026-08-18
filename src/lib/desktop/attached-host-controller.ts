@@ -2,12 +2,15 @@ import type { Accessor } from "solid-js"
 import { isLocalId } from "@daw-browser/shared"
 import {
   desktopHostExportRunInputSchemaV1,
+  desktopHostExportCancelInputSchemaV1,
   desktopHostVstInstancesInputSchemaV1,
   desktopHostVstParametersInputSchemaV1,
   desktopRendererControlCapabilitiesInputSchemaV1,
   desktopRendererControlSnapshotInputSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
+  desktopSeekInputSchemaV1,
+  desktopJsonValueSchema,
   hostError,
   isDesktopControlOperation,
   parseDesktopResult,
@@ -17,14 +20,19 @@ import {
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
 import {
+  controlApprovalRequestSchemaV1,
+  controlCommitRequestSchemaV1,
   controlCommitResultSchemaV1,
-  parseControlCommitRequestV1,
+  controlHistoryQuerySchemaV1,
+  controlPreviewRequestSchemaV1,
+  controlRecoveriesQuerySchemaV1,
   projectSnapshotSchemaV2,
 } from "@daw-browser/control"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
 import { getLocalProject } from "~/lib/local-project-db"
+import { serializeJsonValue } from "~/lib/json"
 import { listLocalExternalProcessors } from "~/lib/external-plugins"
 import {
   createLocalControlService,
@@ -77,14 +85,30 @@ const controlUnavailable = () => hostError("cancelled", "The local control reque
 const controlFailure = () => hostError("internal", "The local control request could not be completed.")
 
 const mountedProjectMismatch = () => hostError("invalid-request", "The requested project is not mounted.")
+const projectIdForControlRequest = (request: HostRequest) => {
+  switch (request.operation) {
+    case "control.capabilities":
+      return undefined
+    case "control.snapshot":
+      return desktopRendererControlSnapshotInputSchemaV1.safeParse(request.input).data?.projectId
+    case "control.preview":
+      return controlPreviewRequestSchemaV1.safeParse(request.input).data?.projectId
+    case "control.commit":
+      return controlCommitRequestSchemaV1.safeParse(request.input).data?.projectId
+    case "control.requestApproval":
+      return controlApprovalRequestSchemaV1.safeParse(request.input).data?.projectId
+    case "control.history":
+      return controlHistoryQuerySchemaV1.safeParse(request.input).data?.projectId
+    case "control.recoveries":
+      return controlRecoveriesQuerySchemaV1.safeParse(request.input).data?.projectId
+    default:
+      return undefined
+  }
+}
+
 const projectMatchesMount = (request: HostRequest, mountedProjectId: string) => (
   request.operation === "control.capabilities"
-  || (
-    typeof request.input === "object"
-    && request.input !== null
-    && "projectId" in request.input
-    && request.input.projectId === mountedProjectId
-  )
+  || projectIdForControlRequest(request) === mountedProjectId
 )
 
 const mountedProjectError = (request: HostRequest, mountedProjectId: string) => (
@@ -118,10 +142,8 @@ type CapabilityExport = {
     | { stemSelection: "selected-tracks"; stemMode: "dry-source" | "post-track-fx" | "reachable-routing" | "channel-output" | "full-master-contribution"; selectedTrackIds: readonly string[] }
 }
 
-const isCapabilityImport = (value: unknown): value is CapabilityImport => desktopRendererImportInputSchemaV1.safeParse(value).success
-
-const parseCapabilityExport = (value: unknown): CapabilityExport | undefined => {
-  const internal = desktopRendererExportInputSchemaV1.safeParse(value)
+const parseCapabilityExport = (request: HostRequest): CapabilityExport | undefined => {
+  const internal = desktopRendererExportInputSchemaV1.safeParse(request.input)
   if (!internal.success) return undefined
   if (internal.data.canceled) {
     const mode = internal.data.mode
@@ -129,9 +151,9 @@ const parseCapabilityExport = (value: unknown): CapabilityExport | undefined => 
     return { canceled: true, preflightOnly: false, mode, output: { token: "", basename: "", directory: false }, settings: { range: { mode: "whole" }, formats: ["wav"], render: { sampleRate: 44100, numberOfChannels: 2, normalization: { mode: "none" }, tail: { mode: "none" } }, encoding: { bitrateByFormat: {}, wav: { codec: "pcm-s16", dither: "none" } } } }
   }
   const { destination } = internal.data
-  const { canceled: _canceled, preflightOnly, ...request } = internal.data
+  const { canceled: _canceled, preflightOnly, ...exportRequest } = internal.data
   const external = desktopHostExportRunInputSchemaV1.safeParse({
-    ...request,
+    ...exportRequest,
     destination: destination.kind === "capability-file"
       ? { kind: "file", path: `/capability/${destination.basename}` }
       : { kind: "directory", path: "/capability" },
@@ -141,15 +163,19 @@ const parseCapabilityExport = (value: unknown): CapabilityExport | undefined => 
   const normalizedRender = normalization.mode === "loudness"
     ? { ...renderBase, numberOfChannels: channels, normalization: { ...normalization, truePeakCeilingDbtp: normalization.ceiling } }
     : { ...renderBase, numberOfChannels: channels, normalization }
+  const bitrateByFormat: TimelineExportInput["encoding"]["bitrateByFormat"] = {}
+  if (external.data.encoding.mp3Bitrate !== undefined) {
+    bitrateByFormat.mp3 = external.data.encoding.mp3Bitrate
+  }
+  if (external.data.encoding.oggOpusBitrate !== undefined) {
+    bitrateByFormat["ogg-opus"] = external.data.encoding.oggOpusBitrate
+  }
   const settings: TimelineExportInput = {
     range: external.data.range,
     formats: external.data.mode === "mixdown" ? [external.data.format] : external.data.formats,
     render: normalizedRender,
     encoding: {
-      bitrateByFormat: {
-        ...(external.data.encoding.mp3Bitrate === undefined ? {} : { mp3: external.data.encoding.mp3Bitrate }),
-        ...(external.data.encoding.oggOpusBitrate === undefined ? {} : { "ogg-opus": external.data.encoding.oggOpusBitrate }),
-      },
+      bitrateByFormat,
       wav: external.data.encoding.wav,
     },
   }
@@ -162,14 +188,20 @@ const parseCapabilityExport = (value: unknown): CapabilityExport | undefined => 
 
 const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
   if (!job) return { status: "idle" as const }
+  const safeJob: NonNullable<DesktopOperationMapV1["host.export.status"]["result"]["job"]> = {
+    id: job.id,
+  }
+  if (job.progress?.phase !== undefined) safeJob.phase = job.progress.phase
+  if (job.progress?.sizeBytes !== undefined) safeJob.sizeBytes = job.progress.sizeBytes
+  if (job.outcome !== undefined) {
+    safeJob.outputs = job.outcome.outputs.map((output) => ({
+      name: output.name,
+      sizeBytes: output.sizeBytes,
+    }))
+  }
   return {
     status: job.status,
-    job: {
-      id: job.id,
-      ...(job.progress?.phase === undefined ? {} : { phase: job.progress.phase }),
-      ...(job.progress?.sizeBytes === undefined ? {} : { sizeBytes: job.progress.sizeBytes }),
-      ...(job.outcome === undefined ? {} : { outputs: job.outcome.outputs.map((output) => ({ name: output.name, sizeBytes: output.sizeBytes })) }),
-    },
+    job: safeJob,
   }
 }
 
@@ -258,6 +290,7 @@ export const createAttachedHostController = (input: {
     }
     if (!projectMatchesMount(request_, mountedProjectId)) return { id: request_.id, error: mountedProjectMismatch() }
     try {
+      const requestInput = desktopJsonValueSchema.parse(request_.input)
       const service = createLocalControlService({
         actor: { subject: request_.actorSubject, issuer: "daw-browser-desktop-host" },
         assertAvailable: () => {
@@ -271,28 +304,28 @@ export const createAttachedHostController = (input: {
         },
       })
       const result = request_.operation === "control.capabilities"
-        ? desktopRendererControlCapabilitiesInputSchemaV1.parse(request_.input).readVersion === "v2"
+        ? desktopRendererControlCapabilitiesInputSchemaV1.parse(requestInput).readVersion === "v2"
           ? service.capabilitiesV2()
           : service.capabilities()
         : request_.operation === "control.snapshot"
-          ? desktopRendererControlSnapshotInputSchemaV1.parse(request_.input).readVersion === "v2"
+          ? desktopRendererControlSnapshotInputSchemaV1.parse(requestInput).readVersion === "v2"
             ? await service.snapshotV2({ projectId: mountedProjectId })
-            : await service.snapshot(desktopRendererControlSnapshotInputSchemaV1.parse(request_.input))
+            : await service.snapshot(desktopRendererControlSnapshotInputSchemaV1.parse(requestInput))
         : request_.operation === "control.preview"
-            ? await service.preview(request_.input)
+            ? await service.preview(requestInput)
             : request_.operation === "control.commit"
-              ? await service.commit(request_.input)
+              ? await service.commit(requestInput)
               : request_.operation === "control.requestApproval"
-                ? await service.requestApproval(request_.input)
+                ? await service.requestApproval(requestInput)
                 : request_.operation === "control.history"
-                  ? await service.history(request_.input)
-                  : await service.recoveries(request_.input)
+                  ? await service.history(requestInput)
+                  : await service.recoveries(requestInput)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
       if (request_.operation === "control.commit" && input.enqueueNativeVstParameter) {
         try {
-          const commitRequest = parseControlCommitRequestV1(request_.input)
+          const commitRequest = controlCommitRequestSchemaV1.parse(requestInput)
           const commitResult = controlCommitResultSchemaV1.safeParse(result)
           if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay) {
             const changedActionIndexes = new Set(commitResult.data.changeSummary.changes
@@ -327,12 +360,20 @@ export const createAttachedHostController = (input: {
       }
       const rendererProtocolVersion = (
         request_.operation === "control.capabilities"
-        && desktopRendererControlCapabilitiesInputSchemaV1.parse(request_.input).readVersion === "v2"
+        && desktopRendererControlCapabilitiesInputSchemaV1.parse(requestInput).readVersion === "v2"
       ) || (
         request_.operation === "control.snapshot"
-        && desktopRendererControlSnapshotInputSchemaV1.parse(request_.input).readVersion === "v2"
+        && desktopRendererControlSnapshotInputSchemaV1.parse(requestInput).readVersion === "v2"
       ) ? "v2" : "v1"
-      return { id: request_.id, result: parseDesktopResult(request_.operation, result, request_.input, rendererProtocolVersion) }
+      return {
+        id: request_.id,
+        result: parseDesktopResult(
+          request_.operation,
+          desktopJsonValueSchema.parse(serializeJsonValue(result)),
+          requestInput,
+          rendererProtocolVersion,
+        ),
+      }
     } catch (error) {
       if (error instanceof ControlRequestUnavailableError) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectRequired() }
@@ -419,13 +460,21 @@ export const createAttachedHostController = (input: {
           const page = pageValues(parameters, parsedInput.data.cursor, parsedInput.data.limit)
           result = { projectId, instanceId: processor.instanceId, parameters: page.values, nextCursor: page.nextCursor }
         }
-        return { id: request_.id, result: parseDesktopResult(request_.operation, result, request_.input) }
+        return {
+          id: request_.id,
+          result: parseDesktopResult(
+            request_.operation,
+            result,
+            desktopJsonValueSchema.parse(request_.input),
+          ),
+        }
       }
       if (isDesktopControlOperation(request_.operation)) return control(request_)
       if (request_.operation === "host.status") result = status()
       else if (request_.operation === "host.import.audio") {
-        const input_ = request_.input
-        if (!isCapabilityImport(input_)) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid audio import request." } }
+        const parsedInput = desktopRendererImportInputSchemaV1.safeParse(request_.input)
+        if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid audio import request." } }
+        const input_: CapabilityImport = parsedInput.data
         if (input_.canceled) result = { status: "canceled", count: 0 }
         else {
           const files = await Promise.all((input_.files ?? []).map((file) => fileFromCapability(request_.id, file)))
@@ -436,7 +485,7 @@ export const createAttachedHostController = (input: {
           result = { status: created > 0 ? "created" : queued > 0 ? "queued" : "failed", count: created + queued }
         }
       } else if (request_.operation === "host.export.run") {
-        const exportInput = parseCapabilityExport(request_.input)
+        const exportInput = parseCapabilityExport(request_)
         if (!exportInput) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export request." } }
         if (exportInput.canceled) {
           preparedExports.delete(request_.id)
@@ -485,10 +534,10 @@ export const createAttachedHostController = (input: {
       } else if (request_.operation === "host.export.status") {
         result = safeExportStatus(input.exportService.status())
       } else if (request_.operation === "host.export.cancel") {
-        const jobId = typeof request_.input === "object" && request_.input !== null && "jobId" in request_.input && typeof request_.input.jobId === "string" ? request_.input.jobId : undefined
-        if (!jobId) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export job ID." } }
-        input.exportService.cancel(jobId)
-        result = safeExportStatus(input.exportService.status(jobId))
+        const parsedInput = desktopHostExportCancelInputSchemaV1.safeParse(request_.input)
+        if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export job ID." } }
+        input.exportService.cancel(parsedInput.data.jobId)
+        result = safeExportStatus(input.exportService.status(parsedInput.data.jobId))
       }
       else if (request_.operation === "transport.status") result = transport()
       else if (request_.operation === "transport.play") {
@@ -504,12 +553,12 @@ export const createAttachedHostController = (input: {
         await input.stop()
         result = transport()
       } else if (request_.operation === "transport.seek") {
-        const seconds = typeof request_.input === "object" && request_.input !== null && "seconds" in request_.input ? request_.input.seconds : undefined
-        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+        const parsedInput = desktopSeekInputSchemaV1.safeParse(request_.input)
+        if (!parsedInput.success) {
           return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid seek position." } }
         }
         if (request_.signal.aborted) return cancelled(request_.id)
-        input.setPlayhead(seconds)
+        input.setPlayhead(parsedInput.data.seconds)
         result = transport()
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()

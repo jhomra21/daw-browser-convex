@@ -94,15 +94,17 @@ const createAsset = (sourceAssetKey: string, buffer: AudioBuffer): PortableExpor
   }
 }
 
+type CollectedPortableAssets = {
+  assets: readonly PortableExportAsset[]
+  bySourceAssetKey: ReadonlyMap<string, AudioAssetRef>
+  reasons: readonly string[]
+}
+
 const collectAssets = (
   tracks: readonly Track<AudioBuffer>[],
   fx: ExportFx | undefined,
   preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset>,
-): {
-  assets: readonly PortableExportAsset[]
-  bySourceAssetKey: ReadonlyMap<string, AudioAssetRef>
-  reasons: readonly string[]
-} => {
+): CollectedPortableAssets => {
   const assets: PortableExportAsset[] = []
   const bySourceAssetKey = new Map<string, AudioAssetRef>()
   const reasons: string[] = []
@@ -330,9 +332,9 @@ export const compilePortableExportSnapshot = (
       includeInstruments: false,
       externalLatencyFrames: input.externalLatencyFrames,
     })
-    const instrumentGraph = input.allowInstruments === true
+    const instrumentGraph: ReturnType<typeof graphWithInstruments> = input.allowInstruments === true
       ? graphWithInstruments(baseGraph, instrumentConfigurations(instrumentCompilation))
-      : { graph: baseGraph, reasons: [] as readonly string[] }
+      : { graph: baseGraph, reasons: [] }
     if (!instrumentGraph.graph) return unsupported([...reasons, ...instrumentGraph.reasons], diagnostics)
     const processorCount = instrumentGraph.graph.nodes.reduce(
       (total, node) => total + node.processorOrder.length,

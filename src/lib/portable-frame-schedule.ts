@@ -78,13 +78,13 @@ const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget 
       kind: 'parameter',
       scope: 'track',
       trackId: envelope.target.trackId,
-      ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+      effectInstanceId: envelope.target.effectInstanceId,
       parameterId: envelope.parameterId === 'volume' ? 'mixer.gain' : envelope.parameterId,
     }
     : {
       kind: 'parameter',
       scope: 'master',
-      ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+      effectInstanceId: envelope.target.effectInstanceId,
       parameterId: envelope.parameterId === 'volume' ? 'mixer.gain' : envelope.parameterId,
     }
 )
@@ -97,7 +97,7 @@ const midiExpressionTarget = (
   kind: 'parameter',
   scope: 'track',
   trackId,
-  ...(effectInstanceId === undefined ? {} : { effectInstanceId }),
+  effectInstanceId,
   parameterId: parameterId === 'volume' ? 'mixer.gain' : parameterId,
 })
 

@@ -1,34 +1,47 @@
 import { hashRecoveryPayloadSyncV1, parseStoredRecoveryPayload, type RecoveryPayload } from '@daw-browser/control'
+import { z } from 'zod'
 import type { LocalControlRecoveryRow } from '~/lib/local-project-db'
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-const isTime = (value: unknown): value is number => (
-  typeof value === 'number' && Number.isInteger(value) && value >= 0
-)
-const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+const localControlRecoveryRowSchema = z.object({
+  version: z.literal(1),
+  id: z.string(),
+  projectId: z.string(),
+  expiresAt: z.number().int().nonnegative(),
+  createdAt: z.number().int().nonnegative(),
+  actorSubject: z.string(),
+  sourceActionIndex: z.number().int().nonnegative(),
+  sourceCommitId: z.string().optional(),
+  kind: z.string(),
+  payload: z.string(),
+  payloadHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  localSampleUrls: z.record(z.string(), z.string()).optional(),
+  consumedAt: z.number().int().nonnegative().optional(),
+}).passthrough()
 
-export const parseLocalControlRecoveryRow = (
-  value: unknown,
+export const parseLocalControlRecoveryRow = <Value>(
+  value: Value,
 ): (LocalControlRecoveryRow & { recovery: RecoveryPayload }) | undefined => {
-  if (
-    !isRecord(value) || value.version !== 1 || typeof value.id !== 'string'
-    || typeof value.projectId !== 'string' || !isTime(value.expiresAt) || !isTime(value.createdAt)
-    || typeof value.actorSubject !== 'string' || !isTime(value.sourceActionIndex)
-    || typeof value.kind !== 'string' || typeof value.payload !== 'string' || !isHash(value.payloadHash)
-    || value.localSampleUrls !== undefined && (
-      !isRecord(value.localSampleUrls)
-      || !Object.values(value.localSampleUrls).every((sampleUrl) => typeof sampleUrl === 'string')
-    )
-    || value.consumedAt !== undefined && !isTime(value.consumedAt)
-    || value.sourceCommitId !== undefined && typeof value.sourceCommitId !== 'string'
-  ) return undefined
   try {
-    if (hashRecoveryPayloadSyncV1(value.payload) !== value.payloadHash) return undefined
-    const recovery = parseStoredRecoveryPayload(value.payload)
-    return recovery.kind === value.kind
-      ? { ...value, recovery } as LocalControlRecoveryRow & { recovery: RecoveryPayload }
+    const row = localControlRecoveryRowSchema.parse(value)
+    if (hashRecoveryPayloadSyncV1(row.payload) !== row.payloadHash) return undefined
+    const recovery = parseStoredRecoveryPayload(row.payload)
+    return recovery.kind === row.kind
+      ? {
+          id: row.id,
+          version: 1,
+          projectId: row.projectId,
+          expiresAt: row.expiresAt,
+          createdAt: row.createdAt,
+          actorSubject: row.actorSubject,
+          sourceActionIndex: row.sourceActionIndex,
+          sourceCommitId: row.sourceCommitId,
+          kind: row.kind,
+          payload: row.payload,
+          payloadHash: row.payloadHash,
+          localSampleUrls: row.localSampleUrls,
+          consumedAt: row.consumedAt,
+          recovery,
+        }
       : undefined
   } catch {
     return undefined

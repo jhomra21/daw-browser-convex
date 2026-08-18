@@ -4,6 +4,10 @@ import { isLocalId } from "@daw-browser/shared";
 
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
 
+const isLocalEffectResolver = (
+  effect: LocalEffectSelector,
+): effect is (targetId: string) => LocalEffectKind => typeof effect === "function";
+
 type LocalEffectRows<TParams> = {
   fetchRow: (projectId: string, targetId: string) => Promise<LocalEffectRow<TParams> | undefined>;
   isLoaded: (targetId: string | undefined) => boolean;
@@ -14,7 +18,7 @@ type LocalEffectRows<TParams> = {
 };
 
 const resolveEffect = (effect: LocalEffectSelector, targetId: string) => (
-  typeof effect === "function" ? effect(targetId) : effect
+  isLocalEffectResolver(effect) ? effect(targetId) : effect
 );
 
 const scopeKey = (projectId: string, targetId: string, effect: LocalEffectKind) => (

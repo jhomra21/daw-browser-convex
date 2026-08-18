@@ -3,6 +3,7 @@ import { assetCloudIdMappingKey, isCloudIdMappingValue } from '~/lib/local-cloud
 import { openLocalProjectDb } from '~/lib/local-project-db'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
+import { z } from 'zod'
 
 type CloudAssetReadResult =
   | { status: 'ready'; file: File; source: 'local' | 'cloud' }
@@ -23,8 +24,12 @@ const readCloudAssetReference = async (
     db.get('syncState', `cloud-source:asset:${assetId}`),
     db.get('syncState', assetCloudIdMappingKey(assetId)),
   ])
-  if (typeof urlRow?.value === 'string') return { kind: 'url', value: urlRow.value }
-  if (typeof sourceRow?.value === 'string') return { kind: 'key', value: sourceRow.value }
+  const parsedUrl = z.string().safeParse(urlRow?.value)
+  const url = parsedUrl.success ? parsedUrl.data : undefined
+  if (url) return { kind: 'url', value: url }
+  const parsedSource = z.string().safeParse(sourceRow?.value)
+  const source = parsedSource.success ? parsedSource.data : undefined
+  if (source) return { kind: 'key', value: source }
   if (isCloudIdMappingValue(mappingRow?.value)) return { kind: 'key', value: mappingRow.value.cloudId }
   return undefined
 }

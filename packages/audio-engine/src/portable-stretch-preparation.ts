@@ -193,12 +193,6 @@ export const validatePortablePreparedStretchAsset = (
   return undefined
 }
 
-const isAbortError = (error: unknown) => (
-  error instanceof DOMException && error.name === 'AbortError'
-) || (
-  error instanceof Error && error.name === 'AbortError'
-)
-
 const fingerprintPcm = (
   planes: readonly Float32Array[],
   sampleRateHz: number,
@@ -432,12 +426,14 @@ export const preparePortableStretchAsset = async (
       },
     }
   } catch (error) {
+    const aborted = (error instanceof DOMException || error instanceof Error)
+      && error.name === 'AbortError'
     return {
       supported: false,
       diagnostics: [diagnostic(
         input.clip.id,
-        isAbortError(error) ? 'stretch-render-cancelled' : 'stretch-render-failed',
-        isAbortError(error)
+        aborted ? 'stretch-render-cancelled' : 'stretch-render-failed',
+        aborted
           ? `${input.clip.id}: portable Stretch preparation was cancelled.`
           : `${input.clip.id}: portable Stretch preparation failed: ${error instanceof Error ? error.message : String(error)}`,
       )],
@@ -717,12 +713,14 @@ export const registerPortableStretchAsset = async (input: {
       },
     }
   } catch (error) {
+    const aborted = (error instanceof DOMException || error instanceof Error)
+      && error.name === 'AbortError'
     return {
       supported: false,
       diagnostics: [diagnostic(
         prepared.clipId,
-        isAbortError(error) ? 'stretch-render-cancelled' : 'stretch-render-failed',
-        isAbortError(error)
+        aborted ? 'stretch-render-cancelled' : 'stretch-render-failed',
+        aborted
           ? `${prepared.clipId}: portable Stretch preparation was cancelled.`
           : `${prepared.clipId}: portable Stretch asset registration failed: ${error instanceof Error ? error.message : String(error)}`,
       )],

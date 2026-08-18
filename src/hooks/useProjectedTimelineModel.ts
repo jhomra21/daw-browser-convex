@@ -247,10 +247,10 @@ export function useProjectedTimelineModel(
       assert(track.volume !== undefined, `Missing mixer channel volume for track ${String(track._id)}`)
       assert(track.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}`)
       serverVolumes.set(track._id, track.volume)
-      if (typeof track.muted === 'boolean') {
+      if (track.muted !== undefined) {
         serverMuted.set(track._id, track.muted)
       }
-      if (typeof track.soloed === 'boolean') {
+      if (track.soloed !== undefined) {
         serverSoloed.set(track._id, track.soloed)
       }
       serverRouting.set(track._id, {

@@ -166,16 +166,11 @@ const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachm
 const maximumExternalStageIndex = 0x7fff_ffff
 const sha256Pattern = /^[a-f0-9]{64}$/
 
-const decodeCapturedVst3State = (value: unknown): CapturedVst3State | undefined => {
-  if (typeof value !== "object" || value === null) return undefined
-  const bytes = Reflect.get(value, "bytes")
-  const sha256 = Reflect.get(value, "sha256")
-  if (!(bytes instanceof Uint8Array)
-    || bytes.byteLength > maxVst3WorkerStateBytes
-    || typeof sha256 !== "string"
-    || !sha256Pattern.test(sha256)
-    || createHash("sha256").update(bytes).digest("hex") !== sha256) return undefined
-  return { bytes, sha256 }
+const decodeCapturedVst3State = (value: CapturedVst3State): CapturedVst3State | undefined => {
+  if (value.bytes.byteLength > maxVst3WorkerStateBytes
+    || !sha256Pattern.test(value.sha256)
+    || createHash("sha256").update(value.bytes).digest("hex") !== value.sha256) return undefined
+  return value
 }
 
 const sameBuses = (left: Attachment["inputBuses"], right: Attachment["inputBuses"]) => (
@@ -260,9 +255,7 @@ const resolveAttachment = (
   return {
     graphNodeId: BigInt(attachment.nativeGraphNodeId),
     stageIndex: attachment.role === "instrument" ? 0 : attachment.stageIndex,
-    ...(attachment.role === "instrument"
-      ? { sourceIndex: attachment.sourceIndex ?? 0 }
-      : {}),
+    sourceIndex: attachment.role === "instrument" ? attachment.sourceIndex ?? 0 : undefined,
     instanceId: attachment.instanceId,
     classId: eligibility.classId,
     vendorId: eligibility.vendorId,
@@ -522,7 +515,7 @@ const createNativeVst3RevisionCoordinatorImplementation = (
         ok: false,
         reason,
         revision: snapshot.revision,
-        ...(instanceId === undefined ? {} : { instanceId }),
+        instanceId,
       }
     } catch {
       playbackStatus = { active: false, revision: snapshot.revision, reason: "safe-stop-failed" }
@@ -530,7 +523,7 @@ const createNativeVst3RevisionCoordinatorImplementation = (
         ok: false,
         reason: "safe-stop-failed",
         revision: snapshot.revision,
-        ...(instanceId === undefined ? {} : { instanceId }),
+        instanceId,
       }
     }
   }
@@ -721,7 +714,7 @@ export const resolveNativeVst3AttachmentPlan = async (input: {
   workerPath: string
   catalogStore: { reload(): Promise<PluginCatalogData> }
   capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
-  stateReader?: (instanceId: string, signal?: AbortSignal) => Promise<unknown>
+  stateReader?: (instanceId: string, signal?: AbortSignal) => Promise<CapturedVst3State>
   preflight?: typeof preflightNativeVst3Worker
   signal?: AbortSignal
 }): Promise<ResolvedVst3Attachment[]> => {
@@ -762,7 +755,7 @@ export const resolveNativeVst3AttachmentPlan = async (input: {
     }
     let initialState = capturedState
     if (!initialState && input.stateReader) {
-      let captured: unknown
+      let captured: CapturedVst3State
       try {
         captured = await input.stateReader(candidate.attachment.instanceId, input.signal)
       } catch (error) {

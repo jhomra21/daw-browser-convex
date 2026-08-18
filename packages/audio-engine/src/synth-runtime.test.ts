@@ -12,13 +12,15 @@ type ParamEvent = {
   time: number
 }
 
+type TestConnectionTarget = TestGain | TestPan | TestParam | TestFilter
+
 type TestOscillator = {
   onended?: () => void
-  connections: unknown[]
+  connections: TestConnectionTarget[]
   disconnects: number
   frequency: TestParam
   detune: TestParam
-  connect: (destination: unknown) => void
+  connect: (destination: TestConnectionTarget) => void
   disconnect: () => void
   starts: number[]
   stops: number[]
@@ -30,10 +32,10 @@ type TestOscillator = {
 type TestBufferSource = {
   onended?: () => void
   buffer: AudioBuffer | null
-  connections: unknown[]
+  connections: TestConnectionTarget[]
   disconnects: number
   loop: boolean
-  connect: (destination: unknown) => void
+  connect: (destination: TestConnectionTarget) => void
   disconnect: () => void
   starts: number[]
   stops: number[]
@@ -42,18 +44,18 @@ type TestBufferSource = {
 }
 
 type TestGain = {
-  connections: unknown[]
+  connections: TestConnectionTarget[]
   disconnects: number
   gain: TestParam
-  connect: (destination: unknown) => void
+  connect: (destination: TestConnectionTarget) => void
   disconnect: () => void
 }
 
 type TestPan = {
-  connections: unknown[]
+  connections: TestConnectionTarget[]
   disconnects: number
   pan: TestParam
-  connect: (destination: unknown) => void
+  connect: (destination: TestConnectionTarget) => void
   disconnect: () => void
 }
 
@@ -66,6 +68,16 @@ type TestParam = {
   setTargetAtTime: (value: number, time: number, timeConstant: number) => void
   cancelScheduledValues: (time: number) => void
   cancelAndHoldAtTime: (time: number) => void
+}
+
+type TestFilter = {
+  disconnects: number
+  type: BiquadFilterType
+  frequency: TestParam
+  detune: TestParam
+  Q: TestParam
+  connect: () => void
+  disconnect: () => void
 }
 
 const createTestAudio = () => {
@@ -85,7 +97,7 @@ const createTestAudio = () => {
     }
   }
   const gains: TestGain[] = []
-  const filters: Array<{ disconnects: number; type: BiquadFilterType; frequency: TestParam; detune: TestParam; Q: TestParam }> = []
+  const filters: TestFilter[] = []
   const pans: TestPan[] = []
   const ctx = Object.assign(Object.create(null), {
     currentTime: 0,
@@ -132,7 +144,7 @@ const createTestAudio = () => {
     createGain: () => {
       const events: ParamEvent[] = []
       const gain = {
-        connections: [] as unknown[],
+        connections: Array<TestConnectionTarget>(),
         disconnects: 0,
         gain: {
           value: 1,
@@ -156,20 +168,20 @@ const createTestAudio = () => {
             events.push({ kind: 'hold', time })
           },
         },
-        connect: (destination: unknown) => { gain.connections.push(destination) },
+        connect: (destination: TestConnectionTarget) => { gain.connections.push(destination) },
         disconnect: () => { gain.disconnects += 1 },
       }
       gains.push(gain)
       return gain
     },
     createBiquadFilter: () => {
-      const filter = {
+      const filter: TestFilter = {
         disconnects: 0,
-      type: 'lowpass' as BiquadFilterType,
-      frequency: param(),
-      detune: param(),
-      Q: param(),
-      connect: () => {},
+        type: 'lowpass',
+        frequency: param(),
+        detune: param(),
+        Q: param(),
+        connect: () => {},
         disconnect: () => { filter.disconnects += 1 },
       }
       filters.push(filter)
@@ -178,7 +190,7 @@ const createTestAudio = () => {
     createStereoPanner: () => {
       const events: ParamEvent[] = []
       const pan = {
-        connections: [] as unknown[],
+        connections: Array<TestConnectionTarget>(),
         disconnects: 0,
       pan: Object.assign(Object.create(null), {
         value: 0,
@@ -190,7 +202,7 @@ const createTestAudio = () => {
         cancelScheduledValues: (time: number) => events.push({ kind: 'cancel', time }),
         cancelAndHoldAtTime: (time: number) => events.push({ kind: 'hold', time }),
       }),
-        connect: (destination: unknown) => { pan.connections.push(destination) },
+        connect: (destination: TestConnectionTarget) => { pan.connections.push(destination) },
         disconnect: () => { pan.disconnects += 1 },
       }
       pans.push(pan)
@@ -326,30 +338,33 @@ describe('synth runtime characterization', () => {
     runtime.triggerNote({ trackId: 'track-1', pitch: 60, velocity: 0.5, clipGain: 0.5, when: 0, durationSec: 1 })
 
     const voicePan = pans[1]
+    if (!voicePan) throw new Error('Expected voice pan.')
     const amplitudeModulation = gains.find((gain) => (
       gain.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
       && gain.connections.includes(voicePan)
     ))
+    if (!amplitudeModulation) throw new Error('Expected amplitude modulation gain.')
     const amplitude = gains.find((gain) => gain.connections.includes(amplitudeModulation))
+    if (!amplitude) throw new Error('Expected amplitude gain.')
     const ampDepth = gains.find((gain) => (
       gain.gain.events.some((event) => event.kind === 'set' && event.value === 1 && event.time === 0)
-      && gain.connections.includes(amplitudeModulation?.gain)
+      && gain.connections.includes(amplitudeModulation.gain)
     ))
+    if (!ampDepth) throw new Error('Expected amplitude modulation depth gain.')
 
-    expect(amplitudeModulation).toBeDefined()
-    expect(amplitude?.connections).toContain(amplitudeModulation)
-    expect(amplitude?.gain.events.some((event) => event.kind === 'ramp' && event.value === 0.25)).toBe(true)
-    expect(ampDepth?.connections).toContain(amplitudeModulation?.gain)
-    expect(ampDepth?.connections).not.toContain(amplitude?.gain)
+    expect(amplitude.connections).toContain(amplitudeModulation)
+    expect(amplitude.gain.events.some((event) => event.kind === 'ramp' && event.value === 0.25)).toBe(true)
+    expect(ampDepth.connections).toContain(amplitudeModulation.gain)
+    expect(ampDepth.connections).not.toContain(amplitude.gain)
 
     ctx.currentTime = 0.1
     runtime.setTrackSynth('track-1', { ...params, lfo: { ...params.lfo, enabled: false, amp: 1 } })
-    expect(ampDepth?.gain.events).toContainEqual({ kind: 'ramp', value: 0, time: 0.1 })
-    expect(amplitudeModulation?.gain.events).toContainEqual({ kind: 'set', value: 1, time: 0 })
+    expect(ampDepth.gain.events).toContainEqual({ kind: 'ramp', value: 0, time: 0.1 })
+    expect(amplitudeModulation.gain.events).toContainEqual({ kind: 'set', value: 1, time: 0 })
 
     for (const oscillator of oscillators) oscillator.onended?.()
     for (const source of bufferSources) source.onended?.()
-    expect(amplitudeModulation?.disconnects).toBe(1)
+    expect(amplitudeModulation.disconnects).toBe(1)
   })
 
   test('keeps zero-level oscillator and LFO graph nodes available for active updates', () => {
@@ -391,6 +406,7 @@ describe('synth runtime characterization', () => {
     runtime.startPreviewNote('track-1', 60)
 
     const voiceFilter = filters.at(-1)
+    if (!voiceFilter) throw new Error('Expected voice filter.')
     const oscillatorGates = gains.filter((gain) => gain.connections.includes(voiceFilter))
     const firstGate = oscillatorGates.find((gate) => (
       gate.gain.events.some((event) => event.kind === 'set' && event.value === 0 && event.time === 0)
@@ -426,22 +442,23 @@ describe('synth runtime characterization', () => {
     runtime.startPreviewNote('track-1', 60)
 
     const voiceFilter = filters.at(-1)
+    if (!voiceFilter) throw new Error('Expected voice filter.')
     const noiseGate = gains.find((gain) => (
       gain.connections.includes(voiceFilter)
       && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0)
     ))
+    if (!noiseGate) throw new Error('Expected noise gate.')
     const noiseLevel = gains.find((gain) => (
       gain.connections.includes(noiseGate)
       && gain.gain.events.some((event) => event.kind === 'set' && event.value === 0.25)
     ))
 
     expect(bufferSources).toHaveLength(1)
-    expect(noiseGate).toBeDefined()
     ctx.currentTime = 0.1
     runtime.setTrackSynth('track-1', { ...initial, noise: { enabled: true, level: 0.6 } })
 
     expect(bufferSources).toHaveLength(1)
-    expect(noiseGate?.gain.events).toContainEqual({ kind: 'ramp', value: 1, time: 0.1 })
+    expect(noiseGate.gain.events).toContainEqual({ kind: 'ramp', value: 1, time: 0.1 })
     expect(noiseLevel?.gain.events).toContainEqual({ kind: 'ramp', value: 0.6, time: 0.1 })
   })
 

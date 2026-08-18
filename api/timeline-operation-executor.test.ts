@@ -1,11 +1,7 @@
+import { expect, test } from 'bun:test'
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
 import { buildClipFadesMutationArgs, buildClipMidiMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs, classifyBulkClipDeleteError } from './timeline-operation-executor'
-
-declare function test(name: string, run: () => void): void
-declare function expect(value: unknown): {
-  toEqual(expected: unknown): void
-}
 
 test('forwards a parsed restore-chain payload without transport-only fields', () => {
   const operation = parseSharedTimelineOperation({

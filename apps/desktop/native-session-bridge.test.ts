@@ -45,10 +45,9 @@ test("keeps spectrum selection on the native session envelope contract", async (
   ])
 
   expect(preload).toContain('setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession("daw:audio-host:session:set-spectrum-node", nodeId)')
-  expect(main).toContain('const envelope = nativeSessionEnvelope(value)')
-  expect(main).toContain('envelope.transactionToken !== undefined')
-  expect(main).toContain('typeof envelope.value !== "bigint"')
-  expect(main).toContain('await supervisor.setSpectrumNode(envelope.value)')
+  expect(main).toContain('const envelope = nativeSpectrumNodeEnvelopeSchema.safeParse(value)')
+  expect(main).toContain('envelope.data.transactionToken !== undefined')
+  expect(main).toContain('await supervisor.setSpectrumNode(envelope.data.value)')
   expect(main).not.toContain('[native-spectrum]')
 })
 

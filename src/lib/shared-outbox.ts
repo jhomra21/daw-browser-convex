@@ -1,6 +1,20 @@
-import { openLocalProjectDb, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
+import {
+  openLocalProjectDb,
+  type LocalProjectStoredValue,
+  type LocalProjectSyncStateRow,
+} from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { assert, isDurableSharedTimelineOperationKind, parseDurableSharedTimelineOperation, readSharedTimelineClipCreatePayload, sanitizeLegacyMidiClipForCreate, type SharedTimelineClipCreatePayload } from '@daw-browser/shared'
+import {
+  AUDIO_EFFECT_ORDER,
+  assert,
+  isDurableSharedTimelineOperationKind,
+  midiClipReadSchema,
+  parseDurableSharedTimelineOperation,
+  readSharedTimelineClipCreatePayload,
+  sanitizeLegacyMidiClipForCreate,
+  type JsonValue,
+  type SharedTimelineClipCreatePayload,
+} from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
   SharedTimelineOperationHttpError,
@@ -12,6 +26,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { loadHistory, saveHistory } from '~/lib/timeline-storage'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
 import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
+import { z } from 'zod'
 
 type SharedOutboxStatus = 'pending' | 'failed' | 'dead-letter'
 type SharedOutboxKind = SharedTimelineOperationKind | 'clips.createUploadedAudio'
@@ -29,7 +44,7 @@ type SharedOutboxEntry = {
   kind: SharedOutboxKind
   projectId: string
   userId: string
-  payload: unknown
+  payload: LocalProjectStoredValue
   completion?: SharedOutboxCompletion
   status: SharedOutboxStatus
   attempts: number
@@ -51,14 +66,114 @@ type SharedOutboxCompletion = {
   automation: TrackAutomationSnapshot
 }
 
-const isSharedOutboxCompletion = (value: unknown): value is SharedOutboxCompletion => (
-  isRecord(value)
-  && value.kind === 'tracks.ungroup'
-  && Array.isArray(value.tracks)
-  && isRecord(value.groupTrack)
-  && isRecord(value.effects)
-  && Array.isArray(value.automation)
-)
+const finiteNumberSchema = z.number().refine(Number.isFinite)
+const optionalFiniteNumberSchema = finiteNumberSchema.optional()
+const clipFadesSchema = z.object({
+  fadeInSec: finiteNumberSchema,
+  fadeOutSec: finiteNumberSchema,
+  fadeInCurve: finiteNumberSchema,
+  fadeOutCurve: finiteNumberSchema,
+})
+const audioWarpSchema = z.object({
+  enabled: z.boolean(),
+  mode: z.enum(['repitch', 'stretch']),
+  sourceBpm: optionalFiniteNumberSchema,
+  sourceBeatOffset: optionalFiniteNumberSchema,
+  markers: z.array(z.object({
+    id: z.string(),
+    sourceBeat: finiteNumberSchema,
+    timelineBeat: finiteNumberSchema,
+  })).optional(),
+}).optional()
+const timelineClipSchema = z.object({
+  id: z.string(),
+  historyRef: z.string().optional(),
+  name: z.string(),
+  mediaStatus: z.enum(['missing', 'permission-denied']).optional(),
+  startSec: finiteNumberSchema,
+  duration: finiteNumberSchema,
+  sourceAssetKey: z.string().optional(),
+  waveformAssetKey: z.string().optional(),
+  sourceKind: z.enum(['upload', 'url', 'recording']).optional(),
+  sourceDurationSec: optionalFiniteNumberSchema,
+  sourceSampleRate: optionalFiniteNumberSchema,
+  sourceChannelCount: optionalFiniteNumberSchema,
+  leftPadSec: optionalFiniteNumberSchema,
+  bufferOffsetSec: optionalFiniteNumberSchema,
+  audioWarp: audioWarpSchema,
+  gain: optionalFiniteNumberSchema,
+  fades: clipFadesSchema.optional(),
+  color: z.string(),
+  sampleUrl: z.string().optional(),
+  midi: midiClipReadSchema.optional(),
+  midiOffsetBeats: optionalFiniteNumberSchema,
+})
+const timelineTrackSchema = z.object({
+  id: z.string(),
+  historyRef: z.string().optional(),
+  name: z.string(),
+  volume: finiteNumberSchema,
+  clips: z.array(timelineClipSchema),
+  muted: z.boolean().optional(),
+  soloed: z.boolean().optional(),
+  lockedBy: z.string().nullable().optional(),
+  lockedAt: finiteNumberSchema.nullable().optional(),
+  kind: z.enum(['audio', 'instrument']).optional(),
+  channelRole: z.enum(['track', 'group', 'return']).optional(),
+  groupId: z.string().optional(),
+  collapsed: z.boolean().optional(),
+  color: z.string().optional(),
+  outputTargetId: z.string().optional(),
+  sends: z.array(z.object({
+    targetId: z.string(),
+    amount: finiteNumberSchema,
+    tap: z.enum(['pre-fx', 'pre-fader', 'post-fader']).optional(),
+  })).optional(),
+})
+const automationEnvelopeSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  target: z.union([
+    z.object({ kind: z.literal('master') }),
+    z.object({ kind: z.literal('track'), trackId: z.string() }),
+  ]),
+  targetKey: z.string(),
+  parameterId: z.string(),
+  enabled: z.boolean(),
+  points: z.array(z.object({
+    id: z.string(),
+    timeSec: finiteNumberSchema,
+    value: finiteNumberSchema,
+    interpolation: z.enum(['linear', 'hold']),
+  })),
+  updatedAt: finiteNumberSchema,
+})
+const audioEffectSnapshotSchema = z.object({
+  effect: z.enum(AUDIO_EFFECT_ORDER),
+  instanceId: z.string().optional(),
+  index: finiteNumberSchema.optional(),
+  params: z.json(),
+})
+const trackEffectSnapshotSchema = z.object({
+  eq: z.json().optional(),
+  compressor: z.json().optional(),
+  saturator: z.json().optional(),
+  limiter: z.json().optional(),
+  delay: z.json().optional(),
+  reverb: z.json().optional(),
+  spectral: z.json().optional(),
+  audioEffects: z.array(audioEffectSnapshotSchema).optional(),
+  synth: z.json().optional(),
+  instrument: z.json().optional(),
+  arp: z.json().optional(),
+})
+const sharedOutboxCompletionSchema = z.object({
+  kind: z.literal('tracks.ungroup'),
+  tracks: z.array(z.custom<Track>((value) => timelineTrackSchema.safeParse(value).success)),
+  groupTrack: z.custom<Track>((value) => timelineTrackSchema.safeParse(value).success),
+  effects: z.custom<TrackEffectSnapshot>((value) => trackEffectSnapshotSchema.safeParse(value).success),
+  automation: z.custom<TrackAutomationSnapshot>((value) => z.array(automationEnvelopeSchema).safeParse(value).success),
+})
 
 type SharedOutboxHistoryUpdate =
   | { kind: 'entry'; entry: HistoryEntry }
@@ -128,7 +243,7 @@ const publishHistoryUpdate = (update: SharedOutboxHistoryUpdate) => {
   return false
 }
 
-const completeUngroup = (entry: SharedOutboxEntry, result: unknown) => {
+const completeUngroup = (entry: SharedOutboxEntry, result: JsonValue) => {
   if (entry.completion?.kind !== 'tracks.ungroup') return
   const committed = readSharedUngroupResult(result)
   if (!committed) throw new Error('Queued shared ungroup was not applied.')
@@ -143,36 +258,39 @@ const completeUngroup = (entry: SharedOutboxEntry, result: unknown) => {
   saveHistory(scope, { undo: [...history.undo, historyEntry].slice(-50), redo: [] })
 }
 
-const attachQueuedClipDeletionRecoveries = (entry: SharedOutboxEntry, result: unknown) => {
-  if (
-    entry.kind !== 'clips.removeMany'
-    || !isRecord(result)
-    || !Array.isArray(result.recoveries)
-    || !Array.isArray(result.removedClipIds)
-  ) return
-  const recoveries = result.recoveries
-  const removedClipIds = result.removedClipIds
-  if (!isRecord(entry.payload) || !Array.isArray(entry.payload.clipIds)) {
+const clipDeletionResultSchema = z.object({
+  recoveries: z.array(z.object({
+    sourceClipId: z.string(),
+    recoveryId: z.string(),
+  })),
+  removedClipIds: z.array(z.string()),
+})
+const clipDeletionPayloadSchema = z.object({
+  clipIds: z.array(z.string()),
+})
+
+const attachQueuedClipDeletionRecoveries = (entry: SharedOutboxEntry, result: JsonValue) => {
+  if (entry.kind !== 'clips.removeMany') return
+  const parsedResult = clipDeletionResultSchema.safeParse(result)
+  if (!parsedResult.success) return
+  const parsedPayload = clipDeletionPayloadSchema.safeParse(entry.payload)
+  if (!parsedPayload.success) {
     throw new Error('Queued clip deletion is missing clip IDs.')
   }
-  const expectedClipIds = entry.payload.clipIds
+  const recoveries = parsedResult.data.recoveries
+  const removedClipIds = parsedResult.data.removedClipIds
+  const expectedClipIds = parsedPayload.data.clipIds
   if (
     expectedClipIds.length === 0
-    || !expectedClipIds.every((clipId) => typeof clipId === 'string')
     || new Set(expectedClipIds).size !== expectedClipIds.length
     || removedClipIds.length !== expectedClipIds.length
-    || !removedClipIds.every((clipId) => typeof clipId === 'string')
     || new Set(removedClipIds).size !== removedClipIds.length
     || !expectedClipIds.every((clipId) => removedClipIds.includes(clipId))
     || recoveries.length !== expectedClipIds.length
   ) throw new Error('Queued clip deletion did not return a complete recovery result.')
   const recoveryIdBySourceClipId = new Map<string, string>()
   for (const recovery of recoveries) {
-    if (
-      isRecord(recovery)
-      && typeof recovery.sourceClipId === 'string'
-      && typeof recovery.recoveryId === 'string'
-    ) recoveryIdBySourceClipId.set(recovery.sourceClipId, recovery.recoveryId)
+    recoveryIdBySourceClipId.set(recovery.sourceClipId, recovery.recoveryId)
   }
   if (
     recoveryIdBySourceClipId.size !== expectedClipIds.length
@@ -255,7 +373,9 @@ export class SharedOutboxUnavailableError extends Error {
   }
 }
 
-export const isSharedOutboxQueuedError = (error: unknown) =>
+type SharedOperationFailure = z.input<ReturnType<typeof z.unknown>>
+
+export const isSharedOutboxQueuedError = (error: SharedOperationFailure) =>
   error instanceof SharedOutboxQueuedError
 
 class SharedOutboxRejectedError extends Error {
@@ -268,7 +388,7 @@ class SharedOutboxRejectedError extends Error {
   }
 }
 
-export const isPermanentSharedOperationError = (error: unknown) => (
+export const isPermanentSharedOperationError = (error: SharedOperationFailure) => (
   error instanceof SharedTimelineOperationRejectedError
   || (error instanceof SharedTimelineOperationHttpError && (
     error.status === 400 || error.status === 403
@@ -292,56 +412,70 @@ const readOutboxRows = async (projectId: string) => {
   return await db.getAll('syncState', outboxKeyRange())
 }
 
-const outboxSequence = (value: unknown) => (
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+const outboxSequenceSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
+const outboxSequence = (value: LocalProjectStoredValue) => (
+  outboxSequenceSchema.safeParse(value).data
 )
+const uploadedAudioClipPayloadSchema = z.object({
+  projectId: z.string(),
+  assetKey: z.string(),
+  file: z.instanceof(File),
+  duration: finiteNumberSchema.optional(),
+  clipPayload: z.custom<SharedTimelineClipCreatePayload>((value) => (
+    (() => {
+      const parsed = z.json().safeParse(value)
+      return parsed.success
+        && readSharedTimelineClipCreatePayload(parsed.data, { requireAudioSampleUrl: false, durable: true }) !== null
+    })()
+  )),
+})
+const sharedOutboxKindSchema = z.custom<SharedOutboxKind>((value) => (
+  value === 'clips.createUploadedAudio'
+  || (() => {
+    const parsed = z.json().safeParse(value)
+    return parsed.success && isDurableSharedTimelineOperationKind(parsed.data)
+  })()
+))
+const sharedOutboxEntrySchema = z.object({
+  id: z.string(),
+  kind: sharedOutboxKindSchema,
+  projectId: z.string(),
+  userId: z.string(),
+  payload: z.union([z.json(), uploadedAudioClipPayloadSchema]),
+  completion: sharedOutboxCompletionSchema.optional(),
+  status: z.enum(['pending', 'failed', 'dead-letter']),
+  attempts: z.number(),
+  nextAttemptAt: z.number(),
+  lastError: z.string().optional(),
+  sequence: outboxSequenceSchema.optional(),
+  claimOwner: z.string().optional(),
+  claimToken: z.string().optional(),
+  leaseExpiresAt: z.number().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const isOutboxKind = (value: unknown): value is SharedOutboxKind => (
-  isDurableSharedTimelineOperationKind(value) || value === 'clips.createUploadedAudio'
-)
-
-const readEntry = (value: unknown): SharedOutboxEntry | null => {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string'
-    || !isOutboxKind(value.kind)
-    || typeof value.projectId !== 'string'
-    || typeof value.userId !== 'string'
-    || (value.status !== 'pending' && value.status !== 'failed' && value.status !== 'dead-letter')
-    || typeof value.attempts !== 'number'
-    || typeof value.nextAttemptAt !== 'number'
-    || typeof value.createdAt !== 'number'
-    || typeof value.updatedAt !== 'number'
-  ) return null
+const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => {
+  const parsed = sharedOutboxEntrySchema.safeParse(value)
+  if (!parsed.success) return null
+  const entry = parsed.data
   return {
-    id: value.id,
-    kind: value.kind,
-    projectId: value.projectId,
-    userId: value.userId,
-    payload: value.payload,
-    completion: isSharedOutboxCompletion(value.completion)
-      ? {
-          kind: value.completion.kind,
-          tracks: value.completion.tracks,
-          groupTrack: value.completion.groupTrack,
-          effects: value.completion.effects,
-          automation: value.completion.automation,
-        }
-      : undefined,
-    status: value.status,
-    attempts: value.attempts,
-    nextAttemptAt: value.nextAttemptAt,
-    lastError: typeof value.lastError === 'string' ? value.lastError : undefined,
-    sequence: outboxSequence(value.sequence),
-    claimOwner: typeof value.claimOwner === 'string' ? value.claimOwner : undefined,
-    claimToken: typeof value.claimToken === 'string' ? value.claimToken : undefined,
-    leaseExpiresAt: typeof value.leaseExpiresAt === 'number' ? value.leaseExpiresAt : undefined,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
+    id: entry.id,
+    kind: entry.kind,
+    projectId: entry.projectId,
+    userId: entry.userId,
+    payload: entry.payload,
+    completion: entry.completion,
+    status: entry.status,
+    attempts: entry.attempts,
+    nextAttemptAt: entry.nextAttemptAt,
+    lastError: entry.lastError,
+    sequence: entry.sequence,
+    claimOwner: entry.claimOwner,
+    claimToken: entry.claimToken,
+    leaseExpiresAt: entry.leaseExpiresAt,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
   }
 }
 
@@ -367,20 +501,22 @@ const migrateLegacyOperationEntry = async (
 ) => {
   if (
     (entry.kind !== 'clips.removeMany' && entry.kind !== 'clips.create' && entry.kind !== 'clips.createMany' && entry.kind !== 'tracks.create')
-    || !isRecord(entry.payload)
-    || (typeof entry.payload.operationId === 'string' && entry.payload.operationId.length > 0)
+    || !z.json().safeParse(entry.payload).success
   ) return entry
+  const payload = z.record(z.string(), z.json()).safeParse(entry.payload)
+  if (!payload.success || z.string().min(1).safeParse(payload.data.operationId).success) return entry
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('syncState', 'readwrite')
   const store = tx.objectStore('syncState')
   const current = readEntry((await store.get(keyFor(entry.id)))?.value)
-  if (!current || !isRecord(current.payload)) {
+  const currentPayload = current && z.record(z.string(), z.json()).safeParse(current.payload)
+  if (!current || !currentPayload || !currentPayload.success) {
     await tx.done
     return current ?? entry
   }
   const migrated: SharedOutboxEntry = {
     ...current,
-    payload: { ...current.payload, operationId: `outbox:${current.id}` },
+    payload: { ...currentPayload.data, operationId: `outbox:${current.id}` },
     updatedAt: now(),
   }
   store.put({ key: keyFor(current.id), value: migrated, updatedAt: migrated.updatedAt })
@@ -433,20 +569,23 @@ const ensureOutboxSequences = async (projectId: string) => {
   await tx.done
 }
 
-const readUploadedAudioClipPayload = (value: unknown): UploadedAudioClipPayload | null => {
-  if (!isRecord(value)) return null
-  const clipPayload = readSharedTimelineClipCreatePayload(value.clipPayload, { requireAudioSampleUrl: false, durable: true })
-  if (
-    typeof value.projectId !== 'string'
-    || typeof value.assetKey !== 'string'
-    || !(value.file instanceof File)
-    || !clipPayload
-  ) return null
+const readUploadedAudioClipPayload = (
+  value: SharedOutboxEntry['payload'],
+): UploadedAudioClipPayload | null => {
+  const parsed = uploadedAudioClipPayloadSchema.safeParse(value)
+  if (!parsed.success) return null
+  const parsedClipPayload = z.json().safeParse(parsed.data.clipPayload)
+  if (!parsedClipPayload.success) return null
+  const clipPayload = readSharedTimelineClipCreatePayload(
+    parsedClipPayload.data,
+    { requireAudioSampleUrl: false, durable: true },
+  )
+  if (!clipPayload) return null
   return {
-    projectId: value.projectId,
-    assetKey: value.assetKey,
-    file: value.file,
-    duration: typeof value.duration === 'number' ? value.duration : undefined,
+    projectId: parsed.data.projectId,
+    assetKey: parsed.data.assetKey,
+    file: parsed.data.file,
+    duration: parsed.data.duration,
     clipPayload,
   }
 }
@@ -456,7 +595,7 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => 
   form.append('projectId', payload.projectId)
   form.append('assetKey', payload.assetKey)
   form.append('file', payload.file, payload.file.name)
-  if (typeof payload.duration === 'number' && Number.isFinite(payload.duration)) {
+  if (payload.duration !== undefined && Number.isFinite(payload.duration)) {
     form.append('duration', String(payload.duration))
   }
   const response = await fetch('/api/samples', { method: 'POST', body: form })
@@ -465,20 +604,25 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => 
     throw new SharedTimelineOperationHttpError(response.status, detail || undefined)
   }
   const data = await response.json().catch(() => null)
-  if (!isRecord(data) || typeof data.url !== 'string' || typeof data.assetKey !== 'string') throw new Error('Shared audio upload failed.')
-  return { url: data.url, assetKey: data.assetKey }
+  const upload = z.object({ url: z.string(), assetKey: z.string() }).safeParse(data)
+  if (!upload.success) throw new Error('Shared audio upload failed.')
+  return upload.data
 }
 
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
   return summarizeOutboxRows(await readOutboxRows(projectId), userId)
 }
 
+const serializeDurableOperationPayload = (payload: SharedTimelineOperation['payload']) => (
+  z.json().parse(JSON.parse(JSON.stringify(payload)))
+)
+
 const enqueueSharedOutboxOperation = async (
   input: {
     projectId: string
     userId: string
     kind: SharedOutboxKind
-    payload: unknown
+    payload: LocalProjectStoredValue
     error?: unknown
     completion?: SharedOutboxCompletion
   },
@@ -551,22 +695,22 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
     const payload = readUploadedAudioClipPayload(entry.payload)
     if (!payload) throw new Error('Invalid queued shared audio clip.')
     const upload = await uploadSharedAudioClipAsset(payload)
-    await publishSharedTimelineOperation(entry.projectId, {
+    return await publishSharedTimelineOperation(entry.projectId, {
       kind: 'clips.create',
       payload: { ...payload.clipPayload, sampleUrl: upload.url, assetKey: upload.assetKey },
     })
-    return
   }
-  const operation = parseDurableSharedTimelineOperation({ kind: entry.kind, payload: entry.payload })
+  const storedOperation = z.json().safeParse({ kind: entry.kind, payload: entry.payload })
+  const operation = storedOperation.success
+    ? parseDurableSharedTimelineOperation(storedOperation.data)
+    : null
   if (!operation) throw new Error('Queued operation is incompatible with current validation and cannot be published.')
   const compatibleOperation = operation.kind === 'clips.create'
     ? {
         ...operation,
         payload: {
           ...operation.payload,
-          ...(operation.payload.midi
-            ? { midi: sanitizeLegacyMidiClipForCreate(operation.payload.midi) }
-            : {}),
+          midi: operation.payload.midi ? sanitizeLegacyMidiClipForCreate(operation.payload.midi) : undefined,
         },
       }
     : operation.kind === 'clips.createMany'
@@ -576,7 +720,7 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
             ...operation.payload,
             items: operation.payload.items.map((item) => ({
               ...item,
-              ...(item.midi ? { midi: sanitizeLegacyMidiClipForCreate(item.midi) } : {}),
+              midi: item.midi ? sanitizeLegacyMidiClipForCreate(item.midi) : undefined,
             })),
           },
         }
@@ -593,7 +737,7 @@ export const enqueueSharedTimelineOperationOnFailure = async (
     projectId: input.projectId,
     userId: input.userId,
     kind: input.operation.kind,
-    payload: input.operation.payload,
+    payload: serializeDurableOperationPayload(input.operation.payload),
     error: input.error,
     completion: input.completion,
   })).id
@@ -609,13 +753,13 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
     completion?: SharedOutboxCompletion
     completionOwner?: 'background' | 'caller'
   },
-): Promise<unknown | T | undefined | { result: unknown; completionOwner: 'background' | 'caller' }> => {
+): Promise<JsonValue | T | undefined | { result: JsonValue; completionOwner: 'background' | 'caller' }> => {
   assert(isDurableSharedTimelineOperationKind(input.operation.kind), `Shared timeline operation ${input.operation.kind} is not durable.`)
   const entry = await enqueueSharedOutboxOperation({
     projectId: input.projectId,
     userId: input.userId,
     kind: input.operation.kind,
-    payload: input.operation.payload,
+    payload: serializeDurableOperationPayload(input.operation.payload),
     completion: input.completion,
   })
   const result = await flushSharedOutboxOperation(
@@ -652,29 +796,33 @@ export const enqueueSharedAudioClipCreateOnFailure = async (
 type ClaimedOutboxEntry = SharedOutboxEntry & { claimToken: string }
 
 type SharedOutboxCompletionResult = {
-  result: unknown
+  result: JsonValue
   createdAt: number
   expiresAt: number
   completionOwner: 'background' | 'caller'
 }
 
 type SharedOutboxOperationResult =
-  | { status: 'applied'; result: unknown; completionOwner: 'background' | 'caller' }
+  | { status: 'applied'; result: JsonValue; completionOwner: 'background' | 'caller' }
   | { status: 'missing' | 'pending' }
 
-const readCompletionResult = (value: unknown): SharedOutboxCompletionResult | null => (
-  isRecord(value)
-  && typeof value.createdAt === 'number'
-  && typeof value.expiresAt === 'number'
-  && 'result' in value
-    ? {
-        result: value.result,
-        createdAt: value.createdAt,
-        expiresAt: value.expiresAt,
-        completionOwner: value.completionOwner === 'caller' ? 'caller' : 'background',
-      }
-    : null
-)
+const sharedOutboxCompletionResultSchema = z.object({
+  result: z.json(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  completionOwner: z.enum(['background', 'caller']).optional(),
+})
+
+const readCompletionResult = (value: LocalProjectStoredValue): SharedOutboxCompletionResult | null => {
+  const parsed = sharedOutboxCompletionResultSchema.safeParse(value)
+  if (!parsed.success) return null
+  return {
+    result: parsed.data.result,
+    createdAt: parsed.data.createdAt,
+    expiresAt: parsed.data.expiresAt,
+    completionOwner: parsed.data.completionOwner === 'caller' ? 'caller' : 'background',
+  }
+}
 
 const claimNextEntry = async (
   projectId: string,
@@ -770,7 +918,7 @@ const keepClaimAlive = (projectId: string, entry: ClaimedOutboxEntry) => {
 const completeClaimedEntry = async (
   projectId: string,
   entry: ClaimedOutboxEntry,
-  result: unknown,
+  result: JsonValue,
   completionOwner: 'background' | 'caller',
 ) => {
   const db = await openLocalProjectDb(projectId)
@@ -807,7 +955,7 @@ const completeClaimedEntry = async (
 const settleClaimedEntryFailure = async (
   projectId: string,
   entry: ClaimedOutboxEntry,
-  error: unknown,
+  error: SharedOperationFailure,
 ) => {
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('syncState', 'readwrite')
@@ -848,7 +996,7 @@ const drainSharedOutbox = async (
   targetOperationId?: string,
   callerCompletionOperationId?: string,
 ) => {
-  const results = new Map<string, unknown>()
+  const results = new Map<string, JsonValue>()
   while (true) {
     const entry = await claimNextEntry(projectId, userId, options)
     if (!entry) break
@@ -886,20 +1034,7 @@ const serializeSharedOutboxFlush = <T>(
   })
 }
 
-type WebLocks = {
-  request: <T>(name: string, callback: () => Promise<T>) => Promise<T>
-}
-
-const webLocks = (): WebLocks | undefined => {
-  const locks = Reflect.get(globalThis.navigator ?? {}, 'locks')
-  if (
-    !locks
-    || typeof locks !== 'object'
-    || !('request' in locks)
-    || typeof locks.request !== 'function'
-  ) return undefined
-  return locks
-}
+const webLocks = () => globalThis.navigator?.locks
 
 const withSharedOutboxPublicationLock = async <T>(
   projectId: string,
@@ -908,7 +1043,7 @@ const withSharedOutboxPublicationLock = async <T>(
 ) => {
   const locks = webLocks()
   if (!locks) {
-    if (typeof window !== 'undefined') throw new SharedOutboxUnavailableError()
+    if (globalThis.window !== undefined) throw new SharedOutboxUnavailableError()
     return await operation(false)
   }
   return await locks.request(lockNameFor(projectId, userId), async () => await operation(true))
@@ -1032,8 +1167,8 @@ export const readQueuedClipDeletionRecoveryIds = (
     for (const item of entry.data.items) {
       if (
         item.clip.recoveryOperationId === operationId
-        && typeof item.clip.recoverySourceClipId === 'string'
-        && typeof item.clip.recoveryId === 'string'
+        && item.clip.recoverySourceClipId !== undefined
+        && item.clip.recoveryId !== undefined
       ) recoveryIds.set(item.clip.recoverySourceClipId, item.clip.recoveryId)
     }
   }

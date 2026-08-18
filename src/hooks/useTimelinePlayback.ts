@@ -11,6 +11,7 @@ import {
 } from '~/lib/desktop-audio-lifecycle'
 import { createSpectrumFrameDelivery } from './spectrum-frame-delivery'
 import { rejectedLiveProcessorControl } from '~/lib/live-processor-control'
+import type { DesktopBridge } from '~/types/desktop-bridge'
 
 type LoopOptions = {
   loopEnabled?: Accessor<boolean>
@@ -84,8 +85,29 @@ type TimelinePlaybackAudioEngine = Pick<
   subscribeMasterStereoLevels?: AudioEngine['subscribeMasterStereoLevels']
 }
 
+type RecoveryAttempt = {
+  generation: number
+  token: number
+  cancelled: boolean
+  promise?: Promise<void>
+}
+
+type DesktopAudioHostBridge = NonNullable<DesktopBridge["audioHost"]>
+type NativePlaybackBridge = NonNullable<
+  Parameters<typeof createNativePlaybackController>[0]["bridge"]
+>
+
+const supportsNativePlayback = (
+  bridge: DesktopAudioHostBridge,
+): bridge is DesktopAudioHostBridge & NativePlaybackBridge => (
+  "configure" in bridge.session
+  && typeof bridge.session.configure === "function"
+  && "beginTransaction" in bridge.session
+  && typeof bridge.session.beginTransaction === "function"
+)
+
 const readNowMs = () =>
-  typeof performance !== 'undefined' ? performance.now() : Date.now()
+  globalThis.performance?.now() ?? Date.now()
 
 export function useTimelinePlayback(
   audioEngine: TimelinePlaybackAudioEngine,
@@ -124,20 +146,19 @@ export function useTimelinePlayback(
     }
   }
 
-  const audioHostBridge = typeof window === 'undefined' ? undefined : window.dawDesktop?.audioHost
+  const desktopAudioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const audioHostBridge = desktopAudioHostBridge && supportsNativePlayback(desktopAudioHostBridge)
+    ? desktopAudioHostBridge
+    : undefined
   const requiresNativeAudio = nativeOptions?.requiresNativeAudio === true
-  const hasAudioLifecycle = typeof audioHostBridge?.onLifecycle === 'function'
-    && typeof audioHostBridge.getLifecycle === 'function'
+  const hasAudioLifecycle = audioHostBridge !== undefined
+    && audioHostBridge.onLifecycle !== undefined
+    && audioHostBridge.getLifecycle !== undefined
   const [audioLifecycleState, setAudioLifecycleState] = createSignal<DesktopAudioLifecycle["state"]>(
     hasAudioLifecycle ? "recovering" : "ready",
   )
   let audioLifecycleGeneration = -1
-  let recoveryAttempt: {
-    generation: number
-    token: number
-    cancelled: boolean
-    promise?: Promise<void>
-  } | undefined
+  let recoveryAttempt: RecoveryAttempt | undefined
   let recoveryToken = 0
   let recoveryRetryPromise: Promise<unknown> | undefined
   let recoveryRetryGeneration: number | undefined
@@ -581,9 +602,10 @@ export function useTimelinePlayback(
       }
       if (
         lifecycleState === "failed"
-        && typeof audioHostBridge?.retryRecovery === "function"
+        && audioHostBridge
         && recoveryRetryGeneration !== audioLifecycleGeneration
         && !recoveryRetryPromise
+        && audioHostBridge.retryRecovery !== undefined
       ) {
         const retryGeneration = audioLifecycleGeneration
         const retry = Promise.resolve().then(() => audioHostBridge.retryRecovery())
@@ -920,7 +942,7 @@ export function useTimelinePlayback(
   }
 
   const acknowledgeRecovery = async (generation: number, result: "ready" | "failed") => {
-    if (!audioHostBridge || typeof audioHostBridge.completeRecovery !== "function") return true
+    if (!audioHostBridge || audioHostBridge.completeRecovery === undefined) return true
     const acknowledgement = await audioHostBridge.completeRecovery(generation, result)
     if (!acknowledgement.accepted) throw new Error("Audio recovery acknowledgement was stale.")
     return true
@@ -953,12 +975,7 @@ export function useTimelinePlayback(
     const recoveryGeneration = lifecycle.powerGeneration
     const token = recoveryToken + 1
     recoveryToken = token
-    const attempt: {
-      generation: number
-      token: number
-      cancelled: boolean
-      promise?: Promise<void>
-    } = { generation: recoveryGeneration, token, cancelled: false }
+    const attempt: RecoveryAttempt = { generation: recoveryGeneration, token, cancelled: false }
     recoveryAttempt = attempt
     const isCurrent = () => (
       mounted
@@ -1070,10 +1087,10 @@ export function useTimelinePlayback(
             owner: 'native',
             projectId: nativeOptions?.projectId?.(),
             projectGeneration: nativeOptions?.projectGeneration?.(),
-          }).catch((error: unknown) => {
+          }).catch((cause: unknown) => {
             nativeOptions?.reportFault?.(
-              error instanceof Error
-                ? error.message
+              cause instanceof Error
+                ? cause.message
                 : 'The native playback graph could not be rebuilt after a structural change.',
             )
           })
@@ -1087,11 +1104,11 @@ export function useTimelinePlayback(
           } else {
             setActiveBackend("native")
           }
-        }).catch((error: unknown) => {
+        }).catch((cause: unknown) => {
           if (reconcileSupersededPausedSeek()) return
           nativeOptions?.reportFault?.(
-            error instanceof Error
-              ? error.message
+            cause instanceof Error
+              ? cause.message
               : "The native playback graph could not seek while paused.",
           )
           setActiveBackend("idle")
@@ -1109,9 +1126,9 @@ export function useTimelinePlayback(
         projectId: nativeOptions?.projectId?.(),
         projectGeneration: nativeOptions?.projectGeneration?.()
           ?? portableBrowserOptions?.projectGeneration?.(),
-      }).catch((error: unknown) => {
+      }).catch((cause: unknown) => {
         portableBrowserOptions?.reportFault?.(
-          error instanceof Error ? error.message : 'Playback could not seek while active.',
+          cause instanceof Error ? cause.message : 'Playback could not seek while active.',
         )
       })
       return
@@ -1666,8 +1683,8 @@ export function useTimelinePlayback(
   let nativePreviewTrackFingerprint: string | undefined
   const bufferFingerprints = new WeakMap<object, number>()
   let nextBufferFingerprint = 1
-  const readBufferFingerprint = (buffer: unknown) => {
-    if (!buffer || typeof buffer !== "object") return null
+  const readBufferFingerprint = (buffer: AudioBuffer | null | undefined) => {
+    if (!buffer) return null
     const existing = bufferFingerprints.get(buffer)
     if (existing !== undefined) return existing
     const fingerprint = nextBufferFingerprint++
@@ -1680,7 +1697,9 @@ export function useTimelinePlayback(
       return {
         ...trackCompilerInputs,
         clips: clips.map((clip) => {
-          const buffer = "buffer" in clip ? clip.buffer : undefined
+          const buffer = "buffer" in clip && clip.buffer instanceof AudioBuffer
+            ? clip.buffer
+            : undefined
           return {
             ...clip,
             buffer: readBufferFingerprint(buffer),

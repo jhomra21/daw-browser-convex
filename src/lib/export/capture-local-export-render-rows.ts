@@ -2,9 +2,10 @@ import { normalizeLocalAutomationEnvelopes } from "~/lib/local-automation"
 import { isLocalEffectRow, type LocalEffectRow } from "~/lib/local-effects"
 import { openLocalProjectDb } from "~/lib/local-project-db"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
+import type { JsonValue } from "@daw-browser/shared"
 
 type LocalExportRenderRowsSnapshot = {
-  effects: LocalEffectRow[]
+  effects: LocalEffectRow<JsonValue>[]
   automationEnvelopes: ReturnType<typeof normalizeLocalAutomationEnvelopes>
 }
 

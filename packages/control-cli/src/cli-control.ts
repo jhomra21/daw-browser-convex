@@ -31,7 +31,12 @@ export const canonicalControlOperations = {
 type CanonicalCommand = keyof typeof canonicalControlOperations
 export const isCanonicalCommand = (command: string): command is CanonicalCommand => Object.hasOwn(canonicalControlOperations, command)
 
-const stripTarget = (arguments_: string[]): { target: ControlTarget; arguments_: string[] } => {
+type ControlRouting = {
+  target: ControlTarget
+  arguments_: string[]
+}
+
+const stripTarget = (arguments_: string[]): ControlRouting => {
   let target: ControlTarget = "cloud"
   let targetSeen = false
   const rest: string[] = []
@@ -114,8 +119,8 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
     const { projectId, cursor, limit } = historyArguments(canonicalArguments)
     const query = {
       projectId,
-      ...(cursor === undefined ? {} : { cursor }),
-      ...(limit === undefined ? {} : { limit: Number(limit) }),
+      cursor,
+      limit: limit === undefined ? undefined : Number(limit),
     }
     const input = command === "history"
       ? controlHistoryQuerySchemaV1.parse(query)
@@ -127,6 +132,6 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
       data = command === "history" ? await client.history(input) : await client.recoveries(input)
     }
   }
-  io.stdout(canonicalJson({ version: "v1", ok: true, command, data }))
+  io.stdout(canonicalJson(JSON.parse(JSON.stringify({ version: "v1", ok: true, command, data }))))
   return 0
 }

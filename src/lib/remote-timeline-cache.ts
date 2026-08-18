@@ -1,8 +1,13 @@
 import type { FunctionReturnType } from 'convex/server'
 
 import type { convexApi } from '~/lib/convex'
-import { normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
-import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
+import {
+  normalizeAudioWarp,
+  normalizeLegacyMidiClip,
+  normalizeTrackChannelRole,
+  sanitizeAudioSourceKind,
+} from '@daw-browser/shared'
+import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
@@ -10,6 +15,7 @@ import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repositor
 import { getDefaultClipColor } from '~/lib/clip-color'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { z } from 'zod'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
@@ -23,13 +29,14 @@ const now = () => Date.now()
 
 const sanitizeStoragePath = (assetKey: string) => assetKey.replace(/[/\\:]/g, '-')
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+const storedRecordSchema = z.record(z.string(), z.custom<LocalProjectStoredValue>())
 
-const readSignature = (value: unknown, key: string) => (
-  isRecord(value) && typeof value[key] === 'string' ? value[key] : undefined
-)
+const readSignature = (value: LocalProjectStoredValue, key: string) => {
+  const parsed = storedRecordSchema.safeParse(value)
+  if (!parsed.success) return undefined
+  const signature = z.string().safeParse(parsed.data[key])
+  return signature.success ? signature.data : undefined
+}
 
 const normalizeTrackKind = (value: string | undefined): TimelineTrackRow['kind'] => (
   value === 'instrument' ? 'instrument' : 'audio'

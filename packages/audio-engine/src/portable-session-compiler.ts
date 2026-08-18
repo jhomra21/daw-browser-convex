@@ -2,7 +2,6 @@ import {
   audioCoreContractVersion,
   type AudioAssetRef,
   type AudioCoreGraphSnapshot,
-  synthParameterRegistry,
   type AudioCoreDrumRackState,
   type AudioCoreGranularState,
   type AudioCoreMixerState,
@@ -13,7 +12,6 @@ import {
 import {
   normalizeDrumRackParams,
   normalizeGranularParams,
-  normalizeSynthParams,
   normalizeSamplerParams,
   MAX_SAMPLED_INSTRUMENT_VOICES,
   parseSynthAutomationKey,
@@ -33,7 +31,7 @@ import {
 } from './portable-wasm-protocol'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import type { ExportFx } from './export-types'
-import { createPortableGraphSnapshot } from './mixer/graph-contract'
+import { compilePortableSynthState, createPortableGraphSnapshot } from './mixer/graph-contract'
 import type { ResolvedMixerGraph } from './mixer/types'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import {
@@ -347,7 +345,7 @@ export const compilePortableGranularConfiguration = (
       assetId: asset?.portableAssetId ?? '',
       seed: params.seed,
       maxGrains: params.maxGrains,
-      windowShape: params.windowShape,
+      'windowShape': params['windowShape'],
       freeze: params.freeze,
       grainSizeMs: params.grainSizeMs,
       densityHz: params.densityHz,
@@ -360,61 +358,13 @@ export const compilePortableGranularConfiguration = (
   }
 }
 
-const waveform = (value: 'sine' | 'square' | 'sawtooth' | 'triangle'): 0 | 1 | 2 | 3 =>
-  value === 'square' ? 1 : value === 'sawtooth' ? 2 : value === 'triangle' ? 3 : 0
-
-const filterMode = (value: 'lowpass' | 'highpass' | 'bandpass' | 'notch'): 0 | 1 | 2 | 3 =>
-  value === 'highpass' ? 1 : value === 'bandpass' ? 2 : value === 'notch' ? 3 : 0
-
 /** Compiles the browser synth profile into the fixed portable synth ABI. */
 export const compilePortableSynthConfiguration = (
   nodeId: string,
   instanceId: string,
   input: SynthParamsInput,
 ): PortableSynthConfiguration => {
-  const params = normalizeSynthParams(input)
-  const state: AudioCoreSynthState = {
-    version: audioCoreContractVersion,
-    kind: 'synth',
-    voiceCapacity: Math.min(32, params.polyphony),
-    outputLayout: 'stereo',
-    parameterTargets: synthParameterRegistry
-      .filter((entry) => !entry.tombstone)
-      .map(({ id, target }) => ({ id, target })),
-    oscillators: params.oscillators.map((oscillator) => ({
-      enabled: oscillator.enabled,
-      waveform: waveform(oscillator.wave),
-      level: oscillator.level,
-      octave: oscillator.octave,
-      semitone: oscillator.semitone,
-      detuneCents: oscillator.detuneCents,
-    })),
-    noiseEnabled: params.noise.enabled,
-    noiseLevel: params.noise.level,
-    filterEnabled: params.filter.enabled,
-    filterMode: filterMode(params.filter.mode),
-    filterCutoffHz: params.filter.frequencyHz,
-    filterResonance: params.filter.q,
-    filterKeyTracking: params.filter.keyTracking,
-    filterEnvelopeAmountOctaves: params.filter.envelopeAmountOctaves,
-    filterAttackMs: params.filter.envelope.attackSec * 1000,
-    filterDecayMs: params.filter.envelope.decaySec * 1000,
-    filterSustain: params.filter.envelope.sustain,
-    filterReleaseMs: params.filter.envelope.releaseSec * 1000,
-    ampAttackMs: params.ampEnvelope.attackSec * 1000,
-    ampDecayMs: params.ampEnvelope.decaySec * 1000,
-    ampSustain: params.ampEnvelope.sustain,
-    ampReleaseMs: params.ampEnvelope.releaseSec * 1000,
-    lfoEnabled: params.lfo.enabled,
-    lfoWaveform: waveform(params.lfo.wave),
-    lfoRateHz: params.lfo.frequencyHz,
-    lfoPitchCents: params.lfo.pitchCents,
-    lfoFilterOctaves: params.lfo.filterOctaves,
-    lfoAmplitude: params.lfo.amp,
-    lfoPan: params.lfo.pan,
-    outputGain: params.gain,
-    outputPan: params.pan,
-  }
+  const state = compilePortableSynthState(input)
   return {
     nodeId,
     instanceId,
@@ -703,11 +653,16 @@ const sourceFrameRange = (schedule: PortableFrameSchedule, rangeEndSec: number) 
   endFrame: schedule.timeOrigin.frame + Math.round((rangeEndSec - schedule.timeOrigin.timelineSec) * schedule.sampleRateHz),
 })
 
+type PreparedPortableSources = {
+  sources?: readonly PreparedPortableSource[]
+  reasons: readonly string[]
+}
+
 const prepareSources = (
   input: PreparedPortableSessionInput,
   assets: readonly AudioAssetRef[],
   graph: AudioCoreGraphSnapshot,
-): { sources?: readonly PreparedPortableSource[]; reasons: readonly string[] } => {
+): PreparedPortableSources => {
   if (!positiveSafeInteger(input.sourceFirstSequence)) {
     return { reasons: ['Portable source event sequence namespace is invalid.'] }
   }

@@ -105,7 +105,7 @@ const buildBrowserSampleRow = (
     source: BrowserItemSource;
     subtitle: string;
   },
-): { item: BrowserItem; sample: SampleDragData } => {
+) => {
   const label = sample.name;
   return {
     item: {
@@ -126,7 +126,7 @@ const buildBrowserSampleRow = (
       sourceKind: sample.sourceKind,
       source: sample.source,
     },
-  };
+  } satisfies { item: BrowserItem; sample: SampleDragData };
 };
 
 type RenameFolderDraft = {

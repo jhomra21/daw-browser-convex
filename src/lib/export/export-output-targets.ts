@@ -5,7 +5,7 @@ export type ExportFileSink = {
   name: string
   target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>
   commit: () => Promise<{ byteLength?: number }>
-  abort: (reason?: unknown) => Promise<void>
+  abort: (cause?: unknown) => Promise<void>
 }
 
 export type MixdownOutputTarget = {

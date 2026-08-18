@@ -1,5 +1,7 @@
+import { isJsonNumber, isJsonObject, isJsonString, type JsonValue } from '@daw-browser/shared'
 import { parseExternalProcessorValue, type ExternalProcessor } from '@daw-browser/external-plugins'
 import { audioEffectKindFromLocalEffect } from '~/lib/audio-effect-kind'
+import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 
 export type MixedEffectKind = 'builtin' | 'external'
 
@@ -11,38 +13,34 @@ export type MixedEffectOrderItem = {
 type EntityRow = {
   kind: string
   id: string
-  value: unknown
+  value: JsonValue
   updatedAt: number
 }
 
-type EffectValue = Record<string, unknown> & {
+type EffectValue = {
   id?: string
   targetId: string
   effect: string
-  params?: unknown
+  params?: JsonValue
   instanceId?: string
   index?: number
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
 const isBuiltinEffect = (row: EntityRow): row is EntityRow & { value: EffectValue } => (
   row.kind === 'effect'
-  && isRecord(row.value)
-  && typeof row.value.targetId === 'string'
-  && typeof row.value.effect === 'string'
+  && isJsonObject(row.value)
+  && isJsonString(row.value.targetId)
+  && isJsonString(row.value.effect)
   && audioEffectKindFromLocalEffect(row.value.effect) !== undefined
 )
 
 const externalValue = (row: EntityRow): ExternalProcessor | undefined => {
   if (row.kind !== 'external-plugin') return undefined
-  const parsed = parseExternalProcessorValue(row.value)
+  const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(row.value))
   if (parsed.success) {
     return parsed.data
   }
-  if (!isRecord(row.value) || typeof row.value.instanceId !== 'string') {
+  if (!isJsonObject(row.value) || !isJsonString(row.value.instanceId)) {
     throw new Error(`External plugin row "${row.id}" is corrupt.`)
   }
   throw new Error(`External plugin row "${row.id}" is incompatible or corrupt.`)
@@ -69,7 +67,7 @@ const orderedRowsForTarget = <Row extends EntityRow>(rows: readonly Row[], targe
         row,
         kind: 'builtin',
         instanceId,
-        index: typeof row.value.index === 'number' ? row.value.index : undefined,
+        index: isJsonNumber(row.value.index) ? row.value.index : undefined,
       })
       continue
     }
@@ -101,7 +99,7 @@ const orderedRowsForTarget = <Row extends EntityRow>(rows: readonly Row[], targe
 
 const withoutLegacyOrderFields = (value: EffectValue, instanceId: string, index: number): EffectValue => {
   return {
-    ...(value.id ? { id: value.id } : {}),
+    id: value.id ? value.id : undefined,
     targetId: value.targetId,
     effect: value.effect,
     params: value.params,

@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/solid-query'
 import { authClient } from '~/lib/auth-client'
+import { isJsonObject, isJsonString, type JsonObject } from '@daw-browser/shared'
+import { z } from 'zod'
+import { serializeJsonValue } from '~/lib/json'
 
 type ClientSession = {
   user: {
@@ -8,24 +11,21 @@ type ClientSession = {
     name?: string
     image?: string | null
   }
-  session: Record<string, unknown>
+  session: JsonObject
 } | null
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+export const normalizeClientSession = <Value>(value: Value): ClientSession => {
+  const parsed = z.json().safeParse(value)
+  if (!parsed.success || !isJsonObject(parsed.data) || !isJsonObject(parsed.data.user) || !isJsonObject(parsed.data.session)) return null
 
-export const normalizeClientSession = (value: unknown): ClientSession => {
-  if (!isRecord(value) || !isRecord(value.user) || !isRecord(value.session)) return null
-
-  const { user: rawUser, session } = value
+  const { user: rawUser, session } = parsed.data
   const { id } = rawUser
-  if (typeof id !== 'string' || id.trim() === '') return null
+  if (!isJsonString(id) || id.trim() === '') return null
 
   const user: NonNullable<ClientSession>['user'] = { id }
-  if (typeof rawUser.email === 'string') user.email = rawUser.email
-  if (typeof rawUser.name === 'string') user.name = rawUser.name
-  if (typeof rawUser.image === 'string' || rawUser.image === null) user.image = rawUser.image
+  if (isJsonString(rawUser.email)) user.email = rawUser.email
+  if (isJsonString(rawUser.name)) user.name = rawUser.name
+  if (isJsonString(rawUser.image) || rawUser.image === null) user.image = rawUser.image
 
   return { user, session }
 }
@@ -33,7 +33,7 @@ export const normalizeClientSession = (value: unknown): ClientSession => {
 // Fetcher used by both the route guard and components
 export async function fetchSession(): Promise<ClientSession> {
   const res = await authClient.getSession()
-  return normalizeClientSession(res?.data)
+  return normalizeClientSession(serializeJsonValue(res?.data))
 }
 
 export function useSessionQuery() {

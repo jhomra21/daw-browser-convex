@@ -2,10 +2,9 @@ import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runt
 import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
-import type { AutomationEnvelope } from "@daw-browser/shared"
+import type { AutomationEnvelope,TrackInstrumentParams } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
-import type { TrackInstrumentParams } from "@daw-browser/shared"
 
 export type LivePlaybackTransport = {
   state: "playing" | "paused" | "stopped"
@@ -116,7 +115,7 @@ const snapshotTracks = (tracks: readonly RuntimeTrack[]): RuntimeTrack[] => trac
     ...structuredClone(trackWithoutClips),
     clips: clips.map((clip) => {
       const { buffer, ...clipWithoutBuffer } = clip
-      return { ...structuredClone(clipWithoutBuffer), ...(buffer === undefined ? {} : { buffer }) }
+      return { ...structuredClone(clipWithoutBuffer), buffer }
     }),
   }
 })
@@ -134,14 +133,12 @@ const cloneLiveTrackFxEntry = (entry: LiveTrackFxEntry): LiveTrackFxEntry => {
   const { drumRackBuffers, samplerBuffers, granularBuffer, ...serializableEntry } = entry
   return {
     ...structuredClone(serializableEntry),
-    ...(drumRackBuffers === undefined ? {} : { drumRackBuffers: cloneAudioBufferMap(drumRackBuffers) }),
-    ...(samplerBuffers === undefined ? {} : { samplerBuffers: cloneAudioBufferMap(samplerBuffers) }),
-    ...(granularBuffer === undefined ? {} : {
-      granularBuffer: {
+    drumRackBuffers: drumRackBuffers === undefined ? undefined : cloneAudioBufferMap(drumRackBuffers),
+    samplerBuffers: samplerBuffers === undefined ? undefined : cloneAudioBufferMap(samplerBuffers),
+    granularBuffer: granularBuffer === undefined ? undefined : {
         assetKey: granularBuffer.assetKey,
         buffer: granularBuffer.buffer,
       },
-    }),
   }
 }
 
@@ -149,11 +146,9 @@ const cloneLiveFx = (fx: ExportFx): ExportFx => {
   const { trackFx, ...serializableFx } = fx
   return {
     ...structuredClone(serializableFx),
-    ...(trackFx === undefined ? {} : {
-      trackFx: Object.fromEntries(
+    trackFx: trackFx === undefined ? undefined : Object.fromEntries(
         Object.entries(trackFx).map(([trackId, entry]) => [trackId, cloneLiveTrackFxEntry(entry)]),
       ),
-    }),
   }
 }
 

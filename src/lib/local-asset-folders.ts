@@ -1,6 +1,7 @@
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
+import { openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { z } from 'zod'
 
 type LocalAssetFolderRow = {
   id: string
@@ -15,22 +16,18 @@ const now = () => Date.now()
 export const localAssetFolderKey = (folderId: string) => `${LOCAL_ASSET_FOLDER_KEY_PREFIX}${folderId}`
 const createFolderId = () => `asset-folder:${crypto.randomUUID()}`
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
 const normalizeFolderName = (name: string) => name.trim() || 'Folder'
 
-export const parseLocalAssetFolderRow = (value: unknown): LocalAssetFolderRow | undefined => {
-  if (!isRecord(value)) return undefined
-  if (typeof value.id !== 'string' || typeof value.name !== 'string') return undefined
-  if (typeof value.createdAt !== 'number' || typeof value.updatedAt !== 'number') return undefined
-  return {
-    id: value.id,
-    name: value.name,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
-  }
+const localAssetFolderRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+
+export const parseLocalAssetFolderRow = (storedValue: LocalProjectStoredValue): LocalAssetFolderRow | undefined => {
+  const parsed = localAssetFolderRowSchema.safeParse(storedValue)
+  return parsed.success ? parsed.data : undefined
 }
 
 const sortFoldersByName = (folders: LocalAssetFolderRow[]) => (
@@ -77,7 +74,7 @@ export const renameLocalAssetFolder = async (
 ): Promise<LocalAssetFolderRow | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const stateRow = await db.get('projectState', localAssetFolderKey(folderId))
-  const folder = parseLocalAssetFolderRow(stateRow?.value)
+  const folder = stateRow === undefined ? undefined : parseLocalAssetFolderRow(stateRow.value)
   if (!folder) return undefined
   const timestamp = now()
   const next = {
@@ -118,7 +115,8 @@ export const moveLocalAssetToFolder = async (
     const asset = await db.get('assets', assetId)
     if (!asset) return undefined
     if (folderId) {
-      const folder = parseLocalAssetFolderRow((await db.get('projectState', localAssetFolderKey(folderId)))?.value)
+      const folderRow = await db.get('projectState', localAssetFolderKey(folderId))
+      const folder = folderRow === undefined ? undefined : parseLocalAssetFolderRow(folderRow.value)
       if (!folder) return undefined
     }
     const timestamp = now()

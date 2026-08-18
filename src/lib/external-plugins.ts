@@ -3,14 +3,22 @@ import {
   externalProcessorSchema,
   parseExternalProcessorValue,
   type ExternalProcessor,
+  type ExternalPluginJsonValue,
 } from '@daw-browser/external-plugins'
-import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
+import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
+import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { mixedOrderFromRows, normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
+import { z } from 'zod'
 
 const externalProcessorRowId = (instanceId: string) => `external-plugin:${instanceId}`
 const externalProjectWriteChains = new Map<string, Promise<void>>()
 const externalProcessorWriteChains = new Map<string, Promise<void>>()
+
+const jsonEntityRows = (rows: readonly LocalProjectEntityRow[]) => rows.flatMap((row) => {
+  const parsed = z.json().safeParse(row.value)
+  return parsed.success ? [{ ...row, value: parsed.data }] : []
+})
 
 const withWriteChain = async <Value>(
   chains: Map<string, Promise<void>>,
@@ -55,7 +63,7 @@ const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProces
   })
 }
 
-const parseExternalProcessor = (value: unknown, rowId: string): ExternalProcessor => {
+const parseExternalProcessor = (value: ExternalPluginJsonValue, rowId: string): ExternalProcessor => {
   const parsed = parseExternalProcessorValue(value)
   if (parsed.success) return parsed.data
   throw new Error(`External plugin row "${rowId}" is incompatible or corrupt: ${parsed.error.issues[0]?.message ?? 'invalid processor data'}.`)
@@ -83,7 +91,7 @@ const patchLocalExternalProcessor = async (
       await tx.done
       return undefined
     }
-    const current = parseExternalProcessorValue(row.value)
+    const current = parseExternalProcessorValue(parseExternalPluginJsonValue(row.value))
     if (!current.success || current.data.instanceId !== instanceId) {
       await tx.done
       return undefined
@@ -125,7 +133,7 @@ const patchLocalExternalProcessor = async (
 export const listLocalExternalProcessors = async (projectId: string): Promise<ExternalProcessor[]> => {
   const db = await openLocalProjectDb(projectId)
   const rows = await db.getAllFromIndex('entities', 'by-kind', externalPluginEntityKind)
-  return rows.map((row) => parseExternalProcessor(row.value, row.id))
+  return rows.map((row) => parseExternalProcessor(parseExternalPluginJsonValue(row.value), row.id))
 }
 
 export const getLocalExternalProcessor = async (
@@ -134,7 +142,7 @@ export const getLocalExternalProcessor = async (
 ): Promise<ExternalProcessor | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('entities', [externalPluginEntityKind, externalProcessorRowId(instanceId)])
-  return row ? parseExternalProcessor(row.value, row.id) : undefined
+  return row ? parseExternalProcessor(parseExternalPluginJsonValue(row.value), row.id) : undefined
 }
 
 export const setLocalExternalProcessor = async (
@@ -145,7 +153,7 @@ export const setLocalExternalProcessor = async (
   return withExternalProcessorWriteLock(projectId, parsed.instanceId, async () => {
     const db = await openLocalProjectDb(projectId)
     const existing = await db.get('entities', [externalPluginEntityKind, externalProcessorRowId(parsed.instanceId)])
-    const prior = existing ? parseExternalProcessorValue(existing.value) : undefined
+    const prior = existing ? parseExternalProcessorValue(parseExternalPluginJsonValue(existing.value)) : undefined
     const next = pathFreeExternalProcessor(externalProcessorSchema.parse({
       ...parsed,
       index: parsed.manifest.role === 'instrument'
@@ -203,9 +211,7 @@ export const setLocalExternalProcessorBypassed = async (
   instanceId: string,
   bypassed: boolean,
 ): Promise<LocalExternalProcessorCommit | undefined> => (
-  typeof bypassed === 'boolean'
-    ? patchLocalExternalProcessor(projectId, instanceId, () => ({ bypassed }))
-    : undefined
+  patchLocalExternalProcessor(projectId, instanceId, () => ({ bypassed }))
 )
 
 export const appendLocalExternalProcessor = async (
@@ -227,9 +233,9 @@ export const appendLocalExternalProcessor = async (
         'Failed to insert external plugin because the target track was not found.',
       )
     }
-    let normalizedRows: typeof allRows
+    let normalizedRows: ReturnType<typeof jsonEntityRows>
     try {
-      normalizedRows = normalizeMixedEffectEntityRows(allRows)
+      normalizedRows = normalizeMixedEffectEntityRows(jsonEntityRows(allRows))
     } catch (error) {
       await tx.done
       const reason = error instanceof Error ? error.message : 'Existing external plugin data is invalid.'
@@ -280,11 +286,11 @@ export const deleteLocalExternalProcessor = async (
       await tx.done
       return
     }
-    parseExternalProcessor(target.value, target.id)
+    parseExternalProcessor(parseExternalPluginJsonValue(target.value), target.id)
     await tx.store.delete([externalPluginEntityKind, rowId])
-    const normalized = normalizeMixedEffectEntityRows(rows.filter((row) => (
+    const normalized = normalizeMixedEffectEntityRows(jsonEntityRows(rows.filter((row) => (
       row.kind !== externalPluginEntityKind || row.id !== rowId
-    )))
+    ))))
     for (const row of normalized) await tx.store.put(row)
     await tx.done
     notifyLocalProjectChanged(projectId)

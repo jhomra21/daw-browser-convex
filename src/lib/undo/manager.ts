@@ -1,10 +1,13 @@
 import type { HistoryEntry, MergeKey, PersistedHistory } from './types'
 
+import { isJsonObject, type JsonValue } from '@daw-browser/shared'
+import { serializeJsonValue } from '~/lib/json'
+
 export type UndoManager = ReturnType<typeof createUndoManager>
 
-const sameHistoryEntry = (left: unknown, right: unknown): boolean => {
+const sameHistoryEntry = (left: JsonValue, right: JsonValue): boolean => {
   if (Object.is(left, right)) return true
-  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) return false
+  if (!isJsonObject(left) || !isJsonObject(right)) return false
   if (Array.isArray(left) || Array.isArray(right)) {
     return Array.isArray(left) && Array.isArray(right)
       && left.length === right.length
@@ -13,17 +16,22 @@ const sameHistoryEntry = (left: unknown, right: unknown): boolean => {
   const leftEntries = Object.entries(left)
   const rightEntries = new Map(Object.entries(right))
   return leftEntries.length === rightEntries.size
-    && leftEntries.every(([key, value]) => rightEntries.has(key) && sameHistoryEntry(value, rightEntries.get(key)))
+    && leftEntries.every(([key, value]) => {
+      const rightValue = rightEntries.get(key)
+      return rightValue !== undefined && sameHistoryEntry(value, rightValue)
+    })
 }
 
 const occurrenceFromEnd = (entries: HistoryEntry[], entry: HistoryEntry, index: number) => (
-  entries.slice(index + 1).filter((candidate) => sameHistoryEntry(candidate, entry)).length
+  entries.slice(index + 1).filter((candidate) => (
+    sameHistoryEntry(serializeJsonValue(candidate), serializeJsonValue(entry))
+  )).length
 )
 
 const occurrenceIndexFromEnd = (entries: HistoryEntry[], entry: HistoryEntry, occurrence: number) => {
   let remaining = occurrence
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    if (!sameHistoryEntry(entries[index], entry)) continue
+    if (!sameHistoryEntry(serializeJsonValue(entries[index]), serializeJsonValue(entry))) continue
     if (remaining === 0) return index
     remaining -= 1
   }
@@ -229,8 +237,8 @@ export function createUndoManager(options: { max?: number; onChange?: (state: Pe
   }
   const hydrate = (state?: PersistedHistory) => {
     if (!state) return
-    undo = Array.isArray(state.undo) ? state.undo as HistoryEntry[] : []
-    redo = Array.isArray(state.redo) ? state.redo as HistoryEntry[] : []
+    undo = state.undo
+    redo = state.redo
     if (reservedUndo) {
       const reserved = reservedUndo
       const index = occurrenceIndexFromEnd(undo, reserved.entry, reserved.occurrence)

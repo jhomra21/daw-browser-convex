@@ -4,6 +4,7 @@ import {
   findDuplicateRecoveryActionIndexV1,
   parseControlPreviewRequestV1,
   planControlRequestV1,
+  projectSnapshotSchemaV2,
   rebaseRecoveryAutomationParameterIdV1,
   type ControlActionV1,
   type ControlPlanV1,
@@ -15,10 +16,18 @@ import {
   createInstrumentInstanceId,
   createLocalClipId,
   createLocalTrackId,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
 } from '@daw-browser/shared'
-import { localEffectRowId, localSidechainRouteRowId, type LocalEffectRow } from '~/lib/local-effects'
-import type { LocalControlRecoveryRow } from '~/lib/local-project-db'
-import { materializeLocalControlSnapshot } from './local-control-model'
+import { z } from 'zod'
+import {
+  localEffectRowId,
+  localSidechainRouteRowId,
+  type LocalEffectKind,
+} from '~/lib/local-effects'
+import type { LocalControlRecoveryRow, LocalProjectStoredValue } from '~/lib/local-project-db'
+import { materializeLocalControlSnapshot, parseLocalProjectStoredJsonValue } from './local-control-model'
 import { withLocalControlTransaction, type LocalControlTransactionResult } from './local-control-state'
 import {
   captureLocalRecoveryPayload,
@@ -30,9 +39,7 @@ import { projectLocalControlSnapshotV2 } from './local-control-projector'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
 import { localControlAssetGcLeaseMs } from './local-control-asset-gc'
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+const jsonValueSchema = z.json()
 
 const digestFor = (snapshot: ControlPlanV1['snapshot']) => {
   const { revision: _revision, updatedAt: _updatedAt, ...project } = snapshot.project
@@ -53,21 +60,21 @@ export const rewriteLocalControlActionReferences = (
   ids: ReadonlyMap<string, string>,
   clientRefs: ReadonlyMap<string, string>,
 ): ControlActionV1 => {
-  const rewrite = (value: unknown): unknown => {
+  const rewrite = (value: JsonValue): JsonValue => {
     if (Array.isArray(value)) return value.map(rewrite)
-    if (typeof value !== 'object' || value === null) return value
-    if (!isRecord(value)) return value
+    if (!isJsonObject(value)) return value
     const record = value
-    if (record.source === 'persisted' && typeof record.id === 'string') {
+    if (record.source === 'persisted' && isJsonString(record.id)) {
       return { ...record, id: ids.get(record.id) ?? record.id }
     }
-    if (record.source === 'client' && typeof record.clientRef === 'string') {
+    if (record.source === 'client' && isJsonString(record.clientRef)) {
       const id = clientRefs.get(record.clientRef)
       return id === undefined ? record : { source: 'persisted', id }
     }
     return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, rewrite(entry)]))
   }
-  return controlActionSchemaV1.parse(rewrite(action))
+  const actionValue = jsonValueSchema.parse(JSON.parse(JSON.stringify(action)))
+  return controlActionSchemaV1.parse(rewrite(actionValue))
 }
 
 const isRecoverable = (action: ControlActionV1) => (
@@ -84,22 +91,22 @@ const isRecoverable = (action: ControlActionV1) => (
 )
 
 const recoveryMappings = (
-  payload: unknown,
+  payload: RecoveryPayload,
   recoveryId: string,
   ids: ReadonlyMap<string, string>,
   instanceIds: ReadonlyMap<string, string>,
 ) => {
-  if (!isRecord(payload)) return []
-  const data = payload.data
-  if (!isRecord(data)) return []
+  const payloadValue = jsonValueSchema.parse(JSON.parse(JSON.stringify(payload)))
+  if (!isJsonObject(payloadValue) || !isJsonObject(payloadValue.data)) return []
+  const data = payloadValue.data
   const record = data
   const mappings: Array<{ entity: string; sourceId: string; restoredId: string }> = []
-  const append = (entity: string, entries: unknown, prefix: string) => {
+  const append = (entity: string, entries: JsonValue | undefined, prefix: string) => {
     if (!Array.isArray(entries)) return
     for (const entry of entries) {
-      if (!isRecord(entry)) continue
+      if (!isJsonObject(entry)) continue
       const sourceId = entry.id
-      if (typeof sourceId !== 'string') continue
+      if (!isJsonString(sourceId)) continue
       const restoredId = ids.get(`recovery:${prefix}:${recoveryId}:${sourceId}`)
       if (restoredId) mappings.push({ entity, sourceId, restoredId })
     }
@@ -108,25 +115,25 @@ const recoveryMappings = (
   append('clip', record.clips, 'clip')
   append('clip', record.deletedClips, 'clip')
   append('effect', record.effects, 'effect')
-  const appendAutomation = (sourceId: unknown, automation: unknown) => {
-    if (typeof sourceId !== 'string' || !isRecord(automation)) return
+  const appendAutomation = (sourceId: JsonValue | undefined, automation: JsonValue | undefined) => {
+    if (!isJsonString(sourceId) || !isJsonObject(automation)) return
     const target = automation.targetKind === 'master'
       ? {
           kind: 'master' as const,
-          effectInstanceId: typeof automation.effectInstanceId === 'string'
+          effectInstanceId: isJsonString(automation.effectInstanceId)
             ? replace(automation.effectInstanceId, instanceIds)
             : undefined,
         }
-      : typeof automation.trackId === 'string'
+      : isJsonString(automation.trackId)
         ? {
             kind: 'track' as const,
             trackId: ids.get(`recovery:track:${recoveryId}:${automation.trackId}`) ?? automation.trackId,
-            effectInstanceId: typeof automation.effectInstanceId === 'string'
+            effectInstanceId: isJsonString(automation.effectInstanceId)
               ? replace(automation.effectInstanceId, instanceIds)
               : undefined,
           }
         : undefined
-    if (target && typeof automation.parameterId === 'string') {
+    if (target && isJsonString(automation.parameterId)) {
       mappings.push({
         entity: 'automation',
         sourceId,
@@ -140,8 +147,8 @@ const recoveryMappings = (
       })
     }
   }
-  const appendSidechain = (sourceId: unknown, sidechain: unknown) => {
-    if (!isRecord(sidechain) || typeof sourceId !== 'string' || typeof sidechain.targetTrackId !== 'string' || typeof sidechain.effectInstanceId !== 'string') return
+  const appendSidechain = (sourceId: JsonValue | undefined, sidechain: JsonValue | undefined) => {
+    if (!isJsonObject(sidechain) || !isJsonString(sourceId) || !isJsonString(sidechain.targetTrackId) || !isJsonString(sidechain.effectInstanceId)) return
     mappings.push({
       entity: 'sidechain',
       sourceId,
@@ -153,16 +160,16 @@ const recoveryMappings = (
   }
   if (Array.isArray(record.automation)) {
     for (const entry of record.automation) {
-      if (isRecord(entry)) appendAutomation(entry.id, entry.automation)
+      if (isJsonObject(entry)) appendAutomation(entry.id, entry.automation)
     }
   }
   if (Array.isArray(record.sidechains)) {
     for (const entry of record.sidechains) {
-      if (isRecord(entry)) appendSidechain(entry.id, entry.sidechain)
+      if (isJsonObject(entry)) appendSidechain(entry.id, entry.sidechain)
     }
   }
-  const appendSingle = (entity: string, sourceId: unknown, prefix: string) => {
-    if (typeof sourceId !== 'string') return
+  const appendSingle = (entity: string, sourceId: JsonValue | undefined, prefix: string) => {
+    if (!isJsonString(sourceId)) return
     const restoredId = ids.get(`recovery:${prefix}:${recoveryId}:${sourceId}`)
       ?? ids.get(`recovery:${prefix}:${recoveryId}`)
     if (restoredId) mappings.push({ entity, sourceId, restoredId })
@@ -171,11 +178,11 @@ const recoveryMappings = (
   appendSingle('sidechain', record.sidechainId, 'sidechain')
   appendAutomation(record.automationId, record.automation)
   appendSidechain(record.sidechainId, record.sidechain)
-  if (typeof record.clipId === 'string') {
+  if (isJsonString(record.clipId)) {
     const restoredId = ids.get(`recovery:clip:${recoveryId}`)
     if (restoredId) mappings.push({ entity: 'clip', sourceId: record.clipId, restoredId })
   }
-  if (typeof record.assetId === 'string') mappings.push({
+  if (isJsonString(record.assetId)) mappings.push({
     entity: 'asset',
     sourceId: record.assetId,
     restoredId: ids.get(`recovery:asset:${recoveryId}`) ?? record.assetId,
@@ -188,51 +195,50 @@ const replace = (value: string | undefined, ids: ReadonlyMap<string, string>) =>
 )
 const isGenerated = (value: string) => value.startsWith('control:') || value.startsWith('recovery:')
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
-const localSampleUrls = (entities: readonly { kind: string; id: string; value: unknown }[]) => new Map(
-  entities.flatMap((entity) => (
-    entity.kind === 'clip'
-      && isRecord(entity.value)
-      && typeof entity.value.sampleUrl === 'string'
-      ? [[entity.id, entity.value.sampleUrl] as const]
-      : []
-  )),
+const jsonObjectFromStoredValue = (value: LocalProjectStoredValue) => {
+  const parsed = parseLocalProjectStoredJsonValue(value)
+  return isJsonObject(parsed) ? parsed : undefined
+}
+const localSampleUrls = (entities: readonly { kind: string; id: string; value: LocalProjectStoredValue }[]) => new Map(
+  entities.flatMap((entity) => {
+    const value = entity.kind === 'clip' ? jsonObjectFromStoredValue(entity.value) : undefined
+    return value && isJsonString(value.sampleUrl) ? [[entity.id, value.sampleUrl] as const] : []
+  }),
 )
-const localClipHistoryRefs = (entities: readonly { kind: string; id: string; value: unknown }[]) => new Map(
-  entities.flatMap((entity) => (
-    entity.kind === 'clip'
-      && isRecord(entity.value)
-      && typeof entity.value.historyRef === 'string'
-      ? [[entity.id, entity.value.historyRef] as const]
-      : []
-  )),
+const localClipHistoryRefs = (entities: readonly { kind: string; id: string; value: LocalProjectStoredValue }[]) => new Map(
+  entities.flatMap((entity) => {
+    const value = entity.kind === 'clip' ? jsonObjectFromStoredValue(entity.value) : undefined
+    return value && isJsonString(value.historyRef) ? [[entity.id, value.historyRef] as const] : []
+  }),
 )
-const recoveryClipHistoryRefs = (payload: unknown) => {
-  if (!isRecord(payload) || !isRecord(payload.data)) return []
-  const data = payload.data
+const recoveryClipHistoryRefs = (payload: RecoveryPayload) => {
+  const payloadValue = jsonValueSchema.parse(JSON.parse(JSON.stringify(payload)))
+  if (!isJsonObject(payloadValue) || !isJsonObject(payloadValue.data)) return []
+  const data = payloadValue.data
   const clips = [
     ...(Array.isArray(data.clips) ? data.clips : []),
     ...(Array.isArray(data.deletedClips) ? data.deletedClips : []),
-    ...(typeof data.clipId === 'string' && isRecord(data.clip) ? [{ id: data.clipId, clip: data.clip }] : []),
+    ...(isJsonString(data.clipId) && isJsonObject(data.clip) ? [{ id: data.clipId, clip: data.clip }] : []),
   ]
   return clips.flatMap((entry) => {
-    if (!isRecord(entry) || typeof entry.id !== 'string') return []
-    const clip = isRecord(entry.clip) ? entry.clip : isRecord(entry.before) ? entry.before : undefined
-    return clip && typeof clip.historyRef === 'string' ? [[entry.id, clip.historyRef] as const] : []
+    if (!isJsonObject(entry) || !isJsonString(entry.id)) return []
+    const clip = isJsonObject(entry.clip) ? entry.clip : isJsonObject(entry.before) ? entry.before : undefined
+    return clip && isJsonString(clip.historyRef) ? [[entry.id, clip.historyRef] as const] : []
   })
 }
 
-const rewriteInstanceIds = (value: unknown, instanceIds: ReadonlyMap<string, string>): unknown => {
+const rewriteInstanceIds = (value: JsonValue, instanceIds: ReadonlyMap<string, string>): JsonValue => {
   if (Array.isArray(value)) return value.map((entry) => rewriteInstanceIds(entry, instanceIds))
-  if (!isRecord(value)) return value
+  if (!isJsonObject(value)) return value
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
     key,
-    key === 'instanceId' && typeof entry === 'string'
+    key === 'instanceId' && isJsonString(entry)
       ? replace(entry, instanceIds) ?? entry
       : rewriteInstanceIds(entry, instanceIds),
   ]))
 }
 
-const localEffectKind = (kind: string, master = false): LocalEffectRow['effect'] | undefined => {
+const localEffectKind = (kind: string, master = false): LocalEffectKind | undefined => {
   if (kind === 'instrument') return 'instrument'
   if (kind === 'arpeggiator') return 'arp'
   return kind === 'utility' || kind === 'eq' || kind === 'autofilter' || kind === 'gate'
@@ -312,7 +318,7 @@ const materializedSnapshot = (
     || compareText(left.effectInstanceId, right.effectInstanceId)
     || compareText(left.sourceTrackId, right.sourceTrackId)
   ))
-  return materialized
+  return projectSnapshotSchemaV2.parse(materialized)
 }
 
 const canonicalEntityKeys = (snapshot: ControlPlanV1['snapshot']) => new Set([
@@ -375,7 +381,10 @@ export const executeLocalControlRequestInTransactionV1 = (
   const recoveryById = new Map(context.rows.recoveries.flatMap((row) => {
     const parsed = parseLocalControlRecoveryRow(row)
     if (!parsed) {
-      if (isRecord(row) && typeof row.id === 'string') invalidRecoveryIds.add(row.id)
+      const parsedRow = jsonValueSchema.safeParse(row)
+      if (parsedRow.success && isJsonObject(parsedRow.data) && isJsonString(parsedRow.data.id)) {
+        invalidRecoveryIds.add(parsedRow.data.id)
+      }
       return []
     }
     if (parsed.projectId !== request.projectId || parsed.consumedAt !== undefined || parsed.expiresAt <= Date.now()) return []

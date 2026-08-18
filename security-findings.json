@@ -1,27 +1,93 @@
 {
-  "scan_id": "scan-2026-08-15-003",
-  "scan_date": "2026-08-15T16:20:05Z",
+  "scan_id": "scan-2026-08-17-001",
+  "scan_date": "2026-08-17T21:57:11Z",
   "scan_type": "working",
-  "commit_range": "7eb5ae7ef2aaab4106cc4c389d73aa12fad38e6f..working-tree",
+  "commit_range": "5a432db8401483ddaeed78e1301bceb92d727ca9..working-tree",
   "pr_number": null,
   "threat_model_version": "1.0.0",
-  "findings": [],
+  "findings": [
+    {
+      "id": "VULN-001",
+      "severity": "CRITICAL",
+      "stride_category": "ElevationOfPrivilege",
+      "vulnerability_type": "Unconfined Native Plugin Execution",
+      "cwe": "CWE-250",
+      "file": "apps/desktop/entitlements/vst3-worker.plist",
+      "line_range": "5-6",
+      "code_context": "<key>com.apple.security.cs.disable-library-validation</key>\n<true/>",
+      "analysis": "The branch introduces scanner and worker executables that deliberately disable macOS library validation so they can load third-party VST3 code, but their entitlement files do not enable the App Sandbox and the launch paths do not apply another deny-by-default OS policy. A VST3 module is native executable code, so process separation only isolates crashes: once loaded, the plugin retains the desktop user's ambient filesystem, network, process, and credential access.",
+      "exploit_scenario": "An attacker distributes a correctly signed VST3 plugin or compromises an installed signed plugin. When the user scans, inserts, previews, or opens the plugin editor, the scanner or worker loads the attacker's native code. That code can read same-user project files and credentials, make arbitrary network connections, modify accessible files, or launch processes outside the DAW despite running in a child process.",
+      "threat_model_reference": "Threat I3/E3 - Third-Party VST3 Plugin Reads Same-User Files or Gains Desktop User Privileges; Prioritized Risk Register #1",
+      "existing_mitigations": [
+        "Scanner and worker run outside Electron main and the native real-time audio host.",
+        "Plugin bundles are canonicalized, code-sign validated, fingerprinted, checked for quarantine, and restricted to arm64.",
+        "Child environments and inherited descriptors are minimized.",
+        "Core dumps are disabled and IPC/shared-memory protocols are bounded."
+      ],
+      "recommended_fix": "Run every scanner and plugin worker under an OS-enforced deny-by-default sandbox. Permit only the verified plugin bundle reads and inherited control/audio descriptors required for operation; broker any UI, file, or network capability through an explicitly authorized host API. Keep disable-library-validation limited to the sandboxed plugin processes and add release tests that fail if the confinement profile is absent.",
+      "confidence": "HIGH",
+      "reasoning": "The entitlement explicitly weakens code-loading protection, neither plugin-process entitlement enables com.apple.security.app-sandbox, and the reviewed spawn/native startup code applies no alternative sandbox. The module load at native/plugin-host/src/vst3-worker.cpp:540 executes third-party code with that process authority."
+    },
+    {
+      "id": "VULN-002",
+      "severity": "HIGH",
+      "stride_category": "Tampering",
+      "vulnerability_type": "Plugin Validation-to-Load TOCTOU",
+      "cwe": "CWE-367",
+      "file": "native/plugin-host/src/vst3-worker.cpp",
+      "line_range": "532-540",
+      "code_context": "if (!IsTrustedLaunch(request.eligibility) || request.classId.size() != 32 || !ValidSetup(request.setup)) {\n  return false;\n}\n...\nimplementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);",
+      "analysis": "IsTrustedLaunch hashes and signature-checks the bundle and executable, closes those file handles, and then Module::create reopens the bundle by pathname. The verified object is therefore not bound to the object that the dynamic loader consumes. A local attacker able to replace or rename the bundle during this interval can cause different bytes to be loaded after the trust decision, bypassing the catalog fingerprints and the worker's repeated validation.",
+      "exploit_scenario": "The attacker monitors worker startup for a trusted plugin path and atomically swaps the verified bundle after IsTrustedLaunch returns but before Module::create opens it. Because library validation is disabled for the worker, the replacement code can execute even though its bytes were never represented by the approved bundle and binary fingerprints.",
+      "threat_model_reference": "Threat T3 - Plugin Bundle or Shared-Memory State Is Modified Across Validation Boundaries",
+      "existing_mitigations": [
+        "Scanner and worker canonicalize plugin paths and reject invalid bundle placement.",
+        "The worker recomputes bundle and executable SHA-256 fingerprints immediately before loading.",
+        "The worker repeats quarantine, architecture, and code-sign checks."
+      ],
+      "recommended_fix": "Bind verification to loading with an OS primitive that prevents path replacement: open the bundle and executable with no-follow semantics, verify stable device/inode metadata and bytes, and load from an immutable descriptor or equivalent sealed/staged location. If the VST3 loader cannot consume descriptors, copy the verified bundle into a private non-writable staging directory, verify the staged bytes, and load only that staged path while holding the directory and file identities stable.",
+      "confidence": "HIGH",
+      "reasoning": "The source directly shows a completed path-based trust check followed by a separate path-based module open, with no descriptor, lock, immutable staging location, or final identity comparison spanning the two operations."
+    },
+    {
+      "id": "VULN-003",
+      "severity": "HIGH",
+      "stride_category": "DoS",
+      "vulnerability_type": "Uncontrolled Native Plugin Resource Consumption",
+      "cwe": "CWE-400",
+      "file": "native/plugin-host/src/worker-main.cpp",
+      "line_range": "123-125",
+      "code_context": "const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};\nif (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;",
+      "analysis": "The plugin worker constrains only core-dump size. It does not set CPU, address-space, file-descriptor, process-count, or other enforceable resource limits, and no machine-wide worker budget or OS sandbox policy was found. Protocol byte ceilings and stop escalation do not constrain native code while it is spinning, allocating, opening descriptors, forking, or blocking inside a synchronous VST callback.",
+      "exploit_scenario": "A malicious or defective plugin enters an infinite loop, allocates memory until pressure affects the system, opens files or sockets until descriptor exhaustion, or spawns child processes. Loading several instances compounds the pressure. The supervisor may eventually kill a worker during a managed timeout or shutdown, but the plugin can first starve the DAW, interrupt audio, or make the user's desktop unresponsive.",
+      "threat_model_reference": "Threat D3 - Malicious Plugin or Native Child Exhausts Desktop Resources; Prioritized Risk Register #6",
+      "existing_mitigations": [
+        "Scanner and preflight modes have wall-clock deadlines and forced termination.",
+        "Worker shutdown escalates from protocol stop to SIGTERM and SIGKILL.",
+        "Control frames, state, shared memory, slots, channels, events, latency, tail, and restart counts are bounded.",
+        "Workers have fault health state and run in dedicated processes."
+      ],
+      "recommended_fix": "Before loading any plugin, apply enforceable per-worker limits for CPU, address space, file descriptors, process creation, and writable storage; deny child-process creation in the sandbox; add processing/editor watchdogs that terminate blocked workers; and enforce a global count and memory budget across scanner and worker instances. Treat failure to install these limits as a fail-closed launch error.",
+      "confidence": "HIGH",
+      "reasoning": "The worker startup code visibly sets only RLIMIT_CORE, repository-wide searches found no CPU, memory, descriptor, or process limits for scanner/worker execution, and attacker-controlled native plugin code runs synchronously inside the worker."
+    }
+  ],
   "summary": {
-    "total_findings": 0,
+    "total_findings": 3,
     "by_severity": {
-      "CRITICAL": 0,
-      "HIGH": 0,
+      "CRITICAL": 1,
+      "HIGH": 2,
       "MEDIUM": 0,
       "LOW": 0
     },
     "by_stride": {
       "Spoofing": 0,
-      "Tampering": 0,
+      "Tampering": 1,
       "Repudiation": 0,
       "InfoDisclosure": 0,
-      "DoS": 0,
-      "ElevationOfPrivilege": 0
+      "DoS": 1,
+      "ElevationOfPrivilege": 1
     },
-    "files_analyzed": 98
+    "files_analyzed": 773
   }
 }

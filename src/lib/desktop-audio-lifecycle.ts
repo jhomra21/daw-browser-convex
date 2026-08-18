@@ -7,6 +7,10 @@ type DesktopAudioHostBridge = Pick<
 export type { DesktopAudioLifecycle }
 
 export type DesktopAudioRecoveryResult = "ready" | "failed"
+type DesktopAudioRecoveryCompletion = {
+  accepted: boolean
+  lifecycle: DesktopAudioLifecycle
+}
 
 export const isNativeRecordingLifecycleEligible = (
   state: DesktopAudioLifecycle["state"],
@@ -22,7 +26,7 @@ export const completeDesktopAudioRecovery = (
   lifecycle: DesktopAudioLifecycle,
   generation: number,
   result: DesktopAudioRecoveryResult,
-): { accepted: boolean; lifecycle: DesktopAudioLifecycle } => {
+): DesktopAudioRecoveryCompletion => {
   if (lifecycle.state !== "recovering" || lifecycle.powerGeneration !== generation) {
     return { accepted: false, lifecycle }
   }

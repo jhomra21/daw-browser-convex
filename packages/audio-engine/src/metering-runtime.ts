@@ -1,3 +1,4 @@
+import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonValue } from '@daw-browser/shared'
 import { disconnectAudioNodes } from './effects/chain'
 import { loadWorkletModule } from './worklet-loader'
 import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
@@ -41,14 +42,14 @@ export type TrackMeterFrame = {
 export type TrackMeterFrameBatch = ReadonlyMap<string, TrackMeterFrame>
 export type TrackMeterFrameListener = (frames: TrackMeterFrameBatch) => void
 
-const readChannelFrame = (value: unknown): TrackMeterChannelFrame | null => {
-  if (!value || typeof value !== 'object') return null
-  if (!('samplePeak' in value) || typeof value.samplePeak !== 'number' || !Number.isFinite(value.samplePeak) || value.samplePeak < 0) return null
-  if (!('rms' in value) || typeof value.rms !== 'number' || !Number.isFinite(value.rms) || value.rms < 0) return null
-  if (!('clipping' in value) || typeof value.clipping !== 'boolean') return null
-  if (!('dcMean' in value) || typeof value.dcMean !== 'number' || !Number.isFinite(value.dcMean)) return null
+const readChannelFrame = (value: JsonValue): TrackMeterChannelFrame | null => {
+  if (!isJsonObject(value)) return null
+  if (!('samplePeak' in value) || !isJsonNumber(value.samplePeak) || !Number.isFinite(value.samplePeak) || value.samplePeak < 0) return null
+  if (!('rms' in value) || !isJsonNumber(value.rms) || !Number.isFinite(value.rms) || value.rms < 0) return null
+  if (!('clipping' in value) || !isJsonBoolean(value.clipping)) return null
+  if (!('dcMean' in value) || !isJsonNumber(value.dcMean) || !Number.isFinite(value.dcMean)) return null
   if (!('truePeak' in value) || (value.truePeak !== null
-    && (typeof value.truePeak !== 'number' || !Number.isFinite(value.truePeak) || value.truePeak < 0))) return null
+    && (!isJsonNumber(value.truePeak) || !Number.isFinite(value.truePeak) || value.truePeak < 0))) return null
   return {
     samplePeak: value.samplePeak,
     rms: value.rms,
@@ -58,12 +59,12 @@ const readChannelFrame = (value: unknown): TrackMeterChannelFrame | null => {
   }
 }
 
-export function readTrackMeterFrame(data: unknown): TrackMeterFrame | null {
-  if (!data || typeof data !== 'object' || !('type' in data) || data.type !== 'meter-frame') return null
-  if (!('frameCount' in data) || typeof data.frameCount !== 'number'
+export function readTrackMeterFrame(data: JsonValue): TrackMeterFrame | null {
+  if (!isJsonObject(data) || !('type' in data) || data.type !== 'meter-frame') return null
+  if (!('frameCount' in data) || !isJsonNumber(data.frameCount)
     || !Number.isInteger(data.frameCount) || data.frameCount < 0) return null
   if (!('channels' in data) || !Array.isArray(data.channels) || data.channels.length !== 2) return null
-  if (!('correlation' in data) || typeof data.correlation !== 'number'
+  if (!('correlation' in data) || !isJsonNumber(data.correlation)
     || !Number.isFinite(data.correlation) || data.correlation < -1 || data.correlation > 1) return null
   const left = readChannelFrame(data.channels[0])
   const right = readChannelFrame(data.channels[1])
@@ -71,11 +72,11 @@ export function readTrackMeterFrame(data: unknown): TrackMeterFrame | null {
   return { frameCount: data.frameCount, channels: [left, right], correlation: data.correlation }
 }
 
-export function readTrackStereoLevels(data: unknown): TrackStereoLevels | null {
-  if (!data || typeof data !== 'object') return null
+export function readTrackStereoLevels(data: JsonValue): TrackStereoLevels | null {
+  if (!isJsonObject(data)) return null
   if (!('type' in data) || data.type !== 'levels') return null
-  if (!('left' in data) || typeof data.left !== 'number' || !Number.isFinite(data.left)) return null
-  if (!('right' in data) || typeof data.right !== 'number' || !Number.isFinite(data.right)) return null
+  if (!('left' in data) || !isJsonNumber(data.left) || !Number.isFinite(data.left)) return null
+  if (!('right' in data) || !isJsonNumber(data.right) || !Number.isFinite(data.right)) return null
   if (data.left < 0 || data.left > 1 || data.right < 0 || data.right > 1) return null
   return { left: data.left, right: data.right }
 }

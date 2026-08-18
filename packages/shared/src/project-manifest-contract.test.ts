@@ -128,7 +128,7 @@ describe('project format boundaries', () => {
   })
 
   test('preserves current effect entity values without migration', () => {
-    const manifest = {
+    const manifest: ProjectManifest = {
       ...manifestV1,
       schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
       entityCount: 3,

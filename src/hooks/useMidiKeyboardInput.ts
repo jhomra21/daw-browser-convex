@@ -7,28 +7,28 @@ const BASE_C4 = 60
 const DEFAULT_VELOCITY = 0.9
 const VELOCITY_STEP = 0.1
 
-const whiteKeySemitones: Record<string, number> = {
-  KeyA: 0,
-  KeyS: 2,
-  KeyD: 4,
-  KeyF: 5,
-  KeyG: 7,
-  KeyH: 9,
-  KeyJ: 11,
-  KeyK: 12,
-  KeyL: 14,
-  Semicolon: 16,
-}
+const whiteKeySemitones = new Map<string, number>([
+  ['KeyA', 0],
+  ['KeyS', 2],
+  ['KeyD', 4],
+  ['KeyF', 5],
+  ['KeyG', 7],
+  ['KeyH', 9],
+  ['KeyJ', 11],
+  ['KeyK', 12],
+  ['KeyL', 14],
+  ['Semicolon', 16],
+])
 
-const blackKeySemitones: Record<string, number> = {
-  KeyW: 1,
-  KeyE: 3,
-  KeyT: 6,
-  KeyY: 8,
-  KeyU: 10,
-  KeyO: 13,
-  KeyP: 15,
-}
+const blackKeySemitones = new Map<string, number>([
+  ['KeyW', 1],
+  ['KeyE', 3],
+  ['KeyT', 6],
+  ['KeyY', 8],
+  ['KeyU', 10],
+  ['KeyO', 13],
+  ['KeyP', 15],
+])
 
 type UseMidiKeyboardInputOptions = {
   projectId: () => string | undefined
@@ -39,9 +39,9 @@ type UseMidiKeyboardInputOptions = {
 }
 
 export const midiKeyboardCodeToSemitone = (code: string): number | undefined => {
-  const white = whiteKeySemitones[code]
+  const white = whiteKeySemitones.get(code)
   if (white !== undefined) return white
-  return blackKeySemitones[code]
+  return blackKeySemitones.get(code)
 }
 
 export const clampMidiKeyboardOctave = (value: number) => Math.max(-4, Math.min(4, value))

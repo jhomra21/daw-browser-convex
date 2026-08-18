@@ -157,17 +157,20 @@ export function scheduleSamplerVoice(input: {
   outputPan.connect(outputGain)
   outputGain.connect(input.destination)
   if (input.timelineStartSec !== undefined && input.timelineToCtxTime) {
-    const directBindings: Partial<Record<SamplerAutomationParameterId, AudioParam>> = {
-      'output.gain': outputGain.gain,
-      'output.pan': outputPan.pan,
-      'filter.frequency': filter.frequency,
-      'filter.q': filter.Q,
-      'lfo.rate': oscillator?.frequency,
-      ...lfoDepthParams,
-    }
+    const directBindings = new Map<SamplerAutomationParameterId, AudioParam | undefined>([
+      ['output.gain', outputGain.gain],
+      ['output.pan', outputPan.pan],
+      ['filter.frequency', filter.frequency],
+      ['filter.q', filter.Q],
+      ['lfo.rate', oscillator?.frequency],
+      ['lfo.filterDepth', lfoDepthParams['lfo.filterDepth']],
+      ['lfo.ampDepth', lfoDepthParams['lfo.ampDepth']],
+      ['lfo.panDepth', lfoDepthParams['lfo.panDepth']],
+      ['lfo.pitchDepth', lfoDepthParams['lfo.pitchDepth']],
+    ])
     for (const envelope of input.automationEnvelopes ?? []) {
       const key = parseInstrumentAutomationKey(envelope.parameterId)
-      const param = key ? directBindings[key.parameterId] : undefined
+      const param = key ? directBindings.get(key.parameterId) : undefined
       if (!key || !param || !envelope.enabled) continue
       scheduleAutomationEnvelope(
         [{ param, valueToAudioValue: (value) => key.parameterId === 'lfo.ampDepth' ? value * plan.peakGain : value }],

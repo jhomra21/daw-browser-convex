@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
 import { AUDIO_EFFECT_CONTRACTS, createDefaultSynthParams } from "@daw-browser/shared";
+import type { FunctionArgs } from "convex/server";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
@@ -287,14 +288,12 @@ test("versions projected effect, automation, and sidechain state only for materi
   });
   expect(await projectRevision(t, "project-1")).toBe(3);
 
-  const automation: {
-    projectId: string; targetKind: "track"; trackId: string; effectInstanceId: string; parameterId: string; enabled: boolean;
-    points: Array<{ id: string; timeSec: number; value: number; interpolation: "linear" }>;
-  } = {
-    projectId: "project-1", targetKind: "track", trackId: targetTrackId,
+  const automation = {
+    projectId: "project-1", targetKind: "track" satisfies "track", trackId: targetTrackId,
     effectInstanceId: "gate-1", parameterId: "gate.thresholdDb", enabled: true,
-    points: [{ id: "point-1", timeSec: 0, value: -30, interpolation: "linear" }],
-  };
+    points: [{ id: "point-1", timeSec: 0, value: -30, interpolation: "linear" satisfies "linear" }],
+    updatedAt: 0,
+  } satisfies FunctionArgs<typeof api.automation.serverSetEnvelope>;
   await user.mutation(api.automation.serverSetEnvelope, { ...automation, updatedAt: 1 });
   expect(await projectRevision(t, "project-1")).toBe(4);
   await user.mutation(api.automation.serverSetEnvelope, { ...automation, updatedAt: 2 });
@@ -330,14 +329,11 @@ test("restores an effect chain once and no-ops across operation identities", asy
   const t = newTest();
   await createProject(t, "project-1");
   const trackId = await seedTrack(t, { projectId: "project-1", index: 0 });
-  const input: {
-    projectId: string; trackId: string; operationId: string;
-    audioEffects: Array<{ id: string; kind: "utility"; params: ReturnType<typeof AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams> }>;
-  } = {
+  const input = {
     projectId: "project-1", trackId,
-    audioEffects: [{ id: "utility-1", kind: "utility", params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() }],
+    audioEffects: [{ id: "utility-1", kind: "utility" satisfies "utility", params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() }],
     operationId: "restore-1",
-  };
+  } satisfies FunctionArgs<typeof api.effects.serverRestoreChain>;
   const user = t.withIdentity({ subject: owner });
   expect(await user.mutation(api.effects.serverRestoreChain, input)).toEqual({ status: "applied" });
   expect(await projectRevision(t, "project-1")).toBe(1);

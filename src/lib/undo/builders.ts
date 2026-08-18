@@ -426,9 +426,9 @@ export function buildClipDeleteHistoryEntry(input: {
           trackRef: getTrackHistoryRef(track),
           clip: {
             ...buildClipHistorySnapshot(clip),
-            ...(input.recoveryIdsByClipId?.get(clip.id) ? { recoveryId: input.recoveryIdsByClipId.get(clip.id) } : {}),
-            ...(input.recoveryOperationId ? { recoveryOperationId: input.recoveryOperationId } : {}),
-            ...(input.recoveryOperationId ? { recoverySourceClipId: clip.id } : {}),
+            recoveryId: input.recoveryIdsByClipId?.get(clip.id) ? input.recoveryIdsByClipId.get(clip.id) : undefined,
+            recoveryOperationId: input.recoveryOperationId ? input.recoveryOperationId : undefined,
+            recoverySourceClipId: input.recoveryOperationId ? clip.id : undefined,
           },
         }))),
     },

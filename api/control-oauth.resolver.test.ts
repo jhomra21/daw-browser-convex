@@ -130,7 +130,7 @@ const insertIdentity = () => {
   ).run("family-1", userId, clientId, now(), now());
 };
 
-const sign = async (payload: Record<string, unknown>) => {
+const sign = async <Payload extends object>(payload: Payload) => {
   const { token } = await createAuth(environment).api.signJWT({
     body: { payload: { ...payload, jti: crypto.randomUUID() } },
   });

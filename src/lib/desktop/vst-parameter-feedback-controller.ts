@@ -34,9 +34,8 @@ export const createVstParameterFeedbackController = (
     scheduled: boolean
   }
   const instances = new Map<string, InstanceState>()
-  const reportFault = (error: unknown) => {
-    const message = error instanceof Error ? error.message : "VST parameter feedback persistence failed."
-    input.reportFault?.(message)
+  const reportFault = (failure: Error | string) => {
+    input.reportFault?.(failure instanceof Error ? failure.message : failure)
   }
   const drain = async (instanceId: string, state: InstanceState) => {
     if (state.inFlight || disposed) return
@@ -83,7 +82,7 @@ export const createVstParameterFeedbackController = (
         }
       }
     } catch (error) {
-      reportFault(error)
+      reportFault(error instanceof Error ? error : "VST parameter feedback persistence failed.")
     } finally {
       state.inFlight = false
       if (state.pending.size === 0) instances.delete(instanceId)

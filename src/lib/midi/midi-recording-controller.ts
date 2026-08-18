@@ -3,7 +3,7 @@ import { buildLocalClip, pushClipCreateHistory } from '~/lib/clip-create'
 import { trackColorForClip } from '~/lib/clip-color'
 import { createMidiRecordingSession } from '~/lib/midi/recording-session'
 import { createMidiRecordingCheckpointController, type MidiRecordingCheckpointController } from '~/lib/midi/recording-checkpoint'
-import { isLocalId, isClipKindCompatibleWithTrack, type MidiClip, type SharedTimelineOperation } from '@daw-browser/shared'
+import { isJsonString, isLocalId, isClipKindCompatibleWithTrack, type MidiClip, type SharedTimelineOperation } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import {
   enqueueSharedTimelineOperationOnFailure,
@@ -313,7 +313,7 @@ export const createMidiTrackRecordingController = (
             clipKind: 'midi', operationId: crypto.randomUUID(),
           },
         })
-        clipId = typeof result === 'string' ? result : null
+        clipId = isJsonString(result) ? result : null
       }
       if (!clipId) throw new Error('MIDI clip creation was rejected.')
       const session = createMidiRecordingSession(startSec)

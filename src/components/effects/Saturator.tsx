@@ -49,12 +49,12 @@ const createSaturatorCurvePoints = (curve: SaturatorCurve) => {
   return points.join(' ')
 }
 
-const SATURATOR_CURVE_POINTS: Record<SaturatorCurve, string> = {
+const SATURATOR_CURVE_POINTS = {
   soft: createSaturatorCurvePoints('soft'),
   medium: createSaturatorCurvePoints('medium'),
   hard: createSaturatorCurvePoints('hard'),
   clip: createSaturatorCurvePoints('clip'),
-}
+} satisfies Record<SaturatorCurve, string>
 
 function SaturatorCurveGraph(props: { curve: SaturatorCurve }) {
   const patternId = createUniqueId()

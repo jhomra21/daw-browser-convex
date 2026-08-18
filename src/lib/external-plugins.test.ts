@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
+import type { LocalProjectStoredValue } from '~/lib/local-project-db'
 import {
   appendLocalExternalProcessor,
   deleteLocalExternalProcessor,
@@ -12,6 +13,11 @@ import {
   setLocalExternalProcessorBypassed,
 } from './external-plugins'
 import { reorderLocalMixedEffects, setLocalEffectInstance } from './local-effects'
+import { z } from 'zod'
+
+const storedObjectSchema = z.record(z.string(), z.custom<LocalProjectStoredValue>())
+const indexedStoredObjectSchema = z.object({ index: z.number() }).passthrough()
+const identifiedStoredObjectSchema = z.object({ id: z.string() }).passthrough()
 
 const createProcessor = (instanceId: string) => externalProcessorSchema.parse({
   instanceId,
@@ -218,13 +224,10 @@ test('deleting an external effect compacts the remaining mixed chain', async () 
 
   const db = await openLocalProjectDb(project.id)
   const rows = await db.getAll('entities')
-  const builtin = rows.find((row) => (
-    row.kind === 'effect'
-    && typeof row.value === 'object'
-    && row.value !== null
-    && 'instanceId' in row.value
-    && row.value.instanceId === builtinId
-  ))
+  const builtin = rows.find((row) => {
+    const parsed = storedObjectSchema.safeParse(row.value)
+    return row.kind === 'effect' && parsed.success && parsed.data.instanceId === builtinId
+  })
   expect(builtin?.value).toMatchObject({ index: 0 })
 })
 
@@ -255,10 +258,8 @@ test('persists an exact mixed-chain permutation atomically and keeps instruments
   const rows = await db.getAll('entities')
   const indexFor = (id: string) => {
     const row = rows.find((entry) => entry.id.endsWith(id))
-    const value = row?.value
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? Reflect.get(value, 'index')
-      : undefined
+    const parsed = indexedStoredObjectSchema.safeParse(row?.value)
+    return parsed.success ? parsed.data.index : undefined
   }
   expect(indexFor(firstId)).toBe(0)
   expect(indexFor(externalId)).toBe(1)
@@ -323,9 +324,8 @@ test('preserves concurrent external overrides while atomically reordering the mi
     const rows = await db.getAll('entities')
     const indexFor = (id: string) => {
       const row = rows.find((entry) => entry.id.endsWith(id))
-      return row?.value && typeof row.value === 'object' && !Array.isArray(row.value)
-        ? Reflect.get(row.value, 'index')
-        : undefined
+      const parsed = indexedStoredObjectSchema.safeParse(row?.value)
+      return parsed.success ? parsed.data.index : undefined
     }
     expect(indexFor(firstId)).toBe(1)
     expect(indexFor(secondId)).toBe(2)
@@ -340,14 +340,11 @@ test('lists captured chainIndex rows and transactionally self-heals them during 
   const db = await openLocalProjectDb(project.id)
   const track = (await db.getAll('entities')).find((row) => row.kind === 'track')
   if (!track) throw new Error('Expected the project track.')
-  const trackValue = track.value
-  const candidateTargetId = typeof trackValue === 'object' && trackValue !== null && !Array.isArray(trackValue)
-    ? Reflect.get(trackValue, 'id')
-    : undefined
-  if (typeof candidateTargetId !== 'string') {
+  const parsedTrack = identifiedStoredObjectSchema.safeParse(track.value)
+  if (!parsedTrack.success) {
     throw new Error('Expected a valid project track.')
   }
-  const targetId = candidateTargetId
+  const targetId = parsedTrack.data.id
   await db.put('entities', createLocalProjectEntityRow(
     'external-plugin',
     `external-plugin:${legacyId}`,
@@ -372,22 +369,18 @@ test('lists captured chainIndex rows and transactionally self-heals them during 
   const rows = await db.getAll('entities')
   const externalRows = rows.filter((row) => row.kind === 'external-plugin')
   expect(externalRows).toHaveLength(2)
-  expect(externalRows.map((row) => (
-    typeof row.value === 'object' && row.value !== null && !Array.isArray(row.value)
-      ? Reflect.get(row.value, 'index')
-      : undefined
-  )).sort()).toEqual([0, 2])
-  expect(rows.filter((row) => row.kind === 'effect' || row.kind === 'external-plugin').map((row) => (
-    typeof row.value === 'object' && row.value !== null && !Array.isArray(row.value)
-      ? Reflect.get(row.value, 'index')
-      : undefined
-  )).sort()).toEqual([0, 1, 2])
-  expect(externalRows.every((row) => (
-    typeof row.value === 'object'
-    && row.value !== null
-    && !Array.isArray(row.value)
-    && !Object.hasOwn(row.value, 'chainIndex')
-  ))).toBeTrue()
+  expect(externalRows.map((row) => {
+    const parsed = storedObjectSchema.safeParse(row.value)
+    return parsed.success ? parsed.data.index : undefined
+  }).sort()).toEqual([0, 2])
+  expect(rows.filter((row) => row.kind === 'effect' || row.kind === 'external-plugin').map((row) => {
+    const parsed = storedObjectSchema.safeParse(row.value)
+    return parsed.success ? parsed.data.index : undefined
+  }).sort()).toEqual([0, 1, 2])
+  expect(externalRows.every((row) => {
+    const parsed = storedObjectSchema.safeParse(row.value)
+    return parsed.success && !Object.hasOwn(parsed.data, 'chainIndex')
+  })).toBeTrue()
   expect(externalRows.find((row) => row.id.endsWith(legacyId))?.value).toMatchObject({
     index: 0,
     state: { location: 'plugin-state/valhalla' },
@@ -427,10 +420,11 @@ test('reorder and delete paths repair legacy rows before compacting the chain', 
   ])
   const repaired = await db.get('entities', ['external-plugin', `external-plugin:${legacyId}`])
   expect(repaired?.value).toMatchObject({ index: 0 })
-  if (typeof repaired?.value !== 'object' || repaired.value === null || Array.isArray(repaired.value)) {
+  const repairedValue = storedObjectSchema.safeParse(repaired?.value)
+  if (!repairedValue.success) {
     throw new Error('Expected repaired external processor row.')
   }
-  expect(Object.hasOwn(repaired.value, 'chainIndex')).toBeFalse()
+  expect(Object.hasOwn(repairedValue.data, 'chainIndex')).toBeFalse()
 
   await deleteLocalExternalProcessor(project.id, legacyId)
   const remaining = await db.get('entities', ['effect', `track-1:effect:${builtinId}`])

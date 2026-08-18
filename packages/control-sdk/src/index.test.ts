@@ -63,7 +63,7 @@ describe("control SDK", () => {
       fetch: async (input, init) => {
         urls.push(String(input))
         authorizations.push(new Headers(init?.headers).get("authorization") ?? "")
-        if (typeof init?.body === "string") bodies.push(init.body)
+        if (init?.body !== undefined) bodies.push(String(init.body))
         if (urls.at(-1)?.endsWith("/capabilities")) return Response.json(controlCapabilitiesV1)
         if (urls.at(-1)?.endsWith("/snapshot")) return Response.json(snapshot)
         if (urls.at(-1)?.endsWith("/preview")) return Response.json(preview)
@@ -98,8 +98,8 @@ describe("control SDK", () => {
       "Bearer access-5",
     ])
     expect(bodies).toEqual([
-      canonicalJson(request),
-      canonicalJson({ ...request, idempotencyKey: "request-1" }),
+      canonicalJson(JSON.parse(JSON.stringify(request))),
+      canonicalJson(JSON.parse(JSON.stringify({ ...request, idempotencyKey: "request-1" }))),
     ])
   })
 

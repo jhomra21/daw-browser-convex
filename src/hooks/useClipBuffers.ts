@@ -126,9 +126,13 @@ type ClipBufferControls = ClipBuffers & {
   loadCapturedMedia: (reference: CapturedClipMediaReference, signal?: AbortSignal) => Promise<CapturedClipBufferLoadResult>
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
-}
+type UploadedAssetPayload = { url?: unknown; assetKey?: unknown }
+
+const isUploadedAssetPayload = (cause: unknown): cause is UploadedAssetPayload => (
+  typeof cause === 'object' && cause !== null
+)
+
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
 
 export const createAudioAssetRef = (assetId: string, buffer: AudioBuffer): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -178,13 +182,13 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       fd.append('projectId', room)
       fd.append('assetKey', assetKey)
       fd.append('file', file, file.name)
-      if (typeof durationSec === 'number' && isFinite(durationSec)) {
+      if (durationSec !== undefined && Number.isFinite(durationSec)) {
         fd.append('duration', String(durationSec))
       }
       const res = await fetch('/api/samples', { method: 'POST', body: fd })
       if (!res.ok) return null
       const data = await res.json().catch(() => null)
-      return isRecord(data) && typeof data.url === 'string' && typeof data.assetKey === 'string'
+      return isUploadedAssetPayload(data) && isString(data.url) && isString(data.assetKey)
         ? { assetKey: data.assetKey, url: data.url }
         : null
     } catch {

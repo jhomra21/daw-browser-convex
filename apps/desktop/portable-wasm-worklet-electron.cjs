@@ -91,9 +91,9 @@ app.whenReady().then(async () => {
   app.exit(0)
 }).catch((error) => {
   if (audioDiagnostics.length > 0) process.stderr.write(`audio diagnostics: ${JSON.stringify(audioDiagnostics)}\n`)
-  const details = error && typeof error === "object"
-    ? JSON.stringify(error, Object.getOwnPropertyNames(error))
+  const details = error instanceof Error
+    ? error.stack ?? error.message
     : String(error)
-  process.stderr.write(`${error instanceof Error ? error.stack : details}\n`)
+  process.stderr.write(`${details}\n`)
   app.exit(1)
 })

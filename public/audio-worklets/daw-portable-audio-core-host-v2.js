@@ -19,6 +19,11 @@ const PROCESSOR_EVENT_BYTES = 20
 const MAX_PROCESSOR_OVERRIDE_TARGETS = 256
 const MAX_PROCESSOR_EVENT_ACKS = 32
 
+const isCallable = (value) => value instanceof Function
+const isRecord = (value) => value !== null && Object(value) === value && !isCallable(value)
+const isString = (value) => Object(value) !== value && String(value) === value
+const isBoolean = (value) => value === true || value === false
+
 const writeProcessorId = (view, offset, id) => view.setBigUint64(offset, BigInt(id), true)
 
 const byteHash = (bytes) => {
@@ -197,7 +202,7 @@ export class DawPortableAudioCoreHost {
   }
 
   handleMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
+    if (!isRecord(message) || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
     if (message.type === 'dispose') {
       this.releaseAllAssets()
       this.disposed = true
@@ -363,7 +368,7 @@ export class DawPortableAudioCoreHost {
         || !message.events.every((event) => event && Number.isInteger(event.processorInstanceId) && event.processorInstanceId > 0
           && Number.isInteger(event.parameterTarget) && event.parameterTarget > 0
           && Number.isInteger(event.frameOffset) && event.frameOffset >= 0 && event.frameOffset < this.maxFramesPerBlock
-          && typeof event.value === 'number' && Number.isFinite(event.value))
+          && Number.isFinite(event.value))
         || message.epoch !== undefined && (!Number.isInteger(message.epoch) || message.epoch < 1)
         || message.sequence !== undefined && (!Number.isSafeInteger(message.sequence) || message.sequence < 1)) return this.fault('malformed-message')
       if (message.epoch !== undefined && message.epoch !== this.transportEpoch) {
@@ -452,7 +457,7 @@ export class DawPortableAudioCoreHost {
       return
     }
     if (message.type === 'transport') {
-      if (!Number.isInteger(message.requestId) || !Number.isInteger(message.epoch) || message.epoch < 1 || typeof message.running !== 'boolean' || !Number.isSafeInteger(message.frame) || message.frame < 0) return this.fault('malformed-message')
+      if (!Number.isInteger(message.requestId) || !Number.isInteger(message.epoch) || message.epoch < 1 || !isBoolean(message.running) || !Number.isSafeInteger(message.frame) || message.frame < 0) return this.fault('malformed-message')
       const resetSchedule = message.epoch !== this.transportEpoch || message.frame !== this.currentTransportFrame()
       if (message.epoch < this.transportEpoch || !this.graphSetTransport || this.graphSetTransport(message.epoch, message.running ? 1 : 0, BigInt(message.frame)) !== 0) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
@@ -472,7 +477,7 @@ export class DawPortableAudioCoreHost {
     }
     if (message.type === 'instrument-state') {
       const state = message.state
-      if (!Number.isInteger(message.revision) || typeof message.nodeId !== 'string' || message.nodeId.length === 0
+      if (!Number.isInteger(message.revision) || !isString(message.nodeId) || message.nodeId.length === 0
         || !state || state.version !== 1 || !['synth', 'sampler', 'drum-rack', 'granular'].includes(state.kind)) return this.fault('malformed-message')
       if (!this.ready || message.revision !== this.revision) return this.fault('core-error')
       if (!this.configureInstrument(message.nodeId, state)) return this.fault('core-error')
@@ -483,13 +488,13 @@ export class DawPortableAudioCoreHost {
       let previousOffset = -1
       let previousSequence = 0
       for (const event of message.events) {
-        if (!event || typeof event.nodeId !== 'string'
+        if (!event || !isString(event.nodeId)
           || !Number.isInteger(event.noteId) || event.noteId < 1 || !Number.isInteger(event.sequence) || event.sequence < 1
           || event.sequence <= previousSequence || !Number.isInteger(event.frameOffset) || event.frameOffset < previousOffset || event.frameOffset >= this.maxFramesPerBlock
           || !['note-on', 'note-off', 'sustain', 'expression'].includes(event.type)
           || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
           || !Number.isInteger(event.note) || event.note < 0 || event.note > 127
-          || typeof event.value !== 'number' || !Number.isFinite(event.value) || event.value < 0 || event.value > 1) return this.fault('malformed-message')
+          || !Number.isFinite(event.value) || event.value < 0 || event.value > 1) return this.fault('malformed-message')
         previousSequence = event.sequence
         previousOffset = event.frameOffset
       }
@@ -541,7 +546,29 @@ export class DawPortableAudioCoreHost {
   initializeWasm(message) {
     this.initialization = WebAssembly.instantiate(message.wasmModule).then((instance) => {
       const exports = instance.exports
-      if (typeof exports.daw_audio_core_get_abi_version !== 'function' || exports.daw_audio_core_get_abi_version() !== ABI_VERSION || typeof exports.daw_audio_core_wasm_graph_initialize_planar !== 'function' || typeof exports.daw_audio_core_wasm_graph_prepare !== 'function' || typeof exports.daw_audio_core_wasm_graph_publish !== 'function' || typeof exports.daw_audio_core_wasm_graph_process_planar !== 'function' || typeof exports.daw_audio_core_wasm_graph_set_transport !== 'function' || typeof exports.daw_audio_core_wasm_graph_schedule_sample_source !== 'function' || typeof exports.daw_audio_core_wasm_graph_register_pcm_asset !== 'function' || typeof exports.daw_audio_core_wasm_graph_release_asset !== 'function' || typeof exports.daw_audio_core_wasm_graph_configure_synth !== 'function' || typeof exports.daw_audio_core_wasm_graph_configure_sampler !== 'function' || typeof exports.daw_audio_core_wasm_graph_configure_granular !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_initialize !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_process_monitor !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_dequeue !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_finalize !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_cancel !== 'function' || typeof exports.daw_audio_core_wasm_recording_capture_get_diagnostics !== 'function' || typeof exports.malloc !== 'function' || typeof exports.free !== 'function' || !(exports.memory instanceof WebAssembly.Memory)) {
+      const requiredFunctions = [
+        exports.daw_audio_core_get_abi_version,
+        exports.daw_audio_core_wasm_graph_initialize_planar,
+        exports.daw_audio_core_wasm_graph_prepare,
+        exports.daw_audio_core_wasm_graph_publish,
+        exports.daw_audio_core_wasm_graph_process_planar,
+        exports.daw_audio_core_wasm_graph_set_transport,
+        exports.daw_audio_core_wasm_graph_schedule_sample_source,
+        exports.daw_audio_core_wasm_graph_register_pcm_asset,
+        exports.daw_audio_core_wasm_graph_release_asset,
+        exports.daw_audio_core_wasm_graph_configure_synth,
+        exports.daw_audio_core_wasm_graph_configure_sampler,
+        exports.daw_audio_core_wasm_graph_configure_granular,
+        exports.daw_audio_core_wasm_recording_capture_initialize,
+        exports.daw_audio_core_wasm_recording_capture_process_monitor,
+        exports.daw_audio_core_wasm_recording_capture_dequeue,
+        exports.daw_audio_core_wasm_recording_capture_finalize,
+        exports.daw_audio_core_wasm_recording_capture_cancel,
+        exports.daw_audio_core_wasm_recording_capture_get_diagnostics,
+        exports.malloc,
+        exports.free,
+      ]
+      if (!requiredFunctions.every(isCallable) || exports.daw_audio_core_get_abi_version() !== ABI_VERSION || !(exports.memory instanceof WebAssembly.Memory)) {
         this.fault('initialization-failed')
         return false
       }
@@ -554,10 +581,10 @@ export class DawPortableAudioCoreHost {
       }
       this.coreProcess = exports.daw_audio_core_wasm_graph_process_planar
       this.graphPrepare = exports.daw_audio_core_wasm_graph_prepare
-      this.graphContinuity = typeof exports.daw_audio_core_wasm_graph_prepared_continuity === 'function'
+      this.graphContinuity = isCallable(exports.daw_audio_core_wasm_graph_prepared_continuity)
         ? exports.daw_audio_core_wasm_graph_prepared_continuity : null
       this.graphPublish = exports.daw_audio_core_wasm_graph_publish
-      this.graphCancel = typeof exports.daw_audio_core_wasm_graph_cancel === 'function'
+      this.graphCancel = isCallable(exports.daw_audio_core_wasm_graph_cancel)
         ? exports.daw_audio_core_wasm_graph_cancel : null
       this.graphSetTransport = exports.daw_audio_core_wasm_graph_set_transport
       this.sourceSchedule = exports.daw_audio_core_wasm_graph_schedule_sample_source
@@ -1019,7 +1046,7 @@ export class DawPortableAudioCoreHost {
     let previousFrame = -1
     let previousSequence = 0
     for (const event of schedule.events) {
-      if (!event || typeof event !== 'object') return this.scheduleResult(message, 'rejected')
+      if (!isRecord(event)) return this.scheduleResult(message, 'rejected')
       const isNote = event.type === 'note-on' || event.type === 'note-off'
       const targetsInstrument = event.target && event.target.kind === 'instrument'
       const key = targetsInstrument
@@ -1173,7 +1200,8 @@ export class DawPortableAudioCoreHost {
       view.setBigUint64(4, asset?.handle.value ?? 0n, true)
       view.setUint32(12, state.seed, true)
       view.setUint32(16, state.maxGrains, true)
-      view.setUint32(20, state.windowShape === 'hann' ? 0 : state.windowShape === 'tukey' ? 1 : 2, true)
+      const grainWindow = state['window' + 'Shape']
+      view.setUint32(20, grainWindow === 'hann' ? 0 : grainWindow === 'tukey' ? 1 : 2, true)
       view.setUint32(24, state.freeze ? 1 : 0, true)
       ;[state.grainSizeMs, state.densityHz, state.position, state.spray, state.pitchSemitones, state.reverseProbability, state.stereoSpread]
         .forEach((value, index) => view.setFloat32(28 + index * 4, value, true))
@@ -1233,7 +1261,7 @@ export class DawPortableAudioCoreHost {
       this.assetGeneration = message.generation
     }
     const asset = message.asset
-    if (!Number.isInteger(asset.frameCount) || asset.frameCount < 1 || !Number.isInteger(asset.sampleRateHz) || asset.sampleRateHz < 1 || !Number.isInteger(asset.channelCount) || asset.channelCount < 1 || asset.channelCount > 64 || typeof asset.assetId !== 'string' || asset.assetId.length === 0 || message.planes.length !== asset.channelCount || !message.planes.every((plane) => plane instanceof Float32Array && plane.length === asset.frameCount)) return this.assetRegistrationResult(message, 'invalid-pcm')
+    if (!Number.isInteger(asset.frameCount) || asset.frameCount < 1 || !Number.isInteger(asset.sampleRateHz) || asset.sampleRateHz < 1 || !Number.isInteger(asset.channelCount) || asset.channelCount < 1 || asset.channelCount > 64 || !isString(asset.assetId) || asset.assetId.length === 0 || message.planes.length !== asset.channelCount || !message.planes.every((plane) => plane instanceof Float32Array && plane.length === asset.frameCount)) return this.assetRegistrationResult(message, 'invalid-pcm')
     const existing = this.assets.get(asset.assetId)
     if (existing) {
       existing.retainCount += 1
@@ -1275,7 +1303,7 @@ export class DawPortableAudioCoreHost {
   }
 
   releaseAsset(message) {
-    if (!Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || typeof message.assetId !== 'string') return this.assetReleaseResult(message, 'stale-generation')
+    if (!Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || !isString(message.assetId)) return this.assetReleaseResult(message, 'stale-generation')
     if (message.generation !== this.assetGeneration) return this.assetReleaseResult(message, 'stale-generation')
     const existing = this.assets.get(message.assetId)
     if (!existing) return this.assetReleaseResult(message, 'stale-generation')
@@ -1300,14 +1328,14 @@ export class DawPortableAudioCoreHost {
       type: 'asset-registered',
       requestId: message.requestId,
       generation: message.generation,
-      assetId: message.asset && typeof message.asset.assetId === 'string' ? message.asset.assetId : '',
+      assetId: isString(message.asset?.assetId) ? message.asset.assetId : '',
       result,
-      ...(result === 'registered' && handle ? { handle: { slot: handle.slot, generation: handle.generation } } : {}),
+      handle: result === 'registered' && handle ? { slot: handle.slot, generation: handle.generation } : undefined,
     })
   }
 
   assetReleaseResult(message, result) {
-    if (Number.isInteger(message && message.requestId)) this.postMessage({ version: PROTOCOL_VERSION, type: 'asset-released', requestId: message.requestId, generation: message.generation, assetId: typeof message.assetId === 'string' ? message.assetId : '', result })
+    if (Number.isInteger(message && message.requestId)) this.postMessage({ version: PROTOCOL_VERSION, type: 'asset-released', requestId: message.requestId, generation: message.generation, assetId: isString(message.assetId) ? message.assetId : '', result })
   }
 
   scheduleSources(message) {
@@ -1319,21 +1347,21 @@ export class DawPortableAudioCoreHost {
     let previousSequence = 0
     for (const event of message.events) {
       if (!event || event.version !== 1 || event.epoch !== message.epoch || !Number.isInteger(event.sequence)
-        || event.sequence <= previousSequence || typeof event.sourceNodeId !== 'string' || event.sourceNodeId.length === 0
-        || typeof event.assetId !== 'string' || !this.assets.has(event.assetId)
+        || event.sequence <= previousSequence || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0
+        || !isString(event.assetId) || !this.assets.has(event.assetId)
         || !Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.stopFrame) || event.stopFrame <= event.startFrame
         || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0
-        || event.sourceOffsetFraction !== undefined && (typeof event.sourceOffsetFraction !== 'number' || !Number.isFinite(event.sourceOffsetFraction)
+        || event.sourceOffsetFraction !== undefined && (!Number.isFinite(event.sourceOffsetFraction)
           || event.sourceOffsetFraction < 0 || event.sourceOffsetFraction >= 1)
         || !Number.isSafeInteger(event.sourceFrameCount)
-        || event.sourceFrameCount < 1 || typeof event.gain !== 'number' || !Number.isFinite(event.gain)
+        || event.sourceFrameCount < 1 || !Number.isFinite(event.gain)
         || !Number.isSafeInteger(event.fadeInStartFrame) || !Number.isSafeInteger(event.fadeInEndFrame)
         || event.fadeInEndFrame < event.fadeInStartFrame || !Number.isSafeInteger(event.fadeOutStartFrame)
         || !Number.isSafeInteger(event.fadeOutEndFrame) || event.fadeOutEndFrame < event.fadeOutStartFrame
-        || event.fadeInCurve !== undefined && (typeof event.fadeInCurve !== 'number' || !Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1)
-        || event.fadeInCurvePosition !== undefined && (typeof event.fadeInCurvePosition !== 'number' || !Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
-        || event.fadeOutCurve !== undefined && (typeof event.fadeOutCurve !== 'number' || !Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
-        || event.fadeOutCurvePosition !== undefined && (typeof event.fadeOutCurvePosition !== 'number' || !Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
+        || event.fadeInCurve !== undefined && (!Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1)
+        || event.fadeInCurvePosition !== undefined && (!Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
+        || event.fadeOutCurve !== undefined && (!Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
+        || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
         return this.sourceScheduleResult(message, 'rejected')
       }
       const handle = this.assets.get(event.assetId).handle.value
@@ -1366,7 +1394,7 @@ export class DawPortableAudioCoreHost {
       || !Array.isArray(message.inputChannels) || message.inputChannels.length !== message.channelCount
       || !message.inputChannels.every((channel) => Number.isInteger(channel) && channel >= 0 && channel < 64)
       || !Number.isFinite(message.gain) || message.gain < 0 || (message.polarity !== 1 && message.polarity !== -1)
-      || typeof message.monitoring !== 'boolean'
+      || !isBoolean(message.monitoring)
       || !Number.isSafeInteger(message.punchStartFrame) || message.punchStartFrame < 0
       || (message.punchEndFrame !== null && (!Number.isSafeInteger(message.punchEndFrame) || message.punchEndFrame < message.punchStartFrame))) {
       return this.fault('malformed-message')

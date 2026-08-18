@@ -20,8 +20,8 @@ const isDefaultSampleApiUrl = (value: string) => {
   }
 }
 
-const parseConfiguredApiOrigin = (value: unknown): string | null => {
-  if (typeof value !== 'string' || value.trim() === '') return null
+const parseConfiguredApiOrigin = (value: string | undefined): string | null => {
+  if (value === undefined || value.trim() === '') return null
   try {
     const url = new URL(value)
     if (
@@ -49,7 +49,7 @@ const isHttpOrigin = (origin: string) => {
 }
 
 export const resolveApiBaseOrigin = (
-  configuredBaseUrl: unknown,
+  configuredBaseUrl: string | undefined,
   runtime: RendererApiRuntime,
 ): string | null => {
   const configured = parseConfiguredApiOrigin(configuredBaseUrl)
@@ -60,7 +60,7 @@ export const resolveApiBaseOrigin = (
 }
 
 export const resolveRendererApiUrl = (
-  configuredBaseUrl: unknown,
+  configuredBaseUrl: string | undefined,
   runtime: RendererApiRuntime,
   value: string,
 ): string | null => {
@@ -85,7 +85,7 @@ export const resolveRendererApiUrl = (
 }
 
 export const resolveDefaultSampleMediaUrl = (
-  configuredBaseUrl: unknown,
+  configuredBaseUrl: string | undefined,
   runtime: RendererApiRuntime,
   value: string | undefined,
 ): string | null => {

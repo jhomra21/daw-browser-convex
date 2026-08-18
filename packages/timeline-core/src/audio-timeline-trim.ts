@@ -44,7 +44,7 @@ export const calculateAudioTimelineTrimOffsets = (input: {
   bufferDurationSec: number
   timelineTrimSec: number
   projectBpm: number
-}): { leftPadSec: number; bufferOffsetSec: number; audioWarp?: AudioWarp } => {
+}) => {
   let leftPadSec = Math.max(0, input.clip.leftPadSec ?? 0)
   let bufferOffsetSec = Math.max(0, input.clip.bufferOffsetSec ?? 0)
   let audioWarp: AudioWarp | undefined
@@ -81,5 +81,9 @@ export const calculateAudioTimelineTrimOffsets = (input: {
       })
     }
   }
-  return { leftPadSec, bufferOffsetSec, audioWarp }
+  return { leftPadSec, bufferOffsetSec, audioWarp } satisfies {
+    leftPadSec: number
+    bufferOffsetSec: number
+    audioWarp?: AudioWarp
+  }
 }

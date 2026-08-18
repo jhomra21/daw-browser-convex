@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test'
-import type { ControlPlanV1 } from '@daw-browser/control'
+import type { ProjectSnapshotV2 } from '@daw-browser/control'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
+import { isJsonObject } from '@daw-browser/shared'
 import { createLocalProjectEntityRow } from '~/lib/local-project-db'
-import { materializeLocalControlSnapshot } from './local-control-model'
+import { materializeLocalControlSnapshot, parseLocalProjectStoredJsonValue } from './local-control-model'
 
 test('materializes a legacy oversized persisted MIDI snapshot', () => {
-  const snapshot: ControlPlanV1['snapshot'] = {
+  const snapshot: ProjectSnapshotV2 = {
+    version: 'v2',
     project: {
       id: 'project-1',
       name: 'Project',
@@ -46,15 +48,17 @@ test('materializes a legacy oversized persisted MIDI snapshot', () => {
     projectState: [],
   }, snapshot, 1)
   const clip = model.entities.find((entity) => entity.kind === 'clip')
-  if (!clip || typeof clip.value !== 'object' || clip.value === null || !('midi' in clip.value)) {
+  const value = clip ? parseLocalProjectStoredJsonValue(clip.value) : undefined
+  if (!clip || !isJsonObject(value) || value.midi === undefined) {
     throw new Error('Expected a materialized MIDI clip.')
   }
-  expect(clip.value.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
-  expect(JSON.stringify(clip.value.midi)).toContain('"channel":1')
+  expect(value.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
+  expect(JSON.stringify(value.midi)).toContain('"channel":1')
 })
 
 test('clears a legacy clip URL when assigning its first authoritative source', () => {
-  const snapshot: ControlPlanV1['snapshot'] = {
+  const snapshot: ProjectSnapshotV2 = {
+    version: 'v2',
     project: {
       id: 'project-1', name: 'Project', revision: 1, tempoBpm: 120,
       timeSignature: { numerator: 4, denominator: 4 }, loop: { enabled: false, startSec: 0, endSec: 0 },
@@ -63,6 +67,7 @@ test('clears a legacy clip URL when assigning its first authoritative source', (
     tracks: [],
     clips: [{
       id: 'clip-1', trackId: 'track-1', name: 'Audio', startSec: 0, duration: 1,
+      leftPadSec: 0, bufferOffsetSec: 0, midiOffsetBeats: 0,
       source: { assetId: 'asset-2', sourceKind: 'upload', durationSec: 1, sampleRate: 48_000, channelCount: 2 },
     }],
     processors: [], automation: [], sidechains: [], assets: [], assetFolders: [],
@@ -75,10 +80,11 @@ test('clears a legacy clip URL when assigning its first authoritative source', (
     projectState: [],
   }, snapshot, 2)
   const clip = model.entities.find((entity) => entity.kind === 'clip')
-  if (!clip || typeof clip.value !== 'object' || clip.value === null) {
+  const value = clip ? parseLocalProjectStoredJsonValue(clip.value) : undefined
+  if (!clip || !isJsonObject(value)) {
     throw new Error('Expected a materialized audio clip.')
   }
-  expect(clip.value).toMatchObject({ sampleUrl: undefined })
+  expect(value.sampleUrl).toBeUndefined()
 })
 
 const externalInstanceId = '00000000-0000-4000-8000-000000000001'
@@ -136,7 +142,8 @@ const externalRow = externalProcessorSchema.parse({
   updatedAt: 1,
 })
 
-const externalSnapshot = (overrides: Record<string, number>): ControlPlanV1['snapshot'] => ({
+const externalSnapshot = (overrides: Record<string, number>): ProjectSnapshotV2 => ({
+  version: 'v2',
   project: {
     id: 'project-1', name: 'Project', revision: 1, tempoBpm: 120,
     timeSignature: { numerator: 4, denominator: 4 }, loop: { enabled: false, startSec: 0, endSec: 0 },

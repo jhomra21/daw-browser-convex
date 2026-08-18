@@ -1,10 +1,18 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import { createLocalProjectId, createLocalTrackId } from '@daw-browser/shared'
-import type { ProjectManifestPluginArtifact } from '@daw-browser/shared'
+import {
+  createLocalProjectId,
+  createLocalTrackId,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
+  type ProjectManifestPluginArtifact,
+} from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
+import { z } from 'zod'
 
 export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
@@ -34,17 +42,35 @@ export type LocalProjectDirectoryEntry = {
   updatedAt: number
 }
 
+export type LocalProjectStoredValue =
+  | null
+  | undefined
+  | boolean
+  | number
+  | bigint
+  | string
+  | Date
+  | RegExp
+  | File
+  | Blob
+  | ArrayBuffer
+  | ArrayBufferView<ArrayBufferLike>
+  | ReadonlyMap<LocalProjectStoredValue, LocalProjectStoredValue>
+  | ReadonlySet<LocalProjectStoredValue>
+  | readonly LocalProjectStoredValue[]
+  | { readonly [key: string]: LocalProjectStoredValue }
+
 export type LocalProjectEntityRow = {
   kind: string
   id: string
-  value: unknown
+  value: LocalProjectStoredValue
   updatedAt: number
 }
 
 export const createLocalProjectEntityRow = (
   kind: string,
   id: string,
-  value: unknown,
+  value: LocalProjectStoredValue,
   updatedAt = Date.now(),
 ): LocalProjectEntityRow => ({ kind, id, value, updatedAt })
 
@@ -69,19 +95,19 @@ export type LocalProjectAssetRow = {
 
 export type LocalProjectStateRow = {
   key: string
-  value: unknown
+  value: LocalProjectStoredValue
   updatedAt: number
 }
 
 export type LocalProjectHistoryRow = {
   key: string
-  value: unknown
+  value: LocalProjectStoredValue
   updatedAt: number
 }
 
 export type LocalProjectSyncStateRow = {
   key: string
-  value: unknown
+  value: LocalProjectStoredValue
   updatedAt: number
 }
 export type LocalProjectExternalPluginArtifactRow = ProjectManifestPluginArtifact & {
@@ -99,7 +125,7 @@ export type LocalControlCommitRow = {
   actorRole: 'owner'
   idempotencyKey: string
   requestDigest: string
-  result: unknown
+  result: JsonValue
   priorRevision: number
   revision: number
   applied: boolean
@@ -227,16 +253,25 @@ export const getProjectDbName = (projectId: string) => `${PROJECT_DB_PREFIX}${pr
 const now = () => Date.now()
 let globalDbPromise: Promise<IDBPDatabase<GlobalProjectsDB>> | undefined
 const projectDbPromises = new Map<string, Promise<IDBPDatabase<ProjectDB>>>()
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-const isPositiveInteger = (value: unknown): value is number => (
-  typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0
+const normalizeStoredEntityRows = (
+  rows: readonly LocalProjectEntityRow[],
+): LocalProjectEntityRow[] => {
+  const jsonRows = rows.flatMap((row) => {
+    const parsed = z.json().safeParse(row.value)
+    return parsed.success ? [{ ...row, value: parsed.data }] : []
+  })
+  const normalizedByKey = new Map(
+    normalizeMixedEffectEntityRows(jsonRows).map((row) => [`${row.kind}\u0000${row.id}`, row]),
+  )
+  return rows.map((row) => normalizedByKey.get(`${row.kind}\u0000${row.id}`) ?? row)
+}
+const isPositiveInteger = (value: JsonValue): value is number => (
+  isJsonNumber(value) && Number.isFinite(value) && Number.isInteger(value) && value > 0
 )
 export const isCanonicalLocalControlTimeSignature = (
-  value: unknown,
+  value: JsonValue,
 ): value is LocalControlProjectMetadata['timeSignature'] => (
-  isRecord(value)
+  isJsonObject(value)
   && isPositiveInteger(value.numerator)
   && value.numerator <= 32
   && (
@@ -249,14 +284,17 @@ export const isCanonicalLocalControlTimeSignature = (
   )
 )
 
-const readControlProjectMetadata = (value: unknown): LocalControlProjectMetadata | undefined => {
-  if (!isRecord(value)) return undefined
+const readControlProjectMetadata = (storedValue: LocalProjectStoredValue): LocalControlProjectMetadata | undefined => {
+  const parsed = z.json().safeParse(storedValue)
+  if (!parsed.success) return undefined
+  const value = parsed.data
+  if (!isJsonObject(value)) return undefined
   const record = value
   const timeSignature = record.timeSignature
   if (
     record.version !== 1
-    || typeof record.name !== 'string'
-    || typeof record.updatedAt !== 'number'
+    || !isJsonString(record.name)
+    || !isJsonNumber(record.updatedAt)
     || !isCanonicalLocalControlTimeSignature(timeSignature)
   ) return undefined
   return {
@@ -283,7 +321,7 @@ const normalizedProjectState = (
   projectState: LocalProjectStateRow[],
 ): LocalProjectStateRow[] => {
   const incoming = projectState.find((row) => row.key === LOCAL_CONTROL_PROJECT_METADATA_KEY)
-  const timeSignature = readControlProjectMetadata(incoming?.value)?.timeSignature
+  const timeSignature = (incoming === undefined ? undefined : readControlProjectMetadata(incoming.value))?.timeSignature
     ?? { numerator: 4, denominator: 4 }
   return [
     ...projectState.filter((row) => row.key !== LOCAL_CONTROL_PROJECT_METADATA_KEY),
@@ -303,7 +341,7 @@ const normalizedProjectState = (
 const ensureControlProjectMetadata = async (project: LocalProjectEntry) => {
   const projectDb = await openLocalProjectDb(project.id)
   const existing = await projectDb.get('projectState', LOCAL_CONTROL_PROJECT_METADATA_KEY)
-  const metadata = readControlProjectMetadata(existing?.value)
+  const metadata = existing === undefined ? undefined : readControlProjectMetadata(existing.value)
   if (metadata) return metadata
   const seeded = metadataRowFor(project)
   await projectDb.put('projectState', seeded)
@@ -394,7 +432,7 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
       if (oldVersion < 6) {
         const store = transaction.objectStore('entities')
         void store.getAll().then((rows) => {
-          const normalized = normalizeMixedEffectEntityRows(rows)
+          const normalized = normalizeStoredEntityRows(rows)
           for (const row of normalized) store.put(row)
         })
       }
@@ -485,9 +523,8 @@ export const renameLocalProject = async (
     lastOpenedAt: timestamp,
   }
   const projectDb = await openLocalProjectDb(projectId)
-  const metadata = readControlProjectMetadata(
-    (await projectDb.get('projectState', LOCAL_CONTROL_PROJECT_METADATA_KEY))?.value,
-  )
+  const metadataRow = await projectDb.get('projectState', LOCAL_CONTROL_PROJECT_METADATA_KEY)
+  const metadata = metadataRow === undefined ? undefined : readControlProjectMetadata(metadataRow.value)
   await projectDb.put('projectState', {
     key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
     value: {
@@ -533,7 +570,7 @@ export const importLocalProjectUnlocked = async (
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
-  const entities = normalizeMixedEffectEntityRows(rows.entities)
+  const entities = normalizeStoredEntityRows(rows.entities)
   const projectState = normalizedProjectState(project, rows.projectState)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
   await Promise.all([
@@ -576,7 +613,7 @@ const replaceLocalProjectUnlocked = async (
   const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
   const projectState = normalizedProjectState(project, rows.projectState)
-  const entities = normalizeMixedEffectEntityRows(rows.entities)
+  const entities = normalizeStoredEntityRows(rows.entities)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   await Promise.all([
     tx.objectStore('entities').clear(),

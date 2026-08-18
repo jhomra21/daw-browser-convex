@@ -38,6 +38,8 @@ type ConvexClientType = typeof convexClient
 type ConvexApiType = typeof convexApi
 type TrackDeleteResult = FunctionReturnType<ConvexApiType['tracks']['remove']>
 
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
 type TimelineClipActionsOptions = {
   tracks: Accessor<RuntimeTrack[]>
   insertLocalClip: (trackId: Track['id'], clip: RuntimeClip) => void
@@ -269,7 +271,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       items: pending,
       createMany: async (items, operationId) => {
         const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
-        return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+        return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
       },
       insertLocalClip,
       audioBufferCache: audioBufferCache.writer,
@@ -351,7 +353,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         items: pending,
         createMany: async (items, operationId) => {
           const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
-          return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+          return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
         },
         insertLocalClip,
         audioBufferCache: audioBufferCache.writer,

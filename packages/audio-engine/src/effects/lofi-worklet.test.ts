@@ -2,9 +2,16 @@ import { describe, expect, test } from 'bun:test'
 import { createDefaultLoFiParams } from '@daw-browser/shared'
 import { loFiWorklet } from '../worklet-manifest'
 
+type LoFiConfigureMessage = {
+  type: 'configure'
+  version: 1
+  revision: number
+  state: ReturnType<typeof createDefaultLoFiParams>
+}
+
 type Port = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  postMessage: (message: unknown) => void
+  onmessage: ((event: { data: LoFiConfigureMessage }) => void) | null
+  postMessage: (message: LoFiConfigureMessage) => void
   close: () => void
 }
 

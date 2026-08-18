@@ -25,6 +25,8 @@ import {
   type RecoveryPayload,
 } from '@daw-browser/control'
 import { sha256 } from '@noble/hashes/sha2.js'
+import { isJsonString, type JsonValue } from '@daw-browser/shared'
+import { z } from 'zod'
 import type { removeLocalAssetFileUnlocked } from '~/lib/local-assets'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
@@ -56,16 +58,48 @@ const apiVersion = 'v1'
 const hashApprovalToken = (value: string) => (
   Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
 )
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
 const compareNewest = (left: { createdAt: number; id: string }, right: { createdAt: number; id: string }) => (
   right.createdAt - left.createdAt || right.id.localeCompare(left.id)
 )
-const isBoundedText = (value: unknown) => typeof value === 'string' && value.length >= 1 && value.length <= 256
-const isNonnegativeInteger = (value: unknown) => (
-  typeof value === 'number' && Number.isInteger(value) && value >= 0
-)
+const isBoundedText = (value: JsonValue | undefined): value is string => isJsonString(value)
+  && value.length >= 1 && value.length <= 256
+type ControlParserInput = Parameters<typeof parseControlPreviewRequestV1>[0]
+type ErrorInput = Parameters<typeof controlErrorSchemaV1.safeParse>[0]
+const controlPlanningErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  actionIndex: z.number().optional(),
+})
+const localControlCommitRowSchema = z.object({
+  version: z.literal(1),
+  status: z.literal('completed'),
+  id: z.string(),
+  projectId: z.string(),
+  createdAt: z.number().int().nonnegative(),
+  actorSubject: z.string().min(1).max(256),
+  actorIssuer: z.string().min(1).max(256).optional(),
+  actorTokenIdentifier: z.string().min(1).max(256).optional(),
+  actorRole: z.literal('owner'),
+  idempotencyKey: z.string(),
+  requestDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+  result: z.json(),
+  priorRevision: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
+  applied: z.boolean(),
+})
+const localControlApprovalRowSchema = z.object({
+  version: z.literal(1),
+  id: z.string(),
+  projectId: z.string(),
+  expiresAt: z.number().int().nonnegative(),
+  createdAt: z.number().int().nonnegative(),
+  actorSubject: z.string().min(1).max(256),
+  requestDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+  baseRevision: z.number().int().nonnegative(),
+  actionIndexes: z.array(z.number().int().nonnegative()).min(1),
+  tokenHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  consumedAt: z.number().int().nonnegative().optional(),
+})
 const assetGcJobLimit = 1_000
 const maintenanceByProject = new Map<string, Promise<void>>()
 
@@ -87,8 +121,8 @@ const fail = (
 ): never => {
   throw new LocalControlServiceError(controlErrorSchemaV1.parse({
     version: 'v1', code, message,
-    ...(actionIndex === undefined ? {} : { actionIndex }),
-    ...(details === undefined ? {} : { details }),
+    actionIndex,
+    details,
   }))
 }
 
@@ -111,8 +145,8 @@ const duplicateRecoveryIndex = (actions: readonly { kind: string; recovery?: { i
 }
 
 const parseRequest = <Value extends { actions: readonly { kind: string; recovery?: { id: string } }[] }>(
-  input: unknown,
-  parser: (value: unknown) => Value,
+  input: ControlParserInput,
+  parser: (value: ControlParserInput) => Value,
   label: string,
 ) => {
   const request = parse(() => parser(input), `Invalid ${label} request.`)
@@ -127,15 +161,13 @@ const projectSnapshotV1 = (snapshot: ProjectSnapshotV2) => (
     version: 'v1',
     clips: snapshot.clips.map((clip) => ({
       ...clip,
-      ...(clip.midi === undefined ? {} : {
-        midi: {
+      midi: clip.midi === undefined ? undefined : {
           wave: clip.midi.wave,
-          ...(clip.midi.gain === undefined ? {} : { gain: clip.midi.gain }),
+          gain: clip.midi.gain,
           notes: clip.midi.notes.map(({ beat, length, pitch, velocity }) => ({
-            beat, length, pitch, ...(velocity === undefined ? {} : { velocity }),
+            beat, length, pitch, velocity,
           })),
         },
-      }),
     })),
   })
 )
@@ -170,10 +202,11 @@ const plan = (
   try {
     return planControlRequestV1(snapshot, request, recoveries)
   } catch (error) {
-    if (isRecord(error) && typeof error.code === 'string' && typeof error.message === 'string') {
-      const actionIndex = typeof error.actionIndex === 'number' ? error.actionIndex : undefined
-      if (error.code === 'validation' || error.code === 'not-found' || error.code === 'limit-exceeded') {
-        return fail(error.code, error.message, actionIndex)
+    const parsedError = controlPlanningErrorSchema.safeParse(error)
+    if (parsedError.success) {
+      const actionIndex = parsedError.data.actionIndex
+      if (parsedError.data.code === 'validation' || parsedError.data.code === 'not-found' || parsedError.data.code === 'limit-exceeded') {
+        return fail(parsedError.data.code, parsedError.data.message, actionIndex)
       }
     }
     return fail('internal', 'Control planning failed.')
@@ -201,72 +234,53 @@ const token = () => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-const parseCommitRow = (value: unknown): LocalControlCommitRow | undefined => {
-  if (!isRecord(value) || value.version !== 1 || value.status !== 'completed'
-    || typeof value.id !== 'string' || typeof value.projectId !== 'string'
-    || typeof value.createdAt !== 'number' || !isNonnegativeInteger(value.createdAt)
-    || typeof value.actorSubject !== 'string' || !isBoundedText(value.actorSubject)
-    || (value.actorIssuer !== undefined && (typeof value.actorIssuer !== 'string' || !isBoundedText(value.actorIssuer)))
-    || (value.actorTokenIdentifier !== undefined && (typeof value.actorTokenIdentifier !== 'string' || !isBoundedText(value.actorTokenIdentifier)))
-    || value.actorRole !== 'owner' || typeof value.idempotencyKey !== 'string'
-    || typeof value.requestDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(value.requestDigest)
-    || typeof value.priorRevision !== 'number' || !isNonnegativeInteger(value.priorRevision)
-    || typeof value.revision !== 'number' || !isNonnegativeInteger(value.revision)
-    || typeof value.applied !== 'boolean') return undefined
+const parseCommitRow = (value: LocalControlCommitRow): LocalControlCommitRow | undefined => {
   try {
-    const result = controlCommitResultSchemaV1.parse(value.result)
+    const row = localControlCommitRowSchema.parse(value)
+    const result = controlCommitResultSchemaV1.parse(row.result)
     if (
       result.idempotencyReplay
-      || result.projectId !== value.projectId
-      || result.requestDigest !== value.requestDigest
-      || result.priorRevision !== value.priorRevision
-      || result.revision !== value.revision
-      || result.applied !== value.applied
+      || result.projectId !== row.projectId
+      || result.requestDigest !== row.requestDigest
+      || result.priorRevision !== row.priorRevision
+      || result.revision !== row.revision
+      || result.applied !== row.applied
     ) return undefined
     return {
-      id: value.id, version: 1, projectId: value.projectId, createdAt: value.createdAt,
-      actorSubject: value.actorSubject,
-      ...(value.actorIssuer === undefined ? {} : { actorIssuer: value.actorIssuer }),
-      ...(value.actorTokenIdentifier === undefined ? {} : { actorTokenIdentifier: value.actorTokenIdentifier }),
+      id: row.id, version: 1, projectId: row.projectId, createdAt: row.createdAt,
+      actorSubject: row.actorSubject,
+      actorIssuer: row.actorIssuer,
+      actorTokenIdentifier: row.actorTokenIdentifier,
       actorRole: 'owner', idempotencyKey: value.idempotencyKey, requestDigest: value.requestDigest,
-      result, priorRevision: value.priorRevision, revision: value.revision,
-      applied: value.applied, status: 'completed',
+      result, priorRevision: row.priorRevision, revision: row.revision,
+      applied: row.applied, status: 'completed',
     }
   } catch {
     return undefined
   }
 }
 
-const parseApprovalRow = (value: unknown): LocalControlApprovalRow | undefined => {
-  if (
-    !isRecord(value) || value.version !== 1 || typeof value.id !== 'string'
-    || typeof value.projectId !== 'string' || typeof value.expiresAt !== 'number' || !isNonnegativeInteger(value.expiresAt)
-    || typeof value.createdAt !== 'number' || !isNonnegativeInteger(value.createdAt)
-    || typeof value.actorSubject !== 'string' || !isBoundedText(value.actorSubject)
-    || typeof value.requestDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(value.requestDigest)
-    || typeof value.baseRevision !== 'number' || !isNonnegativeInteger(value.baseRevision) || !Array.isArray(value.actionIndexes)
-    || value.actionIndexes.length === 0 || value.actionIndexes.some((index) => !isNonnegativeInteger(index))
-    || typeof value.tokenHash !== 'string' || !/^[0-9a-f]{64}$/u.test(value.tokenHash)
-    || value.consumedAt !== undefined && (typeof value.consumedAt !== 'number' || !isNonnegativeInteger(value.consumedAt))
-  ) return undefined
+const parseApprovalRow = (value: LocalControlApprovalRow): LocalControlApprovalRow | undefined => {
+  const row = localControlApprovalRowSchema.safeParse(value)
+  if (!row.success) return undefined
   return {
-    id: value.id,
+    id: row.data.id,
     version: 1,
-    projectId: value.projectId,
-    expiresAt: value.expiresAt,
-    createdAt: value.createdAt,
-    actorSubject: value.actorSubject,
-    requestDigest: value.requestDigest,
-    baseRevision: value.baseRevision,
-    actionIndexes: [...value.actionIndexes],
-    tokenHash: value.tokenHash,
-    ...(value.consumedAt === undefined ? {} : { consumedAt: value.consumedAt }),
+    projectId: row.data.projectId,
+    expiresAt: row.data.expiresAt,
+    createdAt: row.data.createdAt,
+    actorSubject: row.data.actorSubject,
+    requestDigest: row.data.requestDigest,
+    baseRevision: row.data.baseRevision,
+    actionIndexes: [...row.data.actionIndexes],
+    tokenHash: row.data.tokenHash,
+    consumedAt: row.data.consumedAt,
   }
 }
 
 const serviceOperation = async <Value>(
   callback: () => Promise<Value>,
-  isAvailabilityFailure?: (error: unknown) => boolean,
+  isAvailabilityFailure?: (error: ErrorInput) => boolean,
 ): Promise<Value> => {
   try {
     return await callback()
@@ -280,10 +294,11 @@ const serviceOperation = async <Value>(
       }
       return fail('internal', 'Local control state is malformed.')
     }
-    if (isRecord(error) && typeof error.code === 'string' && typeof error.message === 'string') {
-      const actionIndex = typeof error.actionIndex === 'number' ? error.actionIndex : undefined
-      if (error.code === 'validation' || error.code === 'not-found' || error.code === 'limit-exceeded') {
-        return fail(error.code, error.message, actionIndex)
+    const parsedError = controlPlanningErrorSchema.safeParse(error)
+    if (parsedError.success) {
+      const actionIndex = parsedError.data.actionIndex
+      if (parsedError.data.code === 'validation' || parsedError.data.code === 'not-found' || parsedError.data.code === 'limit-exceeded') {
+        return fail(parsedError.data.code, parsedError.data.message, actionIndex)
       }
     }
     return fail('internal', 'Local control operation failed.')
@@ -352,23 +367,24 @@ const validateLocalDestructivePreflight = (
     planControlRequestV1(context.snapshot, request, recoveries, {
       onActionPlanned: (entry) => {
         if (!entry.changed) return
-        if (entry.action.kind === 'recovery.restore') {
-          const gc = context.rows.assetGc.find((row) => row.recoveryId === entry.action.recovery.id)
+        const action = entry.action
+        if (action.kind === 'recovery.restore') {
+          const gc = context.rows.assetGc.find((row) => row.recoveryId === action.recovery.id)
           if (gc?.claimedAt !== undefined && gc.claimedAt > Date.now() - localControlAssetGcLeaseMs) {
             fail('validation', 'Recovery asset bytes are being deleted.', entry.actionIndex)
           }
-          const recovery = recoveries.get(entry.action.recovery.id)
-          if (recovery) restoredRecoveries.set(entry.action.recovery.id, recovery)
+          const recovery = recoveries.get(action.recovery.id)
+          if (recovery) restoredRecoveries.set(action.recovery.id, recovery)
           return
         }
-        if (!isRecoverableAction(entry.action)) return
+        if (!isRecoverableAction(action)) return
         // Recovery capture must see the same reference form that the executor
         // will use after resolving client references, without allocating rows.
-        const action = rewriteLocalControlActionReferences(entry.action, new Map(), plannedRefs)
+        const rewrittenAction = rewriteLocalControlActionReferences(action, new Map(), plannedRefs)
         const payload = captureLocalRecoveryPayload({
           projectId: request.projectId,
           actorSubject,
-          action,
+          action: rewrittenAction,
           actionIndex: entry.actionIndex,
           snapshot: projectSnapshotSchemaV2.parse({ ...entry.beforeSnapshot, version: 'v2' }),
           assets: resolveLocalRecoveryAssets(
@@ -417,7 +433,7 @@ const prune = (
   for (const row of context.rows.approvals) {
     const parsed = parseApprovalRow(row)
     if (!parsed) {
-      if (isRecord(row) && row.projectId === projectId) fail('internal', 'Control approval retention is malformed.')
+      if (row.projectId === projectId) fail('internal', 'Control approval retention is malformed.')
       continue
     }
     if (parsed.projectId === projectId && (parsed.expiresAt <= now || parsed.consumedAt !== undefined)) {
@@ -425,9 +441,7 @@ const prune = (
     }
   }
   const recoveries = context.rows.recoveries.filter((row) => row.projectId === projectId)
-  const assetGcRecoveryIds = new Set(context.rows.assetGc.flatMap((row) => (
-    typeof row.recoveryId === 'string' ? [row.recoveryId] : []
-  )))
+  const assetGcRecoveryIds = new Set(context.rows.assetGc.map((row) => row.recoveryId))
   for (const id of pendingAssetGcRecoveryIds) assetGcRecoveryIds.add(id)
   for (const id of consumedRecoveryIds) assetGcRecoveryIds.delete(id)
   for (const row of recoveries) {
@@ -486,17 +500,20 @@ export const createLocalControlService = (input: {
   }
   const actor = input.actor
   const availabilityFailures = new WeakSet<object>()
+  const availabilityFailureSchema = z.custom<object>((value) => value === Object(value))
   const assertAvailable = () => {
     try {
       input.assertAvailable?.()
     } catch (error) {
-      if (typeof error === 'object' && error !== null) availabilityFailures.add(error)
+      const availabilityFailure = availabilityFailureSchema.safeParse(error)
+      if (availabilityFailure.success) availabilityFailures.add(availabilityFailure.data)
       throw error
     }
   }
-  const isAvailabilityFailure = (error: unknown) => (
-    typeof error === 'object' && error !== null && availabilityFailures.has(error)
-  )
+  const isAvailabilityFailure = (error: ErrorInput) => {
+    const availabilityFailure = availabilityFailureSchema.safeParse(error)
+    return availabilityFailure.success && availabilityFailures.has(availabilityFailure.data)
+  }
   const withTransaction = async <Value>(
     projectId: string,
     callback: (context: LocalControlTransactionResult) => Value,
@@ -514,7 +531,7 @@ export const createLocalControlService = (input: {
       },
     )
   }
-  const preview = async (inputValue: unknown) => {
+  const preview = async (inputValue: JsonValue) => {
     const request = parseRequest(inputValue, parseControlPreviewRequestV1, 'control preview')
     const requestDigest = controlRequestDigestSyncV1(request)
     assertAvailable()
@@ -533,7 +550,7 @@ export const createLocalControlService = (input: {
     })
   }
 
-  const requestApproval = async (inputValue: unknown) => {
+  const requestApproval = async (inputValue: JsonValue) => {
     const request = parseRequest(inputValue, parseControlApprovalRequestV1, 'control approval')
     const requestDigest = controlRequestDigestSyncV1(request)
     assertAvailable()
@@ -584,7 +601,7 @@ export const createLocalControlService = (input: {
     })
   }
 
-  const commit = async (inputValue: unknown) => {
+  const commit = async (inputValue: JsonValue) => {
     const request = parseRequest(inputValue, parseControlCommitRequestV1, 'control commit')
     const requestDigest = controlRequestDigestSyncV1(request)
     const approvalTokenHash = request.approvalToken === undefined
@@ -655,8 +672,8 @@ export const createLocalControlService = (input: {
       const commitId = `local-commit:${crypto.randomUUID()}`
       context.write.commit({
         id: commitId, version: 1, projectId: request.projectId, createdAt: Date.now(),
-        actorSubject: actor.subject, ...(actor.issuer === undefined ? {} : { actorIssuer: actor.issuer }),
-        ...(actor.tokenIdentifier === undefined ? {} : { actorTokenIdentifier: actor.tokenIdentifier }),
+        actorSubject: actor.subject, actorIssuer: actor.issuer,
+        actorTokenIdentifier: actor.tokenIdentifier,
         actorRole: 'owner', idempotencyKey: request.idempotencyKey, requestDigest,
         result, priorRevision: result.priorRevision, revision: result.revision,
         applied: result.applied, status: 'completed',
@@ -694,7 +711,7 @@ export const createLocalControlService = (input: {
     return outcome.result
   }
 
-  const snapshot = async (inputValue: unknown) => {
+  const snapshot = async (inputValue: JsonValue) => {
     const request = parse(() => parseControlSnapshotQueryV1(inputValue), 'Invalid control snapshot request.')
     assertAvailable()
     await flushLocalProjectPendingWrites(request.projectId, {
@@ -710,7 +727,7 @@ export const createLocalControlService = (input: {
       return projectSnapshotV1(context.snapshot)
     })
   }
-  const snapshotV2 = async (inputValue: unknown) => {
+  const snapshotV2 = async (inputValue: JsonValue) => {
     const request = parse(() => parseControlSnapshotQueryV1(inputValue), 'Invalid control snapshot request.')
     assertAvailable()
     await flushLocalProjectPendingWrites(request.projectId, {
@@ -727,7 +744,7 @@ export const createLocalControlService = (input: {
     })
   }
 
-  const page = async (inputValue: unknown, kind: 'history' | 'recoveries') => {
+  const page = async (inputValue: JsonValue, kind: 'history' | 'recoveries') => {
     const request = parse(() => (
       kind === 'history' ? parseControlHistoryQueryV1(inputValue) : parseControlRecoveriesQueryV1(inputValue)
     ), `Invalid ${kind} request.`)
@@ -754,8 +771,8 @@ export const createLocalControlService = (input: {
           const result = controlCommitResultSchemaV1.parse(parsed.result)
           return controlHistoryEntrySchemaV1.parse({
             id: parsed.id, projectId: parsed.projectId, actorSubject: parsed.actorSubject,
-            ...(parsed.actorIssuer === undefined ? {} : { actorIssuer: parsed.actorIssuer }),
-            ...(parsed.actorTokenIdentifier === undefined ? {} : { actorTokenIdentifier: parsed.actorTokenIdentifier }),
+            actorIssuer: parsed.actorIssuer,
+            actorTokenIdentifier: parsed.actorTokenIdentifier,
             actorRole: parsed.actorRole, idempotencyKey: parsed.idempotencyKey,
             requestDigest: parsed.requestDigest, priorRevision: parsed.priorRevision,
             revision: parsed.revision, applied: parsed.applied, createdAt: parsed.createdAt,
@@ -768,7 +785,7 @@ export const createLocalControlService = (input: {
           entries, isDone,
           continueCursor: encodeLocalControlCursor({
             version: 1, kind, createdAt: last?.createdAt ?? cursor?.createdAt ?? 0,
-            id: last?.id ?? cursor?.id ?? 'terminal', ...(isDone ? { terminal: true } : {}),
+            id: last?.id ?? cursor?.id ?? 'terminal', terminal: isDone ? true : undefined,
           }),
         })
       }
@@ -793,7 +810,7 @@ export const createLocalControlService = (input: {
         entries: entries.map(({ createdAt: _createdAt, ...entry }) => entry), isDone,
         continueCursor: encodeLocalControlCursor({
           version: 1, kind, createdAt: last?.createdAt ?? cursor?.createdAt ?? 0,
-          id: last?.id ?? cursor?.id ?? 'terminal', ...(isDone ? { terminal: true } : {}),
+          id: last?.id ?? cursor?.id ?? 'terminal', terminal: isDone ? true : undefined,
         }),
       })
     })
@@ -802,12 +819,12 @@ export const createLocalControlService = (input: {
   return {
     capabilities: () => localControlCapabilitiesV1,
     capabilitiesV2: () => localControlCapabilitiesV2,
-    snapshot: (inputValue: unknown) => serviceOperation(() => snapshot(inputValue), isAvailabilityFailure),
-    snapshotV2: (inputValue: unknown) => serviceOperation(() => snapshotV2(inputValue), isAvailabilityFailure),
-    preview: (inputValue: unknown) => serviceOperation(() => preview(inputValue), isAvailabilityFailure),
-    commit: (inputValue: unknown) => serviceOperation(() => commit(inputValue), isAvailabilityFailure),
-    requestApproval: (inputValue: unknown) => serviceOperation(() => requestApproval(inputValue), isAvailabilityFailure),
-    history: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'history'), isAvailabilityFailure),
-    recoveries: (inputValue: unknown) => serviceOperation(() => page(inputValue, 'recoveries'), isAvailabilityFailure),
+    snapshot: (inputValue: JsonValue) => serviceOperation(() => snapshot(inputValue), isAvailabilityFailure),
+    snapshotV2: (inputValue: JsonValue) => serviceOperation(() => snapshotV2(inputValue), isAvailabilityFailure),
+    preview: (inputValue: JsonValue) => serviceOperation(() => preview(inputValue), isAvailabilityFailure),
+    commit: (inputValue: JsonValue) => serviceOperation(() => commit(inputValue), isAvailabilityFailure),
+    requestApproval: (inputValue: JsonValue) => serviceOperation(() => requestApproval(inputValue), isAvailabilityFailure),
+    history: (inputValue: JsonValue) => serviceOperation(() => page(inputValue, 'history'), isAvailabilityFailure),
+    recoveries: (inputValue: JsonValue) => serviceOperation(() => page(inputValue, 'recoveries'), isAvailabilityFailure),
   }
 }

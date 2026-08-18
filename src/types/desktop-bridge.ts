@@ -1,5 +1,4 @@
 import type {
-  NativeHostDeviceConfiguration,
   NativeInputDevice,
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
@@ -11,11 +10,12 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeOfflinePcmChunk,
+  NativeOfflineRenderPlan
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
-  NativeOfflineRenderPlan,
-} from "@daw-browser/audio-engine/native-host-wire"
-import type {
+  DesktopOperationV1,
+  ControlErrorV1,
+  HostErrorV1,
   DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
 import type {
@@ -29,7 +29,6 @@ import type {
 import type { ExportAudioFormat } from "@daw-browser/shared"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
-type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
 type NativeVstEditorReply = { ok: true; status: { success: boolean; owned: boolean; supported: boolean; open: boolean; width: number; height: number } } | { ok: false; error: string }
 export type DesktopVstEditorState = { projectId: string; instanceId: string; open: boolean }
 type NativeVstEditorAnchor = { x: number; y: number }
@@ -74,9 +73,26 @@ type NativeAudioHostDiagnosticsReply = (
   | { ok: false; error: string }
 ) & { artifactVerification: NativeReleaseArtifactVerification }
 
+type DesktopRequest = {
+  id: string
+  operation: DesktopOperationV1
+  input: unknown
+  signal: AbortSignal
+  actorSubject?: string
+}
+
+type DesktopResponse = {
+  id: string
+  result?: unknown
+  error?: HostErrorV1 | ControlErrorV1
+}
+
+type DesktopRequestHandler = (request: DesktopRequest) => Promise<DesktopResponse>
+type DesktopPrepareToCloseHandler = () => Promise<{ flushed: boolean }>
+
 type NativeSessionBridge = {
-  configure(input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeSessionReply>
-  beginTransaction(): Promise<NativeTransactionReply>
+  setRequestHandler(next: DesktopRequestHandler | undefined): void
+  onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   commitTransaction(transactionToken: string): Promise<NativeSessionReply>
   rollbackTransaction(transactionToken: string): Promise<NativeSessionReply>
   detachVst(instanceId: string, transactionToken?: string): Promise<NativeSessionReply>
@@ -123,8 +139,8 @@ export type DesktopAudioLifecycle = {
 }
 
 type DesktopBridge = {
-  setRequestHandler(next: unknown): void
-  onPrepareToClose(next: unknown): void
+  setRequestHandler(next: DesktopRequestHandler | undefined): void
+  onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   prepareToClose(): Promise<{ flushed: boolean }>
   pickOutputFile(
     requestId: string,

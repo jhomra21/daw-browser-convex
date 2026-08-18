@@ -1,3 +1,5 @@
+import { isJsonString, type JsonValue } from "@daw-browser/shared"
+
 export type MidiInputEvent =
   | {
     sourceId: string
@@ -45,11 +47,13 @@ export type MidiSourceReset = {
 
 const MAX_SELECTED_MIDI_INPUTS = 16
 
-export const normalizeMidiSelectedInputIds = (value: unknown): string[] => {
+export const normalizeMidiSelectedInputIds = (
+  value: JsonValue | readonly string[] | undefined,
+): string[] => {
   if (!Array.isArray(value)) return []
   const ids = new Set<string>()
   for (const item of value) {
-    if (typeof item !== "string" || item.length === 0 || item.length > 256) continue
+    if (!isJsonString(item) || item.length === 0 || item.length > 256) continue
     ids.add(item)
     if (ids.size === MAX_SELECTED_MIDI_INPUTS) break
   }

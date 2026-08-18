@@ -1,5 +1,27 @@
 import { buildLocalClip } from "~/lib/clip-create";
-import { AUDIO_EFFECT_CONTRACTS, assert, automationTargetKey, buildClipCreatePayload, type AutomationEnvelope, type ClipCreateSnapshot, granularAutomationKey, instrumentAutomationKey, isLocalId, normalizeAudioWarp, normalizeCompressorParams, normalizeReverbParams, normalizeSpectralParamsEnvelope, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sanitizeLegacyMidiClipForCreate, synthAutomationKey, trackCreationIndex } from "@daw-browser/shared";
+import {
+  AUDIO_EFFECT_CONTRACTS,
+  assert,
+  automationTargetKey,
+  buildClipCreatePayload,
+  isJsonObject,
+  isJsonString,
+  type AutomationEnvelope,
+  type ClipCreateSnapshot,
+  granularAutomationKey,
+  instrumentAutomationKey,
+  isLocalId,
+  normalizeAudioWarp,
+  normalizeCompressorParams,
+  normalizeReverbParams,
+  normalizeSpectralParamsEnvelope,
+  parseGranularAutomationKey,
+  parseInstrumentAutomationKey,
+  parseSynthAutomationKey,
+  sanitizeLegacyMidiClipForCreate,
+  synthAutomationKey,
+  trackCreationIndex,
+} from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
 import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffectInstance } from "~/lib/local-effects";
@@ -162,7 +184,7 @@ export const createHistoryTrack = async (
     color: track.color,
   });
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
-  assert(typeof result === "string", "Failed to create history track");
+  assert(isJsonString(result), "Failed to create history track");
   return { trackId: result, index };
 };
 
@@ -264,10 +286,6 @@ type RestoreUngroupInput = {
   automation?: TrackAutomationSnapshot
   sidechainRoutes: Array<{ sourceTrackId?: Track["id"]; targetTrackId?: Track["id"]; effectInstanceId: string }>
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-)
 
 const snapshotAudioEffects = (effects: TrackEffectSnapshot): TrackAudioEffectSnapshot[] => {
   if (effects.audioEffects?.length) return effects.audioEffects
@@ -380,7 +398,7 @@ export const persistHistoryRestoreUngroup = async (deps: Deps, input: RestoreUng
       },
     },
   )
-  if (!isRecord(result) || result.status !== "applied" || typeof result.groupId !== "string") {
+  if (!isJsonObject(result) || result.status !== "applied" || !isJsonString(result.groupId)) {
     throw new Error("Failed to restore dissolved group.")
   }
   return result.groupId
@@ -407,18 +425,18 @@ export const createHistoryClip = async (
       }),
       operationId: `legacy-history:${crypto.randomUUID()}`,
     });
-    return typeof result === "string" ? result : null;
+    return isJsonString(result) ? result : null;
   }
   const operation = buildSharedClipCreateOperation(buildClipCreatePayload({
     projectId: deps.projectId,
     trackId,
     clip: {
       ...clip,
-      ...(clip.midi ? { midi: sanitizeLegacyMidiClipForCreate(clip.midi) } : {}),
+      midi: clip.midi ? sanitizeLegacyMidiClipForCreate(clip.midi) : undefined,
     },
   }));
   const result = await publishSharedTimelineOperation(deps.projectId, operation);
-  return typeof result === "string" ? result : null;
+  return isJsonString(result) ? result : null;
 };
 
 type TrackDeleteEffects = NonNullable<Extract<HistoryEntry, { type: "track-delete" }>["data"]["effects"]>;
@@ -767,7 +785,7 @@ export const removeHistoryClipIdsOrThrow = async (
   );
   const removedIds = new Set(
     Array.isArray(result?.removedClipIds)
-      ? result.removedClipIds.map((clipId: unknown) => String(clipId))
+    ? result.removedClipIds.map(String)
       : [],
   );
   assert(clipIds.every((clipId) => removedIds.has(String(clipId))), message);
@@ -775,8 +793,8 @@ export const removeHistoryClipIdsOrThrow = async (
   if (Array.isArray(result?.recoveries)) {
     for (const recovery of result.recoveries) {
       if (
-        typeof recovery?.sourceClipId === "string"
-        && typeof recovery.recoveryId === "string"
+        isJsonString(recovery?.sourceClipId)
+        && isJsonString(recovery.recoveryId)
       ) recoveryIdsByClipId.set(recovery.sourceClipId, recovery.recoveryId);
     }
   }
@@ -956,7 +974,7 @@ export const persistHistoryTrackMixState = async (
   trackId: Track["id"],
   mix: { muted?: boolean; soloed?: boolean },
 ) => {
-  if (typeof mix.muted !== "boolean" && typeof mix.soloed !== "boolean") return;
+  if (mix.muted === undefined && mix.soloed === undefined) return;
   await deps.convexClient.mutation(deps.convexApi.tracks.setMix, buildTrackMixMutationInput({
     trackId,
     muted: mix.muted,

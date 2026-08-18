@@ -27,7 +27,7 @@ type MidiInputPort = {
   state: "connected" | "disconnected"
   addEventListener: (type: "midimessage", listener: (event: MidiMessage) => void) => void
   removeEventListener: (type: "midimessage", listener: (event: MidiMessage) => void) => void
-  close: () => Promise<unknown>
+  close: () => Promise<object>
 }
 
 type MidiAccess = {

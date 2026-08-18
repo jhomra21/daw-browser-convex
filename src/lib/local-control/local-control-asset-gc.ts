@@ -1,4 +1,5 @@
 import { removeLocalAssetFileUnlocked } from '~/lib/local-assets'
+import { isJsonNumber, isJsonString, type JsonValue } from '@daw-browser/shared'
 import { assetCloudIdMappingKey, isAssetCloudMappingRow } from '~/lib/local-cloud-id-map'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import type { LocalControlAssetGcRow } from '~/lib/local-project-db'
@@ -15,28 +16,24 @@ const claimToken = () => Array.from(
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-const isText = (value: unknown): value is string => typeof value === 'string' && value.length > 0
-const isBoundedText = (value: unknown, maximum: number): value is string => (
+const isText = (value: JsonValue | undefined): value is string => isJsonString(value) && value.length > 0
+const isBoundedText = (value: JsonValue | undefined, maximum: number): value is string => (
   isText(value) && value.length <= maximum
 )
-const isLocalAssetStoragePath = (value: unknown): value is string => (
+const isLocalAssetStoragePath = (value: JsonValue | undefined): value is string => (
   isBoundedText(value, 2_048)
   && value !== '.'
   && value !== '..'
   && !/[\\/:]/u.test(value)
 )
-const isTime = (value: unknown): value is number => (
-  typeof value === 'number' && Number.isInteger(value) && value >= 0
+const isTime = (value: JsonValue | undefined): value is number => (
+  isJsonNumber(value) && Number.isInteger(value) && value >= 0
 )
-const isClaimToken = (value: unknown): value is string => (
-  typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value)
+const isClaimToken = (value: JsonValue | undefined): value is string => (
+  isJsonString(value) && /^[0-9a-f]{64}$/u.test(value)
 )
 
-const parseAssetGcRow = (value: unknown): LocalControlAssetGcRow | undefined => {
-  if (!isRecord(value)) return undefined
+const parseAssetGcRow = (value: LocalControlAssetGcRow): LocalControlAssetGcRow | undefined => {
   const {
     id, version, projectId, assetId, eligibleAt, storagePath, recoveryId,
     cloudAssetKey, claimToken: rowClaimToken, claimedAt,
@@ -56,7 +53,7 @@ const parseAssetGcRow = (value: unknown): LocalControlAssetGcRow | undefined => 
     || rowClaimToken === undefined && claimedAt !== undefined
     || rowClaimToken !== undefined && claimedAt === undefined
   ) return undefined
-  return {
+  const row: LocalControlAssetGcRow = {
     id,
     version: 1,
     projectId,
@@ -64,10 +61,11 @@ const parseAssetGcRow = (value: unknown): LocalControlAssetGcRow | undefined => 
     eligibleAt,
     storagePath,
     recoveryId,
-    ...(cloudAssetKey === undefined ? {} : { cloudAssetKey }),
-    ...(rowClaimToken === undefined ? {} : { claimToken: rowClaimToken }),
-    ...(claimedAt === undefined ? {} : { claimedAt }),
+    cloudAssetKey,
+    claimToken: rowClaimToken,
+    claimedAt,
   }
+  return row
 }
 
 const hasLiveAssetReference = (
@@ -80,8 +78,9 @@ const inactiveRecoveryFor = (
   rows: readonly unknown[],
   now: number,
 ) => {
-  const row = rows.find((candidate) => isRecord(candidate) && candidate.id === job.recoveryId)
-  const recovery = parseLocalControlRecoveryRow(row)
+  const recovery = rows
+    .map(parseLocalControlRecoveryRow)
+    .find((candidate) => candidate?.id === job.recoveryId)
   if (!recovery || recovery.recovery.kind !== 'asset.delete') return undefined
   const payload = recovery.recovery
   if (

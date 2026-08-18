@@ -181,7 +181,6 @@ const serializeTransport = (input: NativeHostTransport) => {
       && (!Number.isSafeInteger(input.timeSignatureDenominator)
         || input.timeSignatureDenominator <= 0 || input.timeSignatureDenominator > 32))
     || ((input.timeSignatureNumerator === undefined) !== (input.timeSignatureDenominator === undefined))
-    || (input.cycleActive !== undefined && typeof input.cycleActive !== "boolean")
     || (input.cycleStartSec !== undefined && (!Number.isFinite(input.cycleStartSec) || input.cycleStartSec < 0))
     || (input.cycleEndSec !== undefined && (!Number.isFinite(input.cycleEndSec) || input.cycleEndSec < 0))
     || ((input.cycleStartSec !== undefined || input.cycleEndSec !== undefined)
@@ -465,12 +464,20 @@ export type NativeWorkerNotification =
     normalizedValue: number
   })
 
-export type NativeVstEditorCommand = "open" | "close" | "focus" | "resize" | "status"
-export type NativeVstEditorAnchor = { x: number; y: number }
-export const nativeVstEditorOwnershipProbe = (instanceId: string): {
+type NativeVstEditorOwnershipProbe = {
   instanceId: string
   command: "status"
-} => ({
+}
+
+type NativeAudioHostTerminationTimers = {
+  graceful?: ReturnType<typeof setTimeout>
+  sigterm?: ReturnType<typeof setTimeout>
+  killObservation?: ReturnType<typeof setTimeout>
+}
+
+export type NativeVstEditorCommand = "open" | "close" | "focus" | "resize" | "status"
+export type NativeVstEditorAnchor = { x: number; y: number }
+export const nativeVstEditorOwnershipProbe = (instanceId: string): NativeVstEditorOwnershipProbe => ({
   instanceId,
   command: "status",
 })
@@ -1053,11 +1060,7 @@ export const createNativeAudioHostSupervisor = (
   }
   const terminateDetachedChild = (current: ChildProcessWithoutNullStreams) => new Promise<void>((resolve, reject) => {
     let settled = false
-    const timers: {
-      graceful?: ReturnType<typeof setTimeout>
-      sigterm?: ReturnType<typeof setTimeout>
-      killObservation?: ReturnType<typeof setTimeout>
-    } = {}
+    const timers: NativeAudioHostTerminationTimers = {}
     const finish = (error?: Error) => {
       if (settled) return
       settled = true
@@ -1511,7 +1514,7 @@ export const createNativeAudioHostSupervisor = (
     const next = urgentSends.shift() ?? refillSends.shift() ?? normalSends.shift()
     if (!next) return
     if ((teardownPromise && !next.allowDuringTeardown)
-      || (typeof transactionOwner === "symbol" && transactionOwner !== next.owner)) {
+      || (transactionOwner !== undefined && transactionOwner !== next.owner)) {
       next.reject(new Error("The native audio host is unavailable."))
       dispatchNext()
       return
@@ -1562,7 +1565,7 @@ export const createNativeAudioHostSupervisor = (
     allowDuringTeardown = false,
   ) => new Promise<void>((resolve, reject) => {
     if (suspended || !child || (teardownPromise && !allowDuringTeardown)
-      || (typeof transactionOwner === "symbol" && transactionOwner !== owner)) {
+      || (transactionOwner !== undefined && transactionOwner !== owner)) {
       reject(new Error("The native audio host is unavailable."))
       return
     }
@@ -1600,7 +1603,7 @@ export const createNativeAudioHostSupervisor = (
     await supervisor.start()
     return new Promise((resolve, reject) => {
       if (suspended || !child || teardownPromise
-        || (typeof transactionOwner === "symbol" && transactionOwner !== owner)) {
+        || (transactionOwner !== undefined && transactionOwner !== owner)) {
         reject(new Error("The native audio host is unavailable."))
         return
       }
@@ -2102,7 +2105,7 @@ export const createNativeAudioHostSupervisor = (
       )
       return next
     },
-    status: () => ({ running: child !== undefined && hello !== undefined, ...(hello ? { hello } : {}) }),
+    status: () => ({ running: child !== undefined && hello !== undefined, hello: hello ? hello : undefined }),
     transactionOpen: () => transactionOwner !== undefined,
     onLoss(listener) {
       lossListeners.add(listener)

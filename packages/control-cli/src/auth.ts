@@ -6,6 +6,7 @@ import {
   type ControlCredentials,
 } from "./credentials"
 import { normalizeControlOrigin } from "@daw-browser/control-sdk"
+import { z } from "zod"
 
 const requestedScopes = ["control:read", "control:write", "offline_access"]
 const refreshSkewMs = 60_000
@@ -48,13 +49,32 @@ export const persistLoginCredentials = async (
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-)
-
-const stringArray = (value: unknown): string[] | undefined => (
-  Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined
-)
+const oauthResourceMetadataSchema = z.object({
+  resource: z.string(),
+  authorization_servers: z.array(z.string()),
+  scopes_supported: z.array(z.string()),
+}).passthrough()
+const oauthAuthorizationMetadataSchema = z.object({
+  issuer: z.string(),
+  authorization_endpoint: z.string().url(),
+  token_endpoint: z.string().url(),
+  registration_endpoint: z.string().url(),
+  revocation_endpoint: z.string().url(),
+  response_types_supported: z.array(z.string()),
+  grant_types_supported: z.array(z.string()),
+  token_endpoint_auth_methods_supported: z.array(z.string()),
+  code_challenge_methods_supported: z.array(z.string()),
+  scopes_supported: z.array(z.string()),
+}).passthrough()
+const oauthTokenSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1),
+  token_type: z.literal("Bearer"),
+  expires_in: z.number().finite().positive(),
+  scope: z.string().optional(),
+}).passthrough()
+const oauthErrorSchema = z.object({ error: z.string() }).passthrough()
+const oauthRegistrationSchema = z.object({ client_id: z.string().min(1) }).passthrough()
 
 const secureRandom = (bytes: number) => {
   const value = new Uint8Array(bytes)
@@ -68,8 +88,7 @@ export const pkceChallenge = async (verifier: string) => (
 
 export const normalizeBaseUrl = normalizeControlOrigin
 
-const urlAtOrigin = (value: unknown, origin: string, field: string) => {
-  if (typeof value !== "string") throw new Error(`OAuth metadata is missing ${field}.`)
+const urlAtOrigin = (value: string, origin: string, field: string) => {
   const url = new URL(value)
   if (url.origin !== origin || url.protocol !== new URL(origin).protocol) throw new Error(`OAuth metadata has an invalid ${field}.`)
   return url.toString()
@@ -81,25 +100,24 @@ const metadata = async (origin: string, requestFetch: FetchLike): Promise<Author
     requestFetch(`${origin}/.well-known/oauth-authorization-server`),
   ])
   if (!resourceResponse.ok || !authorizationResponse.ok) throw new Error("OAuth metadata discovery failed.")
-  const [resource, authorization] = await Promise.all([
-    resourceResponse.json(),
-    authorizationResponse.json(),
+  const [resourceResult, authorizationResult] = await Promise.all([
+    resourceResponse.json().then((body) => oauthResourceMetadataSchema.safeParse(body)),
+    authorizationResponse.json().then((body) => oauthAuthorizationMetadataSchema.safeParse(body)),
   ])
-  if (!isRecord(resource) || resource.resource !== `${origin}/api`) throw new Error("OAuth protected resource metadata is invalid.")
-  const authorizationServers = stringArray(resource.authorization_servers)
-  const resourceScopes = stringArray(resource.scopes_supported)
-  if (!authorizationServers || authorizationServers.length !== 1 || authorizationServers[0] !== origin
-    || !resourceScopes || !requestedScopes.every((scope) => resourceScopes.includes(scope))) {
+  if (!resourceResult.success || resourceResult.data.resource !== `${origin}/api`) throw new Error("OAuth protected resource metadata is invalid.")
+  const resource = resourceResult.data
+  const authorization = authorizationResult.success ? authorizationResult.data : undefined
+  if (!resource.authorization_servers.length || resource.authorization_servers.length !== 1 || resource.authorization_servers[0] !== origin
+    || !requestedScopes.every((scope) => resource.scopes_supported.includes(scope))) {
     throw new Error("OAuth protected resource metadata is unsupported.")
   }
-  if (!isRecord(authorization) || authorization.issuer !== origin) throw new Error("OAuth authorization metadata is invalid.")
-  const responseTypes = stringArray(authorization.response_types_supported)
-  const grants = stringArray(authorization.grant_types_supported)
-  const methods = stringArray(authorization.token_endpoint_auth_methods_supported)
-  const challenges = stringArray(authorization.code_challenge_methods_supported)
-  const scopes = stringArray(authorization.scopes_supported)
-  if (!responseTypes?.includes("code") || !grants?.includes("authorization_code") || !grants.includes("refresh_token")
-    || !methods?.includes("none") || !challenges?.includes("S256") || !scopes || !requestedScopes.every((scope) => scopes.includes(scope))) {
+  if (!authorization || authorization.issuer !== origin) throw new Error("OAuth authorization metadata is invalid.")
+  if (!authorization.response_types_supported.includes("code")
+    || !authorization.grant_types_supported.includes("authorization_code")
+    || !authorization.grant_types_supported.includes("refresh_token")
+    || !authorization.token_endpoint_auth_methods_supported.includes("none")
+    || !authorization.code_challenge_methods_supported.includes("S256")
+    || !requestedScopes.every((scope) => authorization.scopes_supported.includes(scope))) {
     throw new Error("OAuth authorization metadata is unsupported.")
   }
   return {
@@ -112,23 +130,19 @@ const metadata = async (origin: string, requestFetch: FetchLike): Promise<Author
 }
 
 const parseToken = async (response: Response, expectedScopes: string[]): Promise<OAuthToken> => {
-  const body: unknown = await response.json().catch(() => undefined)
+  const body = await response.json().catch(() => undefined)
   if (!response.ok) {
-    if (isRecord(body) && body.error === "invalid_grant") throw new OAuthRefreshRejectedError()
+    if (oauthErrorSchema.safeParse(body).data?.error === "invalid_grant") throw new OAuthRefreshRejectedError()
     throw new Error("OAuth token request failed.")
   }
-  if (!isRecord(body)
-    || typeof body.access_token !== "string" || body.access_token.length === 0
-    || typeof body.refresh_token !== "string" || body.refresh_token.length === 0
-    || body.token_type !== "Bearer"
-    || typeof body.expires_in !== "number" || !Number.isFinite(body.expires_in) || body.expires_in <= 0
-    || (body.scope !== undefined && typeof body.scope !== "string")) throw new Error("OAuth token response is invalid.")
-  const scopes = (body.scope ?? expectedScopes.join(" ")).split(" ").filter(Boolean)
+  const parsed = oauthTokenSchema.safeParse(body)
+  if (!parsed.success) throw new Error("OAuth token response is invalid.")
+  const scopes = (parsed.data.scope ?? expectedScopes.join(" ")).split(" ").filter(Boolean)
   if (!expectedScopes.every((scope) => scopes.includes(scope))) throw new Error("OAuth token response has insufficient scopes.")
   return {
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token,
-    expiresAt: Date.now() + body.expires_in * 1000,
+    accessToken: parsed.data.access_token,
+    refreshToken: parsed.data.refresh_token,
+    expiresAt: Date.now() + parsed.data.expires_in * 1000,
     scopes,
   }
 }
@@ -167,11 +181,11 @@ const registerClient = async (
     }),
     credentials: "omit",
   })
-  const body: unknown = await response.json().catch(() => undefined)
-  if (!response.ok || !isRecord(body) || typeof body.client_id !== "string" || body.client_id.length === 0) {
+  const body = oauthRegistrationSchema.safeParse(await response.json().catch(() => undefined))
+  if (!response.ok || !body.success) {
     throw new Error("OAuth client registration failed.")
   }
-  return body.client_id
+  return body.data.client_id
 }
 
 type Callback = { code: string } | { error: true }

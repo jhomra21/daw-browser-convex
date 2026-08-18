@@ -249,28 +249,15 @@ test("phase 3B-1 automation row helpers stay revision-free while wrappers versio
     instanceId: "gate-1",
     params: gateParams,
   }));
-  const input: {
-    projectId: string;
-    targetKind: "track";
-    trackId: typeof trackId;
-    effectInstanceId: string;
-    parameterId: string;
-    enabled: boolean;
-    points: Array<{
-      id: string;
-      timeSec: number;
-      value: number;
-      interpolation: "linear";
-    }>;
-  } = {
+  const input = {
     projectId,
-    targetKind: "track",
+    targetKind: "track" satisfies "track",
     trackId,
     effectInstanceId: "gate-1",
     parameterId: "gate.thresholdDb",
     enabled: true,
-    points: [{ id: "point-1", timeSec: 0, value: -30, interpolation: "linear" }],
-  };
+    points: [{ id: "point-1", timeSec: 0, value: -30, interpolation: "linear" satisfies "linear" }],
+  } satisfies Parameters<typeof setAutomationEnvelopeRow>[1];
 
   const created = await t.run(async (ctx) => await setAutomationEnvelopeRow(ctx, input));
   expect(created).toMatchObject({ changed: true, status: "created" });

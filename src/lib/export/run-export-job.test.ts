@@ -459,8 +459,8 @@ test("instrument export preload reads local-asset bytes with the project context
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
   if (!firstPad) throw new Error("Expected a default drum-rack pad.")
-  const instrumentKind: "drum-rack" = "drum-rack"
-  const sampleSourceKind: "upload" = "upload"
+  const instrumentKind = "drum-rack" as const
+  const sampleSourceKind = "upload" as const
   const fx: ExportFx = {
     trackFx: {
       "track-local": {

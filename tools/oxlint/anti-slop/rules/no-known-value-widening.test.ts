@@ -12,6 +12,13 @@ tester.run("anti-slop/no-known-value-widening", noKnownValueWideningRule, {
 	valid: [
 		`${prelude} const commands: Record<string, Command> = {};`,
 		`${prelude} type Index<T> = Record<string, T>; const commands: Index<Command> = {};`,
+		`${prelude} class Registry { commands: Record<string, Command> = {}; }`,
+		`${prelude} class Registry { accessor commands: Record<string, Command> = {}; }`,
+		`${prelude} let commands: Record<string, Command>; commands = {};`,
+		`${prelude} function create(): Record<string, Command> { return {}; }`,
+		`${prelude} const create = (): Record<string, Command> => ({});`,
+		`${prelude} const commands = {} as Record<string, Command>;`,
+		`${prelude} const commands = <Record<string, Command>>{};`,
 		`${prelude} const commands = { start: startCommand };`,
 		`${prelude} const commands = { start: startCommand } as const;`,
 		`${prelude} const commands = { start: startCommand } satisfies Record<string, Command>;`,
@@ -19,7 +26,6 @@ tester.run("anti-slop/no-known-value-widening", noKnownValueWideningRule, {
 		`${prelude} interface Commands { readonly start: Command } const commands: Commands = { start: startCommand };`,
 		`${prelude} type Commands = { readonly start: Command }; const commands: Commands = { start: startCommand };`,
 		`${prelude} type PermissionLevels = { readonly [Level in Permission]: number }; const levels: PermissionLevels = { admin: 1 };`,
-		`${prelude} type Index<T> = Record<string, T>; type CommandsByName = Index<Command>; const commands: CommandsByName = { start: startCommand };`,
 		`${prelude} function create() { return { start: startCommand }; }`,
 		`${prelude} interface Commands { readonly start: Command } function create(): Commands { return { start: startCommand }; }`,
 		`${prelude} declare function make(): Record<string, Command>; const commands: Record<string, Command> = make();`,
@@ -75,7 +81,27 @@ tester.run("anti-slop/no-known-value-widening", noKnownValueWideningRule, {
 			errors: [error],
 		},
 		{
+			code: `${prelude} type Open = Record<string, Command>; const source = { start: startCommand }; const commands: Open = source;`,
+			errors: [error],
+		},
+		{
+			code: `${prelude} type Open = { [key: string]: Command }; const source = { start: startCommand }; const commands: Open = source;`,
+			errors: [error],
+		},
+		{
+			code: `${prelude} type Open = { [key in string]: Command }; const source = { start: startCommand }; const commands: Open = source;`,
+			errors: [error],
+		},
+		{
+			code: `${prelude} type Open = Readonly<Record<string, Command>>; const source = { start: startCommand }; const commands: Open = source;`,
+			errors: [error],
+		},
+		{
 			code: `${prelude} type Index<T> = Record<string, T>; const commands: Index<Command> = { start: startCommand };`,
+			errors: [error],
+		},
+		{
+			code: `${prelude} type Index<T> = Record<string, T>; type CommandsByName = Index<Command>; const commands: CommandsByName = { start: startCommand };`,
 			errors: [error],
 		},
 		{

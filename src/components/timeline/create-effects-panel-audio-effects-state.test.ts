@@ -10,7 +10,7 @@ import {
   createEffectsPanelAudioDevice,
 } from "./create-effects-panel-audio-effects-state";
 
-type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
+type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<void>;
 
 class SpyAudioEngine extends AudioEngine {
   readonly trackFxCalls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = [];
@@ -46,7 +46,7 @@ const createDevice = (
     projectGeneration?: number;
     targetId?: string;
     persistAudioEffectOrder?: PersistOrder;
-    persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<unknown>;
+    persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<void>;
     sidechainRoutes?: ExternalSidechainRoute[];
     onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   } = {},
@@ -152,11 +152,8 @@ describe("effects panel instance engine synchronization", () => {
       await addPromise;
 
       expect(engine.trackFxCalls.length).toBeGreaterThan(before);
-      const hasUpdatedFeedback = (params: unknown) => (
-        typeof params === "object" &&
-        params !== null &&
-        "feedback" in params &&
-        params.feedback === 0.8
+      const hasUpdatedFeedback = (params: AudioEffectRuntimeInstance["params"]) => (
+        "feedback" in params && params.feedback === 0.8
       );
       const updated = engine.trackFxCalls
         .flatMap((call) => call.instances)

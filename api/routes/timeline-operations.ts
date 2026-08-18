@@ -2,18 +2,17 @@ import { api as convexApi } from '../../convex/_generated/api'
 import type { App } from '../app-types'
 import { parseJsonBody } from '../json-body'
 import { requireProjectRoleContextForApi } from '../project-access'
-import { parseSharedTimelineOperation, type SharedTimelineOperation } from '@daw-browser/shared'
+import { parseSharedTimelineOperation, type JsonValue, type SharedTimelineOperation } from '@daw-browser/shared'
 import { executeTimelineOperation, TimelineOperationTargetError } from '../timeline-operation-executor'
 import { z } from 'zod'
 
 export const parseTimelineOperationRequest = (
-  value: unknown,
+  value: JsonValue,
 ): SharedTimelineOperation | null => parseSharedTimelineOperation(value)
 
-const timelineOperationRequestSchema = () => z.preprocess(
-  parseTimelineOperationRequest,
-  z.custom<SharedTimelineOperation>((value) => value !== null),
-)
+const timelineOperationRequestSchema = () => z.json()
+  .transform(parseTimelineOperationRequest)
+  .pipe(z.custom<SharedTimelineOperation>((value) => value !== null))
 
 export function registerTimelineOperationRoutes(app: App) {
   app.get('/api/projects/:projectId/timeline/full-view', async (c) => {

@@ -1,5 +1,6 @@
 import { normalizeMixedEffectEntityRows, mixedOrderFromRows } from './mixed-effect-order'
 import { expect, test } from 'bun:test'
+import { isJsonObject } from '@daw-browser/shared'
 
 const external = (instanceId: string, index: number) => ({
   instanceId,
@@ -46,7 +47,7 @@ test('normalizes legacy built-in and external rows into one target order', () =>
     { kind: 'external', instanceId: '00000000-0000-4000-8000-000000000001' },
     { kind: 'builtin', instanceId: 'builtin-b' },
   ])
-  expect(rows.map((row) => Reflect.get(row.value, 'index'))).toEqual([0, 2, 1])
+  expect(rows.map((row) => isJsonObject(row.value) ? row.value.index : undefined)).toEqual([0, 2, 1])
 })
 
 test('rejects duplicate instance identities across built-in and external rows', () => {
@@ -78,5 +79,7 @@ test('leaves instrument, synth, arp, and non-audio rows out of mixed effect migr
     { kind: 'builtin', instanceId: 'delay' },
   ])
   expect(rows.find((row) => row.id === 'delay-row')?.value).toMatchObject({ index: 1 })
-  expect(rows.filter((row) => row.id !== 'delay-row' && row.kind === 'effect').map((row) => Reflect.get(row.value, 'index'))).toEqual([0, 1, 2, 3])
+  expect(rows.filter((row) => row.id !== 'delay-row' && row.kind === 'effect').map((row) => (
+    isJsonObject(row.value) ? row.value.index : undefined
+  ))).toEqual([0, 1, 2, 3])
 })

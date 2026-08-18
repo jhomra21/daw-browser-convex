@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/solid-router";
 import { For, Show, createMemo, createSignal } from "solid-js";
+import { isJsonObject, isJsonString, type JsonValue } from "@daw-browser/shared";
 
 const Consent = () => {
   const [submitting, setSubmitting] = createSignal(false);
@@ -26,13 +27,11 @@ const Consent = () => {
           })(),
         }),
       });
-      const body: unknown = await response.json();
+      const body: JsonValue = await response.json();
       if (
         !response.ok
-        || typeof body !== "object"
-        || body === null
-        || !("redirect_uri" in body)
-        || typeof body.redirect_uri !== "string"
+        || !isJsonObject(body)
+        || !isJsonString(body.redirect_uri)
       ) {
         throw new Error("Unable to complete consent.");
       }

@@ -211,7 +211,13 @@ const createBridge = (
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
   const installedAssets: NativeHostPcmAsset[] = []
-  const transports: Array<{ epoch: number; frame: number; running: boolean }> = []
+  const transports: Array<{
+    epoch: number
+    frame: number
+    running: boolean
+    hasCycleStart: boolean
+    hasCycleEnd: boolean
+  }> = []
   const spectrumNodeIds: Array<bigint | null> = []
   const spectrumSelections: Array<{ nodeId: bigint | null; sessionStarted: boolean }> = []
   const instrumentRequests: Array<{
@@ -406,6 +412,8 @@ const createBridge = (
             epoch: transport.epoch,
             frame: transport.frame,
             running: transport.running,
+            hasCycleStart: Object.hasOwn(transport, "cycleStartSec"),
+            hasCycleEnd: Object.hasOwn(transport, "cycleEndSec"),
           })
           transportEpoch = transport.epoch
           appliedTransitionId = transport.transitionId ?? (appliedTransitionId + 1n)
@@ -562,6 +570,7 @@ test("commits a supported native session before starting and tears it down deter
 
   expect(await controller.start(input().transport)).toBe("started")
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport"])
+  expect(fixture.transports.every(({ hasCycleStart, hasCycleEnd }) => !hasCycleStart && !hasCycleEnd)).toBe(true)
   await controller.dispose()
   expect(fixture.calls).toEqual([
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
@@ -820,7 +829,13 @@ test("seeks a paused native preview without rebuilding its prepared session", as
   expect(controller.canProcessLiveMidi()).toBeTrue()
   expect(controller.hasLiveMidiTails()).toBeTrue()
   expect(resetCount).toBe(0)
-  expect(fixture.transports.at(-1)).toEqual({ epoch: 2, frame: 24_000, running: false })
+  expect(fixture.transports.at(-1)).toEqual({
+    epoch: 2,
+    frame: 24_000,
+    running: false,
+    hasCycleStart: false,
+    hasCycleEnd: false,
+  })
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beforeCounts.begin)
   expect(fixture.calls.filter((call) => call === "graph")).toHaveLength(beforeCounts.graph)
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(beforeCounts.install)

@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { createDefaultGranularParams } from '@daw-browser/shared'
-import { createGranularRuntime } from './granular-runtime'
+import {
+  createGranularRuntime,
+  type GranularWorkletControlMessage,
+  type GranularWorkletStatusMessage,
+} from './granular-runtime'
 
 class FakeAudioBuffer {
   readonly length: number
@@ -46,7 +50,7 @@ describe('granular runtime transfer contract', () => {
       ['stereoSpread', parameter('stereoSpread')],
       ['gate', parameter('gate')],
     ])
-    const messages: unknown[] = []
+    const messages: GranularWorkletControlMessage[] = []
     const node = {
       parameters,
       connect: () => {},
@@ -54,7 +58,7 @@ describe('granular runtime transfer contract', () => {
       onprocessorerror: null,
       port: {
         onmessage: null,
-        postMessage: (message: unknown) => messages.push(message),
+        postMessage: (message: GranularWorkletControlMessage) => messages.push(message),
         close: () => {},
       },
     }
@@ -88,9 +92,9 @@ describe('granular runtime transfer contract', () => {
 
   test('acks transfers, deduplicates identity, freezes, releases, faults, and closes idempotently', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
-    const messages: unknown[] = []
+    const messages: GranularWorkletControlMessage[] = []
     const transfers: Transferable[][] = []
-    let onmessage: ((event: MessageEvent) => void) | null = null
+    let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     let disconnected = 0
     let released = 0
     const node = {
@@ -101,7 +105,7 @@ describe('granular runtime transfer contract', () => {
       port: {
         get onmessage() { return onmessage },
         set onmessage(value) { onmessage = value },
-        postMessage: (message: unknown, options?: StructuredSerializeOptions | Transferable[]) => {
+        postMessage: (message: GranularWorkletControlMessage, options?: StructuredSerializeOptions | Transferable[]) => {
           messages.push(message)
           if (Array.isArray(options)) transfers.push(options)
         },
@@ -179,7 +183,7 @@ describe('granular runtime transfer contract', () => {
 
   test('rejects oversize, install errors, stale acknowledgements, and pending work on close', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
-    let onmessage: ((event: MessageEvent) => void) | null = null
+    let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     const faults: string[] = []
     const node = {
       parameters: new Map(),

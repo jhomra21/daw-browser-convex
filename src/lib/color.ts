@@ -1,7 +1,7 @@
 import { isHexColor } from '@daw-browser/shared'
 
-export const parseHexColor = (value: unknown, fallback: string): string =>
-  typeof value === "string" && isHexColor(value) ? value : fallback
+export const parseHexColor = (value: string | undefined, fallback: string): string =>
+  value !== undefined && isHexColor(value) ? value : fallback
 
 export const colorInputValue = (color: string, fallback: string): string => {
   const parsed = parseHexColor(color, fallback)

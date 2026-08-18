@@ -19,7 +19,7 @@ export const deviceCollapseIdentity = {
 };
 
 const canUseStorage = () => {
-  if (typeof window === "undefined") return false;
+  if (!globalThis.window) return false;
   try {
     return Boolean(window.localStorage);
   } catch {
@@ -133,11 +133,12 @@ export type DeviceCollapseGestureResult = {
   recognized: boolean;
 };
 
-export const devicePointerIdentity = (event: Pick<PointerEvent, "pointerType"> & { persistentDeviceId?: string }) => (
-  typeof event.persistentDeviceId === "string" && event.persistentDeviceId.length > 0
-    ? event.persistentDeviceId
-    : event.pointerType
-);
+export const devicePointerIdentity = (event: PointerEvent) => {
+  const persistentDeviceId = event.persistentDeviceId;
+  return persistentDeviceId !== 0
+    ? String(persistentDeviceId)
+    : event.pointerType;
+};
 
 export const recognizeDeviceDoubleTap = (
   previous: DeviceCollapseGesture,

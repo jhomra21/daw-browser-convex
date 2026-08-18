@@ -176,10 +176,7 @@ const resolveCompatibleTarget = (
   };
 };
 
-export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions): {
-  session: Accessor<BrowserDragSession | undefined>;
-  onPointerDown: (event: PointerEvent, itemId: string) => void;
-} {
+export function createBrowserDeviceDrag(options: BrowserDeviceDragOptions) {
   const [session, setSession] = createSignal<BrowserDragSession>();
   let clickSuppressor: ((event: MouseEvent) => void) | undefined;
   let pending:

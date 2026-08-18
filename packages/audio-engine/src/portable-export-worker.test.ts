@@ -11,6 +11,7 @@ import {
   portableExportWorkerMaxFrames,
   portableExportWorkerProtocolVersion,
   type PortableExportWorkerRequest,
+  type PortableExportWorkerResponse,
 } from './portable-export-worker-protocol'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import { portableWasmCapabilityMatrix as emittedPortableWasmCapabilityMatrix } from '../../../public/audio-workers/daw-portable-capability-metadata-v1.js'
@@ -18,7 +19,7 @@ import { portableWasmCapabilityMatrix as emittedPortableWasmCapabilityMatrix } f
 const workerUrl = new URL('../../../public/audio-workers/daw-portable-export-worker-v1.js', import.meta.url)
 
 class MockWorker implements PortableExportWorkerLike {
-  onmessage: ((event: MessageEvent<unknown>) => void) | null = null
+  onmessage: ((event: MessageEvent<PortableExportWorkerResponse>) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   readonly messages: PortableExportWorkerRequest[] = []
   readonly transfers: Transferable[][] = []
@@ -144,27 +145,30 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
   expect(artifact.bytes.byteLength).toBe(bytes.byteLength)
 
   worker.onmessage?.(new MessageEvent('message', {
-    data: { version: portableExportWorkerProtocolVersion, type: 'complete', jobId: message.jobId },
+    data: {
+      version: portableExportWorkerProtocolVersion,
+      type: 'complete',
+      jobId: message.jobId,
+      frameCount: 1,
+      chunkCount: 0,
+    },
   }))
   await rendering
 })
 
 test('the Worker rejects unsupported snapshots and renders the production Wasm artifact in bounded transferable chunks', async () => {
-  const responses: unknown[] = []
+  type WorkerHarness = {
+    onmessage: ((event: MessageEvent<object>) => void) | null
+    postMessage: (message: PortableExportWorkerResponse) => void
+  }
+  const responses: PortableExportWorkerResponse[] = []
   const cancellation = { jobId: 0 }
-  const harness: {
-    onmessage: ((event: MessageEvent<unknown>) => void) | null
-    postMessage: (message: unknown) => void
-  } = {
+  const harness: WorkerHarness = {
     onmessage: null,
-    postMessage: (message: unknown) => {
+    postMessage: (message) => {
       responses.push(message)
       if (cancellation.jobId > 0
-        && typeof message === 'object'
-        && message !== null
-        && 'type' in message
         && message.type === 'chunk'
-        && 'jobId' in message
         && message.jobId === cancellation.jobId) {
         harness.onmessage?.(new MessageEvent('message', {
           data: { version: portableExportWorkerProtocolVersion, type: 'cancel', jobId: cancellation.jobId },
@@ -203,7 +207,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     message: 'The export snapshot contains a processor or instrument unsupported by the portable core.',
   }])
 
-  const renderRequest = {
+  const renderRequest: Extract<PortableExportWorkerRequest, { type: 'render' }> = {
       version: portableExportWorkerProtocolVersion,
       type: 'render',
       jobId: 2,
@@ -222,7 +226,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
             { id: 'source', kind: 'source', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] },
             { id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] },
           ],
-          edges: [{ version: 1, id: 'source-master', fromNodeId: 'source', toNodeId: 'master', gain: 1, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 }],
+          edges: [{ version: 1, id: 'source-master', fromNodeId: 'source', toNodeId: 'master', gain: 1, kind: 'output', tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 }],
           masterNodeId: 'master',
           assets: [{ version: 1, assetId: 'fixture', frameCount: 4, sampleRateHz: 48_000, channelCount: 2 }],
         },
@@ -252,13 +256,12 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
   harness.onmessage(new MessageEvent('message', { data: renderRequest }))
 
   for (let attempt = 0; attempt < 50 && !responses.some((response) => (
-    typeof response === 'object' && response !== null && 'type' in response && response.type === 'complete'
+    response.type === 'complete'
   )); attempt += 1) await Bun.sleep(10)
-  const chunk = responses.find((response) => (
-    typeof response === 'object' && response !== null && 'type' in response && response.type === 'chunk'
-  ))
-  if (!chunk || typeof chunk !== 'object' || !('pcm' in chunk) || typeof chunk.pcm !== 'object' || chunk.pcm === null
-    || !('planes' in chunk.pcm) || !Array.isArray(chunk.pcm.planes)) throw new Error('Worker did not return PCM.')
+  const chunk = responses.find((
+    response,
+  ): response is Extract<PortableExportWorkerResponse, { type: 'chunk' }> => response.type === 'chunk')
+  if (!chunk) throw new Error('Worker did not return PCM.')
   expect(chunk.pcm.planes).toEqual([
     new Float32Array([0, 0.25, -0.5, 1]),
     new Float32Array([1, -0.5, 0.25, 0]),
@@ -281,8 +284,7 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     },
   }))
   for (let attempt = 0; attempt < 50 && !responses.some((response) => (
-    typeof response === 'object' && response !== null && 'type' in response
-      && response.type === 'cancelled' && 'jobId' in response && response.jobId === 3
+    response.type === 'cancelled' && response.jobId === 3
   )); attempt += 1) await Bun.sleep(10)
   expect(responses).toContainEqual({
     version: portableExportWorkerProtocolVersion,
@@ -290,7 +292,6 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     jobId: 3,
   })
   expect(responses.some((response) => (
-    typeof response === 'object' && response !== null && 'type' in response
-      && response.type === 'complete' && 'jobId' in response && response.jobId === 3
+    response.type === 'complete' && response.jobId === 3
   ))).toBe(false)
 })

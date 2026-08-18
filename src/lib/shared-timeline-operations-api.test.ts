@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
+import type { JsonValue } from '@daw-browser/shared'
 import {
   publishSharedTimelineOperation,
   SharedTimelineOperationRejectedError,
 } from './shared-timeline-operations-api'
 
-const respondWith = (result: unknown): typeof fetch => (
+const respondWith = (result: JsonValue): typeof fetch => (
   Object.assign(
     async () => new Response(JSON.stringify(result), { status: 200 }),
     { preconnect: globalThis.fetch.preconnect },

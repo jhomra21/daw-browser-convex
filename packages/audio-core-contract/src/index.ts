@@ -101,7 +101,7 @@ export type AmplitudeModulationProcessorState = {
   waveform: 'sine' | 'triangle'
   rateHz: number
   depth: number
-  shape: number
+  'shape': number
   phase: number
 }
 
@@ -182,7 +182,7 @@ export type ReverbProcessorState = {
   reflectionSpin: boolean
   reflectionModAmountMs: number
   reflectionModRateHz: number
-  reflectionShape: number
+  'reflectionShape': number
   diffuse: number
   size: number
   diffusion: number
@@ -316,7 +316,7 @@ export type AudioCoreGranularState = {
   assetId: string
   seed: number
   maxGrains: number
-  windowShape: 'hann' | 'tukey' | 'gaussian'
+  'windowShape': 'hann' | 'tukey' | 'gaussian'
   freeze: boolean
   grainSizeMs: number
   densityHz: number
@@ -383,16 +383,16 @@ export type AudioCoreDrumRackState = Omit<AudioCoreSamplerState, 'kind'> & {
   kind: 'drum-rack'
 }
 
-const isBoundedFloat = (value: unknown, minimum: number, maximum: number) =>
+const isBoundedFloat = (value: JsonValue, minimum: number, maximum: number) =>
   isFiniteNumber(value) && value >= minimum && value <= maximum
 
-const isNonnegativeSafeInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const isNonnegativeSafeInteger = (value: JsonValue): value is number =>
+  isJsonNumber(value) && Number.isSafeInteger(value) && value >= 0
 
-const isAudioCoreSampleZone = (value: unknown, drumRack: boolean): value is AudioCoreSampleZone =>
+const isAudioCoreSampleZone = <Value>(value: Value, drumRack: boolean): value is Value & AudioCoreSampleZone =>
   isRecord(value)
   && hasOnlyKeys(value, ['assetId', 'keyLow', 'keyHigh', 'velocityLow', 'velocityHigh', 'rootNote', 'tuneCents', 'gain', 'pan', 'roundRobinGroup', 'roundRobinIndex', 'playbackMode', 'startFrame', 'endFrame', 'loopStartFrame', 'loopEndFrame', 'crossfadeFrameCount', 'chokeGroup'])
-  && typeof value.assetId === 'string' && value.assetId.length > 0
+  && isJsonString(value.assetId) && value.assetId.length > 0
   && isFiniteNumber(value.keyLow) && Number.isInteger(value.keyLow) && value.keyLow >= 0 && value.keyLow <= 127
   && isFiniteNumber(value.keyHigh) && Number.isInteger(value.keyHigh) && value.keyHigh >= value.keyLow && value.keyHigh <= 127
   && isFiniteNumber(value.velocityLow) && Number.isInteger(value.velocityLow) && value.velocityLow >= 1 && value.velocityLow <= 127
@@ -411,7 +411,10 @@ const isAudioCoreSampleZone = (value: unknown, drumRack: boolean): value is Audi
   && isNonnegativeSafeInteger(value.chokeGroup)
   && (!drumRack || (value.keyLow === value.keyHigh && value.roundRobinGroup === 0))
 
-const isAudioCoreSamplerState = (value: unknown, kind: 'sampler' | 'drum-rack'): value is AudioCoreSamplerState | AudioCoreDrumRackState =>
+const isAudioCoreSamplerState = <Value>(
+  value: Value,
+  kind: 'sampler' | 'drum-rack',
+): value is Value & (AudioCoreSamplerState | AudioCoreDrumRackState) =>
   isRecord(value)
   && hasOnlyKeys(value, ['version', 'kind', 'voiceCapacity', 'outputLayout', 'ampAttackMs', 'ampDecayMs', 'ampSustain', 'ampReleaseMs', 'filterEnabled', 'filterMode', 'filterCutoffHz', 'filterResonance', 'filterEnvelopeAmount', 'filterAttackMs', 'filterDecayMs', 'filterSustain', 'filterReleaseMs', 'lfoEnabled', 'lfoRateHz', 'lfoPitchCents', 'lfoFilterHz', 'lfoAmplitude', 'lfoPan', 'retrigger', 'zones'])
   && value.version === audioCoreContractVersion && value.kind === kind
@@ -419,26 +422,26 @@ const isAudioCoreSamplerState = (value: unknown, kind: 'sampler' | 'drum-rack'):
   && value.outputLayout === 'stereo'
   && isBoundedFloat(value.ampAttackMs, 0, 60000) && isBoundedFloat(value.ampDecayMs, 0, 60000)
   && isBoundedFloat(value.ampSustain, 0, 1) && isBoundedFloat(value.ampReleaseMs, 0, 60000)
-  && typeof value.filterEnabled === 'boolean' && (value.filterMode === 'lowpass' || value.filterMode === 'highpass' || value.filterMode === 'bandpass' || value.filterMode === 'notch')
+  && isJsonBoolean(value.filterEnabled) && (value.filterMode === 'lowpass' || value.filterMode === 'highpass' || value.filterMode === 'bandpass' || value.filterMode === 'notch')
   && isBoundedFloat(value.filterCutoffHz, 20, 20000) && isBoundedFloat(value.filterResonance, 0.0001, 30)
   && isBoundedFloat(value.filterEnvelopeAmount, -1, 1)
   && isBoundedFloat(value.filterAttackMs, 0, 60000)
   && isBoundedFloat(value.filterDecayMs, 0, 60000)
   && isBoundedFloat(value.filterSustain, 0, 1)
   && isBoundedFloat(value.filterReleaseMs, 0, 60000)
-  && typeof value.lfoEnabled === 'boolean'
+  && isJsonBoolean(value.lfoEnabled)
   && isBoundedFloat(value.lfoRateHz, 0.01, 100)
   && isBoundedFloat(value.lfoPitchCents, -2400, 2400)
   && isBoundedFloat(value.lfoFilterHz, -20000, 20000)
   && isBoundedFloat(value.lfoAmplitude, 0, 1)
   && isBoundedFloat(value.lfoPan, 0, 1)
-  && typeof value.retrigger === 'boolean' && Array.isArray(value.zones)
+  && isJsonBoolean(value.retrigger) && Array.isArray(value.zones)
   && value.zones.length <= audioCoreMaxSampleZones && value.zones.every((zone) => isAudioCoreSampleZone(zone, kind === 'drum-rack'))
 
-export const isAudioCoreSamplerInstrumentState = (value: unknown): value is AudioCoreSamplerState =>
+export const isAudioCoreSamplerInstrumentState = <Value>(value: Value): value is Value & AudioCoreSamplerState =>
   isAudioCoreSamplerState(value, 'sampler')
 
-export const isAudioCoreDrumRackState = (value: unknown): value is AudioCoreDrumRackState =>
+export const isAudioCoreDrumRackState = <Value>(value: Value): value is Value & AudioCoreDrumRackState =>
   isAudioCoreSamplerState(value, 'drum-rack')
 
 export type AudioCoreInstrumentState =
@@ -447,7 +450,7 @@ export type AudioCoreInstrumentState =
   | AudioCoreDrumRackState
   | AudioCoreGranularState
 
-export const isAudioCoreInstrumentState = (value: unknown): value is AudioCoreInstrumentState =>
+export const isAudioCoreInstrumentState = <Value>(value: Value): value is Value & AudioCoreInstrumentState =>
   isAudioCoreSynthState(value)
   || isAudioCoreSamplerInstrumentState(value)
   || isAudioCoreDrumRackState(value)
@@ -517,7 +520,7 @@ export const encodeAudioCoreInstrumentState = (
     view.setBigUint64(4, state.assetId === '' ? 0n : resolveAssetHandle(state.assetId), true)
     view.setUint32(12, state.seed, true)
     view.setUint32(16, state.maxGrains, true)
-    view.setUint32(20, state.windowShape === 'hann' ? 0 : state.windowShape === 'tukey' ? 1 : 2, true)
+    view.setUint32(20, state['windowShape'] === 'hann' ? 0 : state['windowShape'] === 'tukey' ? 1 : 2, true)
     view.setUint32(24, state.freeze ? 1 : 0, true)
     const values = [state.grainSizeMs, state.densityHz, state.position, state.spray, state.pitchSemitones, state.reverseProbability, state.stereoSpread]
     values.forEach((value, index) => view.setFloat32(28 + index * 4, value, true))
@@ -560,18 +563,18 @@ export const encodeAudioCoreInstrumentState = (
   return { state: binaryState, zones }
 }
 
-export const isAudioCoreGranularState = (value: unknown): value is AudioCoreGranularState =>
+export const isAudioCoreGranularState = <Value>(value: Value): value is Value & AudioCoreGranularState =>
   isRecord(value)
   && hasOnlyKeys(value, ['version', 'kind', 'voiceCapacity', 'outputLayout', 'assetId', 'seed', 'maxGrains', 'windowShape', 'freeze', 'grainSizeMs', 'densityHz', 'position', 'spray', 'pitchSemitones', 'reverseProbability', 'stereoSpread'])
   && value.version === audioCoreContractVersion
   && value.kind === 'granular'
-  && typeof value.voiceCapacity === 'number' && Number.isSafeInteger(value.voiceCapacity) && value.voiceCapacity >= 1 && value.voiceCapacity <= audioCoreMaxInstrumentVoices
+  && isJsonNumber(value.voiceCapacity) && Number.isSafeInteger(value.voiceCapacity) && value.voiceCapacity >= 1 && value.voiceCapacity <= audioCoreMaxInstrumentVoices
   && value.outputLayout === 'stereo'
-  && typeof value.assetId === 'string'
-  && typeof value.seed === 'number' && Number.isSafeInteger(value.seed) && value.seed > 0 && value.seed <= 0xffffffff
-  && typeof value.maxGrains === 'number' && Number.isSafeInteger(value.maxGrains) && value.maxGrains >= 1 && value.maxGrains <= audioCoreMaxGranularGrains
-  && (value.windowShape === 'hann' || value.windowShape === 'tukey' || value.windowShape === 'gaussian')
-  && typeof value.freeze === 'boolean'
+  && isJsonString(value.assetId)
+  && isJsonNumber(value.seed) && Number.isSafeInteger(value.seed) && value.seed > 0 && value.seed <= 0xffffffff
+  && isJsonNumber(value.maxGrains) && Number.isSafeInteger(value.maxGrains) && value.maxGrains >= 1 && value.maxGrains <= audioCoreMaxGranularGrains
+  && (value['windowShape'] === 'hann' || value['windowShape'] === 'tukey' || value['windowShape'] === 'gaussian')
+  && isJsonBoolean(value.freeze)
   && isFiniteNumber(value.grainSizeMs) && value.grainSizeMs >= 5 && value.grainSizeMs <= 1000
   && isFiniteNumber(value.densityHz) && value.densityHz >= 0.25 && value.densityHz <= 200
   && isFiniteNumber(value.position) && value.position >= 0 && value.position <= 1
@@ -580,20 +583,20 @@ export const isAudioCoreGranularState = (value: unknown): value is AudioCoreGran
   && isFiniteNumber(value.reverseProbability) && value.reverseProbability >= 0 && value.reverseProbability <= 1
   && isFiniteNumber(value.stereoSpread) && value.stereoSpread >= 0 && value.stereoSpread <= 1
 
-const isAudioCoreSynthOscillator = (
-  value: unknown,
-): value is NonNullable<AudioCoreSynthState['oscillators']>[number] => (
+const isAudioCoreSynthOscillator = <Value>(
+  value: Value,
+): value is Value & NonNullable<AudioCoreSynthState['oscillators']>[number] => (
   isRecord(value)
   && hasOnlyKeys(value, ['enabled', 'waveform', 'level', 'octave', 'semitone', 'detuneCents'])
-  && typeof value.enabled === 'boolean'
-  && typeof value.waveform === 'number' && [0, 1, 2, 3].includes(value.waveform)
+  && isJsonBoolean(value.enabled)
+  && isJsonNumber(value.waveform) && [0, 1, 2, 3].includes(value.waveform)
   && isBoundedFloat(value.level, 0, 1)
-  && typeof value.octave === 'number' && Number.isInteger(value.octave) && value.octave >= -3 && value.octave <= 3
-  && typeof value.semitone === 'number' && Number.isInteger(value.semitone) && value.semitone >= -12 && value.semitone <= 12
+  && isJsonNumber(value.octave) && Number.isInteger(value.octave) && value.octave >= -3 && value.octave <= 3
+  && isJsonNumber(value.semitone) && Number.isInteger(value.semitone) && value.semitone >= -12 && value.semitone <= 12
   && isBoundedFloat(value.detuneCents, -100, 100)
 )
 
-export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthState => {
+export const isAudioCoreSynthState = <Value>(value: Value): value is Value & AudioCoreSynthState => {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'version', 'kind', 'voiceCapacity', 'outputLayout', 'parameterTargets', 'oscillators',
     'noiseEnabled', 'noiseLevel', 'filterEnabled', 'filterMode', 'filterCutoffHz',
@@ -605,14 +608,14 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
   const complete = value.oscillators !== undefined
   const oscillators = value.oscillators
   if (value.version !== audioCoreContractVersion || value.kind !== 'synth'
-    || typeof value.voiceCapacity !== 'number' || !Number.isSafeInteger(value.voiceCapacity)
+    || !isJsonNumber(value.voiceCapacity) || !Number.isSafeInteger(value.voiceCapacity)
     || value.voiceCapacity < 1 || value.voiceCapacity > audioCoreMaxInstrumentVoices
     || value.outputLayout !== 'stereo' || !Array.isArray(value.parameterTargets)
     || value.parameterTargets.length > audioCoreMaxInstrumentParameterTargets) return false
   if (complete && (
     !Array.isArray(value.oscillators) || value.oscillators.length !== 2
-    || typeof value.noiseEnabled !== 'boolean' || !isFiniteNumber(value.noiseLevel)
-    || typeof value.filterEnabled !== 'boolean' || typeof value.filterMode !== 'number' || ![0, 1, 2, 3].includes(value.filterMode)
+    || !isJsonBoolean(value.noiseEnabled) || !isFiniteNumber(value.noiseLevel)
+    || !isJsonBoolean(value.filterEnabled) || !isJsonNumber(value.filterMode) || ![0, 1, 2, 3].includes(value.filterMode)
     || !isBoundedFloat(value.filterCutoffHz, 20, 20_000)
     || !isBoundedFloat(value.filterResonance, 0.0001, 30)
     || !isBoundedFloat(value.filterKeyTracking, 0, 1)
@@ -625,8 +628,8 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
     || !isBoundedFloat(value.ampDecayMs, 0, 60_000)
     || !isBoundedFloat(value.ampSustain, 0, 1)
     || !isBoundedFloat(value.ampReleaseMs, 0, 60_000)
-    || typeof value.lfoEnabled !== 'boolean'
-    || typeof value.lfoWaveform !== 'number' || ![0, 1, 2, 3].includes(value.lfoWaveform)
+    || !isJsonBoolean(value.lfoEnabled)
+    || !isJsonNumber(value.lfoWaveform) || ![0, 1, 2, 3].includes(value.lfoWaveform)
     || !isBoundedFloat(value.lfoRateHz, 0.01, 100)
     || !isBoundedFloat(value.lfoPitchCents, -1_200, 1_200)
     || !isBoundedFloat(value.lfoFilterOctaves, -6, 6)
@@ -640,7 +643,7 @@ export const isAudioCoreSynthState = (value: unknown): value is AudioCoreSynthSt
   const ids = new Set<string>()
   const targets = new Set<number>()
   return value.parameterTargets.every((parameter) => {
-    if (!isRecord(parameter) || typeof parameter.id !== 'string' || !isPositiveSafeInteger(parameter.target)
+    if (!isRecord(parameter) || !isJsonString(parameter.id) || !isPositiveSafeInteger(parameter.target)
       || ids.has(parameter.id) || targets.has(parameter.target)) return false
     const entry = synthParameterRegistry.find((candidate) => candidate.id === parameter.id && candidate.target === parameter.target)
     if (entry === undefined || entry.tombstone) return false
@@ -863,7 +866,7 @@ const encodeAmplitudeModulationProcessorState = (state: AmplitudeModulationProce
   view.setUint32(4, state.waveform === 'triangle' ? 1 : 0, true)
   view.setFloat32(8, state.rateHz, true)
   view.setFloat32(12, state.depth, true)
-  view.setFloat32(16, state.shape, true)
+  view.setFloat32(16, state['shape'], true)
   view.setFloat32(20, state.phase, true)
   return output
 }
@@ -966,7 +969,7 @@ export const encodeReverbProcessorState = (state: ReverbProcessorState): Uint8Ar
   view.setUint32(20, state.reflectionSpin ? 1 : 0, true)
   view.setFloat32(24, state.reflectionModAmountMs, true)
   view.setFloat32(28, state.reflectionModRateHz, true)
-  view.setFloat32(32, state.reflectionShape, true)
+  view.setFloat32(32, state['reflectionShape'], true)
   view.setFloat32(36, state.diffuse, true)
   view.setFloat32(40, state.size, true)
   view.setFloat32(44, state.diffusion, true)
@@ -1097,14 +1100,14 @@ export type PlanarPcm = {
   planes: readonly Float32Array[]
 }
 
-const isPositiveSafeInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+const isPositiveSafeInteger = (value: JsonValue): value is number =>
+  isJsonNumber(value) && Number.isSafeInteger(value) && value > 0
 
-export const isAudioAssetRef = (value: unknown): value is AudioAssetRef =>
+export const isAudioAssetRef = (value: JsonValue): value is AudioAssetRef =>
   isRecord(value)
   && hasOnlyKeys(value, ['version', 'assetId', 'frameCount', 'sampleRateHz', 'channelCount'])
   && value.version === audioCoreContractVersion
-  && typeof value.assetId === 'string'
+  && isJsonString(value.assetId)
   && value.assetId.length > 0
   && isPositiveSafeInteger(value.frameCount)
   && isPositiveSafeInteger(value.sampleRateHz)
@@ -1119,16 +1122,21 @@ export const isPlanarPcmForAsset = (
   && pcm.planes.every((plane) => plane instanceof Float32Array && plane.length === asset.frameCount)
 )
 
-type JsonRecord = Record<string, unknown>
+type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonRecord
+type JsonRecord = { [key: string]: JsonValue }
 
-const isRecord = (value: unknown): value is JsonRecord =>
+const isJsonString = <Value>(value: Value): value is Value & string => typeof value === 'string'
+const isJsonNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+const isJsonBoolean = <Value>(value: Value): value is Value & boolean => typeof value === 'boolean'
+
+const isRecord = <Value>(value: Value): value is Value & JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const hasOnlyKeys = (value: JsonRecord, keys: readonly string[]) =>
   Object.keys(value).every((key) => keys.includes(key))
 
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value)
+const isFiniteNumber = <Value>(value: Value): value is Value & number =>
+  isJsonNumber(value) && Number.isFinite(value)
 
 const eqBandTypeId = (type: EqProcessorBandState['type']) =>
   type === 'highpass' ? 1
@@ -1140,9 +1148,9 @@ const eqBandTypeId = (type: EqProcessorBandState['type']) =>
               : type === 'allpass' ? 7
                 : 0
 
-const isUtilityState = (value: unknown): value is UtilityProcessorState => {
+const isUtilityState = (value: JsonValue): value is UtilityProcessorState => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['enabled', 'gainDb', 'polarity', 'inputMode', 'pan', 'balance', 'width', 'matrix', 'swap', 'dcBlock'])) return false
-  return typeof value.enabled === 'boolean'
+  return isJsonBoolean(value.enabled)
     && isFiniteNumber(value.gainDb)
     && (value.polarity === 'normal' || value.polarity === 'invert')
     && (value.inputMode === 'stereo' || value.inputMode === 'mono-sum')
@@ -1150,28 +1158,28 @@ const isUtilityState = (value: unknown): value is UtilityProcessorState => {
     && isFiniteNumber(value.balance)
     && isFiniteNumber(value.width)
     && (value.matrix === 'stereo' || value.matrix === 'mid-side-encode' || value.matrix === 'mid-side-decode')
-    && typeof value.swap === 'boolean'
-    && typeof value.dcBlock === 'boolean'
+    && isJsonBoolean(value.swap)
+    && isJsonBoolean(value.dcBlock)
 }
 
-export const isUtilityProcessorContract = (value: unknown): value is UtilityProcessorContract =>
+export const isUtilityProcessorContract = (value: JsonValue): value is UtilityProcessorContract =>
   isRecord(value)
   && hasOnlyKeys(value, ['version', 'kind', 'state'])
   && value.version === audioCoreContractVersion
   && value.kind === 'utility'
   && isUtilityState(value.state)
 
-export const parseUtilityProcessorContract = (value: unknown): UtilityProcessorContract => {
+export const parseUtilityProcessorContract = (value: JsonValue): UtilityProcessorContract => {
   if (!isUtilityProcessorContract(value)) throw new Error('Invalid audio-core utility processor contract.')
   return value
 }
 
-export const isAudioCoreGraphProcessor = (value: unknown): value is AudioCoreGraphProcessorDto => {
+export const isAudioCoreGraphProcessor = <Value>(value: Value): value is Value & AudioCoreGraphProcessorDto => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'kind', 'kindId', 'instanceId', 'stateVersion', 'state', 'parameterTargets', 'latencyFrames', 'tailFrames', 'tailKind', 'bypassed'])) return false
   const registryEntry = processorRegistry.find((entry) => entry.name === value.kind && entry.id === value.kindId)
-  return typeof value.id === 'string'
+  return isJsonString(value.id)
     && value.id.length > 0
-    && typeof value.kind === 'string'
+    && isJsonString(value.kind)
     && registryEntry !== undefined
     && !registryEntry.tombstone
     && Number.isSafeInteger(value.kindId)
@@ -1184,44 +1192,46 @@ export const isAudioCoreGraphProcessor = (value: unknown): value is AudioCoreGra
     && Array.isArray(value.parameterTargets)
     && value.parameterTargets.length <= audioCoreMaxProcessorParameterTargets
     && value.parameterTargets.every((target) => isRecord(target)
-      && typeof target.id === 'string'
+      && isJsonString(target.id)
       && (registryEntry.parameters.length === 0
         ? target.id.startsWith(`${registryEntry.name}.`)
         : registryEntry.parameters.some((parameter) => `${registryEntry.name}.${parameter.id}` === target.id))
       && isPositiveSafeInteger(target.target))
-    && typeof value.latencyFrames === 'number'
+    && isJsonNumber(value.latencyFrames)
     && Number.isSafeInteger(value.latencyFrames)
     && value.latencyFrames >= 0
-    && typeof value.tailFrames === 'number'
+    && isJsonNumber(value.tailFrames)
     && Number.isSafeInteger(value.tailFrames)
     && value.tailFrames >= 0
     && (value.tailKind === undefined || value.tailKind === 'finite' || value.tailKind === 'unbounded')
-    && typeof value.bypassed === 'boolean'
+    && isJsonBoolean(value.bypassed)
 }
 
-export const isAudioCoreProcessorStateEnvelope = (value: unknown): value is AudioCoreProcessorStateEnvelope =>
+export const isAudioCoreProcessorStateEnvelope = <Value>(
+  value: Value,
+): value is Value & AudioCoreProcessorStateEnvelope =>
   isRecord(value)
-  && typeof value.kindId === 'number'
+  && isJsonNumber(value.kindId)
   && Number.isSafeInteger(value.kindId)
   && value.kindId > 0
-  && typeof value.schemaVersion === 'number'
+  && isJsonNumber(value.schemaVersion)
   && Number.isSafeInteger(value.schemaVersion)
   && value.schemaVersion > 0
   && value.state instanceof Uint8Array
   && value.state.byteLength <= audioCoreMaxProcessorStateBytes
   && isPositiveSafeInteger(value.instanceId)
-  && typeof value.bypassed === 'boolean'
+  && isJsonBoolean(value.bypassed)
   && (value.inputLayout === 'mono' || value.inputLayout === 'stereo')
   && (value.outputLayout === 'mono' || value.outputLayout === 'stereo')
-  && typeof value.latencyFrames === 'number'
+  && isJsonNumber(value.latencyFrames)
   && Number.isSafeInteger(value.latencyFrames)
   && value.latencyFrames >= 0
-  && typeof value.tailFrames === 'number'
+  && isJsonNumber(value.tailFrames)
   && Number.isSafeInteger(value.tailFrames)
   && value.tailFrames >= 0
   && Array.isArray(value.parameterTargets)
   && value.parameterTargets.length <= audioCoreMaxProcessorParameterTargets
-  && value.parameterTargets.every((target) => typeof target.id === 'string' && isPositiveSafeInteger(target.target))
+  && value.parameterTargets.every((target) => isJsonString(target.id) && isPositiveSafeInteger(target.target))
 
 export type AudioCoreWireEnvelope = {
   version: typeof audioCoreContractVersion

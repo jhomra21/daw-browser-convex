@@ -212,10 +212,10 @@ const pathsEqual = (left: string, right: string) =>
     ? left.toLowerCase() === right.toLowerCase()
     : left === right
 
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+const isNodeError = (error: Error): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error
 
-const nativeError = (error: unknown): never => {
+const nativeError = (error: Error): never => {
   if (error instanceof NativeFileCapabilityError) {
     if (error.code === "commit-indeterminate") {
       throw new FileCapabilityError("commit-indeterminate", "The native commit reached an indeterminate terminal state.")
@@ -277,6 +277,10 @@ const bytesToHex = (bytes: Uint8Array) => {
   return value
 }
 
+const isPrivateTempDirectoryFactory = (
+  value: string | (() => string),
+): value is () => string => typeof value === "function"
+
 export const createFileCapabilityManager = ({
   dialog,
   fileSystem = nodeFileSystem,
@@ -308,7 +312,7 @@ export const createFileCapabilityManager = ({
     try {
       await fileSystem.unlink(tempPath)
     } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") throw error
+      if (!(error instanceof Error) || !isNodeError(error) || error.code !== "ENOENT") throw error
     }
   }
 
@@ -539,10 +543,10 @@ export const createFileCapabilityManager = ({
       }
       return grant
     } catch (error) {
-      if (!(error instanceof NativeFileCapabilityError) && !(error instanceof FileCapabilityError)) {
-        invalidPath("The selected output could not be retained securely.")
+      if (error instanceof NativeFileCapabilityError || error instanceof FileCapabilityError) {
+        return nativeError(error)
       }
-      return nativeError(error)
+      return invalidPath("The selected output could not be retained securely.")
     }
   }
 
@@ -551,7 +555,8 @@ export const createFileCapabilityManager = ({
     try {
       return await helper.statDirectory(directoryPath)
     } catch (error) {
-      return nativeError(error)
+      if (error instanceof Error) return nativeError(error)
+      throw error
     }
   }
 
@@ -573,7 +578,7 @@ export const createFileCapabilityManager = ({
     if (temporaryDirectoryPromise) return temporaryDirectoryPromise
     temporaryDirectoryPromise = (async () => {
       if (privateTempDirectory) {
-        const configuredPath = typeof privateTempDirectory === "function"
+        const configuredPath = isPrivateTempDirectoryFactory(privateTempDirectory)
           ? privateTempDirectory()
           : privateTempDirectory
         requireAbsoluteNormalizedPath(configuredPath)
@@ -599,7 +604,7 @@ export const createFileCapabilityManager = ({
           await fileSystem.mkdir(candidate, { mode: 0o700 })
           return candidate
         } catch (error) {
-          if (!isNodeError(error) || error.code !== "EEXIST") throw error
+          if (!(error instanceof Error) || !isNodeError(error) || error.code !== "EEXIST") throw error
         }
       }
       throw new Error("Unable to reserve a private temporary output directory.")
@@ -619,7 +624,7 @@ export const createFileCapabilityManager = ({
         )
         return { tempPath, handle }
       } catch (error) {
-        if (!isNodeError(error) || error.code !== "EEXIST") throw error
+        if (!(error instanceof Error) || !isNodeError(error) || error.code !== "EEXIST") throw error
       }
     }
     throw new Error("Unable to reserve a unique temporary output file.")

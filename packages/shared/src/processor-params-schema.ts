@@ -20,7 +20,7 @@ const eq = z.object({ bands: z.array(eqBand), enabled: z.boolean(), channelMode:
 const reverb = z.object({
   enabled: z.boolean(), wet: finiteNumber, decaySec: finiteNumber, preDelayMs: finiteNumber,
   reflections: finiteNumber, reflectionSpin: z.boolean(), reflectionModAmountMs: finiteNumber,
-  reflectionModRateHz: finiteNumber, reflectionShape: finiteNumber, diffuse: finiteNumber,
+  reflectionModRateHz: finiteNumber, 'reflectionShape': finiteNumber, diffuse: finiteNumber,
   size: finiteNumber, diffusion: finiteNumber, density: finiteNumber, lowCutHz: finiteNumber,
   highCutHz: finiteNumber, diffusionLowCutHz: finiteNumber, diffusionHighCutHz: finiteNumber,
   stereoWidth: finiteNumber,
@@ -87,7 +87,7 @@ const phaser = envelope(z.object({
 }).strict())
 const tremolo = envelope(z.object({
   enabled: z.boolean(), waveform: z.enum(['sine', 'triangle']), rateHz: finiteNumber,
-  depth: finiteNumber, shape: finiteNumber, phase: finiteNumber,
+  depth: finiteNumber, 'shape': finiteNumber, phase: finiteNumber,
 }).strict())
 const ensemble = envelope(z.object({
   enabled: z.boolean(), voices: z.literal(3), delayMs: finiteNumber, depthMs: finiteNumber,
@@ -166,7 +166,7 @@ const sampler = z.object({
 const granular = z.object({
   version: z.literal(1), zone: samplerZone.optional(), grainSizeMs: finiteNumber, densityHz: finiteNumber,
   position: finiteNumber, spray: finiteNumber, pitchSemitones: finiteNumber, reverseProbability: finiteNumber,
-  windowShape: z.enum(['hann', 'tukey', 'gaussian']), stereoSpread: finiteNumber, freeze: z.boolean(),
+  'windowShape': z.enum(['hann', 'tukey', 'gaussian']), stereoSpread: finiteNumber, freeze: z.boolean(),
   seed: finiteNumber, maxGrains: finiteNumber, maxDecodedBytes: finiteNumber,
 }).strict()
 const drumRack = z.object({

@@ -7,7 +7,7 @@ import {
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
-import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { createSamplerBufferSync, GranularLoadStatus, SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot, isLocalId,
   createDefaultArpeggiatorParams,
@@ -261,10 +261,10 @@ export function createEffectsPanelInstrumentDevice(
       projectGeneration: context.projectGeneration?.(),
     }),
     isRemote: () => !isLocalProject(),
-    persistParams: (targetId, params, persistContext) => {
+    persistParams: async (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      return persistArpeggiator(track.id, params, persistContext);
+      await persistArpeggiator(track.id, params, persistContext);
     },
     isMissingRowLoaded: () => isLocalProject()
       ? localArp.isLoaded(getTrackTargetId())
@@ -315,10 +315,10 @@ export function createEffectsPanelInstrumentDevice(
       userId: context.userId(),
       projectGeneration: context.projectGeneration?.(),
     }),
-    persistParams: (targetId, params, persistContext) => {
+    persistParams: async (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      return persistInstrument(track.id, params, persistContext);
+      await persistInstrument(track.id, params, persistContext);
     },
     isMissingRowLoaded: () => isLocalProject()
       ? localInstrument.isLoaded(getTrackTargetId())
@@ -477,7 +477,9 @@ export function createEffectsPanelInstrumentDevice(
         }),
       );
       const result = await publishDurableSharedTimelineOperation({ projectId, userId: grantScope.userId, operation });
-      const clipId = typeof result === "string" ? result : null;
+      const clipId = result !== null && result !== undefined && result === String(result)
+        ? String(result)
+        : null;
       if (!clipId) return false;
 
       context.grantClipWrite?.(clipId, grantScope);

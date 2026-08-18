@@ -9,6 +9,8 @@ import { convexApi, convexClient } from '~/lib/convex'
 import { createLocalControlService } from '~/lib/local-control/local-control-service'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
+import { serializeJsonValue } from '~/lib/json'
+import { z } from 'zod'
 
 export type MidiEditorNote = NormalizedLegacyMidiClip['notes'][number] & { id: string; channel: number }
 
@@ -259,7 +261,7 @@ export const projectMidiEditorOperations = (
 export const reconcileMidiEditorOperationBatch = (
   midi: NormalizedLegacyMidiClip,
   operations: readonly MidiEditorOperation[],
-): { midi: NormalizedLegacyMidiClip; conflicts: MidiEditorOperation[] } => {
+): MidiEditorOperationBatch => {
   let projected = midi
   const conflicts: MidiEditorOperation[] = []
   for (const operation of operations) {
@@ -271,6 +273,11 @@ export const reconcileMidiEditorOperationBatch = (
     }
   }
   return { midi: projected, conflicts }
+}
+
+type MidiEditorOperationBatch = {
+  midi: NormalizedLegacyMidiClip
+  conflicts: MidiEditorOperation[]
 }
 
 const coalesceOperations = (operations: readonly MidiEditorOperation[]) => {
@@ -314,37 +321,37 @@ const commitAction = (clipId: string, midi: NormalizedLegacyMidiClip): ControlAc
   kind: 'clip.midi.set',
   clip: { source: 'persisted', id: clipId },
   wave: midi.wave,
-  ...(midi.gain === undefined ? {} : { gain: midi.gain }),
+  gain: midi.gain,
   notes: midi.notes,
   inputChannel: midi.inputChannel ?? null,
-  ...(midi.cc.length === 0 ? {} : { cc: midi.cc }),
-  ...(midi.pitchBends.length === 0 ? {} : { pitchBends: midi.pitchBends }),
-  ...(midi.channelPressure.length === 0 ? {} : { channelPressure: midi.channelPressure }),
-  ...(midi.polyPressure.length === 0 ? {} : { polyPressure: midi.polyPressure }),
+  cc: midi.cc.length === 0 ? undefined : midi.cc,
+  pitchBends: midi.pitchBends.length === 0 ? undefined : midi.pitchBends,
+  channelPressure: midi.channelPressure.length === 0 ? undefined : midi.channelPressure,
+  polyPressure: midi.polyPressure.length === 0 ? undefined : midi.polyPressure,
   mappings: midi.mappings,
 })
 
-const errorCode = (error: unknown) => (
-  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-    ? error.code
-    : typeof error === 'object' && error !== null && 'data' in error
-      && typeof error.data === 'object' && error.data !== null
-      && 'code' in error.data && typeof error.data.code === 'string'
-        ? error.data.code
-        : undefined
+const codedErrorSchema = z.object({ code: z.string() })
+const nestedCodedErrorSchema = z.object({ data: codedErrorSchema })
+
+const errorCode = (cause: unknown) => {
+  const direct = codedErrorSchema.safeParse(cause)
+  if (direct.success) return direct.data.code
+  const nested = nestedCodedErrorSchema.safeParse(cause)
+  return nested.success ? nested.data.data.code : undefined
+}
+
+const terminalError = (cause: unknown) => (
+  cause instanceof MidiEditorConflictError
+  || errorCode(cause) === 'not-found'
+  || errorCode(cause) === 'validation'
+  || errorCode(cause) === 'limit-exceeded'
+  || errorCode(cause) === 'forbidden'
+  || errorCode(cause) === 'authorization'
 )
 
-const terminalError = (error: unknown) => (
-  error instanceof MidiEditorConflictError
-  || errorCode(error) === 'not-found'
-  || errorCode(error) === 'validation'
-  || errorCode(error) === 'limit-exceeded'
-  || errorCode(error) === 'forbidden'
-  || errorCode(error) === 'authorization'
-)
-
-const asError = (error: unknown) => (
-  error instanceof Error ? error : new Error('Unable to save MIDI changes.')
+const asError = (cause: unknown) => (
+  cause instanceof Error ? cause : new Error('Unable to save MIDI changes.')
 )
 
 const operationId = (operation: MidiEditorOperation) => (
@@ -408,7 +415,7 @@ export const createMidiEditorPersistence = (input: {
         awaitingReconciliation = undefined
         notifyMidiProjectProjection(input.projectId)
       }
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       input.onError?.({ error: asError(error), retryable: true })
     }).finally(() => {
       reconciliationQuery = undefined
@@ -441,12 +448,12 @@ export const createMidiEditorPersistence = (input: {
     }
     const commit = async () => {
       const value = local
-        ? await service!.commit(request)
-        : await convexClient.mutation(convexApi.control.commitV1, { request })
+        ? await service!.commit(serializeJsonValue(request))
+        : await convexClient.mutation(convexApi.control.commitV1, { request: serializeJsonValue(request) })
       return controlCommitResultSchemaV1.parse(value)
     }
     try {
-      const result = await commit().catch(async (error: unknown) => {
+      const result = await commit().catch(async (error) => {
         if (errorCode(error) !== undefined) throw error
         return commit()
       })
@@ -494,7 +501,7 @@ export const createMidiEditorPersistence = (input: {
     const operations = pending
     pending = []
     inFlightOperations = operations
-    inFlight = attempt(operations).catch((error: unknown) => {
+    inFlight = attempt(operations).catch((error) => {
       if (terminalError(error)) {
         lastError = { error: asError(error), retryable: false }
         input.onError?.(lastError)

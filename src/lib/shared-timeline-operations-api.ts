@@ -1,6 +1,4 @@
-import type {
-  SharedTimelineOperation,
-} from '@daw-browser/shared'
+import { isJsonObject, isJsonString, type JsonValue, type SharedTimelineOperation } from '@daw-browser/shared'
 
 export type {
   SharedTimelineOperation,
@@ -21,11 +19,11 @@ export class SharedTimelineOperationRejectedError extends Error {
   }
 }
 
-export const isAppliedSharedTimelineOperationResult = (value: unknown) => (
-  typeof value === 'object' && value !== null && 'status' in value && value.status === 'applied'
+export const isAppliedSharedTimelineOperationResult = (value: JsonValue) => (
+  isJsonObject(value) && value.status === 'applied'
 )
 
-export const assertAppliedSharedTimelineOperationResult = (result: unknown) => {
+export const assertAppliedSharedTimelineOperationResult = (result: JsonValue) => {
   if (!isAppliedSharedTimelineOperationResult(result)) {
     throw new Error('Shared timeline operation was not applied.')
   }
@@ -33,7 +31,7 @@ export const assertAppliedSharedTimelineOperationResult = (result: unknown) => {
 
 const assertValidClipCreateResult = (
   operation: SharedTimelineOperation,
-  result: unknown,
+  result: JsonValue,
 ) => {
   if (operation.kind === 'clips.create' && result === null) {
     throw new SharedTimelineOperationRejectedError('Clip creation was rejected.')
@@ -54,7 +52,7 @@ export const publishSharedTimelineOperation = async (
   projectId: string,
   operation: SharedTimelineOperation,
   options?: { fetch?: typeof fetch },
-): Promise<unknown> => {
+): Promise<JsonValue> => {
   const response = await (options?.fetch ?? fetch)(`/api/projects/${encodeURIComponent(projectId)}/timeline/operations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,18 +63,8 @@ export const publishSharedTimelineOperation = async (
     throw new SharedTimelineOperationHttpError(response.status, detail || undefined)
   }
   const result = await response.json().catch(() => null)
-  if (
-    typeof result === 'object'
-    && result !== null
-    && 'status' in result
-    && result.status === 'rejected'
-  ) {
-    const detail = (
-      typeof result === 'object'
-      && result !== null
-      && 'reason' in result
-      && typeof result.reason === 'string'
-    ) ? result.reason : undefined
+  if (isJsonObject(result) && result.status === 'rejected') {
+    const detail = isJsonString(result.reason) ? result.reason : undefined
     throw new SharedTimelineOperationRejectedError(detail)
   }
   assertValidClipCreateResult(operation, result)

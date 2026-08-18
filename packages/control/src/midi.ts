@@ -1,19 +1,31 @@
 import {
   normalizeLegacyMidiClip,
   normalizeMidiClip,
+  type LegacyMidiClip,
+  type MidiCcEvent,
+  type MidiChannelPressureEvent,
+  type MidiMapping,
+  type MidiPitchBendEvent,
+  type MidiPolyPressureEvent,
+  type NormalizedMidiClip,
   type NormalizedLegacyMidiClip,
 } from '@daw-browser/shared'
+import { z } from 'zod'
 
 type ControlMidiActionV1 = {
   wave: string
   gain?: number
-  notes: Array<{ id?: string; beat: number; length: number; pitch: number; velocity?: number; channel?: number }>
-  inputChannel?: unknown | null
-  cc?: unknown
-  pitchBends?: unknown
-  channelPressure?: unknown
-  polyPressure?: unknown
-  mappings?: unknown
+  notes: LegacyMidiClip['notes']
+  inputChannel?: number | null
+  cc?: MidiCcEvent[]
+  pitchBends?: MidiPitchBendEvent[]
+  channelPressure?: MidiChannelPressureEvent[]
+  polyPressure?: MidiPolyPressureEvent[]
+  mappings?: MidiMapping[]
+}
+
+type StrictMidiPatch = Partial<Omit<ControlMidiActionV1, 'inputChannel'>> & {
+  inputChannel?: number
 }
 
 export class ControlMidiResolutionError extends Error {
@@ -25,25 +37,28 @@ export class ControlMidiResolutionError extends Error {
   }
 }
 
-const strict = (value: Record<string, unknown>) => {
+const strict = (value: StrictMidiPatch): NormalizedMidiClip => {
   try {
     return normalizeMidiClip({ wave: 'sine', notes: [], ...value })
-  } catch (error) {
-    throw new ControlMidiResolutionError('validation', error instanceof Error ? error.message : 'Invalid MIDI action.')
+  } catch (cause) {
+    throw new ControlMidiResolutionError('validation', cause instanceof Error ? cause.message : 'Invalid MIDI action.')
   }
 }
 
-const normalizeStrictAction = (action: ControlMidiActionV1) => normalizeMidiClip({
-  wave: action.wave,
-  ...(action.gain === undefined ? {} : { gain: action.gain }),
-  ...(typeof action.inputChannel === 'number' ? { inputChannel: action.inputChannel } : {}),
-  ...(action.cc === undefined ? {} : { cc: action.cc }),
-  ...(action.pitchBends === undefined ? {} : { pitchBends: action.pitchBends }),
-  ...(action.channelPressure === undefined ? {} : { channelPressure: action.channelPressure }),
-  ...(action.polyPressure === undefined ? {} : { polyPressure: action.polyPressure }),
-  ...(action.mappings === undefined ? {} : { mappings: action.mappings }),
-  notes: action.notes,
-})
+const normalizeStrictAction = (action: ControlMidiActionV1) => {
+  const input: StrictMidiPatch & Pick<ControlMidiActionV1, 'wave' | 'notes'> = {
+    wave: action.wave,
+    notes: action.notes,
+  }
+  if (action.gain !== undefined) input.gain = action.gain
+  if (action.inputChannel !== undefined && action.inputChannel !== null) input.inputChannel = action.inputChannel
+  if (action.cc !== undefined) input.cc = action.cc
+  if (action.pitchBends !== undefined) input.pitchBends = action.pitchBends
+  if (action.channelPressure !== undefined) input.channelPressure = action.channelPressure
+  if (action.polyPressure !== undefined) input.polyPressure = action.polyPressure
+  if (action.mappings !== undefined) input.mappings = action.mappings
+  return normalizeMidiClip(z.json().parse(input))
+}
 
 const noteKey = (note: { beat: number; length: number; pitch: number; velocity?: number }) => (
   JSON.stringify([
@@ -54,24 +69,24 @@ const noteKey = (note: { beat: number; length: number; pitch: number; velocity?:
   ])
 )
 
-const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
-const legacy = (value: unknown) => {
+const same = <Value>(left: Value, right: Value) => JSON.stringify(left) === JSON.stringify(right)
+const legacy = (value: LegacyMidiClip): NormalizedLegacyMidiClip => {
   try {
     return normalizeLegacyMidiClip(value)
-  } catch (error) {
-    throw new ControlMidiResolutionError('validation', error instanceof Error ? error.message : 'Invalid MIDI action.')
+  } catch (cause) {
+    throw new ControlMidiResolutionError('validation', cause instanceof Error ? cause.message : 'Invalid MIDI action.')
   }
 }
 
 export const resolveControlMidiActionV1 = (
   action: ControlMidiActionV1,
-  existing?: unknown,
+  existing?: LegacyMidiClip,
 ): NormalizedLegacyMidiClip => {
   if (existing === undefined) {
     try {
       return normalizeStrictAction(action)
-    } catch (error) {
-      throw new ControlMidiResolutionError('validation', error instanceof Error ? error.message : 'Invalid MIDI action.')
+    } catch (cause) {
+      throw new ControlMidiResolutionError('validation', cause instanceof Error ? cause.message : 'Invalid MIDI action.')
     }
   }
 
@@ -100,11 +115,11 @@ export const resolveControlMidiActionV1 = (
   })
   const candidate = legacy({
     wave: action.wave,
-    ...(action.gain === undefined ? {} : { gain: action.gain }),
+    gain: action.gain,
     notes,
     ...(action.inputChannel === undefined
       ? (replacesExpanded ? {} : (current.inputChannel === undefined ? {} : { inputChannel: current.inputChannel }))
-      : typeof action.inputChannel === 'number' ? { inputChannel: action.inputChannel } : {}),
+      : action.inputChannel === null ? {} : { inputChannel: action.inputChannel }),
     cc: action.cc ?? (replacesExpanded ? [] : current.cc),
     pitchBends: action.pitchBends ?? (replacesExpanded ? [] : current.pitchBends),
     channelPressure: action.channelPressure ?? (replacesExpanded ? [] : current.channelPressure),

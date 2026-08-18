@@ -80,14 +80,14 @@ const snapshotStemInput = (input: TimelineStemExportInput): TimelineStemExportIn
   if (input.stemSelection === "all-tracks") {
     return {
       ...settings,
-      ...(input.name === undefined ? {} : { name: input.name }),
+      name: input.name,
       stemSelection: input.stemSelection,
       stemMode: input.stemMode,
     }
   }
   return {
     ...settings,
-    ...(input.name === undefined ? {} : { name: input.name }),
+    name: input.name,
     stemSelection: input.stemSelection,
     stemMode: input.stemMode,
     selectedTrackIds: [...input.selectedTrackIds],
@@ -228,9 +228,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
         ? {
           ...hydratedRenderStateSnapshot,
           nativeExternalAttachments: nativeExternalAttachments.plan,
-          ...(nativeExternalAttachments.capturedVstStates
-            ? { capturedVstStates: nativeExternalAttachments.capturedVstStates }
-            : {}),
+          capturedVstStates: nativeExternalAttachments.capturedVstStates ? nativeExternalAttachments.capturedVstStates : undefined,
         }
         : hydratedRenderStateSnapshot,
       snapshotClips,

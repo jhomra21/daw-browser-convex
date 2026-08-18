@@ -1,14 +1,16 @@
 import { expect, test } from 'bun:test'
-import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from '@daw-browser/audio-engine/recording-protocol'
+import {
+  RECORDER_BLOCK_FRAMES,
+  RECORDER_MAX_QUEUED_BLOCKS,
+  type WriterInboundMessage,
+  type WriterOutboundMessage,
+} from '@daw-browser/audio-engine/recording-protocol'
 import type { PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
 import { createPortableRecordingWriter } from '~/lib/recording/portable-recording-writer'
 
-const isMessage = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
-
 test('bridges portable planar blocks into the bounded recording writer protocol', async () => {
-  const posted: unknown[] = []
-  let handleMessage = (_message: unknown) => {}
+  const posted: WriterInboundMessage[] = []
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
   const writer = createPortableRecordingWriter({
     generation: 3,
     sessionId: 'take-1',
@@ -38,10 +40,10 @@ test('bridges portable planar blocks into the bounded recording writer protocol'
     peak: 0.5,
   })
 
-  const block = posted.find((message) => isMessage(message) && message.type === 'block')
-  expect(isMessage(block) && block.frameCount).toBe(2)
-  expect(isMessage(block) && block.buffer instanceof ArrayBuffer).toBeTrue()
-  if (!isMessage(block) || !(block.buffer instanceof ArrayBuffer)) throw new Error('Expected a portable recording block.')
+  const block = posted.find((message) => message.type === 'block')
+  expect(block?.frameCount).toBe(2)
+  expect(block?.buffer instanceof ArrayBuffer).toBeTrue()
+  if (!block) throw new Error('Expected a portable recording block.')
   const samples = new Float32Array(block.buffer)
   expect(Array.from(samples.slice(0, 2))).toEqual([0.25, 0.5])
   expect(Array.from(samples.slice(RECORDER_BLOCK_FRAMES, RECORDER_BLOCK_FRAMES + 2))).toEqual([-0.25, -0.5])
@@ -49,13 +51,13 @@ test('bridges portable planar blocks into the bounded recording writer protocol'
   handleMessage({ type: 'return', generation: 3, sessionId: 'take-1', blockId: 0, buffer: block.buffer })
   const completion = writer.finalize(2)
   await Promise.resolve()
-  expect(posted.some((message) => isMessage(message) && message.type === 'finalize')).toBeTrue()
+  expect(posted.some((message) => message.type === 'finalize')).toBeTrue()
   handleMessage({ type: 'finalized', generation: 3, sessionId: 'take-1', capturedFrames: 2 })
   expect(await completion).toEqual({ capturedFrames: 2 })
 })
 
 test('fails instead of growing beyond the fixed portable writer queue', async () => {
-  let handleMessage = (_message: unknown) => {}
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
   const writer = createPortableRecordingWriter({
     generation: 4,
     sessionId: 'take-2',
@@ -113,8 +115,8 @@ test('terminates when the portable writer never becomes ready', async () => {
 })
 
 test('terminates when portable writer abort acknowledgement hangs', async () => {
-  const posted: unknown[] = []
-  let handleMessage = (_message: unknown) => {}
+  const posted: WriterInboundMessage[] = []
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
   let terminations = 0
   const writer = createPortableRecordingWriter({
     generation: 6,
@@ -137,6 +139,6 @@ test('terminates when portable writer abort acknowledgement hangs', async () => 
 
   await writer.abort()
 
-  expect(posted.some((message) => isMessage(message) && message.type === 'abort')).toBeTrue()
+  expect(posted.some((message) => message.type === 'abort')).toBeTrue()
   expect(terminations).toBe(1)
 })

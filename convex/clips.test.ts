@@ -402,10 +402,11 @@ test("restores authenticated idempotent legacy history without relaxing ordinary
   };
   expect(await t.withIdentity({ subject: "other-user" }).mutation(api.clips.restoreLegacyHistory, request)).toBeNull();
   const restored = await t.withIdentity({ subject: owner }).mutation(api.clips.restoreLegacyHistory, request);
-  expect(typeof restored).toBe("string");
+  expect(restored).not.toBeNull();
+  if (restored === null) throw new Error("Expected legacy history restore to return a clip ID.");
   expect(await t.withIdentity({ subject: owner }).mutation(api.clips.restoreLegacyHistory, request)).toBe(restored);
   const clip = await t.run(async (ctx) => {
-    const id = typeof restored === "string" ? ctx.db.normalizeId("clips", restored) : null;
+    const id = ctx.db.normalizeId("clips", restored);
     return id ? await ctx.db.get(id) : null;
   });
   expect(clip?.midi).toMatchObject({ wave: "custom-legacy", gain: 7 });

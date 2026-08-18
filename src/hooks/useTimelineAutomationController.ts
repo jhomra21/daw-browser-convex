@@ -43,6 +43,32 @@ type RemoteAutomationRow = {
   updatedAt: number;
 };
 
+type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+type JsonObject = { readonly [key: string]: JsonValue };
+
+const isJsonObject = (cause: unknown): cause is JsonObject => (
+  typeof cause === "object"
+  && cause !== null
+  && !Array.isArray(cause)
+  && Object.values(cause).every(isJsonValue)
+);
+
+const isJsonValue = (cause: unknown): cause is JsonValue => (
+  cause === null
+  || typeof cause === "boolean"
+  || typeof cause === "number"
+  || typeof cause === "string"
+  || (Array.isArray(cause) && cause.every(isJsonValue))
+  || isJsonObject(cause)
+);
+
+const isBoolean = (cause: unknown): cause is boolean => typeof cause === "boolean";
+const isFiniteNumber = (cause: unknown): cause is number => typeof cause === "number" && Number.isFinite(cause);
+const isString = (cause: unknown): cause is string => typeof cause === "string";
+const isAutomationTargetKey = (cause: JsonValue): cause is string => (
+  typeof cause === "string" && cause.startsWith("automation:v2:")
+);
+
 type TimelineAutomationControllerOptions = {
   projectId: Accessor<string>;
   userId: Accessor<string>;
@@ -124,11 +150,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, boolean> = {};
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "boolean") next[key] = value;
+          if (isBoolean(value)) next[key] = value;
         }
         return next;
       } catch {
@@ -147,10 +173,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const legacySelected: Record<string, string> = {};
       if (selectedRaw) {
         try {
-          const parsed = JSON.parse(selectedRaw);
-          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          const parsed: unknown = JSON.parse(selectedRaw);
+          if (isJsonObject(parsed)) {
             for (const [key, value] of Object.entries(parsed)) {
-              if (typeof value === "string") legacySelected[key] = value;
+              if (isString(value)) legacySelected[key] = value;
             }
           }
         } catch {}
@@ -158,8 +184,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const readLegacy = () => {
         if (!legacyRaw) return {};
         try {
-          const parsed = JSON.parse(legacyRaw);
-          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+          const parsed: unknown = JSON.parse(legacyRaw);
+          if (!isJsonObject(parsed)) return {};
           const next: Record<string, string[]> = {};
           for (const [key, value] of Object.entries(parsed)) {
             if (key === "master" || value !== true) continue;
@@ -174,12 +200,12 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       };
       if (!raw) return readLegacy();
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return readLegacy();
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return readLegacy();
         const next: Record<string, string[]> = {};
         for (const [key, value] of Object.entries(parsed)) {
           if (!Array.isArray(value)) continue;
-          const targetKeys = value.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("automation:v2:"));
+          const targetKeys = value.filter(isAutomationTargetKey);
           if (targetKeys.length > 0) next[key] = Array.from(new Set(targetKeys));
         }
         return next;
@@ -196,11 +222,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-lane-heights`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, number> = {};
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "number" && Number.isFinite(value)) next[key] = clampAutomationLaneHeight(value);
+          if (isFiniteNumber(value)) next[key] = clampAutomationLaneHeight(value);
         }
         return next;
       } catch {
@@ -216,15 +242,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, AutomationParameterSelection> = {};
         for (const [key, value] of Object.entries(parsed)) {
           if (value === "volume") next[key] = { parameterId: "volume" };
-          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-            const parameterId = Reflect.get(value, "parameterId");
-            const effectInstanceId = Reflect.get(value, "effectInstanceId");
-            if (typeof parameterId === "string" && (effectInstanceId === undefined || typeof effectInstanceId === "string")) {
+          if (isJsonObject(value)) {
+            const parameterId = value.parameterId;
+            const effectInstanceId = value.effectInstanceId;
+            if (isString(parameterId) && (effectInstanceId === undefined || isString(effectInstanceId))) {
               next[key] = { parameterId, effectInstanceId };
             }
           }
@@ -457,7 +483,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         }
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
         if (normalizedKind === "instrument") {
-          const instrument = normalizeTrackInstrumentParams(row.params);
+          const instrument = isJsonValue(row.params)
+            ? normalizeTrackInstrumentParams(row.params)
+            : undefined;
           if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular" && instrument.kind !== "synth")) continue;
           const entries = grouped.get(row.targetId) ?? [];
           entries.push({ id: instrument.instanceId, kind: instrument.kind, index: row.index ?? entries.length });

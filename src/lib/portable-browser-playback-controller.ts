@@ -26,6 +26,9 @@ import type {
 
 type PortableStartResult = "started" | "unavailable"
 type PortableScheduleRange = Extract<PreparedPortableSession, { supported: true }>["scheduleRange"]
+type PortableSessionFault = {
+  error?: Error
+}
 
 type PortableSession = Pick<
   PortableWasmPlaybackSession,
@@ -66,9 +69,9 @@ const boundedControl = <T>(promise: Promise<T>, message: string) => new Promise<
   promise.then((value) => {
     clearTimeout(deadline)
     resolve(value)
-  }, (error: unknown) => {
+  }, (cause: unknown) => {
     clearTimeout(deadline)
-    reject(error)
+    reject(cause)
   })
 })
 
@@ -225,7 +228,7 @@ export const createPortableBrowserPlaybackController = (input: {
     transport: LivePlaybackTransport
     requestedFrame: number
     unsubscribeFault: () => void
-    sessionFault: { error?: Error }
+    sessionFault: PortableSessionFault
   }
 
   const prepareRuntime = async (
@@ -244,7 +247,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const requestedFrame = Math.round(transport.playheadSec * context.sampleRate)
     let session: PortableSession | undefined
     let unsubscribeSessionFault: (() => void) | undefined
-    const sessionFault: { error?: Error } = {}
+    const sessionFault: PortableSessionFault = {}
     try {
       const compilation = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
@@ -640,9 +643,9 @@ export const createPortableBrowserPlaybackController = (input: {
         }
         return "unavailable"
       }
-    })().catch((error: unknown) => {
+    })().catch((cause: unknown) => {
       failedRefreshEndFrame = activeScheduleRange?.endFrame
-      input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
+      input.reportFault?.(cause instanceof Error ? cause.message : "Portable schedule refresh failed.")
       return "unavailable"
     })
     refreshPromise = request

@@ -28,15 +28,13 @@ export const catalogViewForRenderer = (catalog: PluginCatalogData): Vst3CatalogV
   ...catalog,
   entries: catalog.entries.map(({ bundlePath: _bundlePath, configuredDirectory: _configuredDirectory, launchEligibility, ...entry }) => ({
     ...entry,
-    ...(launchEligibility === undefined ? {} : {
-      catalogReference: {
+    catalogReference: launchEligibility === undefined ? undefined : {
         version: 1,
         architecture: launchEligibility.architecture,
         bundleFingerprint: launchEligibility.bundleFingerprint,
         binaryFingerprint: launchEligibility.binaryFingerprint,
         scannerCatalogVersion: launchEligibility.scannerProtocolVersion,
       },
-    }),
   })),
 })
 

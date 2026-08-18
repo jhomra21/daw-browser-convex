@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js"
+import {
+  CallToolRequestSchema,
+  type CallToolRequest,
+  type CallToolResult,
+} from "@modelcontextprotocol/sdk/types.js"
 import { z } from "zod"
 import {
   canonicalJson,
@@ -67,6 +71,19 @@ type ControlMcpOptions = {
   cloudService?: (scope: ControlMcpScope) => Promise<ControlService>;
 }
 
+type McpToolInput = CallToolRequest["params"]["arguments"]
+type ControlServiceResult =
+  | ControlCapabilitiesV1
+  | ControlCapabilitiesV2
+  | ProjectSnapshotV1
+  | ProjectSnapshotV2
+  | ControlPreviewResultV1
+  | ControlCommitResultV1
+  | ControlApprovalResultV1
+  | ControlHistoryResultV1
+  | ControlRecoveriesResultV1
+type McpStructuredContent = NonNullable<CallToolResult["structuredContent"]>
+
 const annotations = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   preview: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -98,17 +115,17 @@ const hostUnavailable = (): ControlErrorV1 => ({
   code: "not-found",
   message: "A local desktop host is unavailable.",
 })
-const canonicalHostError = (value: unknown): HostErrorV1 | undefined => {
-  const v1 = hostErrorSchemaV1.safeParse(value)
+const canonicalHostError = (cause: unknown): HostErrorV1 | undefined => {
+  const v1 = hostErrorSchemaV1.safeParse(cause)
   if (v1.success) return v1.data
-  const v2 = hostErrorSchemaV2.safeParse(value)
+  const v2 = hostErrorSchemaV2.safeParse(cause)
   return v2.success ? { version: 'v1', code: v2.data.code, message: v2.data.message } : undefined
 }
-const hostTransportError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
+const hostTransportError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
-    error,
-    isRecord(error) ? error.data : undefined,
-    isRecord(error) ? error.errorData : undefined,
+    cause,
+    isRecord(cause) ? cause.data : undefined,
+    isRecord(cause) ? cause.errorData : undefined,
   ]) {
     const control = controlErrorSchemaV1.safeParse(candidate)
     if (control.success) return control.data
@@ -118,15 +135,15 @@ const hostTransportError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   return hostUnavailable()
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const isRecord = (cause: unknown): cause is NonNullable<McpToolInput> => (
+  typeof cause === "object" && cause !== null && !Array.isArray(cause)
 )
 
-const serviceError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
+const serviceError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
-    error,
-    isRecord(error) ? error.data : undefined,
-    isRecord(error) ? error.errorData : undefined,
+    cause,
+    isRecord(cause) ? cause.data : undefined,
+    isRecord(cause) ? cause.errorData : undefined,
   ]) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
     if (parsed.success) return parsed.data
@@ -136,31 +153,27 @@ const serviceError = (error: unknown): ControlErrorV1 | HostErrorV1 => {
   return internalError()
 }
 
-const success = <Value>(value: Value) => ({
-  structuredContent: value,
-  content: [{ type: "text" as const, text: canonicalJson(value) }],
-})
+const success = <Value extends object>(value: Value) => {
+  const canonicalContent = JSON.parse(JSON.stringify(value))
+  const structuredContent: McpStructuredContent = canonicalContent
+  return {
+    structuredContent,
+    content: [{ type: "text" as const, text: canonicalJson(canonicalContent) }],
+  }
+}
 
 const failure = (error: ControlErrorV1 | HostErrorV1) => ({
   isError: true,
   content: [{ type: "text" as const, text: canonicalJson(error) }],
 })
 
-const execute = async <Input, Output>(
-  input: unknown,
-  parseInput: (value: unknown) => Input,
-  invoke: (value: Input) => Promise<unknown>,
-  parseOutput: (value: unknown) => Output,
-  errorFor: (error: unknown) => ControlErrorV1 | HostErrorV1 = serviceError,
+const execute = async <Output extends object>(
+  invoke: () => Promise<ControlServiceResult>,
+  parseOutput: (value: ControlServiceResult) => Output,
+  errorFor: (cause: unknown) => ControlErrorV1 | HostErrorV1 = serviceError,
 ) => {
-  let parsedInput: Input
   try {
-    parsedInput = parseInput(input)
-  } catch {
-    return failure(invalidRequest())
-  }
-  try {
-    return success(parseOutput(await invoke(parsedInput)))
+    return success(parseOutput(await invoke()))
   } catch (error) {
     return failure(errorFor(error))
   }
@@ -168,7 +181,7 @@ const execute = async <Input, Output>(
 
 const targetSchema = z.enum(["cloud", "host"]).default("cloud")
 const withTarget = <Schema extends z.ZodObject>(schema: Schema) => schema.extend({ target: targetSchema })
-const targetInput = (input: unknown) => {
+const targetInput = (input: McpToolInput) => {
   if (!isRecord(input)) throw new Error("Invalid control tool input.")
   const { target, ...canonicalInput } = input
   return { target: targetSchema.parse(target), canonicalInput }
@@ -183,11 +196,11 @@ export const createControlMcpServer = (
     { instructions },
   )
   const canWrite = async () => options.authorize === undefined || await options.authorize("control:write")
-  const executeRouted = async <Input, Output>(
-    input: unknown,
-    parseInput: (value: unknown) => Input,
-    invoke: (service_: ControlService, value: Input) => Promise<unknown>,
-    parseOutput: (value: unknown) => Output,
+  const executeRouted = async <Input, Output extends object>(
+    input: McpToolInput,
+    parseInput: (value: McpToolInput) => Input,
+    invoke: (service_: ControlService, value: Input) => Promise<ControlServiceResult>,
+    parseOutput: (value: ControlServiceResult) => Output,
     requiresWriteScope: boolean,
   ) => {
     let target: ControlMcpTarget
@@ -216,7 +229,7 @@ export const createControlMcpServer = (
           return failure(serviceError(error))
         }
       }
-      return execute(parsedInput, parseInput, (value) => invoke(cloud, value), parseOutput)
+      return execute(() => invoke(cloud, parsedInput), parseOutput)
     }
     if (!options.hostService) return failure(hostUnavailable())
     let host: Awaited<ReturnType<ControlMcpHostService>>
@@ -226,20 +239,20 @@ export const createControlMcpServer = (
       return failure(hostTransportError(error))
     }
     try {
-      return await execute(parsedInput, parseInput, (value) => invoke(host.service, value), parseOutput, hostTransportError)
+      return await execute(() => invoke(host.service, parsedInput), parseOutput, hostTransportError)
     } finally {
       host.close()
     }
   }
-  const capabilities = (input: unknown) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
-  const capabilitiesV2 = (input: unknown) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
-  const snapshot = (input: unknown) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
-  const snapshotV2 = (input: unknown) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshotV2(value), projectSnapshotSchemaV2.parse, false)
-  const preview = (input: unknown) => executeRouted(input, controlPreviewRequestSchemaV1.parse, (service_, value) => service_.preview(value), controlPreviewResultSchemaV1.parse, true)
-  const commit = (input: unknown) => executeRouted(input, controlCommitRequestSchemaV1.parse, (service_, value) => service_.commit(value), controlCommitResultSchemaV1.parse, true)
-  const requestApproval = (input: unknown) => executeRouted(input, controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
-  const history = (input: unknown) => executeRouted(input, controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
-  const recoveries = (input: unknown) => executeRouted(input, controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
+  const capabilities = (input: McpToolInput) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
+  const capabilitiesV2 = (input: McpToolInput) => executeRouted(input, controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
+  const snapshot = (input: McpToolInput) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
+  const snapshotV2 = (input: McpToolInput) => executeRouted(input, controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshotV2(value), projectSnapshotSchemaV2.parse, false)
+  const preview = (input: McpToolInput) => executeRouted(input, controlPreviewRequestSchemaV1.parse, (service_, value) => service_.preview(value), controlPreviewResultSchemaV1.parse, true)
+  const commit = (input: McpToolInput) => executeRouted(input, controlCommitRequestSchemaV1.parse, (service_, value) => service_.commit(value), controlCommitResultSchemaV1.parse, true)
+  const requestApproval = (input: McpToolInput) => executeRouted(input, controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
+  const history = (input: McpToolInput) => executeRouted(input, controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
+  const recoveries = (input: McpToolInput) => executeRouted(input, controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
 
   server.registerTool("control_capabilities", {
     description: "Return the supported DAW control API capabilities.",

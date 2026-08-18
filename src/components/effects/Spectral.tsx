@@ -28,14 +28,14 @@ type SpectralProps = {
 }
 
 const defaults = createDefaultSpectralParams()
-const modeLabels: Record<SpectralMode, string> = {
+const modeLabels = {
   freeze: 'Freeze',
   gate: 'Gate',
   morph: 'Morph',
   'shift-blur': 'Shift/Blur',
   hpss: 'HPSS',
   'noise-reduce': 'Noise Reduce',
-}
+} satisfies Record<SpectralMode, string>
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const formatLatency = (frames: number) => `${(frames / 48).toFixed(1)} ms @ 48 kHz`
 

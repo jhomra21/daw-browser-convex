@@ -44,6 +44,8 @@ import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { convexApi, convexClient } from '~/lib/convex'
 import type { UploadToR2 } from '~/hooks/useClipBuffers'
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/app-preferences'
 import { buildRecordingConstraints } from '~/lib/audio-settings-core'
@@ -187,9 +189,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const [currentRecordingTrackId, setCurrentRecordingTrackId] = createSignal<Track['id'] | null>(null)
 
   let activeCtx: RecordingContext | null = null
-  const audioHostBridge = typeof window === 'undefined' ? undefined : window.dawDesktop?.audioHost
-  const hasAudioLifecycle = typeof audioHostBridge?.onLifecycle === 'function'
-    && typeof audioHostBridge.getLifecycle === 'function'
+  const audioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const hasAudioLifecycle = audioHostBridge !== undefined
   let audioLifecycleState: "suspended" | "recovering" | "ready" | "failed" = hasAudioLifecycle ? "recovering" : "ready"
   let recordingStartGeneration = 0
   let lockHeartbeatTimer: number | null = null
@@ -503,7 +504,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
             kind: 'clips.create',
             payload,
           })
-          return typeof result === 'string' ? result : null
+          return isString(result) ? result : null
         },
         insertLocalClip,
         removeLocalClips,
@@ -1059,7 +1060,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     return result
   }
 
-  const removeAudioLifecycle = hasAudioLifecycle
+  const removeAudioLifecycle = audioHostBridge
     ? createDesktopAudioLifecycleReconciler(audioHostBridge, (lifecycle) => {
       audioLifecycleState = lifecycle.state
       if (lifecycle.state === 'suspended') recordingStartGeneration += 1

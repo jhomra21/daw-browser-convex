@@ -95,12 +95,20 @@ type UseTimelineDataReturn = {
   deleteProject: (projectId: string) => Promise<void>
 }
 
-const normalizeProjects = (value: unknown): TimelineProject[] => {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((project) => {
-    if (!project || typeof project !== 'object') return []
-    const projectId = 'projectId' in project && typeof project.projectId === 'string' ? project.projectId : ''
-    const name = 'name' in project && typeof project.name === 'string' ? project.name : ''
+type ProjectPayload = { projectId?: unknown; name?: unknown }
+
+const isProjectPayload = (cause: unknown): cause is ProjectPayload => (
+  typeof cause === 'object' && cause !== null
+)
+
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
+const normalizeProjects = (cause: unknown): TimelineProject[] => {
+  if (!Array.isArray(cause)) return []
+  return cause.flatMap((project) => {
+    if (!isProjectPayload(project)) return []
+    const projectId = isString(project.projectId) ? project.projectId : ''
+    const name = isString(project.name) ? project.name : ''
     if (!projectId || !name) return []
     return [{ projectId, name }]
   })

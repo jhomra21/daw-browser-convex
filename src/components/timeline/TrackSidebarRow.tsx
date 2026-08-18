@@ -395,7 +395,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       )}
       style={{
         height: `${rowHeightPx()}px`,
-        ...(rowBackgroundColor() ? { background: rowBackgroundColor() } : {}),
+        background: rowBackgroundColor() ? rowBackgroundColor() : undefined,
       }}
       onClick={() => {
         if (suppressTrackClickId() === track.id) {

@@ -19,10 +19,10 @@ const createSink = (name: string, writable: Awaited<ReturnType<typeof createLoca
     settled = true
     return {}
   }
-  const abort = async (reason?: unknown) => {
+  const abort = async (cause?: unknown) => {
     if (settled) return
     settled = true
-    await writable.writable.abort(reason)
+    await writable.writable.abort(cause)
   }
   return {
     name,

@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
+import type { JsonValue } from '@daw-browser/shared'
+import { z } from 'zod'
 import { openLocalProjectDb } from './local-project-db'
 import {
   attachClipDeletionRecoveriesToHistory,
@@ -12,6 +14,20 @@ import {
   SharedOutboxUnavailableError,
   setSharedOutboxRuntimeForTesting,
 } from './shared-outbox'
+
+const parseRequestBody = (init: RequestInit | undefined): JsonValue => (
+  JSON.parse(init?.body?.toString() ?? 'null')
+)
+const volumeOperationSchema = z.object({
+  payload: z.object({ volume: z.number() }),
+})
+const midiOperationSchema = z.object({
+  payload: z.object({
+    midi: z.object({
+      notes: z.array(z.json()),
+    }),
+  }),
+})
 
 test('sanitizes legacy queued MIDI through the strict endpoint and continues with later operations', async () => {
   const projectId = `outbox-replay-${crypto.randomUUID()}`
@@ -64,7 +80,7 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
       const [input, init] = arguments_
       requests.push({
         url: String(input),
-        operation: JSON.parse(typeof init?.body === 'string' ? init.body : 'null'),
+        operation: parseRequestBody(init),
       })
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
@@ -92,21 +108,10 @@ test('sanitizes legacy queued MIDI through the strict endpoint and continues wit
       midi: { wave: 'sine' },
     },
   })
-  const firstOperation = requests[0]?.operation
-  if (
-    !firstOperation
-    || typeof firstOperation !== 'object'
-    || !('payload' in firstOperation)
-    || typeof firstOperation.payload !== 'object'
-    || firstOperation.payload === null
-    || !('midi' in firstOperation.payload)
-    || typeof firstOperation.payload.midi !== 'object'
-    || firstOperation.payload.midi === null
-    || !('notes' in firstOperation.payload.midi)
-    || !Array.isArray(firstOperation.payload.midi.notes)
-  ) throw new Error('Expected sanitized queued MIDI payload.')
-  expect(firstOperation.payload.midi.notes).toHaveLength(500)
-  expect(firstOperation.payload.midi).not.toHaveProperty('gain')
+  const firstOperation = midiOperationSchema.safeParse(requests[0]?.operation)
+  if (!firstOperation.success) throw new Error('Expected sanitized queued MIDI payload.')
+  expect(firstOperation.data.payload.midi.notes).toHaveLength(500)
+  expect(firstOperation.data.payload.midi).not.toHaveProperty('gain')
   expect(requests[1]?.operation).toEqual({
     kind: 'tracks.setVolume',
     payload: { trackId: 'track-1', volume: 0.5 },
@@ -152,7 +157,7 @@ test('migrates legacy queued clip deletion operation IDs before publishing and r
   const replayFetch: typeof globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      requests.push(JSON.parse(typeof init?.body === 'string' ? init.body : 'null'))
+      requests.push(parseRequestBody(init))
       if (fail) return new Response('retry', { status: 500 })
       return new Response(JSON.stringify({
         removedClipIds: ['clip-1'],
@@ -213,7 +218,7 @@ test('migrates legacy queued track creation IDs before a response-loss retry', a
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      requests.push(JSON.parse(typeof init?.body === 'string' ? init.body : 'null'))
+      requests.push(parseRequestBody(init))
       return responseLost
         ? new Response('response lost', { status: 500 })
         : new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
@@ -262,8 +267,8 @@ test('queues newer durable operations behind an existing backlog and replays the
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
-      if (typeof body?.payload?.volume === 'number') volumes.push(body.payload.volume)
+      const operation = volumeOperationSchema.parse(parseRequestBody(init))
+      volumes.push(operation.payload.volume)
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -313,11 +318,11 @@ test('dead-letters a rejected operation and continues with later FIFO rows', asy
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
-      if (body.payload.volume === 0.5) {
+      const operation = volumeOperationSchema.parse(parseRequestBody(init))
+      if (operation.payload.volume === 0.5) {
         return new Response(JSON.stringify({ status: 'rejected', reason: 'Track was deleted.' }), { status: 200 })
       }
-      volumes.push(body.payload.volume)
+      volumes.push(operation.payload.volume)
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -417,9 +422,9 @@ test('dead-letters HTTP 400 failures without blocking later rows', async () => {
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
-      if (body.payload.volume === 0.5) return new Response('invalid track', { status: 400 })
-      published.push(body.payload.volume)
+      const operation = volumeOperationSchema.parse(parseRequestBody(init))
+      if (operation.payload.volume === 0.5) return new Response('invalid track', { status: 400 })
+      published.push(operation.payload.volume)
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -510,8 +515,8 @@ test('assigns a durable FIFO sequence before publishing same-millisecond admissi
     globalThis.fetch = Object.assign(
       async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         const [, init] = arguments_
-        const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
-        if (body.payload.volume === 0.5) {
+        const operation = volumeOperationSchema.parse(parseRequestBody(init))
+        if (operation.payload.volume === 0.5) {
           resolve()
           await new Promise<void>((release) => { releaseFirst = release })
         }
@@ -572,7 +577,7 @@ test('requires explicit stale-claim recovery when Web Locks are unavailable', as
     updatedAt: timestamp,
   })
   const originalFetch = globalThis.fetch
-  const originalWindow = Reflect.get(globalThis, 'window')
+  const originalWindow = globalThis.window
   let requests = 0
   globalThis.fetch = Object.assign(
     async () => {
@@ -674,9 +679,9 @@ test('retains authentication failures for reauthentication and preserves FIFO', 
   globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
-      const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
+      const operation = volumeOperationSchema.parse(parseRequestBody(init))
       if (!authenticated) return new Response('authentication required', { status: 401 })
-      published.push(body.payload.volume)
+      published.push(operation.payload.volume)
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
@@ -830,8 +835,8 @@ test('stops the current drain after lease ownership is lost', async () => {
       async (...arguments_: Parameters<typeof globalThis.fetch>) => {
         requests += 1
         const [, init] = arguments_
-        const body = JSON.parse(typeof init?.body === 'string' ? init.body : 'null')
-        if (body.payload.volume === 0.5) {
+        const operation = volumeOperationSchema.parse(parseRequestBody(init))
+        if (operation.payload.volume === 0.5) {
           resolve()
           await new Promise<void>((release) => { releaseFirst = release })
         }
@@ -844,12 +849,16 @@ test('stops the current drain after lease ownership is lost', async () => {
     const flushing = flushSharedOutbox(projectId, userId)
     await firstStarted
     const claimed = await db.get('syncState', 'shared-outbox:first')
-    if (!claimed || typeof claimed.value !== 'object' || claimed.value === null || Array.isArray(claimed.value)) {
+    const parsedClaimedValue = z.record(
+      z.string(),
+      z.union([z.json(), z.undefined()]),
+    ).safeParse(claimed?.value)
+    if (!claimed || !parsedClaimedValue.success) {
       throw new Error('Expected first outbox row to be claimed.')
     }
     await db.put('syncState', {
       ...claimed,
-      value: { ...claimed.value, claimOwner: 'other-context', claimToken: 'other-token' },
+      value: { ...parsedClaimedValue.data, claimOwner: 'other-context', claimToken: 'other-token' },
       updatedAt: timestamp,
     })
     releaseFirst?.()

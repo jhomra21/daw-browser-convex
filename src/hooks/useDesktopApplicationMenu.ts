@@ -1,6 +1,6 @@
-import {
-  type DesktopApplicationMenuCommand,
-  type DesktopApplicationMenuState,
+import type {
+  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu";
 import { createEffect, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";

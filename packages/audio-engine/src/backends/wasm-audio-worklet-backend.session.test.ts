@@ -2,38 +2,47 @@ import { expect, test } from "bun:test"
 
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../../audio-core-contract/src"
 import { PortableWasmPlaybackSession } from "./wasm-audio-worklet-backend"
+import {
+  portableWasmProtocolVersion,
+  type PortableWasmControlMessage,
+  type PortableWasmStatusMessage,
+} from "../portable-wasm-protocol"
 
-const responseFor = (message: Record<string, unknown>) => {
-  const requestId = message.requestId
-  if (typeof requestId !== "number") return undefined
-  if (message.type === "prepare-graph") return { type: "graph-prepared", requestId, result: "prepared" }
-  if (message.type === "publish-graph") return { type: "graph-published", requestId, result: "published" }
-  if (message.type === "register-asset") return { type: "asset-registered", requestId, result: "registered", handle: { slot: 0, generation: 1 } }
-  if (message.type === "install-schedule") return { type: "schedule-installed", requestId, result: "installed" }
-  if (message.type === "schedule-sources") return { type: "sources-scheduled", requestId, result: "scheduled" }
-  if (message.type === "transport") return { type: "transport-applied", requestId, result: "applied" }
-  return undefined
+type PortableRequest = Extract<PortableWasmControlMessage, { requestId: number }>
+
+const responseFor = (message: PortableRequest): PortableWasmStatusMessage => {
+  if (message.type === "prepare-graph") return { version: portableWasmProtocolVersion, type: "graph-prepared", requestId: message.requestId, revision: message.snapshot.revision, result: "prepared" }
+  if (message.type === "publish-graph") return { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published" }
+  if (message.type === "register-asset") return { version: portableWasmProtocolVersion, type: "asset-registered", requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: "registered", handle: { slot: 0, generation: message.generation } }
+  if (message.type === "install-schedule") return { version: portableWasmProtocolVersion, type: "schedule-installed", requestId: message.requestId, revision: message.schedule.revision, epoch: message.schedule.transportEpoch, result: "installed" }
+  if (message.type === "schedule-sources") return { version: portableWasmProtocolVersion, type: "sources-scheduled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
+  if (message.type === "transport") return { version: portableWasmProtocolVersion, type: "transport-applied", requestId: message.requestId, epoch: message.epoch, result: "applied" }
+  if (message.type === "processor-events") return { version: portableWasmProtocolVersion, type: "processor-events-applied", requestId: message.requestId, revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: "applied" }
+  if (message.type === "release-asset") return { version: portableWasmProtocolVersion, type: "asset-released", requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: "released" }
+  return { version: portableWasmProtocolVersion, type: "processor-automation-reenabled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "applied" }
 }
+
+const isPortableRequest = (message: PortableWasmControlMessage): message is PortableRequest =>
+  "requestId" in message
 
 const createSession = (
   reply = true,
-  respond: (message: Record<string, unknown>) => Record<string, unknown> | undefined = responseFor,
+  respond: (message: PortableRequest) => PortableWasmStatusMessage = responseFor,
   controlTimeoutMs?: number,
 ) => {
   const calls: string[] = []
-  let handler: ((event: MessageEvent<unknown>) => void) | null = null
+  let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
   const node: AudioWorkletNode = Object.assign(Object.create(null), {
     port: {
       get onmessage() {
         return handler
       },
-      set onmessage(next: ((event: MessageEvent<unknown>) => void) | null) {
+      set onmessage(next: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null) {
         handler = next
       },
-      postMessage(message: unknown) {
-        if (typeof message !== "object" || message === null || !("type" in message) || typeof message.type !== "string") return
+      postMessage(message: PortableWasmControlMessage) {
         calls.push(message.type)
-        const response = reply ? respond(message) : undefined
+        const response = reply && isPortableRequest(message) ? respond(message) : undefined
         if (response) handler?.(new MessageEvent("message", { data: response }))
       },
       close() {},
@@ -99,7 +108,9 @@ test("mutes and reports an active worklet fault", () => {
   const faults: string[] = []
   fixture.session.markActive()
   fixture.session.onFault((error) => faults.push(error.message))
-  fixture.node.port.onmessage?.(new MessageEvent("message", { data: { type: "fault" } }))
+  fixture.node.port.onmessage?.(new MessageEvent("message", {
+    data: { version: portableWasmProtocolVersion, type: "fault", code: "core-error" },
+  }))
 
   expect(fixture.session.isActive).toBeFalse()
   expect(fixture.calls).toEqual(["dispose"])
@@ -121,7 +132,14 @@ test("routes requestless graph continuity notifications to telemetry listeners",
 test("rejects an unacknowledged schedule installation", async () => {
   const fixture = createSession(true, (message) => (
     message.type === "install-schedule"
-      ? { type: "schedule-installed", requestId: message.requestId, result: "rejected" }
+      ? {
+        version: portableWasmProtocolVersion,
+        type: "schedule-installed",
+        requestId: message.requestId,
+        revision: message.schedule.revision,
+        epoch: message.schedule.transportEpoch,
+        result: "rejected",
+      }
       : responseFor(message)
   ))
 

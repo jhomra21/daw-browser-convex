@@ -168,28 +168,22 @@ const projectClip = (
       epoch: input.epoch,
       sequence,
       sourceNodeId,
-      ...(input.includeStableIdentity
-        ? { sourceIdentity: stableSourceIdentity(sourceNodeId, clip.id) }
-        : {}),
+      sourceIdentity: input.includeStableIdentity ? stableSourceIdentity(sourceNodeId, clip.id) : undefined,
       assetId: asset.assetId,
       startFrame,
       stopFrame,
       sourceOffsetFrame,
-      ...(sourceOffsetFraction === 0 ? {} : { sourceOffsetFraction }),
+      sourceOffsetFraction: sourceOffsetFraction === 0 ? undefined : sourceOffsetFraction,
       sourceFrameCount,
       gain: normalizeClipGain(clip.gain ?? 1),
       fadeInStartFrame: frameAt(clip.startSec + fades.fadeInStartSec, input.sampleRateHz),
       fadeInEndFrame: frameAt(clip.startSec + fades.fadeInSec, input.sampleRateHz),
       fadeOutStartFrame: frameAt(clip.startSec + clip.duration - fades.fadeOutSec, input.sampleRateHz),
       fadeOutEndFrame: frameAt(clip.startSec + clip.duration - fades.fadeOutEndSec, input.sampleRateHz),
-      ...(fades.fadeInCurve === 0 ? {} : {
-        fadeInCurve: fades.fadeInCurve,
-        fadeInCurvePosition: fades.fadeInCurvePosition,
-      }),
-      ...(fades.fadeOutCurve === 0 ? {} : {
-        fadeOutCurve: fades.fadeOutCurve,
-        fadeOutCurvePosition: fades.fadeOutCurvePosition,
-      }),
+      fadeInCurve: fades.fadeInCurve === 0 ? undefined : fades.fadeInCurve,
+      fadeInCurvePosition: fades.fadeInCurve === 0 ? undefined : fades.fadeInCurvePosition,
+      fadeOutCurve: fades.fadeOutCurve === 0 ? undefined : fades.fadeOutCurve,
+      fadeOutCurvePosition: fades.fadeOutCurve === 0 ? undefined : fades.fadeOutCurvePosition,
     },
   }
 }

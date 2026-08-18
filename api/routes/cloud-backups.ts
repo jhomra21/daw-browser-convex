@@ -54,17 +54,17 @@ const cloudProjectCreateBodySchema = z.object({
   projectId: z.string(),
 })
 
-const readPendingDeletedCloudKeys = (value: unknown, projectId: string) => {
+const readPendingDeletedCloudKeys = (value: string | null, projectId: string) => {
   if (value === null) return []
-  if (typeof value !== 'string') return null
-  let parsed: unknown
+  let parsed
   try {
     parsed = JSON.parse(value)
   } catch {
     return null
   }
-  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) return null
-  const keys = [...new Set(parsed)]
+  const keysResult = z.array(z.string()).safeParse(parsed)
+  if (!keysResult.success) return null
+  const keys = [...new Set(keysResult.data)]
   return keys.every((key) => isValidCloudBackupAssetKey(projectId, key)) ? keys : null
 }
 
@@ -160,7 +160,9 @@ export function registerCloudBackupRoutes(app: App) {
     const conflictAction = form.get('conflictAction') === 'overwrite' ? 'overwrite' : 'detect'
     const baseManifestVersion = form.get('baseManifestVersion')?.toString()
     if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
-    const pendingDeletedCloudKeys = readPendingDeletedCloudKeys(form.get('pendingDeletedCloudKeys'), projectId)
+    const pendingDeletedCloudKeysEntry = z.string().nullable().safeParse(form.get('pendingDeletedCloudKeys'))
+    if (!pendingDeletedCloudKeysEntry.success) return c.json({ error: 'Invalid pending delete keys' }, 400)
+    const pendingDeletedCloudKeys = readPendingDeletedCloudKeys(pendingDeletedCloudKeysEntry.data, projectId)
     if (!pendingDeletedCloudKeys) return c.json({ error: 'Invalid pending delete keys' }, 400)
 
     let manifest: ProjectManifest

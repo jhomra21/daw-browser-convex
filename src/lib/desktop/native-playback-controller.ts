@@ -26,6 +26,7 @@ import {
 } from "@daw-browser/audio-engine/portable-stretch-preparation"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
+  NativeHostDeviceConfiguration,
   NativeHostTransport,
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
@@ -37,8 +38,12 @@ import type {
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
-import type { LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
-import type { LivePlaybackCompileContext } from "~/lib/live-playback-snapshot"
+import type {
+  LivePlaybackCompileContext,
+  LivePlaybackSnapshot,
+  LivePlaybackSnapshotCompilation,
+  LivePlaybackTransport,
+} from "~/lib/live-playback-snapshot"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { DesktopBridge } from "~/types/desktop-bridge"
@@ -67,16 +72,16 @@ export type NativeLiveMidiNoteHandle = {
   noteId: number
 }
 
-const sanitizeNativeVst3DiagnosticError = (error: unknown) => {
+type NativePlaybackDiagnosticFailure = Error | string | null | undefined
+
+const sanitizeNativeVst3DiagnosticError = (error: NativePlaybackDiagnosticFailure) => {
   const message = error instanceof Error
     ? error.message
-    : typeof error === "string"
-      ? error
-    : "Native playback could not start."
+    : error ?? "Native playback could not start."
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
 }
 
-const indicatesNativeHostConnectionLoss = (error: unknown) => {
+const indicatesNativeHostConnectionLoss = (error: NativePlaybackDiagnosticFailure) => {
   const message = sanitizeNativeVst3DiagnosticError(error).toLowerCase()
   return message.includes("native playback host connection was lost")
     || message.includes("native audio host is unavailable")
@@ -85,23 +90,25 @@ const indicatesNativeHostConnectionLoss = (error: unknown) => {
     || message.includes("host connection closed")
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
-const enabledValue = (value: unknown) => {
-  if (!isRecord(value)) return undefined
-  const state = isRecord(value.state) ? value.state : value
-  return typeof state.enabled === "boolean" ? state.enabled : undefined
+const enabledValue = (
+  payload: EffectParamsCommitPayload,
+  direction: "from" | "to",
+) => {
+  if (payload.effect === "synth" || payload.effect === "instrument" || payload.effect === "arp") {
+    return undefined
+  }
+  const value = payload[direction]
+  const state = "state" in value ? value.state : value
+  return state.enabled
 }
 
+type NativeSessionBridge = NonNullable<DesktopBridge["audioHost"]>["session"]
 type NativePlaybackBridge = Pick<
   NonNullable<DesktopBridge["audioHost"]>,
   "resolveOutputDevice" | "resolveInputDevice"
 > & {
   session: Pick<
-    NonNullable<DesktopBridge["audioHost"]>["session"],
-    | "configure"
-    | "beginTransaction"
+    NativeSessionBridge,
     | "commitTransaction"
     | "rollbackTransaction"
     | "installAsset"
@@ -128,6 +135,14 @@ type NativePlaybackBridge = Pick<
     | "onMeterBatch"
     | "onScheduleProgress"
   > & {
+    configure: (
+      input: NativeHostDeviceConfiguration,
+      transactionToken?: string,
+    ) => Promise<NativeSessionReply>
+    beginTransaction: () => Promise<
+      | { ok: true; transactionToken: string }
+      | { ok: false; error: string }
+    >
     queueProcessorStatePatch?: NonNullable<DesktopBridge["audioHost"]>["session"]["queueProcessorStatePatch"]
     reenableVstScheduleAutomation?: NonNullable<DesktopBridge["audioHost"]>["session"]["reenableVstScheduleAutomation"]
     setSpectrumNode?: NonNullable<DesktopBridge["audioHost"]>["session"]["setSpectrumNode"]
@@ -143,22 +158,23 @@ const nativeTransportFor = (
   running: boolean,
   frame: number,
   transitionId: bigint,
-): NativeHostTransport => ({
-  epoch,
-  running,
-  frame,
-  bpm: snapshot.bpm,
-  timeSignatureNumerator: snapshot.timeSignature?.numerator ?? 4,
-  timeSignatureDenominator: snapshot.timeSignature?.denominator ?? 4,
-  cycleActive: snapshot.transport.loopEnabled,
-  ...(snapshot.transport.loopEnabled
-    ? {
-        cycleStartSec: snapshot.transport.loopStartSec,
-        cycleEndSec: snapshot.transport.loopEndSec,
-      }
-    : {}),
-  transitionId,
-})
+): NativeHostTransport => {
+  const transport: NativeHostTransport = {
+    epoch,
+    running,
+    frame,
+    bpm: snapshot.bpm,
+    timeSignatureNumerator: snapshot.timeSignature?.numerator ?? 4,
+    timeSignatureDenominator: snapshot.timeSignature?.denominator ?? 4,
+    cycleActive: snapshot.transport.loopEnabled,
+    transitionId,
+  }
+  if (snapshot.transport.loopEnabled) {
+    transport.cycleStartSec = snapshot.transport.loopStartSec
+    transport.cycleEndSec = snapshot.transport.loopEndSec
+  }
+  return transport
+}
 export type NativeBuiltInParameterQueueResult =
   | { handled: true }
   | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-target" | "unavailable" | "bridge-error"; error?: string }
@@ -181,6 +197,10 @@ type NativeRecordingSession = {
   latestStatus?: NativeHostRecordingStatus
   onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
   onFailure?: (error: Error) => void
+}
+
+type NativeRecordingStatusSubscription = {
+  current?: () => void
 }
 
 type LiveNoteReadiness = {
@@ -734,11 +754,14 @@ export const createNativePlaybackController = (input: {
           return "started"
         }
       } catch (error) {
+        const diagnosticError = error === null || error === undefined
+          ? undefined
+          : error instanceof Error ? error : String(error)
         console.error("[native-vst3] session.start failed", {
           result: "unavailable",
-          error: sanitizeNativeVst3DiagnosticError(error),
+          error: sanitizeNativeVst3DiagnosticError(diagnosticError),
         })
-        if (!cancelled() && indicatesNativeHostConnectionLoss(error)) {
+        if (!cancelled() && indicatesNativeHostConnectionLoss(diagnosticError)) {
           markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
         }
         if (!cancelled()) reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
@@ -775,6 +798,7 @@ export const createNativePlaybackController = (input: {
     let transactionOpen = false
     let transactionToken: string | undefined
     let requiresNative = false
+    let startStage = "compile"
     try {
       const snapshotResult = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return "unavailable"
@@ -898,6 +922,7 @@ export const createNativePlaybackController = (input: {
       if (deviceReply.device.outputChannelCount < 2) return unavailable("The native audio output does not provide compatible stereo routing.")
       const assets = mapNativeSessionAssets(projection.graph.assets)
       const nativeGraph = projection.graph
+      startStage = "begin-transaction"
       const transactionReply = await bridge.session.beginTransaction()
       assertReply(transactionReply)
       transactionToken = transactionReply.transactionToken
@@ -916,6 +941,7 @@ export const createNativePlaybackController = (input: {
         assertReply(coordination)
       }
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
+      startStage = "configure"
       assertReply(await bridge.session.configure({
         deviceId: deviceReply.device.deviceId,
         sampleRateHz: deviceReply.device.nominalSampleRateHz,
@@ -925,6 +951,7 @@ export const createNativePlaybackController = (input: {
       }, transactionToken))
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
       for (const { asset, pcm } of projection.assets) {
+        startStage = "install-asset"
         const mapping = assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)
         if (!mapping) throw new Error("Native session asset mapping is incomplete.")
         assertReply(await bridge.session.installAsset({
@@ -936,6 +963,7 @@ export const createNativePlaybackController = (input: {
         }, transactionToken))
         if (cancelled()) throw new Error("Native playback startup was cancelled.")
       }
+      startStage = "publish-graph"
       assertReply(await bridge.session.publishGraph(serializeNativeGraph(nativeGraph), transactionToken))
       if (bridge.session.configureInstrumentStates) {
         assertReply(await bridge.session.configureInstrumentStates(
@@ -975,6 +1003,7 @@ export const createNativePlaybackController = (input: {
       nextCoordinator.install()
       scheduleCoordinator = nextCoordinator
       const initialTransitionId = ++nextTransportTransitionId
+      startStage = "set-initial-transport"
       assertReply(await bridge.session.setTransport(
         nativeTransportFor(runtimeSnapshot, transportEpoch, false, initialFrame, initialTransitionId),
         transactionToken,
@@ -982,6 +1011,8 @@ export const createNativePlaybackController = (input: {
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
       await nextCoordinator.queueInitialSynthState(initialFrame, transactionToken)
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
+      if (!transactionToken) throw new Error("Native playback transaction token was lost.")
+      startStage = "commit-transaction"
       assertReply(await bridge.session.commitTransaction(transactionToken))
       transactionOpen = false
       transactionToken = undefined
@@ -1001,6 +1032,7 @@ export const createNativePlaybackController = (input: {
       unsubscribeMeters = bridge.session.onMeterBatch?.(handleNativeMeterBatch)
       unsubscribeSpectrum?.()
       unsubscribeSpectrum = bridge.session.onSpectrumFrame?.(handleNativeSpectrumFrame)
+      startStage = "start-session"
       assertReply(await bridge.session.start())
       nativeSessionStarted = true
       configureNativeSpectrumTarget()
@@ -1011,6 +1043,7 @@ export const createNativePlaybackController = (input: {
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
       // VST workers are started only after the graph transaction is committed.
       // Prime the bounded owned schedule before either paused preview or playback.
+      startStage = "prime-schedule"
       await nextCoordinator.prime(initialFrame)
       await nextCoordinator.waitForAccepted(initialFrame + Math.min(runtimeMaximumFrames, nextCoordinator.scheduleEndFrame() - initialFrame))
       if (runTransport) {
@@ -1031,11 +1064,15 @@ export const createNativePlaybackController = (input: {
       }
       else if (!wasCancelled) await dispose()
       const result = requiresNative ? "blocked" : "unavailable"
+      const diagnosticError = error === null || error === undefined
+        ? undefined
+        : error instanceof Error ? error : String(error)
       console.error("[native-vst3] native start failed", {
         result,
-        error: sanitizeNativeVst3DiagnosticError(error),
+        stage: startStage,
+        error: sanitizeNativeVst3DiagnosticError(diagnosticError),
       })
-      if (!wasCancelled && indicatesNativeHostConnectionLoss(error)) {
+      if (!wasCancelled && indicatesNativeHostConnectionLoss(diagnosticError)) {
         markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
       }
       if (!wasCancelled) reportFault(error instanceof Error ? error.message : "Native playback could not start.")
@@ -1244,7 +1281,7 @@ export const createNativePlaybackController = (input: {
     predicate: (status: NativeHostRecordingStatus) => boolean,
     message: string,
   ) => new Promise<NativeHostRecordingStatus>((resolve, reject) => {
-    const subscription: { current?: () => void } = {}
+    const subscription: NativeRecordingStatusSubscription = {}
     // A native control transition must settle promptly so stale device or host
     // state cannot retain the single recording session indefinitely.
     const deadline = setTimeout(() => {
@@ -1557,13 +1594,13 @@ export const createNativePlaybackController = (input: {
     if (!prepared || !preparedGraph) return { handled: false, reason: "unprepared" }
     const commit = encodeNativeBuiltInStateCommit(request.payload, request.bpm)
     if (!commit) return { handled: false, reason: "unsupported-state" }
-    if (enabledValue(request.payload.from) !== enabledValue(request.payload.to)) {
+    if (enabledValue(request.payload, "from") !== enabledValue(request.payload, "to")) {
       return { handled: false, reason: "unsupported-state" }
     }
     const graph = preparedGraph
     const match = resolveGraphProcessor(graph, commit.instanceId)
     if (!match) return { handled: false, reason: "unsupported-instance" }
-    const fromEnabled = enabledValue(request.payload.from)
+    const fromEnabled = enabledValue(request.payload, "from")
     if (fromEnabled !== undefined && fromEnabled === match.processor.bypassed) {
       return { handled: false, reason: "unsupported-state" }
     }
@@ -1645,7 +1682,7 @@ export const createNativePlaybackController = (input: {
     if (!prepared || !preparedGraph) return Promise.resolve({ handled: false, reason: "unprepared" })
     const commit = encodeNativeBuiltInStateCommit(request.payload, request.bpm)
     if (!commit) return Promise.resolve({ handled: false, reason: "unsupported-state" })
-    if (enabledValue(request.payload.from) !== enabledValue(request.payload.to)) {
+    if (enabledValue(request.payload, "from") !== enabledValue(request.payload, "to")) {
       return Promise.resolve({ handled: false, reason: "unsupported-state" })
     }
     const previous = pendingStatePatches.get(commit.instanceId)

@@ -167,10 +167,10 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
     setFailureCount: (count: number) => { remainingFailures = count },
     setOnAccept: (listener: (attempt: number) => void) => { onAccept = listener },
     emitProgress: (progress: NativeScheduleProgress) => {
-      for (const listener of [...progressListeners]) listener(progress)
+      for (const listener of Array.from(progressListeners)) listener(progress)
     },
     emitLoss: () => {
-      for (const listener of [...lossListeners]) listener()
+      for (const listener of Array.from(lossListeners)) listener()
     },
     listenerStats: () => ({
       progress: progressListeners.size,

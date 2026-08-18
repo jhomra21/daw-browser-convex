@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
+import { isJsonObject } from '@daw-browser/shared'
+import { z } from 'zod'
 
 import {
   LOCAL_CONTROL_PROJECT_METADATA_KEY,
@@ -13,6 +15,7 @@ import {
   renameLocalProject,
   replaceLocalProject,
   type LocalProjectEntry,
+  type LocalProjectStoredValue,
 } from './local-project-db'
 
 const openNativeDb = (name: string, version?: number) => new Promise<IDBDatabase>((resolve, reject) => {
@@ -30,6 +33,29 @@ const completeProject = (id: string, name: string, timestamp: number): LocalProj
   createdAt: timestamp,
   updatedAt: timestamp,
   lastOpenedAt: timestamp,
+})
+
+test('stores structured-clone values without reducing them to JSON', async () => {
+  const projectId = `project:structured-clone-${crypto.randomUUID()}`
+  const db = await openLocalProjectDb(projectId)
+  const file = new File(['audio'], 'clip.wav', { type: 'audio/wav' })
+  const blob = new Blob(['waveform'], { type: 'application/octet-stream' })
+  const buffer = new Uint8Array([1, 2, 3]).buffer
+  const bytes = new Uint8Array([4, 5, 6])
+  const readonlyValues: readonly LocalProjectStoredValue[] = ['audio', undefined, bytes]
+  const value = {
+    file,
+    blob,
+    buffer,
+    bytes,
+    readonlyValues,
+    optionalValue: undefined,
+    nested: { omittedOptionalValue: undefined },
+  } satisfies LocalProjectStoredValue
+
+  await db.put('syncState', { key: 'structured-clone', value, updatedAt: 1 })
+
+  expect((await db.get('syncState', 'structured-clone'))?.value).toEqual(value)
 })
 
 test('upgrades existing project databases additively and retains v1 rows', async () => {
@@ -115,10 +141,11 @@ test('upgrades existing project databases additively and retains v1 rows', async
   expect(await upgraded.get('projectState', 'legacy')).toEqual({ key: 'legacy', value: 1, updatedAt: 1 })
   const migrated = await upgraded.get('entities', ['external-plugin', `external-plugin:${processor.instanceId}`])
   expect(migrated?.value).toMatchObject({ index: 0 })
-  if (typeof migrated?.value !== 'object' || migrated.value === null || Array.isArray(migrated.value)) {
+  const parsedMigratedValue = z.json().safeParse(migrated?.value)
+  if (!parsedMigratedValue.success || !isJsonObject(parsedMigratedValue.data)) {
     throw new Error('Expected migrated external processor row.')
   }
-  expect(Object.hasOwn(migrated.value, 'chainIndex')).toBeFalse()
+  expect(Object.hasOwn(parsedMigratedValue.data, 'chainIndex')).toBeFalse()
   expect(upgraded.objectStoreNames.contains('controlState')).toBe(true)
   expect(upgraded.objectStoreNames.contains('controlCommits')).toBe(true)
   expect(upgraded.objectStoreNames.contains('controlApprovals')).toBe(true)

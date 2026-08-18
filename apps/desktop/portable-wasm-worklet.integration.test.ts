@@ -3,6 +3,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import type { DesktopJsonValue } from "@daw-browser/desktop-protocol"
 import { computePortableWasmSourceHash } from "../../native/audio-core/scripts/portable-wasm-source-hash"
 
 const desktopDirectory = import.meta.dirname
@@ -45,7 +46,9 @@ type WorkletDiagnostics = {
   } | null
 }
 
-const isWorkletDiagnostics = (value: unknown): value is WorkletDiagnostics =>
+const isWorkletDiagnostics = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & WorkletDiagnostics =>
   typeof value === "object"
   && value !== null
   && "requestedSampleRate" in value && typeof value.requestedSampleRate === "number"
@@ -67,19 +70,24 @@ const isWorkletDiagnostics = (value: unknown): value is WorkletDiagnostics =>
   && "memoryBytes" in value && typeof value.memoryBytes === "number"
   && "graphPrepare" in value
 
+const isPortableWasmManifest = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & { sourceHash: string } => (
+  typeof value === "object"
+  && value !== null
+  && !Array.isArray(value)
+  && "sourceHash" in value
+  && typeof value.sourceHash === "string"
+)
+
 test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the portable Wasm AudioWorklet against static assets in Electron", async () => {
   const artifactPath = path.join(artifactDirectory, artifactName)
   const manifestPath = path.join(artifactDirectory, manifestName)
   if (!existsSync(artifactPath) || !existsSync(manifestPath)) {
     throw new Error("Build the portable Wasm production assets with sh native/audio-core/scripts/build-wasm.sh before running this integration test.")
   }
-  const manifest: unknown = JSON.parse(await readFile(manifestPath, "utf8"))
-  const sourceHash = typeof manifest === "object"
-    && manifest !== null
-    && "sourceHash" in manifest
-    && typeof manifest.sourceHash === "string"
-    ? manifest.sourceHash
-    : undefined
+  const manifest: DesktopJsonValue = JSON.parse(await readFile(manifestPath, "utf8"))
+  const sourceHash = isPortableWasmManifest(manifest) ? manifest.sourceHash : undefined
   if (sourceHash !== await computePortableWasmSourceHash(repositoryRoot)) {
     throw new Error("Portable Wasm manifest is stale for the current audio-core build inputs.")
   }
@@ -122,7 +130,7 @@ test.skipIf(process.env.DAW_ELECTRON_AUDIO_WORKLET_TEST !== "1")("runs the porta
       const stderr = new TextDecoder().decode(result.stderr)
       if (result.exitCode !== 0) throw new Error(stderr)
       expect(stderr).toBe("")
-      const output = JSON.parse(new TextDecoder().decode(result.stdout))
+      const output: DesktopJsonValue = JSON.parse(new TextDecoder().decode(result.stdout))
       if (!isWorkletDiagnostics(output)) throw new Error(`Electron did not return diagnostics for ${sampleRate} Hz.`)
       expect(output.requestedSampleRate).toBe(sampleRate)
       expect(output.actualSampleRate).toBe(sampleRate)

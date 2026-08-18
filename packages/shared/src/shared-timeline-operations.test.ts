@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { parseDurableSharedTimelineOperation, parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
 import { createDefaultSpectralParams } from './spectral-params'
+import type { JsonValue } from './json-value'
 
 describe('shared timeline operations', () => {
   test('builds expanded MIDI clip creates while retaining note-only creates', () => {
@@ -200,7 +201,7 @@ describe('shared timeline operations', () => {
   })
 
   test('rejects supplied MIDI create payloads that exceed write limits', () => {
-    const create = (midi: unknown) => parseSharedTimelineOperation({
+    const create = (midi: JsonValue) => parseSharedTimelineOperation({
       kind: 'clips.create',
       payload: {
         trackId: 'track-1',

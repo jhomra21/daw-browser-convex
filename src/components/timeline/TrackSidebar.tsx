@@ -325,14 +325,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     return byTrackId;
   });
-  const masterAutomationMeta = createMemo<{
+  type MasterAutomationMeta = {
     automatedTargetKeys: Set<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
-  }>(() => {
-    const meta: {
-      automatedTargetKeys: Set<string>;
-      selectedEnvelope: AutomationEnvelope | undefined;
-    } = {
+  };
+  const masterAutomationMeta = createMemo<MasterAutomationMeta>(() => {
+    const meta: MasterAutomationMeta = {
       automatedTargetKeys: new Set<string>(),
       selectedEnvelope: undefined,
     };

@@ -271,7 +271,7 @@ test("serializes empty sampled instruments without staged assets", () => {
         assetId: "",
         seed: 1,
         maxGrains: 2,
-        windowShape: "hann",
+        'windowShape': "hann",
         freeze: false,
         grainSizeMs: 5,
         densityHz: 1,

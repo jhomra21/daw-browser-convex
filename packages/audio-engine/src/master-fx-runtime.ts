@@ -53,6 +53,10 @@ type MasterCandidate = {
   eqParamUpdates: Array<{ nodes: BiquadFilterNode[]; params: EqParams }>
 }
 
+type StaticWorkletChainHolder = {
+  chain: StaticWorkletNodeChain | undefined
+}
+
 export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let analyser: AnalyserNode | null = null
   let spectrumTmp: Uint8Array<ArrayBuffer> | null = null
@@ -406,7 +410,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       removeCandidateResources(candidate.resources, instance.id)
       if (isStaticWorkletInstance(instance)) {
         const faultGeneration = options.getFaultGeneration()
-        const createdHolder: { chain: StaticWorkletNodeChain | undefined } = { chain: undefined }
+        const createdHolder: StaticWorkletChainHolder = { chain: undefined }
         const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
           const chain = createdHolder.chain
           if (!chain) return

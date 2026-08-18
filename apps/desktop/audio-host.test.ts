@@ -6,6 +6,7 @@ import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { portableGraphContractHash, processorContractHash } from "@daw-browser/audio-core-contract/generated"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
+import { z } from "zod"
 import {
   createNativeAudioHostSupervisor,
   encodeNativeAudioHostControlFrame,
@@ -244,7 +245,7 @@ const fixtureSupervisor = async (
       const child = spawn(
         process.execPath,
         [hostPath],
-        { env: { ...process.env, ...(mode ? { MODE: mode } : {}) }, stdio: ["pipe", "pipe", "pipe"] },
+        { env: { ...process.env, MODE: mode ? mode : undefined }, stdio: ["pipe", "pipe", "pipe"] },
       )
       onChild?.(child)
       return child
@@ -944,10 +945,8 @@ test("resolves the host default recording input and sends bounded recording cont
       peak: 0.5,
     })
     expect(recordingBlockMessage).toHaveProperty("rms")
-    if (typeof recordingBlockMessage === "object" && recordingBlockMessage !== null
-      && "rms" in recordingBlockMessage && typeof recordingBlockMessage.rms === "number") {
-      expect(recordingBlockMessage.rms).toBeCloseTo(0.4)
-    }
+    const recordingBlockWithRms = z.object({ rms: z.number() }).safeParse(recordingBlockMessage)
+    if (recordingBlockWithRms.success) expect(recordingBlockWithRms.data.rms).toBeCloseTo(0.4)
     await expect(status).resolves.toMatchObject({
       generation: 1,
       sessionId: 1n,

@@ -4,12 +4,13 @@ import {
   readWriterOutboundMessage,
   type RecorderBlockMessage,
   type WriterInboundMessage,
+  type WriterOutboundMessage,
 } from '@daw-browser/audio-engine/recording-protocol'
 import type { PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
 
 type WorkerEndpoint = {
-  postMessage: (message: unknown, transfer?: readonly ArrayBuffer[]) => void
-  setMessageHandler: (handler: (message: unknown) => void) => void
+  postMessage: (message: WriterInboundMessage, transfer?: readonly ArrayBuffer[]) => void
+  setMessageHandler: (handler: (message: WriterOutboundMessage | null) => void) => void
   terminate: () => void
 }
 
@@ -87,8 +88,7 @@ export const createPortableRecordingWriter = (input: {
     } satisfies WriterInboundMessage)
   }
 
-  worker.setMessageHandler((value) => {
-    const message = readWriterOutboundMessage(value)
+  worker.setMessageHandler((message) => {
     if (!message) {
       fail('Malformed portable recording writer message.')
       return
@@ -225,7 +225,7 @@ const createBrowserRecordingWriter = (): WorkerEndpoint => {
   return {
     postMessage: (message, transfer = []) => worker.postMessage(message, [...transfer]),
     setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(event.data)
+      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
     },
     terminate: () => worker.terminate(),
   }

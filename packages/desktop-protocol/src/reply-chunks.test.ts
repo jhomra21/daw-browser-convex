@@ -18,6 +18,7 @@ import {
   maxDesktopReplyPayloadBase64Characters,
   maxDesktopReplyPayloadBytes,
   type DesktopOperationV1,
+  type DesktopJsonValue,
 } from "./index"
 import { encodeDesktopFrame } from "./socket"
 
@@ -42,13 +43,13 @@ const chunkForBytes = (
   ...overrides,
 })
 
-const chunkForReply = (reply: unknown, operation: DesktopOperationV1 = "host.status") => (
+const chunkForReply = (reply: DesktopJsonValue, operation: DesktopOperationV1 = "host.status") => (
   chunkForBytes(encoder.encode(JSON.stringify(reply)), operation)
 )
 
 const expectRejectedAndCleared = (
   reassembler: ReturnType<typeof createDesktopReplyReassembler>,
-  value: unknown,
+  value: DesktopJsonValue,
 ) => {
   expect(() => reassembler.push(value)).toThrow()
   expect(reassembler.pending()).toBe(0)

@@ -7,11 +7,11 @@ import { requireProjectRow } from "./projectRows";
 
 type SnapshotContext = { db: DatabaseReader };
 
-const readProjectControlSnapshot = async (
+const readProjectControlSnapshot = async <Snapshot>(
   ctx: SnapshotContext,
   projectId: string,
-  projectSnapshot: typeof projectControlSnapshotV1 | typeof projectControlSnapshotV2,
-) => {
+  projectSnapshot: (input: Parameters<typeof projectControlSnapshotV1>[0]) => Snapshot,
+): Promise<Snapshot> => {
   const [project, tracks, mixerSettings, clips, automationEnvelopes, effects, sidechainRoutes, assets, assetFolders] = await Promise.all([
     requireProjectRow(ctx, projectId),
     listProjectTracksWithMixerChannels(ctx, projectId),

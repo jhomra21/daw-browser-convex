@@ -1,13 +1,25 @@
-import { AUDIO_EFFECT_ORDER, isAudioEffectKind, normalizeAudioWarp } from '@daw-browser/shared'
+import {
+  AUDIO_EFFECT_ORDER,
+  isAudioEffectKind,
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  normalizeAudioWarp,
+  type JsonObject,
+  type JsonValue,
+} from '@daw-browser/shared'
 import type { EffectType, HistoryEntry, PersistedHistory } from '~/lib/undo/types'
+import { serializeJsonValue } from '~/lib/json'
+import { z } from 'zod'
 
 const PERSISTED_HISTORY_VERSION = 7 as const
 const READABLE_PERSISTED_HISTORY_VERSIONS: ReadonlySet<number> = new Set([2, 3, 4, 5, 6, PERSISTED_HISTORY_VERSION])
 
 type PersistedHistoryEnvelope = {
   version: number
-  undo: unknown[]
-  redo: unknown[]
+  undo: JsonValue[]
+  redo: JsonValue[]
 }
 
 const EFFECT_TYPES: ReadonlySet<string> = new Set([
@@ -18,9 +30,9 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
   ...AUDIO_EFFECT_ORDER.map((effect): EffectType => `master-${effect}`),
 ])
 
-const isEffectType = (value: unknown): value is EffectType => typeof value === 'string' && EFFECT_TYPES.has(value)
+const isEffectType = (value: JsonValue): value is EffectType => isJsonString(value) && EFFECT_TYPES.has(value)
 
-function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEnvelope {
+function isPersistedHistoryEnvelope(value: JsonValue): value is PersistedHistoryEnvelope {
   return isRecord(value)
     && isNumber(value.version)
     && READABLE_PERSISTED_HISTORY_VERSIONS.has(value.version)
@@ -28,22 +40,20 @@ function isPersistedHistoryEnvelope(value: unknown): value is PersistedHistoryEn
     && Array.isArray(value.redo)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object'
-}
+const isRecord = (value: JsonValue): value is JsonObject => isJsonObject(value)
 
-const isString = (value: unknown): value is string => typeof value === 'string'
-const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
-const isScope = (value: unknown) => value === 'shared' || value === 'local'
-const isAudioWarp = (value: unknown) => normalizeAudioWarp(value) !== undefined
-const isClipFades = (value: unknown) => isRecord(value)
+const isString = (value: JsonValue): value is string => isJsonString(value)
+const isNumber = (value: JsonValue): value is number => isJsonNumber(value) && Number.isFinite(value)
+const isBoolean = (value: JsonValue): value is boolean => isJsonBoolean(value)
+const isScope = (value: JsonValue) => value === 'shared' || value === 'local'
+const isAudioWarp = (value: JsonValue) => normalizeAudioWarp(value) !== undefined
+const isClipFades = (value: JsonValue) => isRecord(value)
   && isNumber(value.fadeInSec)
   && isNumber(value.fadeOutSec)
   && isNumber(value.fadeInCurve)
   && isNumber(value.fadeOutCurve)
 
-const isClipTiming = (value: unknown) => isRecord(value)
+const isClipTiming = (value: JsonValue) => isRecord(value)
   && isNumber(value.startSec)
   && isNumber(value.duration)
   && (value.leftPadSec === undefined || isNumber(value.leftPadSec))
@@ -53,17 +63,17 @@ const isClipTiming = (value: unknown) => isRecord(value)
   && (value.fades === undefined || isClipFades(value.fades))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
-const isRoutingSnapshot = (value: unknown) => isRecord(value)
+const isRoutingSnapshot = (value: JsonValue) => isRecord(value)
   && Array.isArray(value.sends)
   && value.sends.every((send) => isRecord(send) && isString(send.targetTrackRef) && isNumber(send.amount))
   && (value.outputTargetRef === undefined || isString(value.outputTargetRef))
 
-const isSidechainRouteSnapshot = (value: unknown) => isRecord(value)
+const isSidechainRouteSnapshot = (value: JsonValue) => isRecord(value)
   && isString(value.sourceTrackRef)
   && isString(value.targetTrackRef)
   && isString(value.effectInstanceId)
 
-const isClipSnapshot = (value: unknown) => isRecord(value)
+const isClipSnapshot = (value: JsonValue) => isRecord(value)
   && isString(value.clipRef)
   && isNumber(value.startSec)
   && isNumber(value.duration)
@@ -78,9 +88,12 @@ const isClipSnapshot = (value: unknown) => isRecord(value)
   && (value.sourceKind === undefined || isString(value.sourceKind))
   && (value.gain === undefined || isNumber(value.gain))
   && (value.fades === undefined || isClipFades(value.fades))
-  && (value.timing === undefined || isClipTiming({ startSec: 0, duration: 0, ...value.timing }))
+  && (
+    value.timing === undefined
+    || isRecord(value.timing) && isClipTiming({ startSec: 0, duration: 0, ...value.timing })
+  )
 
-const isTrackCreateData = (value: unknown) => isRecord(value)
+const isTrackCreateData = (value: JsonValue) => isRecord(value)
   && isString(value.trackRef)
   && isNumber(value.index)
   && (value.currentTrackId === undefined || isString(value.currentTrackId))
@@ -89,7 +102,7 @@ const isTrackCreateData = (value: unknown) => isRecord(value)
   && (value.collapsed === undefined || isBoolean(value.collapsed))
   && (value.color === undefined || isString(value.color))
 
-const isTrackSnapshot = (value: unknown) => isRecord(value)
+const isTrackSnapshot = (value: JsonValue) => isRecord(value)
   && (value.trackRef === undefined || isString(value.trackRef))
   && isNumber(value.index)
   && isString(value.name)
@@ -100,25 +113,25 @@ const isTrackSnapshot = (value: unknown) => isRecord(value)
   && (value.channelRole === undefined || value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
   && isRoutingSnapshot(value.routing)
 
-const isTrackGroupChildUpdate = (value: unknown) => isRecord(value)
+const isTrackGroupChildUpdate = (value: JsonValue) => isRecord(value)
   && isString(value.trackRef)
   && (value.previousGroupRef === undefined || isString(value.previousGroupRef))
   && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
   && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
 
-const isTrackUngroupChildSnapshot = (value: unknown) => isRecord(value)
+const isTrackUngroupChildSnapshot = (value: JsonValue) => isRecord(value)
   && isString(value.trackRef)
   && isString(value.previousGroupRef)
   && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
   && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
 
-const isAutomationPoint = (value: unknown) => isRecord(value)
+const isAutomationPoint = (value: JsonValue) => isRecord(value)
   && isString(value.id)
   && isNumber(value.timeSec)
   && isNumber(value.value)
   && (value.interpolation === 'linear' || value.interpolation === 'hold')
 
-const isAutomationEnvelope = (value: unknown) => isRecord(value)
+const isAutomationEnvelope = (value: JsonValue) => isRecord(value)
   && isString(value.id)
   && isString(value.projectId)
   && isRecord(value.target)
@@ -130,11 +143,11 @@ const isAutomationEnvelope = (value: unknown) => isRecord(value)
   && value.points.every(isAutomationPoint)
   && isNumber(value.updatedAt)
 
-const isTrackAutomationSnapshot = (value: unknown) => (
+const isTrackAutomationSnapshot = (value: JsonValue) => (
   Array.isArray(value) && value.every(isAutomationEnvelope)
 )
 
-const isTrackEffectSnapshot = (value: unknown) => {
+const isTrackEffectSnapshot = (value: JsonValue) => {
   if (!isRecord(value)) return false
   const audioEffects = value.audioEffects
   return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
@@ -146,7 +159,7 @@ const isTrackEffectSnapshot = (value: unknown) => {
   ))))
 }
 
-function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSectionEdit: boolean, version: number) {
+function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: boolean, version: number) {
   switch (type) {
     case 'section-edit':
       return allowSectionEdit
@@ -273,7 +286,11 @@ function isHistoryEntryData(type: string, data: Record<string, unknown>, allowSe
   }
 }
 
-function isHistoryEntryValue(value: unknown, allowSectionEdit: boolean, version: number): value is HistoryEntry {
+function isHistoryEntryValue(
+  value: JsonValue,
+  allowSectionEdit: boolean,
+  version: number,
+): value is JsonObject & HistoryEntry {
   return isRecord(value)
     && typeof value.type === 'string'
     && typeof value.projectId === 'string'
@@ -281,12 +298,12 @@ function isHistoryEntryValue(value: unknown, allowSectionEdit: boolean, version:
     && isHistoryEntryData(value.type, value.data, allowSectionEdit, version)
 }
 
-function isHistoryEntry(value: unknown, version: number): value is HistoryEntry {
+function isHistoryEntry(value: JsonValue, version: number): value is JsonObject & HistoryEntry {
   return isHistoryEntryValue(value, true, version)
 }
 
-function readHistoryEntries(entries: unknown[], version: number): HistoryEntry[] {
-  return entries.flatMap((entry) => {
+function readHistoryEntries(entries: JsonValue[], version: number): HistoryEntry[] {
+  return entries.flatMap((entry): HistoryEntry[] => {
     if (!isHistoryEntry(entry, version)) return []
     if (version >= PERSISTED_HISTORY_VERSION) return [entry]
     if (entry.type === 'section-edit') {
@@ -294,7 +311,7 @@ function readHistoryEntries(entries: unknown[], version: number): HistoryEntry[]
         ...entry,
         data: {
           ...entry.data,
-          entries: readHistoryEntries(entry.data.entries, version),
+          entries: readHistoryEntries(entry.data.entries.map(serializeJsonValue), version),
         },
       }]
     }
@@ -315,11 +332,12 @@ function readHistoryEntries(entries: unknown[], version: number): HistoryEntry[]
   })
 }
 
-export function normalizePersistedHistory(value: unknown): PersistedHistory {
-  if (isPersistedHistoryEnvelope(value)) {
+export function normalizePersistedHistory<Value>(value: Value): PersistedHistory {
+  const parsed = z.json().safeParse(value)
+  if (parsed.success && isPersistedHistoryEnvelope(parsed.data)) {
     return {
-      undo: readHistoryEntries(value.undo, value.version),
-      redo: readHistoryEntries(value.redo, value.version),
+      undo: readHistoryEntries(parsed.data.undo, parsed.data.version),
+      redo: readHistoryEntries(parsed.data.redo, parsed.data.version),
     }
   }
   return { undo: [], redo: [] }
@@ -328,7 +346,7 @@ export function normalizePersistedHistory(value: unknown): PersistedHistory {
 export function serializePersistedHistory(value: PersistedHistory): PersistedHistoryEnvelope {
   return {
     version: PERSISTED_HISTORY_VERSION,
-    undo: value.undo,
-    redo: value.redo,
+    undo: value.undo.map(serializeJsonValue),
+    redo: value.redo.map(serializeJsonValue),
   }
 }

@@ -183,7 +183,7 @@ const render = async (request) => {
 
 self.onmessage = (event) => {
   const request = event.data
-  if (!request || request.version !== VERSION || typeof request.type !== 'string') return
+  if (!request || request.version !== VERSION || String(request.type) !== request.type) return
   if (request.type === 'cancel' && positiveInteger(request.jobId)) {
     if (currentJob && currentJob.request.jobId === request.jobId) currentJob.cancelled = true
     return
@@ -200,7 +200,7 @@ self.onmessage = (event) => {
     && positiveInteger(request.frameCount)
     && positiveInteger(request.maxFramesPerBlock)
     && positiveInteger(request.generation)
-    && typeof request.contractHash === 'string'
+    && String(request.contractHash) === request.contractHash
     && request.wasmBytes instanceof ArrayBuffer) {
     void render(request)
   } else if (request.type === 'render') {

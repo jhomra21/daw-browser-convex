@@ -55,7 +55,9 @@ export function useDrag(options: UseDragOptions = {}) {
   const onPointerDown = (event: PointerEvent) => {
     if (options.disabled?.()) return
     if (options.preventDefaultOnPointerDown !== false) event.preventDefault()
-    ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     activePointerId = event.pointerId
     setIsDragging(true)
     document.body.classList.add('select-none')

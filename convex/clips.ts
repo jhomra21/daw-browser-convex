@@ -1,6 +1,7 @@
 import type { Doc, Id } from './_generated/dataModel'
 import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 import { v } from 'convex/values'
+import { z } from 'zod'
 
 import { getClipOwnership, getClipWriteAccess } from './clipWrites'
 import { getMergedTrack } from './mixerChannels'
@@ -8,7 +9,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
-import { audioWarpEqual, buildClipAudioSourceFields, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
+import { audioWarpEqual, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -60,14 +61,18 @@ type ClipDeleteResult = {
 
 type ClipOwnership = { clip: Doc<'clips'>; owner: Doc<'ownerships'> }
 
-const isClipDeleteResult = (value: unknown): value is ClipDeleteResult => (
-  typeof value === 'object'
-  && value !== null
-  && 'removedClipIds' in value
-  && 'recoveries' in value
-  && Array.isArray(value.removedClipIds)
-  && Array.isArray(value.recoveries)
-)
+const clipDeleteResultSchema = z.object({
+  removedClipIds: z.array(z.string()),
+  recoveries: z.array(z.object({
+    sourceClipId: z.string(),
+    recoveryId: z.string(),
+  })),
+  skippedClipIds: z.array(z.string()),
+  skipped: z.array(z.object({
+    clipId: z.string(),
+    reason: z.enum(['access-denied', 'not-found']),
+  })),
+})
 
 const clipRestoreResult = v.union(
   v.object({ status: v.literal('applied'), clipId: v.string() }),
@@ -515,29 +520,29 @@ const clipDeletionRecoveryPayload = (
   clip: {
     projectId: clip.projectId,
     trackId: String(clip.trackId),
-    ...(trackHistoryRef === undefined ? {} : { trackHistoryRef }),
+    trackHistoryRef,
     startSec: clip.startSec,
     duration: clip.duration,
-    ...(clip.sourceAssetKey === undefined ? {} : { sourceAssetKey: clip.sourceAssetKey }),
-    ...(clip.sourceKind === undefined ? {} : { sourceKind: clip.sourceKind }),
-    ...(clip.sourceDurationSec === undefined ? {} : { sourceDurationSec: clip.sourceDurationSec }),
-    ...(clip.sourceSampleRate === undefined ? {} : { sourceSampleRate: clip.sourceSampleRate }),
-    ...(clip.sourceChannelCount === undefined ? {} : { sourceChannelCount: clip.sourceChannelCount }),
-    ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
-    ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
-    ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
-    ...(clip.gain === undefined ? {} : { gain: clip.gain }),
-    ...(clip.fades === undefined ? {} : { fades: clip.fades }),
-    ...(clip.color === undefined ? {} : { color: clip.color }),
-    ...(clip.name === undefined ? {} : { name: clip.name }),
-    ...(clip.sampleUrl === undefined ? {} : { sampleUrl: clip.sampleUrl }),
-    ...(clip.midi === undefined ? {} : { midi: clip.midi }),
-    ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+    sourceAssetKey: clip.sourceAssetKey,
+    sourceKind: clip.sourceKind,
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+    leftPadSec: clip.leftPadSec,
+    bufferOffsetSec: clip.bufferOffsetSec,
+    audioWarp: clip.audioWarp,
+    gain: clip.gain,
+    fades: clip.fades,
+    color: clip.color,
+    name: clip.name,
+    sampleUrl: clip.sampleUrl,
+    midi: clip.midi,
+    midiOffsetBeats: clip.midiOffsetBeats,
   },
   ownership: {
     projectId: ownership.projectId,
     ownerUserId: ownership.ownerUserId,
-    ...(ownership.role === undefined ? {} : { role: ownership.role }),
+    role: ownership.role,
   },
 })
 
@@ -617,7 +622,7 @@ export const deleteClipRow = async (
       sourceClipId: String(input.clipId),
       deleteOperationId: input.recovery.deleteOperationId,
       payload: recoveryPayload,
-      payloadDigest: hashCanonicalJsonSyncV1(recoveryPayload),
+      payloadDigest: hashCanonicalJsonSyncV1(JSON.parse(JSON.stringify(recoveryPayload))),
       createdAt: Date.now(),
       expiresAt: Date.now() + clipDeletionRecoveryLifetimeMs,
     })
@@ -1493,7 +1498,7 @@ export const removeMany = mutation({
       projectId,
       userId,
       operationId,
-      isResult: isClipDeleteResult,
+      isResult: (value): value is ClipDeleteResult => clipDeleteResultSchema.safeParse(value).success,
       run: () => removeManyForUser(ctx, clipIds, userId, projectId, operationId),
     })
   },
@@ -1508,7 +1513,7 @@ export const serverRemoveMany = mutation({
       projectId,
       userId,
       operationId,
-      isResult: isClipDeleteResult,
+      isResult: (value): value is ClipDeleteResult => clipDeleteResultSchema.safeParse(value).success,
       run: async () => {
         if (clipIds.length === 0) throw new Error('Clip deletion requires at least one clip.')
         const normalizedClipIds: Id<'clips'>[] = []
@@ -1565,14 +1570,14 @@ export const restoreDeleted = mutation({
     const ownership = payload?.ownership
     if (
       !clip || !ownership || clip.projectId !== recovery.projectId
-      || ownership.projectId !== recovery.projectId || typeof clip.trackId !== 'string'
-      || typeof ownership.ownerUserId !== 'string'
+      || ownership.projectId !== recovery.projectId || !isJsonString(clip.trackId)
+      || !isJsonString(ownership.ownerUserId)
     ) return { status: 'rejected' as const }
     const originalTrackId = ctx.db.normalizeId('tracks', clip.trackId)
     const originalTrack = originalTrackId
       ? await getCompatibleMergedTrack(ctx, originalTrackId, recovery.projectId, clip.midi ? 'midi' : 'audio')
       : null
-    const replacementTracks = !originalTrack && typeof clip.trackHistoryRef === 'string'
+    const replacementTracks = !originalTrack && isJsonString(clip.trackHistoryRef)
       ? (await ctx.db.query('tracks').withIndex('by_room', (q) => q.eq('projectId', recovery.projectId)).collect())
         .filter((candidate) => candidate.historyRef === clip.trackHistoryRef)
       : []
@@ -1606,24 +1611,25 @@ export const restoreDeleted = mutation({
       ? await findSampleRow(ctx, { projectId: recovery.projectId, assetKey: audioSource.assetKey })
       : undefined
     if (!clip.midi && clip.sourceAssetKey !== undefined && !asset) return { status: 'rejected' as const, reason: 'missing-audio-asset' }
+    const audioSourceFields = audioSource === undefined ? {} : buildClipAudioSourceFields(audioSource)
     const restoredId = await insertOwnedClipRow(ctx, {
       projectId: clip.projectId,
       trackId,
       startSec: clip.startSec,
       duration: clip.duration,
-      ...(audioSource ? buildClipAudioSourceFields(audioSource) : {}),
-      ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
-      ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
-      ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
-      ...(clip.gain === undefined ? {} : { gain: clip.gain }),
-      ...(clip.fades === undefined ? {} : { fades: clip.fades }),
-      ...(clip.color === undefined ? {} : { color: clip.color }),
-      ...(clip.name === undefined ? {} : { name: clip.name }),
+      ...audioSourceFields,
+      leftPadSec: clip.leftPadSec,
+      bufferOffsetSec: clip.bufferOffsetSec,
+      audioWarp: clip.audioWarp,
+      gain: clip.gain,
+      fades: clip.fades,
+      color: clip.color,
+      name: clip.name,
       ...(asset
         ? { sampleUrl: `/api/samples/${encodeURIComponent(recovery.projectId)}/${encodeURIComponent(asset.assetKey)}` }
-        : typeof clip.sampleUrl === 'string' ? { sampleUrl: clip.sampleUrl } : {}),
-      ...(clip.midi === undefined ? {} : { midi: normalizeLegacyMidiClip(clip.midi) }),
-      ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+        : isJsonString(clip.sampleUrl) ? { sampleUrl: clip.sampleUrl } : {}),
+      midi: clip.midi === undefined ? undefined : normalizeLegacyMidiClip(clip.midi),
+      midiOffsetBeats: clip.midiOffsetBeats,
     }, ownership.ownerUserId)
     await pruneClipDeletionRecoveryReceipts(ctx, {
       projectId: recovery.projectId,

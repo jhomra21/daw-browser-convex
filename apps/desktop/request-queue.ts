@@ -92,7 +92,7 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
       id: entry.request.id,
       operation: entry.request.operation,
       input: entry.request.input,
-      ...("actorSubject" in entry.request ? { actorSubject: entry.request.actorSubject } : {}),
+      actorSubject: "actorSubject" in entry.request ? entry.request.actorSubject : undefined,
       signal: controller.signal,
     }).then(
       (response) => {

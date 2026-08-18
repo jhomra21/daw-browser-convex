@@ -19,10 +19,10 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
   const bottomPanelOffsetPx = () => getBottomPanelMountedFootprintPx({ open: open(), heightPx: heightPx() });
   const chatBottomOffsetPx = () => bottomPanelOffsetPx() > 0 ? bottomPanelOffsetPx() + BOTTOM_PANEL_GAP_PX : 0;
   const preferenceScopeId = () => options.projectId() ?? "default";
-  const viewportHeightPx = () => typeof window === "undefined" ? heightPx() : window.innerHeight;
+  const viewportHeightPx = () => globalThis.window?.innerHeight ?? heightPx();
 
   createEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!globalThis.window) return;
     setHeightPx(loadBottomPanelHeight(preferenceScopeId(), window.innerHeight));
   });
 

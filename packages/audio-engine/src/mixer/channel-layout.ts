@@ -48,9 +48,10 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
     }
   }
 
-  const resolved = new Map<string, { input: ChannelLayout; output: ChannelLayout }>()
+  type ResolvedChannelLayout = { input: ChannelLayout; output: ChannelLayout }
+  const resolved = new Map<string, ResolvedChannelLayout>()
   const visiting = new Set<string>()
-  const visit = (channelId: string): { input: ChannelLayout; output: ChannelLayout } => {
+  const visit = (channelId: string): ResolvedChannelLayout => {
     const existing = resolved.get(channelId)
     if (existing) return existing
     assert(!visiting.has(channelId), `Cyclic mixer routing at ${channelId}`)

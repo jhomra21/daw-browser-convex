@@ -1,10 +1,13 @@
+import type { z } from "zod";
 import {
   normalizeLegacyMidiClip,
   type LegacyMidiClip,
   getAutomationParameterDescriptor,
   normalizeAutomationPoints,
   normalizePersistedInstrumentParams,
+  type JsonValue,
   type MidiClip,
+  type NormalizedLegacyMidiClip,
 } from "@daw-browser/shared";
 
 export type ControlProjectSnapshotInput = {
@@ -75,7 +78,7 @@ export type ControlProjectSnapshotInput = {
     index: number;
     type: string;
     instanceId?: string;
-    params: unknown;
+    params: JsonValue;
   }>;
   externalProcessors?: Array<{
     instanceId: string;
@@ -129,6 +132,19 @@ export type ControlProjectSnapshotInput = {
   }>;
 };
 
+type ProjectedLegacyMidi = {
+  wave: string;
+  gain?: number;
+  notes: Array<{
+    beat: number;
+    length: number;
+    pitch: number;
+    velocity?: number;
+  }>;
+};
+
+type ProjectedMidi = ProjectedLegacyMidi | NormalizedLegacyMidiClip;
+
 export const compareControlSnapshotText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 const effectiveControlClipName = (name: string | undefined) => name?.trim() || "Clip";
 const effectiveControlTimingOffset = (value: number | undefined) => value ?? 0;
@@ -137,8 +153,8 @@ const effectiveControlMixerBoolean = (value: boolean | undefined) => value ?? fa
 const projectControlSnapshotCore = <Snapshot>(
   input: ControlProjectSnapshotInput,
   version: "v1" | "v2",
-  projectMidi: (midi: LegacyMidiClip) => unknown,
-  parseSnapshot: (snapshot: unknown) => Snapshot,
+  projectMidi: (midi: LegacyMidiClip) => ProjectedMidi,
+  parseSnapshot: z.ZodType<Snapshot>,
 ): Snapshot => {
   const assets = [...input.assets]
     .sort((left, right) => compareControlSnapshotText(left.assetKey, right.assetKey))
@@ -149,10 +165,10 @@ const projectControlSnapshotCore = <Snapshot>(
       mimeType: asset.mimeType,
       sizeBytes: asset.sizeBytes,
       contentSha256: asset.contentSha256,
-      ...(asset.duration === undefined ? {} : { durationSec: asset.duration }),
-      ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
-      ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
-      ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+      durationSec: asset.duration,
+      sampleRate: asset.sampleRate,
+      channelCount: asset.channelCount,
+      folderId: asset.folderId,
       createdAt: asset.createdAt,
       updatedAt: asset.updatedAt,
     }));
@@ -186,7 +202,7 @@ const projectControlSnapshotCore = <Snapshot>(
         }))
         .sort((left, right) => compareControlSnapshotText(left.targetTrackId, right.targetTrackId)),
       collapsed: track.collapsed === true,
-      ...(track.color === undefined ? {} : { color: track.color }),
+      color: track.color,
     }));
   const clips = [...input.clips]
     .sort((left, right) => left.startSec - right.startSec || compareControlSnapshotText(String(left._id), String(right._id)))
@@ -204,18 +220,16 @@ const projectControlSnapshotCore = <Snapshot>(
       bufferOffsetSec: effectiveControlTimingOffset(clip.bufferOffsetSec),
       midiOffsetBeats: effectiveControlTimingOffset(clip.midiOffsetBeats),
       fades: clip.fades,
-      ...(clip.color === undefined ? {} : { color: clip.color }),
-      ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
+      color: clip.color,
+      audioWarp: clip.audioWarp,
       midi: clip.midi ? projectMidi(normalizeLegacyMidiClip(clip.midi)) : undefined,
-      ...(asset === undefined ? {} : {
-        source: {
+      source: asset === undefined ? undefined : {
           assetId: asset.id,
           sourceKind: asset.sourceKind,
-          ...(asset.durationSec === undefined ? {} : { durationSec: asset.durationSec }),
-          ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
-          ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
+          durationSec: asset.durationSec,
+          sampleRate: asset.sampleRate,
+          channelCount: asset.channelCount,
         },
-      }),
     };
     });
   const processors = input.effects.flatMap((effect) => {
@@ -227,7 +241,7 @@ const projectControlSnapshotCore = <Snapshot>(
     if (!target) return [];
     const instrument = normalizePersistedInstrumentParams(
       effect.type,
-      effect.instanceId,
+      effect.instanceId ?? null,
       effect.params,
     );
     const processor = instrument
@@ -326,7 +340,7 @@ const projectControlSnapshotCore = <Snapshot>(
       || compareControlSnapshotText(left.sourceTrackId, right.sourceTrackId)
     ));
 
-  return parseSnapshot({
+  return parseSnapshot.parse({
     version,
     project: {
       id: input.project.projectId,
@@ -366,18 +380,18 @@ const projectControlSnapshotCore = <Snapshot>(
 
 export const projectControlSnapshotCoreV1 = <Snapshot>(
   input: ControlProjectSnapshotInput,
-  parseSnapshot: (snapshot: unknown) => Snapshot,
+  parseSnapshot: z.ZodType<Snapshot>,
 ) => projectControlSnapshotCore(
   input,
   "v1",
   (midi) => ({
     wave: midi.wave,
-    ...(midi.gain === undefined ? {} : { gain: midi.gain }),
+    gain: midi.gain,
     notes: midi.notes.map(({ beat, length, pitch, velocity }) => ({
       beat,
       length,
       pitch,
-      ...(velocity === undefined ? {} : { velocity }),
+      velocity,
     })),
   }),
   parseSnapshot,
@@ -385,5 +399,5 @@ export const projectControlSnapshotCoreV1 = <Snapshot>(
 
 export const projectControlSnapshotCoreV2 = <Snapshot>(
   input: ControlProjectSnapshotInput,
-  parseSnapshot: (snapshot: unknown) => Snapshot,
+  parseSnapshot: z.ZodType<Snapshot>,
 ) => projectControlSnapshotCore(input, "v2", (midi) => midi, parseSnapshot)

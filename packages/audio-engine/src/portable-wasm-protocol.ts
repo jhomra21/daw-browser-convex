@@ -102,81 +102,88 @@ export type PortableWasmInstrumentEvent = {
   value: number
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+type ProtocolValue = null | boolean | number | string | readonly ProtocolValue[] | ProtocolObject | Float32Array | Uint8Array
+type ProtocolObject = { [key: string]: ProtocolValue }
 
-const isPositiveInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value > 0
+const isProtocolString = <Value>(value: Value): value is Value & string => typeof value === 'string'
+const isProtocolNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+const isProtocolBoolean = <Value>(value: Value): value is Value & boolean => typeof value === 'boolean'
 
-const isBoundedFinite = (value: unknown, minimum: number, maximum: number): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+const isRecord = <Value>(value: Value): value is Value & ProtocolObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Float32Array) && !(value instanceof Uint8Array)
 
-const isAudioAssetRef = (value: unknown): value is AudioAssetRef => {
+const isPositiveInteger = <Value>(value: Value): value is Value & number =>
+  isProtocolNumber(value) && Number.isInteger(value) && value > 0
+
+const isBoundedFinite = <Value>(value: Value, minimum: number, maximum: number): value is Value & number =>
+  isProtocolNumber(value) && Number.isFinite(value) && value >= minimum && value <= maximum
+
+const isAudioAssetRef = <Value>(value: Value): value is Value & AudioAssetRef => {
   if (!isRecord(value)) return false
   return value.version === audioCoreContractVersion
-    && typeof value.assetId === 'string'
+    && isProtocolString(value.assetId)
     && value.assetId.length > 0
     && isPositiveInteger(value.frameCount)
     && isPositiveInteger(value.sampleRateHz)
     && isPositiveInteger(value.channelCount)
 }
 
-const isPlanarAsset = (asset: AudioAssetRef, planes: unknown): planes is readonly Float32Array[] =>
+const isPlanarAsset = <Value>(asset: AudioAssetRef, planes: Value): planes is Value & readonly Float32Array[] =>
   Array.isArray(planes)
   && planes.length === asset.channelCount
   && planes.every((plane) => plane instanceof Float32Array && plane.length === asset.frameCount)
 
-const isUtilityState = (value: unknown): value is UtilityProcessorState => {
+const isUtilityState = <Value>(value: Value): value is Value & UtilityProcessorState => {
   if (!isRecord(value)) return false
-  return typeof value.enabled === 'boolean'
-    && typeof value.gainDb === 'number'
+  return isProtocolBoolean(value.enabled)
+    && isProtocolNumber(value.gainDb)
     && (value.polarity === 'normal' || value.polarity === 'invert')
     && (value.inputMode === 'stereo' || value.inputMode === 'mono-sum')
-    && typeof value.pan === 'number'
-    && typeof value.balance === 'number'
-    && typeof value.width === 'number'
+    && isProtocolNumber(value.pan)
+    && isProtocolNumber(value.balance)
+    && isProtocolNumber(value.width)
     && (value.matrix === 'stereo' || value.matrix === 'mid-side-encode' || value.matrix === 'mid-side-decode')
-    && typeof value.swap === 'boolean'
-    && typeof value.dcBlock === 'boolean'
+    && isProtocolBoolean(value.swap)
+    && isProtocolBoolean(value.dcBlock)
 }
 
-const isInstrumentEvent = (value: unknown): value is PortableWasmInstrumentEvent =>
+const isInstrumentEvent = <Value>(value: Value): value is Value & PortableWasmInstrumentEvent =>
   isRecord(value)
-  && typeof value.nodeId === 'string' && value.nodeId.length > 0
+  && isProtocolString(value.nodeId) && value.nodeId.length > 0
   && isPositiveInteger(value.noteId)
   && isPositiveInteger(value.sequence)
-  && typeof value.frameOffset === 'number' && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
+  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
   && (value.type === 'note-on' || value.type === 'note-off' || value.type === 'sustain' || value.type === 'expression' || value.type === 'parameter')
-  && typeof value.channel === 'number' && Number.isInteger(value.channel) && value.channel >= 0 && value.channel <= 15
-  && typeof value.note === 'number' && Number.isInteger(value.note) && value.note >= 0 && value.note <= 127
-  && typeof value.value === 'number' && Number.isFinite(value.value)
+  && isProtocolNumber(value.channel) && Number.isInteger(value.channel) && value.channel >= 0 && value.channel <= 15
+  && isProtocolNumber(value.note) && Number.isInteger(value.note) && value.note >= 0 && value.note <= 127
+  && isProtocolNumber(value.value) && Number.isFinite(value.value)
   && (value.type === 'parameter' || value.value >= 0 && value.value <= 1)
 
-const isSampleSourceEvent = (value: unknown): value is AudioCoreSampleSourceEventDto =>
+const isSampleSourceEvent = <Value>(value: Value): value is Value & AudioCoreSampleSourceEventDto =>
   isRecord(value)
   && value.version === audioCoreContractVersion
   && isPositiveInteger(value.epoch)
   && isPositiveInteger(value.sequence)
-  && typeof value.sourceNodeId === 'string' && value.sourceNodeId.length > 0
-  && typeof value.assetId === 'string' && value.assetId.length > 0
-  && typeof value.startFrame === 'number' && Number.isSafeInteger(value.startFrame)
-  && typeof value.stopFrame === 'number' && Number.isSafeInteger(value.stopFrame) && value.stopFrame > value.startFrame
-  && typeof value.sourceOffsetFrame === 'number' && Number.isSafeInteger(value.sourceOffsetFrame) && value.sourceOffsetFrame >= 0
+  && isProtocolString(value.sourceNodeId) && value.sourceNodeId.length > 0
+  && isProtocolString(value.assetId) && value.assetId.length > 0
+  && isProtocolNumber(value.startFrame) && Number.isSafeInteger(value.startFrame)
+  && isProtocolNumber(value.stopFrame) && Number.isSafeInteger(value.stopFrame) && value.stopFrame > value.startFrame
+  && isProtocolNumber(value.sourceOffsetFrame) && Number.isSafeInteger(value.sourceOffsetFrame) && value.sourceOffsetFrame >= 0
   && (value.sourceOffsetFraction === undefined
-    || typeof value.sourceOffsetFraction === 'number' && Number.isFinite(value.sourceOffsetFraction)
+    || isProtocolNumber(value.sourceOffsetFraction) && Number.isFinite(value.sourceOffsetFraction)
       && value.sourceOffsetFraction >= 0 && value.sourceOffsetFraction < 1)
   && isPositiveInteger(value.sourceFrameCount)
-  && typeof value.gain === 'number' && Number.isFinite(value.gain)
-  && typeof value.fadeInStartFrame === 'number' && Number.isSafeInteger(value.fadeInStartFrame)
-  && typeof value.fadeInEndFrame === 'number' && Number.isSafeInteger(value.fadeInEndFrame) && value.fadeInEndFrame >= value.fadeInStartFrame
-  && typeof value.fadeOutStartFrame === 'number' && Number.isSafeInteger(value.fadeOutStartFrame)
-  && typeof value.fadeOutEndFrame === 'number' && Number.isSafeInteger(value.fadeOutEndFrame) && value.fadeOutEndFrame >= value.fadeOutStartFrame
+  && isProtocolNumber(value.gain) && Number.isFinite(value.gain)
+  && isProtocolNumber(value.fadeInStartFrame) && Number.isSafeInteger(value.fadeInStartFrame)
+  && isProtocolNumber(value.fadeInEndFrame) && Number.isSafeInteger(value.fadeInEndFrame) && value.fadeInEndFrame >= value.fadeInStartFrame
+  && isProtocolNumber(value.fadeOutStartFrame) && Number.isSafeInteger(value.fadeOutStartFrame)
+  && isProtocolNumber(value.fadeOutEndFrame) && Number.isSafeInteger(value.fadeOutEndFrame) && value.fadeOutEndFrame >= value.fadeOutStartFrame
   && (value.fadeInCurve === undefined || isBoundedFinite(value.fadeInCurve, -1, 1))
   && (value.fadeInCurvePosition === undefined || isBoundedFinite(value.fadeInCurvePosition, 0, 1))
   && (value.fadeOutCurve === undefined || isBoundedFinite(value.fadeOutCurve, -1, 1))
   && (value.fadeOutCurvePosition === undefined || isBoundedFinite(value.fadeOutCurvePosition, 0, 1))
 
-const isParameterBlock = (value: unknown): value is PortableWasmParameterBlock =>
+const isParameterBlock = <Value>(value: Value): value is Value & PortableWasmParameterBlock =>
   isRecord(value)
   && isPositiveInteger(value.processorInstanceId)
   && isPositiveInteger(value.frameCount)
@@ -188,42 +195,42 @@ const isParameterBlock = (value: unknown): value is PortableWasmParameterBlock =
   && value.values instanceof Float32Array
   && value.values.length === value.parameterTargets.length * value.frameCount
 
-const isProcessorEvent = (value: unknown): value is PortableWasmProcessorEvent =>
+const isProcessorEvent = <Value>(value: Value): value is Value & PortableWasmProcessorEvent =>
   isRecord(value)
   && isPositiveInteger(value.processorInstanceId)
   && isPositiveInteger(value.parameterTarget)
-  && typeof value.frameOffset === 'number' && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
-  && typeof value.value === 'number' && Number.isFinite(value.value)
+  && isProtocolNumber(value.frameOffset) && Number.isInteger(value.frameOffset) && value.frameOffset >= 0 && value.frameOffset < 8192
+  && isProtocolNumber(value.value) && Number.isFinite(value.value)
 
-const isRecordingCaptureConfigure = (value: Record<string, unknown>): value is Record<string, unknown> & RecordingCaptureConfigureFields =>
+const isRecordingCaptureConfigure = (value: ProtocolObject): value is ProtocolObject & RecordingCaptureConfigureFields =>
   value.type === 'recording-capture-configure'
-  && typeof value.generation === 'number' && Number.isSafeInteger(value.generation) && value.generation >= 0
-  && typeof value.sessionId === 'number' && Number.isSafeInteger(value.sessionId) && value.sessionId >= 0
+  && isProtocolNumber(value.generation) && Number.isSafeInteger(value.generation) && value.generation >= 0
+  && isProtocolNumber(value.sessionId) && Number.isSafeInteger(value.sessionId) && value.sessionId >= 0
   && (value.channelCount === 1 || value.channelCount === 2)
   && Array.isArray(value.inputChannels) && value.inputChannels.length === value.channelCount
-  && value.inputChannels.every((channel) => typeof channel === 'number' && Number.isInteger(channel) && channel >= 0 && channel < 64)
-  && typeof value.gain === 'number' && Number.isFinite(value.gain) && value.gain >= 0
+  && value.inputChannels.every((channel) => isProtocolNumber(channel) && Number.isInteger(channel) && channel >= 0 && channel < 64)
+  && isProtocolNumber(value.gain) && Number.isFinite(value.gain) && value.gain >= 0
   && (value.polarity === 1 || value.polarity === -1)
-  && typeof value.monitoring === 'boolean'
-  && typeof value.punchStartFrame === 'number' && Number.isSafeInteger(value.punchStartFrame) && value.punchStartFrame >= 0
-  && (value.punchEndFrame === null || (typeof value.punchEndFrame === 'number'
+  && isProtocolBoolean(value.monitoring)
+  && isProtocolNumber(value.punchStartFrame) && Number.isSafeInteger(value.punchStartFrame) && value.punchStartFrame >= 0
+  && (value.punchEndFrame === null || (isProtocolNumber(value.punchEndFrame)
     && Number.isSafeInteger(value.punchEndFrame) && value.punchEndFrame >= value.punchStartFrame))
 
 export const readPortableWasmRecordingStatusMessage = (
-  value: unknown,
+  value: ProtocolValue,
 ): Extract<PortableWasmStatusMessage, { type: `recording-${string}` }> | null => {
-  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || typeof value.type !== 'string'
-    || typeof value.generation !== 'number' || !Number.isSafeInteger(value.generation) || value.generation < 0
-    || typeof value.sessionId !== 'number' || !Number.isSafeInteger(value.sessionId) || value.sessionId < 0) return null
+  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || !isProtocolString(value.type)
+    || !isProtocolNumber(value.generation) || !Number.isSafeInteger(value.generation) || value.generation < 0
+    || !isProtocolNumber(value.sessionId) || !Number.isSafeInteger(value.sessionId) || value.sessionId < 0) return null
   if (value.type === 'recording-capture-available') {
-    return { version: portableWasmProtocolVersion, type: value.type, generation: value.generation, sessionId: value.sessionId }
+    return { version: portableWasmProtocolVersion, type: 'recording-capture-available', generation: value.generation, sessionId: value.sessionId }
   }
   if (value.type === 'recording-capture-applied'
     && (value.action === 'configured' || value.action === 'finalized' || value.action === 'cancelled')
-    && typeof value.frame === 'number' && Number.isSafeInteger(value.frame) && value.frame >= 0) {
+    && isProtocolNumber(value.frame) && Number.isSafeInteger(value.frame) && value.frame >= 0) {
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'recording-capture-applied',
       generation: value.generation,
       sessionId: value.sessionId,
       action: value.action,
@@ -231,16 +238,16 @@ export const readPortableWasmRecordingStatusMessage = (
     }
   }
   if (value.type === 'recording-capture-block'
-    && typeof value.sequence === 'number' && Number.isSafeInteger(value.sequence) && value.sequence >= 0
-    && typeof value.frameCount === 'number' && Number.isSafeInteger(value.frameCount) && value.frameCount > 0
+    && isProtocolNumber(value.sequence) && Number.isSafeInteger(value.sequence) && value.sequence >= 0
+    && isProtocolNumber(value.frameCount) && Number.isSafeInteger(value.frameCount) && value.frameCount > 0
     && (value.channelCount === 1 || value.channelCount === 2)
     && Array.isArray(value.planes) && value.planes.length === value.channelCount
     && value.planes.every((plane) => plane instanceof Float32Array && plane.length === value.frameCount)
-    && typeof value.rms === 'number' && Number.isFinite(value.rms) && value.rms >= 0
-    && typeof value.peak === 'number' && Number.isFinite(value.peak) && value.peak >= 0) {
+    && isProtocolNumber(value.rms) && Number.isFinite(value.rms) && value.rms >= 0
+    && isProtocolNumber(value.peak) && Number.isFinite(value.peak) && value.peak >= 0) {
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'recording-capture-block',
       generation: value.generation,
       sessionId: value.sessionId,
       sequence: value.sequence,
@@ -252,17 +259,17 @@ export const readPortableWasmRecordingStatusMessage = (
     }
   }
   if (value.type === 'recording-capture-diagnostics'
-    && typeof value.capturedFrames === 'number' && Number.isSafeInteger(value.capturedFrames) && value.capturedFrames >= 0
-    && typeof value.droppedFrames === 'number' && Number.isSafeInteger(value.droppedFrames) && value.droppedFrames >= 0
-    && typeof value.droppedBlocks === 'number' && Number.isSafeInteger(value.droppedBlocks) && value.droppedBlocks >= 0
-    && typeof value.availableBlocks === 'number' && Number.isSafeInteger(value.availableBlocks) && value.availableBlocks >= 0
-    && typeof value.queuedBlocks === 'number' && Number.isSafeInteger(value.queuedBlocks) && value.queuedBlocks >= 0
-    && typeof value.rms === 'number' && Number.isFinite(value.rms) && value.rms >= 0
-    && typeof value.peak === 'number' && Number.isFinite(value.peak) && value.peak >= 0
-    && typeof value.fatal === 'boolean' && typeof value.active === 'boolean') {
+    && isProtocolNumber(value.capturedFrames) && Number.isSafeInteger(value.capturedFrames) && value.capturedFrames >= 0
+    && isProtocolNumber(value.droppedFrames) && Number.isSafeInteger(value.droppedFrames) && value.droppedFrames >= 0
+    && isProtocolNumber(value.droppedBlocks) && Number.isSafeInteger(value.droppedBlocks) && value.droppedBlocks >= 0
+    && isProtocolNumber(value.availableBlocks) && Number.isSafeInteger(value.availableBlocks) && value.availableBlocks >= 0
+    && isProtocolNumber(value.queuedBlocks) && Number.isSafeInteger(value.queuedBlocks) && value.queuedBlocks >= 0
+    && isProtocolNumber(value.rms) && Number.isFinite(value.rms) && value.rms >= 0
+    && isProtocolNumber(value.peak) && Number.isFinite(value.peak) && value.peak >= 0
+    && isProtocolBoolean(value.fatal) && isProtocolBoolean(value.active)) {
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'recording-capture-diagnostics',
       generation: value.generation,
       sessionId: value.sessionId,
       capturedFrames: value.capturedFrames,
@@ -280,10 +287,10 @@ export const readPortableWasmRecordingStatusMessage = (
 }
 
 export const readPortableWasmGraphContinuityMessage = (
-  value: unknown,
+  value: ProtocolValue,
 ): Extract<PortableWasmStatusMessage, { type: 'graph-continuity' }> | null => {
   if (!isRecord(value) || value.version !== portableWasmProtocolVersion || value.type !== 'graph-continuity'
-    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || !isProtocolNumber(value.revision) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || (value.result !== 'accepted' && value.result !== 'fallback' && value.result !== 'rejected' && value.result !== 'capacity')) return null
   return {
     version: portableWasmProtocolVersion,
@@ -294,14 +301,14 @@ export const readPortableWasmGraphContinuityMessage = (
 }
 
 export const readPortableWasmTransportPositionMessage = (
-  value: unknown,
+  value: ProtocolValue,
 ): Extract<PortableWasmStatusMessage, { type: 'transport-position' }> | null => {
   if (!isRecord(value) || value.version !== portableWasmProtocolVersion || value.type !== 'transport-position'
-    || typeof value.sessionId !== 'number' || !Number.isSafeInteger(value.sessionId) || value.sessionId < 1
-    || typeof value.epoch !== 'number' || !Number.isSafeInteger(value.epoch) || value.epoch < 1
-    || typeof value.sequence !== 'number' || !Number.isSafeInteger(value.sequence) || value.sequence < 1
-    || typeof value.running !== 'boolean'
-    || typeof value.frame !== 'number' || !Number.isSafeInteger(value.frame) || value.frame < 0) return null
+    || !isProtocolNumber(value.sessionId) || !Number.isSafeInteger(value.sessionId) || value.sessionId < 1
+    || !isProtocolNumber(value.epoch) || !Number.isSafeInteger(value.epoch) || value.epoch < 1
+    || !isProtocolNumber(value.sequence) || !Number.isSafeInteger(value.sequence) || value.sequence < 1
+    || !isProtocolBoolean(value.running)
+    || !isProtocolNumber(value.frame) || !Number.isSafeInteger(value.frame) || value.frame < 0) return null
   return {
     version: portableWasmProtocolVersion,
     type: 'transport-position',
@@ -313,14 +320,14 @@ export const readPortableWasmTransportPositionMessage = (
   }
 }
 
-const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapshot => {
+const isPortableGraphSnapshot = <Value>(value: Value): value is Value & AudioCoreGraphSnapshot => {
   if (!isRecord(value)
     || value.version !== audioCoreContractVersion
     || !isPositiveInteger(value.revision)
-    || typeof value.contractHash !== 'string'
+    || !isProtocolString(value.contractHash)
     || !Array.isArray(value.nodes)
     || !Array.isArray(value.edges)
-    || typeof value.masterNodeId !== 'string'
+    || !isProtocolString(value.masterNodeId)
     || !Array.isArray(value.assets)
     || value.nodes.length > portableWasmMaxGraphNodes
     || value.edges.length > portableWasmMaxGraphEdges
@@ -334,24 +341,24 @@ const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapsho
   const processorNodeIds = new Map<string, string>()
   const nodeIds = new Set<string>()
   const validNodes = value.nodes.every((node) => isRecord(node)
-    && typeof node.id === 'string'
+    && isProtocolString(node.id)
     && node.id.length > 0
     && !nodeIds.has(node.id)
     && (nodeIds.add(node.id), true)
     && (node.kind === 'source' || node.kind === 'instrument' || node.kind === 'mixer' || node.kind === 'return' || node.kind === 'group' || node.kind === 'master')
     && (node.inputLayout === 'mono' || node.inputLayout === 'stereo')
     && (node.outputLayout === 'mono' || node.outputLayout === 'stereo')
-    && typeof node.latencyFrames === 'number' && Number.isInteger(node.latencyFrames) && node.latencyFrames >= 0
+    && isProtocolNumber(node.latencyFrames) && Number.isInteger(node.latencyFrames) && node.latencyFrames >= 0
     && (node.kind === 'instrument'
       ? node.inputLayout === 'stereo' && node.outputLayout === 'stereo' && isAudioCoreInstrumentState(node.instrument)
       : node.instrument === undefined)
     && Array.isArray(node.processorOrder)
     && node.processorOrder.length <= audioCoreMaxProcessorsPerNode
-    && node.processorOrder.every((processor) => {
+    && node.processorOrder.every((processor: ProtocolValue) => {
       if (!isAudioCoreGraphProcessor(processor) || processorInstanceIds.has(processor.instanceId) || processorIds.has(processor.id)) return false
       processorInstanceIds.add(processor.instanceId)
       processorIds.add(processor.id)
-      processorNodeIds.set(processor.id, typeof node.id === 'string' ? node.id : '')
+      processorNodeIds.set(processor.id, isProtocolString(node.id) ? node.id : '')
       return true
     })
   )
@@ -359,33 +366,36 @@ const isPortableGraphSnapshot = (value: unknown): value is AudioCoreGraphSnapsho
   const edgeIds = new Set<string>()
   return value.edges.every((edge) => isRecord(edge)
     && edge.version === audioCoreContractVersion
-    && typeof edge.id === 'string'
+    && isProtocolString(edge.id)
     && edge.id.length > 0
     && !edgeIds.has(edge.id)
     && (edgeIds.add(edge.id), true)
-    && typeof edge.fromNodeId === 'string'
-    && typeof edge.toNodeId === 'string'
+    && isProtocolString(edge.fromNodeId)
+    && isProtocolString(edge.toNodeId)
     && edge.fromNodeId !== edge.toNodeId
     && nodeIds.has(edge.fromNodeId)
     && nodeIds.has(edge.toNodeId)
-    && typeof edge.gain === 'number'
+    && isProtocolNumber(edge.gain)
     && Number.isFinite(edge.gain)
     && (edge.kind === 'output' || edge.kind === 'send')
     && (edge.tap === 'pre-fx' || edge.tap === 'pre-fader' || edge.tap === 'post-fader')
-    && typeof edge.sidechain === 'boolean'
-    && typeof edge.pdcDelayFrames === 'number'
+    && isProtocolBoolean(edge.sidechain)
+    && isProtocolNumber(edge.pdcDelayFrames)
     && Number.isInteger(edge.pdcDelayFrames)
     && edge.pdcDelayFrames >= 0
     && (edge.sidechain
-      ? typeof edge.targetProcessorId === 'string' && edge.targetProcessorId.length > 0
+      ? isProtocolString(edge.targetProcessorId) && edge.targetProcessorId.length > 0
         && processorIds.has(edge.targetProcessorId) && processorNodeIds.get(edge.targetProcessorId) === edge.toNodeId
       : edge.targetProcessorId === undefined))
 }
 
-export const parsePortableWasmControlMessage = (value: unknown): PortableWasmControlMessage | null => {
-  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || typeof value.type !== 'string') return null
+export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWasmControlMessage | null => {
+  if (!isRecord(value) || value.version !== portableWasmProtocolVersion || !isProtocolString(value.type)) return null
   if (value.type === 'dispose' || value.type === 'diagnostics' || value.type === 'recording-capture-cancel' || value.type === 'recording-capture-drain') {
-    return { version: portableWasmProtocolVersion, type: value.type }
+    if (value.type === 'dispose') return { version: portableWasmProtocolVersion, type: 'dispose' }
+    if (value.type === 'diagnostics') return { version: portableWasmProtocolVersion, type: 'diagnostics' }
+    if (value.type === 'recording-capture-cancel') return { version: portableWasmProtocolVersion, type: 'recording-capture-cancel' }
+    return { version: portableWasmProtocolVersion, type: 'recording-capture-drain' }
   }
   if (isRecordingCaptureConfigure(value)) {
     return {
@@ -403,12 +413,12 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
     }
   }
   if (value.type === 'recording-capture-finalize'
-    && (value.stopFrame === null || (typeof value.stopFrame === 'number' && Number.isSafeInteger(value.stopFrame) && value.stopFrame >= 0))) {
-    return { version: portableWasmProtocolVersion, type: value.type, stopFrame: value.stopFrame }
+    && (value.stopFrame === null || (isProtocolNumber(value.stopFrame) && Number.isSafeInteger(value.stopFrame) && value.stopFrame >= 0))) {
+    return { version: portableWasmProtocolVersion, type: 'recording-capture-finalize', stopFrame: value.stopFrame }
   }
-  if (value.type === 'publish-graph' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)) return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, revision: value.revision }
+  if (value.type === 'publish-graph' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)) return { version: portableWasmProtocolVersion, type: 'publish-graph', requestId: value.requestId, revision: value.revision }
   if (value.type === 'prepare-graph' && isPositiveInteger(value.requestId) && isPortableGraphSnapshot(value.snapshot)) {
-    return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, snapshot: value.snapshot }
+    return { version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: value.requestId, snapshot: value.snapshot }
   }
   if (value.type === 'processor-state' && isPositiveInteger(value.revision) && value.envelope instanceof Uint8Array) {
     try {
@@ -424,7 +434,7 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
   }
   if (value.type === 'parameter-blocks' && isPositiveInteger(value.revision) && Array.isArray(value.blocks)
     && value.blocks.length <= 512 && value.blocks.every(isParameterBlock)) {
-    return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, blocks: value.blocks }
+    return { version: portableWasmProtocolVersion, type: 'parameter-blocks', revision: value.revision, blocks: value.blocks }
   }
   if (value.type === 'processor-events' && isPositiveInteger(value.revision) && Array.isArray(value.events)
     && value.events.length <= portableWasmMaxPendingEvents && value.events.every(isProcessorEvent)
@@ -438,7 +448,7 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
     }
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'processor-events',
       revision: value.revision,
       requestId: value.requestId,
       epoch: value.epoch,
@@ -457,7 +467,7 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
     && value.parameterTargets.every(isPositiveInteger)) {
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'reenable-processor-automation',
       requestId: value.requestId,
       revision: value.revision,
       epoch: value.epoch,
@@ -466,15 +476,15 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
     }
   }
   if (value.type === 'utility-state' && isPositiveInteger(value.revision) && isUtilityState(value.state)) {
-    return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, state: value.state }
+    return { version: portableWasmProtocolVersion, type: 'utility-state', revision: value.revision, state: value.state }
   }
-  if (value.type === 'instrument-state' && isPositiveInteger(value.revision) && typeof value.nodeId === 'string'
+  if (value.type === 'instrument-state' && isPositiveInteger(value.revision) && isProtocolString(value.nodeId)
     && value.nodeId.length > 0 && isAudioCoreInstrumentState(value.state)) {
-    return { version: portableWasmProtocolVersion, type: value.type, revision: value.revision, nodeId: value.nodeId, state: value.state }
+    return { version: portableWasmProtocolVersion, type: 'instrument-state', revision: value.revision, nodeId: value.nodeId, state: value.state }
   }
-  if (value.type === 'transport' && isPositiveInteger(value.requestId) && isPositiveInteger(value.epoch) && typeof value.running === 'boolean'
-    && typeof value.frame === 'number' && Number.isSafeInteger(value.frame) && value.frame >= 0) {
-    return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, epoch: value.epoch, running: value.running, frame: value.frame }
+  if (value.type === 'transport' && isPositiveInteger(value.requestId) && isPositiveInteger(value.epoch) && isProtocolBoolean(value.running)
+    && isProtocolNumber(value.frame) && Number.isSafeInteger(value.frame) && value.frame >= 0) {
+    return { version: portableWasmProtocolVersion, type: 'transport', requestId: value.requestId, epoch: value.epoch, running: value.running, frame: value.frame }
   }
   if (value.type === 'instrument-events' && isPositiveInteger(value.epoch) && Array.isArray(value.events)
     && value.events.length <= portableWasmMaxInstrumentEvents && value.events.every(isInstrumentEvent)) {
@@ -485,14 +495,14 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
       previousOffset = event.frameOffset
       previousSequence = event.sequence
     }
-    return { version: portableWasmProtocolVersion, type: value.type, epoch: value.epoch, events: value.events }
+    return { version: portableWasmProtocolVersion, type: 'instrument-events', epoch: value.epoch, events: value.events }
   }
   if (value.type === 'install-schedule' && isPositiveInteger(value.requestId)
     && isRecord(value.schedule)
     && Array.isArray(value.schedule.events)
     && value.schedule.events.length <= portableWasmMaxScheduleEvents
     && isPortableFrameSchedule(value.schedule)) {
-    return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, schedule: value.schedule }
+    return { version: portableWasmProtocolVersion, type: 'install-schedule', requestId: value.requestId, schedule: value.schedule }
   }
   if (value.type === 'schedule-sources' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch) && Array.isArray(value.events) && value.events.length <= portableWasmMaxPendingEvents
@@ -502,7 +512,7 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
       if (event.epoch !== value.epoch || event.sequence <= previousSequence) return null
       previousSequence = event.sequence
     }
-    return { version: portableWasmProtocolVersion, type: value.type, requestId: value.requestId, revision: value.revision, epoch: value.epoch, events: value.events }
+    return { version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: value.requestId, revision: value.revision, epoch: value.epoch, events: value.events }
   }
   if (value.type === 'register-asset'
     && isPositiveInteger(value.requestId)
@@ -521,7 +531,7 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
   if (value.type === 'release-asset'
     && isPositiveInteger(value.requestId)
     && isPositiveInteger(value.generation)
-    && typeof value.assetId === 'string'
+    && isProtocolString(value.assetId)
     && value.assetId.length > 0) {
     return {
       version: portableWasmProtocolVersion,
@@ -536,13 +546,13 @@ export const parsePortableWasmControlMessage = (value: unknown): PortableWasmCon
   }
   if (value.type === 'initialize'
     && isPositiveInteger(value.abiVersion)
-    && typeof value.contractHash === 'string'
+    && isProtocolString(value.contractHash)
     && isPositiveInteger(value.maxFramesPerBlock)
     && value.maxFramesPerBlock > 0
     && value.maxFramesPerBlock <= 8192) {
     return {
       version: portableWasmProtocolVersion,
-      type: value.type,
+      type: 'initialize',
       abiVersion: value.abiVersion,
       contractHash: value.contractHash,
       maxFramesPerBlock: value.maxFramesPerBlock,

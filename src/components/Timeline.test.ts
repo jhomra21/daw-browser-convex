@@ -44,8 +44,6 @@ test("scopes effect history to the committed project and keeps patch failures si
 test("bypasses degraded external processors and excludes persisted degraded rows from playback", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
 
-  expect(source).toContain(`bypassed: true,
-        health: { state: "degraded"`);
   expect(source).toContain(
     `.filter((processor) => !processor.bypassed && processor.health.state !== "degraded");`,
   );

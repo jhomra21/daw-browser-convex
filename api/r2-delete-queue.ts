@@ -42,7 +42,7 @@ export const deleteR2Keys = async (bucket: R2Bucket, keys: string[]) => {
   await bucket.delete(keys)
 }
 
-const markFailed = async (convex: ApiConvexClient, row: R2DeleteQueueRow, error: unknown) => {
+const markFailed = async (convex: ApiConvexClient, row: R2DeleteQueueRow, error: Error) => {
   if (!row.claimToken) return
   await convex.mutation(convexApi.r2Deletes.markFailed, {
     projectId: row.projectId,
@@ -92,7 +92,7 @@ const drainR2DeleteRows = async (input: {
         deletedPrefixes.push(row.r2Key)
         recordDeleted(row)
       } catch (error) {
-        await markFailed(input.convex, row, error)
+        await markFailed(input.convex, row, error instanceof Error ? error : new Error('R2 delete failed'))
       }
     }))
   }
@@ -106,7 +106,11 @@ const drainR2DeleteRows = async (input: {
       await deleteR2Keys(input.bucket, remainingObjectRows.map((row) => row.r2Key))
       for (const row of remainingObjectRows) recordDeleted(row)
     } catch (error) {
-      await Promise.all(remainingObjectRows.map((row) => markFailed(input.convex, row, error)))
+      await Promise.all(remainingObjectRows.map((row) => markFailed(
+        input.convex,
+        row,
+        error instanceof Error ? error : new Error('R2 delete failed'),
+      )))
     }
   }
   await Promise.all(Array.from(deletedIdsByProject).map(([projectId, ids]) => (

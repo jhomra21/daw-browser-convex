@@ -977,7 +977,7 @@ export class AudioEngine {
           values: baselines,
           sourceIds: baselineState?.sourceIds ?? new Set<string>(),
           sourceValues: baselineState?.sourceValues ?? new Map<string, number>(),
-          ...(event.phase === 'restore' ? { restoreTime: contextTime } : {}),
+          restoreTime: event.phase === 'restore' ? contextTime : undefined,
         })
         if (scheduledParams.size > 0) this.scheduledMidiMappingParams.set(targetKey, scheduledParams)
       }
@@ -1017,7 +1017,7 @@ export class AudioEngine {
     return automationTargetKey({
       kind: 'track',
       trackId,
-      ...(target.effectInstanceId === undefined ? {} : { effectInstanceId: target.effectInstanceId }),
+      effectInstanceId: target.effectInstanceId,
     }, target.parameterId)
   }
 

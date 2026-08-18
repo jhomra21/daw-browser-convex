@@ -37,6 +37,8 @@ const appliedRowOperation = <State extends object>(state: State): RowOperationRe
   value: { ...state, status: "applied" },
 });
 
+const statusResult = <Status extends string>(status: Status) => ({ status });
+
 async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
   await Promise.all([
     ctx.db.query("samples").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
@@ -191,8 +193,7 @@ export const createOwnedRoom = mutation({
         throw new Error("Project deletion is pending.");
       }
       if (existingProject.ownerUserId === userId) {
-        const result: { status: "exists" } = { status: "exists" };
-        return result;
+        return statusResult("exists");
       }
       throw new Error("Project already exists.");
     }
@@ -228,8 +229,7 @@ export const prepareCloudRoomDeleteAsOwner = mutation({
     if (!ownerProject) throw new Error("Only project owners can delete this project.");
     const deletionPendingAt = ownerProject.deletionPendingAt ?? Date.now();
     await setRoomProjectDeletionPendingAt(ctx, projectId, deletionPendingAt);
-    const result: { status: "pending" } = { status: "pending" };
-    return result;
+    return statusResult("pending");
   },
 });
 
@@ -240,8 +240,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject) {
-      const result: { status: "deleted" } = { status: "deleted" };
-      return result;
+      return statusResult("deleted");
     }
     if (ownerProject.deletionPendingAt === undefined) {
       throw new Error("Project deletion is not pending.");
@@ -251,8 +250,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
       projectId, storageNamespace: ownerProject.storageNamespace,
       keys: [`asset-namespaces/${ownerProject.storageNamespace}/`], kind: "project-prefix",
     });
-    const result: { status: "deleted" } = { status: "deleted" };
-    return result;
+    return statusResult("deleted");
   },
 });
 
@@ -263,12 +261,10 @@ export const clearCloudRoomDeletePendingAsOwner = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
     if (!ownerProject?.deletionPendingAt) {
-      const result: { status: "skipped" } = { status: "skipped" };
-      return result;
+      return statusResult("skipped");
     }
     await setRoomProjectDeletionPendingAt(ctx, projectId, undefined);
-    const result: { status: "cleared" } = { status: "cleared" };
-    return result;
+    return statusResult("cleared");
   },
 });
 
@@ -280,8 +276,7 @@ export const leaveCloudRoomAccess = mutation({
     const role = await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
     if (role === "owner") throw new Error("Project owners cannot leave without deleting or transferring the project.");
     await removeProjectMemberAccessAndTransferEntities(ctx, projectId, userId);
-    const result: { status: "left" } = { status: "left" };
-    return result;
+    return statusResult("left");
   },
 });
 

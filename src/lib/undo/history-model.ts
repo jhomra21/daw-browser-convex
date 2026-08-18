@@ -130,10 +130,10 @@ export const applyTrackMixStateInHistoryModel = (
 ) => {
   const track = tracks.find((entry) => entry.id === trackId)
   if (!track) return
-  if (typeof patch.muted === 'boolean') {
+  if (patch.muted !== undefined) {
     track.muted = patch.muted
   }
-  if (typeof patch.soloed === 'boolean') {
+  if (patch.soloed !== undefined) {
     track.soloed = patch.soloed
   }
 }

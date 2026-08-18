@@ -61,7 +61,7 @@ describe('reverb parameter normalization', () => {
     expect(defaults.reflectionSpin).toBe(true)
     expect(defaults.reflectionModAmountMs).toBe(17.5)
     expect(defaults.reflectionModRateHz).toBe(0.3)
-    expect(defaults.reflectionShape).toBe(0.5)
+    expect(defaults['reflectionShape']).toBe(0.5)
     expect(defaults.diffuse).toBe(1)
   })
 
@@ -69,12 +69,12 @@ describe('reverb parameter normalization', () => {
     const normalized = normalizeReverbParams({
       reflectionModAmountMs: 50,
       reflectionModRateHz: 0,
-      reflectionShape: 2,
+      'reflectionShape': 2,
       diffuse: -1,
     })
     expect(normalized.reflectionModAmountMs).toBe(25)
     expect(normalized.reflectionModRateHz).toBe(0.01)
-    expect(normalized.reflectionShape).toBe(1)
+    expect(normalized['reflectionShape']).toBe(1)
     expect(normalized.diffuse).toBe(0)
   })
 })

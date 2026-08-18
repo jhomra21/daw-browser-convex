@@ -53,7 +53,7 @@ class DawReverbProcessor extends AudioWorkletProcessor {
       reflectionSpin: true,
       reflectionModAmountMs: 17.5,
       reflectionModRateHz: 0.3,
-      reflectionShape: 0.5,
+      'reflectionShape': 0.5,
       diffuse: 1,
       size: 0.65,
       diffusion: 0.75,
@@ -63,8 +63,8 @@ class DawReverbProcessor extends AudioWorkletProcessor {
     }
     this.port.onmessage = (event) => {
       const message = event.data
-      if (!message || typeof message !== 'object' || message.version !== 1) return
-      if (message.type === 'configure' && message.state && typeof message.state === 'object') {
+      if (!message || Object.prototype.toString.call(message) !== '[object Object]' || message.version !== 1) return
+      if (message.type === 'configure' && message.state && Object.prototype.toString.call(message.state) === '[object Object]') {
         this.state = message.state
         return
       }
@@ -152,7 +152,7 @@ class DawReverbProcessor extends AudioWorkletProcessor {
       ))
       const decay = Math.max(0.05, finite(state.decaySec, 2.2))
       const feedbackGain = Math.min(0.9999, Math.pow(1e-4, networkDelayFrames / (decay * sampleRate)))
-      const reflectionGain = finite(state.reflections) * (0.65 + finite(state.reflectionShape) * 0.7)
+      const reflectionGain = finite(state.reflections) * (0.65 + finite(state['reflectionShape']) * 0.7)
       const earlyLeft = rawLeft * reflectionGain
       const earlyRight = rawRight * reflectionGain
       const hasLateTexture = state.diffuse > 0 && state.density > 0 && state.diffusion > 0

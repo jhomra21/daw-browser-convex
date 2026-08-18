@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, untrack } from 'solid-js'
 import { isServer } from 'solid-js/web'
 
 import { useTimelinePlayback } from './useTimelinePlayback'
@@ -10,10 +10,51 @@ import { createDefaultDrumRackParams } from '@daw-browser/shared'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
+import {
+  portableWasmProtocolVersion,
+  type PortableWasmControlMessage,
+  type PortableWasmStatusMessage,
+} from '@daw-browser/audio-engine/portable-wasm-protocol'
 
 type ScheduleCall = {
   playheadSec: number
   opts: Parameters<Parameters<typeof useTimelinePlayback>[0]['scheduleAllClipsFromPlayhead']>[2]
+}
+
+type LifecycleEmitter = { emit: (value: DesktopAudioLifecycle) => void }
+type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
+
+const nativeTransactionToken = 'native-playback-transaction-token-000000000'
+
+const isFailureResolver = (
+  failure: string | (() => string | undefined) | undefined,
+): failure is () => string | undefined => typeof failure === 'function'
+
+const portableResponseFor = (
+  message: PortableWasmControlMessage,
+): PortableWasmStatusMessage | undefined => {
+  if (message.type === 'initialize') {
+    return { version: portableWasmProtocolVersion, type: 'ready', revision: 1 }
+  }
+  if (message.type === 'prepare-graph') {
+    return { version: portableWasmProtocolVersion, type: 'graph-prepared', requestId: message.requestId, revision: message.snapshot.revision, result: 'prepared' }
+  }
+  if (message.type === 'publish-graph') {
+    return { version: portableWasmProtocolVersion, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'published' }
+  }
+  if (message.type === 'transport') {
+    return { version: portableWasmProtocolVersion, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'applied' }
+  }
+  if (message.type === 'install-schedule') {
+    return { version: portableWasmProtocolVersion, type: 'schedule-installed', requestId: message.requestId, revision: message.schedule.revision, epoch: message.schedule.transportEpoch, result: 'installed' }
+  }
+  if (message.type === 'schedule-sources') {
+    return { version: portableWasmProtocolVersion, type: 'sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
+  }
+  if (message.type === 'register-asset') {
+    return { version: portableWasmProtocolVersion, type: 'asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
+  }
+  return undefined
 }
 
 const track: Track = {
@@ -91,8 +132,8 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
     readonly audioWorklet = { addModule: async () => undefined }
   }
   type FakePort = {
-    onmessage: ((event: { data: unknown }) => void) | null
-    postMessage: (message: Record<string, unknown>) => void
+    onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null
+    postMessage: (message: PortableWasmControlMessage) => void
     close: () => void
   }
   class FakeAudioWorkletNode {
@@ -100,23 +141,8 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
     constructor() {
       this.port = {
         onmessage: null,
-        postMessage: (message: Record<string, unknown>) => {
-          const requestId = message.requestId
-          const response = message.type === "initialize"
-            ? { version: 1, type: "ready", revision: 1 }
-            : message.type === "prepare-graph"
-              ? { version: 1, type: "graph-prepared", requestId, revision: message.snapshot && typeof message.snapshot === "object" && "revision" in message.snapshot ? message.snapshot.revision : 1, result: "prepared" }
-              : message.type === "publish-graph"
-                ? { version: 1, type: "graph-published", requestId, revision: message.revision, result: "published" }
-                : message.type === "transport"
-                  ? { version: 1, type: "transport-applied", requestId, epoch: message.epoch, result: "applied" }
-                  : message.type === "install-schedule"
-                    ? { version: 1, type: "schedule-installed", requestId, revision: message.revision, epoch: message.epoch, result: "installed" }
-                    : message.type === "schedule-sources"
-                      ? { version: 1, type: "sources-scheduled", requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
-                      : message.type === "register-asset"
-                        ? { version: 1, type: "asset-registered", requestId, generation: message.generation, assetId: message.asset && typeof message.asset === "object" && "assetId" in message.asset ? message.asset.assetId : "", result: "registered", handle: { slot: 0, generation: 1 } }
-                        : undefined
+        postMessage: (message) => {
+          const response = portableResponseFor(message)
           if (response) queueMicrotask(() => this.port.onmessage?.({ data: response }))
         },
         close: () => {},
@@ -175,7 +201,7 @@ const createNativeHookBridge = (
     completeRecovery: (generation: number, result: "ready" | "failed") => Promise<{ accepted: boolean }>
     retryRecovery: () => Promise<{ accepted: boolean }>
   },
-  initialBeginGate?: Promise<{ ok: true } | { ok: false; error: string }>,
+  initialBeginGate?: Promise<NativeTransactionReply>,
   transportGate?: Promise<{ ok: true } | { ok: false; error: string }>,
 ) => {
   const calls: string[] = []
@@ -184,9 +210,10 @@ const createNativeHookBridge = (
   let beginGate = initialBeginGate
   const reply = (name: string) => async () => {
     calls.push(name)
-    const failureName = typeof failure === "function" ? failure() : failure
+    const failureName = isFailureResolver(failure) ? failure() : failure
     if (name === failureName) return { ok: false as const, error: 'failed' }
     if (name === "begin" && beginGate) return beginGate
+    if (name === "begin") return { ok: true as const, transactionToken: nativeTransactionToken }
     return { ok: true as const }
   }
   let progressListener = (_progress: NativeScheduleProgress) => {}
@@ -201,7 +228,7 @@ const createNativeHookBridge = (
     transportFrames,
     emitLoss: () => lossListener(),
     armTransportGate: () => { transportGateArmed = true },
-    setBeginGate: (gate: Promise<{ ok: true } | { ok: false; error: string }> | undefined) => {
+    setBeginGate: (gate: Promise<NativeTransactionReply> | undefined) => {
       beginGate = gate
     },
     emitLifecycle: (value: DesktopAudioLifecycle) => lifecycleListener?.(value),
@@ -277,15 +304,13 @@ const createNativeHookBridge = (
           return () => { progressListener = () => {} }
         },
       },
-      ...(lifecycle ? {
-        getLifecycle: async () => lifecycle.initial,
-        completeRecovery: lifecycle.completeRecovery,
-        retryRecovery: lifecycle.retryRecovery,
-        onLifecycle: (listener: (value: DesktopAudioLifecycle) => void) => {
-          lifecycleListener = listener
-          return () => { lifecycleListener = undefined }
-        },
-      } : {}),
+      getLifecycle: lifecycle ? async () => lifecycle.initial : undefined,
+      completeRecovery: lifecycle?.completeRecovery,
+      retryRecovery: lifecycle?.retryRecovery,
+      onLifecycle: lifecycle === undefined ? undefined : (listener: (value: DesktopAudioLifecycle) => void) => {
+        lifecycleListener = listener
+        return () => { lifecycleListener = undefined }
+      },
     },
   }
 }
@@ -426,7 +451,7 @@ test('waits for audio clip hydration before native paused preview and retries af
     if (!isServer) {
       setTracks(() => [hydratedTrack])
       await flushMicrotasks()
-      expect(tracks()).toEqual([hydratedTrack])
+      expect(untrack(tracks)).toEqual([hydratedTrack])
       expect(fixture.calls).toContain("begin")
       expect(faults).toEqual([])
       expect(playback.isNativePlaybackPrepared()).toBeTrue()
@@ -770,7 +795,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
 
 test('does not acknowledge stale recovery after suspend or unmount', async () => {
   const previousWindow = globalThis.window
-  const gate = Promise.withResolvers<{ ok: true }>()
+  const gate = Promise.withResolvers<NativeTransactionReply>()
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "suspended", powerGeneration: 1 },
@@ -795,7 +820,7 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
       await flushMicrotasks()
       fixture.emitLifecycle({ state: "suspended", powerGeneration: 2 })
       dispose()
-      gate.resolve({ ok: true })
+      gate.resolve({ ok: true, transactionToken: nativeTransactionToken })
       await flushMicrotasks()
       expect(acknowledgements).toEqual([])
       expect(playback.isPlaying()).toBeFalse()
@@ -914,7 +939,7 @@ test('native-required play retries failed recovery and stays stopped while recov
   const previousWindow = globalThis.window
   let retries = 0
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
-  const lifecycleEmitter: { emit: (value: DesktopAudioLifecycle) => void } = {
+  const lifecycleEmitter: LifecycleEmitter = {
     emit: () => {},
   }
   const fixture = createNativeHookBridge(undefined, {
@@ -1250,7 +1275,7 @@ test('cancels delayed portable resume before it can start the portable backend',
 
 test('cancels delayed native startup and disposes the late backend', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
   const nativeEnabled = true
   Object.defineProperty(globalThis, "window", {
@@ -1271,7 +1296,7 @@ test('cancels delayed native startup and disposes the late backend', async () =>
         await flushMicrotasks()
         expect(fixture.calls).toContain("begin")
         await playback.handlePause()
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe("idle")
@@ -1288,7 +1313,7 @@ test('cancels delayed native startup and disposes the late backend', async () =>
 test('cancels an in-flight native preview before selecting portable playback', async () => {
   await withPortableAudioWorklet(async () => {
     const previousWindow = globalThis.window
-    const beginGate = Promise.withResolvers<{ ok: true }>()
+    const beginGate = Promise.withResolvers<NativeTransactionReply>()
     const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
@@ -1331,7 +1356,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
           expect(fixture.calls).toContain("stop")
           expect(fixture.calls).toContain("teardown")
 
-          beginGate.resolve({ ok: true })
+          beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
           await play
 
           expect(playback.isPlaying()).toBeTrue()
@@ -1351,7 +1376,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
 
 test('rebuilds from the persisted generation when native insertion races delayed startup', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
   const [nativeEnabled, setNativeEnabled] = createSignal(false)
   let projectGeneration = 1
@@ -1393,7 +1418,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
         await flushMicrotasks()
         expect(playback.isPlaying()).toBeFalse()
 
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
         await play
 
@@ -1909,7 +1934,7 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
 
 test('preserves the latest instrument override across an active structural rebuild', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   const compileContexts: Array<unknown> = []
   const instrumentA = {
@@ -1963,7 +1988,7 @@ test('preserves the latest instrument override across an active structural rebui
           instrumentOverride: { targetId: track.id, instrument: instrumentB },
         })
         await flushMicrotasks()
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await Promise.all([first, second])
 
         expect(compileContexts).toContainEqual({ instrumentOverride: { targetId: track.id, instrument: instrumentA } })
@@ -1982,7 +2007,7 @@ test('preserves the latest instrument override across an active structural rebui
 
 test('does not restart after pause wins an active native rebuild', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, undefined, undefined)
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -2007,7 +2032,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
         const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
         await flushMicrotasks()
         await playback.handlePause()
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()
@@ -2023,7 +2048,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
 
 test('does not resume a structural rebuild after stop wins', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -2053,7 +2078,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
         })
         await flushMicrotasks()
         await playback.handleStop()
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()
@@ -2069,7 +2094,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
 
 test('does not resume a structural rebuild after switching projects', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   let projectId = "project"
   let projectGeneration = 1
@@ -2103,7 +2128,7 @@ test('does not resume a structural rebuild after switching projects', async () =
         await flushMicrotasks()
         projectId = "other-project"
         projectGeneration = 2
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()
@@ -2120,7 +2145,7 @@ test('does not resume a structural rebuild after switching projects', async () =
 
 test('rebuilds a delayed paused native preview without committing play intent', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -2141,7 +2166,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
         expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
 
         const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()
@@ -2160,7 +2185,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
 
 test('fails safely when the fresh native graph cannot start after insertion', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   let failFreshBegin = false
   const fixture = createNativeHookBridge(() => {
     return failFreshBegin ? "begin" : undefined
@@ -2187,10 +2212,13 @@ test('fails safely when the fresh native graph cannot start after insertion', as
         await flushMicrotasks()
         projectGeneration = 2
         const rebuild = playback.restartTimelineSchedule([track], { rebuildBackend: true })
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         failFreshBegin = true
 
-        const rebuildError = await rebuild.catch((error: unknown) => error)
+        const rebuildError = await rebuild.then(
+          () => undefined,
+          (cause) => cause instanceof Error ? cause : new Error(String(cause)),
+        )
         expect(rebuildError).toBeInstanceOf(Error)
         if (rebuildError instanceof Error) expect(rebuildError.message).toContain("failed")
         await play
@@ -2394,7 +2422,7 @@ test('preserves active legacy playback across a failed native retry', async () =
 
 test('suspension cancels delayed native startup before it can commit playback', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "recovering", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
@@ -2418,7 +2446,7 @@ test('suspension cancels delayed native startup before it can commit playback', 
         await flushMicrotasks()
         expect(fixture.calls).toContain("begin")
         fixture.emitLifecycle({ state: "suspended", powerGeneration: 3 })
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         expect(playback.isPlaying()).toBeFalse()
         expect(fake.scheduleCalls).toEqual([])
@@ -2432,7 +2460,7 @@ test('suspension cancels delayed native startup before it can commit playback', 
 
 test('failed lifecycle transition cancels delayed native startup', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge(undefined, {
     initial: { state: "ready", powerGeneration: 1 },
     completeRecovery: async () => ({ accepted: true }),
@@ -2456,7 +2484,7 @@ test('failed lifecycle transition cancels delayed native startup', async () => {
         await flushMicrotasks()
         expect(fixture.calls).toContain("begin")
         fixture.emitLifecycle({ state: "failed", powerGeneration: 2 })
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe("idle")
@@ -2688,7 +2716,9 @@ test('uses the committed native backend without scheduling Web Audio', async () 
   const calls: string[] = []
   const reply = (name: string) => async () => {
     calls.push(name)
-    return { ok: true as const }
+    return name === 'begin'
+      ? { ok: true as const, transactionToken: nativeTransactionToken }
+      : { ok: true as const }
   }
   let progressListener = (_progress: NativeScheduleProgress) => {}
   let progressSequence = 0n
@@ -2984,9 +3014,11 @@ test('reconciles a paused seek superseded by native preview fingerprint disposal
 test('rebuilds a prepared native backend while paused', async () => {
   const previousWindow = globalThis.window
   const calls: string[] = []
-  const reply = (name: string): (() => Promise<{ ok: true }>) => async () => {
+  const reply = (name: string) => async () => {
     calls.push(name)
-    return { ok: true }
+    return name === 'begin'
+      ? { ok: true as const, transactionToken: nativeTransactionToken }
+      : { ok: true as const }
   }
   let progressListener = (_progress: NativeScheduleProgress) => {}
   let progressSequence = 0n
@@ -3173,7 +3205,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
 
 test('structural rebuild owns paused preview while reactive tracks change', async () => {
   const previousWindow = globalThis.window
-  const beginGate = Promise.withResolvers<{ ok: true }>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
   const fixture = createNativeHookBridge()
   const [tracks, setTracks] = createSignal([track])
   const instrument: Track = { ...track, kind: 'instrument' }
@@ -3220,7 +3252,7 @@ test('structural rebuild owns paused preview while reactive tracks change', asyn
           },
         })
         await flushMicrotasks()
-        beginGate.resolve({ ok: true })
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await expect(rebuild).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeFalse()

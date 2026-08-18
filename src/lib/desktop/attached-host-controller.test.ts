@@ -1,6 +1,11 @@
 import "fake-indexeddb/auto"
-import { expect, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
+import {
+  controlApprovalResultSchemaV1,
+  projectSnapshotSchemaV1,
+} from "@daw-browser/control"
+import type { DesktopOperationMapV1 } from "@daw-browser/desktop-protocol"
 import { setLocalExternalProcessor } from "~/lib/external-plugins"
 
 import { createExportQueue } from "~/lib/export/export-queue"
@@ -155,8 +160,8 @@ const createController = (
       },
       importFiles: async () => ({ outcomes: [] }),
       setPlayhead: () => undefined,
-      ...(enqueueNativeVstParameter === undefined ? {} : { enqueueNativeVstParameter }),
-      ...(getMountedLocalProject === undefined ? {} : { getMountedLocalProject }),
+      enqueueNativeVstParameter,
+      getMountedLocalProject,
     }),
     dispose: () => queue.dispose(),
   }
@@ -164,8 +169,8 @@ const createController = (
 
 const requestControl = (
   controller: ReturnType<typeof createController>["controller"],
-  operation: "control.capabilities" | "control.snapshot" | "control.preview" | "control.commit" | "control.requestApproval" | "control.history" | "control.recoveries",
-  input: unknown,
+  operation: ControlOperation,
+  input: DesktopOperationMapV1[ControlOperation]["input"],
   signal = new AbortController().signal,
   actorSubject?: string,
 ) => controller.request({
@@ -173,8 +178,32 @@ const requestControl = (
   operation,
   input,
   signal,
-  ...(actorSubject === undefined ? {} : { actorSubject }),
+  actorSubject,
 })
+
+const registrations = new Set<() => void>()
+const registerController = (controller: ReturnType<typeof createController>["controller"]) => {
+  const unregister = registerAttachedHostController(controller)
+  const cleanup = () => {
+    unregister()
+    registrations.delete(cleanup)
+  }
+  registrations.add(cleanup)
+  return cleanup
+}
+
+afterEach(() => {
+  for (const cleanup of registrations) cleanup()
+})
+
+type ControlOperation =
+  | "control.capabilities"
+  | "control.snapshot"
+  | "control.preview"
+  | "control.commit"
+  | "control.requestApproval"
+  | "control.history"
+  | "control.recoveries"
 
 test("accepted exports outlive the initiating request and remain queryable and cancelable", async () => {
   const terminalJobs: string[] = []
@@ -226,7 +255,7 @@ test("accepted exports outlive the initiating request and remain queryable and c
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   const firstInitiator = new AbortController()
   const firstPreflight = await controller.request({
@@ -304,7 +333,7 @@ test("attaches control only to an existing mounted local project", async () => {
   const project = await createLocalProject(`Attached control ${crypto.randomUUID()}`)
   let mountedProjectId = project.id
   const { controller, dispose } = createController(() => mountedProjectId)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   const capabilities = await requestControl(controller, "control.capabilities", {}, undefined, controlActor)
   expect(capabilities.result).toMatchObject({ executionTarget: "local-project" })
@@ -343,7 +372,7 @@ test("rejects an unmounted local project without dispatching to it", async () =>
   const mounted = await createLocalProject(`Mounted ${crypto.randomUUID()}`)
   const other = await createLocalProject(`Other ${crypto.randomUUID()}`)
   const { controller, dispose } = createController(() => mounted.id)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   expect((await requestControl(controller, "control.snapshot", { projectId: other.id }, undefined, controlActor)).error).toEqual({
     version: "v1",
@@ -362,17 +391,12 @@ test("runs the complete local control flow with the trusted actor", async () => 
   installBridge([])
   const project = await createLocalProject(`Control flow ${crypto.randomUUID()}`)
   const { controller, dispose } = createController(() => project.id)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   const initial = await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)
-  const snapshot = initial.result
-  if (typeof snapshot !== "object" || snapshot === null || !("tracks" in snapshot) || !Array.isArray(snapshot.tracks)) {
-    throw new Error("Expected control snapshot tracks.")
-  }
+  const snapshot = projectSnapshotSchemaV1.parse(initial.result)
   const track = snapshot.tracks[0]
-  if (typeof track !== "object" || track === null || !("id" in track) || typeof track.id !== "string") {
-    throw new Error("Expected control snapshot track.")
-  }
+  if (!track) throw new Error("Expected control snapshot track.")
   const destructive = {
     version: "v1" as const,
     projectId: project.id,
@@ -384,10 +408,7 @@ test("runs the complete local control flow with the trusted actor", async () => 
     actions: [{ kind: "project.rename", name: "Preview only" }],
   }, undefined, controlActor)).result).toMatchObject({ applied: true })
   const approval = await requestControl(controller, "control.requestApproval", destructive, undefined, controlActor)
-  const approvalResult = approval.result
-  if (typeof approvalResult !== "object" || approvalResult === null || !("approvalToken" in approvalResult) || typeof approvalResult.approvalToken !== "string") {
-    throw new Error("Expected local control approval.")
-  }
+  const approvalResult = controlApprovalResultSchemaV1.parse(approval.result)
   expect((await requestControl(controller, "control.commit", {
     ...destructive,
     idempotencyKey: "attached-destructive-commit",
@@ -482,7 +503,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
       return true
     },
   )
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const input = {
     version: "v1" as const,
     projectId: project.id,
@@ -572,7 +593,7 @@ test("does not fail a durable external parameter commit when native delivery fai
       throw new Error("native host unavailable")
     },
   )
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const result = await requestControl(controller, "control.commit", {
     version: "v1",
     projectId: project.id,
@@ -597,7 +618,7 @@ test("preserves local control errors and fails closed without a trusted actor", 
   installBridge([])
   const project = await createLocalProject(`Control errors ${crypto.randomUUID()}`)
   const { controller, dispose } = createController(() => project.id)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   expect((await requestControl(controller, "control.preview", {
     version: "v1",
@@ -629,7 +650,7 @@ test("cancels or rejects control requests that change mount during lookup", asyn
     releaseLookup = resolve
   })
   const { controller, dispose } = createController(() => mountedProjectId, lookup)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
 
   const pending = requestControl(controller, "control.snapshot", { projectId: first.id }, undefined, controlActor)
   mountedProjectId = second.id
@@ -678,7 +699,7 @@ test("does not commit after cancellation while waiting for the asset lock", asyn
     lockHeld = resolve
   })
   const { controller, dispose } = createController(() => project.id)
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const abort = new AbortController()
   const pending = requestControl(controller, "control.commit", {
     version: "v1",
@@ -724,7 +745,7 @@ test("does not commit after a mount switch while waiting for the asset lock", as
     undefined,
     () => mountedProjectGeneration,
   )
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const pending = requestControl(controller, "control.commit", {
     version: "v1",
     projectId: first.id,
@@ -801,7 +822,7 @@ test("pre-accept cancellation does not retain prepared export state", async () =
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const initiator = new AbortController()
   const preflight = controller.request({
     id: "request-canceled",
@@ -860,7 +881,7 @@ test("renderer cancellation immediately deletes prepared export state before fin
     importFiles: async () => ({ outcomes: [] }),
     setPlayhead: () => undefined,
   })
-  const unregister = registerAttachedHostController(controller)
+  const unregister = registerController(controller)
   const requestId = "picker-unresolved"
   await controller.request({
     id: requestId,
@@ -947,8 +968,16 @@ test("discovers only mounted VST instances and paginates safe parameter values",
   await setLocalExternalProcessor(project.id, processor(secondInstance, "master", 1))
   await setLocalExternalProcessor(project.id, processor(firstInstance, "track-1", 0))
   const { controller, dispose } = createController(() => project.id)
-  const unregister = registerAttachedHostController(controller)
-  const request = (operation: "host.vst.instances" | "host.vst.parameters", input: unknown) => controller.request({
+  const unregister = registerController(controller)
+  const request = <Operation extends "host.vst.instances" | "host.vst.parameters">(
+    operation: Operation,
+    input: {
+      projectId: string
+      instanceId?: string
+      cursor?: string
+      limit?: number
+    },
+  ) => controller.request({
     id: crypto.randomUUID(),
     operation,
     input,

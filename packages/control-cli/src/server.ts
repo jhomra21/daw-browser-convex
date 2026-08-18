@@ -14,11 +14,23 @@ import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { createControlMcpServer } from "@daw-browser/control-mcp"
 import { ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
 import {
+  desktopDiagnosticsSchemaV1,
+  desktopHostExportCancelInputSchemaV1,
+  desktopHostExportRunInputSchemaV1,
+  desktopHostExportRunResultSchemaV1,
+  desktopHostExportStatusSchemaV1,
+  desktopHostImportInputSchemaV1,
+  desktopHostImportResultSchemaV1,
+  desktopHostStatusSchemaV1,
   desktopHostVstInstancesInputSchemaV1,
   desktopHostVstInstancesResultSchemaV1,
   desktopHostVstParametersInputSchemaV1,
   desktopHostVstParametersResultSchemaV1,
+  desktopSeekInputSchemaV1,
+  desktopTransportStatusSchemaV1,
   hostError,
+  type DesktopJsonValue,
+  type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
 import { createAccessTokenProvider } from "./auth"
 import { credentialIdentity, createCredentialStore, sameCredentialIdentity, type ControlCredentialIdentity, type ControlCredentials } from "./credentials"
@@ -108,9 +120,9 @@ export const startControlMcp = async () => {
       capabilitiesV2: async () => controlCapabilitiesSchemaV2.parse(await client.requestV2("control.capabilities", {})),
       snapshot: async (input) => projectSnapshotSchemaV1.parse(await client.request("control.snapshot", input)),
       snapshotV2: async (input) => projectSnapshotSchemaV2.parse(await client.requestV2("control.snapshot", input)),
-      preview: async (input) => controlPreviewResultSchemaV1.parse(await client.request("control.preview", input)),
-      requestApproval: async (input) => controlApprovalResultSchemaV1.parse(await client.request("control.requestApproval", input)),
-      commit: async (input) => controlCommitResultSchemaV1.parse(await client.request("control.commit", input)),
+      preview: async (input) => controlPreviewResultSchemaV1.parse(await client.request("control.preview", JSON.parse(JSON.stringify(input)))),
+      requestApproval: async (input) => controlApprovalResultSchemaV1.parse(await client.request("control.requestApproval", JSON.parse(JSON.stringify(input)))),
+      commit: async (input) => controlCommitResultSchemaV1.parse(await client.request("control.commit", JSON.parse(JSON.stringify(input)))),
       history: async (input) => controlHistoryResultSchemaV1.parse(await client.request("control.history", input)),
       recoveries: async (input) => controlRecoveriesResultSchemaV1.parse(await client.request("control.recoveries", input)),
     }
@@ -119,69 +131,56 @@ export const startControlMcp = async () => {
       close: client.close,
     }
   }
+  const requestHostTool = async <Value>(
+    operation: DesktopOperationV1,
+    input: DesktopJsonValue,
+    parseResult: (value: DesktopJsonValue) => Value,
+  ) => {
+    const client = await createHostClient()
+    try {
+      return parseResult(await client.request(operation, input))
+    } finally {
+      client.close()
+    }
+  }
   const hostTools = {
-    status: async () => {
-      const client = await createHostClient()
-      try { return await client.request("host.status", {}) } finally { client.close() }
-    },
-    transportStatus: async () => {
-      const client = await createHostClient()
-      try { return await client.request("transport.status", {}) } finally { client.close() }
-    },
-    play: async () => {
-      const client = await createHostClient()
-      try { return await client.request("transport.play", {}) } finally { client.close() }
-    },
-    pause: async () => {
-      const client = await createHostClient()
-      try { return await client.request("transport.pause", {}) } finally { client.close() }
-    },
-    stop: async () => {
-      const client = await createHostClient()
-      try { return await client.request("transport.stop", {}) } finally { client.close() }
-    },
-    seek: async (input: { seconds: number }) => {
-      const client = await createHostClient()
-      try { return await client.request("transport.seek", input) } finally { client.close() }
-    },
-    diagnostics: async () => {
-      const client = await createHostClient()
-      try { return await client.request("diagnostics.snapshot", {}) } finally { client.close() }
-    },
-    importAudio: async (input: unknown) => {
-      const client = await createHostClient()
-      try { return await client.request("host.import.audio", input) } finally { client.close() }
-    },
-    exportRun: async (input: unknown) => {
-      const client = await createHostClient()
-      try { return await client.request("host.export.run", input) } finally { client.close() }
-    },
-    exportStatus: async () => {
-      const client = await createHostClient()
-      try { return await client.request("host.export.status", {}) } finally { client.close() }
-    },
-    exportCancel: async (input: { jobId: string }) => {
-      const client = await createHostClient()
-      try { return await client.request("host.export.cancel", input) } finally { client.close() }
-    },
-    vstInstances: async (input: unknown) => {
-      const client = await createHostClient()
-      try {
-        return desktopHostVstInstancesResultSchemaV1.parse(await client.request(
-          "host.vst.instances",
-          desktopHostVstInstancesInputSchemaV1.parse(input),
-        ))
-      } finally { client.close() }
-    },
-    vstParameters: async (input: unknown) => {
-      const client = await createHostClient()
-      try {
-        return desktopHostVstParametersResultSchemaV1.parse(await client.request(
-          "host.vst.parameters",
-          desktopHostVstParametersInputSchemaV1.parse(input),
-        ))
-      } finally { client.close() }
-    },
+    status: async () => requestHostTool("host.status", {}, desktopHostStatusSchemaV1.parse),
+    transportStatus: async () => requestHostTool("transport.status", {}, desktopTransportStatusSchemaV1.parse),
+    play: async () => requestHostTool("transport.play", {}, desktopTransportStatusSchemaV1.parse),
+    pause: async () => requestHostTool("transport.pause", {}, desktopTransportStatusSchemaV1.parse),
+    stop: async () => requestHostTool("transport.stop", {}, desktopTransportStatusSchemaV1.parse),
+    seek: async (input: Parameters<typeof desktopSeekInputSchemaV1.parse>[0]) => requestHostTool(
+      "transport.seek",
+      desktopSeekInputSchemaV1.parse(input),
+      desktopTransportStatusSchemaV1.parse,
+    ),
+    diagnostics: async () => requestHostTool("diagnostics.snapshot", {}, desktopDiagnosticsSchemaV1.parse),
+    importAudio: async (input: Parameters<typeof desktopHostImportInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.import.audio",
+      desktopHostImportInputSchemaV1.parse(input),
+      desktopHostImportResultSchemaV1.parse,
+    ),
+    exportRun: async (input: Parameters<typeof desktopHostExportRunInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.export.run",
+      desktopHostExportRunInputSchemaV1.parse(input),
+      desktopHostExportRunResultSchemaV1.parse,
+    ),
+    exportStatus: async () => requestHostTool("host.export.status", {}, desktopHostExportStatusSchemaV1.parse),
+    exportCancel: async (input: Parameters<typeof desktopHostExportCancelInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.export.cancel",
+      desktopHostExportCancelInputSchemaV1.parse(input),
+      desktopHostExportStatusSchemaV1.parse,
+    ),
+    vstInstances: async (input: Parameters<typeof desktopHostVstInstancesInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.vst.instances",
+      desktopHostVstInstancesInputSchemaV1.parse(input),
+      desktopHostVstInstancesResultSchemaV1.parse,
+    ),
+    vstParameters: async (input: Parameters<typeof desktopHostVstParametersInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.vst.parameters",
+      desktopHostVstParametersInputSchemaV1.parse(input),
+      desktopHostVstParametersResultSchemaV1.parse,
+    ),
   }
   const server = createControlMcpServer(undefined, {
     authorize: async (scope) => {

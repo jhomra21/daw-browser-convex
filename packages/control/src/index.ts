@@ -12,9 +12,16 @@ import {
   instrumentAddPayloadSchema,
   midiClipSchema,
   midiClipReadSchema,
+  midiNoteSchema,
   midiPerformanceEventCount,
   normalizeLegacyMidiClip,
   normalizeMidiClip,
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  type JsonObject,
+  type JsonValue,
   persistedProcessorSnapshotSchema,
   type NormalizedLegacyMidiClip,
   type NormalizedMidiClip,
@@ -154,9 +161,30 @@ export const controlCapabilitiesSchemaV1 = z.object({
 }).strict()
 
 export const controlCapabilitiesQuerySchemaV1 = z.object({}).strict()
+const controlCapabilityLimitFields = {
+  maxActions: z.number().int().positive(),
+  maxSerializedBodyBytes: z.number().int().positive(),
+  maxRecoveryEntities: z.number().int().positive(),
+  maxRecoveryMappings: z.number().int().positive(),
+  maxRecoveryMidiNotes: z.number().int().positive(),
+  maxRecoveryAutomationPoints: z.number().int().positive(),
+  maxRecoveryWarpMarkers: z.number().int().positive(),
+  maxRecoverySends: z.number().int().positive(),
+  maxAssetsPerSnapshot: z.number().int().positive(),
+  maxAssetFoldersPerSnapshot: z.number().int().positive(),
+  maxAssetUploadBytes: z.number().int().positive(),
+  maxMidiNotesPerCommit: z.number().int().positive(),
+  maxAutomationPointsPerCommit: z.number().int().positive(),
+  maxErrorDetails: z.number().int().positive(),
+  defaultHistoryPageSize: z.number().int().positive(),
+  maxHistoryPageSize: z.number().int().positive(),
+  defaultRecoveryPageSize: z.number().int().positive(),
+  maxRecoveryPageSize: z.number().int().positive(),
+}
 export const controlCapabilitiesSchemaV2 = controlCapabilitiesSchemaV1.extend({
   version: z.literal(CONTROL_API_VERSION_V2),
-  limits: controlCapabilitiesSchemaV1.shape.limits.extend({
+  limits: z.object({
+    ...controlCapabilityLimitFields,
     maxMidiPerformanceEventsPerCommit: z.number().int().positive(),
     maxMidiPerformanceEventsPerClip: z.number().int().positive(),
     maxMidiEventsPerArray: z.number().int().positive(),
@@ -240,14 +268,13 @@ const trackColorCascadeActionSchema = z.object({
 const trackUngroupActionSchema = z.object({
   kind: z.literal('track.ungroup'), group: trackRefSchemaV1,
 }).strict()
-const midiNoteSchema = midiClipSchema.shape.notes.element
 const midiActionFields = {
-  inputChannel: midiClipSchema.shape.inputChannel.nullable(),
-  cc: midiClipSchema.shape.cc,
-  pitchBends: midiClipSchema.shape.pitchBends,
-  channelPressure: midiClipSchema.shape.channelPressure,
-  polyPressure: midiClipSchema.shape.polyPressure,
-  mappings: midiClipSchema.shape.mappings,
+  inputChannel: midiClipReadSchema['shape'].inputChannel.nullable(),
+  cc: midiClipReadSchema['shape'].cc,
+  pitchBends: midiClipReadSchema['shape'].pitchBends,
+  channelPressure: midiClipReadSchema['shape'].channelPressure,
+  polyPressure: midiClipReadSchema['shape'].polyPressure,
+  mappings: midiClipReadSchema['shape'].mappings,
 }
 const validateMidiActionIds = (
   action: {
@@ -457,7 +484,7 @@ const effectUpsertActionSchema = z.object({
   }
   const result = audioEffectAddPayloadSchema.safeParse({
     effectKind: action.effectKind,
-    ...(action.params === undefined ? {} : { params: action.params }),
+    params: action.params,
   })
   if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
 })
@@ -497,7 +524,7 @@ const instrumentSetActionSchema = z.object({
 }).strict().superRefine((action, context) => {
   const result = instrumentAddPayloadSchema.safeParse({
     instrumentKind: action.instrumentKind,
-    ...(action.params === undefined ? {} : { params: action.params }),
+    params: action.params,
   })
   if (!result.success) context.addIssue({ code: 'custom', message: result.error.message, path: ['params'] })
 })
@@ -649,7 +676,7 @@ export const findDuplicateRecoveryActionIndexV1 = (
   return undefined
 }
 
-const requestBaseShape = {
+const requestBaseFields = {
   version: z.literal(CONTROL_API_VERSION_V1),
   projectId: projectIdSchema,
   expectedRevision: revisionSchema.optional(),
@@ -662,7 +689,7 @@ export const idempotencyKeySchemaV1 = z.string()
   .regex(/^[A-Za-z0-9._~-]+$/, 'Idempotency keys may contain only ASCII letters, digits, dot, underscore, tilde, and hyphen.')
 
 export const controlCommitRequestSchemaV1 = z.object({
-  ...requestBaseShape,
+  ...requestBaseFields,
   idempotencyKey: idempotencyKeySchemaV1,
   approvalToken: approvalTokenSchemaV1.optional(),
 }).strict().superRefine(addAggregateIssues)
@@ -689,11 +716,11 @@ export const controlErrorSchemaV1 = z.object({
     .optional(),
 }).strict()
 
-export const controlPreviewRequestSchemaV1 = z.object(requestBaseShape)
+export const controlPreviewRequestSchemaV1 = z.object(requestBaseFields)
   .strict()
   .superRefine(addAggregateIssues)
 
-export const controlApprovalRequestSchemaV1 = z.object(requestBaseShape)
+export const controlApprovalRequestSchemaV1 = z.object(requestBaseFields)
   .strict()
   .superRefine(addAggregateIssues)
 
@@ -757,7 +784,7 @@ const restoredMappingSchemaV1 = z.object({
   }).strict()).max(controlLimitsV1.maxRecoveryMappings),
 }).strict()
 
-const planningResultShape = {
+const planningResultFields = {
   version: z.literal(CONTROL_API_VERSION_V1),
   projectId: projectIdSchema,
   priorRevision: revisionSchema,
@@ -768,7 +795,7 @@ const planningResultShape = {
 }
 
 export const controlPreviewResultSchemaV1 = z.object({
-  ...planningResultShape,
+  ...planningResultFields,
   revision: revisionSchema,
   applied: z.boolean(),
   approval: controlApprovalRequirementSchemaV1.optional(),
@@ -782,7 +809,7 @@ export const controlApprovalResultSchemaV1 = z.object({
   expiresAt: z.number().int().nonnegative(),
 }).strict()
 export const controlCommitResultSchemaV1 = z.object({
-  ...planningResultShape,
+  ...planningResultFields,
   revision: revisionSchema,
   applied: z.boolean(),
   idempotencyReplay: z.boolean(),
@@ -1097,21 +1124,52 @@ export const localControlCapabilitiesV2 = {
   executionTarget: 'local-project',
 } satisfies z.input<typeof controlCapabilitiesSchemaV2>
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+const isPlainObject = (value: JsonValue): value is JsonObject => {
+  if (!isJsonObject(value)) return false
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
 }
 
-export const canonicalJson = (value: unknown): string => {
-  const canonicalize = (entry: unknown): string => {
+const jsonValueSchema = z.json()
+const traversableJsonObjectSchema = z.record(z.string(), z.any())
+
+const validateCanonicalJsonInput = <Value>(value: Value, arrayEntry = false): void => {
+  const tag = Object.prototype.toString.call(value)
+  if (tag === '[object Undefined]') {
+    if (arrayEntry) throw new Error('Canonical JSON does not support undefined array entries.')
+    return
+  }
+  if (tag === '[object Null]' || tag === '[object Boolean]' || tag === '[object String]') return
+  if (tag === '[object Number]') {
+    if (!Number.isFinite(z.number().parse(value))) throw new Error('Canonical JSON only supports JSON values.')
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) validateCanonicalJsonInput(entry, true)
+    return
+  }
+  if (tag !== '[object Object]') throw new Error('Canonical JSON only supports JSON values.')
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Canonical JSON only supports plain JSON objects.')
+  }
+  const record = traversableJsonObjectSchema.parse(value)
+  for (const entry of Object.values(record)) validateCanonicalJsonInput(entry)
+}
+
+export const canonicalJson = <Value>(value: Value): string => {
+  validateCanonicalJsonInput(value)
+  const serialized = JSON.stringify(value)
+  if (serialized === undefined) throw new Error('Canonical JSON only supports JSON values.')
+  const parsed = jsonValueSchema.parse(JSON.parse(serialized))
+  const canonicalize = (entry: JsonValue): string => {
     if (entry === null) return 'null'
-    if (typeof entry === 'boolean') return entry ? 'true' : 'false'
-    if (typeof entry === 'number') {
+    if (isJsonBoolean(entry)) return entry ? 'true' : 'false'
+    if (isJsonNumber(entry)) {
       if (!Number.isFinite(entry)) throw new Error('Canonical JSON only supports finite numbers.')
       return JSON.stringify(entry)
     }
-    if (typeof entry === 'string') return JSON.stringify(entry)
+    if (isJsonString(entry)) return JSON.stringify(entry)
     if (Array.isArray(entry)) {
       for (let index = 0; index < entry.length; index += 1) {
         if (!(index in entry)) throw new Error('Canonical JSON does not support sparse arrays.')
@@ -1121,7 +1179,7 @@ export const canonicalJson = (value: unknown): string => {
     if (!isPlainObject(entry)) throw new Error('Canonical JSON only supports plain JSON objects.')
     return `{${Object.keys(entry).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(entry[key])}`).join(',')}}`
   }
-  return canonicalize(value)
+  return canonicalize(parsed)
 }
 
 const recoveryPointSchemaV1 = z.object({
@@ -1325,9 +1383,9 @@ const recoveryClipBundleSchemaV1 = z.object({
 const recoveryTrackEntityBundleSchemaV1 = z.object({
   tracks: z.array(recoveryTrackSchemaV1).min(1).max(controlLimitsV1.maxRecoveryEntities),
   clips: z.array(recoveryClipBundleSchemaV1).max(controlLimitsV1.maxRecoveryEntities),
-  effects: recoveryEffectBundleSchemaV1.shape.effects,
-  automation: recoveryEffectBundleSchemaV1.shape.automation,
-  sidechains: recoveryEffectBundleSchemaV1.shape.sidechains,
+  effects: recoveryEffectBundleSchemaV1['shape'].effects,
+  automation: recoveryEffectBundleSchemaV1['shape'].automation,
+  sidechains: recoveryEffectBundleSchemaV1['shape'].sidechains,
 }).strict().superRefine((data, context) => {
   const entities = data.tracks.length + data.clips.length + data.effects.length + data.automation.length + data.sidechains.length
   const notes = data.clips.reduce((total, entry) => total + (entry.clip.midi ? midiPerformanceEventCount(entry.clip.midi) : 0), 0)
@@ -1362,13 +1420,14 @@ const recoveryTrackEntityBundleSchemaV1 = z.object({
     }
   }
 })
-const recoveryTrackDeleteSchemaV1 = recoveryTrackEntityBundleSchemaV1.extend({
-  rootTrackId: stableIdSchema,
-  survivors: z.array(z.object({
+const recoveryTrackStateTransitionsSchemaV1 = z.array(z.object({
     id: stableIdSchema,
     before: recoveryTrackStateSchemaV1,
     after: recoveryTrackStateSchemaV1,
-  }).strict()).max(controlLimitsV1.maxRecoveryEntities),
+  }).strict()).max(controlLimitsV1.maxRecoveryEntities)
+const recoveryTrackDeleteSchemaV1 = recoveryTrackEntityBundleSchemaV1.extend({
+  rootTrackId: stableIdSchema,
+  survivors: recoveryTrackStateTransitionsSchemaV1,
 }).strict().superRefine((data, context) => {
   if (!data.tracks.some((track) => track.id === data.rootTrackId)) {
     context.addIssue({ code: 'custom', message: 'Deleted root must be captured.', path: ['rootTrackId'] })
@@ -1381,11 +1440,7 @@ const recoveryTrackDeleteSchemaV1 = recoveryTrackEntityBundleSchemaV1.extend({
 })
 const recoveryUngroupSchemaV1 = recoveryTrackEntityBundleSchemaV1.extend({
   groupId: stableIdSchema,
-  children: z.array(z.object({
-    id: stableIdSchema,
-    before: recoveryTrackStateSchemaV1,
-    after: recoveryTrackStateSchemaV1,
-  }).strict()).max(controlLimitsV1.maxRecoveryEntities),
+  children: recoveryTrackStateTransitionsSchemaV1,
 }).strict().superRefine((data, context) => {
   if (data.tracks.length !== 1 || data.tracks[0]?.id !== data.groupId) {
     context.addIssue({ code: 'custom', message: 'Ungroup recovery must capture exactly its group.', path: ['groupId'] })
@@ -1426,11 +1481,11 @@ const recoveryTrackEntityBundleSchemaV2 = recoveryTrackEntityBundleSchemaV1.safe
 }).strict()
 const recoveryTrackDeleteSchemaV2 = recoveryTrackEntityBundleSchemaV2.safeExtend({
   rootTrackId: stableIdSchema,
-  survivors: recoveryTrackDeleteSchemaV1.shape.survivors,
+  survivors: recoveryTrackStateTransitionsSchemaV1,
 }).strict()
 const recoveryUngroupSchemaV2 = recoveryTrackEntityBundleSchemaV2.safeExtend({
   groupId: stableIdSchema,
-  children: recoveryUngroupSchemaV1.shape.children,
+  children: recoveryTrackStateTransitionsSchemaV1,
 }).strict()
 const validateRecoveryRangeDataV2 = (
   data: {
@@ -1563,12 +1618,12 @@ const validateCapturedRecoveryTrackEntityBundle = (
   }
 }
 const recoveryCapturedTrackEntityBundleSchemaV2 = z.object({
-  ...recoveryTrackEntityBundleSchemaV1.shape,
+  ...recoveryTrackEntityBundleSchemaV1['shape'],
   clips: z.array(recoveryCapturedClipBundleSchemaV2).max(controlLimitsV1.maxRecoveryEntities),
 }).strict().superRefine(validateCapturedRecoveryTrackEntityBundle)
 const recoveryCapturedTrackDeleteSchemaV2 = recoveryCapturedTrackEntityBundleSchemaV2.extend({
   rootTrackId: stableIdSchema,
-  survivors: recoveryTrackDeleteSchemaV1.shape.survivors,
+  survivors: recoveryTrackStateTransitionsSchemaV1,
 }).strict().superRefine((data, context) => {
   if (!data.tracks.some((track) => track.id === data.rootTrackId)) {
     context.addIssue({ code: 'custom', message: 'Deleted root must be captured.', path: ['rootTrackId'] })
@@ -1581,7 +1636,7 @@ const recoveryCapturedTrackDeleteSchemaV2 = recoveryCapturedTrackEntityBundleSch
 })
 const recoveryCapturedUngroupSchemaV2 = recoveryCapturedTrackEntityBundleSchemaV2.extend({
   groupId: stableIdSchema,
-  children: recoveryUngroupSchemaV1.shape.children,
+  children: recoveryTrackStateTransitionsSchemaV1,
 }).strict().superRefine((data, context) => {
   if (data.tracks.length !== 1 || data.tracks[0]?.id !== data.groupId) {
     context.addIssue({ code: 'custom', message: 'Ungroup recovery must capture exactly its group.', path: ['groupId'] })
@@ -1590,7 +1645,7 @@ const recoveryCapturedUngroupSchemaV2 = recoveryCapturedTrackEntityBundleSchemaV
   if (new Set(ids).size !== ids.length) context.addIssue({ code: 'custom', message: 'Ungroup children must be unique.', path: ['children'] })
 })
 const recoveryCapturedRangeDataSchemaV2 = z.object({
-  ...recoveryRangeDataSchemaV2.shape,
+  ...recoveryRangeDataSchemaV2['shape'],
   deletedClips: z.array(z.object({
     id: stableIdSchema,
     before: recoveryCapturedClipSchemaV2,
@@ -1626,9 +1681,9 @@ export type CapturedRecoveryPayloadV2 = z.infer<typeof recoveryCapturedPayloadSc
 export type RecoveryPayloadWire = RecoveryPayloadV1 | RecoveryPayloadV2
 export type RecoveryPayload = CapturedRecoveryPayloadV2
 
-const normalizeRecoveryClipMidi = <Clip extends { midi?: unknown }>(
+const normalizeRecoveryClipMidi = <Clip extends { midi?: JsonValue }>(
   clip: Clip,
-  normalizeMidi: (value: unknown) => NormalizedMidiClip | NormalizedLegacyMidiClip,
+  normalizeMidi: (value: JsonValue) => NormalizedMidiClip | NormalizedLegacyMidiClip,
 ) => (
   clip.midi === undefined ? clip : { ...clip, midi: normalizeMidi(clip.midi) }
 )
@@ -1757,8 +1812,8 @@ export const parseRecoveryPayload = (payload: string): RecoveryPayload => {
   if (recoveryPayloadBytesV1(payload) > controlLimitsV1.maxSerializedBodyBytes) {
     throw new Error('Recovery payload exceeds the serialized body limit.')
   }
-  const parsed: unknown = JSON.parse(payload)
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || !('version' in parsed)) {
+  const parsed: JsonValue = JSON.parse(payload)
+  if (!isJsonObject(parsed) || !('version' in parsed)) {
     throw new Error('Recovery payload version is invalid.')
   }
   const validated = parsed.version === 1
@@ -1773,8 +1828,8 @@ export const parseCapturedRecoveryPayload = (payload: string): RecoveryPayload =
   if (recoveryPayloadBytesV1(payload) > controlLimitsV1.maxSerializedBodyBytes) {
     throw new Error('Recovery payload exceeds the serialized body limit.')
   }
-  const parsed: unknown = JSON.parse(payload)
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || !('version' in parsed) || parsed.version !== 2) {
+  const parsed: JsonValue = JSON.parse(payload)
+  if (!isJsonObject(parsed) || !('version' in parsed) || parsed.version !== 2) {
     throw new Error('Recovery payload version is invalid.')
   }
   const validated = recoveryCapturedPayloadSchemaV2.parse(parsed)
@@ -1791,8 +1846,8 @@ export const parseStoredRecoveryPayload = (payload: string): RecoveryPayload => 
   if (recoveryPayloadBytesV1(payload) > controlLimitsV1.maxSerializedBodyBytes) {
     throw new Error('Recovery payload exceeds the serialized body limit.')
   }
-  const parsed: unknown = JSON.parse(payload)
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || !('version' in parsed)) {
+  const parsed: JsonValue = JSON.parse(payload)
+  if (!isJsonObject(parsed) || !('version' in parsed)) {
     throw new Error('Recovery payload version is invalid.')
   }
   if (parsed.version === 1) {
@@ -1827,7 +1882,7 @@ export const canonicalCapturedRecoveryPayloadV2 = (payload: CapturedRecoveryPayl
 const sha256Hex = (value: string) => (
   Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
 )
-export const hashCanonicalJsonSyncV1 = (value: unknown) => sha256Hex(canonicalJson(value))
+export const hashCanonicalJsonSyncV1 = (value: JsonValue) => sha256Hex(canonicalJson(value))
 const timelineRangeRecoveryClipSemanticValueV2 = (clip: ProjectSnapshotV2['clips'][number]) => {
   const { id: _id, ...semantic } = clip
   return semantic
@@ -1852,31 +1907,34 @@ export const assertControlSerializedBodyV1 = <Value>(value: Value): Value => {
   return value
 }
 
-export const parseControlCommitRequestV1 = (input: unknown) => {
-  assertControlSerializedBodyV1(input)
-  return assertControlSerializedBodyV1(controlCommitRequestSchemaV1.parse(input))
+export const parseControlCommitRequestV1 = <Input>(input: Input): ControlCommitRequestV1 => {
+  const parsed = controlCommitRequestSchemaV1.parse(assertControlSerializedBodyV1(input))
+  assertControlSerializedBodyV1(parsed)
+  return parsed
 }
 
-export const parseControlPreviewRequestV1 = (input: unknown) => {
-  assertControlSerializedBodyV1(input)
-  return assertControlSerializedBodyV1(controlPreviewRequestSchemaV1.parse(input))
+export const parseControlPreviewRequestV1 = <Input>(input: Input): ControlPreviewRequestV1 => {
+  const parsed = controlPreviewRequestSchemaV1.parse(assertControlSerializedBodyV1(input))
+  assertControlSerializedBodyV1(parsed)
+  return parsed
 }
-export const parseControlApprovalRequestV1 = (input: unknown) => {
-  assertControlSerializedBodyV1(input)
-  return assertControlSerializedBodyV1(controlApprovalRequestSchemaV1.parse(input))
+export const parseControlApprovalRequestV1 = <Input>(input: Input): ControlApprovalRequestV1 => {
+  const parsed = controlApprovalRequestSchemaV1.parse(assertControlSerializedBodyV1(input))
+  assertControlSerializedBodyV1(parsed)
+  return parsed
 }
 
-export const parseControlSnapshotQueryV1 = (input: unknown) => (
+export const parseControlSnapshotQueryV1 = <Input>(input: Input) => (
   controlSnapshotQuerySchemaV1.parse(input)
 )
-export const parseControlSnapshotQueryV2 = (input: unknown) => (
+export const parseControlSnapshotQueryV2 = <Input>(input: Input) => (
   controlSnapshotQuerySchemaV1.parse(input)
 )
 
-export const parseControlHistoryQueryV1 = (input: unknown) => (
+export const parseControlHistoryQueryV1 = <Input>(input: Input) => (
   controlHistoryQuerySchemaV1.parse(input)
 )
-export const parseControlRecoveriesQueryV1 = (input: unknown) => (
+export const parseControlRecoveriesQueryV1 = <Input>(input: Input) => (
   controlRecoveriesQuerySchemaV1.parse(input)
 )
 
@@ -1885,7 +1943,7 @@ export const controlRequestDigestInputV1 = (
 ) => canonicalJson({
   version: request.version,
   projectId: request.projectId,
-  ...(request.expectedRevision === undefined ? {} : { expectedRevision: request.expectedRevision }),
+  expectedRevision: request.expectedRevision,
   actions: request.actions,
 })
 
@@ -1916,8 +1974,8 @@ export {
 } from './projection'
 export type { ControlProjectSnapshotInput }
 export const projectControlSnapshotV1 = (input: ControlProjectSnapshotInput) => (
-  projectControlSnapshotCoreV1(input, projectSnapshotSchemaV1.parse)
+  projectControlSnapshotCoreV1(input, projectSnapshotSchemaV1)
 )
 export const projectControlSnapshotV2 = (input: ControlProjectSnapshotInput) => (
-  projectControlSnapshotCoreV2(input, projectSnapshotSchemaV2.parse)
+  projectControlSnapshotCoreV2(input, projectSnapshotSchemaV2)
 )

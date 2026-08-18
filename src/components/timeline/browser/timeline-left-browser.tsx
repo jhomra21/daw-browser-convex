@@ -3,11 +3,11 @@ import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection,
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
 
-const tabPlaceholder: Record<TimelineBrowserTab, string> = {
+const tabPlaceholder = {
   assets: "",
   effects: "No effects match this search.",
   "midi-instruments": "No MIDI instruments match this search.",
-};
+} satisfies Record<TimelineBrowserTab, string>;
 
 const rootRowId = (sectionId: string) => `section:${sectionId}`;
 

@@ -1,4 +1,5 @@
 import { RECORDER_BLOCK_FRAMES } from "../../../packages/audio-engine/src/recording/recording-protocol"
+import { z } from "zod"
 
 const RECORDING_DIRECTORY = "recording-sessions"
 const SESSION_METADATA_FILE = "session.json"
@@ -93,16 +94,16 @@ type RecordingTempSession = {
 
 const isSafeName = (value: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
 
-const classifyStorageFailure = (error: unknown): RecordingTempStorageFailure => {
-  if (error instanceof DOMException) {
-    if (error.name === "QuotaExceededError") return "quota-exceeded"
-    if (error.name === "NotAllowedError" || error.name === "SecurityError") return "permission-denied"
+const classifyStorageFailure = (cause: unknown): RecordingTempStorageFailure => {
+  if (cause instanceof DOMException) {
+    if (cause.name === "QuotaExceededError") return "quota-exceeded"
+    if (cause.name === "NotAllowedError" || cause.name === "SecurityError") return "permission-denied"
   }
   return "write-failed"
 }
 
-const storageFailure = (message: string, error: unknown): RecordingTempStorageError =>
-  new RecordingTempStorageError(classifyStorageFailure(error), message, { cause: error })
+const storageFailure = (message: string, cause: unknown): RecordingTempStorageError =>
+  new RecordingTempStorageError(classifyStorageFailure(cause), message, { cause })
 
 const encodeText = (value: string): Uint8Array<ArrayBuffer> => {
   const encoded = new TextEncoder().encode(value)
@@ -169,34 +170,22 @@ export const decodePlanarPcmBlocks = (bytes: Uint8Array, channelCount: number): 
   return blocks
 }
 
+const recordingTempSessionDescriptorSchema = z.object({
+  version: z.literal(1),
+  sessionId: z.string(),
+  format: z.literal("planar-float32-blocks"),
+  sampleRate: z.number(),
+  channelCount: z.number(),
+  capturedFrames: z.number(),
+  byteLength: z.number(),
+  createdAtMs: z.number(),
+  finalizedAtMs: z.number().nullable(),
+})
+
 const parseDescriptor = (value: string): RecordingTempSessionDescriptor | null => {
   try {
-    const parsed: unknown = JSON.parse(value)
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
-    const descriptor = parsed
-    if (
-      !("version" in descriptor) || descriptor.version !== 1 ||
-      !("sessionId" in descriptor) || typeof descriptor.sessionId !== "string" ||
-      !("format" in descriptor) || descriptor.format !== "planar-float32-blocks" ||
-      !("sampleRate" in descriptor) || typeof descriptor.sampleRate !== "number" ||
-      !("channelCount" in descriptor) || typeof descriptor.channelCount !== "number" ||
-      !("capturedFrames" in descriptor) || typeof descriptor.capturedFrames !== "number" ||
-      !("byteLength" in descriptor) || typeof descriptor.byteLength !== "number" ||
-      !("createdAtMs" in descriptor) || typeof descriptor.createdAtMs !== "number" ||
-      !("finalizedAtMs" in descriptor) ||
-      (descriptor.finalizedAtMs !== null && typeof descriptor.finalizedAtMs !== "number")
-    ) return null
-    return {
-      version: 1,
-      sessionId: descriptor.sessionId,
-      format: "planar-float32-blocks",
-      sampleRate: descriptor.sampleRate,
-      channelCount: descriptor.channelCount,
-      capturedFrames: descriptor.capturedFrames,
-      byteLength: descriptor.byteLength,
-      createdAtMs: descriptor.createdAtMs,
-      finalizedAtMs: descriptor.finalizedAtMs
-    }
+    const descriptor = recordingTempSessionDescriptorSchema.safeParse(JSON.parse(value))
+    return descriptor.success ? descriptor.data : null
   } catch {
     return null
   }
@@ -286,7 +275,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     }
     ownedSessionIds.add(input.sessionId)
 
-    const sessions = await sessionsDirectory().catch((error: unknown) => {
+    const sessions = await sessionsDirectory().catch((error) => {
       ownedSessionIds.delete(input.sessionId)
       throw storageFailure("Could not access recording session storage.", error)
     })
@@ -372,7 +361,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         }
         capturedFrames += frameCount
         byteLength += blockBytes
-      }).catch(async (error: unknown) => {
+      }).catch(async (error) => {
         if (state === "open") await abortAndRemove()
         throw error
       })

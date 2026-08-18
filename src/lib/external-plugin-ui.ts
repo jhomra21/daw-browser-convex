@@ -2,11 +2,11 @@ import type { ExternalProcessor } from "@daw-browser/external-plugins";
 
 export type Vst3ScanHealth = "filesystem-only" | "scanned" | "scan-failed";
 
-const scanHealthLabels: Record<Vst3ScanHealth, string> = {
+const scanHealthLabels = {
   "filesystem-only": "Filesystem-only",
   scanned: "Scanned",
   "scan-failed": "Scan failed",
-};
+} satisfies Record<Vst3ScanHealth, string>;
 
 export const vst3ScanHealthLabel = (health: Vst3ScanHealth) => scanHealthLabels[health];
 

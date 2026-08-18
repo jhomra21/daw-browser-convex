@@ -67,8 +67,8 @@ export function useTimelinePreferences(
   const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
     if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
   }
-  const onLocalSaveError = (error: unknown) => {
-    options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local project settings could not be saved.')
+  const onLocalSaveError = (cause: unknown) => {
+    options.onLocalSaveFailed?.(cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
   }
 
   const syncMixState = useProjectPersistedState<boolean>({
@@ -156,6 +156,9 @@ export function useTimelinePreferences(
     ? loopState.value().endSec
     : cloudTimelineSettings()?.loopEndSec ?? 8
   const pixelsPerSecond = () => clampPixelsPerSecond(scaleState.value())
+  const isBooleanUpdater = (
+    value: boolean | ((current: boolean) => boolean),
+  ): value is (current: boolean) => boolean => typeof value === 'function'
 
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
@@ -171,7 +174,7 @@ export function useTimelinePreferences(
   const setGridEnabled = (value: boolean | ((current: boolean) => boolean)) => {
     gridState.setValue((current) => ({
       ...current,
-      enabled: typeof value === 'function' ? value(current.enabled) : value,
+      enabled: isBooleanUpdater(value) ? value(current.enabled) : value,
     }))
   }
 
@@ -182,14 +185,14 @@ export function useTimelinePreferences(
   const setLoopEnabled = (value: boolean | ((current: boolean) => boolean)) => {
     if (!isLocalProject()) {
       const current = loopEnabled()
-      const enabled = typeof value === 'function' ? value(current) : value
+      const enabled = isBooleanUpdater(value) ? value(current) : value
       const projectId = options.projectId()
       if (projectId) options.onCloudTimelineSettingsChange?.(projectId, { loopEnabled: enabled })
       return
     }
     loopState.setValue((current) => ({
       ...current,
-      enabled: typeof value === 'function' ? value(current.enabled) : value,
+      enabled: isBooleanUpdater(value) ? value(current.enabled) : value,
     }))
   }
 

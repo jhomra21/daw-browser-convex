@@ -1,6 +1,6 @@
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
-import { normalizeDelayParams, normalizeReverbParams, normalizeTrackInstrumentParams } from '@daw-browser/shared'
+import { normalizeDelayParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
 import { compilePortableExportSnapshot } from './portable-export-snapshot'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
 import type { ExportFx } from './export-types'
@@ -72,14 +72,14 @@ const normalizeNativeFx = (fx: ExportFx | undefined): ExportFx | undefined => {
   const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([trackId, entry]) => {
     let nextEntry = entry
     if (entry.instrument === undefined && entry.synth !== undefined) {
-      const instrument = normalizeTrackInstrumentParams({
-        kind: 'synth',
-        instanceId: `legacy-synth:${trackId}`,
-        params: entry.synth,
-      })
-      if (instrument) {
-        changed = true
-        nextEntry = { ...nextEntry, instrument }
+      changed = true
+      nextEntry = {
+        ...nextEntry,
+        instrument: {
+          kind: 'synth',
+          instanceId: `legacy-synth:${trackId}`,
+          params: normalizeSynthParams(entry.synth),
+        },
       }
     }
     const instances = nextEntry.instances.filter((instance) => (

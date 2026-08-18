@@ -21,13 +21,13 @@ const interactiveSelector = [
 ].join(",");
 
 export const isDeviceInteractiveTarget = (target: EventTarget | null): boolean => (
-  typeof Element !== "undefined"
-  && target instanceof Element
+  globalThis.Element !== undefined
+  && target instanceof globalThis.Element
   && target.closest(interactiveSelector) !== null
 );
 
 export const isDeviceHeaderTarget = (target: EventTarget | null): boolean => (
-  typeof Element !== "undefined"
-  && target instanceof Element
+  globalThis.Element !== undefined
+  && target instanceof globalThis.Element
   && target.closest('[data-effect-shell-header="true"]') !== null
 );

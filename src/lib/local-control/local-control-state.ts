@@ -16,16 +16,15 @@ import {
   type LocalProjectAssetRow,
   type LocalProjectEntityRow,
   type LocalProjectStateRow,
+  type LocalProjectStoredValue,
   type LocalProjectSyncStateRow,
 } from '~/lib/local-project-db'
+import { isJsonNumber, isJsonObject, isJsonString } from '@daw-browser/shared'
 import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
+import { parseLocalProjectStoredJsonValue } from './local-control-model'
 
 const CONTROL_SNAPSHOT_STATE_KEY = 'snapshot'
 const chains = new Map<string, Promise<void>>()
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
 type LocalControlSnapshotState = {
   version: 1 | 2
   revision: number
@@ -79,16 +78,17 @@ export type LocalControlTransactionResult = {
   }
 }
 
-const controlState = (value: unknown): LocalControlSnapshotState | undefined => {
+const controlState = (storedValue: LocalProjectStoredValue): LocalControlSnapshotState | undefined => {
+  const value = parseLocalProjectStoredJsonValue(storedValue)
   if (
-    !isRecord(value)
+    !isJsonObject(value)
     || (value.version !== 1 && value.version !== 2)
-    || typeof value.revision !== 'number'
+    || !isJsonNumber(value.revision)
     || !Number.isInteger(value.revision)
     || value.revision < 0
-    || typeof value.digest !== 'string'
+    || !isJsonString(value.digest)
     || !/^[0-9a-f]{64}$/u.test(value.digest)
-    || typeof value.updatedAt !== 'number'
+    || !isJsonNumber(value.updatedAt)
     || !Number.isInteger(value.updatedAt)
     || value.updatedAt < 0
   ) return undefined
@@ -139,9 +139,8 @@ const metadataFor = (project: { name: string; updatedAt: number }): LocalControl
   timeSignature: { numerator: 4, denominator: 4 },
 })
 
-const isThenable = (value: unknown): value is PromiseLike<unknown> => (
-  (typeof value === 'object' && value !== null || typeof value === 'function')
-  && typeof Reflect.get(value, 'then') === 'function'
+const isThenable = <Value>(value: Value | PromiseLike<Value>): value is PromiseLike<Value> => (
+  Object(value).then instanceof Function
 )
 
 type LocalControlTransactionOptions = {

@@ -2,12 +2,17 @@ import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
 import { chmod, link, lstat, mkdir, open, realpath, rm } from "node:fs/promises"
 import path from "node:path"
+import { z } from "zod"
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const maxIdentityBytes = 1024
+const actorIdentitySchema = z.object({
+  version: z.literal("v1"),
+  actorId: z.string().regex(uuid),
+}).strict()
 
-const hasErrorCode = (error: unknown, code: string) =>
-  error instanceof Error && "code" in error && error.code === code
+const hasErrorCode = (cause: unknown, code: string): cause is NodeJS.ErrnoException =>
+  cause instanceof Error && "code" in cause && cause.code === code
 
 const validatePrivateDirectory = async (directory: string) => {
   const info = await lstat(directory)
@@ -93,22 +98,7 @@ const readIdentity = async (file: string, directory: string) => {
     await handle.close()
   }
 
-  const parsed: unknown = JSON.parse(contents)
-  if (
-    typeof parsed !== "object"
-    || parsed === null
-    || Array.isArray(parsed)
-    || Object.getPrototypeOf(parsed) !== Object.prototype
-    || Object.keys(parsed).length !== 2
-    || !("version" in parsed)
-    || !("actorId" in parsed)
-    || parsed.version !== "v1"
-    || typeof parsed.actorId !== "string"
-    || !uuid.test(parsed.actorId)
-  ) {
-    throw new Error("Host actor identity is invalid.")
-  }
-  return parsed.actorId
+  return actorIdentitySchema.parse(JSON.parse(contents)).actorId
 }
 
 const syncDirectory = async (directory: string) => {

@@ -22,13 +22,24 @@ const MidiAccessContext = createContext<MidiAccessContextValue | null>(null)
 
 export const MidiAccessProvider: ParentComponent = (props) => {
   const appPreferences = useAppPreferences()
+  const getNavigator = () => "navigator" in globalThis ? globalThis.navigator : undefined
+  const isMidiSupported = () => {
+    const browserNavigator = getNavigator()
+    return browserNavigator !== undefined && "requestMIDIAccess" in browserNavigator
+  }
   const [status, setStatus] = createSignal<MidiAccessStatus>(
-    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator ? "idle" : "unsupported"
+    isMidiSupported() ? "idle" : "unsupported"
   )
   const [inputs, setInputs] = createSignal<MidiInputDescriptor[]>([])
   const controller = createMidiAccessController({
-    isSupported: () => typeof navigator !== "undefined" && "requestMIDIAccess" in navigator,
-    requestAccess: () => navigator.requestMIDIAccess({ sysex: false }),
+    isSupported: isMidiSupported,
+    requestAccess: () => {
+      const browserNavigator = getNavigator()
+      if (!browserNavigator || !("requestMIDIAccess" in browserNavigator)) {
+        return Promise.reject(new Error("Web MIDI is not supported."))
+      }
+      return browserNavigator.requestMIDIAccess({ sysex: false })
+    },
     initialSelectedInputIds: appPreferences.midi.selectedInputIds(),
     onSelectedInputIdsChange: appPreferences.midi.setSelectedInputIds,
     onStatusChange: setStatus,

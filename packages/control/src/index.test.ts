@@ -54,13 +54,24 @@ const trackTarget = (track: ContextualRefV1): ProcessorTargetV1 => ({
 })
 const masterTarget: ProcessorTargetV1 = { kind: 'master' }
 
-const commit = (actions: unknown[], idempotencyKey = 'request-0001'): {
+type ControlCommitFixture = {
   version: string
   projectId: string
   expectedRevision?: number
   idempotencyKey: string
   actions: unknown[]
-} => ({
+}
+type ControlPreviewFixture = {
+  version: string
+  projectId: string
+  expectedRevision?: number
+  actions: unknown[]
+}
+
+const commit = (
+  actions: unknown[],
+  idempotencyKey = 'request-key',
+): ControlCommitFixture => ({
   version: 'v1',
   projectId: 'project-1',
   expectedRevision: 0,
@@ -68,12 +79,7 @@ const commit = (actions: unknown[], idempotencyKey = 'request-0001'): {
   actions,
 })
 
-const preview = (actions: unknown[]): {
-  version: string
-  projectId: string
-  expectedRevision?: number
-  actions: unknown[]
-} => ({
+const preview = (actions: unknown[]): ControlPreviewFixture => ({
   version: 'v1',
   projectId: 'project-1',
   expectedRevision: 0,
@@ -819,6 +825,39 @@ test('captures oversized durable V2 MIDI without relaxing new recovery payload l
   expect(parsed.data.clip.midi).toMatchObject({ wave: 'custom-legacy', gain: 7 })
   expect(hashRecoveryPayloadSyncV1(bytes)).toHaveLength(64)
   expect(bytes).toBe(canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(JSON.parse(bytes))))
+
+  const trackPayload = {
+    version: 2 as const,
+    kind: 'track.delete' as const,
+    data: {
+      rootTrackId: 'track-1',
+      tracks: [{
+        id: 'track-1',
+        track: {
+          projectId: 'project-1',
+          name: 'Track 1',
+          index: 0,
+          mixer: { volume: 1, channelRole: 'track' as const, sends: [] },
+        },
+        ownership: { projectId: 'project-1', localActorSubject: 'actor-1' },
+      }],
+      clips: [{
+        id: 'clip-1',
+        clip: clipPayload.data.clip,
+        ownership: clipPayload.data.ownership,
+      }],
+      effects: [],
+      automation: [],
+      sidechains: [],
+      survivors: [],
+    },
+  }
+  expect(() => recoveryPayloadSchemaV2.parse(trackPayload)).toThrow()
+  const trackBytes = canonicalCapturedRecoveryPayloadV2(recoveryCapturedPayloadSchemaV2.parse(trackPayload))
+  const parsedTrack = parseCapturedRecoveryPayload(trackBytes)
+  if (parsedTrack.kind !== 'track.delete') throw new Error('Expected track recovery payload.')
+  expect(parsedTrack.data.clips[0]?.clip.midi?.notes).toHaveLength(500)
+  expect(parsedTrack.data.clips[0]?.clip.midi?.cc).toHaveLength(1)
 })
 
 test('projects historical finite MIDI values through the narrow V1 snapshot schema', () => {
@@ -972,15 +1011,13 @@ test('aggregates strict MIDI set payloads while preserving oversized legacy set 
     clip: persisted('clip-1'),
     wave: 'sine',
     notes: midiNotes(notes),
-    ...(mappings === 0 ? {} : {
-      mappings: Array.from({ length: mappings }, (_, index) => ({
+    mappings: mappings === 0 ? undefined : Array.from({ length: mappings }, (_, index) => ({
         id: `mapping-${index}`,
         source: { kind: 'cc' as const, controller: index, channel: 1 },
         target: { parameterId: 'gain' },
         outputMin: 0,
         outputMax: 1,
       })),
-    }),
   })
   expect(() => parseControlPreviewRequestV1(preview([set(250), set(251)]))).toThrow('MIDI performance events')
   expect(() => parseControlCommitRequestV1(commit([

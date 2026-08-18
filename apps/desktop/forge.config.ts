@@ -5,6 +5,7 @@ import { execFile } from "node:child_process"
 import { chmod, mkdir, open, readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
+import type { DesktopJsonValue } from "@daw-browser/desktop-protocol"
 import { computePortableWasmSourceHash } from "../../native/audio-core/scripts/portable-wasm-source-hash"
 import {
   nativeAudioHostArtifactName,
@@ -29,6 +30,31 @@ const portableWasmReleaseAssetNames = [
   "daw-audio-core.manifest.json",
 ] as const
 
+type PortableWasmReleaseManifest = {
+  artifactKind: "production"
+  buildType: "Release"
+  lto: true
+  sizeBytes: number
+  maximumBytes: number
+  sha256: string
+  sourceHash: string
+}
+
+const isPortableWasmReleaseManifest = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & PortableWasmReleaseManifest => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+  && "artifactKind" in value && value.artifactKind === "production"
+  && "buildType" in value && value.buildType === "Release"
+  && "lto" in value && value.lto === true
+  && "sizeBytes" in value && typeof value.sizeBytes === "number"
+  && "maximumBytes" in value && typeof value.maximumBytes === "number"
+  && "sha256" in value && typeof value.sha256 === "string"
+  && "sourceHash" in value && typeof value.sourceHash === "string"
+  && /^[a-f0-9]{64}$/.test(value.sha256)
+  && /^[a-f0-9]{64}$/.test(value.sourceHash)
+)
+
 export const validatePortableWasmReleaseAssets = async (
   publicDirectory = path.join(repositoryRoot, "public"),
   sourceRepositoryRoot = repositoryRoot,
@@ -37,22 +63,13 @@ export const validatePortableWasmReleaseAssets = async (
   const wasmPath = path.join(publicDirectory, "audio-core", wasmName)
   const manifestPath = path.join(publicDirectory, "audio-core", manifestName)
   if (!await isFile(wasmPath)) throw new Error(`Required portable Wasm release asset is missing: ${wasmPath}`)
-  let manifest: unknown
+  let manifest: DesktopJsonValue
   try {
     manifest = JSON.parse(await readFile(manifestPath, "utf8"))
   } catch {
     throw new Error(`Required portable Wasm release asset is missing or invalid: ${manifestPath}`)
   }
-  if (typeof manifest !== "object" || manifest === null
-    || !("artifactKind" in manifest) || manifest.artifactKind !== "production"
-    || !("buildType" in manifest) || manifest.buildType !== "Release"
-    || !("lto" in manifest) || manifest.lto !== true
-    || !("sizeBytes" in manifest) || typeof manifest.sizeBytes !== "number"
-    || !("maximumBytes" in manifest) || typeof manifest.maximumBytes !== "number"
-    || !("sha256" in manifest) || typeof manifest.sha256 !== "string"
-    || !("sourceHash" in manifest) || typeof manifest.sourceHash !== "string"
-    || !/^[a-f0-9]{64}$/.test(manifest.sha256)
-    || !/^[a-f0-9]{64}$/.test(manifest.sourceHash)) {
+  if (!isPortableWasmReleaseManifest(manifest)) {
     throw new Error(`Required portable Wasm release asset is invalid: ${manifestPath}`)
   }
   const sourceHash = await computePortableWasmSourceHash(sourceRepositoryRoot)
@@ -108,7 +125,7 @@ const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | 
   if (environment.APPLE_NOTARY_KEYCHAIN_PROFILE) {
     return {
       keychainProfile: environment.APPLE_NOTARY_KEYCHAIN_PROFILE,
-      ...(environment.APPLE_NOTARY_KEYCHAIN ? { keychain: environment.APPLE_NOTARY_KEYCHAIN } : {}),
+      keychain: environment.APPLE_NOTARY_KEYCHAIN ? environment.APPLE_NOTARY_KEYCHAIN : undefined,
     }
   }
   if (environment.APPLE_ID && environment.APPLE_APP_SPECIFIC_PASSWORD && environment.APPLE_TEAM_ID) {
@@ -171,7 +188,7 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
         return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
       },
     },
-    ...(notarize ? { notarize } : {}),
+    notarize: notarize ? notarize : undefined,
   }
 }
 
@@ -313,7 +330,7 @@ const config: ForgeConfig = {
           }
           void getPackagedMacResourcesPath(buildPath)
             .then((resourcesPath) => signPackagedNativeReleaseArtifacts(resourcesPath, requireMacReleaseConfiguration()))
-            .then(() => callback(), (error: unknown) => callback(
+            .then(() => callback(), (error) => callback(
               error instanceof Error ? error : new Error(String(error)),
             ))
         }]

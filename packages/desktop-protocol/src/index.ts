@@ -26,6 +26,23 @@ export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktop
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 
+export type DesktopJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | DesktopJsonValue[]
+  | { [key: string]: DesktopJsonValue }
+
+export const desktopJsonValueSchema: z.ZodType<DesktopJsonValue> = z.lazy(() => z.union([
+  z.null(),
+  z.boolean(),
+  z.number().finite(),
+  z.string(),
+  z.array(desktopJsonValueSchema),
+  z.record(z.string(), desktopJsonValueSchema),
+]))
+
 export const desktopVstParameterEditPayloadSchema = z.object({
   projectId: projectIdSchemaV1,
   source: z.enum(["active-playback", "editor-session"]),
@@ -225,16 +242,15 @@ const capabilityFile = z.object({
 }).strict()
 export const desktopRendererImportInputSchemaV1 = z.object({
   canceled: z.boolean(),
-  files: z.array(z.object({
-    ...capabilityFile.shape,
+  files: z.array(capabilityFile.extend({
     mime: z.string().min(1).max(128),
   }).strict()).min(1).max(1).optional(),
 }).strict().superRefine((value, context) => {
   if (!value.canceled && value.files === undefined) context.addIssue({ code: "custom", message: "A non-canceled import requires a file capability." })
 })
 const internalExportDestination = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("capability-file"), ...capabilityFile.shape }).strict(),
-  z.object({ kind: z.literal("capability-directory"), ...capabilityFile.shape }).strict(),
+  capabilityFile.extend({ kind: z.literal("capability-file") }).strict(),
+  capabilityFile.extend({ kind: z.literal("capability-directory") }).strict(),
 ])
 const internalExportRequestKeys = new Set([
   "canceled", "preflightOnly", "destination", "mode", "format", "formats", "range",
@@ -396,7 +412,7 @@ const request = z.object({
   type: z.literal("request"),
   id: correlationId,
   operation: desktopOperationSchemaV1,
-  input: z.unknown(),
+  input: desktopJsonValueSchema,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
   const schema = value.operation === "host.export.run"
@@ -421,7 +437,7 @@ const rendererRequest = z.object({
   type: z.literal("request"),
   id: correlationId,
   operation: desktopOperationSchemaV1.exclude(["control.capabilities", "control.snapshot", "control.preview", "control.commit", "control.requestApproval", "control.history", "control.recoveries"]),
-  input: z.unknown(),
+  input: desktopJsonValueSchema,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
   const schema = value.operation === "host.import.audio"
@@ -443,7 +459,7 @@ export const desktopControlOperationSchemaV1 = z.enum([
 export type DesktopControlOperationV1 = z.infer<typeof desktopControlOperationSchemaV1>
 const trustedRendererControlRequest = z.object({
   version, type: z.literal("request"), id: correlationId, operation: desktopControlOperationSchemaV1,
-  input: z.unknown(), deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
+  input: desktopJsonValueSchema, deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
   actorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
 }).strict().superRefine((value, context) => {
   const schema = value.operation === "control.capabilities"
@@ -462,19 +478,20 @@ export const desktopReplySchemaV1 = z.object({
   version,
   type: z.literal("reply"),
   id: correlationId,
-  result: z.unknown().optional(),
+  result: desktopJsonValueSchema.optional(),
   error: z.union([hostErrorSchemaV1, controlErrorSchemaV1]).optional(),
 }).strict().superRefine((value, context) => {
   if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
 })
 export const desktopCancelSchemaV1 = z.object({ version, type: z.literal("cancel"), id: correlationId }).strict()
-export const desktopReplyChunkSchemaV1 = z.object({
+const desktopReplyChunkFieldsV1 = {
   version, type: z.literal("replyChunk"), id: correlationId, operation: desktopOperationSchemaV1,
   index: z.number().int().nonnegative(), total: z.number().int().positive().max(maxDesktopReplyChunks),
   byteLength: z.number().int().positive().max(maxDesktopReplyBytes),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   payload: z.string().max(maxDesktopReplyPayloadBase64Characters).regex(/^[A-Za-z0-9+/]*={0,2}$/),
-}).strict().refine((value) => value.index < value.total)
+}
+export const desktopReplyChunkSchemaV1 = z.object(desktopReplyChunkFieldsV1).strict().refine((value) => value.index < value.total)
 export const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
 export const desktopExportTerminalSchemaV1 = z.object({
   version,
@@ -498,7 +515,7 @@ const requestV2 = z.object({
   type: z.literal("request"),
   id: correlationId,
   operation: desktopOperationSchemaV1,
-  input: z.unknown(),
+  input: desktopJsonValueSchema,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict().superRefine((value, context) => {
   const schema = value.operation === "host.export.run"
@@ -521,7 +538,7 @@ export const desktopReplySchemaV2 = z.object({
   version: versionV2,
   type: z.literal("reply"),
   id: correlationId,
-  result: z.unknown().optional(),
+  result: desktopJsonValueSchema.optional(),
   error: z.union([
     hostErrorSchemaV2,
     controlErrorSchemaV1,
@@ -531,7 +548,7 @@ export const desktopReplySchemaV2 = z.object({
 })
 export const desktopCancelSchemaV2 = z.object({ version: versionV2, type: z.literal("cancel"), id: correlationId }).strict()
 export const desktopReplyChunkSchemaV2 = z.object({
-  ...desktopReplyChunkSchemaV1.shape,
+  ...desktopReplyChunkFieldsV1,
   version: versionV2,
 }).strict().refine((value) => value.index < value.total)
 export const desktopProgressSchemaV2 = desktopProgressSchemaV1.extend({ version: versionV2 })
@@ -634,26 +651,26 @@ const inputSchemaFor = (operation: DesktopOperationV1) => (
 
 export const parseDesktopResult = (
   operation: DesktopOperationV1,
-  value: unknown,
-  input?: unknown,
+  value: DesktopJsonValue,
+  input: DesktopJsonValue = {},
   protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
-): unknown => {
+): DesktopJsonValue => {
   if (protocolVersion === desktopProtocolVersionV2 && operation === "control.capabilities" && desktopControlCapabilitiesInputSchemaV2.safeParse(input).success) {
-    return controlCapabilitiesSchemaV2.parse(value)
+    return desktopJsonValueSchema.parse(controlCapabilitiesSchemaV2.parse(value))
   }
   if (protocolVersion === desktopProtocolVersionV2 && operation === "control.snapshot" && desktopControlSnapshotInputSchemaV2.safeParse(input).success) {
-    return projectSnapshotSchemaV2.parse(value)
+    return desktopJsonValueSchema.parse(projectSnapshotSchemaV2.parse(value))
   }
   const schema = isDesktopControlOperation(operation)
     ? desktopControlOperationDescriptorsV1[operation].output
     : nonControlResultSchemas[operation]
   if (!schema) throw new Error("Unknown desktop operation.")
-  return schema.parse(value)
+  return desktopJsonValueSchema.parse(schema.parse(value))
 }
 
 export const parseDesktopReplyError = (
   operation: DesktopOperationV1,
-  value: unknown,
+  value: DesktopJsonValue,
   protocolVersion: DesktopProtocolVersion = desktopProtocolVersion,
 ): HostErrorV1 | HostErrorV2 | ControlErrorV1 => (
   isDesktopControlOperation(operation)

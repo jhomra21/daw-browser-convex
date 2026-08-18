@@ -22,32 +22,46 @@ const defaultStatePath = (parameterId: string) => {
 }
 
 const statePath = (parameterId: string) =>
-  parameterId in AUDIO_PARAM_STATE_PATHS
-    ? Reflect.get(AUDIO_PARAM_STATE_PATHS, parameterId)
-    : defaultStatePath(parameterId)
+  Object.entries(AUDIO_PARAM_STATE_PATHS).find(([key]) => key === parameterId)?.[1]
+    ?? defaultStatePath(parameterId)
 
-const readPath = (value: object, path: readonly string[]) => {
-  let current: unknown = value
+type OwnedProcessorState = ReturnType<typeof normalizeOwnedProcessorParams>['state']
+type OwnedProcessorPathValue = OwnedProcessorState | number | string | boolean | null | undefined
+
+const isObjectValue = (value: OwnedProcessorPathValue): value is Extract<OwnedProcessorPathValue, object> =>
+  typeof value === 'object' && value !== null
+
+const isNumberValue = (value: OwnedProcessorPathValue): value is number =>
+  typeof value === 'number'
+
+const readPath = (value: OwnedProcessorState, path: readonly string[]) => {
+  let current: OwnedProcessorPathValue = value
   for (const key of path) {
-    if (typeof current !== 'object' || current === null) return undefined
-    current = Reflect.get(current, key)
+    if (!isObjectValue(current)) return undefined
+    current = Object.entries(current).find(([candidate]) => candidate === key)?.[1]
   }
-  return typeof current === 'number' ? current : undefined
+  return isNumberValue(current) ? current : undefined
 }
 
-export const normalizeOwnedProcessorAudioState = (kind: OwnedProcessorKind, params: unknown) =>
+export const normalizeOwnedProcessorAudioState = (
+  kind: OwnedProcessorKind,
+  params: Parameters<typeof normalizeOwnedProcessorParams>[1],
+) =>
   normalizeOwnedProcessorParams(kind, params).state
 
-const audioParamValuesFromState = (kind: OwnedProcessorKind, state: object) =>
+const audioParamValuesFromState = <State extends object>(kind: OwnedProcessorKind, state: State) =>
   OWNED_PROCESSOR_PARAMETER_IDS[kind].map((parameterId) => ({
     parameterId,
     value: readPath(state, statePath(parameterId)),
   }))
 
-export const ownedProcessorAudioParamValuesFromState = (kind: OwnedProcessorKind, state: object) =>
+export const ownedProcessorAudioParamValuesFromState = <State extends object>(kind: OwnedProcessorKind, state: State) =>
   audioParamValuesFromState(kind, state)
 
-export const ownedProcessorAudioParamValues = (kind: OwnedProcessorKind, params: unknown) => {
+export const ownedProcessorAudioParamValues = (
+  kind: OwnedProcessorKind,
+  params: Parameters<typeof normalizeOwnedProcessorParams>[1],
+) => {
   const state = normalizeOwnedProcessorAudioState(kind, params)
   return audioParamValuesFromState(kind, state)
 }

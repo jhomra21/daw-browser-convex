@@ -361,9 +361,10 @@ describe("desktop preload request queue", () => {
 
     expect(replies).toHaveLength(4)
     for (const reply of replies) {
-      expect(() => parseDesktopReplyError("control.capabilities", reply.error)).not.toThrow()
-      if (!reply.error) throw new Error("Expected a queue failure reply.")
-      expect(["deadline-exceeded", "cancelled", "unavailable", "internal"]).toContain(reply.error.code)
+      const error = reply.error
+      if (!error) throw new Error("Expected a queue failure reply.")
+      expect(() => parseDesktopReplyError("control.capabilities", error)).not.toThrow()
+      expect(["deadline-exceeded", "cancelled", "unavailable", "internal"]).toContain(error.code)
     }
     expect(replies.map((reply) => reply.error?.message)).toEqual([
       "The request deadline elapsed.",
@@ -422,7 +423,9 @@ describe("desktop preload request queue", () => {
       "internal",
     ])
     for (const reply of replies) {
-      expect(() => parseDesktopReplyError("transport.status", reply.error)).not.toThrow()
+      const error = reply.error
+      if (!error) throw new Error("Expected a queue failure reply.")
+      expect(() => parseDesktopReplyError("transport.status", error)).not.toThrow()
     }
   })
 })

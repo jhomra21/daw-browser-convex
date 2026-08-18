@@ -37,10 +37,13 @@ const buttonVariants = cva(
 type ButtonProps<T extends ValidComponent = "button"> = ButtonPrimitive.ButtonRootProps<T> &
   VariantProps<typeof buttonVariants> & { class?: string | undefined; children?: JSX.Element }
 
-const Button = <T extends ValidComponent = "button">(
-  props: PolymorphicProps<T, ButtonProps<T>>
-) => {
-  const [local, others] = splitProps(props as ButtonProps, ["variant", "size", "class"])
+function Button<T extends ValidComponent = "button">(
+  props: PolymorphicProps<T, ButtonProps<T>>,
+): JSX.Element
+function Button(
+  props: PolymorphicProps<ValidComponent, ButtonProps<ValidComponent>>,
+): JSX.Element {
+  const [local, others] = splitProps(props, ["variant", "size", "class"])
   return (
     <ButtonPrimitive.Root
       class={cn(buttonVariants({ variant: local.variant, size: local.size }), local.class)}

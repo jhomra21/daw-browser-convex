@@ -214,6 +214,26 @@ describe('offline instrument scheduling', () => {
       cancelScheduledValues: (time: number) => void
       cancelAndHoldAtTime: (time: number) => void
     }
+    type TestBiquadFilter = {
+      type: BiquadFilterType
+      frequency: Param
+      detune: Param
+      Q: Param
+      connect: () => void
+      disconnect: () => void
+    }
+    type TestOscillator = {
+      type: OscillatorType
+      frequency: Param
+      detune: Param
+      starts: number[]
+      stops: number[]
+      connect: () => void
+      disconnect: () => void
+      start: (when: number) => void
+      stop: (when: number) => void
+      onended: (() => void) | undefined
+    }
     const param = (): Param => {
       const events: Event[] = []
       return {
@@ -249,21 +269,29 @@ describe('offline instrument scheduling', () => {
       }
 
       createBiquadFilter() {
-        return { type: 'lowpass' as BiquadFilterType, frequency: param(), detune: param(), Q: param(), connect: () => {}, disconnect: () => {} }
+        const filter: TestBiquadFilter = {
+          type: 'lowpass',
+          frequency: param(),
+          detune: param(),
+          Q: param(),
+          connect: () => {},
+          disconnect: () => {},
+        }
+        return filter
       }
 
       createOscillator() {
-        const oscillator = {
-          type: 'sine' as OscillatorType,
+        const oscillator: TestOscillator = {
+          type: 'sine',
           frequency: param(),
           detune: param(),
-          starts: [] as number[],
-          stops: [] as number[],
+          starts: [],
+          stops: [],
           connect: () => {},
           disconnect: () => {},
           start: (when: number) => { oscillator.starts.push(when) },
           stop: (when: number) => { oscillator.stops.push(when) },
-          onended: undefined as (() => void) | undefined,
+          onended: undefined,
         }
         this.oscillators.push(oscillator)
         return oscillator

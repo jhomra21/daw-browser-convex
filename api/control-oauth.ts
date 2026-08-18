@@ -1,4 +1,6 @@
 import type { Context } from "hono";
+import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from "@daw-browser/shared";
+import { z } from "zod";
 import type { ApiBindings } from "./app-types";
 
 export type ControlOAuthScope = "control:read" | "control:write" | "offline_access";
@@ -45,6 +47,27 @@ type VerifiedControlClaims = {
   issuedAt: number;
 };
 
+const verifiedControlClaimsSchema = z.object({
+  sub: z.string(),
+  azp: z.string(),
+  scope: z.string(),
+  iss: z.string(),
+  exp: z.number(),
+  iat: z.number(),
+  sid: z.string(),
+  aud: z.string(),
+});
+
+type VerifiedControlClaimsInput = Parameters<typeof verifiedControlClaimsSchema.safeParse>[0];
+
+const tokenResponseSchema = z.object({
+  access_token: z.string(),
+  refresh_token: z.string().optional(),
+  token_type: z.string(),
+  expires_in: z.number(),
+  scope: z.string().optional(),
+});
+
 type TokenResponse = {
   access_token: string;
   refresh_token?: string;
@@ -53,7 +76,7 @@ type TokenResponse = {
   scope?: string;
 };
 
-type JsonRecord = Record<string, unknown>;
+type JsonRecord = JsonObject;
 
 export type ControlBearer = {
   userId: string;
@@ -63,7 +86,7 @@ export type ControlBearer = {
   scopes: string[];
 };
 
-const isRecord = (value: unknown): value is JsonRecord => typeof value === "object" && value !== null && !Array.isArray(value);
+const isRecord = (value: JsonValue | undefined): value is JsonRecord => isJsonObject(value);
 
 const sha256 = async (value: string) => {
   const bytes = new TextEncoder().encode(value);
@@ -141,10 +164,12 @@ export const validateControlTokenRequest = (body: URLSearchParams, resource: str
   return null;
 };
 
-const supportedGrantTypes = (values: unknown) => {
-  if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) return false;
-  return values.length === 1 && values[0] === "authorization_code"
-    || values.length === 2 && values[0] === "authorization_code" && values[1] === "refresh_token";
+const supportedGrantTypes = (values: JsonValue | undefined) => {
+  if (!Array.isArray(values)) return false;
+  const grantTypes = values.filter(isJsonString);
+  if (grantTypes.length !== values.length) return false;
+  return grantTypes.length === 1 && grantTypes[0] === "authorization_code"
+    || grantTypes.length === 2 && grantTypes[0] === "authorization_code" && grantTypes[1] === "refresh_token";
 };
 
 const approvedHttpsOrigins = (value: string | undefined) => new Set(
@@ -169,7 +194,7 @@ const validRedirectUri = (value: string, approvedOrigins: Set<string>) => {
 };
 
 export const validateControlClientRegistration = (
-  body: unknown,
+  body: JsonValue,
   approvedOrigins: Set<string>,
 ): string | null => {
   if (!isRecord(body)) return "metadata must be a JSON object";
@@ -184,61 +209,46 @@ export const validateControlClientRegistration = (
   if (body.token_endpoint_auth_method !== "none") return "token_endpoint_auth_method must be none";
   if (body.require_pkce !== true) return "PKCE is required";
   if (!Array.isArray(body.redirect_uris) || body.redirect_uris.length === 0 || body.redirect_uris.length > 8) return "redirect_uris must contain 1-8 URIs";
-  if (body.redirect_uris.some((uri) => typeof uri !== "string" || uri.length > 2048 || !validRedirectUri(uri, approvedOrigins))) return "unsupported redirect URI";
-  if (typeof body.scope !== "string" || body.scope.length === 0 || body.scope.length > 200 || !hasSupportedScopes(parseScopes(body.scope))) return "unsupported scope";
+  const redirectUris = body.redirect_uris.filter(isJsonString);
+  if (redirectUris.length !== body.redirect_uris.length || redirectUris.some((uri) => uri.length > 2048 || !validRedirectUri(uri, approvedOrigins))) return "unsupported redirect URI";
+  if (!isJsonString(body.scope) || body.scope.length === 0 || body.scope.length > 200 || !hasSupportedScopes(parseScopes(body.scope))) return "unsupported scope";
   for (const key of ["client_name", "client_uri", "logo_uri", "tos_uri", "policy_uri", "software_id", "software_version"]) {
     const value = body[key];
-    if (value !== undefined && (typeof value !== "string" || value.length > 512)) return `invalid ${key}`;
+    if (value !== undefined && (!isJsonString(value) || value.length > 512)) return `invalid ${key}`;
   }
-  if (body.contacts !== undefined && (!Array.isArray(body.contacts) || body.contacts.length > 8 || body.contacts.some((item) => typeof item !== "string" || item.length > 320))) return "invalid contacts";
+  if (body.contacts !== undefined) {
+    if (!Array.isArray(body.contacts) || body.contacts.length > 8) return "invalid contacts";
+    const contacts = body.contacts.filter(isJsonString);
+    if (contacts.length !== body.contacts.length || contacts.some((item) => item.length > 320)) return "invalid contacts";
+  }
   return null;
 };
 
 const tokenResponse = async (response: Response): Promise<TokenResponse | null> => {
   if (!response.ok) return null;
-  const value: unknown = await response.clone().json().catch(() => null);
-  if (!isRecord(value)
-    || typeof value.access_token !== "string"
-    || typeof value.token_type !== "string"
-    || typeof value.expires_in !== "number"
-    || (value.refresh_token !== undefined && typeof value.refresh_token !== "string")
-    || (value.scope !== undefined && typeof value.scope !== "string")) return null;
-  return {
-    access_token: value.access_token,
-    token_type: value.token_type,
-    expires_in: value.expires_in,
-    refresh_token: typeof value.refresh_token === "string" ? value.refresh_token : undefined,
-    scope: typeof value.scope === "string" ? value.scope : undefined,
-  };
+  const value = await response.clone().json().catch(() => null);
+  const parsed = tokenResponseSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 };
 
 const db = (env: ApiBindings["Bindings"]) => env.daw_convex_auth;
 
 export const normalizeVerifiedControlClaims = (
-  payload: Record<string, unknown> | null,
+  payload: VerifiedControlClaimsInput | null,
   resource: string,
 ): VerifiedControlClaims | null => {
-  if (
-    !payload
-    || typeof payload.sub !== "string"
-    || typeof payload.azp !== "string"
-    || typeof payload.scope !== "string"
-    || typeof payload.iss !== "string"
-    || typeof payload.exp !== "number"
-    || typeof payload.iat !== "number"
-    || typeof payload.sid !== "string"
-    || payload.aud !== resource
-  ) return null;
-  const scopes = parseScopes(payload.scope);
-  if (!hasSupportedScopes(scopes) || payload.exp <= unixSeconds()) return null;
+  const parsed = verifiedControlClaimsSchema.safeParse(payload);
+  if (!parsed.success || parsed.data.aud !== resource) return null;
+  const scopes = parseScopes(parsed.data.scope);
+  if (!hasSupportedScopes(scopes) || parsed.data.exp <= unixSeconds()) return null;
   return {
-    userId: payload.sub,
-    clientId: payload.azp,
+    userId: parsed.data.sub,
+    clientId: parsed.data.azp,
     scopes,
-    sessionId: payload.sid,
-    issuer: payload.iss,
-    expiresAt: payload.exp,
-    issuedAt: payload.iat,
+    sessionId: parsed.data.sid,
+    issuer: parsed.data.iss,
+    expiresAt: parsed.data.exp,
+    issuedAt: parsed.data.iat,
   };
 };
 
@@ -496,8 +506,10 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
         },
       });
     }
-    const body: unknown = await c.req.raw.clone().json().catch(() => null);
-    const invalid = validateControlClientRegistration(body, approvedHttpsOrigins(c.env.CONTROL_OAUTH_APPROVED_REDIRECT_ORIGINS));
+    const body = z.json().safeParse(await c.req.raw.clone().json().catch(() => null));
+    const invalid = body.success
+      ? validateControlClientRegistration(body.data, approvedHttpsOrigins(c.env.CONTROL_OAUTH_APPROVED_REDIRECT_ORIGINS))
+      : "metadata must be valid JSON";
     if (invalid) return new Response(JSON.stringify({ error: "invalid_client_metadata", error_description: invalid }), { status: 400, headers: { ...rateHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
     const response = await createAuth(c.env).handler(proxyWithoutCookies(c.req.raw));
     const headers = new Headers(response.headers);

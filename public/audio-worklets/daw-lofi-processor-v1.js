@@ -24,10 +24,10 @@ class DawLoFiProcessor extends AudioWorkletProcessor {
   }
 
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!message || Object.prototype.toString.call(message) !== '[object Object]' || message.version !== 1) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') return this.reset()
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
+    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || Object.prototype.toString.call(message.state) !== '[object Object]') return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
     const seed = Number.isInteger(message.state.seed) && message.state.seed > 0 ? message.state.seed >>> 0 : 1

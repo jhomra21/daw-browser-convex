@@ -33,13 +33,22 @@ export type AudioCoreWasmArtifactResult =
   | { available: true; artifact: AudioCoreWasmArtifact }
   | { available: false; reason: AudioCoreWasmArtifactFailure; message: string }
 
-type ArtifactFetch = (input: string) => Promise<{ ok: boolean; json: () => Promise<unknown>; arrayBuffer: () => Promise<ArrayBuffer> }>
+type ArtifactFetch = (input: string) => Promise<{ ok: boolean; json: () => Promise<JsonValue>; arrayBuffer: () => Promise<ArrayBuffer> }>
 type AvailableAudioCoreWasmArtifact = Extract<AudioCoreWasmArtifactResult, { available: true }>
+
+type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
+type JsonObject = { [key: string]: JsonValue }
+
+const isObject = (value: JsonValue): value is JsonObject => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+const isNumber = (value: JsonValue): value is number => typeof value === 'number'
+const isString = (value: JsonValue): value is string => typeof value === 'string'
+const isBoolean = (value: JsonValue): value is boolean => typeof value === 'boolean'
 
 const artifactCache = new Map<string, Promise<AvailableAudioCoreWasmArtifact>>()
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const isRecord = isObject
 
 const readUnsignedLeb128 = (bytes: Uint8Array, offset: number) => {
   let value = 0
@@ -121,7 +130,7 @@ export async function loadAudioCoreWasmArtifact(
   }
   if (!manifestResponse.ok) return { available: false, reason: 'artifact-unavailable', message: 'Portable audio-core Wasm manifest is unavailable.' }
 
-  let unknownManifest: unknown
+  let unknownManifest: JsonValue
   try {
     unknownManifest = await manifestResponse.json()
   } catch {
@@ -129,16 +138,16 @@ export async function loadAudioCoreWasmArtifact(
   }
   if (!isRecord(unknownManifest)
     || unknownManifest.version !== audioCoreWasmArtifactVersion
-    || typeof unknownManifest.abiVersion !== 'number'
-    || typeof unknownManifest.contractVersion !== 'number'
-    || typeof unknownManifest.contractHash !== 'string'
-    || typeof unknownManifest.fixedMemory !== 'boolean'
-    || typeof unknownManifest.memoryBytes !== 'number'
+    || !isNumber(unknownManifest.abiVersion)
+    || !isNumber(unknownManifest.contractVersion)
+    || !isString(unknownManifest.contractHash)
+    || !isBoolean(unknownManifest.fixedMemory)
+    || !isNumber(unknownManifest.memoryBytes)
     || !Number.isSafeInteger(unknownManifest.memoryBytes)
     || unknownManifest.memoryBytes <= 0
-    || typeof unknownManifest.sha256 !== 'string'
+    || !isString(unknownManifest.sha256)
     || !/^[0-9a-f]{64}$/.test(unknownManifest.sha256)
-    || typeof unknownManifest.wasmUrl !== 'string'
+    || !isString(unknownManifest.wasmUrl)
     || unknownManifest.wasmUrl.length === 0) {
     return { available: false, reason: 'manifest-invalid', message: 'Portable audio-core Wasm manifest is invalid.' }
   }

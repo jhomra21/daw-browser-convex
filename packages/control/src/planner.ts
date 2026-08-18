@@ -33,6 +33,12 @@ import { collectDeletedTrackIdsV1, collectTrackDeletionAffectedIdsV1 } from './t
 import { recoveryLimitsV1 } from './recovery-limits'
 import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
+import type {
+  ControlActionV1 as CanonicalControlActionV1,
+  ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
+  ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
+  RecoveryPayload,
+} from './index'
 
 type ContextualRefV1 = { source: 'persisted'; id: string } | { source: 'client'; clientRef: string }
 type TrackRefV1 = ContextualRefV1
@@ -40,6 +46,7 @@ type ClipRefV1 = ContextualRefV1
 type ProcessorRefV1 = ContextualRefV1
 type ControlActionV1 = any
 type ProjectSnapshotV1 = {
+  version: any
   project: any
   tracks: any[]
   clips: any[]
@@ -50,8 +57,10 @@ type ProjectSnapshotV1 = {
   assetFolders: any[]
 }
 type PlannerRequest = { projectId: string; actions: ControlActionV1[] }
+type CanonicalPlannerRequest = { projectId: string; actions: CanonicalControlActionV1[] }
+type CanonicalProjectSnapshot = CanonicalProjectSnapshotV1 | CanonicalProjectSnapshotV2
+type PlannerRecovery = { payload: RecoveryPayload }
 type Entity = 'track' | 'clip' | 'effect'
-
 export type ControlPlanError = {
   code: 'validation' | 'not-found' | 'limit-exceeded'
   message: string
@@ -60,16 +69,18 @@ export type ControlPlanError = {
 
 export type PlannedControlActionV1 = {
   actionIndex: number
-  action: ControlActionV1
+  action: CanonicalControlActionV1
   changed: boolean
   destructivePersisted?: boolean
   generatedInstrumentInstanceId?: string
   timelineRangeDelete?: TimelineRangeDeletePatchV1
 }
 
-export type ControlPlanV1 = {
-  baseSnapshot: ProjectSnapshotV1
-  snapshot: ProjectSnapshotV1
+export type ControlPlanV1<
+  Snapshot extends CanonicalProjectSnapshot = CanonicalProjectSnapshotV2,
+> = {
+  baseSnapshot: Snapshot
+  snapshot: Snapshot
   actions: PlannedControlActionV1[]
   applied: boolean
   priorRevision: number
@@ -82,13 +93,15 @@ export type ControlPlanV1 = {
   }
 }
 
-type ControlPlannerTraceV1 = {
+type ControlPlannerTraceV1<
+  Snapshot extends CanonicalProjectSnapshot = CanonicalProjectSnapshotV1,
+> = {
   onActionPlanned: (entry: {
     actionIndex: number
-    action: ControlActionV1
+    action: CanonicalControlActionV1
     changed: boolean
-    beforeSnapshot: ProjectSnapshotV1
-    afterSnapshot: ProjectSnapshotV1
+    beforeSnapshot: Snapshot
+    afterSnapshot: Snapshot
   }) => void
 }
 
@@ -112,7 +125,7 @@ const countRemoved = (base: { id: string }[], final: { id: string }[]) => {
   return base.filter((entry) => !finalIds.has(entry.id)).length
 }
 
-const countRemovedEntries = (base: unknown[], final: unknown[]) => {
+const countRemovedEntries = <Entry>(base: Entry[], final: Entry[]) => {
   const finalEntries = new Set(final.map(canonical))
   return base.filter((entry) => !finalEntries.has(canonical(entry))).length
 }
@@ -163,12 +176,26 @@ const placeholderId = (entity: Entity, clientRef: string | undefined, actionInde
   `control:${entity}:${clientRef ?? actionIndex}`
 )
 
-const canonical = (value: unknown): string => {
+const isCanonicalPrimitive = <Value>(
+  value: Value,
+): value is Value & (null | boolean | number | string | undefined) => (
+  value === undefined
+  || value === null
+  || typeof value === 'boolean'
+  || typeof value === 'number'
+  || typeof value === 'string'
+)
+
+const isCanonicalObject = <Value>(value: Value): value is Value & object => (
+  typeof value === 'object' && value !== null
+)
+
+const canonical = <Value>(value: Value): string => {
   if (value === undefined) return 'undefined'
   if (value === null) return 'null'
-  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return JSON.stringify(value)
+  if (isCanonicalPrimitive(value)) return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (typeof value !== 'object') throw new Error('Unsupported planner value.')
+  if (!isCanonicalObject(value)) throw new Error('Unsupported planner value.')
   return `{${Object.entries(value)
     .filter(([, entry]) => entry !== undefined)
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
@@ -176,7 +203,7 @@ const canonical = (value: unknown): string => {
     .join(',')}}`
 }
 
-const same = (left: unknown, right: unknown) => canonical(left) === canonical(right)
+const same = <Left, Right>(left: Left, right: Right) => canonical(left) === canonical(right)
 const plannerSha256 = (value: string) => (
   Array.from(sha256(new TextEncoder().encode(value)), (byte) => byte.toString(16).padStart(2, '0')).join('')
 )
@@ -188,9 +215,11 @@ const timelineRangeAutomationDigest = (automation: ProjectSnapshotV1['automation
   plannerSha256(canonical(automation))
 )
 
-export const canonicalizePlannerSnapshotV1 = (
-  snapshot: ProjectSnapshotV1,
-): ProjectSnapshotV1 => {
+export const canonicalizePlannerSnapshotV1 = <
+  Snapshot extends CanonicalProjectSnapshot,
+>(
+  snapshot: Snapshot,
+): Snapshot => {
   const canonicalSnapshot = structuredClone(snapshot)
   canonicalSnapshot.tracks.sort((left, right) => left.index - right.index || (left.id < right.id ? -1 : 1))
   canonicalSnapshot.clips.sort((left, right) => left.startSec - right.startSec || (left.id < right.id ? -1 : 1))
@@ -205,7 +234,7 @@ const recoverySurvivorState = (entry: any) => ({
   sends: (entry.mixer?.sends ?? entry.sends).map((send: any) => ({
     targetTrackId: send.targetId ?? send.targetTrackId,
     amount: send.amount,
-    ...(send.tap === undefined ? {} : { tap: send.tap }),
+    tap: send.tap,
   })),
 })
 
@@ -363,7 +392,7 @@ const requireAudioAssetSource = (
   actionIndex: number,
 ) => {
   const asset = assets.get(assetId)
-  if (!asset) planError(actionIndex, 'not-found', `Asset "${assetId}" was not found.`)
+    ?? planError(actionIndex, 'not-found', `Asset "${assetId}" was not found.`)
   if (asset.durationSec === undefined || asset.sampleRate === undefined || asset.channelCount === undefined) {
     planError(actionIndex, 'validation', 'Audio clips require an asset with complete source metadata.')
   }
@@ -388,17 +417,15 @@ const recoveredClip = (
   name: clip.name ?? 'Recovered clip',
   startSec: clip.startSec,
   duration: clip.duration,
-  ...(clip.gain === undefined ? {} : { gain: clip.gain }),
+  gain: clip.gain,
   leftPadSec: clip.leftPadSec ?? 0,
   bufferOffsetSec: clip.bufferOffsetSec ?? 0,
   midiOffsetBeats: clip.midiOffsetBeats ?? 0,
-  ...(clip.fades === undefined ? {} : { fades: clip.fades }),
-  ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
-  ...(clip.color === undefined ? {} : { color: clip.color }),
-  ...(clip.midi === undefined ? {} : { midi: normalizeLegacyMidiClip(clip.midi) }),
-  ...(clip.sourceAssetKey === undefined ? {} : {
-    source: requireAudioAssetSource(clip.sourceAssetKey, assets, actionIndex),
-  }),
+  fades: clip.fades,
+  audioWarp: clip.audioWarp,
+  color: clip.color,
+  midi: clip.midi === undefined ? undefined : normalizeLegacyMidiClip(clip.midi),
+  source: clip.sourceAssetKey === undefined ? undefined : requireAudioAssetSource(clip.sourceAssetKey, assets, actionIndex),
 })
 
 const targetMatches = (
@@ -450,7 +477,7 @@ const compactTrackProcessorIndexes = (
 }
 
 const validateAutomationTarget = (
-  action: ControlActionV1,
+  action: { parameterId: string },
   target: ProjectSnapshotV1['processors'][number]['target'],
   effect: ProjectSnapshotV1['processors'][number] | undefined,
   processors: Map<string, ProjectSnapshotV1['processors'][number]>,
@@ -469,7 +496,10 @@ const validateAutomationTarget = (
   const synthKey = parseSynthAutomationKey(action.parameterId)
   const instrumentAutomation = instrumentKey ?? granularKey ?? synthKey
   if (instrumentAutomation) {
-    if ('master' in target || effect || instrumentAutomation.trackId !== target.trackId) {
+    if ('master' in target || effect) {
+      planError(actionIndex, 'validation', 'Instrument automation identity does not match its target.')
+    }
+    if (instrumentAutomation.trackId !== target.trackId) {
       planError(actionIndex, 'validation', 'Instrument automation identity does not match its target.')
     }
     const instrument = Array.from(processors.values()).find((entry) => (
@@ -485,8 +515,9 @@ const validateAutomationTarget = (
     return descriptor
   }
   if (descriptor.owner !== 'mixer') {
-    if (!effect) planError(actionIndex, 'validation', 'Effect automation requires an effect instance.')
-    if (effect.processor.kind !== descriptor.owner) {
+    const requiredEffect = effect
+      ?? planError(actionIndex, 'validation', 'Effect automation requires an effect instance.')
+    if (requiredEffect.processor.kind !== descriptor.owner) {
       planError(actionIndex, 'validation', 'Automation effect instance does not belong to this target.')
     }
   }
@@ -518,13 +549,22 @@ const validateMidiMappings = (
   }
 }
 
-export const planControlRequestV1 = (
+export function planControlRequestV1<
+  Snapshot extends CanonicalProjectSnapshot,
+>(
+  base: Snapshot,
+  request: CanonicalPlannerRequest,
+  trustedRecoveries?: ReadonlyMap<string, PlannerRecovery>,
+  trace?: ControlPlannerTraceV1<Snapshot>,
+  actionIndexOffset?: number,
+): ControlPlanV1<Snapshot>
+export function planControlRequestV1(
   base: ProjectSnapshotV1,
   request: PlannerRequest,
-  trustedRecoveries: ReadonlyMap<string, { payload: { kind: string; data: any } }> = new Map(),
-  trace?: ControlPlannerTraceV1,
+  trustedRecoveries: ReadonlyMap<string, PlannerRecovery> = new Map(),
+  trace?: ControlPlannerTraceV1<CanonicalProjectSnapshot>,
   actionIndexOffset = 0,
-): ControlPlanV1 => {
+) {
   if (base.project.id !== request.projectId) {
     planError(0, 'not-found', 'Project snapshot does not match the request project.')
   }
@@ -641,9 +681,7 @@ export const planControlRequestV1 = (
           soloed: false,
           sends: [],
           collapsed: trackCreationCollapsed(action.channelRole, undefined),
-          ...(action.color === undefined ? {} : {
-            color: normalizeTrackColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid track color.'),
-          }),
+          color: action.color === undefined ? undefined : normalizeTrackColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid track color.'),
         }
         tracks.set(id, track)
         snapshot.tracks.push(track)
@@ -674,7 +712,7 @@ export const planControlRequestV1 = (
           resolvedRefs.push({ entity: 'track', clientRef: action.clientRef, id, persisted: false })
         }
         changed = true
-        planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
+        planned.push({ actionIndex, action, changed, generatedInstrumentInstanceId })
         traceAction(actionIndex, action, changed, beforeAction)
         continue
       }
@@ -707,7 +745,7 @@ export const planControlRequestV1 = (
           : action.sends.map((send: any) => ({
               targetTrackId: requireTrack(send.target, tracks, trackRefs, actionIndex).id,
               amount: send.amount,
-              ...(send.tap === undefined ? {} : { tap: send.tap }),
+              tap: send.tap,
             }))
         const normalized = normalizeTrackRouting({
           track: { id: track.id, channelRole: track.channelRole, groupId: track.groupId },
@@ -718,7 +756,7 @@ export const planControlRequestV1 = (
         const nextSends = normalized.sends.map((send) => ({
           targetTrackId: send.targetId,
           amount: send.amount,
-          ...(send.tap === undefined ? {} : { tap: send.tap }),
+          tap: send.tap,
         }))
         changed = !same(
           { outputTargetId: track.outputTargetId, sends: track.sends },
@@ -919,7 +957,7 @@ export const planControlRequestV1 = (
           id, trackId: track.id, name: action.name ?? asset.name, startSec: action.startSec ?? 0, duration,
           gain: action.gain, leftPadSec: action.leftPadSec ?? 0, bufferOffsetSec: action.bufferOffsetSec ?? 0,
           midiOffsetBeats: action.midiOffsetBeats ?? 0, fades: action.fades ? normalizeClipFades(action.fades, duration) : undefined,
-          ...(action.color === undefined ? {} : { color: normalizeClipColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid clip color.') }),
+          color: action.color === undefined ? undefined : normalizeClipColor(action.color) ?? planError(actionIndex, 'validation', 'Invalid clip color.'),
           audioWarp: action.audioWarp ? normalizeAudioWarp(action.audioWarp) : undefined,
           source,
         }
@@ -1003,8 +1041,8 @@ export const planControlRequestV1 = (
           ? (clip.fades === undefined ? undefined : normalizeClipFades(clip.fades, duration))
           : normalizeClipFades({
               ...clip.fades,
-              ...(action.fadeInSec === undefined ? {} : { fadeInSec: action.fadeInSec }),
-              ...(action.fadeOutSec === undefined ? {} : { fadeOutSec: action.fadeOutSec }),
+              fadeInSec: action.fadeInSec,
+              fadeOutSec: action.fadeOutSec,
             }, duration)
         const patch = {
           duration,
@@ -1012,7 +1050,7 @@ export const planControlRequestV1 = (
           leftPadSec: action.leftPadSec ?? clip.leftPadSec,
           bufferOffsetSec: action.bufferOffsetSec ?? clip.bufferOffsetSec,
           midiOffsetBeats: action.midiOffsetBeats ?? clip.midiOffsetBeats,
-          ...(fades === undefined ? {} : { fades }),
+          fades,
         }
         changed = !same(
           {
@@ -1090,7 +1128,7 @@ export const planControlRequestV1 = (
           action,
           changed,
           timelineRangeDelete: patch,
-          ...(destructivePersisted ? { destructivePersisted } : {}),
+          destructivePersisted: destructivePersisted ? destructivePersisted : undefined,
         })
         traceAction(actionIndex, action, changed, beforeAction)
         continue
@@ -1235,20 +1273,20 @@ export const planControlRequestV1 = (
         const generatedInstrumentInstanceId = action.kind === 'instrument.set' && !existingInstrument
           ? `control:instrument:${actionIndex}`
           : undefined
-        const params = action.kind === 'instrument.set'
-          ? {
-              kind: action.instrumentKind,
-              instanceId: existingInstrument?.instanceId ?? generatedInstrumentInstanceId,
-              params: action.params ?? (existingInstrument && existingInstrument.kind === action.instrumentKind ? existingInstrument.params : {}),
-            }
-          : normalizeArpeggiatorParams(action.params)
         const processor = action.kind === 'instrument.set'
-          ? { kind: 'instrument', params: normalizeTrackInstrumentParams(params) ?? planError(actionIndex, 'validation', 'Invalid instrument parameters.') }
-          : { kind: 'arpeggiator', params }
+          ? {
+              kind: 'instrument',
+              params: normalizeTrackInstrumentParams({
+                kind: action.instrumentKind,
+                instanceId: existingInstrument?.instanceId ?? `control:instrument:${actionIndex}`,
+                params: action.params ?? (existingInstrument && existingInstrument.kind === action.instrumentKind ? existingInstrument.params : {}),
+              }) ?? planError(actionIndex, 'validation', 'Invalid instrument parameters.'),
+            }
+          : { kind: 'arpeggiator', params: normalizeArpeggiatorParams(action.params) }
         const next = {
           id: existing?.id ?? placeholderId('effect', undefined, actionIndex),
           target: { trackId: track.id },
-          ...(action.kind === 'instrument.set' ? { instanceId: existingInstrument?.instanceId ?? generatedInstrumentInstanceId } : {}),
+          instanceId: action.kind === 'instrument.set' ? existingInstrument?.instanceId ?? generatedInstrumentInstanceId : undefined,
           index: existing?.index ?? snapshot.processors.filter((processor) => 'trackId' in processor.target && processor.target.trackId === track.id).length,
           processor,
         }
@@ -1264,7 +1302,7 @@ export const planControlRequestV1 = (
           snapshot.processors = snapshot.processors.filter((entry) => !duplicateIds.has(entry.id))
           compactTrackProcessorIndexes(snapshot.processors, track.id)
         }
-        planned.push({ actionIndex, action, changed, ...(generatedInstrumentInstanceId === undefined ? {} : { generatedInstrumentInstanceId }) })
+        planned.push({ actionIndex, action, changed, generatedInstrumentInstanceId })
         traceAction(actionIndex, action, changed, beforeAction)
         continue
       }
@@ -1372,8 +1410,8 @@ export const planControlRequestV1 = (
         const recovery = trustedRecoveries.get(action.recovery.id)
         if (!recovery) planError(actionIndex, 'not-found', 'Recovery is unavailable.')
         const availableRecovery = recovery ?? planError(actionIndex, 'not-found', 'Recovery is unavailable.')
-        const data = availableRecovery.payload.data
         if (availableRecovery.payload.kind === 'timeline.range.delete') {
+          const data = availableRecovery.payload.data
           const selectedTrackIds = new Set(data.range.trackIds)
           for (const trackId of selectedTrackIds) {
             if (!tracks.has(trackId)) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
@@ -1432,9 +1470,12 @@ export const planControlRequestV1 = (
             snapshot.automation[index] = update.before
           }
         } else if (availableRecovery.payload.kind === 'track.delete' || availableRecovery.payload.kind === 'track.ungroup') {
+          const data = availableRecovery.payload.data
           const restoreTracks = data.tracks
           const restoredIds = new Map(restoreTracks.map((entry: any) => [entry.id, `recovery:track:${action.recovery.id}:${entry.id}`]))
-          const survivorStates = availableRecovery.payload.kind === 'track.delete' ? data.survivors : data.children
+          const survivorStates = availableRecovery.payload.kind === 'track.delete'
+            ? availableRecovery.payload.data.survivors
+            : availableRecovery.payload.data.children
           for (const entry of restoreTracks) {
             if (tracks.has(entry.id)) planError(actionIndex, 'validation', 'Recovery track collides with current state.')
           }
@@ -1468,7 +1509,7 @@ export const planControlRequestV1 = (
               sends: survivor.before.mixer.sends.map((send: any) => ({
                 targetTrackId: restoredIds.get(send.targetId) ?? send.targetId,
                 amount: send.amount,
-                ...(send.tap === undefined ? {} : { tap: send.tap }),
+                tap: send.tap,
               })),
             })
           }
@@ -1481,13 +1522,13 @@ export const planControlRequestV1 = (
               channelRole: track.mixer.channelRole,
               groupId: restoredIds.get(track.groupId) ?? track.groupId,
               collapsed: track.collapsed,
-              ...(track.color === undefined ? {} : { color: track.color }),
+              color: track.color,
               volume: track.mixer.volume, muted: Boolean(track.mixer.muted), soloed: Boolean(track.mixer.soloed),
               outputTargetId: restoredIds.get(track.mixer.outputTargetId) ?? track.mixer.outputTargetId,
               sends: track.mixer.sends.map((send: any) => ({
                 targetTrackId: restoredIds.get(send.targetId) ?? send.targetId,
                 amount: send.amount,
-                ...(send.tap === undefined ? {} : { tap: send.tap }),
+                tap: send.tap,
               })),
             }
             tracks.set(id, restored)
@@ -1532,7 +1573,7 @@ export const planControlRequestV1 = (
               planError(actionIndex, 'validation', 'Recovery processor collides with current state.')
             }
             const id = `recovery:effect:${action.recovery.id}:${item.id}`
-            const processor = { id, target, index: effect.index, ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }), processor: effect.processor }
+            const processor = { id, target, index: effect.index, instanceId: effect.instanceId, processor: effect.processor }
             processors.set(id, processor)
             snapshot.processors.push(processor)
           }
@@ -1544,7 +1585,7 @@ export const planControlRequestV1 = (
             const target = row.targetKind === 'master' ? { master: true } : { trackId }
             snapshot.automation.push({
               target,
-              ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: row.effectInstanceId }),
+              effectInstanceId: row.effectInstanceId,
               parameterId: rebaseRecoveryAutomationParameterIdV1(row.parameterId, trackId),
               enabled: row.enabled,
               points: row.points,
@@ -1575,6 +1616,7 @@ export const planControlRequestV1 = (
           }
           if (!hasValidReturnTrackPartition(Array.from(tracks.values()))) planError(actionIndex, 'validation', 'Return tracks must remain an ungrouped suffix.')
         } else if (availableRecovery.payload.kind === 'clip.delete') {
+          const data = availableRecovery.payload.data
           const track = tracks.get(String(data.clip.trackId))
           if (!track) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
           if (clips.has(String(data.clipId))) planError(actionIndex, 'validation', 'Recovery clip collides with current state.')
@@ -1583,6 +1625,7 @@ export const planControlRequestV1 = (
           clips.set(id, clip)
           snapshot.clips.push(clip)
         } else if (availableRecovery.payload.kind === 'asset.delete') {
+          const data = availableRecovery.payload.data
           const id = String(data.asset.assetKey)
           if (assets.has(id)) planError(actionIndex, 'validation', 'Recovery asset key collides with current state.')
           restoredAssetIds.add(id)
@@ -1593,15 +1636,16 @@ export const planControlRequestV1 = (
             mimeType: data.asset.mimeType,
             sizeBytes: Number(data.asset.sizeBytes),
             contentSha256: data.asset.contentSha256,
-            ...(data.asset.duration === undefined ? {} : { durationSec: Number(data.asset.duration) }),
-            ...(data.asset.sampleRate === undefined ? {} : { sampleRate: Number(data.asset.sampleRate) }),
-            ...(data.asset.channelCount === undefined ? {} : { channelCount: Number(data.asset.channelCount) }),
-            ...(data.asset.folderId === undefined ? {} : { folderId: String(data.asset.folderId) }),
+            durationSec: data.asset.duration === undefined ? undefined : Number(data.asset.duration),
+            sampleRate: data.asset.sampleRate === undefined ? undefined : Number(data.asset.sampleRate),
+            channelCount: data.asset.channelCount === undefined ? undefined : Number(data.asset.channelCount),
+            folderId: data.asset.folderId === undefined ? undefined : String(data.asset.folderId),
             createdAt: Number(data.asset.createdAt),
             updatedAt: Number(data.asset.updatedAt),
           })
           snapshot.assets = Array.from(assets.values())
         } else if (availableRecovery.payload.kind === 'automation.delete') {
+          const data = availableRecovery.payload.data
           const row = data.automation
           if (row.targetKind === 'track' && !tracks.has(String(row.trackId))) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
           const target = row.targetKind === 'master' ? { master: true } : { trackId: String(row.trackId) }
@@ -1612,8 +1656,9 @@ export const planControlRequestV1 = (
           if (snapshot.automation.some((entry) => same(entry.target, target) && entry.effectInstanceId === row.effectInstanceId && entry.parameterId === row.parameterId)) {
             planError(actionIndex, 'validation', 'Recovery automation target collides with current state.')
           }
-          snapshot.automation.push({ target, ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: String(row.effectInstanceId) }), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
+          snapshot.automation.push({ target, effectInstanceId: row.effectInstanceId === undefined ? undefined : String(row.effectInstanceId), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
         } else if (availableRecovery.payload.kind === 'sidechain.remove') {
+          const data = availableRecovery.payload.data
           const row = data.sidechain
           if (!tracks.has(String(row.sourceTrackId)) || !tracks.has(String(row.targetTrackId))) planError(actionIndex, 'not-found', 'Recovery sidechain track is unavailable.')
           if (!Array.from(processors.values()).some((entry) => 'trackId' in entry.target && entry.target.trackId === String(row.targetTrackId) && entry.instanceId === row.effectInstanceId)) {
@@ -1624,13 +1669,14 @@ export const planControlRequestV1 = (
           }
           snapshot.sidechains.push({ sourceTrackId: String(row.sourceTrackId), targetTrackId: String(row.targetTrackId), effectInstanceId: String(row.effectInstanceId) })
         } else {
+          const data = availableRecovery.payload.data
           for (const item of data.effects) {
             const row = item.effect
             const target = row.target.kind === 'master' ? { master: true } : { trackId: row.target.trackId }
             if ('trackId' in target && !tracks.has(target.trackId)) planError(actionIndex, 'not-found', 'Recovery target track is unavailable.')
             const instrument = normalizePersistedInstrumentParams(
               row.processor.kind,
-              row.instanceId,
+              row.instanceId ?? null,
               row.processor.params,
             )
             const type = row.processor.kind === 'synth' ? 'instrument' : row.processor.kind
@@ -1652,7 +1698,7 @@ export const planControlRequestV1 = (
             const processor = {
               id,
               target,
-              ...(row.instanceId === undefined ? {} : { instanceId: row.instanceId }),
+              instanceId: row.instanceId,
               index,
               processor: {
                 kind: type,
@@ -1673,7 +1719,7 @@ export const planControlRequestV1 = (
             if (snapshot.automation.some((entry) => same(entry.target, target) && entry.effectInstanceId === row.effectInstanceId && entry.parameterId === row.parameterId)) {
               planError(actionIndex, 'validation', 'Recovery automation target collides with current state.')
             }
-            snapshot.automation.push({ target, ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: String(row.effectInstanceId) }), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
+            snapshot.automation.push({ target, effectInstanceId: row.effectInstanceId === undefined ? undefined : String(row.effectInstanceId), parameterId: String(row.parameterId), enabled: Boolean(row.enabled), points: row.points })
           }
           for (const item of data.sidechains) {
             const row = item.sidechain
@@ -1694,7 +1740,7 @@ export const planControlRequestV1 = (
         hasPersistedDestructiveEffect(base, beforeAction, snapshot)
         || action.kind === 'asset.delete' && restoredAssetIds.has(action.asset.id)
       )
-    planned.push({ actionIndex, action, changed, ...(destructivePersisted ? { destructivePersisted } : {}) })
+    planned.push({ actionIndex, action, changed, destructivePersisted: destructivePersisted ? destructivePersisted : undefined })
     traceAction(actionIndex, action, changed, beforeAction)
   }
 

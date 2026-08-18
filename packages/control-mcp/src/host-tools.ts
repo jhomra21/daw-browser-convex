@@ -16,32 +16,42 @@ import {
   desktopSeekInputSchemaV1,
   desktopTransportStatusSchemaV1,
   type DesktopOperationV1,
+  type DesktopOperationMapV1,
 } from "@daw-browser/desktop-protocol"
 
+type HostOperation = Exclude<DesktopOperationV1, "control.capabilities" | "control.snapshot" | "control.preview" | "control.commit" | "control.requestApproval" | "control.history" | "control.recoveries">
+type HostToolInput = Parameters<typeof desktopEmptyInputSchemaV1.parse>[0]
+type HostToolResult = DesktopOperationMapV1[HostOperation]["result"]
+type ToolTextContent = { type: "text"; text: string }
+type ToolSuccess<Value extends object> = { structuredContent: Value; content: ToolTextContent[] }
+
 export type HostToolService = {
-  status: () => Promise<unknown>
-  transportStatus: () => Promise<unknown>
-  play: () => Promise<unknown>
-  pause: () => Promise<unknown>
-  stop: () => Promise<unknown>
-  seek: (input: { seconds: number }) => Promise<unknown>
-  diagnostics: () => Promise<unknown>
-  importAudio: (input: unknown) => Promise<unknown>
-  exportRun: (input: unknown) => Promise<unknown>
-  exportStatus: () => Promise<unknown>
-  exportCancel: (input: { jobId: string }) => Promise<unknown>
-  vstInstances: (input: unknown) => Promise<unknown>
-  vstParameters: (input: unknown) => Promise<unknown>
+  status: () => Promise<DesktopOperationMapV1["host.status"]["result"]>
+  transportStatus: () => Promise<DesktopOperationMapV1["transport.status"]["result"]>
+  play: () => Promise<DesktopOperationMapV1["transport.play"]["result"]>
+  pause: () => Promise<DesktopOperationMapV1["transport.pause"]["result"]>
+  stop: () => Promise<DesktopOperationMapV1["transport.stop"]["result"]>
+  seek: (input: DesktopOperationMapV1["transport.seek"]["input"]) => Promise<DesktopOperationMapV1["transport.seek"]["result"]>
+  diagnostics: () => Promise<DesktopOperationMapV1["diagnostics.snapshot"]["result"]>
+  importAudio: (input: DesktopOperationMapV1["host.import.audio"]["input"]) => Promise<DesktopOperationMapV1["host.import.audio"]["result"]>
+  exportRun: (input: DesktopOperationMapV1["host.export.run"]["input"]) => Promise<DesktopOperationMapV1["host.export.run"]["result"]>
+  exportStatus: () => Promise<DesktopOperationMapV1["host.export.status"]["result"]>
+  exportCancel: (input: DesktopOperationMapV1["host.export.cancel"]["input"]) => Promise<DesktopOperationMapV1["host.export.cancel"]["result"]>
+  vstInstances: (input: DesktopOperationMapV1["host.vst.instances"]["input"]) => Promise<DesktopOperationMapV1["host.vst.instances"]["result"]>
+  vstParameters: (input: DesktopOperationMapV1["host.vst.parameters"]["input"]) => Promise<DesktopOperationMapV1["host.vst.parameters"]["result"]>
   operations?: ReadonlySet<DesktopOperationV1>
 }
 
 const local = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
 const read = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-const text = <Value extends Record<string, unknown>>(value: Value): { structuredContent: Value; content: { type: "text"; text: string }[] } => ({ structuredContent: value, content: [{ type: "text", text: JSON.stringify(value) }] })
+const text = <Value extends object>(value: Value): ToolSuccess<Value> => ({
+  structuredContent: value,
+  content: [{ type: "text", text: JSON.stringify(value) }],
+})
 const failure = () => ({ isError: true, content: [{ type: "text" as const, text: JSON.stringify({ version: "v1", code: "unavailable", message: "The local desktop host is unavailable." }) }] })
 const invalid = () => ({ isError: true, content: [{ type: "text" as const, text: JSON.stringify({ version: "v1", code: "invalid-request", message: "Invalid local desktop host tool input." }) }] })
 
-const invoke = async <Value extends Record<string, unknown>>(operation: () => Promise<unknown>, output: { parse: (value: unknown) => Value }) => {
+const invoke = async <Value extends object>(operation: () => Promise<HostToolResult>, output: { parse: (value: HostToolResult) => Value }) => {
   try {
     return text(output.parse(await operation()))
   } catch {
@@ -49,7 +59,7 @@ const invoke = async <Value extends Record<string, unknown>>(operation: () => Pr
   }
 }
 
-export const executeHostTool = (name: string, input: unknown, service: HostToolService) => {
+export const executeHostTool = (name: string, input: HostToolInput, service: HostToolService) => {
   const operation = name === "host_status" ? "host.status"
     : name === "host_transport_status" ? "transport.status"
       : name === "host_play" ? "transport.play"

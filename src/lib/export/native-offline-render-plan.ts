@@ -271,11 +271,9 @@ export const compileNativeOfflineRenderPlan = (input: {
     totalFrames,
     blockFrames: Math.min(4_096, totalFrames),
     graph: serializeNativeGraph(snapshot.graph),
-    ...(externalAttachments ? { externalAttachments } : {}),
-    ...(input.capturedVstStates ? { capturedVstStates: input.capturedVstStates } : {}),
-    ...(instrumentStates.length === 0 ? {} : {
-      instrumentStates: serializeNativeInstrumentStates(instrumentStates, sessionAssets),
-    }),
+    externalAttachments: externalAttachments ? externalAttachments : undefined,
+    capturedVstStates: input.capturedVstStates ? input.capturedVstStates : undefined,
+    instrumentStates: instrumentStates.length === 0 ? undefined : serializeNativeInstrumentStates(instrumentStates, sessionAssets),
     assets,
     transport: {
       epoch: 1,
@@ -287,6 +285,6 @@ export const compileNativeOfflineRenderPlan = (input: {
       transitionId: 1n,
     },
     schedule: scheduleBytes,
-    ...(scheduleWindows.length > 1 ? { scheduleWindows } : {}),
+    scheduleWindows: scheduleWindows.length > 1 ? scheduleWindows : undefined,
   }
 }

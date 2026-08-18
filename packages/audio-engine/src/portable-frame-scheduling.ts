@@ -71,22 +71,27 @@ export type PortableFrameScheduleBlock = {
   events: readonly (PortableFrameScheduleEvent & { frameOffset: number })[]
 }
 
-const positiveSafeInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-const nonnegativeSafeInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-const finiteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+type ScheduleValue = string | number | boolean | null | readonly ScheduleValue[] | ScheduleObject
+type ScheduleObject = { [key: string]: ScheduleValue }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
+const positiveSafeInteger = <Value>(value: Value): value is Value & number => isNumber(value) && Number.isSafeInteger(value) && value > 0
+const nonnegativeSafeInteger = <Value>(value: Value): value is Value & number => isNumber(value) && Number.isSafeInteger(value) && value >= 0
+const finiteNumber = <Value>(value: Value): value is Value & number => isNumber(value) && Number.isFinite(value)
+
+const isRecord = <Value>(value: Value): value is Value & ScheduleObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const validTarget = (target: unknown): boolean => (
+const validTarget = <Value>(target: Value): boolean => (
   isRecord(target)
   && (target.kind === 'instrument'
-    ? typeof target.trackId === 'string' && target.trackId.length > 0
-    : typeof target.parameterId === 'string' && target.parameterId.length > 0
-      && (target.scope === 'master' || typeof target.trackId === 'string' && target.trackId.length > 0))
+    ? isString(target.trackId) && target.trackId.length > 0
+    : isString(target.parameterId) && target.parameterId.length > 0
+      && (target.scope === 'master' || isString(target.trackId) && target.trackId.length > 0))
 )
 
-const validEvent = (event: unknown): event is PortableFrameScheduleEvent => (
+const validEvent = <Value>(event: Value): event is Value & PortableFrameScheduleEvent => (
   isRecord(event)
   && nonnegativeSafeInteger(event.frame)
   && positiveSafeInteger(event.sequence)
@@ -108,7 +113,7 @@ const validEvent = (event: unknown): event is PortableFrameScheduleEvent => (
       : finiteNumber(event.value))
 )
 
-export const isPortableFrameSchedule = (value: unknown): value is PortableFrameSchedule => {
+export const isPortableFrameSchedule = <Value>(value: Value): value is Value & PortableFrameSchedule => {
   if (!isRecord(value) || !isRecord(value.timeOrigin) || !Array.isArray(value.events)) return false
   if (
     !positiveSafeInteger(value.revision)

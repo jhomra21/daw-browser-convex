@@ -7,6 +7,7 @@ import {
   type MidiEditorPersistenceError,
   type MidiEditorOperation,
 } from '~/lib/midi/editor-persistence'
+import { z } from 'zod'
 
 type MidiClipData = NonNullable<Clip['midi']>
 
@@ -18,6 +19,12 @@ type MidiEditorPersistenceOptions = {
   onLocalMidiSaved?: (clipId: string, midi: MidiClipData) => void
   onCannotPersist?: () => void
 }
+
+const midiEditorPersistenceErrorSchema = z.object({
+  error: z.instanceof(Error),
+  retryable: z.boolean(),
+  operationIds: z.array(z.string()).optional(),
+})
 
 export const canPersistMidiEditor = (
   projectId: string | undefined,
@@ -31,22 +38,14 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
   const [error, setError] = createSignal<MidiEditorPersistenceError>()
   const [pendingVersion, setPendingVersion] = createSignal(0)
 
-  const isPersistenceError = (reason: unknown): reason is MidiEditorPersistenceError => (
-    typeof reason === 'object'
-    && reason !== null
-    && 'error' in reason
-    && 'retryable' in reason
-    && reason.error instanceof Error
-    && typeof reason.retryable === 'boolean'
-  )
-
-  const retainError = (reason: MidiEditorPersistenceError | unknown) => {
-    if (isPersistenceError(reason)) {
-      setError(reason)
+  const retainError = (cause: unknown) => {
+    const persistenceError = midiEditorPersistenceErrorSchema.safeParse(cause)
+    if (persistenceError.success) {
+      setError(persistenceError.data)
       return
     }
     setError({
-      error: reason instanceof Error ? reason : new Error('Unable to save MIDI changes.'),
+      error: cause instanceof Error ? cause : new Error('Unable to save MIDI changes.'),
       retryable: true,
     })
   }

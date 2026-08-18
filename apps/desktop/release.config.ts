@@ -49,7 +49,7 @@ const runSecurityCommand: SecurityCommand = (command, arguments_) => {
     status: result.status,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
-    ...(result.error ? { error: result.error } : {}),
+    error: result.error ? result.error : undefined,
   }
 }
 
@@ -57,7 +57,7 @@ const runNativeBuildCommand: NativeBuildCommand = (command, arguments_) => {
   const result = spawnSync(command, [...arguments_], { stdio: "inherit" })
   return {
     status: result.status,
-    ...(result.error ? { error: result.error } : {}),
+    error: result.error ? result.error : undefined,
   }
 }
 

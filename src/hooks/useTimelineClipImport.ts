@@ -232,7 +232,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     if (!target) return { fileName: file.name, status: 'skipped' }
     const startSec = resolveClipStartSec(
       target.track,
-      typeof desiredStart === 'number' ? desiredStart : playheadSec(),
+      desiredStart ?? playheadSec(),
       decoded.duration,
     )
     const result = await audioImportTransaction.createUploadedFileClip({
@@ -249,12 +249,10 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     return {
       fileName: file.name,
       status: result.status,
-      ...('message' in result ? { message: result.message } : {}),
-      ...('assetId' in result ? {
-        assetId: result.assetId,
-        ...('clipId' in result ? { clipId: result.clipId } : {}),
-        ...('operationId' in result ? { operationId: result.operationId } : {}),
-      } : {}),
+      message: 'message' in result ? result.message : undefined,
+      assetId: 'assetId' in result ? result.assetId : undefined,
+      clipId: 'clipId' in result ? result.clipId : undefined,
+      operationId: 'operationId' in result ? result.operationId : undefined,
     }
   }
 
@@ -330,7 +328,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
   }
 
   const handleAddAudio = async () => {
-    if (typeof window.showOpenFilePicker === 'function') {
+    if (window.showOpenFilePicker) {
       try {
         const [fileHandle] = await window.showOpenFilePicker({
           multiple: false,

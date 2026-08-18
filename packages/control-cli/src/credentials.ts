@@ -2,21 +2,24 @@ import { watch } from "node:fs"
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { normalizeControlOrigin } from "@daw-browser/control-sdk"
+import { z } from "zod"
 
 const credentialVersion = "v1"
 
-export type ControlCredentials = {
-  version: typeof credentialVersion;
-  baseUrl: string;
-  clientId: string;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  scopes: string[];
-  resource: string;
-  tokenEndpoint: string;
-  revocationEndpoint: string;
-}
+const controlCredentialsSchema = z.object({
+  version: z.literal(credentialVersion),
+  baseUrl: z.string().min(1),
+  clientId: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: z.number().finite().positive(),
+  scopes: z.array(z.string().min(1)).min(1),
+  resource: z.string().min(1),
+  tokenEndpoint: z.string().url(),
+  revocationEndpoint: z.string().url(),
+}).strict()
+
+export type ControlCredentials = z.infer<typeof controlCredentialsSchema>
 
 export type ControlCredentialIdentity = Pick<ControlCredentials, "version" | "baseUrl" | "clientId" | "resource">
 
@@ -27,26 +30,17 @@ type RefreshLock = {
 }
 
 const refreshLockLifetimeMs = 300_000
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const refreshLockSchema = z.object({
+  owner: z.string().min(1),
+  pid: z.number().int().positive(),
+  createdAt: z.number().finite(),
+}).strict()
+
+const hasErrorCode = (cause: unknown, code: string): cause is NodeJS.ErrnoException => (
+  cause instanceof Error && "code" in cause && cause.code === code
 )
 
-const isStringArray = (value: unknown): value is string[] => (
-  Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0)
-)
-
-const parseCredentials = (value: unknown): ControlCredentials => {
-  if (!isRecord(value)
-    || value.version !== credentialVersion
-    || typeof value.baseUrl !== "string"
-    || typeof value.clientId !== "string" || value.clientId.length === 0
-    || typeof value.accessToken !== "string" || value.accessToken.length === 0
-    || typeof value.refreshToken !== "string" || value.refreshToken.length === 0
-    || typeof value.expiresAt !== "number" || !Number.isFinite(value.expiresAt) || value.expiresAt <= 0
-    || !isStringArray(value.scopes)
-    || typeof value.resource !== "string"
-    || typeof value.tokenEndpoint !== "string"
-    || typeof value.revocationEndpoint !== "string") throw new Error("Credential file is invalid.")
+const parseCredentials = (value: ControlCredentials): ControlCredentials => {
   const baseUrl = normalizeControlOrigin(value.baseUrl)
   if (value.resource !== `${baseUrl}/api`) throw new Error("Credential file has an invalid resource.")
   const tokenEndpoint = new URL(value.tokenEndpoint)
@@ -66,9 +60,7 @@ const parseCredentials = (value: unknown): ControlCredentials => {
   }
 }
 
-const missing = (error: unknown) => (
-  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
-)
+const missing = (cause: unknown) => hasErrorCode(cause, "ENOENT")
 
 const privateMode = (mode: number) => (mode & 0o077) === 0
 
@@ -105,28 +97,19 @@ const safeExistingFile = async (path: string) => {
   try {
     const stat = await lstat(path)
     if (!stat.isFile() || stat.isSymbolicLink() || !privateMode(stat.mode)) throw new Error("Credential file permissions are unsafe.")
-  } catch (error) {
-    if (!missing(error)) throw error
+  } catch (cause) {
+    if (!missing(cause)) throw cause
   }
 }
-
-const isRefreshLock = (value: unknown): value is RefreshLock => (
-  isRecord(value)
-  && typeof value.owner === "string" && value.owner.length > 0
-  && typeof value.pid === "number" && Number.isInteger(value.pid) && value.pid > 0
-  && typeof value.createdAt === "number" && Number.isFinite(value.createdAt)
-)
 
 const readRefreshLock = async (path: string): Promise<RefreshLock | undefined> => {
   try {
     const stat = await lstat(path)
     if (!stat.isFile() || stat.isSymbolicLink() || !privateMode(stat.mode)) throw new Error("Credential refresh lock is unsafe.")
-    const value: unknown = JSON.parse(await readFile(path, "utf8"))
-    if (!isRefreshLock(value)) throw new Error("Credential refresh lock is invalid.")
-    return value
-  } catch (error) {
-    if (missing(error)) return undefined
-    throw error
+    return refreshLockSchema.parse(JSON.parse(await readFile(path, "utf8")))
+  } catch (cause) {
+    if (missing(cause)) return undefined
+    throw cause
   }
 }
 
@@ -134,8 +117,8 @@ const processIsDead = (pid: number) => {
   try {
     process.kill(pid, 0)
     return false
-  } catch (error) {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH"
+  } catch (cause) {
+    return hasErrorCode(cause, "ESRCH")
   }
 }
 
@@ -153,9 +136,9 @@ const waitForRefreshLockChange = (directory: string, lockPath: string, wakeMs: n
       else resolve()
     }
     watcher.on("error", finish)
-    void lstat(lockPath).catch((error: unknown) => {
-      if (missing(error)) finish()
-      else finish(error instanceof Error ? error : new Error("Credential refresh lock is unavailable."))
+    void lstat(lockPath).catch((cause: unknown) => {
+      if (missing(cause)) finish()
+      else finish(cause instanceof Error ? cause : new Error("Credential refresh lock is unavailable."))
     })
   })
 )
@@ -175,10 +158,10 @@ export const createCredentialStore = (path = credentialPath()) => {
       } catch {
         throw new Error("Credential file is invalid.")
       }
-      return parseCredentials(value)
-    } catch (error) {
-      if (missing(error)) return undefined
-      throw error
+      return parseCredentials(controlCredentialsSchema.parse(value))
+    } catch (cause) {
+      if (missing(cause)) return undefined
+      throw cause
     }
   }
 
@@ -203,9 +186,9 @@ export const createCredentialStore = (path = credentialPath()) => {
     try {
       await safeExistingFile(path)
       await rename(temporary, path)
-    } catch (error) {
+    } catch (cause) {
       await unlink(temporary).catch(() => undefined)
-      throw error
+      throw cause
     }
   }
 
@@ -213,8 +196,8 @@ export const createCredentialStore = (path = credentialPath()) => {
     await safeExistingFile(path)
     try {
       await unlink(path)
-    } catch (error) {
-      if (!missing(error)) throw error
+    } catch (cause) {
+      if (!missing(cause)) throw cause
     }
   }
 
@@ -246,18 +229,18 @@ export const createCredentialStore = (path = credentialPath()) => {
         return {
           release: async () => {
             const current = await readRefreshLock(lockPath)
-            if (current?.owner === owner.owner) await unlink(lockPath).catch((error: unknown) => {
-              if (!missing(error)) throw error
+            if (current?.owner === owner.owner) await unlink(lockPath).catch((cause: unknown) => {
+              if (!missing(cause)) throw cause
             })
           },
         }
-      } catch (error) {
-        if (!(typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST")) throw error
+      } catch (cause) {
+        if (!hasErrorCode(cause, "EEXIST")) throw cause
         const existing = await readRefreshLock(lockPath)
         if (existing && Date.now() - existing.createdAt > refreshLockLifetimeMs && processIsDead(existing.pid)) {
           const current = await readRefreshLock(lockPath)
-          if (current?.owner === existing.owner) await unlink(lockPath).catch((unlinkError: unknown) => {
-            if (!missing(unlinkError)) throw unlinkError
+          if (current?.owner === existing.owner) await unlink(lockPath).catch((cause: unknown) => {
+            if (!missing(cause)) throw cause
           })
           continue
         }

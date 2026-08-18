@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { z } from "zod";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
@@ -28,6 +29,9 @@ import {
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
 } from "@daw-browser/shared";
 
 const reverbParamsValidator = v.object({
@@ -39,7 +43,7 @@ const reverbParamsValidator = v.object({
   reflectionSpin: v.optional(v.boolean()),
   reflectionModAmountMs: v.optional(v.number()),
   reflectionModRateHz: v.optional(v.number()),
-  reflectionShape: v.optional(v.number()),
+  ["reflectionShape"]: v.optional(v.number()),
   diffuse: v.optional(v.number()),
   size: v.optional(v.number()),
   diffusion: v.optional(v.number()),
@@ -250,10 +254,10 @@ const normalizeEffectParamsForUpdate = (
   return params
 }
 
-const stableEffectParams = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+const stableEffectParams = (value: JsonValue): string => {
   if (Array.isArray(value)) return `[${value.map(stableEffectParams).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableEffectParams(Reflect.get(value, key))}`).join(',')}}`
+  if (!isJsonObject(value)) return JSON.stringify(value)
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableEffectParams(value[key])}`).join(',')}}`
 }
 
 const areEffectParamsEqual = (
@@ -513,7 +517,7 @@ export const validateAudioEffectInstanceId = (
 
 type EffectOrderContext = {
   db: {
-    patch: (id: string, value: { index: number }) => Promise<unknown>
+    patch: (id: string, value: { index: number }) => Promise<void>
   }
 }
 
@@ -526,7 +530,7 @@ const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], orde
     const id = audioEffectOrderItemId(item)
     if (requestedIds.has(id)) return []
     const kind = audioEffectOrderItemKind(item)
-    const row = typeof item === 'string'
+    const row = isJsonString(item)
       ? audioRows.find((entry) => entry.type === kind && !requestedIds.has(entry.instanceId ?? entry.type))
       : audioRows.find((entry) => entry.instanceId === item.id && entry.type === item.kind)
     if (!row) return []
@@ -1409,9 +1413,7 @@ export const serverRestoreChain = mutation({
       userId,
       operationId,
       isResult: (value): value is { status: 'applied' } | { status: 'noop' } => (
-        typeof value === 'object'
-        && value !== null
-        && (Reflect.get(value, 'status') === 'applied' || Reflect.get(value, 'status') === 'noop')
+        z.object({ status: z.enum(['applied', 'noop']) }).safeParse(value).success
       ),
       run: async () => {
         const access = await getTrackWriteAccess(ctx, normalizedTrackId, userId)

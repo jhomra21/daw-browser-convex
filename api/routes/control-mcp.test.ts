@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
+import type { JsonObject, JsonValue } from "@daw-browser/shared"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import {
   StreamableHTTPClientTransport,
@@ -69,7 +70,7 @@ const app = (
 }
 
 const mcpRequest = (
-  body: unknown,
+  body: JsonValue,
   headers: Record<string, string> = {},
 ) => new Request("https://control.example/api/mcp", {
   method: "POST",
@@ -81,7 +82,7 @@ const mcpRequest = (
   body: JSON.stringify(body),
 })
 
-const call = (name: string, arguments_: Record<string, unknown>) => ({
+const call = (name: string, arguments_: JsonObject) => ({
   jsonrpc: "2.0",
   id: 1,
   method: "tools/call",

@@ -12,14 +12,18 @@ import {
 } from '@daw-browser/control'
 import {
   automationTargetKey,
+  isJsonObject,
+  isJsonString,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
 } from '@daw-browser/shared'
+import { z } from 'zod'
 import type { LocalProjectAssetRow } from '~/lib/local-project-db'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 export const localRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
+const jsonValueSchema = z.json()
 
 const ownership = (projectId: string, localActorSubject: string) => ({ projectId, localActorSubject })
 const recoveryAssetRow = (asset: Extract<CapturedRecoveryPayloadV2, { kind: 'asset.delete' }>['data']['asset']): LocalProjectAssetRow => {
@@ -69,25 +73,23 @@ const clipPayload = (
 ) => ({
   projectId,
   trackId: clip.trackId,
-  ...(historyRef === undefined ? {} : { historyRef }),
+  historyRef,
   startSec: clip.startSec,
   duration: clip.duration,
-  ...(clip.source ? {
-    sourceAssetKey: clip.source.assetId,
-    sourceKind: clip.source.sourceKind,
-    sourceDurationSec: clip.source.durationSec,
-    sourceSampleRate: clip.source.sampleRate,
-    sourceChannelCount: clip.source.channelCount,
-  } : {}),
-  ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
-  ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
-  ...(clip.audioWarp === undefined ? {} : { audioWarp: clip.audioWarp }),
-  ...(clip.gain === undefined ? {} : { gain: clip.gain }),
-  ...(clip.fades === undefined ? {} : { fades: clip.fades }),
-  ...(clip.color === undefined ? {} : { color: clip.color }),
-  ...(clip.name === undefined ? {} : { name: clip.name }),
-  ...(clip.midi === undefined ? {} : { midi: clip.midi }),
-  ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
+  sourceAssetKey: clip.source?.assetId,
+  sourceKind: clip.source?.sourceKind,
+  sourceDurationSec: clip.source?.durationSec,
+  sourceSampleRate: clip.source?.sampleRate,
+  sourceChannelCount: clip.source?.channelCount,
+  leftPadSec: clip.leftPadSec,
+  bufferOffsetSec: clip.bufferOffsetSec,
+  audioWarp: clip.audioWarp,
+  gain: clip.gain,
+  fades: clip.fades,
+  color: clip.color,
+  name: clip.name,
+  midi: clip.midi,
+  midiOffsetBeats: clip.midiOffsetBeats,
 })
 const trackPayload = (projectId: string, track: ProjectSnapshotV2['tracks'][number], actorSubject: string) => ({
   id: track.id,
@@ -96,19 +98,19 @@ const trackPayload = (projectId: string, track: ProjectSnapshotV2['tracks'][numb
     name: track.name,
     index: track.index,
     kind: track.kind,
-    ...(track.groupId === undefined ? {} : { groupId: track.groupId }),
-    ...(track.collapsed === undefined ? {} : { collapsed: track.collapsed }),
-    ...(track.color === undefined ? {} : { color: track.color }),
+    groupId: track.groupId,
+    collapsed: track.collapsed,
+    color: track.color,
     mixer: {
       volume: track.volume,
-      ...(track.muted === undefined ? {} : { muted: track.muted }),
-      ...(track.soloed === undefined ? {} : { soloed: track.soloed }),
+      muted: track.muted,
+      soloed: track.soloed,
       channelRole: track.channelRole,
-      ...(track.outputTargetId === undefined ? {} : { outputTargetId: track.outputTargetId }),
+      outputTargetId: track.outputTargetId,
       sends: track.sends.map((send) => ({
         targetId: send.targetTrackId,
         amount: send.amount,
-        ...(send.tap === undefined ? {} : { tap: send.tap }),
+        tap: send.tap,
       })),
     },
   },
@@ -121,7 +123,7 @@ const effectPayload = (projectId: string, effect: ProjectSnapshotV2['processors'
     target: 'master' in effect.target ? { kind: 'master' as const } : { kind: 'track' as const, trackId: effect.target.trackId },
     index: effect.index,
     processor: effect.processor,
-    ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }),
+    instanceId: effect.instanceId,
     createdAt: 0,
   },
 })
@@ -130,8 +132,8 @@ const automationPayload = (projectId: string, entry: ProjectSnapshotV2['automati
   automation: {
     projectId,
     targetKind: 'master' in entry.target ? 'master' as const : 'track' as const,
-    ...('master' in entry.target ? {} : { trackId: entry.target.trackId }),
-    ...(entry.effectInstanceId === undefined ? {} : { effectInstanceId: entry.effectInstanceId }),
+    trackId: 'master' in entry.target ? undefined : entry.target.trackId,
+    effectInstanceId: entry.effectInstanceId,
     targetKey: id,
     parameterId: entry.parameterId,
     enabled: entry.enabled,
@@ -184,9 +186,9 @@ const instrumentAutomation = (
   effects: readonly ProjectSnapshotV2['processors'][number][],
 ) => {
   const instanceIds = new Set(effects.flatMap((effect) => {
-    const params = effect.processor.params
-    return typeof params === 'object' && params !== null && 'instanceId' in params && typeof params.instanceId === 'string'
-      ? [params.instanceId]
+    const params = jsonValueSchema.safeParse(effect.processor.params)
+    return params.success && isJsonObject(params.data) && isJsonString(params.data.instanceId)
+      ? [params.data.instanceId]
       : []
   }))
   return snapshot.automation.flatMap((entry) => {
@@ -214,7 +216,7 @@ export const captureLocalRecoveryPayload = (input: {
   clipHistoryRefs?: ReadonlyMap<string, string>
 }): CapturedRecoveryPayloadV2 | undefined => {
   const { action, snapshot } = input
-  let raw: unknown
+  let raw: Parameters<typeof recoveryCapturedPayloadSchemaV2.safeParse>[0]
   if (action.kind === 'timeline.range.delete') {
     const trackIds = action.tracks.flatMap((track) => (
       track.source === 'persisted' ? [track.id] : []
@@ -425,12 +427,12 @@ export const captureLocalRecoveryPayload = (input: {
           const after = {
             ...trackPayload(input.projectId, track, input.actorSubject).track,
             index,
-            ...(selected.has(track.groupId ?? '') ? { groupId: undefined } : {}),
+            groupId: selected.has(track.groupId ?? '') ? undefined : track.groupId,
             mixer: {
               ...trackPayload(input.projectId, track, input.actorSubject).track.mixer,
-              ...(selected.has(track.outputTargetId ?? '') ? { outputTargetId: undefined } : {}),
+              outputTargetId: selected.has(track.outputTargetId ?? '') ? undefined : track.outputTargetId,
               sends: track.sends.filter((send) => !selected.has(send.targetTrackId)).map((send) => ({
-                targetId: send.targetTrackId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }),
+                targetId: send.targetTrackId, amount: send.amount, tap: send.tap,
               })),
             },
           }
@@ -455,7 +457,7 @@ export const captureLocalRecoveryPayload = (input: {
               groupId: root.groupId,
               mixer: {
                 ...trackPayload(input.projectId, child, input.actorSubject).track.mixer,
-                ...(child.outputTargetId === root.id ? { outputTargetId: root.groupId } : {}),
+                outputTargetId: child.outputTargetId === root.id ? root.groupId : undefined,
               },
             },
           })),

@@ -24,157 +24,139 @@ const cloneRange = (range: ExportRange): ExportRange => {
 
 const cloneMidiClip = (midi: MidiClip): MidiClip => ({
   wave: midi.wave,
-  ...(midi.gain === undefined ? {} : { gain: midi.gain }),
-  ...(midi.inputChannel === undefined ? {} : { inputChannel: midi.inputChannel }),
+  gain: midi.gain,
+  inputChannel: midi.inputChannel,
   notes: midi.notes.map((note) => ({
-    ...(note.id === undefined ? {} : { id: note.id }),
+    id: note.id,
     beat: note.beat,
     length: note.length,
     pitch: note.pitch,
-    ...(note.velocity === undefined ? {} : { velocity: note.velocity }),
-    ...(note.channel === undefined ? {} : { channel: note.channel }),
+    velocity: note.velocity,
+    channel: note.channel,
   })),
-  ...(midi.cc === undefined ? {} : {
-    cc: midi.cc.map((event) => ({
-      ...(event.id === undefined ? {} : { id: event.id }),
+  cc: midi.cc === undefined ? undefined : midi.cc.map((event) => ({
+      id: event.id,
       beat: event.beat,
       controller: event.controller,
       value: event.value,
-      ...(event.channel === undefined ? {} : { channel: event.channel }),
+      channel: event.channel,
     })),
-  }),
-  ...(midi.pitchBends === undefined ? {} : {
-    pitchBends: midi.pitchBends.map((event) => ({
-      ...(event.id === undefined ? {} : { id: event.id }),
+  pitchBends: midi.pitchBends === undefined ? undefined : midi.pitchBends.map((event) => ({
+      id: event.id,
       beat: event.beat,
       value: event.value,
-      ...(event.channel === undefined ? {} : { channel: event.channel }),
+      channel: event.channel,
     })),
-  }),
-  ...(midi.channelPressure === undefined ? {} : {
-    channelPressure: midi.channelPressure.map((event) => ({
-      ...(event.id === undefined ? {} : { id: event.id }),
+  channelPressure: midi.channelPressure === undefined ? undefined : midi.channelPressure.map((event) => ({
+      id: event.id,
       beat: event.beat,
       value: event.value,
-      ...(event.channel === undefined ? {} : { channel: event.channel }),
+      channel: event.channel,
     })),
-  }),
-  ...(midi.polyPressure === undefined ? {} : {
-    polyPressure: midi.polyPressure.map((event) => ({
-      ...(event.id === undefined ? {} : { id: event.id }),
+  polyPressure: midi.polyPressure === undefined ? undefined : midi.polyPressure.map((event) => ({
+      id: event.id,
       beat: event.beat,
       pitch: event.pitch,
       value: event.value,
-      ...(event.channel === undefined ? {} : { channel: event.channel }),
+      channel: event.channel,
     })),
-  }),
-  ...(midi.mappings === undefined ? {} : {
-    mappings: midi.mappings.map((mapping) => ({
+  mappings: midi.mappings === undefined ? undefined : midi.mappings.map((mapping) => ({
       id: mapping.id,
       source: mapping.source.kind === 'cc'
         ? {
           kind: mapping.source.kind,
           controller: mapping.source.controller,
-          ...(mapping.source.channel === undefined ? {} : { channel: mapping.source.channel }),
+          channel: mapping.source.channel,
         }
         : mapping.source.kind === 'pitch-bend'
           ? {
             kind: mapping.source.kind,
-            ...(mapping.source.channel === undefined ? {} : { channel: mapping.source.channel }),
+            channel: mapping.source.channel,
           }
           : mapping.source.kind === 'channel-pressure'
             ? {
               kind: mapping.source.kind,
-              ...(mapping.source.channel === undefined ? {} : { channel: mapping.source.channel }),
+              channel: mapping.source.channel,
             }
             : {
               kind: mapping.source.kind,
-              ...(mapping.source.channel === undefined ? {} : { channel: mapping.source.channel }),
-              ...(mapping.source.pitch === undefined ? {} : { pitch: mapping.source.pitch }),
+              channel: mapping.source.channel,
+              pitch: mapping.source.pitch,
             },
       target: {
         parameterId: mapping.target.parameterId,
-        ...(mapping.target.effectInstanceId === undefined ? {} : { effectInstanceId: mapping.target.effectInstanceId }),
+        effectInstanceId: mapping.target.effectInstanceId,
       },
       outputMin: mapping.outputMin,
       outputMax: mapping.outputMax,
     })),
-  }),
 })
 
 const cloneClip = (clip: RuntimeClip): RuntimeClip => ({
   id: clip.id,
-  ...(clip.historyRef === undefined ? {} : { historyRef: clip.historyRef }),
+  historyRef: clip.historyRef,
   name: clip.name,
-  ...(clip.mediaStatus === undefined ? {} : { mediaStatus: clip.mediaStatus }),
+  mediaStatus: clip.mediaStatus,
   startSec: clip.startSec,
   duration: clip.duration,
-  ...(clip.sourceAssetKey === undefined ? {} : { sourceAssetKey: clip.sourceAssetKey }),
-  ...(clip.waveformAssetKey === undefined ? {} : { waveformAssetKey: clip.waveformAssetKey }),
-  ...(clip.sourceKind === undefined ? {} : { sourceKind: clip.sourceKind }),
-  ...(clip.sourceDurationSec === undefined ? {} : { sourceDurationSec: clip.sourceDurationSec }),
-  ...(clip.sourceSampleRate === undefined ? {} : { sourceSampleRate: clip.sourceSampleRate }),
-  ...(clip.sourceChannelCount === undefined ? {} : { sourceChannelCount: clip.sourceChannelCount }),
-  ...(clip.leftPadSec === undefined ? {} : { leftPadSec: clip.leftPadSec }),
-  ...(clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: clip.bufferOffsetSec }),
-  ...(clip.audioWarp === undefined ? {} : {
-    audioWarp: {
+  sourceAssetKey: clip.sourceAssetKey,
+  waveformAssetKey: clip.waveformAssetKey,
+  sourceKind: clip.sourceKind,
+  sourceDurationSec: clip.sourceDurationSec,
+  sourceSampleRate: clip.sourceSampleRate,
+  sourceChannelCount: clip.sourceChannelCount,
+  leftPadSec: clip.leftPadSec,
+  bufferOffsetSec: clip.bufferOffsetSec,
+  audioWarp: clip.audioWarp === undefined ? undefined : {
       enabled: clip.audioWarp.enabled,
-      ...(clip.audioWarp.sourceBpm === undefined ? {} : { sourceBpm: clip.audioWarp.sourceBpm }),
-      ...(clip.audioWarp.sourceBeatOffset === undefined ? {} : { sourceBeatOffset: clip.audioWarp.sourceBeatOffset }),
-      ...(clip.audioWarp.markers === undefined ? {} : {
-        markers: clip.audioWarp.markers.map((marker) => ({
-          id: marker.id,
-          sourceBeat: marker.sourceBeat,
-          timelineBeat: marker.timelineBeat,
-        })),
-      }),
+      sourceBpm: clip.audioWarp.sourceBpm,
+      sourceBeatOffset: clip.audioWarp.sourceBeatOffset,
+      markers: clip.audioWarp.markers === undefined ? undefined : clip.audioWarp.markers.map((marker) => ({
+        id: marker.id,
+        sourceBeat: marker.sourceBeat,
+        timelineBeat: marker.timelineBeat,
+      })),
       mode: clip.audioWarp.mode,
     },
-  }),
-  ...(clip.gain === undefined ? {} : { gain: clip.gain }),
-  ...(clip.fades === undefined ? {} : {
-    fades: {
-      ...(clip.fades.fadeInStartSec === undefined ? {} : { fadeInStartSec: clip.fades.fadeInStartSec }),
+  gain: clip.gain,
+  fades: clip.fades === undefined ? undefined : {
+      fadeInStartSec: clip.fades.fadeInStartSec,
       fadeInSec: clip.fades.fadeInSec,
       fadeOutSec: clip.fades.fadeOutSec,
-      ...(clip.fades.fadeOutEndSec === undefined ? {} : { fadeOutEndSec: clip.fades.fadeOutEndSec }),
+      fadeOutEndSec: clip.fades.fadeOutEndSec,
       fadeInCurve: clip.fades.fadeInCurve,
       fadeOutCurve: clip.fades.fadeOutCurve,
-      ...(clip.fades.fadeInCurvePosition === undefined ? {} : { fadeInCurvePosition: clip.fades.fadeInCurvePosition }),
-      ...(clip.fades.fadeOutCurvePosition === undefined ? {} : { fadeOutCurvePosition: clip.fades.fadeOutCurvePosition }),
+      fadeInCurvePosition: clip.fades.fadeInCurvePosition,
+      fadeOutCurvePosition: clip.fades.fadeOutCurvePosition,
     },
-  }),
   color: clip.color,
-  ...(clip.sampleUrl === undefined ? {} : { sampleUrl: clip.sampleUrl }),
-  ...(clip.midi === undefined ? {} : { midi: cloneMidiClip(clip.midi) }),
-  ...(clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: clip.midiOffsetBeats }),
-  ...(clip.buffer === undefined ? {} : { buffer: clip.buffer }),
+  sampleUrl: clip.sampleUrl,
+  midi: clip.midi === undefined ? undefined : cloneMidiClip(clip.midi),
+  midiOffsetBeats: clip.midiOffsetBeats,
+  buffer: clip.buffer,
 })
 
 const cloneTrack = (track: RuntimeTrack): RuntimeTrack => ({
   id: track.id,
-  ...(track.historyRef === undefined ? {} : { historyRef: track.historyRef }),
+  historyRef: track.historyRef,
   name: track.name,
   volume: track.volume,
   clips: track.clips.map(cloneClip),
-  ...(track.muted === undefined ? {} : { muted: track.muted }),
-  ...(track.soloed === undefined ? {} : { soloed: track.soloed }),
-  ...(track.lockedBy === undefined ? {} : { lockedBy: track.lockedBy }),
-  ...(track.lockedAt === undefined ? {} : { lockedAt: track.lockedAt }),
-  ...(track.kind === undefined ? {} : { kind: track.kind }),
-  ...(track.channelRole === undefined ? {} : { channelRole: track.channelRole }),
-  ...(track.groupId === undefined ? {} : { groupId: track.groupId }),
-  ...(track.collapsed === undefined ? {} : { collapsed: track.collapsed }),
-  ...(track.color === undefined ? {} : { color: track.color }),
-  ...(track.outputTargetId === undefined ? {} : { outputTargetId: track.outputTargetId }),
-  ...(track.sends === undefined ? {} : {
-    sends: track.sends.map((send) => ({
+  muted: track.muted,
+  soloed: track.soloed,
+  lockedBy: track.lockedBy,
+  lockedAt: track.lockedAt,
+  kind: track.kind,
+  channelRole: track.channelRole,
+  groupId: track.groupId,
+  collapsed: track.collapsed,
+  color: track.color,
+  outputTargetId: track.outputTargetId,
+  sends: track.sends === undefined ? undefined : track.sends.map((send) => ({
       targetId: send.targetId,
       amount: send.amount,
-      ...(send.tap === undefined ? {} : { tap: send.tap }),
+      tap: send.tap,
     })),
-  }),
 })
 
 const cloneAutomationEnvelope = (envelope: ExportAutomationPatch['envelope']) => (
@@ -187,11 +169,11 @@ const cloneAutomationEnvelope = (envelope: ExportAutomationPatch['envelope']) =>
         ? {
           kind: envelope.target.kind,
           trackId: envelope.target.trackId,
-          ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+          effectInstanceId: envelope.target.effectInstanceId,
         }
         : {
           kind: envelope.target.kind,
-          ...(envelope.target.effectInstanceId === undefined ? {} : { effectInstanceId: envelope.target.effectInstanceId }),
+          effectInstanceId: envelope.target.effectInstanceId,
         },
       targetKey: envelope.targetKey,
       parameterId: envelope.parameterId,
@@ -232,8 +214,8 @@ export const snapshotExportSettings = (settings: TimelineExportSettings): Timeli
   },
   encoding: {
     bitrateByFormat: {
-      ...(settings.encoding.bitrateByFormat.mp3 === undefined ? {} : { mp3: settings.encoding.bitrateByFormat.mp3 }),
-      ...(settings.encoding.bitrateByFormat['ogg-opus'] === undefined ? {} : { 'ogg-opus': settings.encoding.bitrateByFormat['ogg-opus'] }),
+      mp3: settings.encoding.bitrateByFormat.mp3,
+      'ogg-opus': settings.encoding.bitrateByFormat['ogg-opus'],
     },
     wav: normalizeWavEncodingSettings(settings.encoding.wav),
   },

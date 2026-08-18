@@ -21,7 +21,7 @@ export type TimelineRangeDeletePatchV1 = {
   }>
 }
 
-const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+const same = <Value>(left: Value, right: Value) => JSON.stringify(left) === JSON.stringify(right)
 const endSec = (clip: SnapshotClip) => clip.startSec + clip.duration
 
 const trimStart = (clip: SnapshotClip, startSec: number, tempoBpm: number): SnapshotClip => {
@@ -48,10 +48,8 @@ const trimStart = (clip: SnapshotClip, startSec: number, tempoBpm: number): Snap
     leftPadSec: audioTiming?.leftPadSec ?? clip.leftPadSec,
     bufferOffsetSec: audioTiming?.bufferOffsetSec ?? clip.bufferOffsetSec,
     midiOffsetBeats: clip.midiOffsetBeats + shiftSec * tempoBpm / 60,
-    ...(clip.fades === undefined ? {} : {
-      fades: transformClipFadesForDuration(clip.fades, clip.duration, duration, shiftSec),
-    }),
-    ...(audioTiming?.audioWarp === undefined ? {} : { audioWarp: audioTiming.audioWarp }),
+    fades: clip.fades === undefined ? undefined : transformClipFadesForDuration(clip.fades, clip.duration, duration, shiftSec),
+    audioWarp: audioTiming?.audioWarp === undefined ? undefined : audioTiming.audioWarp,
   }
 }
 
@@ -60,9 +58,7 @@ const trimEnd = (clip: SnapshotClip, end: number): SnapshotClip => {
   return {
     ...clip,
     duration,
-    ...(clip.fades === undefined ? {} : {
-      fades: clipFadesForFragment(clip.fades, clip.duration, duration, false, true),
-    }),
+    fades: clip.fades === undefined ? undefined : clipFadesForFragment(clip.fades, clip.duration, duration, false, true),
   }
 }
 

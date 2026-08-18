@@ -6,7 +6,7 @@ export const withLocalProjectAssetLock = async <Value>(
   projectId: string,
   callback: () => Promise<Value>,
 ): Promise<Value> => {
-  if (typeof window !== 'undefined' && window === globalThis) {
+  if (globalThis.window === globalThis) {
     if (!navigator.locks) {
       throw new Error('Web Locks are required for browser project asset mutations.')
     }

@@ -1,5 +1,5 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   buildMixerChannelInsert,
@@ -209,7 +209,7 @@ async function deleteTrackFromPreflight(
     .withIndex("by_room_index", (q: any) => q.eq("projectId", track.projectId))
     .collect();
   for (const remainingTrack of remaining) {
-    const patch: { index?: number; groupId?: undefined } = {};
+    const patch: Partial<Pick<Doc<"tracks">, "index" | "groupId">> = {};
     if (remainingTrack.index > track.index) patch.index = remainingTrack.index - 1;
     if (String(remainingTrack.groupId) === String(track._id)) patch.groupId = undefined;
     if (Object.keys(patch).length === 0) continue;
@@ -239,7 +239,7 @@ async function deleteTrackSubtreeFromPreflights(
   for (let index = 0; index < orderedRemaining.length; index += 1) {
     const track = orderedRemaining[index];
     const nextGroupId = deletedTrackIds.has(String(track.groupId)) ? undefined : track.groupId;
-    const patch: { index?: number; groupId?: any } = {};
+    const patch: Partial<Pick<Doc<"tracks">, "index" | "groupId">> = {};
     if (track.index !== index) patch.index = index;
     if (track.groupId !== nextGroupId) patch.groupId = nextGroupId;
     if (Object.keys(patch).length === 0) continue;
@@ -504,18 +504,18 @@ export const setTrackRoutingRow = async (
   const nextOutputTargetId = input.outputTargetId === undefined
     ? channel.outputTargetId
     : input.outputTargetId ?? undefined;
-  const normalizedRouting = sanitizeTrackRouting(
+  const normalizedRouting = sanitizeTrackRouting<Id<"tracks">>(
     { _id: input.trackId, channelRole: channel.channelRole, groupId: track.groupId },
     { sends: nextSends, outputTargetId: nextOutputTargetId },
-    tracksInRoom as any,
+    tracksInRoom,
   );
   if (
     normalizedRouting.outputTargetId === channel.outputTargetId
     && mixerSendsEqual(normalizedRouting.sends, channel.sends)
   ) return { changed: false, status: "noop" as const };
   await ctx.db.patch(channel._id, {
-    sends: normalizedRouting.sends as any,
-    outputTargetId: normalizedRouting.outputTargetId as any,
+    sends: normalizedRouting.sends,
+    outputTargetId: normalizedRouting.outputTargetId,
   });
   return { changed: true, status: "applied" as const };
 }
@@ -783,10 +783,10 @@ export const serverSetRouting = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
     if (!normalizedTrackId) throw new Error("Track not found.");
-    const normalizedOutputTargetId = typeof outputTargetId === "string"
-      ? ctx.db.normalizeId("tracks", outputTargetId)
-      : outputTargetId;
-    if (typeof outputTargetId === "string" && !normalizedOutputTargetId) {
+    const normalizedOutputTargetId = outputTargetId === null || outputTargetId === undefined
+      ? outputTargetId
+      : ctx.db.normalizeId("tracks", outputTargetId);
+    if (outputTargetId !== null && outputTargetId !== undefined && !normalizedOutputTargetId) {
       throw new Error("Output target track not found.");
     }
     const normalizedSends = sends?.flatMap((send) => {
@@ -970,8 +970,10 @@ export const serverSetGroup = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
     if (!normalizedTrackId) throw new Error("Track not found.");
-    const normalizedGroupId = typeof groupId === "string" ? ctx.db.normalizeId("tracks", groupId) : groupId;
-    if (typeof groupId === "string" && !normalizedGroupId) throw new Error("Group track not found.");
+    const normalizedGroupId = groupId === null || groupId === undefined
+      ? groupId
+      : ctx.db.normalizeId("tracks", groupId);
+    if (groupId !== null && groupId !== undefined && !normalizedGroupId) throw new Error("Group track not found.");
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
     const result = await setTrackGroupRow(ctx, {
       projectId: track.projectId,
@@ -1097,10 +1099,14 @@ export const serverReorderAndGroup = mutation({
     for (const update of updates) {
       const trackId = ctx.db.normalizeId("tracks", update.trackId);
       if (!trackId) return { status: "rejected" };
-      const groupId = typeof update.groupId === "string" ? ctx.db.normalizeId("tracks", update.groupId) : update.groupId;
-      const outputTargetId = typeof update.outputTargetId === "string" ? ctx.db.normalizeId("tracks", update.outputTargetId) : update.outputTargetId;
-      if (typeof update.groupId === "string" && !groupId) return { status: "rejected" };
-      if (typeof update.outputTargetId === "string" && !outputTargetId) return { status: "rejected" };
+      const groupId = update.groupId === null || update.groupId === undefined
+        ? update.groupId
+        : ctx.db.normalizeId("tracks", update.groupId);
+      const outputTargetId = update.outputTargetId === null || update.outputTargetId === undefined
+        ? update.outputTargetId
+        : ctx.db.normalizeId("tracks", update.outputTargetId);
+      if (update.groupId !== null && update.groupId !== undefined && !groupId) return { status: "rejected" };
+      if (update.outputTargetId !== null && update.outputTargetId !== undefined && !outputTargetId) return { status: "rejected" };
       normalizedUpdates.push({ ...update, trackId, groupId, outputTargetId });
     }
 

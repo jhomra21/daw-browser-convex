@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { ApiBindings } from "../app-types";
 import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
 
@@ -28,11 +29,14 @@ test("browser uploads derive a stable server idempotency key and return the auth
       convex: {
         query: async () => null,
         mutation: async (_reference, args) => {
-          if (typeof args !== "object" || args === null || !("name" in args)) {
+          const beginUpload = z.object({
+            name: z.string(),
+            idempotencyKey: z.string(),
+          }).passthrough().safeParse(args);
+          if (!beginUpload.success) {
             return { asset: { id: "asset-authoritative" } };
           }
-          const input = args;
-          if (typeof input.idempotencyKey === "string") idempotencyKeys.push(input.idempotencyKey);
+          idempotencyKeys.push(beginUpload.data.idempotencyKey);
           begins += 1;
           return begins === 1
             ? { status: "pending", assetKey: "asset-authoritative", r2Key: "asset-namespaces/namespace/object" }

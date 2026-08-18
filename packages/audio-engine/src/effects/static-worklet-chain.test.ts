@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test'
-import { createDefaultSpectralParams } from '@daw-browser/shared'
+import { createDefaultSpectralParams, type JsonValue } from '@daw-browser/shared'
 import { applyStaticWorkletNodeParams, type StaticWorkletNodeChain } from './static-worklet-chain'
 
+type TestMessage = { type: 'reconfigure' | 'configure'; [key: string]: JsonValue | undefined }
+
 const testChain = () => {
-  const messages: unknown[] = []
+  const messages: TestMessage[] = []
   const node = Object.create(null)
   node.port = {
-    postMessage: (message: unknown) => messages.push(message),
+    postMessage: (message: TestMessage) => messages.push(message),
   }
   node.parameters = new Map()
   const chain = {
@@ -31,7 +33,7 @@ test('normalizes static worklet state once per update and skips no-op configurat
     state: { ...params.state, mix: 0.5 },
   })
 
-  expect(messages.map((message) => typeof message === 'object' && message !== null ? Reflect.get(message, 'type') : undefined)).toEqual([
+  expect(messages.map((message) => message.type)).toEqual([
     'reconfigure',
     'configure',
     'configure',
@@ -53,7 +55,7 @@ test('reconfigures spectral topology only when FFT size or overlap changes', () 
     state: { ...params.state, fftSize: 1024 },
   })
 
-  expect(messages.map((message) => typeof message === 'object' && message !== null ? Reflect.get(message, 'type') : undefined)).toEqual([
+  expect(messages.map((message) => message.type)).toEqual([
     'reconfigure',
     'configure',
     'configure',

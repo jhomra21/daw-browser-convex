@@ -21,6 +21,8 @@ import {
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
 } from "@daw-browser/control"
+import type { JsonValue } from "@daw-browser/shared"
+import { z } from "zod"
 import { api as convexApi } from "../../convex/_generated/api"
 import type { App, ApiContext } from "../app-types"
 import { createControlConvexClient } from "../convex-auth"
@@ -38,10 +40,7 @@ import {
   controlUnauthorizedHeaders,
 } from "../control-authorization"
 
-type ConvexGateway = {
-  query: (reference: unknown, args: unknown) => Promise<unknown>;
-  mutation: (reference: unknown, args: unknown) => Promise<unknown>;
-}
+type ConvexGateway = Pick<Awaited<ReturnType<typeof createControlConvexClient>>, "query" | "mutation">
 
 type ControlRouteDependencies = {
   resolveBearer?: (
@@ -90,15 +89,17 @@ const statusForError = (code: ReturnType<typeof controlError>["code"]) => {
   return 500
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-)
+const controlErrorEnvelopeSchema = z.object({
+  data: z.json().optional(),
+  errorData: z.json().optional(),
+}).passthrough()
 
-const readControlError = (error: unknown) => {
+const readControlError = <Failure>(error: Failure) => {
+  const envelope = controlErrorEnvelopeSchema.safeParse(error)
   const candidates = [
     error,
-    isRecord(error) ? error.data : undefined,
-    isRecord(error) ? error.errorData : undefined,
+    envelope.success ? envelope.data.data : undefined,
+    envelope.success ? envelope.data.errorData : undefined,
   ]
   for (const candidate of candidates) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
@@ -111,7 +112,7 @@ const respondError = (context: ApiContext, error: ReturnType<typeof controlError
   context.json(error, statusForError(error.code), noStore)
 )
 
-type JsonBody = { value: unknown } | { error: ControlErrorV1; status: 400 | 413 }
+type JsonBody = { value: JsonValue } | { error: ControlErrorV1; status: 400 | 413 }
 
 const readJsonBody = async (context: ApiContext): Promise<JsonBody> => {
   const contentLength = context.req.header("content-length")
@@ -123,7 +124,7 @@ const readJsonBody = async (context: ApiContext): Promise<JsonBody> => {
     return { error: controlError("limit-exceeded", "Control body exceeds the serialized body limit."), status: 413 }
   }
   try {
-    return { value: JSON.parse(new TextDecoder().decode(bytes)) }
+    return { value: z.json().parse(JSON.parse(new TextDecoder().decode(bytes))) }
   } catch {
     return { error: controlError("invalid-request", "Malformed control JSON body."), status: 400 }
   }
@@ -160,7 +161,7 @@ const readAssetUpload = async (context: ApiContext) => {
   }
   const contentSha256 = await assetDigest(file);
   if (contentSha256 !== declaredDigest) throw controlError("validation", "Asset digest does not match uploaded bytes.");
-  return { file, contentSha256, name, ...(folderId ? { folderId } : {}) };
+  return Object.assign({ file, contentSha256, name }, folderId ? { folderId } : undefined);
 }
 
 export function registerControlRoutes(app: App, dependencies: ControlRouteDependencies = {}) {
@@ -286,11 +287,13 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     try {
-      const query = parseControlHistoryQueryV1({
-        projectId: context.req.param("projectId"),
-        ...(context.req.query("cursor") === undefined ? {} : { cursor: context.req.query("cursor") }),
-        ...(context.req.query("limit") === undefined ? {} : { limit: Number(context.req.query("limit")) }),
-      })
+      const cursor = context.req.query("cursor")
+      const limit = context.req.query("limit")
+      const query = parseControlHistoryQueryV1(Object.assign(
+        { projectId: context.req.param("projectId") },
+        cursor === undefined ? undefined : { cursor },
+        limit === undefined ? undefined : { limit: Number(limit) },
+      ))
       const gateway = await createGateway(context, bearer.bearer)
       return context.json(controlHistoryResultSchemaV1.parse(await gateway.query(convexApi.control.historyV1, query)), 200, noStore)
     } catch (error) {
@@ -305,11 +308,13 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
     try {
-      const query = parseControlRecoveriesQueryV1({
-        projectId: context.req.param("projectId"),
-        ...(context.req.query("cursor") === undefined ? {} : { cursor: context.req.query("cursor") }),
-        ...(context.req.query("limit") === undefined ? {} : { limit: Number(context.req.query("limit")) }),
-      })
+      const cursor = context.req.query("cursor")
+      const limit = context.req.query("limit")
+      const query = parseControlRecoveriesQueryV1(Object.assign(
+        { projectId: context.req.param("projectId") },
+        cursor === undefined ? undefined : { cursor },
+        limit === undefined ? undefined : { limit: Number(limit) },
+      ))
       const gateway = await createGateway(context, bearer.bearer)
       return context.json(controlRecoveriesResultSchemaV1.parse(await gateway.query(convexApi.control.recoveriesV1, query)), 200, noStore)
     } catch (error) {
@@ -336,13 +341,14 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
       const upload = await readAssetUpload(context);
       const gateway = await createGateway(context, authorized);
-      const begun = await gateway.mutation(convexApi.assets.beginUpload, {
+      const begun = z.object({
+        r2Key: z.string(),
+        assetKey: z.string(),
+        status: z.string(),
+      }).passthrough().parse(await gateway.mutation(convexApi.assets.beginUpload, Object.assign({
         projectId, idempotencyKey, contentSha256: upload.contentSha256, name: upload.name, mimeType: upload.file.type,
-        sizeBytes: upload.file.size, ...(upload.folderId === undefined ? {} : { folderId: upload.folderId }),
-      });
-      if (!isRecord(begun) || typeof begun.r2Key !== "string" || typeof begun.assetKey !== "string") {
-        throw controlError("internal", "Upload receipt response is invalid.");
-      }
+        sizeBytes: upload.file.size,
+      }, upload.folderId === undefined ? undefined : { folderId: upload.folderId })));
       if (begun.status !== "completed") {
         try {
           await context.env.daw_audio_samples.put(begun.r2Key, upload.file.stream(), {
@@ -354,13 +360,12 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
           throw controlError("internal", "Asset object upload failed.");
         }
       }
-      let result: unknown;
       try {
-        result = await gateway.mutation(convexApi.assets.finalizeUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
+        const result = await gateway.mutation(convexApi.assets.finalizeUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
+        return context.json(assetUploadResultSchemaV1.parse(result), 201, noStore);
       } catch {
         throw controlError("internal", "Asset finalization failed.");
       }
-      return context.json(assetUploadResultSchemaV1.parse(result), 201, noStore);
     } catch (error) {
       return respondError(context, readControlError(error));
     }
@@ -372,9 +377,11 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
       const gateway = await createGateway(context, authorized);
-      const locator = await gateway.query(convexApi.assets.getContentLocator, { projectId, assetKey: context.req.param("assetId") });
-      if (!isRecord(locator) || typeof locator.r2Key !== "string") return respondError(context, controlError("not-found", "Asset not found."));
-      const object = await context.env.daw_audio_samples.get(locator.r2Key, { range: context.req.raw.headers });
+      const locator = z.object({ r2Key: z.string() }).safeParse(
+        await gateway.query(convexApi.assets.getContentLocator, { projectId, assetKey: context.req.param("assetId") }),
+      );
+      if (!locator.success) return respondError(context, controlError("not-found", "Asset not found."));
+      const object = await context.env.daw_audio_samples.get(locator.data.r2Key, { range: context.req.raw.headers });
       if (!object) return respondError(context, controlError("not-found", "Asset content not found."));
       return createR2ObjectResponse(object, "private, no-store");
     } catch (error) {
@@ -394,12 +401,11 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       const expectedRevision = context.req.header("if-match-revision");
       let request
       try {
-        request = parseControlCommitRequestV1({
+        request = parseControlCommitRequestV1(Object.assign({
           version: "v1", projectId, idempotencyKey,
-          ...(approvalToken === undefined ? {} : { approvalToken }),
-          ...(expectedRevision === undefined ? {} : { expectedRevision: Number(expectedRevision) }),
           actions: [{ kind: "asset.delete", asset: { source: "persisted", id: context.req.param("assetId") } }],
-        });
+        }, approvalToken === undefined ? undefined : { approvalToken },
+        expectedRevision === undefined ? undefined : { expectedRevision: Number(expectedRevision) }));
       } catch {
         return respondError(context, controlError("invalid-request", "Invalid asset delete request."));
       }
@@ -413,9 +419,10 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     try {
       const body = await readJsonBody(context);
       if ("error" in body) return context.json(body.error, body.status, noStore);
-      if (!isRecord(body.value) || typeof body.value.name !== "string") return respondError(context, controlError("invalid-request", "Folder name is required."));
+      const folder = z.object({ name: z.string() }).safeParse(body.value);
+      if (!folder.success) return respondError(context, controlError("invalid-request", "Folder name is required."));
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
-      const result = await (await createGateway(context, authorized)).mutation(convexApi.assets.createFolder, { projectId, name: body.value.name });
+      const result = await (await createGateway(context, authorized)).mutation(convexApi.assets.createFolder, { projectId, name: folder.data.name });
       return context.json(assetFolderResultSchemaV1.parse(result), 201, noStore);
     } catch (error) { return respondError(context, readControlError(error)); }
   });
@@ -426,9 +433,10 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     try {
       const body = await readJsonBody(context);
       if ("error" in body) return context.json(body.error, body.status, noStore);
-      if (!isRecord(body.value) || typeof body.value.name !== "string") return respondError(context, controlError("invalid-request", "Folder name is required."));
+      const folder = z.object({ name: z.string() }).safeParse(body.value);
+      if (!folder.success) return respondError(context, controlError("invalid-request", "Folder name is required."));
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
-      const result = await (await createGateway(context, authorized)).mutation(convexApi.assets.renameFolder, { projectId, folderId: context.req.param("folderId"), name: body.value.name });
+      const result = await (await createGateway(context, authorized)).mutation(convexApi.assets.renameFolder, { projectId, folderId: context.req.param("folderId"), name: folder.data.name });
       return context.json(assetFolderResultSchemaV1.parse(result), 200, noStore);
     } catch (error) { return respondError(context, readControlError(error)); }
   });
@@ -449,13 +457,18 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     try {
       const body = await readJsonBody(context);
       if ("error" in body) return context.json(body.error, body.status, noStore);
-      if (!isRecord(body.value) || (body.value.folderId !== undefined && typeof body.value.folderId !== "string")) {
+      const destination = z.object({ folderId: z.string().optional() }).safeParse(body.value);
+      if (!destination.success) {
         return respondError(context, controlError("invalid-request", "folderId must be a string or omitted."));
       }
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
-      const result = await (await createGateway(context, authorized)).mutation(convexApi.assets.moveAssetToFolder, {
-        projectId, assetKey: context.req.param("assetId"), ...(typeof body.value.folderId === "string" ? { folderId: body.value.folderId } : {}),
-      });
+      const result = await (await createGateway(context, authorized)).mutation(
+        convexApi.assets.moveAssetToFolder,
+        Object.assign(
+          { projectId, assetKey: context.req.param("assetId") },
+          destination.data.folderId === undefined ? undefined : { folderId: destination.data.folderId },
+        ),
+      );
       return context.json(result, 200, noStore);
     } catch (error) { return respondError(context, readControlError(error)); }
   });

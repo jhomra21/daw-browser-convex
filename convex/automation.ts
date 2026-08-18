@@ -6,6 +6,7 @@ import {
   getAutomationParameterDescriptor,
   normalizeTrackInstrumentParams,
   normalizeAutomationPoints,
+  parseJsonValue,
   parseInstrumentAutomationKey,
   parseGranularAutomationKey,
   parseSynthAutomationKey,
@@ -33,13 +34,13 @@ type DeleteAutomationEnvelopeRowResult = {
 
 export const readAutomationTrackInstrument = (rows: readonly InstrumentEffectRow[]) => {
   const instrumentRow = rows.find((entry) => entry.type === "instrument");
-  if (instrumentRow) return normalizeTrackInstrumentParams(instrumentRow.params);
+  if (instrumentRow) return normalizeTrackInstrumentParams(parseJsonValue(instrumentRow.params) ?? null);
   const legacySynthRow = rows.find((entry) => entry.type === "synth");
   return legacySynthRow
     ? normalizeTrackInstrumentParams({
         kind: "synth",
-        instanceId: legacySynthRow.instanceId,
-        params: legacySynthRow.params,
+        instanceId: legacySynthRow.instanceId ?? null,
+        params: parseJsonValue(legacySynthRow.params) ?? null,
       })
     : undefined;
 };

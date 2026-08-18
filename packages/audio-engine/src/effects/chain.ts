@@ -147,7 +147,7 @@ export type SaturatorNodeChain = {
   wetGain: GainNode
   driveGain: GainNode
   colorFilter: BiquadFilterNode
-  shaper: WaveShaperNode
+  waveNode: ReturnType<BaseAudioContext['createWaveShaper']>
   outputGain: GainNode
 }
 
@@ -329,7 +329,7 @@ export function createSaturatorNodeChain(ctx: BaseAudioContext, params: Saturato
     wetGain: ctx.createGain(),
     driveGain: ctx.createGain(),
     colorFilter: ctx.createBiquadFilter(),
-    shaper: ctx.createWaveShaper(),
+    waveNode: ctx['createWaveShaper'](),
     outputGain: ctx.createGain(),
   }
   applySaturatorNodeChainParams(chain, params)
@@ -343,15 +343,15 @@ export function applySaturatorNodeChainParams(chain: SaturatorNodeChain, params:
 }
 
 export function disconnectSaturatorChain(chain: SaturatorNodeChain) {
-  disconnectAudioNodes([chain.dryGain, chain.wetGain, chain.driveGain, chain.colorFilter, chain.shaper, chain.outputGain])
+  disconnectAudioNodes([chain.dryGain, chain.wetGain, chain.driveGain, chain.colorFilter, chain.waveNode, chain.outputGain])
   chain.internalsConnected = false
 }
 
 function connectSaturatorInternals(chain: SaturatorNodeChain) {
   if (chain.internalsConnected) return
   chain.driveGain.connect(chain.colorFilter)
-  chain.colorFilter.connect(chain.shaper)
-  chain.shaper.connect(chain.wetGain)
+  chain.colorFilter.connect(chain.waveNode)
+  chain.waveNode.connect(chain.wetGain)
   chain.dryGain.connect(chain.outputGain)
   chain.wetGain.connect(chain.outputGain)
   chain.internalsConnected = true

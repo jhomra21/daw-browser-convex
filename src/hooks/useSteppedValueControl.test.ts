@@ -4,33 +4,37 @@ import { knobValueFromDrag } from '~/components/ui/knob'
 import { useSteppedValueControl } from './useSteppedValueControl'
 
 type ListenerEntry = {
-  listener: (...args: never[]) => unknown
+  listener: (event: PointerLifecycleEvent) => void
   capture: boolean
 }
+
+type PointerLifecycleEvent = PointerEvent
+
+const capturesEvents = (options?: boolean | EventListenerOptions) => (
+  options === true || (options !== false && options?.capture === true)
+)
 
 class CapturedPointerWindow {
   private readonly listeners = new Map<string, ListenerEntry[]>()
 
-  addEventListener(type: string, listener: (...args: never[]) => unknown | null, options?: boolean | AddEventListenerOptions) {
-    if (!listener) return
+  addEventListener(type: string, listener: (event: PointerLifecycleEvent) => void, options?: boolean | AddEventListenerOptions) {
     const entries = this.listeners.get(type) ?? []
     entries.push({
       listener,
-      capture: typeof options === 'boolean' ? options : options?.capture === true,
+      capture: capturesEvents(options),
     })
     this.listeners.set(type, entries)
   }
 
-  removeEventListener(type: string, listener: (...args: never[]) => unknown | null, options?: boolean | EventListenerOptions) {
-    if (!listener) return
-    const capture = typeof options === 'boolean' ? options : options?.capture === true
+  removeEventListener(type: string, listener: (event: PointerLifecycleEvent) => void, options?: boolean | EventListenerOptions) {
+    const capture = capturesEvents(options)
     const entries = this.listeners.get(type) ?? []
     this.listeners.set(type, entries.filter((entry) => entry.listener !== listener || entry.capture !== capture))
   }
 
-  dispatch(type: string, event: object) {
+  dispatch(type: string, event: PointerLifecycleEvent) {
     for (const entry of this.listeners.get(type) ?? []) {
-      Reflect.apply(entry.listener, undefined, [event])
+      entry.listener(event)
     }
   }
 
@@ -39,22 +43,40 @@ class CapturedPointerWindow {
   }
 }
 
+class TestHTMLElement {
+  setPointerCapture() {}
+}
+
+class TestPointerEvent extends Event {
+  readonly pointerId: number
+  readonly clientX: number
+  readonly clientY: number
+  readonly shiftKey: boolean
+
+  constructor(_type: string, init: PointerEventInit) {
+    super('pointerdown')
+    this.pointerId = init.pointerId ?? 0
+    this.clientX = init.clientX ?? 0
+    this.clientY = init.clientY ?? 0
+    this.shiftKey = init.shiftKey ?? false
+    Object.defineProperty(this, 'currentTarget', { value: new TestHTMLElement() })
+  }
+}
+
 const pointerEvent = (clientY: number, shiftKey = false, pointerId = 1) => ({
-  pointerId,
-  clientX: 0,
   clientY,
-  currentTarget: { setPointerCapture: () => undefined },
   shiftKey,
-  preventDefault: () => undefined,
-  stopPropagation: () => undefined,
+  pointerId,
 })
 
 describe('useSteppedValueControl pointer lifecycle', () => {
   test('does not start a disabled control interaction', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
+    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
     Reflect.set(globalThis, 'document', { body: { classList: { add: () => undefined, remove: () => undefined } } })
 
     try {
@@ -68,7 +90,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
           onValueChange: () => undefined,
           valueFromDrag: ({ startValue }) => startValue,
         })
-        Reflect.apply(control.onPointerDown, undefined, [pointerEvent(240)])
+        control.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
 
         expect(capturedWindow.listenerCount('pointermove')).toBe(0)
         expect(capturedWindow.listenerCount('pointerup')).toBe(0)
@@ -77,15 +99,20 @@ describe('useSteppedValueControl pointer lifecycle', () => {
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)
       Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
     }
   })
 
   test('continues emitting pointer moves while the parent value updates', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
     Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
     Reflect.set(globalThis, 'document', {
       body: {
         classList: {
@@ -122,8 +149,8 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')
 
-        Reflect.apply(initialControl.onPointerDown, undefined, [pointerEvent(240)])
-        capturedWindow.dispatch('pointermove', pointerEvent(192))
+        initialControl.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(192)))
 
         expect(values).toEqual([16])
         expect(capturedWindow.listenerCount('pointermove')).toBe(1)
@@ -131,8 +158,8 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(capturedWindow.listenerCount('pointercancel')).toBe(1)
         expect(bodyClasses.has('select-none')).toBe(true)
 
-        capturedWindow.dispatch('pointermove', pointerEvent(144))
-        capturedWindow.dispatch('pointerup', pointerEvent(144))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(144)))
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(144)))
 
         expect(values).toEqual([16, 21])
         expect(capturedWindow.listenerCount('pointermove')).toBe(0)
@@ -140,7 +167,7 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         expect(capturedWindow.listenerCount('pointercancel')).toBe(0)
         expect(bodyClasses.has('select-none')).toBe(false)
 
-        capturedWindow.dispatch('pointermove', pointerEvent(96))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(96)))
         expect(values).toEqual([16, 21])
 
         disposeParent()
@@ -148,14 +175,20 @@ describe('useSteppedValueControl pointer lifecycle', () => {
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)
       Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
     }
   })
   test('cleans up listeners and body state when disposed during an active drag', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
     Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
     Reflect.set(globalThis, 'document', {
       body: {
         classList: {
@@ -192,8 +225,8 @@ describe('useSteppedValueControl pointer lifecycle', () => {
         const initialControl = control
         if (!initialControl) throw new Error('Expected the initial control owner.')
 
-        Reflect.apply(initialControl.onPointerDown, undefined, [pointerEvent(240)])
-        capturedWindow.dispatch('pointermove', pointerEvent(192))
+        initialControl.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
+        capturedWindow.dispatch('pointermove', new PointerEvent('pointermove', pointerEvent(192)))
         disposeParent()
 
         expect(values).toEqual([16])
@@ -205,15 +238,21 @@ describe('useSteppedValueControl pointer lifecycle', () => {
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)
       Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
     }
   })
 
   test('ignores unrelated pointer completion events during an active drag', () => {
     const previousWindow = globalThis.window
     const previousDocument = globalThis.document
+    const previousHTMLElement = globalThis.HTMLElement
+    const previousPointerEvent = globalThis.PointerEvent
     const capturedWindow = new CapturedPointerWindow()
     const bodyClasses = new Set<string>()
     Reflect.set(globalThis, 'window', capturedWindow)
+    Reflect.set(globalThis, 'HTMLElement', TestHTMLElement)
+    Reflect.set(globalThis, 'PointerEvent', TestPointerEvent)
     Reflect.set(globalThis, 'document', {
       body: {
         classList: {
@@ -235,14 +274,14 @@ describe('useSteppedValueControl pointer lifecycle', () => {
           valueFromDrag: ({ startValue }) => startValue,
         })
 
-        Reflect.apply(control.onPointerDown, undefined, [pointerEvent(240)])
-        capturedWindow.dispatch('pointerup', pointerEvent(240, false, 2))
-        capturedWindow.dispatch('pointercancel', pointerEvent(240, false, 3))
+        control.onPointerDown(new PointerEvent('pointerdown', pointerEvent(240)))
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(240, false, 2)))
+        capturedWindow.dispatch('pointercancel', new PointerEvent('pointercancel', pointerEvent(240, false, 3)))
 
         expect(capturedWindow.listenerCount('pointermove')).toBe(1)
         expect(bodyClasses.has('select-none')).toBe(true)
 
-        capturedWindow.dispatch('pointerup', pointerEvent(240))
+        capturedWindow.dispatch('pointerup', new PointerEvent('pointerup', pointerEvent(240)))
         expect(capturedWindow.listenerCount('pointermove')).toBe(0)
         expect(bodyClasses.has('select-none')).toBe(false)
         dispose()
@@ -250,6 +289,8 @@ describe('useSteppedValueControl pointer lifecycle', () => {
     } finally {
       Reflect.set(globalThis, 'window', previousWindow)
       Reflect.set(globalThis, 'document', previousDocument)
+      Reflect.set(globalThis, 'HTMLElement', previousHTMLElement)
+      Reflect.set(globalThis, 'PointerEvent', previousPointerEvent)
     }
   })
 })

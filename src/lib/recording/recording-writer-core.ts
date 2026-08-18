@@ -101,7 +101,7 @@ export const createRecordingWriterHandler = (
   }
 
   const scheduleSabDrain = () => {
-    operations = operations.then(drainSab).catch((error: unknown) => {
+    operations = operations.then(drainSab).catch((error) => {
       transitionToFailure(error instanceof Error ? error.message : 'write-failed')
     })
   }
@@ -115,7 +115,7 @@ export const createRecordingWriterHandler = (
     }
   }
 
-  const handle = (value: unknown) => {
+  const handle = <Message,>(value: Message) => {
     const message = readWriterInboundMessage(value)
     if (!message) {
       transitionToFailure('malformed-message')
@@ -148,10 +148,10 @@ export const createRecordingWriterHandler = (
         if (hasFailed()) return
         state = 'open'
         output({ type: 'ready', generation, sessionId })
-        if (sabConsumer && typeof Atomics.waitAsync === 'function') {
+        if (sabConsumer && 'waitAsync' in Atomics) {
           void waitForSabData()
         }
-      }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'start-failed'))
+      }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'start-failed'))
       return
     }
     if (message.generation !== generation || message.sessionId !== sessionId) return
@@ -207,7 +207,7 @@ export const createRecordingWriterHandler = (
         ) throw new Error('Recording SAB captured frame count mismatch.')
         state = 'closed'
         output({ type: 'finalized', generation, sessionId, capturedFrames: descriptor.capturedFrames })
-      }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
+      }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
       return
     }
     if (state === 'closed' || state === 'failed') return
@@ -218,7 +218,7 @@ export const createRecordingWriterHandler = (
       if (hasFailed()) return
       state = 'closed'
       output({ type: 'aborted', generation, sessionId })
-    }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'abort-failed'))
+    }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'abort-failed'))
   }
 
   return {

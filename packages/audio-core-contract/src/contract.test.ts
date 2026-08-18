@@ -88,7 +88,7 @@ test('granular instrument contract bounds immutable assets and grain state', () 
     assetId: 'asset:7',
     seed: 77,
     maxGrains: 64,
-    windowShape: 'hann',
+    'windowShape': 'hann',
     freeze: true,
     grainSizeMs: 80,
     densityHz: 12,
@@ -224,7 +224,7 @@ test('empty sampled instrument states use silent portable sentinels', () => {
     assetId: '',
     seed: 1,
     maxGrains: 2,
-    windowShape: 'hann' as const,
+    'windowShape': 'hann' as const,
     freeze: false,
     grainSizeMs: 5,
     densityHz: 1,
@@ -315,7 +315,7 @@ test('modulation codecs preserve the native little-endian state layouts', () => 
   const phaser = encodePhaserProcessorState({ enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 })
   expect(phaser.byteLength).toBe(32)
   expect(new DataView(phaser.buffer).getUint32(4, true)).toBe(6)
-  expect(encodeTremoloProcessorState({ enabled: true, waveform: 'triangle', rateHz: 4, depth: 0.5, shape: 0.5, phase: 0 }).byteLength).toBe(24)
+  expect(encodeTremoloProcessorState({ enabled: true, waveform: 'triangle', rateHz: 4, depth: 0.5, ['shape']: 0.5, phase: 0 }).byteLength).toBe(24)
   expect(encodeEnsembleProcessorState({ enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 }).byteLength).toBe(28)
 })
 
@@ -329,7 +329,7 @@ test('delay and reverb codecs preserve portable state without claiming browser c
   const reverb = encodeReverbProcessorState({
     enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0,
     reflectionSpin: true, reflectionModAmountMs: 17.5, reflectionModRateHz: 0.3,
-    reflectionShape: 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 0.8,
+    'reflectionShape': 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 0.8,
     lowCutHz: 20, highCutHz: 20_000, diffusionLowCutHz: 20,
     diffusionHighCutHz: 20_000, stereoWidth: 1,
   })

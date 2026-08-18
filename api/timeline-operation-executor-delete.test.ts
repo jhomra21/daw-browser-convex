@@ -19,7 +19,7 @@ test('delete retries reach the receipt-aware mutation before target validation',
     skippedClipIds: [],
     skipped: [],
   }
-  const result = await Reflect.apply(executeTimelineOperation, undefined, [{
+  const result = await executeTimelineOperation({
     projectId: 'project-1',
     convex: {
       query: async () => {
@@ -31,7 +31,7 @@ test('delete retries reach the receipt-aware mutation before target validation',
         return receipt
       },
     },
-  }, removeOperation])
+  }, removeOperation)
 
   expect(result).toEqual(receipt)
   expect(queries).toBe(0)
@@ -40,7 +40,7 @@ test('delete retries reach the receipt-aware mutation before target validation',
 
 test('a new delete propagates the strict mutation rejection without a post-validation query', async () => {
   const rejection = new Error('Clip deletion target was not found.')
-  const promise = Reflect.apply(executeTimelineOperation, undefined, [{
+  const promise = executeTimelineOperation({
     projectId: 'project-1',
     convex: {
       query: async () => {
@@ -48,13 +48,13 @@ test('a new delete propagates the strict mutation rejection without a post-valid
       },
       mutation: async () => { throw rejection },
     },
-  }, removeOperation])
+  }, removeOperation)
 
   await expect(promise).rejects.toBe(rejection)
 })
 
 test('classifies locked-track clip deletion as terminal forbidden', async () => {
-  const promise = Reflect.apply(executeTimelineOperation, undefined, [{
+  const promise = executeTimelineOperation({
     projectId: 'project-1',
     convex: {
       query: async () => ({ tracks: [], clips: [] }),
@@ -62,7 +62,7 @@ test('classifies locked-track clip deletion as terminal forbidden', async () => 
         throw new Error('Actor cannot delete clips on a locked track.')
       },
     },
-  }, removeOperation])
+  }, removeOperation)
 
   await expect(promise).rejects.toMatchObject({
     name: TimelineOperationTargetError.name,

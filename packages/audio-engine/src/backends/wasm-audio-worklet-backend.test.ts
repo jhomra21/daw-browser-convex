@@ -7,6 +7,11 @@ import {
   WasmAudioWorkletBackend,
 } from './wasm-audio-worklet-backend'
 import { resolvePortableWasmManifestUrl } from '../worklet-manifest'
+import {
+  portableWasmProtocolVersion,
+  type PortableWasmControlMessage,
+  type PortableWasmStatusMessage,
+} from '../portable-wasm-protocol'
 
 const wasmModule = new WebAssembly.Module(new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]))
 
@@ -28,9 +33,6 @@ const capability = (): Extract<PortableWasmCapability, { available: true }> => (
   },
   sharedQueue: 'available',
 })
-
-const isMessage = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
 
 test('resolves the generated portable Wasm manifest from the production static root', () => {
   expect(resolvePortableWasmManifestUrl()).toBe('/audio-core/daw-audio-core.manifest.json')
@@ -72,11 +74,11 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
   const original = Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode')
   let mode: 'fault' | 'silent' = 'fault'
   let created: {
-    messages: unknown[]
+    messages: PortableWasmControlMessage[]
     disconnects: number
     closes: number
     options: AudioWorkletNodeOptions
-    port: { onmessage: ((event: MessageEvent<unknown>) => void) | null }
+    port: { onmessage: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null }
   } | undefined
 
   const FakeAudioWorkletNode = function (
@@ -84,18 +86,25 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
     _name: string,
     options: AudioWorkletNodeOptions,
   ) {
-    const messages: unknown[] = []
+    const messages: PortableWasmControlMessage[] = []
     const state = { disconnects: 0, closes: 0 }
-    const port: {
-      onmessage: ((event: MessageEvent<unknown>) => void) | null
-      postMessage: (message: unknown) => void
+    type TestPort = {
+      onmessage: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null
+      postMessage: (message: PortableWasmControlMessage) => void
       close: () => void
-    } = {
+    }
+    const port: TestPort = {
       onmessage: null,
       postMessage: (message) => {
         messages.push(message)
-        if (mode === 'fault' && isMessage(message) && message.type === 'initialize') {
-          port.onmessage?.(new MessageEvent('message', { data: { type: 'fault' } }))
+        if (mode === 'fault' && message.type === 'initialize') {
+          port.onmessage?.(new MessageEvent('message', {
+            data: {
+              version: portableWasmProtocolVersion,
+              type: 'fault',
+              code: 'initialization-failed',
+            },
+          }))
         }
       },
       close: () => {
@@ -135,10 +144,10 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
     const portableCapability = capability()
     await expect(backend.createNode(context, portableCapability, 128))
       .rejects.toThrow('Portable audio-core AudioWorklet initialization failed.')
-    expect(created?.messages.map((message) => isMessage(message) ? message.type : undefined))
+    expect(created?.messages.map((message) => message.type))
       .toEqual(['initialize', 'dispose'])
     const initialization = created?.messages[0]
-    if (!isMessage(initialization)) throw new Error('Expected portable Wasm initialization message.')
+    if (!initialization || initialization.type !== 'initialize') throw new Error('Expected portable Wasm initialization message.')
     expect(initialization).not.toHaveProperty('wasmModule')
     expect(created?.options.processorOptions?.wasmModule).toBe(portableCapability.artifact.module)
     expect(created?.disconnects).toBe(1)
@@ -148,7 +157,7 @@ test('disposes failed and timed out AudioWorklet initialization attempts', async
     mode = 'silent'
     await expect(backend.createNode(context, portableCapability, 128))
       .rejects.toThrow('Portable audio-core AudioWorklet initialization timed out.')
-    expect(created?.messages.map((message) => isMessage(message) ? message.type : undefined))
+    expect(created?.messages.map((message) => message.type))
       .toEqual(['initialize', 'dispose'])
     expect(created?.disconnects).toBe(1)
     expect(created?.closes).toBe(1)

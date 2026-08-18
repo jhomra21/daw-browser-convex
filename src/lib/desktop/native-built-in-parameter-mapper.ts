@@ -103,43 +103,31 @@ export const nativeBuiltInTimingForCommit = (
 }
 
 type ChangedValue = number | boolean
-type Field = {
-  parameterId?: string
+type ParameterField = {
+  parameterId: string
+  from: ChangedValue
+  to: ChangedValue
+}
+type StructuralField = {
   from: ChangedValue | string
   to: ChangedValue | string
 }
 
-const same = (from: unknown, to: unknown) => (
-  Object.is(from, to)
-  || (
-    typeof from === 'object'
-    && from !== null
-    && typeof to === 'object'
-    && to !== null
-    && JSON.stringify(from) === JSON.stringify(to)
-  )
-)
-
-const numeric = (value: ChangedValue | string) =>
-  typeof value === 'boolean' ? (value ? 1 : 0) : typeof value === 'number' ? value : undefined
+const same = (from: ChangedValue | string, to: ChangedValue | string) => Object.is(from, to)
+const numeric = (value: ChangedValue) => Number(value)
 
 const mapFields = (
-  supported: readonly Field[],
-  unsupported: readonly Field[],
+  supported: readonly ParameterField[],
+  unsupported: readonly StructuralField[],
 ) => {
   if (unsupported.some((field) => !same(field.from, field.to))) return undefined
   return supported
-    .filter((field) => field.parameterId !== undefined && !same(field.from, field.to))
-    .flatMap((field) => {
-      const value = numeric(field.to)
-      return field.parameterId !== undefined && value !== undefined
-        ? [{ parameterId: field.parameterId, value }]
-        : []
-    })
+    .filter((field) => !same(field.from, field.to))
+    .map((field) => ({ parameterId: field.parameterId, value: numeric(field.to) }))
 }
 
 const instanceIdOf = (payload: EffectParamsCommitPayload) =>
-  typeof payload.instanceId === 'string' && payload.instanceId.length > 0 ? payload.instanceId : undefined
+  payload.instanceId && payload.instanceId.length > 0 ? payload.instanceId : undefined
 
 const mapUtility = (payload: EffectParamsCommitPayload<'utility'> | EffectParamsCommitPayload<'master-utility'>) => {
   const from = payload.from.state
@@ -244,7 +232,7 @@ const mapReverb = (payload: EffectParamsCommitPayload<'reverb'> | EffectParamsCo
       { parameterId: 'reverb.reflections', from: from.reflections, to: to.reflections },
       { parameterId: 'reverb.reflectionModAmountMs', from: from.reflectionModAmountMs, to: to.reflectionModAmountMs },
       { parameterId: 'reverb.reflectionModRateHz', from: from.reflectionModRateHz, to: to.reflectionModRateHz },
-      { parameterId: 'reverb.reflectionShape', from: from.reflectionShape, to: to.reflectionShape },
+      { parameterId: 'reverb.reflectionShape', from: from["reflectionShape"], to: to["reflectionShape"] },
       { parameterId: 'reverb.diffuse', from: from.diffuse, to: to.diffuse },
       { parameterId: 'reverb.size', from: from.size, to: to.size },
       { parameterId: 'reverb.diffusion', from: from.diffusion, to: to.diffusion },
@@ -325,7 +313,7 @@ const mapAmplitudeModulation = (
     [
       { parameterId: `${prefix}.rateHz`, from: from.rateHz, to: to.rateHz },
       { parameterId: `${prefix}.depth`, from: from.depth, to: to.depth },
-      { parameterId: `${prefix}.shape`, from: from.shape, to: to.shape },
+      { parameterId: `${prefix}.shape`, from: from["shape"], to: to["shape"] },
       { parameterId: `${prefix}.phase`, from: from.phase, to: to.phase },
     ],
     [{ from: from.enabled, to: to.enabled }, { from: from.waveform, to: to.waveform }],

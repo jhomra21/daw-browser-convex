@@ -83,7 +83,7 @@ export function getScheduledMidiEvents(input: {
   const secondsPerBeat = 60 / Math.max(1, input.bpm || 120)
   const clipStart = input.clip.startSec
   const clipEndRaw = input.clip.startSec + input.clip.duration
-  const clipEnd = typeof input.rangeEndSec === 'number' ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
+  const clipEnd = input.rangeEndSec === undefined ? clipEndRaw : Math.min(clipEndRaw, input.rangeEndSec)
   const clipDurationBeats = input.clip.duration / secondsPerBeat
   const midiOffsetBeats = Math.max(0, input.clip.midiOffsetBeats ?? 0)
 

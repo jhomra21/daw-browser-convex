@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs"
 import { readFile, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
+import type { DesktopJsonValue } from "@daw-browser/desktop-protocol"
 
 export const nativeReleaseArtifactManifestName = "daw-native-artifacts-v1.json"
 export const nativeVst3ScannerArtifactName = "daw-vst3-scanner"
@@ -32,11 +33,13 @@ const artifactNames: readonly NativeReleaseArtifactName[] = [
   nativeAudioHostArtifactName,
 ]
 
-const isArtifactName = (value: unknown): value is NativeReleaseArtifactName => (
+const isArtifactName = (value: DesktopJsonValue): value is NativeReleaseArtifactName => (
   typeof value === "string" && artifactNames.some((name) => name === value)
 )
 
-const isManifest = (value: unknown): value is NativeReleaseArtifactManifest => {
+const isManifest = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & NativeReleaseArtifactManifest => {
   if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1
     || !("artifacts" in value) || !Array.isArray(value.artifacts)
     || value.artifacts.length !== artifactNames.length) return false
@@ -63,7 +66,7 @@ export const sha256ReleaseArtifact = async (filePath: string) => {
 const readNativeReleaseArtifactManifest = async (
   manifestPath: string,
 ): Promise<NativeReleaseArtifactManifest> => {
-  let value: unknown
+  let value: DesktopJsonValue
   try {
     value = JSON.parse(await readFile(manifestPath, "utf8"))
   } catch {

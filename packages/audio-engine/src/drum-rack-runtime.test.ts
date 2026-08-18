@@ -20,11 +20,15 @@ type TestParam = {
   setTargetAtTime: (value: number, time: number, timeConstant: number) => void
 }
 
+type TestConnectionTarget = {
+  readonly testConnectionTarget?: never
+}
+
 type TestSource = {
   buffer?: AudioBuffer
   loop?: boolean
   playbackRate: TestParam
-  connect: (node: unknown) => void
+  connect: (node: TestConnectionTarget) => void
   disconnect: () => void
   start: (when: number, offset: number, duration: number) => void
   stop: (when?: number) => void
@@ -35,12 +39,12 @@ type TestSource = {
 
 type TestGain = {
   gain: TestParam
-  connect: (node: unknown) => void
+  connect: (node: TestConnectionTarget) => void
 }
 
 type TestPan = {
   pan: TestParam
-  connect: (node: unknown) => void
+  connect: (node: TestConnectionTarget) => void
 }
 
 const createMutableParam = (initial = 0): TestParam => {

@@ -109,7 +109,6 @@ export const preflightNativeVst3Worker = async (input: {
     const chunks: Buffer[] = []
     let outputBytes = 0
     let settled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
     let abort = () => {}
     const finish = (result: NativeVst3PreflightResult) => {
       if (settled) return
@@ -128,7 +127,7 @@ export const preflightNativeVst3Worker = async (input: {
     input.signal?.addEventListener("abort", abort, { once: true })
     if (settled) return
     // A hard deadline contains a hung native worker; every other terminal path clears it in finish().
-    timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       child.kill("SIGKILL")
       finish(unavailable("worker-timeout", "The native VST3 worker preflight timed out."))
     }, input.deadlineMs ?? defaultPreflightDeadlineMs)

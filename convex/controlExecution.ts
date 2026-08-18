@@ -136,16 +136,14 @@ export async function executeControlPlanV1(
     const timelineRangeDelete = action.kind === "timeline.range.delete" && entry.timelineRangeDelete
       ? resolveRangeDeletePatch(ctx, entry.timelineRangeDelete, clipRefs)
       : undefined
-    let result: { changed: boolean } = { changed: false }
+  let result = { changed: false }
     let deferredRangeRecovery: any
     if (isRecoverableAction(action)) {
       const payload = await captureRecoveryPayload(ctx, {
         projectId: input.projectId,
         action,
         actionIndex: entry.actionIndex,
-        ...(timelineRangeDelete
-          ? { timelineRangeDelete }
-          : {}),
+        timelineRangeDelete: timelineRangeDelete ? timelineRangeDelete : undefined,
         resolveRef: (table, ref) => resolveRef(ctx, table, table === "tracks" ? trackRefs : table === "clips" ? clipRefs : effectRefs, ref),
       })
       if (payload) {
@@ -258,7 +256,7 @@ export async function executeControlPlanV1(
               tracks.map((track: any) => ({
                 id: String(track._id),
                 index: track.index,
-                ...(track.groupId ? { groupId: String(track.groupId) } : {}),
+                groupId: track.groupId ? String(track.groupId) : undefined,
                 outputTargetId: undefined,
                 sends: [],
               })),
@@ -360,20 +358,14 @@ export async function executeControlPlanV1(
         const patch = {
           startSec: clip.startSec,
           duration: nextDuration,
-          ...(action.leftPadSec === undefined ? {} : { leftPadSec: action.leftPadSec }),
-          ...(action.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: action.bufferOffsetSec }),
-          ...(action.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: action.midiOffsetBeats }),
-          ...(
-            clip.midi || action.fadeInSec === undefined && action.fadeOutSec === undefined && clip.fades === undefined
-              ? {}
-              : {
-                  fades: normalizeClipFades({
+          leftPadSec: action.leftPadSec,
+          bufferOffsetSec: action.bufferOffsetSec,
+          midiOffsetBeats: action.midiOffsetBeats,
+          fades: clip.midi || action.fadeInSec === undefined && action.fadeOutSec === undefined && clip.fades === undefined ? undefined : normalizeClipFades({
                     ...clip.fades,
-                    ...(action.fadeInSec === undefined ? {} : { fadeInSec: action.fadeInSec }),
-                    ...(action.fadeOutSec === undefined ? {} : { fadeOutSec: action.fadeOutSec }),
+                    fadeInSec: action.fadeInSec,
+                    fadeOutSec: action.fadeOutSec,
                   }, nextDuration),
-                }
-          ),
         }
         const timing = await setClipTimingRow(ctx, {
           projectId: input.projectId,
@@ -435,7 +427,7 @@ export async function executeControlPlanV1(
           await ctx.db.insert("ownerships", {
             projectId: ownership.projectId,
             ownerUserId: ownership.ownerUserId,
-            ...(ownership.role === undefined ? {} : { role: ownership.role }),
+            role: ownership.role,
             clipId: created,
           })
           clipRefs.set(creation.placeholderId, created)

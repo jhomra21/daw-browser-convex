@@ -14,6 +14,7 @@ import {
 import { isLocalId } from '@daw-browser/shared'
 import type { convexApi, convexClient } from '~/lib/convex'
 import { createLocalControlService, LocalControlServiceError } from '~/lib/local-control/local-control-service'
+import { serializeJsonValue } from '~/lib/json'
 
 class ProjectControlError extends Error {
   constructor(readonly data: ReturnType<typeof controlErrorSchemaV1.parse>) {
@@ -22,12 +23,12 @@ class ProjectControlError extends Error {
   }
 }
 
-export const isProjectControlRevisionConflict = (error: unknown) => (
-  error instanceof ProjectControlError && error.data.code === 'revision-conflict'
+export const isProjectControlRevisionConflict = (cause: unknown) => (
+  cause instanceof ProjectControlError && cause.data.code === 'revision-conflict'
 )
 
-export const isProjectControlError = (error: unknown): error is ProjectControlError => (
-  error instanceof ProjectControlError
+export const isProjectControlError = (cause: unknown): cause is ProjectControlError => (
+  cause instanceof ProjectControlError
 )
 
 const localResult = async <Value>(operation: () => Promise<Value>) => {
@@ -40,12 +41,12 @@ const localResult = async <Value>(operation: () => Promise<Value>) => {
 }
 
 const parseResult = <Value>(
-  value: unknown,
-  schema: { safeParse: (input: unknown) => { success: true; data: Value } | { success: false } },
+  cause: unknown,
+  schema: { safeParse: (cause: unknown) => { success: true; data: Value } | { success: false } },
 ): Value => {
-  const result = schema.safeParse(value)
+  const result = schema.safeParse(cause)
   if (result.success) return result.data
-  throw new ProjectControlError(controlErrorSchemaV1.parse(value))
+  throw new ProjectControlError(controlErrorSchemaV1.parse(cause))
 }
 
 export type ProjectControlClient = {
@@ -67,9 +68,9 @@ export const createProjectControlClient = (input: {
     })
     return {
       snapshotV2: async () => projectSnapshotSchemaV2.parse(await localResult(() => local.snapshotV2({ projectId: input.projectId }))),
-      previewV1: async (request) => controlPreviewResultSchemaV1.parse(await localResult(() => local.preview(parseControlPreviewRequestV1(request)))),
-      requestApprovalV1: async (request) => controlApprovalResultSchemaV1.parse(await localResult(() => local.requestApproval(parseControlApprovalRequestV1(request)))),
-      commitV1: async (request) => controlCommitResultSchemaV1.parse(await localResult(() => local.commit(parseControlCommitRequestV1(request)))),
+      previewV1: async (request) => controlPreviewResultSchemaV1.parse(await localResult(() => local.preview(serializeJsonValue(parseControlPreviewRequestV1(request))))),
+      requestApprovalV1: async (request) => controlApprovalResultSchemaV1.parse(await localResult(() => local.requestApproval(serializeJsonValue(parseControlApprovalRequestV1(request))))),
+      commitV1: async (request) => controlCommitResultSchemaV1.parse(await localResult(() => local.commit(serializeJsonValue(parseControlCommitRequestV1(request))))),
     }
   }
   return {
@@ -78,15 +79,15 @@ export const createProjectControlClient = (input: {
       { projectId: input.projectId },
     )),
     previewV1: async (request) => parseResult(
-      await input.convexClient.query(input.convexApi.control.previewV1, { request: parseControlPreviewRequestV1(request) }),
+      await input.convexClient.query(input.convexApi.control.previewV1, { request: serializeJsonValue(parseControlPreviewRequestV1(request)) }),
       controlPreviewResultSchemaV1,
     ),
     requestApprovalV1: async (request) => parseResult(
-      await input.convexClient.mutation(input.convexApi.control.requestApprovalV1, { request: parseControlApprovalRequestV1(request) }),
+      await input.convexClient.mutation(input.convexApi.control.requestApprovalV1, { request: serializeJsonValue(parseControlApprovalRequestV1(request)) }),
       controlApprovalResultSchemaV1,
     ),
     commitV1: async (request) => parseResult(
-      await input.convexClient.mutation(input.convexApi.control.commitV1, { request: parseControlCommitRequestV1(request) }),
+      await input.convexClient.mutation(input.convexApi.control.commitV1, { request: serializeJsonValue(parseControlCommitRequestV1(request)) }),
       controlCommitResultSchemaV1,
     ),
   }

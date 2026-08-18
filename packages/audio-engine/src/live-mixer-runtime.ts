@@ -99,6 +99,10 @@ type TrackInstanceResources = {
   staticWorklets: Map<string, StaticWorkletNodeChain>
 }
 
+type StaticWorkletChainHolder = {
+  chain: StaticWorkletNodeChain | undefined
+}
+
 type TrackCandidate = {
   instances: AudioEffectRuntimeInstance[]
   transaction: LiveWorkletTransaction
@@ -599,7 +603,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       removeTrackCandidateResources(candidate.resources, instance.id)
       if (isStaticWorkletInstance(instance)) {
         const faultGeneration = options.getFaultGeneration()
-        const createdHolder: { chain: StaticWorkletNodeChain | undefined } = { chain: undefined }
+        const createdHolder: StaticWorkletChainHolder = { chain: undefined }
         const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
           const chain = createdHolder.chain
           if (!chain) return

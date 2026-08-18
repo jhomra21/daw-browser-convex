@@ -283,7 +283,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
     const trackId = track._id
     trackIds.add(trackId)
     trackRowsById.set(trackId, track)
-    trackLocksById.set(trackId, typeof track.lockedBy === 'string' ? track.lockedBy : null)
+    trackLocksById.set(trackId, track.lockedBy ?? null)
   }
 
   for (const clip of data.clips) {
@@ -385,14 +385,14 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       }),
       volume: serverVolume ?? localTrackRow?.volume ?? 0.8,
       clips: [],
-      muted: typeof trackRow.muted === 'boolean' ? trackRow.muted : false,
-      soloed: typeof trackRow.soloed === 'boolean' ? trackRow.soloed : false,
-      lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
+      muted: trackRow.muted ?? false,
+      soloed: trackRow.soloed ?? false,
+      lockedBy: trackRow.lockedBy ?? null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
       channelRole: normalizeTrackChannelRole(trackRow.channelRole),
       groupId: pendingTrackValue ? pendingTrackValue.groupId : localTrackRow?.groupId ?? trackRow.groupId,
-      collapsed: pendingTrackValue ? pendingTrackValue.collapsed : typeof trackRow.collapsed === 'boolean' ? trackRow.collapsed : localTrackRow?.collapsed,
-      color: pendingTrackValue ? pendingTrackValue.color : typeof trackRow.color === 'string' ? trackRow.color : localTrackRow?.color,
+      collapsed: pendingTrackValue ? pendingTrackValue.collapsed : trackRow.collapsed ?? localTrackRow?.collapsed,
+      color: pendingTrackValue ? pendingTrackValue.color : trackRow.color ?? localTrackRow?.color,
       sends: pendingTrackValue?.sends ?? localTrackRow?.sends ?? trackRow.sends ?? [],
       outputTargetId: pendingTrackValue ? pendingTrackValue.outputTargetId : localTrackRow?.outputTargetId ?? trackRow.outputTargetId,
     })

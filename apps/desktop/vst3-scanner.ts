@@ -124,7 +124,7 @@ const classesForCatalog = (classes: readonly Vst3ScannerClassResult[]) => classe
   version: entry.version,
   role: entry.role,
   source: entry.source,
-  ...(entry.sdkVersion === undefined ? {} : { sdkVersion: entry.sdkVersion }),
+  sdkVersion: entry.sdkVersion,
 }))
 
 export const createVst3ScannerSupervisor = (options: {

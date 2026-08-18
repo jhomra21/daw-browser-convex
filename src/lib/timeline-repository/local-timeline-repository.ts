@@ -1,4 +1,9 @@
-import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
+import {
+  createLocalProjectEntityRow,
+  openLocalProjectDb,
+  type LocalProjectEntityRow,
+  type LocalProjectStoredValue,
+} from '~/lib/local-project-db'
 import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
@@ -26,6 +31,7 @@ import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 import { externalPluginEntityKind } from '@daw-browser/external-plugins'
+import { z } from 'zod'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -40,59 +46,81 @@ let lifecycleFlushAttached = false
 
 const now = () => Date.now()
 
-const isString = (value: unknown): value is string => typeof value === 'string'
-const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
-const isObject = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValue }
+
+const isLocalProjectStoredObject = (
+  value: LocalProjectStoredValue,
+): value is LocalProjectStoredObject => (
+  typeof value === 'object'
+  && value !== null
+  && !Array.isArray(value)
+  && !(value instanceof Date)
+  && !(value instanceof RegExp)
+  && !(value instanceof Blob)
+  && !(value instanceof ArrayBuffer)
+  && !ArrayBuffer.isView(value)
+  && !(value instanceof Map)
+  && !(value instanceof Set)
 )
 
-const isTrackRow = (value: unknown): value is TimelineTrackRow => {
-  if (!isObject(value)) return false
-  return isString(value.id)
-    && isString(value.historyRef)
-    && isString(value.name)
-    && isNumber(value.index)
-    && isNumber(value.volume)
-    && isBoolean(value.muted)
-    && isBoolean(value.soloed)
+const isStoredString = (value: LocalProjectStoredValue): value is string => typeof value === 'string'
+const isStoredNumber = (value: LocalProjectStoredValue): value is number => typeof value === 'number'
+const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => typeof value === 'boolean'
+
+const isTrackRow = (value: LocalProjectStoredValue): value is TimelineTrackRow => {
+  if (!isLocalProjectStoredObject(value)) return false
+  return isStoredString(value.id)
+    && isStoredString(value.historyRef)
+    && isStoredString(value.name)
+    && isStoredNumber(value.index)
+    && Number.isFinite(value.index)
+    && isStoredNumber(value.volume)
+    && Number.isFinite(value.volume)
+    && isStoredBoolean(value.muted)
+    && isStoredBoolean(value.soloed)
     && (value.kind === 'audio' || value.kind === 'instrument')
     && (value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
     && Array.isArray(value.sends)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt)
+    && isStoredNumber(value.createdAt)
+    && Number.isFinite(value.createdAt)
+    && isStoredNumber(value.updatedAt)
+    && Number.isFinite(value.updatedAt)
 }
 
-const isClipRow = (value: unknown): value is TimelineClipRow => {
-  if (!isObject(value)) return false
-  return isString(value.id)
-    && isString(value.trackId)
-    && isString(value.historyRef)
-    && isString(value.name)
-    && isNumber(value.startSec)
-    && isNumber(value.duration)
-    && isString(value.color)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt)
+const isClipRow = (value: LocalProjectStoredValue): value is TimelineClipRow => {
+  if (!isLocalProjectStoredObject(value)) return false
+  return isStoredString(value.id)
+    && isStoredString(value.trackId)
+    && isStoredString(value.historyRef)
+    && isStoredString(value.name)
+    && isStoredNumber(value.startSec)
+    && Number.isFinite(value.startSec)
+    && isStoredNumber(value.duration)
+    && Number.isFinite(value.duration)
+    && isStoredString(value.color)
+    && isStoredNumber(value.createdAt)
+    && Number.isFinite(value.createdAt)
+    && isStoredNumber(value.updatedAt)
+    && Number.isFinite(value.updatedAt)
 }
 
-const isAutomationEnvelopeForTrack = (value: unknown, trackId: TimelineTrackId) => (
-  isObject(value)
-  && isObject(value.target)
-  && value.target.kind === 'track'
-  && value.target.trackId === trackId
-)
+const isAutomationEnvelopeForTrack = (value: LocalProjectStoredValue, trackId: TimelineTrackId) => {
+  return isLocalProjectStoredObject(value)
+    && isLocalProjectStoredObject(value.target)
+    && value.target.kind === 'track'
+    && value.target.trackId === trackId
+}
 
-const isEffectForTrack = (value: unknown, trackId: TimelineTrackId) => (
-  isObject(value) && value.targetId === trackId
-)
+const isEffectForTrack = (value: LocalProjectStoredValue, trackId: TimelineTrackId) => {
+  return isLocalProjectStoredObject(value) && value.targetId === trackId
+}
 
-const isSidechainRoute = (value: unknown): value is ExternalSidechainRoute => (
-  isObject(value)
-  && isString(value.sourceTrackId)
-  && isString(value.targetTrackId)
-  && isString(value.effectInstanceId)
-)
+const isSidechainRoute = (value: LocalProjectStoredValue): value is ExternalSidechainRoute => {
+  return isLocalProjectStoredObject(value)
+    && isStoredString(value.sourceTrackId)
+    && isStoredString(value.targetTrackId)
+    && isStoredString(value.effectInstanceId)
+}
 
 const requireUngroupable = (
   group: TimelineTrackRow,
@@ -121,7 +149,7 @@ const requireUngroupable = (
 const toEntityRow = createLocalProjectEntityRow
 
 const trackValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
-const normalizeClipRow = (value: unknown): TimelineClipRow | null => {
+const normalizeClipRow = (value: LocalProjectStoredValue): TimelineClipRow | null => {
   if (!isClipRow(value)) return null
   try {
     return { ...value, midi: value.midi === undefined ? undefined : normalizeLegacyMidiClip(value.midi) }
@@ -346,7 +374,8 @@ const readEntityRowsByKind = async (projectId: string, kind: string): Promise<Lo
 }
 
 const attachLifecycleFlush = () => {
-  if (lifecycleFlushAttached || typeof window === 'undefined') return
+  const browserWindow = globalThis.window
+  if (lifecycleFlushAttached || !browserWindow) return
   lifecycleFlushAttached = true
   const flush = () => {
     void Promise.all([
@@ -354,11 +383,11 @@ const attachLifecycleFlush = () => {
       flushRegisteredLocalProjectWrites(),
     ])
   }
-  window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flush()
+  browserWindow.addEventListener('visibilitychange', () => {
+    if (browserWindow.document.visibilityState === 'hidden') flush()
   })
-  window.addEventListener('pagehide', flush)
-  window.addEventListener('beforeunload', flush)
+  browserWindow.addEventListener('pagehide', flush)
+  browserWindow.addEventListener('beforeunload', flush)
 }
 
 export const registerPendingLocalTimelineFlusher = (projectId: string, flush: () => Promise<void>): (() => void) => {
@@ -867,7 +896,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
             && effect.instanceId === route.effectInstanceId
           ))
         : effectRows.filter((row) => (
-            isObject(row.value)
+            isLocalProjectStoredObject(row.value)
             && row.value.targetId === route.targetTrackId
             && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
             && row.value.instanceId === route.effectInstanceId
@@ -879,6 +908,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     const timestamp = now()
     const persistedGroup = { ...restoredGroup, createdAt: timestamp, updatedAt: timestamp }
+    const persistedEffects = input.effects.map((effect) => {
+      const params = z.json().safeParse(effect.params)
+      if (!params.success) {
+        throw new Error('Failed to restore local group because an effect has invalid parameters.')
+      }
+      return { ...effect, params: params.data }
+    })
     const existingTrackById = new Map(tracks.map((track) => [track.id, track]))
     const changedTracks = restoredUngroupTracks(input, tracks, restoredGroup)
       .flatMap((track) => {
@@ -894,7 +930,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await Promise.all([
       tx.store.put(toEntityRow(TRACK_KIND, persistedGroup.id, persistedGroup, timestamp)),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
-      ...input.effects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
+      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_KIND, envelope.targetKey, envelope, timestamp))),
       ...sidechainRoutes.map((route) => tx.store.put(toEntityRow(
         SIDECHAIN_KIND,
@@ -960,7 +996,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const tracks = trackValues(trackRows)
     requireTrackIds([route.sourceTrackId, route.targetTrackId], tracks)
     const matchingEffects = effectRows.filter((row) => (
-      isObject(row.value)
+      isLocalProjectStoredObject(row.value)
       && row.value.targetId === route.targetTrackId
       && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
       && row.value.instanceId === route.effectInstanceId
@@ -978,7 +1014,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const row = await db.get('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
-    if (!isSidechainRoute(row?.value) || row.value.targetTrackId !== targetTrackId) return
+    if (!row || !isSidechainRoute(row.value) || row.value.targetTrackId !== targetTrackId) return
     await db.delete('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
     markChanged()
   }

@@ -36,6 +36,7 @@ import type {
   NativeVst3InsertionPreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
+import { z } from "zod"
 import type { DesktopBridge, DesktopVstEditorState } from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 
@@ -46,21 +47,57 @@ const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
 let closeHandler: (() => Promise<{ flushed: boolean }>) | undefined
 let activeGeneration = 0
+const ipcRendererListener = (
+  listener: Parameters<typeof ipcRenderer.on>[1],
+): Parameters<typeof ipcRenderer.on>[1] => listener
+
+const incomingMessageSchema = z.object({
+  generation: z.number().int().safe(),
+  frame: z.union([desktopCancelSchemaV1, desktopTrustedRendererRequestSchemaV1]),
+}).passthrough()
+const offlinePcmChunkSchema = z.object({
+  jobId: z.string(),
+  chunk: z.object({
+    startFrame: z.number().int().safe().min(0),
+    frameCount: z.number().int().safe().positive(),
+    channelCount: z.union([z.literal(1), z.literal(2)]),
+    planes: z.array(z.instanceof(Float32Array)),
+  }).passthrough(),
+}).passthrough()
+const vstEditorStateSchema = z.object({
+  projectId: z.string(),
+  instanceId: z.string(),
+  open: z.boolean(),
+}).passthrough()
+const audioLifecycleSchema = z.object({
+  state: z.enum(["suspended", "recovering", "ready", "failed"]),
+  powerGeneration: z.number(),
+}).passthrough()
+const hostLossSchema = z.string().max(256)
 
 type NativeAudioHostDiagnosticsReply = Awaited<ReturnType<NonNullable<DesktopBridge["audioHost"]>["diagnostics"]>>
 type PluginCatalogReply = Awaited<ReturnType<NonNullable<DesktopBridge["pluginCatalog"]>["read"]>>
 
-const invokePluginCatalog = (channel: string, value?: unknown): Promise<PluginCatalogReply> =>
+const invokePluginCatalog = (channel: string, value?: { directory: string }): Promise<PluginCatalogReply> =>
   ipcRenderer.invoke(channel, value)
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
+type DeclaredAudioHostBridge = NonNullable<DesktopBridge["audioHost"]>
+type PreloadDesktopBridge = Omit<DesktopBridge, "audioHost"> & {
+  audioHost?: {
+    session: Omit<DeclaredAudioHostBridge["session"], "setRequestHandler" | "onPrepareToClose"> & {
+      configure(input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeSessionReply>
+      beginTransaction(): Promise<NativeTransactionReply>
+    }
+  } & Omit<DeclaredAudioHostBridge, "session">
+}
 type NativeVstEditorCommand = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["editor"]>[0]
 type NativeVstEditorReply = Awaited<ReturnType<NonNullable<DesktopBridge["audioHost"]>["session"]["editor"]>>
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
 type NativeVstAttachmentCoordinationInput = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["coordinateVstAttachments"]>[0]
-const invokeNativeSession = (channel: string, value?: unknown, transactionToken?: string): Promise<NativeSessionReply> =>
+const invokeNativeSession = <Value>(channel: string, value?: Value, transactionToken?: string): Promise<NativeSessionReply> =>
   ipcRenderer.invoke(channel, { value, transactionToken })
 const invokeNativeTransaction = (): Promise<NativeTransactionReply> =>
   ipcRenderer.invoke("daw:audio-host:session:begin-transaction", { value: undefined, transactionToken: undefined })
@@ -72,25 +109,6 @@ const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInpu
   ipcRenderer.invoke("daw:audio-host:resolve-input-device", preferredDeviceId)
 const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
-const offlinePcmChunk = (value: unknown): { jobId: string; chunk: NativeOfflinePcmChunk } | undefined => {
-  if (typeof value !== "object" || value === null) return undefined
-  const jobId = Reflect.get(value, "jobId")
-  const chunk = Reflect.get(value, "chunk")
-  if (typeof jobId !== "string" || typeof chunk !== "object" || chunk === null) return undefined
-  const startFrame = Reflect.get(chunk, "startFrame")
-  const frameCount = Reflect.get(chunk, "frameCount")
-  const channelCount = Reflect.get(chunk, "channelCount")
-  const planes = Reflect.get(chunk, "planes")
-  if (
-    !Number.isSafeInteger(startFrame) || startFrame < 0
-    || !Number.isSafeInteger(frameCount) || frameCount <= 0
-    || (channelCount !== 1 && channelCount !== 2)
-    || !Array.isArray(planes)
-    || planes.length !== channelCount
-    || !planes.every((plane) => plane instanceof Float32Array && plane.length === frameCount)
-  ) return undefined
-  return { jobId, chunk: { startFrame, frameCount, channelCount, planes } }
-}
 
 const reply = (generation: number, response: PreloadHostResponse) => {
   const parsed = desktopReplySchemaV1.safeParse({
@@ -113,21 +131,21 @@ const dispatchLifecycle = (
     .catch(() => reply(generation, { id: request.id, error: hostError("internal", "The timeline could not prepare to close.") }))
 }
 
-ipcRenderer.on(incomingChannel, (_event, message: unknown) => {
-  if (typeof message !== "object" || message === null || !("generation" in message) || !("frame" in message)) return
-  const generation = message.generation
-  if (typeof generation !== "number" || !Number.isSafeInteger(generation)) return
+ipcRenderer.on(incomingChannel, (_event, message) => {
+  const incoming = incomingMessageSchema.safeParse(message)
+  if (!incoming.success) return
+  const { generation, frame } = incoming.data
   if (generation < activeGeneration) return
   if (generation > activeGeneration) {
     requestQueue.reset(generation)
     activeGeneration = generation
   }
-  const cancel = desktopCancelSchemaV1.safeParse(message.frame)
+  const cancel = desktopCancelSchemaV1.safeParse(frame)
   if (cancel.success) {
     requestQueue.cancel(cancel.data.id)
     return
   }
-  const parsed = desktopTrustedRendererRequestSchemaV1.safeParse(message.frame)
+  const parsed = desktopTrustedRendererRequestSchemaV1.safeParse(frame)
   if (!parsed.success) return
   if (parsed.data.operation === "lifecycle.prepareToClose") {
     dispatchLifecycle(generation, parsed.data)
@@ -179,10 +197,10 @@ const desktopBridge = {
   },
   applicationMenu: {
     onCommand(listener: (command: DesktopApplicationMenuCommand) => void) {
-      const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      const notify = ipcRendererListener((_event, value) => {
         const parsed = desktopApplicationMenuCommandSchema.safeParse(value)
         if (parsed.success) listener(parsed.data)
-      }
+      })
       ipcRenderer.on(applicationMenuCommandChannel, notify)
       return () => ipcRenderer.removeListener(applicationMenuCommandChannel, notify)
     },
@@ -191,8 +209,7 @@ const desktopBridge = {
       if (parsed.success) ipcRenderer.send(applicationMenuStateChannel, parsed.data)
     },
   },
-  ...(process.platform === "darwin" && process.arch === "arm64" ? {
-    audioHost: {
+  audioHost: process.platform === "darwin" && process.arch === "arm64" ? {
       diagnostics: (): Promise<NativeAudioHostDiagnosticsReply> => ipcRenderer.invoke("daw:audio-host:diagnostics"),
       resolveOutputDevice: invokeNativeOutputDevice,
       resolveInputDevice: invokeNativeInputDevice,
@@ -225,9 +242,10 @@ const desktopBridge = {
         stop: () => invokeNativeSession("daw:audio-host:session:stop"),
         teardown: () => invokeNativeSession("daw:audio-host:session:teardown"),
         onLoss: (listener: (error?: string) => void) => {
-          const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
-            listener(typeof value === "string" && value.length <= 256 ? value : undefined)
-          }
+          const notify = ipcRendererListener((_event, value) => {
+            const parsed = hostLossSchema.safeParse(value)
+            listener(parsed.success ? parsed.data : undefined)
+          })
           ipcRenderer.on("daw:audio-host:loss", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:loss", notify)
         },
@@ -258,10 +276,10 @@ const desktopBridge = {
           return () => ipcRenderer.removeListener("daw:audio-host:schedule-progress", notify)
         },
         onVstParameterEdit: (listener: (payload: DesktopVstParameterEditPayload) => void) => {
-          const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
+          const notify = ipcRendererListener((_event, value) => {
             const payload = desktopVstParameterEditPayloadSchema.safeParse(value)
             if (payload.success) listener(payload.data)
-          }
+          })
           ipcRenderer.on("daw:audio-host:vst-parameter-edit", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:vst-parameter-edit", notify)
         },
@@ -275,10 +293,14 @@ const desktopBridge = {
           if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
             return { ok: false as const, error: "The native offline render plan is invalid." }
           }
-          const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
-            const parsed = offlinePcmChunk(value)
-            if (parsed?.jobId === jobId) listener(parsed.chunk)
-          }
+          const notify = ipcRendererListener((_event, value) => {
+            const parsed = offlinePcmChunkSchema.safeParse(value)
+            if (!parsed.success
+              || parsed.data.jobId !== jobId
+              || parsed.data.chunk.planes.length !== parsed.data.chunk.channelCount
+              || !parsed.data.chunk.planes.every((plane) => plane.length === parsed.data.chunk.frameCount)) return
+            listener(parsed.data.chunk)
+          })
           ipcRenderer.on("daw:audio-host:offline-pcm", notify)
           try {
             return await ipcRenderer.invoke("daw:audio-host:offline-render", { jobId, plan })
@@ -289,13 +311,10 @@ const desktopBridge = {
         cancel: (jobId: string) => ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId),
       },
       onVstEditorState: (listener: (payload: DesktopVstEditorState) => void) => {
-        const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
-          if (typeof value !== "object" || value === null
-            || !("projectId" in value) || typeof value.projectId !== "string"
-            || !("instanceId" in value) || typeof value.instanceId !== "string"
-            || !("open" in value) || typeof value.open !== "boolean") return
-          listener({ projectId: value.projectId, instanceId: value.instanceId, open: value.open })
-        }
+        const notify = ipcRendererListener((_event, value) => {
+          const parsed = vstEditorStateSchema.safeParse(value)
+          if (parsed.success) listener(parsed.data)
+        })
         ipcRenderer.on("daw:audio-host:vst-editor-state", notify)
         return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-state", notify)
       },
@@ -305,18 +324,14 @@ const desktopBridge = {
       ),
       retryRecovery: () => ipcRenderer.invoke("daw:audio-host:recovery-retry"),
       onLifecycle: (listener: Parameters<NonNullable<DesktopBridge["audioHost"]>["onLifecycle"]>[0]) => {
-        const notify = (_event: Electron.IpcRendererEvent, value: unknown) => {
-          if (typeof value !== "object" || value === null || !("state" in value) || !("powerGeneration" in value)) return
-          if (
-            (value.state !== "suspended" && value.state !== "recovering" && value.state !== "ready" && value.state !== "failed")
-            || typeof value.powerGeneration !== "number"
-          ) return
-          listener({ state: value.state, powerGeneration: value.powerGeneration })
-        }
+        const notify = ipcRendererListener((_event, value) => {
+          const parsed = audioLifecycleSchema.safeParse(value)
+          if (parsed.success) listener(parsed.data)
+        })
         ipcRenderer.on("daw:audio-host:lifecycle", notify)
         return () => ipcRenderer.removeListener("daw:audio-host:lifecycle", notify)
       },
-    },
+    } : undefined,
     pluginCatalog: {
       read: () => invokePluginCatalog("daw:plugin-catalog:read"),
       chooseDirectory: () => invokePluginCatalog("daw:plugin-catalog:choose-directory"),
@@ -326,7 +341,6 @@ const desktopBridge = {
         ipcRenderer.invoke("daw:plugin-catalog:preflight-insertion", input)
       ),
     },
-  } : {}),
-} satisfies DesktopBridge
+} satisfies PreloadDesktopBridge
 
 contextBridge.exposeInMainWorld("dawDesktop", desktopBridge)

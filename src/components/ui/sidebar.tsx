@@ -1,4 +1,4 @@
-import type { Accessor, Component, ComponentProps, JSX, ValidComponent } from "solid-js"
+import type { Accessor, Component, ComponentProps, JSX } from "solid-js"
 import {
   createContext,
   createEffect,
@@ -13,8 +13,6 @@ import {
   useContext
 } from "solid-js"
 
-import type { PolymorphicProps } from "@kobalte/core"
-import { Polymorphic } from "@kobalte/core"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 import { assert } from "@daw-browser/shared"
@@ -102,7 +100,7 @@ const SidebarProvider: Component<SidebarProviderProps> = (rawProps) => {
   // We use open and onOpenChange for control from outside the component.
   const open = () => local.open ?? _open()
   const setOpen = (value: boolean | ((value: boolean) => boolean)) => {
-    const nextOpen = typeof value === "function" ? value(open()) : value
+    const nextOpen = value instanceof Function ? value(open()) : value
     if (local.onOpenChange) {
       return local.onOpenChange(nextOpen)
     }
@@ -268,12 +266,12 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
   )
 }
 
-type SidebarTriggerProps<T extends ValidComponent = "button"> = ButtonProps<T> & {
+type SidebarTriggerProps = ButtonProps & {
   onPointerUp?: (event: PointerEvent) => void
 }
 
-const SidebarTrigger = <T extends ValidComponent = "button">(props: SidebarTriggerProps<T>) => {
-  const [local, others] = splitProps(props as SidebarTriggerProps, ["class", "onPointerUp"])
+const SidebarTrigger: Component<SidebarTriggerProps> = (props) => {
+  const [local, others] = splitProps(props, ["class", "onPointerUp"])
   const { toggleSidebar } = useSidebar()
 
   return (
@@ -342,12 +340,10 @@ const SidebarInset: Component<ComponentProps<"main">> = (props) => {
   )
 }
 
-type SidebarInputProps<T extends ValidComponent = "input"> = ComponentProps<
-  typeof TextFieldInput<T>
->
+type SidebarInputProps = ComponentProps<typeof TextFieldInput>
 
-const SidebarInput = <T extends ValidComponent = "input">(props: SidebarInputProps<T>) => {
-  const [local, others] = splitProps(props as SidebarInputProps, ["class"])
+const SidebarInput: Component<SidebarInputProps> = (props) => {
+  const [local, others] = splitProps(props, ["class"])
   return (
     <TextField>
       <TextFieldInput
@@ -376,10 +372,10 @@ const SidebarFooter: Component<ComponentProps<"div">> = (props) => {
   )
 }
 
-type SidebarSeparatorProps<T extends ValidComponent = "hr"> = ComponentProps<typeof Separator<T>>
+type SidebarSeparatorProps = ComponentProps<typeof Separator>
 
-const SidebarSeparator = <T extends ValidComponent = "hr">(props: SidebarSeparatorProps<T>) => {
-  const [local, others] = splitProps(props as SidebarSeparatorProps, ["class"])
+const SidebarSeparator: Component<SidebarSeparatorProps> = (props) => {
+  const [local, others] = splitProps(props, ["class"])
   return (
     <Separator
       data-sidebar="separator"
@@ -414,16 +410,13 @@ const SidebarGroup: Component<ComponentProps<"div">> = (props) => {
   )
 }
 
-type SidebarGroupLabelProps<T extends ValidComponent = "div"> = ComponentProps<T>
+type SidebarGroupLabelProps = ComponentProps<"div">
 
-const SidebarGroupLabel = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, SidebarGroupLabelProps<T>>
-) => {
-  const [local, others] = splitProps(props as SidebarGroupLabelProps, ["class"])
+const SidebarGroupLabel: Component<SidebarGroupLabelProps> = (props) => {
+  const [local, others] = splitProps(props, ["class"])
 
   return (
-    <Polymorphic<SidebarGroupLabelProps>
-      as="div"
+    <div
       data-sidebar="group-label"
       class={cn(
         "flex h-8 shrink-0 items-center px-2 text-xs font-medium text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin-top,opacity] duration-[var(--sidebar-animation-duration)] ease-in-out focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
@@ -435,15 +428,12 @@ const SidebarGroupLabel = <T extends ValidComponent = "div">(
   )
 }
 
-type SidebarGroupActionProps<T extends ValidComponent = "button"> = ComponentProps<T>
+type SidebarGroupActionProps = ComponentProps<"button">
 
-const SidebarGroupAction = <T extends ValidComponent = "button">(
-  props: PolymorphicProps<T, SidebarGroupActionProps<T>>
-) => {
-  const [local, others] = splitProps(props as SidebarGroupActionProps, ["class"])
+const SidebarGroupAction: Component<SidebarGroupActionProps> = (props) => {
+  const [local, others] = splitProps(props, ["class"])
   return (
-    <Polymorphic<SidebarGroupActionProps>
-      as="button"
+    <button
       data-sidebar="group-action"
       class={cn(
         "absolute right-3 top-3.5 flex aspect-square w-5 items-center justify-center p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
@@ -502,17 +492,14 @@ const sidebarMenuButtonVariants = cva(
   }
 )
 
-type SidebarMenuButtonProps<T extends ValidComponent = "button"> = ComponentProps<T> &
+type SidebarMenuButtonProps = ComponentProps<"button"> &
   VariantProps<typeof sidebarMenuButtonVariants> & {
     isActive?: boolean
     tooltip?: string
   }
 
-const SidebarMenuButton = <T extends ValidComponent = "button">(
-  rawProps: PolymorphicProps<T, SidebarMenuButtonProps<T>>
-) => {
-  const props = mergeProps({ isActive: false, variant: "default", size: "default" }, rawProps)
-  const [local, others] = splitProps(props as SidebarMenuButtonProps, [
+const SidebarMenuButton: Component<SidebarMenuButtonProps> = (rawProps) => {
+  const [local, others] = splitProps(rawProps, [
     "isActive",
     "tooltip",
     "variant",
@@ -522,13 +509,15 @@ const SidebarMenuButton = <T extends ValidComponent = "button">(
   const { isMobile, state } = useSidebar()
 
   const button = (
-    <Polymorphic<SidebarMenuButtonProps>
-      as="button"
+    <button
       data-sidebar="menu-button"
-      data-size={local.size}
-      data-active={local.isActive}
+      data-size={local.size ?? "default"}
+      data-active={local.isActive ?? false}
       class={cn(
-        sidebarMenuButtonVariants({ variant: local.variant, size: local.size }),
+        sidebarMenuButtonVariants({
+          variant: local.variant ?? "default",
+          size: local.size ?? "default",
+        }),
         local.class
       )}
       {...others}
@@ -547,19 +536,15 @@ const SidebarMenuButton = <T extends ValidComponent = "button">(
   )
 }
 
-type SidebarMenuActionProps<T extends ValidComponent = "button"> = ComponentProps<T> & {
+type SidebarMenuActionProps = ComponentProps<"button"> & {
   showOnHover?: boolean
 }
 
-const SidebarMenuAction = <T extends ValidComponent = "button">(
-  rawProps: PolymorphicProps<T, SidebarMenuActionProps<T>>
-) => {
-  const props = mergeProps({ showOnHover: false }, rawProps)
-  const [local, others] = splitProps(props as SidebarMenuActionProps, ["class", "showOnHover"])
+const SidebarMenuAction: Component<SidebarMenuActionProps> = (rawProps) => {
+  const [local, others] = splitProps(rawProps, ["class", "showOnHover"])
 
   return (
-    <Polymorphic<SidebarMenuActionProps>
-      as="button"
+    <button
       data-sidebar="menu-action"
       class={cn(
         "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-opacity duration-150 ease-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
@@ -643,32 +628,28 @@ const SidebarMenuSub: Component<ComponentProps<"ul">> = (props) => {
 
 const SidebarMenuSubItem: Component<ComponentProps<"li">> = (props) => <li {...props} />
 
-type SidebarMenuSubButtonProps<T extends ValidComponent = "a"> = ComponentProps<T> & {
+type SidebarMenuSubButtonProps = ComponentProps<"a"> & {
   size?: "sm" | "md"
   isActive?: boolean
 }
 
-const SidebarMenuSubButton = <T extends ValidComponent = "a">(
-  rawProps: PolymorphicProps<T, SidebarMenuSubButtonProps<T>>
-) => {
-  const props = mergeProps({ size: "md" }, rawProps)
-  const [local, others] = splitProps(props as SidebarMenuSubButtonProps, [
+const SidebarMenuSubButton: Component<SidebarMenuSubButtonProps> = (rawProps) => {
+  const [local, others] = splitProps(rawProps, [
     "size",
     "isActive",
     "class"
   ])
 
   return (
-    <Polymorphic<SidebarMenuSubButtonProps>
-      as="a"
+    <a
       data-sidebar="menu-sub-button"
-      data-size={local.size}
+      data-size={local.size ?? "md"}
       data-active={local.isActive}
       class={cn(
         "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden px-0 text-sidebar-foreground outline-none ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
         local.size === "sm" && "text-xs",
-        local.size === "md" && "text-sm",
+        local.size !== "sm" && "text-sm",
         "group-data-[collapsible=icon]:hidden",
         local.class
       )}

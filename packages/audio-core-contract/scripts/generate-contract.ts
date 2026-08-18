@@ -6,10 +6,20 @@ const graphSchemaPath = resolve(packageRoot, 'graph-contract.schema.json')
 const typeScriptOutputPath = resolve(packageRoot, 'src/generated/processor-contract-metadata.ts')
 const cppOutputPath = resolve(packageRoot, '../../native/audio-core/generated/processor_contract_generated.h')
 
-const canonicalize = (value: unknown): string => {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return JSON.stringify(value)
+type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
+type JsonObject = { [key: string]: JsonValue }
+
+const isObject = (value: JsonValue): value is JsonObject => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+const isBoolean = (value: JsonValue): value is boolean => typeof value === 'boolean'
+const isNumber = (value: JsonValue): value is number => typeof value === 'number'
+const isString = (value: JsonValue): value is string => typeof value === 'string'
+
+const canonicalize = (value: JsonValue): string => {
+  if (value === null || isBoolean(value) || isNumber(value) || isString(value)) return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`
-  if (typeof value === 'object') {
+  if (isObject(value)) {
     const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalize(entry)}`).join(',')}}`
   }
@@ -34,23 +44,22 @@ type ProcessorMetadata = {
   parameters: readonly ProcessorParameterMetadata[]
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const isRecord = isObject
 
-const readParameters = (name: string, definition: Record<string, unknown>): ProcessorParameterMetadata[] => {
+const readParameters = (name: string, definition: JsonObject): ProcessorParameterMetadata[] => {
   const state = definition.properties
   if (!isRecord(state)) return []
   const stateDefinition = state.state
   if (!isRecord(stateDefinition) || !isRecord(stateDefinition.properties)) return []
   const stateProperties = stateDefinition.properties
-  const visit = (properties: Record<string, unknown>, prefix: string): ProcessorParameterMetadata[] =>
+  const visit = (properties: JsonObject, prefix: string): ProcessorParameterMetadata[] =>
     Object.entries(properties).flatMap(([id, property]) => {
       if (!isRecord(property)) return []
       const fullId = prefix.length > 0 ? `${prefix}.${id}` : id
       if (property.portableParameter === true) {
-        if (typeof property.default !== 'number' || typeof property.minimum !== 'number' || typeof property.maximum !== 'number') throw new Error(`Processor contract schema is missing numeric ${name} metadata for ${fullId}.`)
+        if (!isNumber(property.default) || !isNumber(property.minimum) || !isNumber(property.maximum)) throw new Error(`Processor contract schema is missing numeric ${name} metadata for ${fullId}.`)
         const alias = property.portableParameterId
-        if (alias !== undefined && (typeof alias !== 'string' || alias.length === 0 || alias.includes('.'))) {
+        if (alias !== undefined && (!isString(alias) || alias.length === 0 || alias.includes('.'))) {
           throw new Error(`Processor contract schema has invalid portableParameterId for ${name}.${fullId}.`)
         }
         return [{ id: prefix.length > 0 ? `${prefix}.${alias ?? id}` : alias ?? id, defaultValue: property.default, minValue: property.minimum, maxValue: property.maximum }]
@@ -61,7 +70,7 @@ const readParameters = (name: string, definition: Record<string, unknown>): Proc
   return visit(stateProperties, '')
 }
 
-const readProcessorRegistry = (schema: unknown): ProcessorMetadata[] => {
+const readProcessorRegistry = (schema: JsonValue): ProcessorMetadata[] => {
   if (!isRecord(schema) || !isRecord(schema.properties) || !isRecord(schema.properties.processors)
     || !isRecord(schema.properties.processors.properties)) throw new Error('Processor contract schema is missing processor registry declarations.')
   const registry = schema.properties.processors.properties
@@ -72,9 +81,9 @@ const readProcessorRegistry = (schema: unknown): ProcessorMetadata[] => {
     const schemaVersion = isRecord(properties.schemaVersion) ? properties.schemaVersion.const : undefined
     const stateBytes = isRecord(properties.stateBytes) ? properties.stateBytes.const : undefined
     const tombstone = isRecord(properties.tombstone) ? properties.tombstone.const : undefined
-    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0
-      || typeof schemaVersion !== 'number' || !Number.isSafeInteger(schemaVersion) || schemaVersion <= 0
-      || typeof stateBytes !== 'number' || !Number.isSafeInteger(stateBytes) || stateBytes < 0 || stateBytes > 256 || typeof tombstone !== 'boolean') {
+    if (!isNumber(id) || !Number.isSafeInteger(id) || id <= 0
+      || !isNumber(schemaVersion) || !Number.isSafeInteger(schemaVersion) || schemaVersion <= 0
+      || !isNumber(stateBytes) || !Number.isSafeInteger(stateBytes) || stateBytes < 0 || stateBytes > 256 || !isBoolean(tombstone)) {
       throw new Error(`Processor declaration ${name} has invalid stable metadata.`)
     }
     return { name, id, schemaVersion, stateBytes, tombstone, parameters: readParameters(name, declaration) }

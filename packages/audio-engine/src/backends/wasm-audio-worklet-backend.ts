@@ -53,7 +53,7 @@ export type PortableWasmBackendSelection =
   | { selected: false; reason: string }
 
 type PendingPortableRequest = {
-  resolve: (message: Record<string, unknown>) => void
+  resolve: (message: PortableRequestStatus) => void
   reject: (error: Error) => void
   deadline: ReturnType<typeof setTimeout>
 }
@@ -61,9 +61,204 @@ type PendingPortableRequest = {
 const portableControlTimeoutMs = 2_000
 
 type PortableWorkletNode = AudioNode & Pick<AudioWorkletNode, 'port' | 'onprocessorerror'>
+type PortableWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | PortableWireValue[]
+  | { [key: string]: PortableWireValue }
+  | Float32Array
+  | Uint8Array
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+type PortableRequestMessage = PortableWasmControlMessage extends infer Message
+  ? Message extends { requestId: number }
+    ? Omit<Message, 'version' | 'requestId'>
+    : never
+  : never
+
+type PortableRequestStatus = Extract<PortableWasmStatusMessage, { requestId: number }>
+
+const isWireObject = (value: PortableWireValue): value is { [key: string]: PortableWireValue } =>
+  typeof value === 'object'
+  && value !== null
+  && !Array.isArray(value)
+  && !(value instanceof Float32Array)
+  && !(value instanceof Uint8Array)
+
+const isFiniteNumber = (value: PortableWireValue | undefined): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+const isString = (value: PortableWireValue | undefined): value is string =>
+  typeof value === 'string'
+
+const isPositiveInteger = (value: PortableWireValue | undefined): value is number =>
+  isFiniteNumber(value) && Number.isSafeInteger(value) && value > 0
+
+const isNonNegativeInteger = (value: PortableWireValue | undefined): value is number =>
+  isFiniteNumber(value) && Number.isSafeInteger(value) && value >= 0
+
+const isRegisteredAssetHandle = (
+  value: PortableWireValue | undefined,
+): value is { slot: number; generation: number } =>
+  value !== undefined
+  && isWireObject(value)
+  && isNonNegativeInteger(value.slot)
+  && isPositiveInteger(value.generation)
+
+const readPortableRequestStatus = (value: PortableWireValue): PortableRequestStatus | null => {
+  if (!isWireObject(value)
+    || value.version !== portableWasmProtocolVersion
+    || !isPositiveInteger(value.requestId)) return null
+  if (value.type === 'graph-prepared'
+    && isPositiveInteger(value.revision)
+    && (value.result === 'prepared' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      result: value.result,
+    }
+  }
+  if (value.type === 'graph-published'
+    && isPositiveInteger(value.revision)
+    && (value.result === 'published' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      result: value.result,
+    }
+  }
+  if (value.type === 'asset-registered'
+    && isPositiveInteger(value.generation)
+    && isString(value.assetId)) {
+    if (value.result === 'registered' && isRegisteredAssetHandle(value.handle)) {
+      return {
+        version: portableWasmProtocolVersion,
+        type: value.type,
+        requestId: value.requestId,
+        generation: value.generation,
+        assetId: value.assetId,
+        result: value.result,
+        handle: value.handle,
+      }
+    }
+    if (value.result === 'capacity-exceeded'
+      || value.result === 'stale-generation'
+      || value.result === 'invalid-pcm') {
+      return {
+        version: portableWasmProtocolVersion,
+        type: value.type,
+        requestId: value.requestId,
+        generation: value.generation,
+        assetId: value.assetId,
+        result: value.result,
+      }
+    }
+  }
+  if (value.type === 'asset-released'
+    && isPositiveInteger(value.generation)
+    && isString(value.assetId)
+    && (value.result === 'released' || value.result === 'stale-generation')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      generation: value.generation,
+      assetId: value.assetId,
+      result: value.result,
+    }
+  }
+  if (value.type === 'transport-applied'
+    && isPositiveInteger(value.epoch)
+    && (value.result === 'applied' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      epoch: value.epoch,
+      result: value.result,
+    }
+  }
+  if (value.type === 'schedule-installed'
+    && isPositiveInteger(value.revision)
+    && isPositiveInteger(value.epoch)
+    && (value.result === 'installed' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      epoch: value.epoch,
+      result: value.result,
+    }
+  }
+  if (value.type === 'sources-scheduled'
+    && isPositiveInteger(value.revision)
+    && isPositiveInteger(value.epoch)
+    && (value.result === 'scheduled' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      epoch: value.epoch,
+      result: value.result,
+    }
+  }
+  if (value.type === 'processor-events-applied'
+    && isPositiveInteger(value.revision)
+    && isPositiveInteger(value.epoch)
+    && isPositiveInteger(value.sequence)
+    && (value.result === 'applied' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      epoch: value.epoch,
+      sequence: value.sequence,
+      result: value.result,
+    }
+  }
+  if (value.type === 'processor-automation-reenabled'
+    && isPositiveInteger(value.revision)
+    && isPositiveInteger(value.epoch)
+    && (value.result === 'applied' || value.result === 'rejected')) {
+    return {
+      version: portableWasmProtocolVersion,
+      type: value.type,
+      requestId: value.requestId,
+      revision: value.revision,
+      epoch: value.epoch,
+      result: value.result,
+    }
+  }
+  return null
+}
+
+const isPortableFault = (
+  value: PortableWireValue,
+): value is Extract<PortableWasmStatusMessage, { type: 'fault' }> =>
+  isWireObject(value)
+  && value.version === portableWasmProtocolVersion
+  && value.type === 'fault'
+  && (value.code === 'malformed-message'
+    || value.code === 'abi-mismatch'
+    || value.code === 'contract-mismatch'
+    || value.code === 'capacity-exceeded'
+    || value.code === 'initialization-failed'
+    || value.code === 'event-overflow'
+    || value.code === 'core-error')
+
+const hasSharedQueueSupport = (
+  environment: typeof globalThis,
+): environment is typeof globalThis & { crossOriginIsolated: true } =>
+  typeof environment.SharedArrayBuffer === 'function'
+  && environment.crossOriginIsolated === true
 
 const disposePortableWorkletNode = (node: PortableWorkletNode, output?: AudioNode) => {
   node.port.onmessage = null
@@ -117,9 +312,8 @@ export class PortableWasmPlaybackSession {
     this.dispose()
   }
 
-  private onMessage(value: unknown) {
-    if (!isRecord(value)) return
-    if (value.type === 'fault') {
+  private onMessage(value: PortableWireValue) {
+    if (isPortableFault(value)) {
       this.fail(new Error('Portable audio-core AudioWorklet control request failed.'))
       return
     }
@@ -138,15 +332,16 @@ export class PortableWasmPlaybackSession {
       for (const listener of this.transportPositionListeners) listener(transportPosition)
       return
     }
-    if (typeof value.requestId !== 'number') return
-    const request = this.pending.get(value.requestId)
+    const response = readPortableRequestStatus(value)
+    if (!response) return
+    const request = this.pending.get(response.requestId)
     if (!request) return
-    this.pending.delete(value.requestId)
+    this.pending.delete(response.requestId)
     clearTimeout(request.deadline)
-    request.resolve(value)
+    request.resolve(response)
   }
 
-  private request(message: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private request(message: PortableRequestMessage): Promise<PortableRequestStatus> {
     return new Promise((resolve, reject) => {
       if (this.disposed) {
         reject(new Error('Portable playback session was disposed.'))
@@ -166,26 +361,25 @@ export class PortableWasmPlaybackSession {
     })
   }
 
-  private require(message: Record<string, unknown>, type: string, result: string) {
-    if (message.type !== type || message.result !== result) throw new Error(`Portable playback ${type} was rejected.`)
-  }
-
   async prepareGraph(snapshot: AudioCoreGraphSnapshot) {
     const response = await this.request({ type: 'prepare-graph', snapshot })
-    this.require(response, 'graph-prepared', 'prepared')
+    if (response.type !== 'graph-prepared' || response.result !== 'prepared') {
+      throw new Error('Portable playback graph-prepared was rejected.')
+    }
   }
 
   async publishGraph(revision: number) {
     const response = await this.request({ type: 'publish-graph', revision })
-    this.require(response, 'graph-published', 'published')
+    if (response.type !== 'graph-published' || response.result !== 'published') {
+      throw new Error('Portable playback graph-published was rejected.')
+    }
   }
 
   async registerAsset(asset: AudioAssetRef, pcm: PlanarPcm, generation: number): Promise<AudioAssetRegistration> {
     if (!isPlanarPcmForAsset(asset, pcm)) return { status: 'invalid-pcm' }
     const response = await this.request({ type: 'register-asset', generation, asset, planes: pcm.planes })
     if (response.type !== 'asset-registered') return { status: 'stale-generation' }
-    if (response.result === 'registered' && isRecord(response.handle)
-      && typeof response.handle.slot === 'number' && typeof response.handle.generation === 'number') {
+    if (response.result === 'registered') {
       return { status: 'registered', handle: { slot: response.handle.slot, generation: response.handle.generation } }
     }
     if (response.result === 'capacity-exceeded' || response.result === 'invalid-pcm' || response.result === 'stale-generation') {
@@ -214,18 +408,24 @@ export class PortableWasmPlaybackSession {
 
   async scheduleSources(revision: number, epoch: number, events: readonly AudioCoreSampleSourceEventDto[]) {
     const response = await this.request({ type: 'schedule-sources', revision, epoch, events })
-    this.require(response, 'sources-scheduled', 'scheduled')
+    if (response.type !== 'sources-scheduled' || response.result !== 'scheduled') {
+      throw new Error('Portable playback sources-scheduled was rejected.')
+    }
   }
 
   async setTransport(epoch: number, running: boolean, frame: number) {
     const response = await this.request({ type: 'transport', epoch, running, frame })
-    this.require(response, 'transport-applied', 'applied')
+    if (response.type !== 'transport-applied' || response.result !== 'applied') {
+      throw new Error('Portable playback transport-applied was rejected.')
+    }
     this.active = running
   }
 
   async installSchedule(schedule: PortableFrameSchedule) {
     const response = await this.request({ type: 'install-schedule', schedule })
-    this.require(response, 'schedule-installed', 'installed')
+    if (response.type !== 'schedule-installed' || response.result !== 'installed') {
+      throw new Error('Portable playback schedule-installed was rejected.')
+    }
   }
 
   async queueProcessorEvents(
@@ -242,7 +442,9 @@ export class PortableWasmPlaybackSession {
       sequence,
       events,
     })
-    this.require(response, 'processor-events-applied', 'applied')
+    if (response.type !== 'processor-events-applied' || response.result !== 'applied') {
+      throw new Error('Portable playback processor-events-applied was rejected.')
+    }
   }
 
   async reenableProcessorAutomation(
@@ -258,7 +460,9 @@ export class PortableWasmPlaybackSession {
       processorInstanceId,
       parameterTargets,
     })
-    this.require(response, 'processor-automation-reenabled', 'applied')
+    if (response.type !== 'processor-automation-reenabled' || response.result !== 'applied') {
+      throw new Error('Portable playback processor-automation-reenabled was rejected.')
+    }
   }
 
   markActive() {
@@ -341,9 +545,7 @@ export const detectPortableWasmCapability = async (
   }
   const artifact = await loadAudioCoreWasmArtifact(manifestUrl)
   if (!artifact.available) return { available: false, reason: artifact.message }
-  const sharedQueue = typeof SharedArrayBuffer === 'function'
-    && typeof crossOriginIsolated === 'boolean'
-    && crossOriginIsolated
+  const sharedQueue = hasSharedQueueSupport(environment)
     ? 'available'
     : 'unavailable-without-cross-origin-isolation'
   return { available: true, artifact: artifact.artifact, sharedQueue }
@@ -390,7 +592,7 @@ export class WasmAudioWorkletBackend {
             resolve()
             return
           }
-          if (typeof event.data === 'object' && event.data !== null && 'type' in event.data && event.data.type === 'fault') {
+          if (isPortableFault(event.data)) {
             reject(new Error('Portable audio-core AudioWorklet initialization failed.'))
           }
         }
@@ -422,13 +624,11 @@ export class WasmAudioWorkletBackend {
     )
   }
 
-  isReady(message: unknown): message is Extract<PortableWasmStatusMessage, { type: 'ready' }> {
-    return typeof message === 'object'
-      && message !== null
-      && 'version' in message
-      && 'type' in message
+  isReady(message: PortableWireValue): message is Extract<PortableWasmStatusMessage, { type: 'ready' }> {
+    return isWireObject(message)
       && message.version === portableWasmProtocolVersion
       && message.type === 'ready'
+      && isNonNegativeInteger(message.revision)
   }
 
   get abiVersion() {

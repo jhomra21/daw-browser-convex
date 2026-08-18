@@ -1,3 +1,3 @@
-export const isAbortError = (error: unknown): boolean => (
-  error instanceof DOMException && error.name === 'AbortError'
+export const isAbortError = (cause: unknown): boolean => (
+  cause instanceof DOMException && cause.name === 'AbortError'
 )

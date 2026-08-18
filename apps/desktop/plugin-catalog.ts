@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { DesktopJsonValue } from "@daw-browser/desktop-protocol"
 
 const maxPluginBinaryBytes = 2 * 1024 * 1024 * 1024
 const catalogVersion = 3
@@ -215,11 +216,18 @@ export const discoverVst3Bundles = async (
   }
 }
 
-const isStringArray = (value: unknown): value is string[] => (
-  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+const isString = (value: DesktopJsonValue): value is string => typeof value === "string"
+const isNumber = (value: DesktopJsonValue): value is number => typeof value === "number"
+const isJsonObject = (
+  value: DesktopJsonValue,
+): value is { [key: string]: DesktopJsonValue } => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+)
+const isStringArray = (value: DesktopJsonValue): value is string[] => (
+  Array.isArray(value) && value.every(isString)
 )
 
-const isValidClass = (value: unknown): value is Vst3CatalogClass => {
+const isValidClass = (value: DesktopJsonValue): value is DesktopJsonValue & Vst3CatalogClass => {
   if (typeof value !== "object" || value === null) return false
   return "classId" in value && typeof value.classId === "string" && value.classId.length > 0 && value.classId.length <= 256
     && "vendor" in value && typeof value.vendor === "string" && value.vendor.length > 0 && value.vendor.length <= 256
@@ -230,7 +238,7 @@ const isValidClass = (value: unknown): value is Vst3CatalogClass => {
     && (!("sdkVersion" in value) || value.sdkVersion === undefined || typeof value.sdkVersion === "string")
 }
 
-const isValidEntry = (value: unknown): value is Vst3CatalogEntry => {
+const isValidEntry = (value: DesktopJsonValue): value is DesktopJsonValue & Vst3CatalogEntry => {
   if (typeof value !== "object" || value === null) return false
   const record = value
   return "bundlePath" in record
@@ -262,7 +270,10 @@ const isValidEntry = (value: unknown): value is Vst3CatalogEntry => {
     && (!("launchEligibility" in record) || record.launchEligibility === undefined || isValidLaunchEligibility(record.launchEligibility, record))
 }
 
-const isValidLaunchEligibility = (value: unknown, entry: unknown): value is Vst3WorkerLaunchEligibility => {
+const isValidLaunchEligibility = (
+  value: DesktopJsonValue,
+  entry: DesktopJsonValue,
+): value is DesktopJsonValue & Vst3WorkerLaunchEligibility => {
   if (typeof value !== "object" || value === null || typeof entry !== "object" || entry === null) return false
   const record = value
   if (!("bundlePath" in entry) || typeof entry.bundlePath !== "string"
@@ -292,7 +303,9 @@ const isValidLaunchEligibility = (value: unknown, entry: unknown): value is Vst3
     && record.scannerProtocolVersion === 2
 }
 
-const isValidDiagnostic = (value: unknown): value is PluginCatalogDiagnostic => {
+const isValidDiagnostic = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & PluginCatalogDiagnostic => {
   if (typeof value !== "object" || value === null) return false
   return "directory" in value
     && typeof value.directory === "string"
@@ -300,8 +313,8 @@ const isValidDiagnostic = (value: unknown): value is PluginCatalogDiagnostic => 
     && typeof value.message === "string"
 }
 
-export const parsePluginCatalogData = (value: unknown): PluginCatalogData | undefined => {
-  if (typeof value !== "object" || value === null) return undefined
+export const parsePluginCatalogData = (value: DesktopJsonValue): PluginCatalogData | undefined => {
+  if (!isJsonObject(value)) return undefined
   const directories = "directories" in value && isStringArray(value.directories) ? value.directories : undefined
   if (
     !("version" in value)
@@ -311,23 +324,41 @@ export const parsePluginCatalogData = (value: unknown): PluginCatalogData | unde
     || !directories.every((directory) => path.isAbsolute(directory) && directory.length <= maxDirectoryPathLength)
     || !("entries" in value)
     || !Array.isArray(value.entries)
-    || !(value.version === 1 ? value.entries.every(isLegacyEntry) : value.entries.every(isValidEntry))
-    || !value.entries.every((entry) => (
-      directories.includes(entry.configuredDirectory)
-      && isInsideDirectory(entry.bundlePath, entry.configuredDirectory)
-    ))
     || !("diagnostics" in value)
     || !Array.isArray(value.diagnostics)
     || !value.diagnostics.every(isValidDiagnostic)
     || !("scannedAtMs" in value)
-    || (value.scannedAtMs !== null && typeof value.scannedAtMs !== "number")
+    || (value.scannedAtMs !== null && !isNumber(value.scannedAtMs))
   ) return undefined
+  if (value.version === 1) {
+    const entries: LegacyVst3CatalogEntry[] = []
+    for (const entry of value.entries) {
+      if (!isLegacyEntry(entry)
+        || !directories.includes(entry.configuredDirectory)
+        || !isInsideDirectory(entry.bundlePath, entry.configuredDirectory)) return undefined
+      entries.push(entry)
+    }
+    return {
+      version: catalogVersion,
+      directories,
+      entries: entries.map(filesystemOnlyEntry),
+      diagnostics: value.diagnostics,
+      scannedAtMs: value.scannedAtMs,
+    }
+  }
+  const entries: Vst3CatalogEntry[] = []
+  for (const entry of value.entries) {
+    if (!isValidEntry(entry)
+      || !directories.includes(entry.configuredDirectory)
+      || !isInsideDirectory(entry.bundlePath, entry.configuredDirectory)) return undefined
+    entries.push(entry)
+  }
   return {
     version: catalogVersion,
     directories,
-    entries: value.version === 1 ? value.entries.map((entry) => filesystemOnlyEntry(entry)) : value.entries.map((entry) => ({
+    entries: entries.map((entry) => ({
       ...entry,
-      ...(value.version === 2 ? { launchEligibility: undefined } : {}),
+      launchEligibility: undefined,
     })),
     diagnostics: value.diagnostics,
     scannedAtMs: value.scannedAtMs,
@@ -335,7 +366,9 @@ export const parsePluginCatalogData = (value: unknown): PluginCatalogData | unde
 }
 
 type LegacyVst3CatalogEntry = Omit<Vst3CatalogEntry, "classes" | "scanHealth" | "scannerVersion" | "sdkVersion" | "binaryFingerprint">
-const isLegacyEntry = (value: unknown): value is LegacyVst3CatalogEntry => {
+const isLegacyEntry = (
+  value: DesktopJsonValue,
+): value is DesktopJsonValue & LegacyVst3CatalogEntry => {
   if (typeof value !== "object" || value === null) return false
   const record = value
   return "bundlePath" in record && typeof record.bundlePath === "string" && path.isAbsolute(record.bundlePath)

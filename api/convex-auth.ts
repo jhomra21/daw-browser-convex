@@ -55,8 +55,8 @@ const readPrivateJwk = (context: ConvexAuthIssuanceContext) => {
   return JSON.parse(raw)
 }
 
-const validateActorClaim = (value: unknown, name: string) => {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+const validateActorClaim = (value: string, name: string) => {
+  if (value.length === 0 || value.length > 256) {
     throw new Error(`${name} must be a string between 1 and 256 characters.`)
   }
   return value
@@ -91,10 +91,8 @@ export const issueConvexAuthToken = async (
     name: user.name,
     picture: user.image,
     dawWorker: options?.worker ? true : undefined,
-    ...(actor === undefined ? {} : {
-      dawControlActorIssuer: actor.issuer,
-      dawControlActorTokenIdentifier: actor.tokenIdentifier,
-    }),
+    dawControlActorIssuer: actor?.issuer,
+    dawControlActorTokenIdentifier: actor?.tokenIdentifier,
   })
     .setProtectedHeader({ alg: algorithm, kid: keyId, typ: 'JWT' })
     .setIssuer(readIssuer(context))

@@ -67,17 +67,20 @@ type LiveBackendHandle =
 type LiveNote =
   | { handle: number; arpeggiator: ReturnType<typeof createLiveMidiArpeggiator<LiveBackendHandle>> }
 
-function readMidiBounds(value: unknown): TimelineMidiBounds | null {
-  if (!value || typeof value !== 'object') return null
-  if (!('x' in value) || !('y' in value) || !('w' in value) || !('h' in value)) return null
-  const x = value.x
-  const y = value.y
-  const w = value.w
-  const h = value.h
-  if (typeof x !== 'number' || !Number.isFinite(x)) return null
-  if (typeof y !== 'number' || !Number.isFinite(y)) return null
-  if (typeof w !== 'number' || !Number.isFinite(w)) return null
-  if (typeof h !== 'number' || !Number.isFinite(h)) return null
+type MidiBoundsPayload = { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+
+const isMidiBoundsPayload = (cause: unknown): cause is MidiBoundsPayload => (
+  typeof cause === 'object' && cause !== null
+)
+
+const isFiniteNumber = (cause: unknown): cause is number => (
+  typeof cause === 'number' && Number.isFinite(cause)
+)
+
+function readMidiBounds(cause: unknown): TimelineMidiBounds | null {
+  if (!isMidiBoundsPayload(cause)) return null
+  const { x, y, w, h } = cause
+  if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(w) || !isFiniteNumber(h)) return null
   return { x, y, w, h }
 }
 
@@ -162,10 +165,9 @@ export function useTimelineMidiOverlay(
   }
 
   const midiKeyboardTarget = createMemo(resolveTargetTrack)
-  const audioHostBridge = typeof window === 'undefined' ? undefined : window.dawDesktop?.audioHost
-  const hasAudioLifecycle = typeof audioHostBridge?.onLifecycle === "function"
-    && typeof audioHostBridge.getLifecycle === "function"
-  const lifecycleBridge = hasAudioLifecycle ? audioHostBridge : undefined
+  const audioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const hasAudioLifecycle = audioHostBridge !== undefined
+  const lifecycleBridge = audioHostBridge
   let midiSuspended = false
   let nativeMidiReady = !hasAudioLifecycle
   const resolveTargetTrackId = () => midiKeyboardTarget()?.id
@@ -486,7 +488,7 @@ export function useTimelineMidiOverlay(
         const targetKey = automationTargetKey({
           kind: 'track',
           trackId,
-          ...(mapping.target.effectInstanceId === undefined ? {} : { effectInstanceId: mapping.target.effectInstanceId }),
+          effectInstanceId: mapping.target.effectInstanceId,
         }, mapping.target.parameterId)
         activeMappingTargets.set(`${event.sourceId}\u0000${targetKey}`, {
           sourceId: event.sourceId,
@@ -541,7 +543,7 @@ export function useTimelineMidiOverlay(
         ? normalizeLegacyMidiClip(clip.midi).mappings.map((mapping) => automationTargetKey({
             kind: 'track',
             trackId,
-            ...(mapping.target.effectInstanceId === undefined ? {} : { effectInstanceId: mapping.target.effectInstanceId }),
+            effectInstanceId: mapping.target.effectInstanceId,
           }, mapping.target.parameterId))
         : [],
     )

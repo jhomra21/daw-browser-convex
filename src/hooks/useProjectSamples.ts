@@ -115,27 +115,50 @@ type UseProjectAssetFoldersResult = {
   refreshFolders: () => void
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
+type ProjectSamplePayload = {
+  key?: unknown
+  assetKey?: unknown
+  sourceKind?: unknown
+  url?: unknown
+  name?: unknown
+  duration?: unknown
+  source?: unknown
+  sizeBytes?: unknown
+  mimeType?: unknown
+  uploadedAt?: unknown
+  durationSec?: unknown
+  sampleRate?: unknown
+  channelCount?: unknown
+  samples?: unknown
 }
 
-const readFiniteNumber = (value: unknown) => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const isProjectSamplePayload = (cause: unknown): cause is ProjectSamplePayload => {
+  return typeof cause === 'object' && cause !== null
 }
 
-const readString = (value: unknown) => {
-  return typeof value === 'string' ? value : undefined
+const isFiniteNumber = (cause: unknown): cause is number => {
+  return typeof cause === 'number' && Number.isFinite(cause)
 }
 
-const readAudioSourceKind = (value: unknown): AudioSourceKind | undefined => {
-  return typeof value === 'string' ? sanitizeAudioSourceKind(value) : undefined
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
+const readFiniteNumber = (cause: unknown) => {
+  return isFiniteNumber(cause) ? cause : undefined
 }
 
-const readAudioSourceMetadata = (value: unknown): AudioSourceMetadata | undefined => {
-  if (!isRecord(value)) return undefined
-  const durationSec = readFiniteNumber(value.durationSec)
-  const sampleRate = readFiniteNumber(value.sampleRate)
-  const channelCount = readFiniteNumber(value.channelCount)
+const readString = (cause: unknown) => {
+  return isString(cause) ? cause : undefined
+}
+
+const readAudioSourceKind = (cause: unknown): AudioSourceKind | undefined => {
+  return isString(cause) ? sanitizeAudioSourceKind(cause) : undefined
+}
+
+const readAudioSourceMetadata = (cause: unknown): AudioSourceMetadata | undefined => {
+  if (!isProjectSamplePayload(cause)) return undefined
+  const durationSec = readFiniteNumber(cause.durationSec)
+  const sampleRate = readFiniteNumber(cause.sampleRate)
+  const channelCount = readFiniteNumber(cause.channelCount)
   if (durationSec === undefined || sampleRate === undefined || channelCount === undefined) {
     return undefined
   }
@@ -214,16 +237,16 @@ const buildProjectSampleUsage = (clip: ClipRow): ProjectSampleUsage | null => {
   }
 }
 
-function buildDefaultSampleCatalogItem(raw: unknown): DefaultSampleCatalogItem {
-  if (!isRecord(raw)) {
+function buildDefaultSampleCatalogItem(cause: unknown): DefaultSampleCatalogItem {
+  if (!isProjectSamplePayload(cause)) {
     throw new Error('Invalid default sample payload')
   }
 
-  const key = readString(raw.key)
-  const assetKey = readString(raw.assetKey)
-  const sourceKind = readAudioSourceKind(raw.sourceKind)
-  const url = readString(raw.url)
-  const name = readString(raw.name)
+  const key = readString(cause.key)
+  const assetKey = readString(cause.assetKey)
+  const sourceKind = readAudioSourceKind(cause.sourceKind)
+  const url = readString(cause.url)
+  const name = readString(cause.name)
   if (!key || !assetKey || !sourceKind || !url || !name) {
     throw new Error('Invalid default sample payload')
   }
@@ -234,19 +257,19 @@ function buildDefaultSampleCatalogItem(raw: unknown): DefaultSampleCatalogItem {
     sourceKind,
     url,
     name,
-    duration: readFiniteNumber(raw.duration),
-    source: readAudioSourceMetadata(raw.source),
-    sizeBytes: readFiniteNumber(raw.sizeBytes),
-    mimeType: readString(raw.mimeType),
-    uploadedAt: readString(raw.uploadedAt),
+    duration: readFiniteNumber(cause.duration),
+    source: readAudioSourceMetadata(cause.source),
+    sizeBytes: readFiniteNumber(cause.sizeBytes),
+    mimeType: readString(cause.mimeType),
+    uploadedAt: readString(cause.uploadedAt),
   }
 }
 
 export const normalizeDefaultSampleCatalogItem = (
-  raw: unknown,
+  cause: unknown,
   resolveUrl: (value: string) => string | null = resolveDefaultSampleMediaUrlForRuntime,
 ): DefaultSampleCatalogItem => {
-  const sample = buildDefaultSampleCatalogItem(raw)
+  const sample = buildDefaultSampleCatalogItem(cause)
   const url = resolveUrl(sample.url)
   if (!url) throw new Error('Invalid default sample URL')
   return { ...sample, url }
@@ -382,7 +405,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       const res = await fetch(catalogUrl).catch(() => null)
       if (!res || !res.ok) return []
       const data = await res.json().catch(() => null)
-      const list = isRecord(data) && Array.isArray(data.samples) ? data.samples : []
+      const list = isProjectSamplePayload(data) && Array.isArray(data.samples) ? data.samples : []
       return list.flatMap((sample) => {
         try {
           return [normalizeDefaultSampleCatalogItem(sample)]

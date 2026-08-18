@@ -14,6 +14,9 @@ type MidiTimestampConverter = ((eventTimeStamp: number) => AudioClockResult | un
   reset: () => void
 }
 
+const isFiniteNumber = (value: number | undefined): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
 export const createMidiTimestampConverter = (input: {
   context: () => AudioClockContext | null
   performanceNow: () => number
@@ -36,10 +39,8 @@ export const createMidiTimestampConverter = (input: {
     const outputTimestamp = context.getOutputTimestamp?.()
     const outputContextTime = outputTimestamp?.contextTime
     const outputPerformanceTime = outputTimestamp?.performanceTime
-    const contextTime = typeof outputContextTime === 'number'
-      && Number.isFinite(outputContextTime)
-      && typeof outputPerformanceTime === 'number'
-      && Number.isFinite(outputPerformanceTime)
+    const contextTime = isFiniteNumber(outputContextTime)
+      && isFiniteNumber(outputPerformanceTime)
       ? outputContextTime + (eventTimeStamp - outputPerformanceTime) / 1000
       : (() => {
           const now = input.performanceNow()

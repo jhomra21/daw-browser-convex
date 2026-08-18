@@ -1,4 +1,4 @@
-import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
+import { getEffectChainTiming } from '../effects/timing'
 import type { ResolvedMixerGraph } from './types'
 
 type MixerTimingPlan = {

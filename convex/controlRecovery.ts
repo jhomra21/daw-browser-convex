@@ -63,35 +63,33 @@ const trackStatePayload = (row: any) => ({
   projectId: row.projectId,
   name: row.name,
   index: row.index,
-  ...(row.kind === undefined ? {} : { kind: row.kind }),
-  ...(row.historyRef === undefined ? {} : { historyRef: row.historyRef }),
-  ...(row.groupId === undefined ? {} : { groupId: String(row.groupId) }),
-  ...(row.collapsed === undefined ? {} : { collapsed: row.collapsed }),
-  ...(row.color === undefined ? {} : { color: row.color }),
+  kind: row.kind,
+  historyRef: row.historyRef,
+  groupId: row.groupId === undefined ? undefined : String(row.groupId),
+  collapsed: row.collapsed,
+  color: row.color,
   mixer: {
     volume: row.volume,
-    ...(row.muted === undefined ? {} : { muted: row.muted }),
-    ...(row.soloed === undefined ? {} : { soloed: row.soloed }),
+    muted: row.muted,
+    soloed: row.soloed,
     channelRole: row.channelRole,
-    ...(row.outputTargetId === undefined ? {} : { outputTargetId: String(row.outputTargetId) }),
+    outputTargetId: row.outputTargetId === undefined ? undefined : String(row.outputTargetId),
     sends: row.sends.map((send: any) => ({
       targetId: String(send.targetId),
       amount: send.amount,
-      ...(send.tap === undefined ? {} : { tap: send.tap }),
+      tap: send.tap,
     })),
   },
 });
 
 const recoverySurvivorState = (row: any) => ({
   index: row.index,
-  ...(row.groupId === undefined ? {} : { groupId: String(row.groupId) }),
-  ...(row.mixer?.outputTargetId === undefined && row.outputTargetId === undefined ? {} : {
-    outputTargetId: String(row.mixer?.outputTargetId ?? row.outputTargetId),
-  }),
+  groupId: row.groupId === undefined ? undefined : String(row.groupId),
+  outputTargetId: row.mixer?.outputTargetId === undefined && row.outputTargetId === undefined ? undefined : String(row.mixer?.outputTargetId ?? row.outputTargetId),
   sends: (row.mixer?.sends ?? row.sends).map((send: any) => ({
     targetId: String(send.targetId),
     amount: send.amount,
-    ...(send.tap === undefined ? {} : { tap: send.tap }),
+    tap: send.tap,
   })),
 });
 
@@ -125,16 +123,16 @@ const requireRecoveryTrackTarget = async (
 const postDeleteTrackState = (row: any, deletedIds: Set<string>, index: number) => ({
   ...trackStatePayload(row),
   index,
-  ...(deletedIds.has(String(row.groupId)) ? { groupId: undefined } : {}),
+  groupId: deletedIds.has(String(row.groupId)) ? undefined : undefined,
   mixer: {
     ...trackStatePayload(row).mixer,
-    ...(deletedIds.has(String(row.outputTargetId)) ? { outputTargetId: undefined } : {}),
+    outputTargetId: deletedIds.has(String(row.outputTargetId)) ? undefined : undefined,
     sends: row.sends
       .filter((send: any) => !deletedIds.has(String(send.targetId)))
       .map((send: any) => ({
         targetId: String(send.targetId),
         amount: send.amount,
-        ...(send.tap === undefined ? {} : { tap: send.tap }),
+        tap: send.tap,
       })),
   },
 });
@@ -142,29 +140,29 @@ const postDeleteTrackState = (row: any, deletedIds: Set<string>, index: number) 
 const clipPayload = (row: Doc<"clips">) => ({
   projectId: row.projectId,
   trackId: String(row.trackId),
-  ...(row.historyRef === undefined ? {} : { historyRef: row.historyRef }),
+  historyRef: row.historyRef,
   startSec: row.startSec,
   duration: row.duration,
-  ...(row.sourceAssetKey === undefined ? {} : { sourceAssetKey: row.sourceAssetKey }),
-  ...(row.sourceKind === undefined ? {} : { sourceKind: row.sourceKind }),
-  ...(row.sourceDurationSec === undefined ? {} : { sourceDurationSec: row.sourceDurationSec }),
-  ...(row.sourceSampleRate === undefined ? {} : { sourceSampleRate: row.sourceSampleRate }),
-  ...(row.sourceChannelCount === undefined ? {} : { sourceChannelCount: row.sourceChannelCount }),
-  ...(row.leftPadSec === undefined ? {} : { leftPadSec: row.leftPadSec }),
-  ...(row.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: row.bufferOffsetSec }),
-  ...(row.audioWarp === undefined ? {} : { audioWarp: row.audioWarp }),
-  ...(row.gain === undefined ? {} : { gain: row.gain }),
-  ...(row.fades === undefined ? {} : { fades: row.fades }),
-  ...(row.color === undefined ? {} : { color: row.color }),
-  ...(row.name === undefined ? {} : { name: row.name }),
-  ...(row.sampleUrl === undefined ? {} : { sampleUrl: row.sampleUrl }),
-  ...(row.midi === undefined ? {} : { midi: row.midi }),
-  ...(row.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: row.midiOffsetBeats }),
+  sourceAssetKey: row.sourceAssetKey,
+  sourceKind: row.sourceKind,
+  sourceDurationSec: row.sourceDurationSec,
+  sourceSampleRate: row.sourceSampleRate,
+  sourceChannelCount: row.sourceChannelCount,
+  leftPadSec: row.leftPadSec,
+  bufferOffsetSec: row.bufferOffsetSec,
+  audioWarp: row.audioWarp,
+  gain: row.gain,
+  fades: row.fades,
+  color: row.color,
+  name: row.name,
+  sampleUrl: row.sampleUrl,
+  midi: row.midi,
+  midiOffsetBeats: row.midiOffsetBeats,
 });
 const ownershipPayload = (row: Doc<"ownerships">) => ({
   projectId: row.projectId,
   ownerUserId: row.ownerUserId,
-  ...(row.role === undefined ? {} : { role: row.role }),
+  role: row.role,
 });
 const assetPayload = (row: Doc<"samples">) => ({
   projectId: row.projectId,
@@ -175,19 +173,19 @@ const assetPayload = (row: Doc<"samples">) => ({
   sizeBytes: row.sizeBytes,
   contentSha256: row.contentSha256,
   r2Key: row.r2Key,
-  ...(row.duration === undefined ? {} : { duration: row.duration }),
-  ...(row.sampleRate === undefined ? {} : { sampleRate: row.sampleRate }),
-  ...(row.channelCount === undefined ? {} : { channelCount: row.channelCount }),
+  duration: row.duration,
+  sampleRate: row.sampleRate,
+  channelCount: row.channelCount,
   ownerUserId: row.ownerUserId,
-  ...(row.folderId === undefined ? {} : { folderId: row.folderId }),
+  folderId: row.folderId,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
 const automationPayload = (row: Doc<"automationEnvelopes">) => ({
   projectId: row.projectId,
   targetKind: row.targetKind,
-  ...(row.trackId === undefined ? {} : { trackId: String(row.trackId) }),
-  ...(row.effectInstanceId === undefined ? {} : { effectInstanceId: row.effectInstanceId }),
+  trackId: row.trackId === undefined ? undefined : String(row.trackId),
+  effectInstanceId: row.effectInstanceId,
   targetKey: row.targetKey,
   parameterId: row.parameterId,
   enabled: row.enabled,
@@ -207,13 +205,13 @@ const effectPayload = (row: Doc<"effects">): RecoveryEffect => ({
     : { kind: "track", trackId: String(row.trackId) },
   index: row.index,
   processor: persistedProcessorSnapshotSchema.parse({ kind: row.type, params: row.params }),
-  ...(row.instanceId === undefined ? {} : { instanceId: row.instanceId }),
+  instanceId: row.instanceId,
   createdAt: row.createdAt,
 });
 
 const removeInstrumentAutomation = (rows: Doc<"automationEnvelopes">[], instruments: Doc<"effects">[]) => {
   const instanceIds = new Set(instruments.flatMap((row) => {
-    const instrument = normalizePersistedInstrumentParams(row.type, row.instanceId, row.params);
+    const instrument = normalizePersistedInstrumentParams(row.type, row.instanceId ?? null, row.params);
     return instrument?.instanceId ? [instrument.instanceId] : [];
   }));
   return rows.filter((row) => {
@@ -224,7 +222,7 @@ const removeInstrumentAutomation = (rows: Doc<"automationEnvelopes">[], instrume
   });
 };
 
-export const isRecoverableAction = (action: { kind: string }) => recoveryKinds.has(action.kind);
+export const isRecoverableAction = (action: ControlActionV1): action is RecoverableAction => recoveryKinds.has(action.kind);
 
 export const captureRecoveryPayload = async (
   ctx: RecoveryCtx,
@@ -375,8 +373,8 @@ export const captureRecoveryPayload = async (
     if (!root || !rootOwnership) return null;
     const selectedIds = action.kind === "track.delete"
       ? collectDeletedTrackIdsV1(merged.map((track) => ({
-          id: String(track._id), index: track.index, ...(track.groupId ? { groupId: String(track.groupId) } : {}),
-          ...(track.outputTargetId ? { outputTargetId: String(track.outputTargetId) } : {}),
+          id: String(track._id), index: track.index, groupId: track.groupId ? String(track.groupId) : undefined,
+          outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
           sends: track.sends.map((send: any) => ({ targetTrackId: String(send.targetId) })),
         })), String(rootId))
       : new Set([String(rootId)]);
@@ -431,12 +429,12 @@ export const captureRecoveryPayload = async (
         after: {
           ...trackStatePayload(child),
           index: child.index > root.index ? child.index - 1 : child.index,
-          ...(root.groupId ? { groupId: String(root.groupId) } : { groupId: undefined }),
+          groupId: root.groupId ? String(root.groupId) : undefined,
           mixer: {
             ...trackStatePayload(child).mixer,
-            ...(String(child.outputTargetId) === String(rootId)
-              ? root.groupId ? { outputTargetId: String(root.groupId) } : { outputTargetId: undefined }
-              : {}),
+            outputTargetId: String(child.outputTargetId) === String(rootId)
+              ? root.groupId ? String(root.groupId) : undefined
+              : undefined,
           },
         },
       })),
@@ -644,16 +642,16 @@ const restoreEffectBundle = async (
     const track = await ensureEffectTarget(ctx, projectId, item.effect, actionIndex);
     const instrument = normalizePersistedInstrumentParams(
       item.effect.processor.kind,
-      item.effect.instanceId,
+      item.effect.instanceId ?? null,
       item.effect.processor.params,
     );
     const id = await ctx.db.insert("effects", {
       projectId: item.effect.projectId,
       targetType: item.effect.target.kind,
-      ...(track === undefined ? {} : { trackId: track._id }),
+      trackId: track === undefined ? undefined : track._id,
       index: item.effect.index,
       type: instrument ? "instrument" : item.effect.processor.kind,
-      ...(item.effect.instanceId === undefined ? {} : { instanceId: item.effect.instanceId }),
+      instanceId: item.effect.instanceId,
       params: instrument ?? item.effect.processor.params,
       createdAt: item.effect.createdAt,
     });
@@ -669,8 +667,8 @@ const restoreEffectBundle = async (
     const id = await ctx.db.insert("automationEnvelopes", {
       projectId: automation.projectId,
       targetKind: automation.targetKind,
-      ...(track === undefined ? {} : { trackId: track._id }),
-      ...(automation.effectInstanceId === undefined ? {} : { effectInstanceId: automation.effectInstanceId }),
+      trackId: track === undefined ? undefined : track._id,
+      effectInstanceId: automation.effectInstanceId,
       targetKey: automation.targetKey,
       parameterId: automation.parameterId,
       enabled: automation.enabled,
@@ -777,10 +775,10 @@ const restoreTrackBundle = async (
       projectId: entry.track.projectId,
       name: entry.track.name,
       index,
-      ...(entry.track.kind === undefined ? {} : { kind: entry.track.kind }),
-      ...(entry.track.historyRef === undefined ? {} : { historyRef: entry.track.historyRef }),
-      ...(entry.track.collapsed === undefined ? {} : { collapsed: entry.track.collapsed }),
-      ...(entry.track.color === undefined ? {} : { color: entry.track.color }),
+      kind: entry.track.kind,
+      historyRef: entry.track.historyRef,
+      collapsed: entry.track.collapsed,
+      color: entry.track.color,
     });
     trackIds.set(entry.id, id);
     mappings.push({ entity: "track", sourceId: entry.id, restoredId: String(id) });
@@ -794,22 +792,22 @@ const restoreTrackBundle = async (
     const sends = entry.track.mixer.sends.map((send: any) => {
       const targetId = resolve(send.targetId);
       if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
-      return { targetId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }) };
+      return { targetId, amount: send.amount, tap: send.tap };
     });
     if (entry.track.groupId && !groupId) throw new ControlDomainError("not-found", "Recovery group target is unavailable.", input.actionIndex);
     if (entry.track.mixer.outputTargetId && !outputTargetId) throw new ControlDomainError("not-found", "Recovery output target is unavailable.", input.actionIndex);
     await ctx.db.patch(id, groupId === undefined ? {} : { groupId });
     await ctx.db.insert("mixerChannels", {
       projectId: entry.track.projectId, trackId: id, volume: entry.track.mixer.volume,
-      ...(entry.track.mixer.muted === undefined ? {} : { muted: entry.track.mixer.muted }),
-      ...(entry.track.mixer.soloed === undefined ? {} : { soloed: entry.track.mixer.soloed }),
+      muted: entry.track.mixer.muted,
+      soloed: entry.track.mixer.soloed,
       channelRole: entry.track.mixer.channelRole,
-      ...(outputTargetId === undefined ? {} : { outputTargetId }),
+      outputTargetId,
       sends,
     });
     await ctx.db.insert("ownerships", {
       projectId: entry.ownership.projectId, ownerUserId: entry.ownership.ownerUserId,
-      ...(entry.ownership.role === undefined ? {} : { role: entry.ownership.role }), trackId: id,
+      role: entry.ownership.role, trackId: id,
     });
   }
   for (const survivor of input.survivors) {
@@ -821,7 +819,7 @@ const restoreTrackBundle = async (
     const sends = survivor.before.mixer.sends.map((send: any) => {
       const targetId = resolve(send.targetId);
       if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
-      return { targetId, amount: send.amount, ...(send.tap === undefined ? {} : { tap: send.tap }) };
+      return { targetId, amount: send.amount, tap: send.tap };
     });
     await ctx.db.patch(id, groupId === undefined ? { groupId: undefined } : { groupId });
     await ctx.db.patch(channel._id, {
@@ -844,9 +842,9 @@ const restoreTrackBundle = async (
     ))) throw new ControlDomainError("validation", "Recovery processor collides with current state.", input.actionIndex);
     const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId, effect.processor.params);
     const id = await ctx.db.insert("effects", {
-      projectId: effect.projectId, targetType: effect.target.kind, ...(trackId === undefined ? {} : { trackId }),
+      projectId: effect.projectId, targetType: effect.target.kind, trackId,
       index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
-      ...(effect.instanceId === undefined ? {} : { instanceId: effect.instanceId }),
+      instanceId: effect.instanceId,
       params: instrument ?? effect.processor.params, createdAt: effect.createdAt,
     });
     mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
@@ -859,7 +857,7 @@ const restoreTrackBundle = async (
     const id = await ctx.db.insert("clips", { ...normalizedClip, trackId });
     await ctx.db.insert("ownerships", {
       projectId: item.ownership.projectId, ownerUserId: item.ownership.ownerUserId,
-      ...(item.ownership.role === undefined ? {} : { role: item.ownership.role }), clipId: id,
+      role: item.ownership.role, clipId: id,
     });
     mappings.push({ entity: "clip", sourceId: item.id, restoredId: String(id) });
   }
@@ -880,8 +878,8 @@ const restoreTrackBundle = async (
     const existing = await ctx.db.query("automationEnvelopes").withIndex("by_project_target_key", (q) => q.eq("projectId", input.projectId).eq("targetKey", targetKey)).unique();
     if (existing) throw new ControlDomainError("validation", "Recovery automation target collides with current state.", input.actionIndex);
     const id = await ctx.db.insert("automationEnvelopes", {
-      projectId: automation.projectId, targetKind: automation.targetKind, ...(trackId === undefined ? {} : { trackId }),
-      ...(automation.effectInstanceId === undefined ? {} : { effectInstanceId: automation.effectInstanceId }),
+      projectId: automation.projectId, targetKind: automation.targetKind, trackId,
+      effectInstanceId: automation.effectInstanceId,
       targetKey, parameterId, enabled: automation.enabled, points: automation.points, updatedAt: automation.updatedAt,
     });
     mappings.push({ entity: "automation", sourceId: item.id, restoredId: String(id) });
@@ -920,7 +918,7 @@ const restoredClipFields = (
   return {
     projectId: clip.projectId,
     trackId,
-    ...(clip.historyRef === undefined ? {} : { historyRef: clip.historyRef }),
+    historyRef: clip.historyRef,
     startSec: clip.startSec,
     duration: clip.duration,
     sourceAssetKey: clip.sourceAssetKey,
@@ -1014,7 +1012,7 @@ const restoreTimelineRange = async (
     await ctx.db.insert("ownerships", {
       projectId: ownership.projectId,
       ownerUserId: ownership.ownerUserId,
-      ...(ownership.role === undefined ? {} : { role: ownership.role }),
+      role: ownership.role,
       clipId: id,
     });
     mappings.push({ entity: "clip", sourceId: deletion.id, restoredId: String(id) });
@@ -1083,26 +1081,26 @@ export const restoreRecovery = async (
       trackId: track._id,
       startSec: data.clip.startSec,
       duration: data.clip.duration,
-      ...(data.clip.sourceAssetKey === undefined ? {} : { sourceAssetKey: data.clip.sourceAssetKey }),
-      ...(data.clip.sourceKind === undefined ? {} : { sourceKind: data.clip.sourceKind }),
-      ...(data.clip.sourceDurationSec === undefined ? {} : { sourceDurationSec: data.clip.sourceDurationSec }),
-      ...(data.clip.sourceSampleRate === undefined ? {} : { sourceSampleRate: data.clip.sourceSampleRate }),
-      ...(data.clip.sourceChannelCount === undefined ? {} : { sourceChannelCount: data.clip.sourceChannelCount }),
-      ...(data.clip.leftPadSec === undefined ? {} : { leftPadSec: data.clip.leftPadSec }),
-      ...(data.clip.bufferOffsetSec === undefined ? {} : { bufferOffsetSec: data.clip.bufferOffsetSec }),
-      ...(data.clip.audioWarp === undefined ? {} : { audioWarp: data.clip.audioWarp }),
-      ...(data.clip.gain === undefined ? {} : { gain: data.clip.gain }),
-      ...(data.clip.fades === undefined ? {} : { fades: data.clip.fades }),
-      ...(data.clip.color === undefined ? {} : { color: data.clip.color }),
-      ...(data.clip.name === undefined ? {} : { name: data.clip.name }),
-      ...(data.clip.sampleUrl === undefined ? {} : { sampleUrl: data.clip.sampleUrl }),
-      ...(midi === undefined ? {} : { midi }),
-      ...(data.clip.midiOffsetBeats === undefined ? {} : { midiOffsetBeats: data.clip.midiOffsetBeats }),
+      sourceAssetKey: data.clip.sourceAssetKey,
+      sourceKind: data.clip.sourceKind,
+      sourceDurationSec: data.clip.sourceDurationSec,
+      sourceSampleRate: data.clip.sourceSampleRate,
+      sourceChannelCount: data.clip.sourceChannelCount,
+      leftPadSec: data.clip.leftPadSec,
+      bufferOffsetSec: data.clip.bufferOffsetSec,
+      audioWarp: data.clip.audioWarp,
+      gain: data.clip.gain,
+      fades: data.clip.fades,
+      color: data.clip.color,
+      name: data.clip.name,
+      sampleUrl: data.clip.sampleUrl,
+      midi,
+      midiOffsetBeats: data.clip.midiOffsetBeats,
     });
     await ctx.db.insert("ownerships", {
       projectId: data.ownership.projectId,
       ownerUserId: data.ownership.ownerUserId,
-      ...(data.ownership.role === undefined ? {} : { role: data.ownership.role }),
+      role: data.ownership.role,
       clipId: id,
     });
     mappings.push({ entity: "clip", sourceId: data.clipId, restoredId: String(id) });
@@ -1129,11 +1127,11 @@ export const restoreRecovery = async (
       sizeBytes: asset.sizeBytes,
       contentSha256: asset.contentSha256,
       r2Key: asset.r2Key,
-      ...(asset.duration === undefined ? {} : { duration: asset.duration }),
-      ...(asset.sampleRate === undefined ? {} : { sampleRate: asset.sampleRate }),
-      ...(asset.channelCount === undefined ? {} : { channelCount: asset.channelCount }),
+      duration: asset.duration,
+      sampleRate: asset.sampleRate,
+      channelCount: asset.channelCount,
       ownerUserId: asset.ownerUserId,
-      ...(asset.folderId === undefined ? {} : { folderId: asset.folderId }),
+      folderId: asset.folderId,
       createdAt: asset.createdAt,
       updatedAt: asset.updatedAt,
     });
@@ -1148,8 +1146,8 @@ export const restoreRecovery = async (
     const id = await ctx.db.insert("automationEnvelopes", {
       projectId: data.automation.projectId,
       targetKind: data.automation.targetKind,
-      ...(track === undefined ? {} : { trackId: track._id }),
-      ...(data.automation.effectInstanceId === undefined ? {} : { effectInstanceId: data.automation.effectInstanceId }),
+      trackId: track === undefined ? undefined : track._id,
+      effectInstanceId: data.automation.effectInstanceId,
       targetKey: data.automation.targetKey,
       parameterId: data.automation.parameterId,
       enabled: data.automation.enabled,

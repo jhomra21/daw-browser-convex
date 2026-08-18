@@ -83,7 +83,7 @@ function getSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
 export function applySaturatorNodeParams(nodes: {
   driveGain: GainNode
   colorFilter: BiquadFilterNode
-  shaper: WaveShaperNode
+  waveNode: ReturnType<BaseAudioContext['createWaveShaper']>
   dryGain: GainNode
   wetGain: GainNode
   outputGain: GainNode
@@ -94,8 +94,8 @@ export function applySaturatorNodeParams(nodes: {
   nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
   nodes.colorFilter.Q.value = 0.8
   nodes.colorFilter.gain.value = normalized.color ? normalized.colorAmount * 12 : 0
-  nodes.shaper.curve = getSaturatorCurve(normalized.curve)
-  nodes.shaper.oversample = '4x'
+  nodes.waveNode.curve = getSaturatorCurve(normalized.curve)
+  nodes.waveNode.oversample = '4x'
   nodes.dryGain.gain.value = 1 - normalized.dryWet
   nodes.wetGain.gain.value = normalized.dryWet
   nodes.outputGain.gain.value = dbToGain(normalized.outputDb)
@@ -105,7 +105,7 @@ export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): numbe
   const normalized = normalizeDelayParams(params)
   if (normalized.mode === 'time') return Math.min(DELAY_MAX_DELAY_TIME_SEC, normalized.timeMs / 1000)
   const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : 120)
-  const multipliers: Record<string, number> = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
+  const multipliers = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
   return Math.min(DELAY_MAX_DELAY_TIME_SEC, beatSec * (multipliers[normalized.syncDivision] ?? 0.5))
 }
 

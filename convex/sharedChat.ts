@@ -14,7 +14,7 @@ export const listLatest = query({
       .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
       .collect();
 
-    const n = Math.max(1, Math.min(500, typeof limit === 'number' ? limit : 200));
+    const n = Math.max(1, Math.min(500, limit ?? 200));
     const start = rows.length > n ? rows.length - n : 0;
     const recent = rows.slice(start);
     recent.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
@@ -43,7 +43,7 @@ export const send = mutation({
       createdAt: Date.now(),
       senderName: senderName && senderName.trim() ? senderName.trim().slice(0, 120) : undefined,
       kind: 'text',
-    } as any);
+    });
 
     return null;
   },

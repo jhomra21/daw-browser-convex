@@ -1,4 +1,5 @@
 import type { MutationCtx } from "./_generated/server";
+import { parseJsonValue, type JsonValueInput } from "@daw-browser/shared";
 
 export const readSharedOperationResult = async (
   ctx: MutationCtx,
@@ -35,7 +36,7 @@ export const runSharedOperationOnce = async <T>(
     projectId?: string
     userId: string
     operationId?: string
-    isResult: (value: unknown) => value is T
+    isResult: (value: JsonValueInput) => value is T
     run: () => Promise<T>
   },
 ) => {
@@ -45,7 +46,8 @@ export const runSharedOperationOnce = async <T>(
     userId: input.userId,
     operationId: input.operationId,
   })
-  if (existingResult && input.isResult(existingResult.result)) return existingResult.result
+  const persistedResult = existingResult ? parseJsonValue(existingResult.result) : undefined
+  if (persistedResult !== undefined && input.isResult(persistedResult)) return persistedResult
   const result = await input.run()
   await writeSharedOperationResult(ctx, {
     projectId: input.projectId,

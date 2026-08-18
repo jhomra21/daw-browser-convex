@@ -418,6 +418,9 @@ int main(int argc, char* argv[]) {
   if (!Check(service.Start(NoPluginStartup(), Configuration(argv[1]), Request()), "worker control service launch failed")) return EXIT_FAILURE;
   const auto firstWorkerGeneration = service.workerGeneration();
   if (!Check(firstWorkerGeneration != 0, "worker generation was not exposed after start")) return EXIT_FAILURE;
+  if (!Check(service.workerProcessGroupId() > 0
+    && service.workerProcessGroupId() != getpgrp(),
+    "worker was not launched in a distinct process group")) return EXIT_FAILURE;
   const WorkerCallbackPort callback = service.callbackPort();
   if (!Check(
     callback.Submit({.slotIndex = 0, .sequence = 7, .numSamples = 64, .events = events}) == WorkerSubmissionStatus::kAccepted,
@@ -484,6 +487,35 @@ int main(int argc, char* argv[]) {
   static_cast<void>(deadCallback.Submit({.slotIndex = 0, .sequence = 8, .numSamples = 64, .events = events}));
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   if (!Check(deadWorker.health() == WorkerHealth::kFaulted, "worker death was not surfaced")) return EXIT_FAILURE;
+  if (!Check(deadWorker.workerProcessGroupId() > 0,
+    "exited worker lost its process-group identity before cleanup")) return EXIT_FAILURE;
   deadWorker.Stop();
+  if (!Check(deadWorker.workerProcessGroupId() == -1,
+    "worker process-group identity was not cleared after cleanup")) return EXIT_FAILURE;
+  deadWorker.Stop();
+
+  WorkerControlService missedWorker;
+  if (!Check(missedWorker.Start(NoPluginStartup(), Configuration(argv[1]), Request()),
+    "watchdog test child launch failed")) return EXIT_FAILURE;
+  const auto missedCallback = missedWorker.callbackPort();
+  if (!Check(missedCallback.PublishDiagnostic({
+    .kind = WorkerDiagnosticKind::kMiss,
+    .sequence = 11,
+  }), "callback miss diagnostic was not queued")) return EXIT_FAILURE;
+  for (int attempt = 0; attempt < 100
+    && missedWorker.health() != WorkerHealth::kFaulted; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!Check(missedWorker.health() == WorkerHealth::kFaulted
+    && missedCallback.health() == WorkerHealth::kFaulted,
+    "callback miss did not fault the worker")) return EXIT_FAILURE;
+  if (!Check(missedWorker.workerGeneration() != 0,
+    "callback miss invalidated transport before normal Stop")) return EXIT_FAILURE;
+  if (!Check(missedWorker.workerProcessGroupId() == -1,
+    "callback miss did not terminate the worker child")) return EXIT_FAILURE;
+  if (!Check(!missedCallback.ReadCompleted(0, 11),
+    "faulted callback transport reported a completion")) return EXIT_FAILURE;
+  missedWorker.Stop();
+  missedWorker.Stop();
   return EXIT_SUCCESS;
 }

@@ -117,6 +117,7 @@ class WorkerControlService {
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] WorkerHealth health() const noexcept;
   [[nodiscard]] std::uint64_t workerGeneration() const noexcept;
+  [[nodiscard]] int workerProcessGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   void SetDiagnosticListener(DiagnosticListener listener, void* context) noexcept;
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(

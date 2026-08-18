@@ -214,7 +214,8 @@ bool PushDiagnostic(SharedHeader& header, const WorkerDiagnostic diagnostic) {
 
 bool WaitForChildExit(const int childProcessId, const long milliseconds) {
   int status = 0;
-  if (waitpid(childProcessId, &status, WNOHANG) == childProcessId) return true;
+  const auto initial = waitpid(childProcessId, &status, WNOHANG);
+  if (initial == childProcessId || (initial < 0 && errno == ECHILD)) return true;
   const auto queue = kqueue();
   if (queue < 0) return false;
   struct kevent change {};
@@ -223,7 +224,8 @@ bool WaitForChildExit(const int childProcessId, const long milliseconds) {
     close(queue);
     return false;
   }
-  if (waitpid(childProcessId, &status, WNOHANG) == childProcessId) {
+  const auto beforeWait = waitpid(childProcessId, &status, WNOHANG);
+  if (beforeWait == childProcessId || (beforeWait < 0 && errno == ECHILD)) {
     close(queue);
     return true;
   }
@@ -232,7 +234,21 @@ bool WaitForChildExit(const int childProcessId, const long milliseconds) {
   const auto received = kevent(queue, nullptr, 0, &event, 1, &timeout);
   close(queue);
   if (received != 1) return false;
-  return waitpid(childProcessId, &status, 0) == childProcessId;
+  const auto finalWait = waitpid(childProcessId, &status, 0);
+  return finalWait == childProcessId || (finalWait < 0 && errno == ECHILD);
+}
+
+bool SignalWorker(const int childProcessId, const int processGroupId, const int signal) {
+  if (childProcessId < 0) return true;
+  if (processGroupId > 0 && processGroupId != getpgrp()) {
+    if (kill(-processGroupId, signal) == 0) return true;
+  }
+  return kill(childProcessId, signal) == 0 || errno == ESRCH;
+}
+
+bool SignalWorkerGroupOnly(const int processGroupId, const int signal) {
+  if (processGroupId <= 0 || processGroupId == getpgrp()) return false;
+  return kill(-processGroupId, signal) == 0 || errno == ESRCH;
 }
 
 }  // namespace
@@ -791,9 +807,10 @@ bool WorkerRuntime::Start(
   posix_spawnattr_t attributes{};
   const auto actionsReady = posix_spawn_file_actions_init(&fileActions) == 0;
   const auto attributesReady = actionsReady && posix_spawnattr_init(&attributes) == 0;
-  short flags = POSIX_SPAWN_CLOEXEC_DEFAULT;
+  const short flags = POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP;
   const auto spawnConfigured = attributesReady
     && posix_spawnattr_setflags(&attributes, flags) == 0
+    && posix_spawnattr_setpgroup(&attributes, 0) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, transport->fileDescriptor(), STDIN_FILENO) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, control[0], STDOUT_FILENO) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, response[1], STDERR_FILENO) == 0;
@@ -816,6 +833,7 @@ bool WorkerRuntime::Start(
   controlWriteDescriptor_ = control[1];
   responseReadDescriptor_ = response[0];
   childProcessId_ = child;
+  childProcessGroupId_ = child;
   transport_ = std::move(*transport);
   if (!WriteWorkerStartupRequest(controlWriteDescriptor_, transport_->token(), startup)) {
     Stop();
@@ -829,9 +847,19 @@ bool WorkerRuntime::Start(
 
 void WorkerRuntime::Stop() {
   bool childAlive = childProcessId_ >= 0;
+  bool childGroupIdentitySafe = false;
+  bool childAlreadyExited = false;
   if (childAlive) {
-    int status = 0;
-    childAlive = waitpid(childProcessId_, &status, WNOHANG) == 0;
+    siginfo_t childInfo{};
+    const auto result = waitid(P_PID, childProcessId_, &childInfo, WEXITED | WNOHANG | WNOWAIT);
+    if (result == 0) {
+      childAlreadyExited = childInfo.si_pid == childProcessId_;
+      childAlive = !childAlreadyExited;
+      childGroupIdentitySafe = true;
+    } else {
+      childAlive = errno != ECHILD;
+      childGroupIdentitySafe = childAlive;
+    }
   }
   if (controlWriteDescriptor_ >= 0) {
     if (childAlive) {
@@ -846,16 +874,69 @@ void WorkerRuntime::Stop() {
   }
   if (childProcessId_ >= 0 && childAlive) {
     if (!WaitForChildExit(childProcessId_, 250)) {
-      kill(childProcessId_, SIGTERM);
+      static_cast<void>(SignalWorker(childProcessId_, childProcessGroupId_, SIGTERM));
       if (!WaitForChildExit(childProcessId_, 250)) {
-        kill(childProcessId_, SIGKILL);
+        static_cast<void>(SignalWorker(childProcessId_, childProcessGroupId_, SIGKILL));
         int status = 0;
         static_cast<void>(waitpid(childProcessId_, &status, 0));
       }
     }
   }
+  if (childProcessId_ >= 0 && childGroupIdentitySafe) {
+    // The direct child may have exited during the wait, but its process group
+    // may still contain descendants. The group ID cannot be reused while that
+    // group exists; ESRCH is the safe idempotent outcome when it is already
+    // gone.
+    static_cast<void>(SignalWorkerGroupOnly(childProcessGroupId_, SIGKILL));
+  }
+  if (childProcessId_ >= 0 && childAlreadyExited) {
+    int status = 0;
+    static_cast<void>(waitpid(childProcessId_, &status, 0));
+  }
   childProcessId_ = -1;
+  childProcessGroupId_ = -1;
   transport_.reset();
+}
+
+bool WorkerRuntime::TerminateForFault() {
+  if (!transport_) return false;
+  bool terminated = true;
+  if (childProcessId_ >= 0) {
+    siginfo_t childInfo{};
+    const auto result = waitid(P_PID, childProcessId_, &childInfo, WEXITED | WNOHANG | WNOWAIT);
+    const auto childAlreadyExited = result == 0 && childInfo.si_pid == childProcessId_;
+    const auto childIsRunning = result == 0 && childInfo.si_pid == 0;
+    if (childIsRunning || (result < 0 && errno != ECHILD)) {
+      static_cast<void>(SignalWorker(childProcessId_, childProcessGroupId_, SIGKILL));
+      terminated = WaitForChildExit(childProcessId_, 250);
+      if (!terminated) {
+        int status = 0;
+        static_cast<void>(SignalWorker(childProcessId_, childProcessGroupId_, SIGKILL));
+        const auto waited = waitpid(childProcessId_, &status, 0);
+        terminated = waited == childProcessId_ || (waited < 0 && errno == ECHILD);
+      }
+      static_cast<void>(SignalWorkerGroupOnly(childProcessGroupId_, SIGKILL));
+    } else if (childAlreadyExited) {
+      // The direct child already exited. Descendants can remain in its
+      // process group, so target the group before reaping and clearing its
+      // identity.
+      terminated = SignalWorkerGroupOnly(childProcessGroupId_, SIGKILL);
+      int status = 0;
+      static_cast<void>(waitpid(childProcessId_, &status, 0));
+    }
+    childProcessId_ = -1;
+    childProcessGroupId_ = -1;
+  }
+  if (controlWriteDescriptor_ >= 0) {
+    close(controlWriteDescriptor_);
+    controlWriteDescriptor_ = -1;
+  }
+  if (responseReadDescriptor_ >= 0) {
+    close(responseReadDescriptor_);
+    responseReadDescriptor_ = -1;
+  }
+  transport_->PublishHealth(WorkerHealth::kFaulted);
+  return terminated;
 }
 
 bool WorkerRuntime::SetState(const WorkerState& state) {
@@ -996,10 +1077,15 @@ WorkerHealth WorkerRuntime::callbackHealth() const {
 WorkerHealth WorkerRuntime::health() const {
   if (!transport_) return WorkerHealth::kStopped;
   if (childProcessId_ >= 0) {
-    int status = 0;
-    if (waitpid(childProcessId_, &status, WNOHANG) == childProcessId_) return WorkerHealth::kFaulted;
+    siginfo_t childInfo{};
+    const auto result = waitid(P_PID, childProcessId_, &childInfo, WEXITED | WNOHANG | WNOWAIT);
+    if (result == 0 && childInfo.si_pid == childProcessId_) return WorkerHealth::kFaulted;
   }
   return transport_->health();
+}
+
+int WorkerRuntime::processGroupId() const noexcept {
+  return childProcessGroupId_;
 }
 
 std::optional<WorkerDiagnostic> WorkerRuntime::ReadDiagnostic() {

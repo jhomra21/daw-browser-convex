@@ -401,6 +401,9 @@ class WorkerRuntime {
     const WorkerTransportRequest& request
   );
   void Stop();
+  // Control-plane-only watchdog termination. Keeps the shared transport alive
+  // until the host has quiesced callback ports and calls Stop().
+  [[nodiscard]] bool TerminateForFault();
   [[nodiscard]] bool SetState(const WorkerState& state);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool Restart();
@@ -437,6 +440,7 @@ class WorkerRuntime {
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] WorkerHealth callbackHealth() const;
   [[nodiscard]] WorkerHealth health() const;
+  [[nodiscard]] int processGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;
   [[nodiscard]] const WorkerTransport* transport() const;
@@ -446,6 +450,7 @@ class WorkerRuntime {
   int controlWriteDescriptor_ = -1;
   int responseReadDescriptor_ = -1;
   int childProcessId_ = -1;
+  int childProcessGroupId_ = -1;
   std::size_t restartCount_ = 0;
   std::optional<WorkerStartupRequest> startup_;
   WorkerHostConfiguration configuration_;

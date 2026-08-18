@@ -16,6 +16,9 @@
 namespace {
 
 constexpr int kEditorPollTimeoutMilliseconds = 8;
+// Commercial plugins may open several files and sockets; retain headroom
+// without allowing unbounded descriptor exhaustion.
+constexpr rlim_t kWorkerNoFileLimit = 512;
 
 template <typename Number>
 bool Parse(const std::string_view text, Number& result) {
@@ -123,6 +126,8 @@ bool WritePreflightHello(const daw::plugin_host::WorkerHello& hello) {
 int main(const int argc, char* argv[]) {
   const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};
   if (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;
+  const rlimit noFileLimit{.rlim_cur = kWorkerNoFileLimit, .rlim_max = kWorkerNoFileLimit};
+  if (setrlimit(RLIMIT_NOFILE, &noFileLimit) != 0) return EXIT_FAILURE;
   if (argc == 28 && std::string_view(argv[1]) == "--preflight"
     && std::string_view(argv[2]) == "--instance-id"
     && std::string_view(argv[4]) == "--bundle-path"

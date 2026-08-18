@@ -23,6 +23,9 @@ constexpr std::size_t kMaximumClasses = 1'024;
 constexpr std::size_t kMaximumTextBytes = 256;
 constexpr std::string_view kScannerVersion = "1";
 constexpr std::string_view kSdkVersion = "3.8.0";
+// Module inspection may open vendor resources; keep enough descriptors for
+// real bundles while bounding scanner-side descriptor exhaustion.
+constexpr rlim_t kScannerNoFileLimit = 512;
 
 struct Request {
   std::string requestId;
@@ -250,6 +253,8 @@ std::string ResultResponse(const Request& request, const std::string& bundlePath
 int main() {
   const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};
   if (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;
+  const rlimit noFileLimit{.rlim_cur = kScannerNoFileLimit, .rlim_max = kScannerNoFileLimit};
+  if (setrlimit(RLIMIT_NOFILE, &noFileLimit) != 0) return EXIT_FAILURE;
   const auto raw = ReadFrame();
   if (!raw) return EXIT_FAILURE;
   const auto request = ParseRequest(*raw);

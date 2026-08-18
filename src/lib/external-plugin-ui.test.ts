@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test";
 import { externalProcessorSchema } from "@daw-browser/external-plugins";
 import {
+  canUseVst3CatalogAction,
   externalProcessorStatusLabel,
+  hasVst3TrustAcknowledgement,
+  saveVst3TrustAcknowledgement,
   selectExternalProcessorsForTarget,
   vst3ScanHealthLabel,
+  vst3TrustAcknowledgementStorageKey,
+  vst3TrustDisclosure,
 } from "./external-plugin-ui";
 
 const processor = (input: {
@@ -47,6 +52,30 @@ const processor = (input: {
 test("labels VST3 catalog health for the effects browser", () => {
   expect(vst3ScanHealthLabel("scanned")).toBe("Scanned");
   expect(vst3ScanHealthLabel("scan-failed")).toBe("Scan failed");
+});
+
+test("requires and persists explicit VST3 trust acknowledgement", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+  };
+
+  expect(hasVst3TrustAcknowledgement(storage)).toBeFalse();
+  saveVst3TrustAcknowledgement(storage);
+  expect(values.get(vst3TrustAcknowledgementStorageKey)).toBe("true");
+  expect(hasVst3TrustAcknowledgement(storage)).toBeTrue();
+  expect(vst3TrustDisclosure.body).toContain("not a security sandbox");
+});
+
+test("gates scanner-capable catalog actions but keeps reading and removal available", () => {
+  expect(canUseVst3CatalogAction("read", false)).toBeTrue();
+  expect(canUseVst3CatalogAction("remove-directory", false)).toBeTrue();
+  expect(canUseVst3CatalogAction("add-directory", false)).toBeFalse();
+  expect(canUseVst3CatalogAction("scan", false)).toBeFalse();
+  expect(canUseVst3CatalogAction("scan", true)).toBeTrue();
 });
 
 test("shows bypass and degraded status for inserted external effects", () => {

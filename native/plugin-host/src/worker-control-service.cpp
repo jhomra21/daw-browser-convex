@@ -83,8 +83,8 @@ bool WorkerControlService::Start(
 void WorkerControlService::Stop() {
   if (running_.exchange(false, std::memory_order_acq_rel)) {
     NotifyService();
-    if (thread_.joinable()) thread_.join();
   }
+  if (thread_.joinable()) thread_.join();
   runtime_.Stop();
   health_.store(WorkerHealth::kStopped, std::memory_order_release);
 }
@@ -123,6 +123,10 @@ WorkerHealth WorkerControlService::health() const noexcept {
 std::uint64_t WorkerControlService::workerGeneration() const noexcept {
   const auto* transport = runtime_.transport();
   return transport == nullptr ? 0 : transport->token();
+}
+
+int WorkerControlService::workerProcessGroupId() const noexcept {
+  return runtime_.processGroupId();
 }
 
 std::optional<WorkerDiagnostic> WorkerControlService::ReadDiagnostic() {
@@ -269,6 +273,7 @@ void WorkerControlService::Run() {
       diagnosticContext_.load(std::memory_order_relaxed)
     );
     WorkerDiagnostic callbackDiagnostic{};
+    bool callbackFault = false;
     while (callbackDiagnostics_.TryPop(callbackDiagnostic)) {
       if (callbackDiagnostic.kind != WorkerDiagnosticKind::kParameterEdit) {
         static_cast<void>(diagnostics_.TryPush(callbackDiagnostic));
@@ -277,6 +282,19 @@ void WorkerControlService::Run() {
       if (listener != nullptr) {
         listener(callbackDiagnostic, diagnosticContext_.load(std::memory_order_relaxed));
       }
+      if (callbackDiagnostic.kind == WorkerDiagnosticKind::kMiss) {
+        {
+          std::lock_guard lock(control_mutex_);
+          static_cast<void>(runtime_.TerminateForFault());
+        }
+        health_.store(WorkerHealth::kFaulted, std::memory_order_release);
+        running_.store(false, std::memory_order_release);
+        callbackFault = true;
+      }
+    }
+    if (callbackFault) {
+      PublishFault();
+      break;
     }
     if (currentHealth == WorkerHealth::kFaulted && previousHealth != WorkerHealth::kFaulted) {
       PublishFault();

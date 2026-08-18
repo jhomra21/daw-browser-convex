@@ -1,4 +1,4 @@
-import { assert } from '@daw-browser/shared'
+import { assertDefined } from '@daw-browser/shared'
 import type { ResolvedMixerGraph } from './types'
 import { createMixerRoutingPlan } from './graph-contract'
 import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
@@ -53,8 +53,10 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
 
   for (const channel of plan.channels) {
     const channelId = channel.channelId
-    const nodes = options.trackNodes.get(channelId)
-    assert(nodes, `Missing live mixer nodes for track ${channelId}`)
+    const nodes = assertDefined(
+      options.trackNodes.get(channelId),
+      `Missing live mixer nodes for track ${channelId}`,
+    )
 
     const staticGainSync = options.staticGainSync?.get(channelId)
     if (!options.staticGainSync || staticGainSync?.gain) nodes.gain.gain.value = channel.gain
@@ -62,11 +64,11 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     nodes.postFx.connect(nodes.gain)
     nodes.gain.connect(nodes.output)
     const targetNodes = channel.outputTargetId
-      ? options.trackNodes.get(channel.outputTargetId)
+      ? assertDefined(
+        options.trackNodes.get(channel.outputTargetId),
+        `Missing output target nodes for track ${channel.outputTargetId}`,
+      )
       : undefined
-    if (channel.outputTargetId) {
-      assert(targetNodes, `Missing output target nodes for track ${channel.outputTargetId}`)
-    }
     const outputTarget = targetNodes?.input ?? options.masterInput
     const outputTargetId = channel.outputTargetId ?? MASTER_ROUTE_TARGET
     const outputEdgeId = mixerRouteKey(channelId, outputTargetId, 'output')
@@ -84,8 +86,10 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     }
 
     for (const send of channel.sends) {
-      const target = options.trackNodes.get(send.targetId)
-      assert(target, `Missing send target nodes for track ${send.targetId}`)
+      const target = assertDefined(
+        options.trackNodes.get(send.targetId),
+        `Missing send target nodes for track ${send.targetId}`,
+      )
       const sendSource = send.tap === 'pre-fx'
         ? nodes.input
         : send.tap === 'pre-fader'
@@ -96,8 +100,8 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       const delaySeconds = (timing.routeDelayFrames.get(edgeId) ?? 0) / options.sampleRate
       const existing = options.edgeRuntimes.get(edgeId)
       if (existing) {
-        assert(existing.gain, `Missing live mixer send gain for edge ${edgeId}`)
-        existing.gain.gain.value = send.amount
+        const gain = assertDefined(existing.gain, `Missing live mixer send gain for edge ${edgeId}`)
+        gain.gain.value = send.amount
         updateDelay(existing.delay, delaySeconds, options.currentTime)
       } else {
         const sendGain = options.createGain()

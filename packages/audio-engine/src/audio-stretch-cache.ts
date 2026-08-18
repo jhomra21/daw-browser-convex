@@ -38,7 +38,7 @@ const QUALITY_WARNING_MIN = 0.75
 const QUALITY_WARNING_MAX = 1.33
 const DEFAULT_PERSIST_MAX_BYTES = 256 * 1024 * 1024
 
-const toError = (error: unknown) => error instanceof Error ? error : new Error(String(error))
+const toError = <Value>(error: Value) => error instanceof Error ? error : new Error(String(error))
 
 const hashNumber = (hash: number, value: number) => {
   const scaled = Math.round(value * 1_000_000)

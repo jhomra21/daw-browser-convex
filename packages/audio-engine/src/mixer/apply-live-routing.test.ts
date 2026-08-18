@@ -3,9 +3,11 @@ import { applyLiveMixerGraph, clearLiveMixerEdges } from './apply-live-routing'
 import { resolveMixerGraph } from './resolve-routing'
 import { createMixerChannels } from './channels'
 
+type TestAudioNode = Record<never, never>
+
 const createParam = (value = 0) => ({
   value,
-  events: [] as Array<readonly [string, number, number]>,
+  events: Array<readonly [string, number, number]>(),
   cancelScheduledValues(time: number) { this.events.push(['cancel', 0, time]) },
   setValueAtTime(next: number, time: number) {
     this.value = next
@@ -19,10 +21,10 @@ const createParam = (value = 0) => ({
 
 const createNode = () => {
   const node = Object.create(null)
-  node.connections = new Set<unknown>()
+  node.connections = new Set()
   node.disconnectCount = 0
-  node.connect = (target: unknown) => node.connections.add(target)
-  node.disconnect = (target?: unknown) => {
+  node.connect = (target: TestAudioNode) => node.connections.add(target)
+  node.disconnect = (target?: TestAudioNode) => {
     node.disconnectCount += 1
     if (target) node.connections.delete(target)
     else node.connections.clear()

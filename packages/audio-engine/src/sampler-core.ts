@@ -2,12 +2,17 @@ import type { SamplerEnvelope, SamplerParams, SamplerZone } from '@daw-browser/s
 
 export type SamplerRoundRobinState = ReadonlyMap<number, number>
 
+type SamplerZoneSelection = {
+  zone?: SamplerZone
+  roundRobin: SamplerRoundRobinState
+}
+
 export function selectSamplerZone(
   zones: readonly SamplerZone[],
   note: number,
   velocity: number,
   roundRobin: SamplerRoundRobinState,
-): { zone?: SamplerZone; roundRobin: SamplerRoundRobinState } {
+): SamplerZoneSelection {
   const matches = zones.filter((zone) => note >= zone.keyLow && note <= zone.keyHigh && velocity >= zone.velocityLow && velocity <= zone.velocityHigh)
   if (matches.length === 0) return { roundRobin }
   const group = matches[0]?.roundRobinGroup ?? 0

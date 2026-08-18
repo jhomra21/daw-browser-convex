@@ -14,9 +14,9 @@ const DB_VERSION = 1
 const STORE_NAME = 'renders'
 
 const openStretchCacheDb = () => {
-  if (typeof indexedDB === 'undefined') return Promise.resolve<IDBDatabase | null>(null)
+  if (!('indexedDB' in globalThis) || !globalThis.indexedDB) return Promise.resolve<IDBDatabase | null>(null)
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'key' })
@@ -30,36 +30,48 @@ export const getStoredRenderByteSize = (row: Pick<StoredStretchedAudioRender, 'c
   row.channels.reduce((total, channel) => total + channel.byteLength, 0)
 )
 
-const normalizeStoredRender = (value: unknown): StoredStretchedAudioRender | null => {
-  if (!value || typeof value !== 'object' || !('key' in value)) return null
-  const row = value
-  if (!('channels' in row) || !Array.isArray(row.channels)) return null
+type StoredRenderFields = {
+  key?: unknown
+  channels?: unknown
+  sampleRate?: unknown
+  timelineStartSec?: unknown
+  sourceStartSec?: unknown
+  timelineDurationSec?: unknown
+  updatedAt?: unknown
+  byteSize?: unknown
+}
+
+const isStoredRenderFields = <Value>(value: Value): value is Value & StoredRenderFields => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+
+const normalizeStoredRender = <Value>(value: Value): StoredStretchedAudioRender | null => {
+  if (!isStoredRenderFields(value) || !Array.isArray(value.channels)) return null
   const channels: Float32Array[] = []
-  for (const channel of row.channels) {
+  for (const channel of value.channels) {
     if (!(channel instanceof Float32Array)) return null
     channels.push(channel)
   }
   if (
-    typeof row.key !== 'string'
-    || !('sampleRate' in row)
-    || typeof row.sampleRate !== 'number'
-    || !('timelineStartSec' in row)
-    || typeof row.timelineStartSec !== 'number'
-    || !('sourceStartSec' in row)
-    || typeof row.sourceStartSec !== 'number'
-    || !('timelineDurationSec' in row)
-    || typeof row.timelineDurationSec !== 'number'
+    !isString(value.key)
+    || !isNumber(value.sampleRate)
+    || !isNumber(value.timelineStartSec)
+    || !isNumber(value.sourceStartSec)
+    || !isNumber(value.timelineDurationSec)
   ) return null
-  const updatedAt = 'updatedAt' in row && typeof row.updatedAt === 'number' ? row.updatedAt : 0
+  const updatedAt = isNumber(value.updatedAt) ? value.updatedAt : 0
   const fallback = getStoredRenderByteSize({ channels })
-  const byteSize = 'byteSize' in row && typeof row.byteSize === 'number' ? row.byteSize : fallback
+  const byteSize = isNumber(value.byteSize) ? value.byteSize : fallback
   return {
-    key: row.key,
-    sampleRate: row.sampleRate,
+    key: value.key,
+    sampleRate: value.sampleRate,
     channels,
-    timelineStartSec: row.timelineStartSec,
-    sourceStartSec: row.sourceStartSec,
-    timelineDurationSec: row.timelineDurationSec,
+    timelineStartSec: value.timelineStartSec,
+    sourceStartSec: value.sourceStartSec,
+    timelineDurationSec: value.timelineDurationSec,
     updatedAt,
     byteSize,
   }

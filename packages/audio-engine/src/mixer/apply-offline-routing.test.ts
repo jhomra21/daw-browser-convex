@@ -1,17 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import { CompressorProcessorError } from '../effects/chain'
+import type { CompressorMeterFrame } from '../effects/compressor-worklet'
 import { createOfflineCompressorLifecycle } from './offline-compressor-lifecycle'
 import type { CompressorProcessorLifecyclePhase } from '../effects/chain'
 
 const createChain = (state: 'active' | 'faulted' = 'active') => {
-  let onmessage: ((data: unknown) => void) | null = null
+  type ProcessorMessage = CompressorMeterFrame | { type: 'meter'; inputDb: number }
+  let onmessage: ((data: ProcessorMessage) => void) | null = null
   return {
     chain: {
       state,
       fault: state === 'faulted' ? new Error('render failed') : null,
     },
-    setMessageHandler: (handler: ((data: unknown) => void) | null) => { onmessage = handler },
-    emit: (data: unknown) => onmessage?.(data),
+    setMessageHandler: (handler: ((data: ProcessorMessage) => void) | null) => { onmessage = handler },
+    emit: (data: ProcessorMessage) => onmessage?.(data),
   }
 }
 

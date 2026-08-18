@@ -45,13 +45,28 @@ export function setCompressorMeteringEnabled(node: AudioWorkletNode, enabled: bo
   node.port.postMessage({ type: 'metering', enabled })
 }
 
-export function readCompressorMeterFrame(data: unknown): CompressorMeterFrame | null {
-  if (!data || typeof data !== 'object') return null
-  if (!('type' in data) || data.type !== 'meter') return null
-  if (!('inputDb' in data) || typeof data.inputDb !== 'number' || !Number.isFinite(data.inputDb)) return null
-  if (!('outputDb' in data) || typeof data.outputDb !== 'number' || !Number.isFinite(data.outputDb)) return null
-  if (!('gainReductionDb' in data) || typeof data.gainReductionDb !== 'number' || !Number.isFinite(data.gainReductionDb)) return null
-  if (!('thresholdDb' in data) || typeof data.thresholdDb !== 'number' || !Number.isFinite(data.thresholdDb)) return null
+type CompressorMeterFields = {
+  type?: unknown
+  inputDb?: unknown
+  outputDb?: unknown
+  gainReductionDb?: unknown
+  thresholdDb?: unknown
+}
+
+const isCompressorMeterFields = <Value>(value: Value): value is Value & CompressorMeterFields => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isFiniteNumber = <Value>(value: Value): value is Value & number => (
+  typeof value === 'number' && Number.isFinite(value)
+)
+
+export function readCompressorMeterFrame<Value>(data: Value): CompressorMeterFrame | null {
+  if (!isCompressorMeterFields(data) || data.type !== 'meter') return null
+  if (!isFiniteNumber(data.inputDb)) return null
+  if (!isFiniteNumber(data.outputDb)) return null
+  if (!isFiniteNumber(data.gainReductionDb)) return null
+  if (!isFiniteNumber(data.thresholdDb)) return null
   return {
     inputDb: data.inputDb,
     outputDb: data.outputDb,

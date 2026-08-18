@@ -76,6 +76,17 @@ export type SynthVoiceHandle = {
 }
 
 export type SynthAutomationEnvelopes = ReadonlyMap<SynthAutomationParameterId, AutomationEnvelope>
+type SynthAutomationBindings = Partial<Record<SynthAutomationParameterId, AudioParam>>
+type ScheduledLfo = {
+  node: OscillatorNode
+  depths: SynthVoiceBindings['lfoDepths']
+  nodes: GainNode[]
+}
+
+const getSynthAutomationBinding = (
+  bindings: SynthAutomationBindings,
+  parameterId: SynthAutomationParameterId,
+) => bindings[parameterId]
 
 type SynthVoiceScheduleOptions = {
   id: number
@@ -158,7 +169,7 @@ export const transposeFrequency = (
 ) => baseHz * 2 ** ((octave * 12 + semitone + detuneCents / 100) / 12)
 
 const getSynthVoiceVelocity = (velocity?: number) => (
-  typeof velocity === 'number' && Number.isFinite(velocity) ? clamp(velocity, 0, 1) : 0.9
+  velocity !== undefined && Number.isFinite(velocity) ? clamp(velocity, 0, 1) : 0.9
 )
 
 export const getSynthCutoffLimit = (sampleRate: number) => Math.min(20_000, sampleRate * 0.45)
@@ -316,7 +327,7 @@ const scheduleLfo = (
   filter: BiquadFilterNode,
   amplitudeModulation: GainNode,
   pan: StereoPannerNode,
-): { node: OscillatorNode; depths: SynthVoiceBindings['lfoDepths']; nodes: GainNode[] } => {
+): ScheduledLfo => {
   const oscillator = ctx.createOscillator()
   oscillator.type = lfo.wave
   oscillator.frequency.setValueAtTime(lfo.frequencyHz, when)
@@ -366,7 +377,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     options.timelineStartSec,
   )
   const releaseTime = when + Math.max(0, options.durationSec)
-  const clipGain = typeof options.clipGain === 'number' && Number.isFinite(options.clipGain)
+  const clipGain = options.clipGain !== undefined && Number.isFinite(options.clipGain)
     ? clamp(options.clipGain, 0, 1.5)
     : 1
   let ampPlan = createSynthEnvelopePlan(
@@ -573,16 +584,16 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       )
       const endTimelineSec = options.timelineStartSec + Math.max(0, handle.effectiveEndTime - when)
       if (startTimelineSec >= endTimelineSec) return
-      const bindings: Partial<Record<SynthAutomationParameterId, AudioParam>> = {
+      const bindings = {
         'lfo.rate': handle.bindings.lfoRate,
         'lfo.pitchDepth': handle.bindings.lfoDepths.pitch,
         'lfo.filterDepth': handle.bindings.lfoDepths.filter,
         'lfo.ampDepth': handle.bindings.lfoDepths.amp,
         'lfo.panDepth': handle.bindings.lfoDepths.pan,
-      }
+      } satisfies SynthAutomationBindings
       for (const [parameterId, envelope] of envelopes) {
         if (!parameterId.startsWith('lfo.') || !envelope.enabled) continue
-        const param = bindings[parameterId]
+        const param = getSynthAutomationBinding(bindings, parameterId)
         if (!param) continue
         scheduleAutomationEnvelope([{
           param,
@@ -628,7 +639,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     },
   }
   if (options.scheduleVoiceAutomation !== false && options.timelineStartSec !== undefined && options.timelineToCtxTime) {
-    const directBindings: Partial<Record<SynthAutomationParameterId, AudioParam>> = {
+    const directBindings = {
       'osc1.level': oscillatorLevels[0],
       'osc1.detune': oscillatorDetunes[0],
       'osc2.level': oscillatorLevels[1],
@@ -641,9 +652,9 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
       'lfo.filterDepth': lfo.depths.filter,
       'lfo.ampDepth': lfo.depths.amp,
       'lfo.panDepth': lfo.depths.pan,
-    }
+    } satisfies SynthAutomationBindings
     for (const [parameterId, envelope] of options.automationEnvelopes ?? []) {
-      const param = directBindings[parameterId]
+      const param = getSynthAutomationBinding(directBindings, parameterId)
       if (!param || !envelope.enabled || (!params.lfo.enabled && parameterId.startsWith('lfo.'))) continue
       scheduleAutomationEnvelope(
         [{

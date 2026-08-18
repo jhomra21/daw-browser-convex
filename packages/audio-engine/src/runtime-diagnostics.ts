@@ -1,3 +1,9 @@
+import type {
+  MasterStereoLevelsListener,
+  TrackMeterFrameListener,
+  TrackStereoLevelsListener,
+} from './metering-runtime'
+
 export type RuntimeFaultKind = 'compressor' | 'owned-processor' | 'track-meter' | 'recorder'
 
 export type RuntimeFault = {
@@ -13,17 +19,36 @@ export type RuntimeFaultSnapshot = {
   last: RuntimeFault | null
 }
 
+type OwnedResource =
+  | string
+  | AudioNode
+  | BaseAudioContext
+  | OfflineAudioContext
+  | MediaStream
+  | MediaStreamTrack
+  | Worker
+  | MessagePort
+  | { connect: (destination: AudioNode) => void; disconnect: () => void }
+  | { terminate: () => void }
+  | { dispose: () => void }
+  | TrackStereoLevelsListener
+  | MasterStereoLevelsListener
+  | TrackMeterFrameListener
+  | ((...args: never[]) => void)
+  | { connectionType: 'fake' }
+  | { terminal: string; kind: string }
+
 export type ResourceObserver = {
-  acquire: (kind: string, id: object | string) => () => void
+  acquire: (kind: string, id: OwnedResource) => () => void
 }
 
 export const observeResource = (
   observer: ResourceObserver | undefined,
   kind: string,
-  id: object | string,
+  id: OwnedResource,
 ): (() => void) => observer?.acquire(kind, id) ?? (() => undefined)
 
-const emptyCounts = (): Record<RuntimeFaultKind, number> => ({
+const emptyCounts = () => ({
   compressor: 0,
   'owned-processor': 0,
   'track-meter': 0,
@@ -58,7 +83,7 @@ export const createRuntimeFaultCounter = (limit = 256) => {
       seen.clear()
       return generation
     },
-    snapshot: (): RuntimeFaultSnapshot => ({
+    snapshot: () => ({
       eventCount,
       uniqueSignatureCount: seen.size,
       byKind: { ...byKind },

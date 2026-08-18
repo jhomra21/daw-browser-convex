@@ -27,7 +27,7 @@ type ExportAudioEncodingDescriptor = {
   requiredBitrate?: number
 }
 
-const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncodingDescriptor> = {
+const exportAudioEncodingDescriptors = {
   wav: {
     codec: 'pcm-s16',
     createOutputFormat: () => new WavOutputFormat(),
@@ -45,14 +45,15 @@ const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncod
     createOutputFormat: () => new FlacOutputFormat(),
     requiredBitrate: 1411200,
   },
-}
+} satisfies Record<ExportAudioFormat, ExportAudioEncodingDescriptor>
 
 export const getExportAudioCodec = (format: ExportAudioFormat): AudioCodec => {
   return exportAudioEncodingDescriptors[format].codec
 }
 
 export const getExportAudioDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
-  return getExportAudioBitrate(format) ?? exportAudioEncodingDescriptors[format].requiredBitrate
+  return getExportAudioBitrate(format)
+    ?? (format === 'flac' ? exportAudioEncodingDescriptors.flac.requiredBitrate : undefined)
 }
 
 export const getExportAudioEncodingConfig = (

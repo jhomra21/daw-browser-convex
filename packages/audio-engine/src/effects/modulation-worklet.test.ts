@@ -10,10 +10,16 @@ import {
 import { modulationWorklet } from '../worklet-manifest'
 
 type Kind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
+type ModulationState = ReturnType<typeof createDefaultChorusParams>
+  | ReturnType<typeof createDefaultFlangerParams>
+  | ReturnType<typeof createDefaultPhaserParams>
+  | ReturnType<typeof createDefaultTremoloParams>
+  | ReturnType<typeof createDefaultAutoPanParams>
+  | ReturnType<typeof createDefaultEnsembleParams>
 type Port = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  messages: unknown[]
-  postMessage: (message: unknown) => void
+  onmessage: ((event: { data: ModulationMessage }) => void) | null
+  messages: ModulationMessage[]
+  postMessage: (message: ModulationMessage) => void
   close: () => void
 }
 type Processor = {
@@ -22,6 +28,10 @@ type Processor = {
   process: (inputs: Float32Array[][], outputs: Float32Array[][]) => boolean
 }
 type ProcessorConstructor = new (options: { processorOptions: { processorKind: Kind } }) => Processor
+type ModulationMessage =
+  | { type: 'configure'; version: number; revision: number; processorKind: Kind; state: ModulationState }
+  | { type: 'reset'; version: number }
+  | { type: 'fault'; version: number; code: string }
 
 const defaults = {
   chorus: createDefaultChorusParams,
@@ -40,7 +50,7 @@ const loadProcessor = async (sampleRate: number, kind: Kind) => {
     port: Port = {
       onmessage: null,
       messages: [],
-      postMessage: (message) => this.port.messages.push(message),
+      postMessage: (message: ModulationMessage) => this.port.messages.push(message),
       close: () => {},
     }
   }
@@ -56,7 +66,7 @@ const loadProcessor = async (sampleRate: number, kind: Kind) => {
   return processor
 }
 
-const render = async (sampleRate: number, kind: Kind, state: object, frames: number, stereo = true, impulse = false) => {
+const render = async (sampleRate: number, kind: Kind, state: ModulationState, frames: number, stereo = true, impulse = false) => {
   const processor = await loadProcessor(sampleRate, kind)
   processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 2, processorKind: kind, state } })
   const left = Float32Array.from({ length: frames }, (_, index) => impulse ? Number(index === 0) : Math.sin(TWO_PI * 220 * index / sampleRate))
@@ -108,14 +118,14 @@ describe('modulation static worklet', () => {
   })
 
   test('tremolo and autopan reach their modulation endpoints', async () => {
-    const tremolo = await render(48_000, 'tremolo', { ...createDefaultTremoloParams(), rateHz: 1, depth: 1, shape: 0.5, phase: 0.25 }, 24_001)
+    const tremolo = await render(48_000, 'tremolo', { ...createDefaultTremoloParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.25 }, 24_001)
     expect(tremolo.output[0][0]).toBeCloseTo(tremolo.input[0][0], 5)
-    const tremoloZero = await render(48_000, 'tremolo', { ...createDefaultTremoloParams(), rateHz: 1, depth: 1, shape: 0.5, phase: 0.75 }, 2)
+    const tremoloZero = await render(48_000, 'tremolo', { ...createDefaultTremoloParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.75 }, 2)
     expect(Math.abs(tremoloZero.output[0][1])).toBeLessThanOrEqual(1e-5)
 
-    const panLeft = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, shape: 0.5, phase: 0.75 }, 2)
+    const panLeft = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.75 }, 2)
     expect(Math.abs(panLeft.output[1][1])).toBeLessThanOrEqual(1e-5)
-    const panRight = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, shape: 0.5, phase: 0.25 }, 2)
+    const panRight = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.25 }, 2)
     expect(Math.abs(panRight.output[0][1])).toBeLessThanOrEqual(1e-5)
   })
 

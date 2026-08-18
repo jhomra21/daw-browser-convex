@@ -7,10 +7,12 @@ type ExportRangeTrack = {
   clips: readonly { startSec: number; duration: number }[]
 }
 
+type ExportRangeBounds = { startSec: number; endSec: number }
+
 export const getExportRangeBounds = (
   tracks: readonly ExportRangeTrack[],
   range: ExportRange,
-): { startSec: number; endSec: number } => {
+): ExportRangeBounds => {
   if (range.mode !== 'whole') {
     const startSec = Math.max(0, range.startSec)
     return {

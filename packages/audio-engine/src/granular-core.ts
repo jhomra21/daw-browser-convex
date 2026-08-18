@@ -1,4 +1,4 @@
-import type { GranularWindowShape } from '@daw-browser/shared'
+import type { GranularWindowKind } from '@daw-browser/shared'
 
 export const createGranularPrng = (seed: number) => {
   let state = seed >>> 0
@@ -8,24 +8,24 @@ export const createGranularPrng = (seed: number) => {
   }
 }
 
-export function granularWindow(shape: GranularWindowShape, phase: number): number {
+export function granularWindow(windowKind: GranularWindowKind, phase: number): number {
   const x = Math.max(0, Math.min(1, phase))
-  if (shape === 'tukey') {
+  if (windowKind === 'tukey') {
     if (x < 0.25) return 0.5 * (1 - Math.cos(4 * Math.PI * x))
     if (x > 0.75) return 0.5 * (1 - Math.cos(4 * Math.PI * (1 - x)))
     return 1
   }
-  if (shape === 'gaussian') {
+  if (windowKind === 'gaussian') {
     const normalized = (x - 0.5) / 0.18
     return Math.exp(-0.5 * normalized * normalized)
   }
   return 0.5 - 0.5 * Math.cos(2 * Math.PI * x)
 }
 
-export const granularWindowEnergy = (shape: GranularWindowShape, frames = 4096) => {
+export const granularWindowEnergy = (windowKind: GranularWindowKind, frames = 4096) => {
   let energy = 0
   for (let frame = 0; frame < frames; frame += 1) {
-    const value = granularWindow(shape, frame / Math.max(1, frames - 1))
+    const value = granularWindow(windowKind, frame / Math.max(1, frames - 1))
     energy += value * value
   }
   return energy / frames

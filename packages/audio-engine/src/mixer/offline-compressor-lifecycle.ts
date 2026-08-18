@@ -1,10 +1,17 @@
 import { CompressorProcessorError, type CompressorNodeChain, type CompressorProcessorLifecyclePhase } from '../effects/chain'
-import { readCompressorMeterFrame } from '../effects/compressor-worklet'
+import { readCompressorMeterFrame, type CompressorMeterFrame } from '../effects/compressor-worklet'
 import { compressorWorklet } from '../worklet-manifest'
 
 export type OfflineProcessorTarget = { kind: 'track'; trackId: string } | { kind: 'master' }
 
 type OfflineCompressorChain = Pick<CompressorNodeChain, 'state' | 'fault'>
+type CompressorProcessorMessage = CompressorMeterFrame | {
+  type?: string
+  inputDb?: number
+  outputDb?: number
+  gainReductionDb?: number
+  thresholdDb?: number
+}
 
 type RetainedOfflineCompressor = {
   target: OfflineProcessorTarget
@@ -45,7 +52,7 @@ export type OfflineCompressorLifecycle<Chain extends OfflineCompressorChain> = {
 
 export function createOfflineCompressorLifecycle<Chain extends OfflineCompressorChain>(
   teardown: (chain: Chain) => void,
-  setMessageHandler: (chain: Chain, handler: ((data: unknown) => void) | null) => void,
+  setMessageHandler: (chain: Chain, handler: ((data: CompressorProcessorMessage) => void) | null) => void,
 ): OfflineCompressorLifecycle<Chain> {
   const retained: Array<RetainedOfflineCompressor & { chain: Chain }> = []
 

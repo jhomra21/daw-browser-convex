@@ -1,4 +1,4 @@
-import { assert, getAutomationParameterDescriptor, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
+import { assertDefined, getAutomationParameterDescriptor, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
@@ -191,18 +191,22 @@ export async function createOfflineMixerNodes(
 
     for (const channel of routingPlan.channels) {
       const channelId = channel.channelId
-      const source = trackNodes.get(channelId)
-      assert(source, `Missing offline mixer source for track ${channelId}`)
-      const resolvedTrack = graph.channels.find((entry) => entry.channel.id === channelId)
-      assert(resolvedTrack, `Missing resolved mixer source for track ${channelId}`)
+      const source = assertDefined(
+        trackNodes.get(channelId),
+        `Missing offline mixer source for track ${channelId}`,
+      )
+      assertDefined(
+        graph.channels.find((entry) => entry.channel.id === channelId),
+        `Missing resolved mixer source for track ${channelId}`,
+      )
       source.gain.gain.value = channel.gain
       source.output.gain.value = channel.outputGain
       const targetNodes = channel.outputTargetId
-        ? trackNodes.get(channel.outputTargetId)
+        ? assertDefined(
+          trackNodes.get(channel.outputTargetId),
+          `Missing offline mixer output target for track ${channel.outputTargetId}`,
+        )
         : undefined
-      if (channel.outputTargetId) {
-        assert(targetNodes, `Missing offline mixer output target for track ${channel.outputTargetId}`)
-      }
       const outputTarget = targetNodes?.input ?? masterInput
       source.postFx.connect(source.gain)
       source.gain.connect(source.output)
@@ -216,8 +220,10 @@ export async function createOfflineMixerNodes(
         source.output.connect(outputTarget)
       }
       for (const send of channel.sends) {
-        const target = trackNodes.get(send.targetId)
-        assert(target, `Missing offline mixer send target for track ${send.targetId}`)
+        const target = assertDefined(
+          trackNodes.get(send.targetId),
+          `Missing offline mixer send target for track ${send.targetId}`,
+        )
         const sendGain = ctx.createGain()
         sendGain.gain.value = send.amount
         const sendSource = send.tap === 'pre-fx'
@@ -239,12 +245,20 @@ export async function createOfflineMixerNodes(
     }
 
     for (const route of sidechainRoutes) {
-      const source = trackNodes.get(route.sourceTrackId)
-      const target = trackNodes.get(route.targetTrackId)
-      const compressor = target?.fx.compressorByInstanceId.get(route.effectInstanceId)
-      const owned = target?.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
-      const targetNode = compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined)
-      assert(source && target && targetNode, `Invalid offline sidechain route for effect ${route.effectInstanceId}`)
+      const source = assertDefined(
+        trackNodes.get(route.sourceTrackId),
+        `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
+      )
+      const target = assertDefined(
+        trackNodes.get(route.targetTrackId),
+        `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
+      )
+      const compressor = target.fx.compressorByInstanceId.get(route.effectInstanceId)
+      const owned = target.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
+      const targetNode = assertDefined(
+        compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined),
+        `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
+      )
       const detectorSource = detectorOnlyTrackIds.has(route.sourceTrackId) ? source.gain : source.output
       detectorSource.connect(targetNode, 0, 1)
     }

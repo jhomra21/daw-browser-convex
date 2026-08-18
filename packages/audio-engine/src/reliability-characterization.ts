@@ -22,16 +22,18 @@ export const RELIABILITY_RESOURCE_KINDS = [
 
 export type ReliabilityResourceKind = typeof RELIABILITY_RESOURCE_KINDS[number]
 
+type ReliabilityResource = Parameters<ResourceObserver['acquire']>[1]
+
 export const createReliabilityResourceLedger = (): ResourceObserver & {
   snapshot: () => Record<ReliabilityResourceKind, number>
   assertEmpty: () => void
 } => {
-  const active = new Map<string, Set<object | string>>(
+  const active = new Map<string, Set<ReliabilityResource>>(
     RELIABILITY_RESOURCE_KINDS.map((kind) => [kind, new Set()]),
   )
   return {
-    acquire(kind: string, resource: object | string) {
-      const resources = active.get(kind) ?? new Set<object | string>()
+    acquire(kind: string, resource: ReliabilityResource) {
+      const resources = active.get(kind) ?? new Set<ReliabilityResource>()
       resources.add(resource)
       active.set(kind, resources)
       let released = false
@@ -41,7 +43,7 @@ export const createReliabilityResourceLedger = (): ResourceObserver & {
         resources.delete(resource)
       }
     },
-    snapshot: (): Record<ReliabilityResourceKind, number> => ({
+    snapshot: () => ({
       'media-streams': active.get('media-streams')?.size ?? 0,
       'audio-contexts': active.get('audio-contexts')?.size ?? 0,
       'audio-worklet-nodes': active.get('audio-worklet-nodes')?.size ?? 0,

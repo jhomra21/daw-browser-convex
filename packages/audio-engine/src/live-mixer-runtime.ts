@@ -1,4 +1,4 @@
-import { assert, normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams, type EqParams } from '@daw-browser/shared'
+import { assertDefined, normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams, type EqParams } from '@daw-browser/shared'
 import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
 import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
@@ -426,8 +426,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
 
   const ensureTrackNodes = (trackId: string): TrackNodeGroup => {
     options.ensureAudio()
-    const ctx = options.getAudioContext()
-    assert(ctx, 'Audio runtime was not initialized')
+    const ctx = assertDefined(options.getAudioContext(), 'Audio runtime was not initialized')
 
     let input = inputs.get(trackId)
     const createdInput = !input

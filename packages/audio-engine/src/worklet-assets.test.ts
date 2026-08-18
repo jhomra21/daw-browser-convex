@@ -6,15 +6,37 @@ import { compressorWorklet, gateWorklet, limiterWorklet, modulationWorklet, reco
 
 const publicRoot = new URL('../../../public/', import.meta.url)
 
+type WorkletMessage = {
+  type: string
+  version?: number
+  code?: string
+  generation?: number
+  sessionId?: string
+  frameCount?: number
+  channelCount?: number
+  capturedFrames?: number
+  droppedFrames?: number
+  droppedBlocks?: number
+  buffer?: ArrayBuffer
+  rms?: number
+  peak?: number
+  reason?: string
+}
+type WorkletProcessorOptions = {
+  processorKind?: string
+  fftSize?: number
+  overlap?: number
+}
+
 type EvaluatedProcessor = {
   port: {
     onmessage: ((event: { data: unknown }) => void) | null
-    messages: unknown[]
+    messages: WorkletMessage[]
   }
   process: (inputs: Float32Array[][], outputs?: Float32Array[][], parameters?: Record<string, Float32Array>) => boolean
 }
 
-type ProcessorConstructor = new (options?: { processorOptions: Record<string, unknown> }) => EvaluatedProcessor
+type ProcessorConstructor = new (options?: { processorOptions: WorkletProcessorOptions }) => EvaluatedProcessor
 
 const evaluateAsset = async (modulePath: string) => {
   const source = await Bun.file(new URL(modulePath, publicRoot)).text()
@@ -22,8 +44,8 @@ const evaluateAsset = async (modulePath: string) => {
   class FakeAudioWorkletProcessor {
     port = {
       onmessage: null,
-      messages: Array<unknown>(),
-      postMessage: (message: unknown) => {
+      messages: Array<WorkletMessage>(),
+      postMessage: (message: WorkletMessage) => {
         this.port.messages.push(message)
       },
     }
@@ -99,7 +121,7 @@ describe('checked-in worklet assets', () => {
     const Processor = evaluated.registered.get(modulationWorklet.processorName)
     if (!Processor) throw new Error('Modulation processor was not registered.')
     const processor = new Processor({ processorOptions: { processorKind: 'tremolo' } })
-    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, processorKind: 'tremolo', state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, shape: 0.5, phase: 0.25 } } })
+    processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, processorKind: 'tremolo', state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.25 } } })
     const input = Float32Array.of(0.5)
     const output = [new Float32Array(1), new Float32Array(1)]
     expect(processor.process([[input]], [output])).toBe(true)
@@ -236,7 +258,7 @@ describe('checked-in worklet assets', () => {
     expect(processor.process([[Float32Array.from([0.25, -0.5])]])).toBe(true)
     onmessage({ data: { type: 'finalize', generation: 1, sessionId: 'asset', stopContextFrame: 2 } })
     const message = processor.port.messages[0]
-    if (typeof message !== 'object' || message === null || !('buffer' in message) || !(message.buffer instanceof ArrayBuffer)) {
+    if (message === undefined || !('buffer' in message) || !(message.buffer instanceof ArrayBuffer)) {
       throw new Error('Recorder did not emit a transferable block.')
     }
     const samples = new Float32Array(message.buffer)
@@ -282,7 +304,7 @@ describe('checked-in worklet assets', () => {
     expect(Array.from(output)).toEqual([-0.5, -1, -1.5, -2])
     onmessage({ data: { type: 'finalize', generation: 4, sessionId: 'bounded', stopContextFrame: 2 } })
     const block = processor.port.messages[0]
-    if (typeof block !== 'object' || block === null || !('buffer' in block) || !(block.buffer instanceof ArrayBuffer)) {
+    if (block === undefined || !('buffer' in block) || !(block.buffer instanceof ArrayBuffer)) {
       throw new Error('Recorder did not emit its bounded block.')
     }
     expect(block).toMatchObject({ type: 'block', frameCount: 2 })

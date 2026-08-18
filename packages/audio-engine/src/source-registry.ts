@@ -10,7 +10,7 @@ export type SourceRegistry = {
 
 export const stopAndDisconnectSource = (source: AudioScheduledSourceNode, stopAt?: number) => {
   try {
-    if (typeof stopAt === 'number') source.stop(stopAt)
+    if (stopAt !== undefined) source.stop(stopAt)
     else source.stop()
   } catch {
     try { source.stop() } catch {}

@@ -166,7 +166,7 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
       const result = createScheduleResult()
       if (!options.getAudioContext()) return result
       if (!opts?.preserveExisting) options.stopClipSources()
-      const now = typeof opts?.atCtxTime === 'number' ? opts.atCtxTime : options.timelineToCtxTime(playheadSec)
+      const now = opts?.atCtxTime !== undefined ? opts.atCtxTime : options.timelineToCtxTime(playheadSec)
       options.updateTrackGains(tracks)
 
       const startLimitSec = opts?.startLimitSec

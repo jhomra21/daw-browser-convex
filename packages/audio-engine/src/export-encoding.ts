@@ -6,7 +6,7 @@ import {
   type StreamTargetChunk,
   type Target,
 } from 'mediabunny'
-import { assert, getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
+import { getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
 import { createExportAudioOutputFormat, getExportAudioCodec, getExportAudioDefaultBitrate } from './export-audio-support'
 import { createWavQuantizer, type WavEncodingSettings } from './export-fidelity'
 
@@ -16,7 +16,7 @@ export type EncodeAudioBufferTarget =
     mode: 'stream'
     writable: WritableStream<StreamTargetChunk>
     close?: () => Promise<void>
-    abort?: (reason?: unknown) => Promise<void>
+    abort?: (reason?: ExportAbortReason) => Promise<void>
   }
 
 export type EncodeAudioBufferOptions = {
@@ -40,14 +40,16 @@ type ExportResult = {
 type EncodeTargetState = {
   target: Target
   close: () => Promise<void>
-  abort: (reason?: unknown) => Promise<void>
+  abort: (reason?: ExportAbortReason) => Promise<void>
 }
+
+type ExportAbortReason = Error | string | null
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => signal?.throwIfAborted()
 
 const createManagedWritable = (
   target: Extract<EncodeAudioBufferTarget, { mode: 'stream' }>,
-  abortTarget: (reason?: unknown) => Promise<void>,
+  abortTarget: (reason?: ExportAbortReason) => Promise<void>,
 ): WritableStream<StreamTargetChunk> => {
   if (!target.close && !target.abort) return target.writable
   let writer: WritableStreamDefaultWriter<StreamTargetChunk> | undefined
@@ -56,7 +58,7 @@ const createManagedWritable = (
       writer = target.writable.getWriter()
     },
     write(chunk) {
-      assert(writer, 'Export stream writer was not initialized.')
+      if (!writer) throw new Error('Export stream writer was not initialized.')
       return writer.write(chunk)
     },
     close() {
@@ -78,7 +80,7 @@ const createEncodeTarget = (target: EncodeAudioBufferTarget | undefined): Encode
     }
   }
   let aborted = false
-  const abortTarget = async (reason?: unknown) => {
+  const abortTarget = async (reason?: ExportAbortReason) => {
     if (aborted) return
     aborted = true
     await target.abort?.(reason)
@@ -148,7 +150,8 @@ export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudi
     if (output.state !== 'canceled' && output.state !== 'finalized') {
       try { await output.cancel() } catch {}
     }
-    try { await encodeTarget.abort(error) } catch {}
+    const abortReason = error instanceof Error ? error : String(error)
+    try { await encodeTarget.abort(abortReason) } catch {}
     throw error
   }
   const blob = getBufferTargetBlob(encodeTarget.target, metadata.mimeType)

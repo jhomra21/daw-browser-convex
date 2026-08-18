@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { gateWorklet, utilityWorklet } from '../worklet-manifest'
 
 type Port = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  messages: unknown[]
+  onmessage: ((event: { data: WorkletMessage }) => void) | null
+  messages: PortMessage[]
   closed: boolean
-  postMessage: (message: unknown) => void
+  postMessage: (message: PortMessage) => void
   close: () => void
 }
 type Processor = {
@@ -13,6 +13,28 @@ type Processor = {
   process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
 }
 type ProcessorConstructor = new () => Processor
+type UtilityState = {
+  enabled: boolean
+  polarity: string
+  inputMode: string
+  matrix: string
+  swap: boolean
+  dcBlock: boolean
+}
+type GateState = {
+  enabled: boolean
+  mode: string
+  detector: string
+  sidechain: { enabled: boolean; frequencyHz: number; q: number }
+}
+type WorkletMessage =
+  | { type: 'configure'; version: number; revision: number; state: UtilityState | GateState }
+  | { type: 'metering'; version: number; enabled: boolean }
+  | { type: 'reset'; version: number }
+type PortMessage =
+  | WorkletMessage
+  | { type: 'fault'; version: number; code: string }
+  | { type: 'meter'; version?: number }
 
 const publicRoot = new URL('../../../../public/', import.meta.url)
 
@@ -24,7 +46,7 @@ const loadProcessor = async (modulePath: string, processorName: string, sampleRa
       onmessage: null,
       messages: [],
       closed: false,
-      postMessage: (message: unknown) => this.port.messages.push(message),
+      postMessage: (message: PortMessage) => this.port.messages.push(message),
       close: () => { this.port.closed = true },
     }
   }
@@ -38,13 +60,13 @@ const loadProcessor = async (modulePath: string, processorName: string, sampleRa
   return new Constructor()
 }
 
-const configure = (processor: Processor, state: object) => {
+const configure = (processor: Processor, state: UtilityState | GateState) => {
   const onmessage = processor.port.onmessage
   if (!onmessage) throw new Error('Processor message handler is unavailable.')
   onmessage({ data: { type: 'configure', version: 1, revision: 1, state } })
 }
 
-const message = (processor: Processor, data: object) => {
+const message = (processor: Processor, data: WorkletMessage) => {
   const onmessage = processor.port.onmessage
   if (!onmessage) throw new Error('Processor message handler is unavailable.')
   onmessage({ data })
@@ -69,7 +91,7 @@ const gateParams = (updates: Partial<Record<string, number>> = {}) => ({
   'gate.link': Float32Array.of(updates['gate.link'] ?? 1),
 })
 
-const utilityState = (updates: Partial<Record<string, unknown>> = {}) => ({
+const utilityState = (updates: Partial<UtilityState> = {}) => ({
   enabled: true,
   polarity: 'normal',
   inputMode: 'stereo',
@@ -79,7 +101,7 @@ const utilityState = (updates: Partial<Record<string, unknown>> = {}) => ({
   ...updates,
 })
 
-const gateState = (updates: Partial<Record<string, unknown>> = {}) => ({
+const gateState = (updates: Partial<GateState> = {}) => ({
   enabled: true,
   mode: 'gate',
   detector: 'peak',
@@ -230,7 +252,7 @@ describe('gate static worklet numerical characterization', () => {
     expect(output[0][96]).toBe(0)
     expect(output[0][97]).toBeCloseTo(1, 6)
     expect(output[1][98]).toBeCloseTo(0.5, 6)
-    expect(processor.port.messages.filter((entry) => typeof entry === 'object' && entry !== null && 'type' in entry && entry.type === 'meter')).toHaveLength(1)
+    expect(processor.port.messages.filter((entry) => entry.type === 'meter')).toHaveLength(1)
     expect(processor.port.messages).toContainEqual({ type: 'fault', version: 1, code: 'nonfinite-input' })
     message(processor, { type: 'reset', version: 1 })
     const resetOutput = [new Float32Array(128), new Float32Array(128)]

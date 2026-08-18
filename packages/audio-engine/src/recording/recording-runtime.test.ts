@@ -2,6 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { createRecordingRuntime, type RecordingMonitorMode, type StartRecordingCaptureOptions } from './recording-runtime'
 import { createReliabilityResourceLedger } from '../reliability-characterization'
 
+type FakeAudioConnection = {
+  connectionType: 'fake'
+}
+type FakeMessage = {
+  type: string
+}
+const fakeConnectionType: FakeAudioConnection['connectionType'] = 'fake'
+
 const eventTarget = () => {
   const listeners = new Map<string, Set<() => void>>()
   return {
@@ -20,41 +28,44 @@ const eventTarget = () => {
 const graph = () => {
   const contextEvents = eventTarget()
   const trackEvents = eventTarget()
-  const connections: unknown[] = []
-  const disconnections: unknown[] = []
+  const connections: FakeAudioConnection[] = []
+  const disconnections: FakeAudioConnection[] = []
   const ramps: number[] = []
   const source = Object.assign(Object.create(null), {
-    connect: (target: unknown) => connections.push(target),
+    connectionType: fakeConnectionType,
+    connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(source),
   })
   const gain = Object.assign(Object.create(null), {
+    connectionType: fakeConnectionType,
     gain: {
       value: 1,
       setValueAtTime: () => undefined,
       linearRampToValueAtTime: (value: number) => ramps.push(value),
       cancelScheduledValues: () => undefined,
     },
-    connect: (target: unknown) => connections.push(target),
+    connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(gain),
   })
-  const messages: unknown[] = []
+  const messages: FakeMessage[] = []
   let processorError: (() => void) | null = null
   const port = Object.assign(Object.create(null), {
     onmessage: null,
     messages,
-    postMessage(message: unknown) {
+    postMessage(message: FakeMessage) {
       port.messages.push(message)
     },
   })
   const worklet = Object.assign(Object.create(null), {
     port,
+    connectionType: fakeConnectionType,
     get onprocessorerror() {
       return processorError
     },
     set onprocessorerror(handler: (() => void) | null) {
       processorError = handler
     },
-    connect: (target: unknown) => connections.push(target),
+    connect: (target: FakeAudioConnection) => connections.push(target),
     disconnect: () => disconnections.push(worklet),
   })
   const track = Object.assign(Object.create(null), trackEvents, {

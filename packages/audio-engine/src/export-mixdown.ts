@@ -17,6 +17,7 @@ import {
   parseGranularAutomationKey,
   parseSynthAutomationKey,
   SYNTH_AUTOMATION_DESCRIPTORS,
+  assertDefined,
 } from '@daw-browser/shared'
 import { createSynthOutputChain, scheduleSynthVoice, type SynthVoiceHandle } from './synth-voice'
 import { chooseSynthVoiceVictim, isSynthVoiceSoundingAt, pruneSynthVoiceAllocations } from './synth-voice-allocation'
@@ -389,7 +390,7 @@ function createOfflineSynthTrack(input: {
   synth: SynthParamsInput | undefined
   automationEnvelopes: readonly AutomationEnvelope[]
 }) {
-  const synth = normalizeSynthParams(input.synth)
+  const synth = normalizeSynthParams(input.synth ?? {})
   const { output: outputGain, outputPan } = createSynthOutputChain(
     input.ctx,
     input.destination,
@@ -773,8 +774,10 @@ export function createStemRenderPlan(
   stem: StemDefinition,
   sidechainRoutes: readonly ExternalSidechainRoute[] = [],
 ): StemRenderPlan {
-  const target = graph.channels.find((channel) => channel.channel.id === stem.targetTrackId)
-  assert(target, `Missing stem target ${stem.targetTrackId}`)
+  const target = assertDefined(
+    graph.channels.find((channel) => channel.channel.id === stem.targetTrackId),
+    `Missing stem target ${stem.targetTrackId}`,
+  )
   if (stem.mode === 'channel-output') {
     assert(target.channel.role === 'group' || target.channel.role === 'return', 'Channel-output stems require a group or return target.')
   } else {
@@ -948,11 +951,15 @@ async function renderSourceIsolatedMixdownFromPrepared(
     }
 
     for (const resolvedTrack of graph.channels) {
-      const track = prepared.trackById.get(resolvedTrack.channel.id)
-      assert(track, `Missing prepared export track ${resolvedTrack.channel.id}`)
+      const track = assertDefined(
+        prepared.trackById.get(resolvedTrack.channel.id),
+        `Missing prepared export track ${resolvedTrack.channel.id}`,
+      )
       if (sourceTrackIds && !sourceTrackIds.has(track.id) && !options.detectorOnlyTrackIds?.has(track.id)) continue
-      const trackInput = trackNodes.get(track.id)?.input
-      assert(trackInput, `Missing offline track input ${track.id}`)
+      const trackInput = assertDefined(
+        trackNodes.get(track.id)?.input,
+        `Missing offline track input ${track.id}`,
+      )
       const fxCfg = resolvedTrack.fx
       const exportFxCfg = prepared.exportTrackFx?.[track.id]
       const instrument = readTrackInstrument(exportFxCfg)

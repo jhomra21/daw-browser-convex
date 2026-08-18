@@ -1,4 +1,4 @@
-import { assert } from '@daw-browser/shared'
+import { assert, assertDefined } from '@daw-browser/shared'
 import type { ChannelLayout, MixerTrackFx, ResolvedMixerGraph } from './types'
 
 export const getSourceChannelLayout = (channelCounts: readonly number[] | undefined): ChannelLayout | undefined => {
@@ -56,8 +56,7 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
     if (existing) return existing
     assert(!visiting.has(channelId), `Cyclic mixer routing at ${channelId}`)
     visiting.add(channelId)
-    const entry = channelById.get(channelId)
-    assert(entry, `Missing mixer channel ${channelId}`)
+    const entry = assertDefined(channelById.get(channelId), `Missing mixer channel ${channelId}`)
     const upstream = (incoming.get(channelId) ?? []).map((sourceId) => visit(sourceId).output)
     const input = upstream.length > 0 ? mergeLayouts(upstream) : entry.sourceLayout ?? 'stereo'
     const output = propagateEffects(input, entry.fx ?? { instances: [] })

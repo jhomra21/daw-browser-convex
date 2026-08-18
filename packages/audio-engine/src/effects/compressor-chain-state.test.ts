@@ -34,12 +34,18 @@ describe('compressor chain state recovery', () => {
     const params = normalizeCompressorParams({ enabled: true, thresholdDb: -18 })
 
     await state.set(context, params)
-    created[0].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -15, gainReductionDb: -3, thresholdDb: -18 } } as MessageEvent)
+    created[0].workletNode.port.onmessage?.(new MessageEvent('message', {
+      data: { type: 'meter', inputDb: -12, outputDb: -15, gainReductionDb: -3, thresholdDb: -18 },
+    }))
     created[0].state = 'faulted'
     await state.set(context, params)
-    created[1].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -18, gainReductionDb: -6, thresholdDb: -18 } } as MessageEvent)
+    created[1].workletNode.port.onmessage?.(new MessageEvent('message', {
+      data: { type: 'meter', inputDb: -12, outputDb: -18, gainReductionDb: -6, thresholdDb: -18 },
+    }))
     unsubscribe()
-    created[1].workletNode.port.onmessage?.({ data: { type: 'meter', inputDb: -12, outputDb: -21, gainReductionDb: -9, thresholdDb: -18 } } as MessageEvent)
+    created[1].workletNode.port.onmessage?.(new MessageEvent('message', {
+      data: { type: 'meter', inputDb: -12, outputDb: -21, gainReductionDb: -9, thresholdDb: -18 },
+    }))
 
     expect(frames).toEqual([-3, -6])
   })

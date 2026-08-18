@@ -10,6 +10,19 @@ export const vst3TrustDisclosure = {
 
 export const vst3TrustAcknowledgementStorageKey = "daw:vst3-trust-acknowledged";
 
+export type NativeVst3PlaybackFaultKind = "launch-authorization-required";
+
+const nativeVst3LaunchAuthorizationRequiredMessage =
+  "A native VST3 attachment is stale or no longer trusted.";
+
+export const classifyNativeVst3PlaybackFault = (
+  message: string,
+): NativeVst3PlaybackFaultKind | undefined => (
+  message === nativeVst3LaunchAuthorizationRequiredMessage
+    ? "launch-authorization-required"
+    : undefined
+);
+
 export const canUseVst3CatalogAction = (
   action: "read" | "add-directory" | "remove-directory" | "scan",
   trustAcknowledged: boolean,

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { externalProcessorSchema } from "@daw-browser/external-plugins";
 import {
   canUseVst3CatalogAction,
+  classifyNativeVst3PlaybackFault,
   externalProcessorStatusLabel,
   hasVst3TrustAcknowledgement,
   saveVst3TrustAcknowledgement,
@@ -76,6 +77,16 @@ test("gates scanner-capable catalog actions but keeps reading and removal availa
   expect(canUseVst3CatalogAction("add-directory", false)).toBeFalse();
   expect(canUseVst3CatalogAction("scan", false)).toBeFalse();
   expect(canUseVst3CatalogAction("scan", true)).toBeTrue();
+});
+
+test("classifies only the exact stale native VST3 playback fault as recoverable", () => {
+  expect(classifyNativeVst3PlaybackFault(
+    "A native VST3 attachment is stale or no longer trusted.",
+  )).toBe("launch-authorization-required");
+  expect(classifyNativeVst3PlaybackFault(
+    'Native VST3 attachment "instance" is stale or untrusted.',
+  )).toBeUndefined();
+  expect(classifyNativeVst3PlaybackFault("The native VST3 worker could not start.")).toBeUndefined();
 });
 
 test("shows bypass and degraded status for inserted external effects", () => {

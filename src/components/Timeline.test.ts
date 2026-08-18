@@ -105,3 +105,24 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
   expect(handled).toContain("request?.ready && request.instanceId === instanceId");
   expect(handled).toContain("setPendingExternalProcessorEditorRequest();");
 });
+
+test("offers trusted VST3 catalog recovery without retrying playback automatically", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const recoveryStart = source.indexOf("if (classifyNativeVst3PlaybackFault(message)");
+  const recoveryEnd = source.indexOf('\n        notify("Native playback stopped", message);', recoveryStart);
+  if (recoveryStart < 0 || recoveryEnd < 0) throw new Error("Expected the native VST3 recovery handler.");
+  const recovery = source.slice(recoveryStart, recoveryEnd);
+
+  expect(recovery).toContain('title: "Plug-in authorization required"');
+  expect(recovery).toContain("This project uses VST3 plug-ins that must be verified again before playback.");
+  expect(recovery).toContain('label: "Rescan plug-ins"');
+  expect(recovery).toContain('busyLabel: "Rescanning…"');
+  expect(recovery).toContain('cancelLabel: "Cancel"');
+  expect(recovery).toContain("canUseVst3CatalogAction");
+  expect(recovery).toContain("saveVst3TrustAcknowledgement");
+  expect(recovery).toContain("await bridge.scan()");
+  expect(recovery).toContain('new Event("daw-plugin-catalog-changed")');
+  expect(recovery).toContain("setAppMessage(null)");
+  expect(recovery).not.toContain("requestPlay()");
+  expect(source).toContain('notify("Native playback stopped", message);');
+});

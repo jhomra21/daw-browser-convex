@@ -88,6 +88,13 @@ import {
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
+import {
+  canUseVst3CatalogAction,
+  classifyNativeVst3PlaybackFault,
+  hasVst3TrustAcknowledgement,
+  saveVst3TrustAcknowledgement,
+  vst3TrustDisclosure,
+} from "~/lib/external-plugin-ui";
 import { listLocalExternalProcessors } from "~/lib/external-plugins";
 import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
 import TimelineChrome from "./timeline/timeline-chrome";
@@ -152,6 +159,16 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [appMessage, setAppMessage] =
     createSignal<AppMessageDialogState | null>(null);
+  const vst3TrustStorage = (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return undefined;
+    }
+  })();
+  const [vst3TrustAcknowledged, setVst3TrustAcknowledged] = createSignal(
+    hasVst3TrustAcknowledgement(vst3TrustStorage),
+  );
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
@@ -563,6 +580,43 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
       reportFault: (message) => {
+        if (classifyNativeVst3PlaybackFault(message) === "launch-authorization-required") {
+          setAppMessage({
+            title: "Plug-in authorization required",
+            message: "This project uses VST3 plug-ins that must be verified again before playback. Rescan your configured plug-in folders, then press Play again.",
+            action: {
+              label: "Rescan plug-ins",
+              busyLabel: "Rescanning…",
+              enabled: () => canUseVst3CatalogAction("scan", vst3TrustAcknowledged()),
+              onAction: async () => {
+                const bridge = window.dawDesktop?.pluginCatalog;
+                if (!bridge) {
+                  throw new Error("Plug-in rescanning requires the desktop app.");
+                }
+                if (!canUseVst3CatalogAction("scan", vst3TrustAcknowledged())) {
+                  throw new Error("Acknowledge the VST3 plug-in disclosure before rescanning.");
+                }
+                const result = await bridge.scan();
+                if ("catalog" in result) {
+                  window.dispatchEvent(new Event("daw-plugin-catalog-changed"));
+                  setAppMessage(null);
+                  return;
+                }
+                if (!result.ok) throw new Error(result.error);
+              },
+            },
+            cancelLabel: "Cancel",
+            trustAcknowledgement: {
+              acknowledged: vst3TrustAcknowledged,
+              onChange: (acknowledged) => {
+                setVst3TrustAcknowledged(acknowledged);
+                if (acknowledged) saveVst3TrustAcknowledgement(vst3TrustStorage);
+              },
+              disclosure: vst3TrustDisclosure,
+            },
+          });
+          return;
+        }
         notify("Native playback stopped", message);
       },
     },

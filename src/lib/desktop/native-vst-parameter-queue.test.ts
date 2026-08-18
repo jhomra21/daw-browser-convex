@@ -34,8 +34,8 @@ describe("native VST parameter queue", () => {
     await Promise.resolve()
     const second = queue.enqueue({ instanceId: "one", id: 7, value: 0.9 })
     release?.()
-    expect(await first).toBe(false)
-    expect(await second).toBe(true)
+    expect(await first).toBe("superseded")
+    expect(await second).toBe("delivered")
 
     expect(payloads).toHaveLength(2)
     expect(decodePayload(payloads[0] ?? new Uint8Array()).events[0]?.value).toBe(0.1)
@@ -51,8 +51,8 @@ describe("native VST parameter queue", () => {
 
     const first = queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })
     const second = queue.enqueue({ instanceId: "one", id: 8, value: 0.75 })
-    expect(await first).toBe(true)
-    expect(await second).toBe(true)
+    expect(await first).toBe("delivered")
+    expect(await second).toBe("delivered")
 
     expect(payloads).toHaveLength(1)
     expect(decodePayload(payloads[0] ?? new Uint8Array())).toEqual({
@@ -73,8 +73,8 @@ describe("native VST parameter queue", () => {
 
     const first = queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })
     const second = queue.enqueue({ instanceId: "two", id: 8, value: 0.75 })
-    expect(await first).toBe(true)
-    expect(await second).toBe(true)
+    expect(await first).toBe("delivered")
+    expect(await second).toBe("delivered")
 
     expect(payloads.map((payload) => decodePayload(payload).instanceId)).toEqual(["one", "two"])
   })
@@ -87,12 +87,12 @@ describe("native VST parameter queue", () => {
       return accept ? { ok: true } : { ok: false, error: "unavailable" }
     })
 
-    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })).toBe(false)
+    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })).toBe("rejected")
     await Promise.resolve()
     expect(attempts).toBe(1)
 
     accept = true
-    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.75 })).toBe(true)
+    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.75 })).toBe("delivered")
     expect(attempts).toBe(2)
   })
 
@@ -105,10 +105,10 @@ describe("native VST parameter queue", () => {
       return { ok: true }
     })
 
-    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })).toBe(false)
+    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.5 })).toBe("rejected")
     expect(attempts).toBe(1)
     accept = true
-    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.75 })).toBe(true)
+    expect(await queue.enqueue({ instanceId: "one", id: 7, value: 0.75 })).toBe("delivered")
     expect(attempts).toBe(2)
   })
 
@@ -126,12 +126,12 @@ describe("native VST parameter queue", () => {
     const pending = queue.enqueue({ instanceId: "one", id: 8, value: 0.75 })
     queue.dispose()
 
-    expect(await active).toBe(false)
-    expect(await pending).toBe(false)
+    expect(await active).toBe("rejected")
+    expect(await pending).toBe("rejected")
     release?.()
     await Promise.resolve()
     expect(sends).toBe(1)
-    expect(await queue.enqueue({ instanceId: "one", id: 9, value: 1 })).toBe(false)
+    expect(await queue.enqueue({ instanceId: "one", id: 9, value: 1 })).toBe("rejected")
   })
 
   test("keeps at most one native request active", async () => {

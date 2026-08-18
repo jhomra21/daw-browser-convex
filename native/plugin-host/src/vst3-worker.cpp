@@ -634,11 +634,6 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
       }
     }
   }
-  if (implementation_->controller) {
-    if (!implementation_->editorView) {
-      implementation_->editorView = implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor);
-    }
-  }
   implementation_->setup = request.setup;
   return true;
 }
@@ -723,11 +718,12 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   }
   BoundedStateStream stateProbe;
   const bool supportsState = implementation_->component->getState(&stateProbe) == Steinberg::kResultOk;
-  auto* editorView = implementation_->controller
-    ? implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor)
-    : nullptr;
-  const bool supportsEditor = editorView != nullptr;
-  if (editorView != nullptr) editorView->release();
+  bool supportsEditor = false;
+  if (implementation_->controller && PrepareVst3EditorRuntime()) {
+    auto* editorView = implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor);
+    supportsEditor = editorView != nullptr;
+    if (editorView != nullptr) editorView->release();
+  }
   WorkerManifest manifest{
     .version = kWorkerManifestVersion,
     .artifact = {

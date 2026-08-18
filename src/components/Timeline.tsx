@@ -1941,7 +1941,9 @@ const Timeline: Component<TimelineProps> = (props) => {
       exportQueue,
       exportService,
       importFiles,
-      enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
+      enqueueNativeVstParameter: nativeVstParameterQueue
+        ? (event) => nativeVstParameterQueue.enqueue(event).then((result) => result === "delivered")
+        : undefined,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
     onCleanup(unregisterHostController);

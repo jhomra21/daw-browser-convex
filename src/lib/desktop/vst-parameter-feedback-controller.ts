@@ -72,12 +72,15 @@ export const createVstParameterFeedbackController = (
         for (const { payload } of snapshot) {
           if (payload.source === "editor-session") {
             if (!input.isNativePlaybackPrepared?.()) continue
-            const delivered = await input.nativeVstParameterQueue?.enqueue({
+            const delivery = await input.nativeVstParameterQueue?.enqueue({
               instanceId,
               id: payload.parameterId,
               value: payload.normalizedValue,
-            }) ?? true
-            if (!delivered) throw new Error("The native VST parameter feedback queue rejected delivery.")
+            }) ?? "delivered"
+            if (delivery === "superseded") continue
+            if (delivery !== "delivered") {
+              throw new Error("The native VST parameter feedback queue rejected delivery.")
+            }
           }
         }
       }

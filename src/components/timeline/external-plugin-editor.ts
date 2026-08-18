@@ -16,9 +16,9 @@ export const nativeEditorAnchorFromElement = (element: HTMLElement): NativeEdito
 
 export const nativeEditorCommandAvailable = (
   bridgeAvailable: boolean,
-  preflightSupportsEditor: boolean,
+  _preflightSupportsEditor: boolean,
   liveSupportsEditor: boolean | undefined,
-): boolean => bridgeAvailable && (liveSupportsEditor ?? preflightSupportsEditor)
+): boolean => bridgeAvailable && liveSupportsEditor !== false
 
 export const nativeEditorAvailabilityMessage = (input: {
   bridgeAvailable: boolean
@@ -27,6 +27,7 @@ export const nativeEditorAvailabilityMessage = (input: {
 }): string => {
   if (!input.bridgeAvailable) return 'Native editor unavailable in this environment.'
   if (input.liveSupportsEditor === false) return 'This plug-in does not provide a native editor.'
-  if (!input.preflightSupportsEditor) return 'This plug-in does not provide a native editor.'
+  if (input.liveSupportsEditor) return 'Native editor available.'
+  if (!input.preflightSupportsEditor) return 'Native editor availability has not been verified.'
   return 'Native editor available.'
 }

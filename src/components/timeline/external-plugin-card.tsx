@@ -205,7 +205,9 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         setEditorMessage(result.error);
         return false;
       }
-      setLiveEditorSupported(result.status.supported);
+      // A close response intentionally reports a closed, unsupported status;
+      // it is not a capability probe and must not hide Open UI.
+      if (command !== "close") setLiveEditorSupported(result.status.supported);
       setEditorOpen(result.status.open);
       if (!result.status.success) {
         if (result.status.supported) setEditorMessage("The native editor command was rejected.");

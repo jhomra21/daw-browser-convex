@@ -10,14 +10,15 @@ export type NativeVstParameterEvent = {
 }
 
 export type NativeVstParameterSender = (bytes: Uint8Array) => Promise<NativeSessionReply>
+export type NativeVstParameterQueueResult = "delivered" | "superseded" | "rejected"
 export type NativeVstParameterQueue = {
-  enqueue: (event: NativeVstParameterEvent) => Promise<boolean>
+  enqueue: (event: NativeVstParameterEvent) => Promise<NativeVstParameterQueueResult>
   dispose: () => void
 }
 
 type PendingEntry = {
   event: NativeVstParameterEvent
-  waiters: Array<(delivered: boolean) => void>
+  waiters: Array<(result: NativeVstParameterQueueResult) => void>
 }
 
 const keyFor = (event: NativeVstParameterEvent) => `${event.instanceId}:${event.id}`
@@ -31,13 +32,16 @@ export const createNativeVstParameterQueue = (
   let drainScheduled = false
   let disposed = false
 
-  const resolveWaiters = (entry: PendingEntry, delivered: boolean) => {
+  const resolveWaiters = (entry: PendingEntry, result: NativeVstParameterQueueResult) => {
     const waiters = entry.waiters
     entry.waiters = []
-    for (const resolve of waiters) resolve(delivered)
+    for (const resolve of waiters) resolve(result)
   }
 
-  const sendPayload = async (instanceId: string, events: NativeVstParameterEvent[]) => {
+  const sendPayload = async (
+    instanceId: string,
+    events: NativeVstParameterEvent[],
+  ): Promise<NativeVstParameterQueueResult> => {
     try {
       const bytes = serializeNativeVstParameterEvents(instanceId, events.map((event) => ({
         id: event.id,
@@ -45,9 +49,9 @@ export const createNativeVstParameterQueue = (
         sampleOffset: 0,
       })))
       const reply = await send(bytes)
-      return reply.ok
+      return reply.ok ? "delivered" : "rejected"
     } catch {
-      return false
+      return "rejected"
     }
   }
 
@@ -70,13 +74,12 @@ export const createNativeVstParameterQueue = (
         for (const [instanceId, entries] of grouped) {
           for (let offset = 0; offset < entries.length; offset += maxVst3WorkerEventsPerBlock) {
             const chunk = entries.slice(offset, offset + maxVst3WorkerEventsPerBlock)
-            const delivered = !disposed && await sendPayload(
-              instanceId,
-              chunk.map((entry) => entry.event),
-            )
+            const delivery = disposed
+              ? "rejected"
+              : await sendPayload(instanceId, chunk.map((entry) => entry.event))
             for (const entry of chunk) {
               activeByKey.delete(keyFor(entry.event))
-              resolveWaiters(entry, delivered)
+              resolveWaiters(entry, delivery)
             }
           }
         }
@@ -95,14 +98,14 @@ export const createNativeVstParameterQueue = (
     })
   }
 
-  const enqueue = (event: NativeVstParameterEvent) => {
-    if (disposed) return Promise.resolve(false)
+  const enqueue = (event: NativeVstParameterEvent): Promise<NativeVstParameterQueueResult> => {
+    if (disposed) return Promise.resolve("rejected")
     const key = keyFor(event)
     const current = pending.get(key)
     const active = activeByKey.get(key)
-    const promise = new Promise<boolean>((resolve) => {
+    const promise = new Promise<NativeVstParameterQueueResult>((resolve) => {
       if (current) {
-        resolveWaiters(current, false)
+        resolveWaiters(current, "superseded")
         pending.set(key, {
           event,
           waiters: [resolve],
@@ -110,7 +113,7 @@ export const createNativeVstParameterQueue = (
         return
       }
       if (active) {
-        resolveWaiters(active, false)
+        resolveWaiters(active, "superseded")
       }
       pending.set(key, { event, waiters: [resolve] })
     })
@@ -123,8 +126,8 @@ export const createNativeVstParameterQueue = (
     dispose() {
       if (disposed) return
       disposed = true
-      for (const entry of pending.values()) resolveWaiters(entry, false)
-      for (const entry of activeByKey.values()) resolveWaiters(entry, false)
+      for (const entry of pending.values()) resolveWaiters(entry, "rejected")
+      for (const entry of activeByKey.values()) resolveWaiters(entry, "rejected")
       pending.clear()
       activeByKey.clear()
     },

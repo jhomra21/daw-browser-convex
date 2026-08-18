@@ -1269,7 +1269,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       audioEffects={audioEffects}
                       externalProcessors={externalProcessorsForTarget()}
                       externalInstrument={externalProcessorsForTarget().find((processor) => processor.manifest.role === "instrument")}
-                      enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve(false))}
+                      enqueueParameter={props.enqueueNativeVstParameter ?? (() => Promise.resolve("rejected"))}
                       canWrite={canWriteCurrentTargetEffects()}
                       onElementChange={props.onEffectChainElementChange}
                       spectrum={spectrum()}

@@ -124,7 +124,7 @@ test.serial('persists active playback feedback without suppressing automation or
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
     })
     expect(controller).toBeDefined()
     expect(bridge.emit(payload(project.id, 'active-playback', 1, 0.75))).toBeTrue()
@@ -152,7 +152,7 @@ test.serial('persists idle editor-session feedback without enqueueing or faultin
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
-          return false
+          return "rejected"
         },
       },
       isNativePlaybackPrepared: () => false,
@@ -186,7 +186,7 @@ test.serial('persists prepared editor-session feedback and enqueues exactly once
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
-          return true
+          return "delivered"
         },
       },
       isNativePlaybackPrepared: () => true,
@@ -215,7 +215,7 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
-          return true
+          return "delivered"
         },
       },
       isNativePlaybackPrepared: () => true,
@@ -243,7 +243,7 @@ test.serial('ignores project-mismatched and disposed feedback', async () => {
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
       isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(otherProject.id, 'editor-session'))
@@ -270,7 +270,7 @@ test.serial('suppresses override and enqueue when the mounted generation changes
       projectId: () => project.id,
       mountedProjectGeneration: () => generation,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
     })
     bridge.emit(payload(project.id, 'editor-session', 1, 0.625))
     generation = 1
@@ -298,7 +298,7 @@ test.serial('does not override or enqueue unknown or read-only descriptors', asy
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return true } },
+      nativeVstParameterQueue: { enqueue: async (event) => { queued.push(event); return "delivered" } },
       isNativePlaybackPrepared: () => true,
     })
     bridge.emit(payload(project.id, 'editor-session', 99, 0.4))
@@ -353,7 +353,7 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
       overrideTarget: (target) => targets.push(target),
-      nativeVstParameterQueue: { enqueue: async () => false },
+      nativeVstParameterQueue: { enqueue: async () => "rejected" },
       isNativePlaybackPrepared: () => true,
       reportFault: (message) => faults.push(message),
     })
@@ -365,6 +365,30 @@ test.serial('keeps persistence when native queue rejects delivery', async () => 
     expect(row?.value).toMatchObject({ parameterOverrides: { '1': 0.375 } })
     expect(targets).toHaveLength(0)
     expect(faults).toEqual(["The native VST parameter feedback queue rejected delivery."])
+    controller?.dispose()
+  } finally {
+    bridge.restore()
+  }
+})
+
+test.serial('does not report expected native queue coalescing as a fault', async () => {
+  const project = await createLocalProject(`Feedback queue superseded ${crypto.randomUUID()}`)
+  await setLocalExternalProcessor(project.id, createProcessor())
+  const bridge = installSubscription()
+  const faults: string[] = []
+  try {
+    const controller = createVstParameterFeedbackController({
+      projectId: () => project.id,
+      mountedProjectGeneration: () => 0,
+      overrideTarget: () => undefined,
+      nativeVstParameterQueue: { enqueue: async () => "superseded" },
+      isNativePlaybackPrepared: () => true,
+      reportFault: (message) => faults.push(message),
+    })
+    bridge.emit(payload(project.id, 'editor-session', 1, 0.5))
+    await flushAsyncWork()
+
+    expect(faults).toEqual([])
     controller?.dispose()
   } finally {
     bridge.restore()

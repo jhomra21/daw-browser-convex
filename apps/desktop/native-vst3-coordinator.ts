@@ -640,7 +640,7 @@ export const coordinateNativeVst3Attachments = async (input: {
   serializedPlan: string
   sampleRateHz: number
   workerPath: string
-  catalogStore: { reload(): Promise<PluginCatalogData> }
+  catalogStore: { load(): Promise<PluginCatalogData> }
   audioHost: Pick<NativeAudioHostSupervisor, "attachVst">
   transactionToken?: string
   preflight?: typeof preflightNativeVst3Worker
@@ -653,7 +653,7 @@ export const coordinateNativeVst3Attachments = async (input: {
   }
   let catalog: PluginCatalogData
   try {
-    catalog = await input.catalogStore.reload()
+    catalog = await input.catalogStore.load()
   } catch {
     return { ok: false, code: "catalog-unavailable", message: "The trusted native plug-in catalog is unavailable." }
   }
@@ -712,14 +712,14 @@ export const resolveNativeVst3AttachmentPlan = async (input: {
   plan: NativeExternalAttachmentPlan
   sampleRateHz: number
   workerPath: string
-  catalogStore: { reload(): Promise<PluginCatalogData> }
+  catalogStore: { load(): Promise<PluginCatalogData> }
   capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
   stateReader?: (instanceId: string, signal?: AbortSignal) => Promise<CapturedVst3State>
   preflight?: typeof preflightNativeVst3Worker
   signal?: AbortSignal
 }): Promise<ResolvedVst3Attachment[]> => {
   input.signal?.throwIfAborted()
-  const catalog = await input.catalogStore.reload()
+  const catalog = await input.catalogStore.load()
   input.signal?.throwIfAborted()
   const resolved: Array<{ attachment: Attachment; native: PreflightAttachment }> = []
   for (const attachment of canonicalAttachments(input.plan.attachments)) {

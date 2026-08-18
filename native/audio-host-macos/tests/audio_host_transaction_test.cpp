@@ -245,9 +245,9 @@ int main(int argc, char* argv[]) {
     daw::audio_host_macos::ControlType::kVstStateGet,
     malformed_state_request
   ), daw::audio_host_macos::ControlType::kVstStateGet, false));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(1, true, 0)),
+    daw::audio_host_macos::ControlType::kTransport, false));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(1, false, 0)),
-    daw::audio_host_macos::ControlType::kTransport, true));
-  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransport, Transport(2, true, 0)),
     daw::audio_host_macos::ControlType::kTransport, true));
   const auto instrument_events = InstrumentEvents();
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kMidiEvents, instrument_events),

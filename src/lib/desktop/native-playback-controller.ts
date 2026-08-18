@@ -175,6 +175,14 @@ const nativeTransportFor = (
   }
   return transport
 }
+
+const hasEquivalentTransportScheduling = (
+  previous: LivePlaybackTransport,
+  next: LivePlaybackTransport,
+) => previous.loopEnabled === next.loopEnabled
+  && previous.loopStartSec === next.loopStartSec
+  && previous.loopEndSec === next.loopEndSec
+
 export type NativeBuiltInParameterQueueResult =
   | { handled: true }
   | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-target" | "unavailable" | "bridge-error"; error?: string }
@@ -703,17 +711,43 @@ export const createNativePlaybackController = (input: {
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== resolveProjectGeneration()
     if (prepared && preparedProjectGeneration === projectGeneration) {
+      let attemptedCoordinator: NativeScheduleCoordinator | undefined
+      let previousCoordinator: NativeScheduleCoordinator | undefined
       try {
-        const previousCoordinator = scheduleCoordinator
+        previousCoordinator = scheduleCoordinator
         const refreshed = previousCoordinator && preparedSnapshot && !compileContext
           ? { supported: true as const, snapshot: { ...preparedSnapshot, transport } }
           : await input.compileSnapshot(transport, compileContext)
         if (!refreshed.supported || refreshed.snapshot.revision !== preparedSnapshot?.revision) {
           preparedProjectGeneration = undefined
         } else {
+          const frame = Math.round(transport.playheadSec * sampleRate)
+          if (cancelled()) return "unavailable"
+          if (
+            runTransport
+            && !compileContext
+            && previousCoordinator
+            && preparedSnapshot
+            && hasEquivalentTransportScheduling(preparedSnapshot.transport, transport)
+            && frame === transportFrame
+          ) {
+            const runTransitionId = ++nextTransportTransitionId
+            assertReply(await bridge.session.setTransport(
+              nativeTransportFor(refreshed.snapshot, transportEpoch, true, frame, runTransitionId),
+            ))
+            await previousCoordinator.waitForTransition(runTransitionId, true)
+            if (cancelled()) {
+              await dispose()
+              return "unavailable"
+            }
+            preparedSnapshot = refreshed.snapshot
+            transportFrame = frame
+            active = true
+            livePreviewActive = true
+            return "started"
+          }
           transportEpoch += 1
           clearNativeSpectrumFrame()
-          const frame = Math.round(transport.playheadSec * sampleRate)
           nativeSessionGeneration += 1
           previousCoordinator?.dispose()
           const nextCoordinator = createCoordinatorForEpoch({
@@ -729,6 +763,7 @@ export const createNativePlaybackController = (input: {
           if (preparedGraph) nextCoordinator.preflight(preparedGraph)
           nextCoordinator.install()
           scheduleCoordinator = nextCoordinator
+          attemptedCoordinator = nextCoordinator
           const transitionId = ++nextTransportTransitionId
           assertReply(await bridge.session.setTransport(
             nativeTransportFor(refreshed.snapshot, transportEpoch, false, frame, transitionId),
@@ -757,15 +792,22 @@ export const createNativePlaybackController = (input: {
         const diagnosticError = error === null || error === undefined
           ? undefined
           : error instanceof Error ? error : String(error)
-        console.error("[native-vst3] session.start failed", {
-          result: "unavailable",
-          error: sanitizeNativeVst3DiagnosticError(diagnosticError),
-        })
-        if (!cancelled() && indicatesNativeHostConnectionLoss(diagnosticError)) {
+        const ownsAttemptedCoordinator = attemptedCoordinator !== undefined
+          ? scheduleCoordinator === attemptedCoordinator
+          : scheduleCoordinator === previousCoordinator
+        if (ownsAttemptedCoordinator) {
+          console.error("[native-vst3] session.start failed", {
+            result: "unavailable",
+            error: sanitizeNativeVst3DiagnosticError(diagnosticError),
+          })
+        }
+        if (!cancelled() && ownsAttemptedCoordinator && indicatesNativeHostConnectionLoss(diagnosticError)) {
           markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
         }
-        if (!cancelled()) reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
-        await dispose()
+        if (!cancelled() && ownsAttemptedCoordinator) {
+          reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
+        }
+        if (ownsAttemptedCoordinator) await dispose()
         return "unavailable"
       }
     }

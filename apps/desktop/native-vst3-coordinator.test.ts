@@ -184,7 +184,7 @@ test("exports stateless VST3 attachments with defaults and persisted parameters"
     plan: { version: 1, attachments: [stateless] },
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     stateReader: async () => {
       stateReaderCalled = true
       throw new Error("state capture must not be requested")
@@ -212,7 +212,7 @@ test("requires and validates live state capture for stateful VST3 attachments", 
     plan: { version: 1, attachments: [stateful] },
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     stateReader: async (instanceId) => {
       calls.push(instanceId)
       return { bytes, sha256 }
@@ -225,14 +225,14 @@ test("requires and validates live state capture for stateful VST3 attachments", 
     plan: { version: 1, attachments: [stateful] },
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     preflight: async () => available(stateful, { supportsState: true }),
   })).rejects.toThrow("cannot be exported without state capture")
   await expect(resolveNativeVst3AttachmentPlan({
     plan: { version: 1, attachments: [stateful] },
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     stateReader: async () => ({ bytes, sha256: "0".repeat(64) }),
     preflight: async () => available(stateful, { supportsState: true }),
   })).rejects.toThrow("captured state is malformed")
@@ -240,7 +240,7 @@ test("requires and validates live state capture for stateful VST3 attachments", 
     plan: { version: 1, attachments: [stateful] },
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     stateReader: async () => { throw new Error("live capture failed") },
     preflight: async () => available(stateful, { supportsState: true }),
   })).rejects.toThrow("state capture failed. live capture failed")
@@ -259,7 +259,7 @@ test("preflights every attachment before attaching to the active native transact
     serializedPlan: plan([second, first]),
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     audioHost: host(calls),
     preflight: async ({ attachment: input }) => {
       calls.push(`preflight:${input.instanceId}`)
@@ -277,6 +277,33 @@ test("preflights every attachment before attaching to the active native transact
   ])
 })
 
+test("uses the trusted same-session catalog without reloading persisted data", async () => {
+  let loadCalls = 0
+  let reloadCalls = 0
+  const calls: string[] = []
+  const catalogStore = {
+    load: async () => {
+      loadCalls += 1
+      return catalog()
+    },
+    reload: async () => {
+      reloadCalls += 1
+      return { ...catalog(), entries: [] }
+    },
+  }
+  const result = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore,
+    audioHost: host(calls),
+    preflight: async () => available(first),
+  })
+  expect(result).toEqual({ ok: true, attached: 1 })
+  expect(loadCalls).toBe(1)
+  expect(reloadCalls).toBe(0)
+})
+
 test("fails before native transaction for stale, unsigned, and quarantined catalog data", async () => {
   const stale = catalog()
   stale.entries[0]!.scanHealth = "scan-failed"
@@ -292,7 +319,7 @@ test("fails before native transaction for stale, unsigned, and quarantined catal
       serializedPlan: plan([first]),
       sampleRateHz: 48_000,
       workerPath: "/Resources/daw-vst3-worker",
-      catalogStore: { reload: async () => untrusted },
+      catalogStore: { load: async () => untrusted },
       audioHost: host(calls),
       preflight: async () => available(first),
     })
@@ -307,7 +334,7 @@ test("reports a failure when an active native transaction rejects an attachment"
     serializedPlan: plan([first]),
     sampleRateHz: 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { reload: async () => catalog() },
+    catalogStore: { load: async () => catalog() },
     audioHost: {
       attachVst: async () => {
         calls.push("attach")
@@ -334,7 +361,7 @@ test("rejects worker role and bus manifest drift before attachment", async () =>
       serializedPlan: plan([first]),
       sampleRateHz: 48_000,
       workerPath: "/Resources/daw-vst3-worker",
-      catalogStore: { reload: async () => catalog() },
+      catalogStore: { load: async () => catalog() },
       audioHost: host(calls),
       preflight: async () => result,
     })
@@ -354,7 +381,7 @@ test("does not begin attachment when any worker preflight times out or crashes",
       serializedPlan: plan([first, second]),
       sampleRateHz: 48_000,
       workerPath: "/Resources/daw-vst3-worker",
-      catalogStore: { reload: async () => catalog() },
+      catalogStore: { load: async () => catalog() },
       audioHost: host(calls),
       preflight: async ({ attachment: input }) => {
         calls.push(`preflight:${input.instanceId}`)

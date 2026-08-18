@@ -51,6 +51,13 @@ test("keeps spectrum selection on the native session envelope contract", async (
   expect(main).not.toContain('[native-spectrum]')
 })
 
+test("preserves renderer transport transition IDs through native IPC mapping", async () => {
+  const main = await readFile(mainPath, "utf8")
+
+  expect(main).toContain("transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional()")
+  expect(main).toContain("transitionId: value.transitionId")
+})
+
 test("routes editor commands through the isolated session before the playback host", async () => {
   const main = await readFile(mainPath, "utf8")
   const isolatedRoute = main.indexOf("if (manager) {")

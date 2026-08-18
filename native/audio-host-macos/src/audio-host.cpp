@@ -34,7 +34,6 @@ constexpr std::uint32_t kMaximumNativeVstFrames = 8'192;
 constexpr std::uint32_t kMaximumNativeVstChannels = 64;
 constexpr std::uint32_t kMaximumNativeVstSlots = 8;
 constexpr std::size_t kGranularStateWireBytes = 60;
-constexpr std::uint32_t kNativeVstMissLimit = 3;
 constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
 constexpr std::uint32_t kSpectrumFftSize = 2048;
@@ -254,6 +253,8 @@ struct NativeVstWorkerAttachment {
   std::array<std::uint64_t, kMaximumNativeVstSlots> pending_sequences{};
   std::array<std::uint32_t, kMaximumNativeVstSlots> pending_frames{};
   std::array<std::uint32_t, kMaximumNativeVstSlots> missed_callbacks{};
+  std::array<std::uint64_t, kMaximumNativeVstSlots> missed_frames{};
+  bool realtime_started = false;
   std::array<float, kMaximumNativeVstFrames * 2> input{};
   std::array<float, kMaximumNativeVstFrames * 2> output{};
   static constexpr std::size_t kCompletedOutputFrames = kMaximumNativeVstFrames * kMaximumNativeVstSlots;
@@ -691,10 +692,18 @@ struct NativeVstWorkerAttachment {
         }
         pending_sequences[slot] = 0;
         pending_frames[slot] = 0;
-        missed_callbacks[slot] = 0;
+        realtime_started = true;
+        missed_callbacks.fill(0);
+        missed_frames.fill(0);
         continue;
       }
-      if (++missed_callbacks[slot] == kNativeVstMissLimit) {
+      if (daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+        realtime_started,
+        render.sample_rate_hz,
+        render.frame_count,
+        missed_frames[slot],
+        missed_callbacks[slot]
+      )) {
         static_cast<void>(port.DiscardLate(slot, sequence + 1));
         static_cast<void>(port.PublishDiagnostic({
           .kind = daw::plugin_host::WorkerDiagnosticKind::kMiss,
@@ -703,6 +712,7 @@ struct NativeVstWorkerAttachment {
         pending_sequences[slot] = 0;
         pending_frames[slot] = 0;
         missed_callbacks[slot] = 0;
+        missed_frames[slot] = 0;
       }
     }
     const std::size_t available_frames = completed_output_write - completed_output_read;
@@ -1499,6 +1509,9 @@ struct AudioHost::Impl {
       attachment->offline = mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline;
       attachment->offline_started = false;
       attachment->offline_parameters_applied = false;
+      attachment->realtime_started = false;
+      attachment->missed_callbacks.fill(0);
+      attachment->missed_frames.fill(0);
       const auto& metadata = attachment->metadata;
       const auto initial_state = metadata.initial_state_sha256.empty()
         ? std::optional<daw::plugin_host::WorkerState>{}
@@ -1573,6 +1586,8 @@ struct AudioHost::Impl {
       attachment->pending_sequences.fill(0);
       attachment->pending_frames.fill(0);
       attachment->missed_callbacks.fill(0);
+      attachment->missed_frames.fill(0);
+      attachment->realtime_started = false;
       attachment->completed_output_read = 0;
       attachment->completed_output_write = 0;
     }
@@ -1828,6 +1843,12 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->schedule_progress_notified_complete = false;
   impl_->assets.clear();
   impl_->prepared_asset_handles.clear();
+  for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
+    static_cast<void>(instance_id);
+    attachment->realtime_started = false;
+    attachment->missed_callbacks.fill(0);
+    attachment->missed_frames.fill(0);
+  }
   impl_->graph_prepared = false;
   impl_->transport_prepared = false;
   impl_->transport_frame.store(0, std::memory_order_release);
@@ -3034,7 +3055,11 @@ bool AudioHost::SetTransport(
   const std::uint64_t transition_id
 ) {
   const daw_audio_core_handle active_core = impl_->active_core.load(std::memory_order_acquire);
-  if (active_core == 0 || impl_->prepared_core != 0 || frame < 0 || epoch == 0
+  const auto lifecycle = impl_->state.load(std::memory_order_acquire);
+  const bool configured_offline_host = lifecycle == LifecycleState::kConfigured
+    && impl_->config.device_uid == "offline:render";
+  if ((running && lifecycle != LifecycleState::kRunning && !configured_offline_host)
+    || active_core == 0 || impl_->prepared_core != 0 || frame < 0 || epoch == 0
     || (bpm != 0.0 && (!std::isfinite(bpm) || bpm <= 0.0))
     || time_signature_numerator > 32 || time_signature_denominator > 32
     || (time_signature_numerator == 0) != (time_signature_denominator == 0)

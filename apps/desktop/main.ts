@@ -135,6 +135,7 @@ const nativeSessionTransportSchema = z.object({
   cycleActive: z.boolean().optional(),
   cycleStartSec: z.number().finite().min(0).optional(),
   cycleEndSec: z.number().finite().min(0).optional(),
+  transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional(),
 }).passthrough().refine((value) => (
   (value.cycleStartSec === undefined && value.cycleEndSec === undefined)
   || (
@@ -1022,6 +1023,7 @@ const registerIpc = () => {
       cycleActive: value.cycleActive,
       cycleStartSec: value.cycleStartSec,
       cycleEndSec: value.cycleEndSec,
+      transitionId: value.transitionId,
     }
   }
   const nativeSessionRecordingConfiguration = (
@@ -1441,7 +1443,7 @@ const registerIpc = () => {
       }
       return await preflightVst3Insertion({
         request: request.data,
-        catalog: await store.reload(),
+        catalog: await store.load(),
         workerPath,
         sampleRateHz: device.nominalSampleRateHz,
       })

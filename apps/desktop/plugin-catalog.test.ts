@@ -10,7 +10,9 @@ import {
   fingerprintVst3Bundle,
   normalizeConfiguredDirectories,
   parsePluginCatalogData,
+  type Vst3CatalogEntry,
 } from './plugin-catalog'
+import { resolveVst3Attachment } from './vst3-attachment'
 
 test('fingerprints plugin files through a stream', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
@@ -174,4 +176,61 @@ test('migrates V2 catalogs without eligibility and persists only validated unava
     ...valid,
     entries: [{ ...valid.entries[0], launchEligibility: { ...valid.entries[0].launchEligibility, quarantinePresent: true } }],
   })).toBeUndefined()
+})
+
+test('keeps scanned eligibility in-session but strips it from a fresh persisted store until rescan', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  const pluginDirectory = path.join(directory, 'plugins')
+  const filePath = path.join(directory, 'plugin-catalog-v1.json')
+  const bundleFingerprint = 'b'.repeat(64)
+  const binaryFingerprint = 'a'.repeat(64)
+  try {
+    await mkdir(path.join(pluginDirectory, 'Example.vst3'), { recursive: true })
+    const store = createPluginCatalogStore({ filePath })
+    await store.addDirectory(pluginDirectory)
+    const scanBundle = async (entry: Vst3CatalogEntry) => ({
+      classes: [{
+        classId: 'example-effect',
+        vendor: 'Example Vendor',
+        name: 'Example',
+        version: '1',
+        role: 'effect' as const,
+        source: 'factory' as const,
+      }],
+      scanHealth: 'scanned' as const,
+      binaryFingerprint,
+      launchEligibility: {
+        canonicalBundlePath: entry.bundlePath,
+        canonicalExecutablePath: path.join(entry.bundlePath, 'Contents', 'MacOS', 'Example'),
+        bundleFingerprint,
+        binaryFingerprint,
+        architecture: 'arm64' as const,
+        codeSignVerifiedAtMs: 1,
+        quarantinePresent: false as const,
+        scannerProtocolVersion: 2 as const,
+      },
+    })
+    const scanned = await store.scan(scanBundle)
+    const reference = {
+      version: 1 as const,
+      classId: 'example-effect',
+      vendorId: 'Example Vendor',
+      architecture: 'arm64' as const,
+      bundleFingerprint,
+      binaryFingerprint,
+      scannerCatalogVersion: 2 as const,
+    }
+    expect(scanned.entries[0]?.launchEligibility).toBeDefined()
+    expect(resolveVst3Attachment(scanned, reference)).toBeDefined()
+
+    const freshStore = createPluginCatalogStore({ filePath })
+    const persisted = await freshStore.load()
+    expect(persisted.entries[0]?.launchEligibility).toBeUndefined()
+    expect(resolveVst3Attachment(persisted, reference)).toBeUndefined()
+
+    const rescanned = await freshStore.scan(scanBundle)
+    expect(resolveVst3Attachment(rescanned, reference)).toBeDefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

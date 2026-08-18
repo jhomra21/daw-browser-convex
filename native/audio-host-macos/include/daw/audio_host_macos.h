@@ -30,6 +30,28 @@ constexpr std::size_t kMaximumScheduleRecords = 2'048;
 constexpr std::size_t kMaximumScheduleAutomationSegments = 2'048;
 constexpr std::size_t kMaximumScheduleInstanceIdBytes = 256;
 
+namespace detail {
+
+constexpr bool NativeVstWatchdogShouldMiss(
+  const bool realtime_started,
+  const std::uint32_t sample_rate_hz,
+  const std::uint32_t frame_count,
+  std::uint64_t& missed_frames,
+  std::uint32_t& missed_callbacks
+) noexcept {
+  if (realtime_started) {
+    constexpr std::uint32_t kNativeVstMissLimit = 3;
+    ++missed_callbacks;
+    return missed_callbacks >= kNativeVstMissLimit;
+  }
+  const auto half_sample_rate = sample_rate_hz / 2;
+  const auto startup_grace_frames = half_sample_rate == 0 ? 1U : half_sample_rate;
+  missed_frames += frame_count;
+  return missed_frames >= startup_grace_frames;
+}
+
+}  // namespace detail
+
 enum class ControlType : std::uint32_t {
   kHostHello = 1,
   kHostCapabilities = 2,

@@ -23,7 +23,7 @@ type EditorSessionSupervisor = Pick<
 
 type EditorSessionInput = {
   workerPath: string
-  catalogStore: { reload(): Promise<PluginCatalogData> }
+  catalogStore: { load(): Promise<PluginCatalogData> }
   createSupervisor: () => EditorSessionSupervisor
   coordinate?: typeof coordinateNativeVst3Attachments
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void

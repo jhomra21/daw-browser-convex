@@ -211,8 +211,9 @@ void AssertMultipleSourceGraphPublishes() {
   AppendLeFloat(source_event, -1.0F);
   AppendLeFloat(source_event, 0.75F);
   assert(host.QueueSourceEvents(source_event));
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
   std::array<float, kFrames> input_left{};
   std::array<float, kFrames> input_right{};
   std::array<float, kFrames> output_left{};
@@ -325,8 +326,9 @@ RenderResult Render(const bool active, const bool instrument, const std::vector<
   const auto graph_status = host.PrepareGraphRevision(2, graph_bytes);
   assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   constexpr std::size_t kBlocks = 32;
   const std::size_t total_frames = kFrames * kBlocks;

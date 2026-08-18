@@ -659,7 +659,7 @@ void TestCallbackPlanarBuffersAndSplitting() {
     .revision = 2,
   }));
   assert(host.diagnostics().active_revision == 2);
-  assert(host.SetTransport(1, true, 100));
+  assert(host.SetTransport(1, false, 100));
   assert(host.diagnostics().transport_epoch == 1);
   assert(host.Retire(2));
   host.Teardown();
@@ -704,10 +704,10 @@ void TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance() {
   assert(host.ConfigureInstrumentStates(InstrumentStatePayload(0.5F)));
   assert(host.PublishGraphRevision(1).code
     == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.QueueInstrumentEvents(UrgentTransportRelease(1)));
-  assert(host.SetTransport(2, true, 0));
   assert(host.StartOffline());
+  assert(host.SetTransport(2, true, 0));
 
   std::array<float, 4> input_left{};
   std::array<float, 4> input_right{};
@@ -797,7 +797,7 @@ void TestNativeMeterQueueAggregatesPostGraphOutput() {
     == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.PublishGraphRevision(2).code
     == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
   std::array<float, 4> left{1.0F, 1.0F, 1.0F, 1.0F};
   std::array<float, 4> right{0.5F, 0.5F, 0.5F, 0.5F};
@@ -937,6 +937,29 @@ void TestNativeVstRuntimeControlBounds() {
   AppendLeU32(invalid_state, 64);
   invalid_state.insert(invalid_state.end(), 65, 0);
   assert(!host.SetNativeVstState(invalid_state));
+}
+
+void TestNativeVstWatchdogStartupGrace() {
+  std::uint64_t missed_frames = 0;
+  std::uint32_t missed_callbacks = 0;
+  assert(!daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+    false, 48'000, 23'999, missed_frames, missed_callbacks
+  ));
+  assert(daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+    false, 48'000, 1, missed_frames, missed_callbacks
+  ));
+
+  missed_frames = 0;
+  missed_callbacks = 0;
+  assert(!daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+    true, 48'000, 512, missed_frames, missed_callbacks
+  ));
+  assert(!daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+    true, 48'000, 512, missed_frames, missed_callbacks
+  ));
+  assert(daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
+    true, 48'000, 512, missed_frames, missed_callbacks
+  ));
 }
 
 void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
@@ -1100,8 +1123,9 @@ void TestVstAutomationSegmentsReclaimWithinEpoch() {
   const auto graph_status = host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F, 2));
   assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
   assert(host.PublishGraphRevision(2).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
   for (std::size_t attempt = 0; attempt < 500; ++attempt) {
     const auto health = host.NativeVstHealth(instance_id);
     if (health && *health == daw::audio_host_macos::NativeVstWorkerHealth::kReady) break;
@@ -1220,8 +1244,9 @@ void TestRollbackSafeGraphRevisionLifecycle() {
   }));
   const auto first_graph = GraphSnapshot(1, 1.0F);
   assert(host.PrepareAndPublishGraph(1, first_graph));
-  assert(host.SetTransport(1, true, 0));
+  assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
 
   auto invalid_graph = GraphSnapshot(2, 0.5F);
   invalid_graph[12] = 99;
@@ -1402,6 +1427,7 @@ int main() {
   TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();
   TestNativeVstRuntimeControlBounds();
+  TestNativeVstWatchdogStartupGrace();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
   TestScheduleWindowCompletionSemantics();
   TestScheduleWindowRollback();

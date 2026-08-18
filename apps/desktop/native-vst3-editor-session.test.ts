@@ -92,7 +92,7 @@ const managerFor = (input: {
   }
   return createNativeVst3EditorSessionManager({
     workerPath: "/worker",
-    catalogStore: { reload: async () => catalog },
+    catalogStore: { load: async () => catalog },
     createSupervisor: () => {
       return supervisors.shift() ?? fakeSupervisor(calls)
     },

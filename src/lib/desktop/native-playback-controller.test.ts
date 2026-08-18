@@ -202,6 +202,7 @@ const createBridge = (
   requireStartedForSchedule = false,
   failureMessage = "failed",
   sampleRateHz = 48_000,
+  suppressRedundantPausedTransition = false,
 ) => {
   const calls: string[] = []
   const parameterPayloads: Uint8Array[] = []
@@ -239,6 +240,7 @@ const createBridge = (
   let appliedUrgentSequence = 0n
   let appliedProcessorSequence = 0n
   let sessionStarted = false
+  let lastTransport: { frame: number; running: boolean } | undefined
   let rejectScheduleWindows = false
   const emitProgress = (frame: number) => {
     progressSequence += 1n
@@ -417,6 +419,13 @@ const createBridge = (
           })
           transportEpoch = transport.epoch
           appliedTransitionId = transport.transitionId ?? (appliedTransitionId + 1n)
+          const redundantPausedTransition = suppressRedundantPausedTransition
+            && lastTransport !== undefined
+            && !transport.running
+            && !lastTransport.running
+            && transport.frame === lastTransport.frame
+          lastTransport = { frame: transport.frame, running: transport.running }
+          if (redundantPausedTransition) return { ok: true as const }
           if (requireStartedForSchedule && !sessionStarted) return { ok: true as const }
           queueMicrotask(() => {
             emitProgress(transport.frame)
@@ -2048,7 +2057,7 @@ test("releases only instrument nodes from the prepared native graph", async () =
 })
 
 test("pause and resume retain the prepared native graph and installed assets", async () => {
-  const fixture = createBridge()
+  const fixture = createBridge(undefined, false, false, "failed", 48_000, true)
   let compilations = 0
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
@@ -2070,8 +2079,92 @@ test("pause and resume retain the prepared native graph and installed assets", a
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
-  expect(fixture.calls.filter((call) => call === "transport")).toHaveLength(5)
+  expect(fixture.calls.filter((call) => call === "transport")).toHaveLength(4)
+  expect(fixture.transports.map(({ running }) => running)).toEqual([false, true, false, true])
+  expect(fixture.transports.map(({ epoch }) => epoch)).toEqual([1, 1, 2, 2])
+  expect(controller.isActive()).toBeTrue()
+  expect(controller.isPrepared()).toBeTrue()
   expect(fixture.calls).not.toContain("release")
+})
+
+test("rebuilds the coordinator when same-frame resume changes loop scheduling", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await controller.start(input().transport)
+  await controller.pause(0.5)
+  await expect(controller.start({
+    ...input().transport,
+    playheadSec: 0.5,
+    loopEnabled: true,
+    loopStartSec: 0.25,
+    loopEndSec: 1.25,
+  })).resolves.toBe("started")
+
+  expect(fixture.transports.map(({ epoch, running, hasCycleStart, hasCycleEnd }) => ({
+    epoch,
+    running,
+    hasCycleStart,
+    hasCycleEnd,
+  }))).toEqual([
+    { epoch: 1, running: false, hasCycleStart: false, hasCycleEnd: false },
+    { epoch: 1, running: true, hasCycleStart: false, hasCycleEnd: false },
+    { epoch: 2, running: false, hasCycleStart: false, hasCycleEnd: false },
+    { epoch: 3, running: false, hasCycleStart: true, hasCycleEnd: true },
+    { epoch: 3, running: true, hasCycleStart: true, hasCycleEnd: true },
+  ])
+  expect(controller.isActive()).toBeTrue()
+  expect(controller.isPrepared()).toBeTrue()
+  await controller.dispose()
+})
+
+test("does not let a superseded prepared resume dispose its replacement coordinator", async () => {
+  const fixture = createBridge()
+  const epoch2PausedTransitionReached = Promise.withResolvers<void>()
+  const resumeGate = Promise.withResolvers<void>()
+  let transportTail = Promise.resolve()
+  const originalSetTransport = fixture.bridge.session.setTransport
+  const bridge = {
+    ...fixture.bridge,
+    session: {
+      ...fixture.bridge.session,
+      setTransport: (transport: Parameters<typeof originalSetTransport>[0]) => {
+        const request = transportTail.then(async () => {
+          if (transport.epoch === 2 && !transport.running) {
+            epoch2PausedTransitionReached.resolve()
+            await resumeGate.promise
+          }
+          return originalSetTransport(transport)
+        })
+        transportTail = request.then(() => undefined, () => undefined)
+        return request
+      },
+    },
+  }
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    reportFault: (message) => faults.push(message),
+  })
+
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  const play = controller.start({ ...input().transport, playheadSec: 0.125 })
+  await epoch2PausedTransitionReached.promise
+  const seek = controller.seekPrepared(0.25)
+  resumeGate.resolve()
+
+  await expect(play).resolves.toBe("unavailable")
+  await expect(seek).resolves.toBe("started")
+  expect(faults).toEqual([])
+  expect(controller.isPrepared()).toBeTrue()
+  expect(controller.isActive()).toBeFalse()
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  expect(controller.isActive()).toBeTrue()
+  await controller.dispose()
 })
 
 test("queues live MIDI notes through the prepared native host while paused", async () => {

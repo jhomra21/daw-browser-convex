@@ -22,6 +22,8 @@ const curveDb = (inputDb, p) => {
   const x = inputDb - lower
   return inputDb + ((1 / ratio - 1) * x * x) / (2 * knee)
 }
+const isCompressorMessage = (data) => data !== null && Object.prototype.toString.call(data) === '[object Object]'
+const isCompressorParams = (params) => params !== null && Object.prototype.toString.call(params) === '[object Object]'
 
 class CompressorProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -48,9 +50,9 @@ class CompressorProcessor extends AudioWorkletProcessor {
     this.meteringEnabled = false
     this.port.onmessage = (event) => {
       const data = event.data
-      if (!data || typeof data !== 'object') return
-      if (data.type === 'params' && data.params && typeof data.params === 'object') this.params = data.params
-      if (data.type === 'metering' && typeof data.enabled === 'boolean') {
+      if (!isCompressorMessage(data)) return
+      if (data.type === 'params' && isCompressorParams(data.params)) this.params = data.params
+      if (data.type === 'metering' && (data.enabled === true || data.enabled === false)) {
         this.meteringEnabled = data.enabled
         if (!data.enabled) this.resetMeter()
       }

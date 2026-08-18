@@ -3,6 +3,13 @@ const names = [
   ['gate.holdMs', 20, 0, 500], ['gate.releaseMs', 120, 5, 2000], ['gate.hysteresisDb', 6, 0, 24],
   ['gate.rangeDb', -80, -80, 0], ['gate.lookaheadMs', 0, 0, 2], ['gate.link', 1, 0, 1],
 ]
+const isGateMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+const isGateConfigureMessage = (message, revision) => isGateMessage(message)
+  && message.type === 'configure'
+  && Number.isInteger(message.revision)
+  && message.revision > revision
+  && Object.prototype.toString.call(message.state) === '[object Object]'
+
 class DawGateProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return names.map(([name, defaultValue, minValue, maxValue]) => ({ name, defaultValue, minValue, maxValue, automationRate: name === 'gate.lookaheadMs' ? 'k-rate' : 'a-rate' })) }
   constructor() {
@@ -30,9 +37,9 @@ class DawGateProcessor extends AudioWorkletProcessor {
     this.port.postMessage({ type: 'ready', version: 1 })
   }
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!isGateMessage(message)) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
-    if (message.type === 'metering' && typeof message.enabled === 'boolean') { this.metering = message.enabled; return }
+    if (message.type === 'metering' && (message.enabled === true || message.enabled === false)) { this.metering = message.enabled; return }
     if (message.type === 'reset') {
       this.delayL.fill(0); this.delayR.fill(0); this.detectorL.fill(0); this.detectorR.fill(0); this.write = 0
       this.gains[0] = this.gains[1] = 1; this.rms[0] = this.rms[1] = 0
@@ -43,7 +50,7 @@ class DawGateProcessor extends AudioWorkletProcessor {
       this.hpY1[0] = this.hpY1[1] = this.hpY2[0] = this.hpY2[1] = 0
       return
     }
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
+    if (!isGateConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
     this.port.postMessage({ type: 'configured', version: 1, revision: this.revision })

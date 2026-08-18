@@ -5,6 +5,12 @@ const parameters = [
   ['limiter.link', 1, 0, 1, 'a-rate'],
   ['limiter.detectorOversampling', 4, 4, 4, 'k-rate'],
 ]
+const isLimiterMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+const isLimiterConfigureMessage = (message, revision) => isLimiterMessage(message)
+  && message.type === 'configure'
+  && Number.isInteger(message.revision)
+  && message.revision > revision
+  && Object.prototype.toString.call(message.state) === '[object Object]'
 
 const createFir = () => {
   const taps = 48
@@ -55,9 +61,9 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
   }
 
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!isLimiterMessage(message)) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
-    if (message.type === 'metering' && typeof message.enabled === 'boolean') {
+    if (message.type === 'metering' && (message.enabled === true || message.enabled === false)) {
       this.metering = message.enabled
       return
     }
@@ -70,7 +76,7 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       this.meterFrames = 0; this.minimumGain = 1
       return
     }
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') {
+    if (!isLimiterConfigureMessage(message, this.revision)) {
       return this.fault('malformed-or-stale-configure')
     }
     this.revision = message.revision

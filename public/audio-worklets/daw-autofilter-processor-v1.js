@@ -14,6 +14,12 @@ const PARAMS = [
 const LATENCY = 6
 const valueAt = (values, index) => values[values.length === 1 ? 0 : index]
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+const isAutoFilterMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+const isAutoFilterConfigureMessage = (message, revision) => isAutoFilterMessage(message)
+  && message.type === 'configure'
+  && Number.isInteger(message.revision)
+  && message.revision > revision
+  && Object.prototype.toString.call(message.state) === '[object Object]'
 
 class DawAutoFilterProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -46,10 +52,10 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
   }
 
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!isAutoFilterMessage(message)) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') return this.reset()
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
+    if (!isAutoFilterConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
     this.port.postMessage({ type: 'configured', version: 1, revision: this.revision })

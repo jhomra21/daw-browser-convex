@@ -1,5 +1,6 @@
 #include "vst3-worker.h"
 
+#include "vst3-bus-arrangement.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
@@ -757,14 +758,62 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
     || transport.inputChannels() != implementation_->setup.inputChannels || transport.outputChannels() != implementation_->setup.outputChannels) {
     return false;
   }
+  const auto readArrangements = [&](const Steinberg::Vst::BusDirection direction) -> std::optional<std::vector<Steinberg::Vst::SpeakerArrangement>> {
+    const auto count = implementation_->component->getBusCount(Steinberg::Vst::kAudio, direction);
+    if (count < 0 || count > 32) return std::nullopt;
+    std::vector<Steinberg::Vst::SpeakerArrangement> arrangements;
+    arrangements.reserve(static_cast<std::size_t>(count));
+    for (Steinberg::int32 index = 0; index < count; ++index) {
+      BusInfo info{};
+      if (implementation_->component->getBusInfo(Steinberg::Vst::kAudio, direction, index, info) != Steinberg::kResultOk
+        || info.channelCount <= 0 || info.channelCount > static_cast<Steinberg::int32>(kMaximumWorkerChannels)) {
+        return std::nullopt;
+      }
+      Steinberg::Vst::SpeakerArrangement arrangement = Steinberg::Vst::SpeakerArr::kEmpty;
+      const auto result = implementation_->processor->getBusArrangement(direction, index, arrangement);
+      if ((result != Steinberg::kResultOk && result != Steinberg::kResultTrue)
+        || Steinberg::Vst::SpeakerArr::getChannelCount(arrangement) != info.channelCount) {
+        return std::nullopt;
+      }
+      arrangements.push_back(arrangement);
+    }
+    return arrangements;
+  };
+  const auto negotiate = [&](const Steinberg::Vst::BusDirection direction, const std::size_t expectedChannels) {
+    const auto current = readArrangements(direction);
+    if (!current) return std::optional<std::vector<Steinberg::Vst::SpeakerArrangement>>{};
+    return SelectWorkerBusArrangements(*current, expectedChannels);
+  };
+  const auto inputArrangements = negotiate(Steinberg::Vst::kInput, transport.inputChannels());
+  const auto outputArrangements = negotiate(Steinberg::Vst::kOutput, transport.outputChannels());
+  if (!inputArrangements || !outputArrangements) return false;
+  auto inputArrangementValues = *inputArrangements;
+  auto outputArrangementValues = *outputArrangements;
+  const auto arrangementResult = implementation_->processor->setBusArrangements(
+    inputArrangementValues.data(),
+    static_cast<Steinberg::int32>(inputArrangementValues.size()),
+    outputArrangementValues.data(),
+    static_cast<Steinberg::int32>(outputArrangementValues.size())
+  );
+  if (arrangementResult != Steinberg::kResultOk && arrangementResult != Steinberg::kResultTrue) return false;
+
+  ProcessSetup setup{
+    WorkerProcessModeToSteinberg(implementation_->setup.mode),
+    Steinberg::Vst::kSample32,
+    static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
+    implementation_->setup.sampleRate
+  };
+  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+
   const auto prepare = [&](const Steinberg::Vst::BusDirection direction, std::vector<AudioBusBuffers>& buses, std::vector<std::vector<Steinberg::Vst::Sample32*>>& pointers, const std::size_t expectedChannels) {
     const auto count = implementation_->component->getBusCount(Steinberg::Vst::kAudio, direction);
-    if (count < 0) return false;
-    if (expectedChannels == 0) return true;
+    if (count < 0 || count > 32) return false;
+    if (expectedChannels == 0) return count == 0;
     std::size_t channels = 0;
     for (Steinberg::int32 index = 0; index < count; ++index) {
       BusInfo info{};
-      if (implementation_->component->getBusInfo(Steinberg::Vst::kAudio, direction, index, info) != Steinberg::kResultOk || info.channelCount < 0) return false;
+      if (implementation_->component->getBusInfo(Steinberg::Vst::kAudio, direction, index, info) != Steinberg::kResultOk
+        || info.channelCount < 0) return false;
       const auto busChannels = static_cast<std::size_t>(info.channelCount);
       if (busChannels > expectedChannels - channels) return false;
       if (implementation_->component->activateBus(Steinberg::Vst::kAudio, direction, index, true) != Steinberg::kResultOk) return false;
@@ -777,19 +826,12 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
     }
     return channels == expectedChannels;
   };
-  ProcessSetup setup{
-    WorkerProcessModeToSteinberg(implementation_->setup.mode),
-    Steinberg::Vst::kSample32,
-    static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
-    implementation_->setup.sampleRate
-  };
-  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
   if (implementation_->controller) {
     // Some VST3 controllers only create their view before realtime processing
     // starts. Keep that first view alive so an editor open command can attach
     // it after the worker becomes ready, and so reopening does not require a
     // second createView call.
-    if (!implementation_->editorView) {
+    if (!implementation_->editorView && PrepareVst3EditorRuntime()) {
       implementation_->editorView = implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor);
     }
   }
@@ -802,7 +844,8 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
     implementation_->editorView = nullptr;
     return false;
   }
-  if (implementation_->processor->setProcessing(true) != Steinberg::kResultOk) {
+  const auto processingResult = implementation_->processor->setProcessing(true);
+  if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
     implementation_->editorView = nullptr;
     return false;
   }

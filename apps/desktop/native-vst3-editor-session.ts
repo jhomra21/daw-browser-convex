@@ -140,13 +140,13 @@ export const createNativeVst3EditorSessionManager = (
       assertCurrent()
       entry.unsubscribeInteraction = supervisor.onWorkerNotification((notification: NativeWorkerNotification) => {
         if (generation !== lifecycleGeneration || entries.get(instanceId) !== entry || entry.supervisor !== supervisor) return
+        if (notification.instanceId !== instanceId) return
         if (notification.kind === "buses") {
           resolveWorkerReady?.()
         }
         if (notification.kind === "fault") {
           rejectWorkerReady?.(new Error("The native VST editor worker failed to start."))
         }
-        if (notification.instanceId !== instanceId) return
         if (notification.kind === "editor-interaction") {
           input.onEditorInteraction?.({ projectId, instanceId })
         }

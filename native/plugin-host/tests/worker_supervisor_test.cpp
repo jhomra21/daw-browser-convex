@@ -2,6 +2,7 @@
 #include "worker-supervisor.h"
 #include "worker-control-protocol.h"
 #include "editor-parameter-state.h"
+#include "vst3-bus-arrangement.h"
 
 #include <array>
 #include <chrono>
@@ -44,6 +45,8 @@ using daw::plugin_host::WorkerPreflightResult;
 using daw::plugin_host::WorkerPreflightStatus;
 using daw::plugin_host::BoundedEditorParameterState;
 using daw::plugin_host::PendingEditorParameterEdit;
+using daw::plugin_host::IsAcceptedWorkerProcessingTransitionResult;
+using daw::plugin_host::SelectWorkerBusArrangements;
 
 bool Check(const bool condition, const char* message) {
   if (condition) return true;
@@ -247,6 +250,37 @@ int main(int argc, char* argv[]) {
       && !ChannelMask(65),
     "channel silence mask contract failed"
   )) return EXIT_FAILURE;
+  {
+    namespace SpeakerArr = Steinberg::Vst::SpeakerArr;
+    if (!Check(IsAcceptedWorkerProcessingTransitionResult(Steinberg::kResultOk)
+        && IsAcceptedWorkerProcessingTransitionResult(Steinberg::kNotImplemented)
+        && !IsAcceptedWorkerProcessingTransitionResult(Steinberg::kResultFalse),
+      "processing transition result contract failed")) return EXIT_FAILURE;
+    const std::array stereo{SpeakerArr::kStereo};
+    const auto preserved = SelectWorkerBusArrangements(stereo, 2);
+    if (!Check(preserved && preserved->size() == 1 && preserved->front() == SpeakerArr::kStereo,
+      "compatible bus arrangement was not preserved")) return EXIT_FAILURE;
+    const auto incompatible = SelectWorkerBusArrangements(
+      std::array{SpeakerArr::kMono},
+      2
+    );
+    if (!Check(!incompatible, "incompatible single-bus arrangement was accepted")) return EXIT_FAILURE;
+    if (!Check(!SelectWorkerBusArrangements(stereo, 1),
+      "incompatible multi-channel arrangement was accepted")) return EXIT_FAILURE;
+    const auto mainBusOnly = SelectWorkerBusArrangements(
+      std::array{SpeakerArr::kStereo, SpeakerArr::kMono},
+      2
+    );
+    if (!Check(mainBusOnly && mainBusOnly->size() == 1 && mainBusOnly->front() == SpeakerArr::kStereo,
+      "compatible main bus was not selected before sidechain")) return EXIT_FAILURE;
+    if (!Check(!SelectWorkerBusArrangements(
+      std::array{SpeakerArr::kStereo, SpeakerArr::kMono},
+      1
+    ), "incompatible multi-bus arrangement was accepted")) return EXIT_FAILURE;
+    if (!Check(SelectWorkerBusArrangements(std::span<const Steinberg::Vst::SpeakerArrangement>{}, 0)
+        .has_value(),
+      "zero-input arrangement was rejected")) return EXIT_FAILURE;
+  }
 
   auto transportResult = WorkerTransport::Create(*layout);
   if (!Check(transportResult.has_value(), "shared transport creation failed")) return EXIT_FAILURE;

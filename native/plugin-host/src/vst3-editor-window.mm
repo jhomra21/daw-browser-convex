@@ -265,7 +265,7 @@ bool Vst3EditorWindow::Resize(const std::uint32_t width, const std::uint32_t hei
 Vst3EditorWindowStatus Vst3EditorWindow::status() const {
   return {
     .supported = implementation_->view != nullptr,
-    .open = implementation_->window != nil && implementation_->window.isVisible,
+    .open = implementation_->window != nil,
     .width = implementation_->width,
     .height = implementation_->height,
   };

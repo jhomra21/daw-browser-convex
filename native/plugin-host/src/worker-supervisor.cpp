@@ -788,7 +788,8 @@ bool WorkerRuntime::Start(
   }
   const auto fd = std::to_string(STDIN_FILENO);
   const auto controlFd = std::to_string(STDOUT_FILENO);
-  const auto responseFd = std::to_string(STDERR_FILENO);
+  constexpr int responseFileDescriptor = STDERR_FILENO + 1;
+  const auto responseFd = std::to_string(responseFileDescriptor);
   const auto token = std::to_string(transport->token());
   std::array<std::string, 9> argumentValues{
     configuration.executable,
@@ -813,7 +814,7 @@ bool WorkerRuntime::Start(
     && posix_spawnattr_setpgroup(&attributes, 0) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, transport->fileDescriptor(), STDIN_FILENO) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, control[0], STDOUT_FILENO) == 0
-    && posix_spawn_file_actions_adddup2(&fileActions, response[1], STDERR_FILENO) == 0;
+    && posix_spawn_file_actions_adddup2(&fileActions, response[1], responseFileDescriptor) == 0;
   pid_t child = -1;
   char* const environment[] = {nullptr};
   const auto spawnResult = spawnConfigured

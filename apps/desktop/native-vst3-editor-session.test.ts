@@ -32,7 +32,7 @@ type FakeSupervisor = {
   onWorkerNotification(listener: (notification: NativeWorkerNotification) => void): () => void
 }
 
-const fakeSupervisor = (calls: string[], failAt?: string): FakeSupervisor => {
+const fakeSupervisor = (calls: string[], failAt?: string, readyInstance = firstInstance): FakeSupervisor => {
   const step = (name: string) => {
     calls.push(name)
     if (failAt === name) throw new Error(`${name} failed`)
@@ -53,7 +53,7 @@ const fakeSupervisor = (calls: string[], failAt?: string): FakeSupervisor => {
         kind: "buses",
         graphRevision: 1,
         graphNodeId: 1n,
-        instanceId: firstInstance,
+        instanceId: readyInstance,
         value: 2,
       })
     },
@@ -142,6 +142,42 @@ test("waits for the worker-ready notification before opening the editor", async 
   })
 
   await startReached.promise
+  expect(calls).not.toContain("editor:open")
+  supervisor.interactionListener?.({
+    kind: "buses",
+    graphRevision: 1,
+    graphNodeId: 1n,
+    instanceId: firstInstance,
+    value: 2,
+  })
+  await expect(opening).resolves.toMatchObject({ success: true, open: true })
+})
+
+test("waits for the requested editor worker when another attachment becomes ready first", async () => {
+  const calls: string[] = []
+  const supervisor = fakeSupervisor(calls)
+  const startReached = Promise.withResolvers<void>()
+  supervisor.startDiagnosticAudio = async () => {
+    calls.push("diagnostic-start")
+    startReached.resolve()
+  }
+  const manager = managerFor({ calls, supervisors: [supervisor] })
+  const opening = manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+  })
+
+  await startReached.promise
+  supervisor.interactionListener?.({
+    kind: "buses",
+    graphRevision: 1,
+    graphNodeId: 2n,
+    instanceId: secondInstance,
+    value: 2,
+  })
+  await Promise.resolve()
   expect(calls).not.toContain("editor:open")
   supervisor.interactionListener?.({
     kind: "buses",
@@ -323,7 +359,7 @@ test("keeps independent editor instances isolated", async () => {
   const firstCalls: string[] = []
   const secondCalls: string[] = []
   const manager = managerFor({
-    supervisors: [fakeSupervisor(firstCalls), fakeSupervisor(secondCalls)],
+    supervisors: [fakeSupervisor(firstCalls), fakeSupervisor(secondCalls, undefined, secondInstance)],
   })
   await Promise.all([
     manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "first" }),

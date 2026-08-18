@@ -20,7 +20,7 @@ export function normalizeClipStartSec(startSec: number): number {
 }
 
 function normalizeClipOffset(value: number | undefined): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  if (value === undefined || !Number.isFinite(value)) return undefined
   return Math.max(0, value)
 }
 

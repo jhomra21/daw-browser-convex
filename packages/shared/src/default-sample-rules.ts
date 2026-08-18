@@ -9,7 +9,7 @@ export function defaultSampleUrl(key: string) {
 }
 
 export function defaultSampleKeyFromAssetKey(assetKey: string | undefined) {
-  return typeof assetKey === 'string' && assetKey.startsWith(DEFAULT_SAMPLE_ASSET_PREFIX)
+  return assetKey?.startsWith(DEFAULT_SAMPLE_ASSET_PREFIX)
     ? assetKey.slice(DEFAULT_SAMPLE_ASSET_PREFIX.length)
     : undefined
 }

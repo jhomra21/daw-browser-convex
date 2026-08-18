@@ -1,3 +1,5 @@
+import { isJsonObject, type JsonValue } from './json-value'
+
 export type AutomationInterpolation = 'linear' | 'hold'
 
 export type AutomationTargetKind = 'track' | 'master'
@@ -72,16 +74,13 @@ export const automationEnvelopeFromRow = (
 }
 
 export const automationTargetMatchesEffectInstance = (
-  target: unknown,
+  target: JsonValue,
   effectInstanceId: string,
-): boolean => (
-  typeof target === 'object'
-  && target !== null
-  && !Array.isArray(target)
-  && Reflect.get(target, 'effectInstanceId') === effectInstanceId
-)
+): boolean => {
+  return isJsonObject(target) && target.effectInstanceId === effectInstanceId
+}
 
-export const isAutomationInterpolation = (value: unknown): value is AutomationInterpolation => (
+export const isAutomationInterpolation = (value: JsonValue | undefined): value is AutomationInterpolation => (
   value === 'linear' || value === 'hold'
 )
 

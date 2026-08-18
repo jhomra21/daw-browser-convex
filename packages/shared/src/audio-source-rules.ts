@@ -28,7 +28,7 @@ type ClipAudioSourceFields = {
 }
 
 export function sanitizePositiveNumber(value: number | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return undefined
   return value
 }
 
@@ -39,9 +39,8 @@ export function sanitizePositiveInt(value: number | undefined) {
 }
 
 export function sanitizeAudioAssetKey(value: string | undefined) {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : undefined
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
 export function sanitizeAudioSourceKind(value: string | undefined): AudioSourceKind | undefined {

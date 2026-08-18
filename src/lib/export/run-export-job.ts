@@ -6,7 +6,7 @@ import { AUDIO_EFFECT_CONTRACTS, type AutomationEnvelope, arpeggiatorParamsSchem
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
   normalizeEnsembleParamsEnvelope, normalizeEqParams, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
   normalizeLoFiParamsEnvelope, normalizePhaserParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams,
-  normalizeSpectralParamsEnvelope, normalizeSynthParams, normalizeTremoloParamsEnvelope, normalizeTrackInstrumentParams, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
+  normalizeSpectralParamsEnvelope, normalizeSynthParams, normalizeTremoloParamsEnvelope, normalizeTrackInstrumentParams, normalizeUtilityParamsEnvelope, parseJsonValue } from '@daw-browser/shared'
 import type { FunctionReturnType } from 'convex/server'
 
 import type { convexApi } from '~/lib/convex'
@@ -304,7 +304,7 @@ const cloneExportEffectRow = (row: ExportEffectRow): ExportEffectRow => {
   if (row.effect === 'ensemble') return { ...metadata, effect: row.effect, params: normalizeEnsembleParamsEnvelope(row.params) }
   if (row.effect === 'spectral') return { ...metadata, effect: row.effect, params: normalizeSpectralParamsEnvelope(row.params) }
   if (row.effect === 'arp') return { targetId: row.targetId, effect: row.effect, params: normalizeArpeggiatorParams(row.params) }
-  if (row.effect === 'synth') return { targetId: row.targetId, effect: row.effect, params: normalizeSynthParams(row.params) }
+  if (row.effect === 'synth') return { targetId: row.targetId, effect: row.effect, params: normalizeSynthParams(parseJsonValue(row.params) ?? null) }
   const instrument = normalizeTrackInstrumentParams(row.params)
   if (!instrument) throw new Error(`Instrument effect "${row.targetId}" has invalid parameters.`)
   return { targetId: row.targetId, effect: row.effect, params: instrument }
@@ -447,7 +447,7 @@ const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffectRow<Js
       const parsed = arpeggiatorParamsSchema.safeParse(row.params)
       if (parsed.success) applyTrackFxPatch(trackFx, row.targetId, { arp: normalizeArpeggiatorParams(parsed.data) })
     }
-    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: normalizeSynthParams(row.params) })
+    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: normalizeSynthParams(parseJsonValue(row.params) ?? null) })
     if (row.effect === 'instrument') {
       const instrument = readInstrumentParamsFromEffectRow(row)
       if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })
@@ -502,7 +502,7 @@ const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectR
       else instances.push(createOwnedExportEffectRow(row.targetId, row.instanceId, row.effect, row.params, row.index))
     }
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: normalizeArpeggiatorParams(row.params) })
-    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: normalizeSynthParams(row.params) })
+    if (row.effect === 'synth') applyTrackFxPatch(trackFx, row.targetId, { synth: normalizeSynthParams(parseJsonValue(row.params) ?? null) })
     if (row.effect === 'instrument') {
       const instrument = readInstrumentParamsFromEffectRow({ type: 'instrument', params: row.params })
       if (instrument) applyTrackFxPatch(trackFx, row.targetId, { instrument })

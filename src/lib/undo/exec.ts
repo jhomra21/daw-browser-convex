@@ -179,7 +179,7 @@ async function applyTrackGroupEntry(entry: Extract<HistoryEntry, { type: 'track-
     groupTrackId = createdTrack.trackId
     groupTrackIndex = createdTrack.index
   }
-  assert(groupTrackId, 'Failed to recreate group track')
+  groupTrackId = assertDefined(groupTrackId, 'Failed to recreate group track')
   entry.data.currentGroupTrackId = groupTrackId
   deps.grantTrackWrite(groupTrackId, { projectId: deps.projectId, userId: deps.userId })
   deps.actions.insertLocalTrack(createLocalTrack({
@@ -533,8 +533,10 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
   if (pendingItems.length > 0) {
     if (isLocalHistoryProject(deps)) {
       for (const item of pendingItems) {
-        const clipId = await createHistoryClip(deps, item.trackId, item.clip)
-        assert(clipId, 'Failed to recreate clip')
+        const clipId = assertDefined(
+          await createHistoryClip(deps, item.trackId, item.clip),
+          'Failed to recreate clip',
+        )
         recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
       }
     } else {
@@ -543,8 +545,10 @@ async function recreateDeletedClips(entry: Extract<HistoryEntry, { type: 'clip-d
           if (!entry.data.legacyRecreate) {
             throw new Error('Cloud clip deletion history is missing its recovery descriptor.')
           }
-          const clipId = await createHistoryClip(deps, item.trackId, item.clip)
-          assert(clipId, 'Failed to recreate legacy cloud clip')
+          const clipId = assertDefined(
+            await createHistoryClip(deps, item.trackId, item.clip),
+            'Failed to recreate legacy cloud clip',
+          )
           recreatedClipIdsByRef.set(item.clip.clipRef, clipId)
           continue
         }
@@ -785,14 +789,14 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const existingId = entry.data.clip.currentId
       const clipSnapshot = entry.data.clip
       const newId = existingId || await createHistoryClip(deps, trackId, clipSnapshot)
-      assert(newId, 'Failed to recreate clip')
-      entry.data.clip.currentId = newId
-      deps.grantClipWrite(newId, grantScope)
+      const resolvedNewId = assertDefined(newId, 'Failed to recreate clip')
+      entry.data.clip.currentId = resolvedNewId
+      deps.grantClipWrite(resolvedNewId, grantScope)
       if (clipSnapshot.sampleUrl) {
-        await deps.ensureClipBuffer?.(newId, clipSnapshot.sampleUrl)
+        await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
       }
-      deps.actions.insertLocalClip(trackId, buildLocalClip({ id: newId, clip: clipSnapshot }))
-      deps.actions.rescheduleChangedClips([newId])
+      deps.actions.insertLocalClip(trackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
+      deps.actions.rescheduleChangedClips([resolvedNewId])
       return
     }
 
@@ -882,11 +886,11 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
         newId = createdTrack.trackId
         index = createdTrack.index
       }
-      assert(newId, 'Failed to recreate track')
-      entry.data.currentTrackId = newId
-      deps.grantTrackWrite(newId, grantScope)
+      const resolvedNewId = assertDefined(newId, 'Failed to recreate track')
+      entry.data.currentTrackId = resolvedNewId
+      deps.grantTrackWrite(resolvedNewId, grantScope)
       deps.actions.insertLocalTrack(createLocalTrack({
-        id: newId,
+        id: resolvedNewId,
         historyRef: entry.data.trackRef,
         index,
         name: entry.data.name,

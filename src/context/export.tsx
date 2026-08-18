@@ -1,6 +1,6 @@
 import { createContext, createSignal, onCleanup, type Accessor, type JSX, untrack, useContext } from 'solid-js'
 
-import { assert } from '@daw-browser/shared'
+import { assertDefined } from '@daw-browser/shared'
 import type { ExportOutcome, ExportProgress } from '~/lib/export/run-export-job'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import { createBrowserExportOutputTargetFactory } from '~/lib/export/browser-export-output-targets'
@@ -63,7 +63,5 @@ export function ExportProvider(props: ExportProviderProps) {
 
 export function useExportContext(): ExportContextValue {
   const context = useContext(ExportContext)
-  assert(context, 'ExportProvider is missing')
-  return context
+  return assertDefined(context, 'ExportProvider is missing')
 }
-

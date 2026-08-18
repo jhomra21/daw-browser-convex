@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import { assert, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp, sanitizeLegacyMidiClipForCreate } from '@daw-browser/shared'
+import { assert, assertDefined, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp, sanitizeLegacyMidiClipForCreate } from '@daw-browser/shared'
 import type { ClipCreateSnapshot, SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
@@ -194,8 +194,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   }
   try {
     const createdClipId = await input.createServerClip(payload)
-    assert(createdClipId, 'Failed to create clip')
-    clipId = createdClipId
+    clipId = assertDefined(createdClipId, 'Failed to create clip')
   } catch (error) {
     removePendingClip()
     if (isPermanentSharedOperationError(error)) throw error
@@ -329,11 +328,11 @@ async function createManyClips(input: {
   for (let index = 0; index < items.length; index++) {
     const item = items[index]
     const clipId = clipIds[index]
-    assert(clipId, 'Failed to create clips')
-    if (item.buffer) bufferEntries.push([clipId, item.buffer])
+    const resolvedClipId = assertDefined(clipId, 'Failed to create clips')
+    if (item.buffer) bufferEntries.push([resolvedClipId, item.buffer])
     created.push({
       trackId: item.trackId,
-      clipId,
+      clipId: resolvedClipId,
       clip: item.clip,
     })
   }

@@ -14,8 +14,8 @@ import {
 } from "solid-js"
 
 import type { VariantProps } from "class-variance-authority"
+import { assertDefined } from "@daw-browser/shared"
 import { cva } from "class-variance-authority"
-import { assert } from "@daw-browser/shared"
 
 import { cn } from "~/lib/utils"
 import type { ButtonProps } from "~/components/ui/button"
@@ -48,9 +48,8 @@ const SidebarContext = createContext<SidebarContext | null>(null)
 
 function useSidebar() {
   const context = useContext(SidebarContext)
-  assert(context, "useSidebar must be used within a Sidebar.")
-
-  return context
+  assertDefined(context, "useSidebar must be used within a Sidebar.")
+  return assertDefined(context, "useSidebar must be used within a Sidebar.")
 }
 
 export function useIsMobile(fallback = false) {

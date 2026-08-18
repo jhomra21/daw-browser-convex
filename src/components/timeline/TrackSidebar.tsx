@@ -10,7 +10,7 @@ import {
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
-  assert,
+  assertDefined,
   automationEnvelopeValueRange,
   automationTargetKey,
   type AutomationEnvelope,
@@ -469,9 +469,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const localY = clientYToTimelineTrackY(clientY, scrollElement);
     const row = trackLayoutRowAtY(sidebar().trackLayout.scrollingRows, localY);
     if (!row) return undefined;
-    const track = sidebar().trackById.get(row.trackId);
-    assert(
-      track,
+    const track = assertDefined(
+      sidebar().trackById.get(row.trackId),
       `Timeline layout row references missing track ${row.trackId}`,
     );
     return {

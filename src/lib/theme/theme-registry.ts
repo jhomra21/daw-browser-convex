@@ -1,4 +1,5 @@
 import type { DawTheme, DawThemeId } from "./theme-types"
+import type { JsonValueInput } from "@daw-browser/shared"
 export type { DawThemeId } from "./theme-types"
 
 export type DawThemeOption = {
@@ -155,10 +156,10 @@ const builtInThemes: readonly DawTheme[] = [
 
 export const themeOptions: readonly DawThemeOption[] = builtInThemes.map((theme) => ({ id: theme.id, name: theme.name }))
 
-const isThemeId = (value: unknown): value is DawThemeId =>
+const isThemeId = (value: JsonValueInput): value is DawThemeId =>
   builtInThemes.some((theme) => theme.id === value)
 
-export const parseThemeId = (value: unknown): DawThemeId =>
+export const parseThemeId = (value: JsonValueInput): DawThemeId =>
   isThemeId(value) ? value : DEFAULT_DAW_THEME_ID
 
 export const getTheme = (id: DawThemeId): DawTheme =>

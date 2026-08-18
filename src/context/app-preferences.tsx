@@ -1,6 +1,6 @@
 import { batch, createContext, createEffect, createSignal, type ParentComponent, useContext } from "solid-js"
 import { useColorMode } from "@kobalte/core"
-import { assert } from "@daw-browser/shared"
+import { assertDefined } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
   normalizeRecordingManualOffsetFrames,
@@ -267,6 +267,5 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
 export const useAppPreferences = () => {
   const context = useContext(AppPreferencesContext)
-  assert(context, "useAppPreferences must be used within AppPreferencesProvider.")
-  return context
+  return assertDefined(context, "useAppPreferences must be used within AppPreferencesProvider.")
 }

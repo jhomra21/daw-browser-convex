@@ -1,5 +1,5 @@
 import { onCleanup, type Accessor } from 'solid-js'
-import { assert } from '@daw-browser/shared'
+import { assertDefined } from '@daw-browser/shared'
 
 import type { convexApi, convexClient } from '~/lib/convex'
 import { commitDuplicatedClipDrag, commitMovedClipDrag } from '~/lib/clip-drag-commit'
@@ -161,8 +161,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const visible = layout.map((row) => {
       const track = trackById.get(row.trackId)
-      assert(track, `Timeline layout row references missing track ${row.trackId}`)
-      return track
+      return assertDefined(track, `Timeline layout row references missing track ${row.trackId}`)
     })
     let result = visible
     if (addedTrackDuringDrag) {

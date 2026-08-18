@@ -1,5 +1,4 @@
 import type {
-  RecordingCaptureTransport,
   RecordingMessageEndpoint,
 } from '../../../packages/audio-engine/src/recording/recording-runtime'
 import { createRecordingSabTransport } from './recording-sab-transport'
@@ -33,8 +32,8 @@ type RecordingTransportEnvironment = {
 export const getRecordingTransportDiagnostics = (
   environment: RecordingTransportEnvironment = {
     sabEnabled: import.meta.env.VITE_ENABLE_RECORDING_SAB === 'true',
-    crossOriginIsolated: typeof crossOriginIsolated === 'boolean' && crossOriginIsolated,
-    sharedArrayBufferAvailable: typeof SharedArrayBuffer === 'function',
+    crossOriginIsolated: globalThis.crossOriginIsolated,
+    sharedArrayBufferAvailable: globalThis.SharedArrayBuffer !== undefined,
   },
 ): RecordingTransportDiagnostics => {
   const active = environment.sabEnabled &&
@@ -56,7 +55,7 @@ export const getRecordingTransportDiagnostics = (
 export const createRecordingTransport = (
   options: RecordingTransportOptions,
   environment?: RecordingTransportEnvironment,
-): { transport: RecordingCaptureTransport; diagnostics: RecordingTransportDiagnostics } => {
+ ) => {
   const diagnostics = getRecordingTransportDiagnostics(environment)
   return {
     transport: diagnostics.active === 'sab'

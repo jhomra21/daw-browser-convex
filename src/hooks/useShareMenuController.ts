@@ -1,4 +1,5 @@
 import { type Accessor, createSignal } from "solid-js";
+import { isJsonObject, isJsonString, parseJsonValue, type JsonValueInput } from "@daw-browser/shared";
 import { copyText } from "~/lib/clipboard";
 
 type ProjectMember = {
@@ -11,14 +12,11 @@ type UseShareMenuControllerOptions = {
   projectId: Accessor<string>;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === "object" && value !== null && !Array.isArray(value)
-);
-
-const readProjectMembers = (value: unknown) => {
-  if (!isRecord(value) || !Array.isArray(value.members)) return null;
-  return value.members.flatMap((member): ProjectMember[] => {
-    if (!isRecord(member) || typeof member.userId !== "string") return [];
+const readProjectMembers = (value: JsonValueInput) => {
+  const parsed = parseJsonValue(value);
+  if (!isJsonObject(parsed) || !Array.isArray(parsed.members)) return null;
+  return parsed.members.flatMap((member): ProjectMember[] => {
+    if (!isJsonObject(member) || !isJsonString(member.userId)) return [];
     if (member.role !== "editor" && member.role !== "viewer") return [];
     return [{ userId: member.userId, role: member.role }];
   });

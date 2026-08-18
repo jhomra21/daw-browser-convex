@@ -4,17 +4,14 @@ type AuthRedirectSearch = {
 
 const FALLBACK_REDIRECT = '/'
 
-const readNonEmptyString = (value: unknown) => {
-  if (typeof value !== 'string') return undefined
+const readNonEmptyString = (value: string | null | undefined) => {
+  if (!value) return undefined
   const trimmed = value.trim()
   return trimmed ? trimmed : undefined
 }
 
 const readAppOrigin = () => {
-  if (typeof window !== 'undefined' && typeof window.location?.origin === 'string') {
-    return window.location.origin
-  }
-  return 'http://localhost'
+  return globalThis.window?.location.origin || 'http://localhost'
 }
 
 const toAppPath = (url: URL) => {
@@ -23,7 +20,7 @@ const toAppPath = (url: URL) => {
 }
 
 export function readAuthRedirectSearch(
-  search: Record<string, unknown>,
+  search: { redirect?: string },
 ): AuthRedirectSearch {
   const redirect = readNonEmptyString(search.redirect)
   return redirect ? { redirect } : {}

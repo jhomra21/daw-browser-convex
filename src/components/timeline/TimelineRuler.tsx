@@ -21,6 +21,9 @@ type Marker = {
   label?: string
 }
 
+const isMarker = (marker: Marker | null): marker is Marker => marker !== null
+const filterMarkers = (markers: Array<Marker | null>): Marker[] => markers.filter(isMarker)
+
 const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled))
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
@@ -200,21 +203,21 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     } as const
   }
 
-  const majorMarkers = createMemo(() => {
+  const majorMarkers = createMemo<Marker[]>(() => {
     if (props.gridEnabled) {
       const step = intervals().majorSec
-      if (!(Number.isFinite(step) && step > 0)) return [] as Marker[]
+      if (!(Number.isFinite(step) && step > 0)) return []
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
       const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
       const rulerWidth = rulerWidthPx()
       const pixelsPerSecond = props.pixelsPerSecond
       const bpm = props.bpm
-      return Array.from({ length: last - first + 1 }, (_, index) => {
+      return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
         const idx = first + index
         const positionPx = idx * step * pixelsPerSecond
         if (positionPx > rulerWidth) return null
         return { positionPx, label: `${musicalBarLabelAtTime(idx * step, bpm)}` }
-      }).filter(Boolean) as Marker[]
+      }))
     }
 
     const step = intervals().majorSec
@@ -222,33 +225,33 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
     const pixelsPerSecond = props.pixelsPerSecond
-    return Array.from({ length: last - first + 1 }, (_, index) => {
+    return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
       const idx = first + index
       const positionPx = idx * step * pixelsPerSecond
       if (positionPx > rulerWidth) return null
       const seconds = idx * step
       return { positionPx, label: `${seconds}s` }
-    }).filter(Boolean) as Marker[]
+    }))
   })
 
-  const minorMarkers = createMemo(() => {
+  const minorMarkers = createMemo<Marker[]>(() => {
     const majors = majorMarkers()
     const majorLookup = new Set(majors.map(m => Math.round(m.positionPx)))
 
     if (props.gridEnabled) {
       const stepSec = intervals().minorSec
-      if (!(Number.isFinite(stepSec) && stepSec > 0)) return [] as Marker[]
+      if (!(Number.isFinite(stepSec) && stepSec > 0)) return []
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / stepSec) - 1)
       const last = Math.min(Math.ceil(props.durationSec / stepSec), Math.ceil(props.visibleRange.endSec / stepSec) + 1)
       const rulerWidth = rulerWidthPx()
       const pixelsPerSecond = props.pixelsPerSecond
-      return Array.from({ length: last - first + 1 }, (_, index) => {
+      return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
         const idx = first + index
         const positionPx = idx * stepSec * pixelsPerSecond
         if (positionPx > rulerWidth) return null
         if (majorLookup.has(Math.round(positionPx))) return null
         return { positionPx }
-      }).filter(Boolean) as Marker[]
+      }))
     }
 
     const step = intervals().minorSec
@@ -256,13 +259,13 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
     const pixelsPerSecond = props.pixelsPerSecond
-    return Array.from({ length: last - first + 1 }, (_, index) => {
+    return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
       const idx = first + index
       const positionPx = idx * step * pixelsPerSecond
       if (positionPx > rulerWidth) return null
       if (majorLookup.has(Math.round(positionPx))) return null
       return { positionPx }
-    }).filter(Boolean) as Marker[]
+    }))
   })
 
   return (

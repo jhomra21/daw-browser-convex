@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'
-import { assert, isLocalId } from '@daw-browser/shared'
+import { assert, assertDefined, isLocalId } from '@daw-browser/shared'
 import {
   buildOptimisticGrantScopeKey,
   isOptimisticGrantScopeCurrent,
@@ -256,10 +256,10 @@ export function useProjectedTimelineModel(
       serverRouting.set(track._id, {
         outputTargetId: track.outputTargetId,
         sends: track.sends.map((send) => {
-          assert(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
+          const targetId = assertDefined(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
           const amount = Number(send.amount)
           assert(Number.isFinite(amount), `Invalid mixer send amount for track ${String(track._id)}`)
-          return { targetId: send.targetId, amount, tap: send.tap }
+          return { targetId, amount, tap: send.tap }
         }),
       })
     }

@@ -1,5 +1,5 @@
 import { createContext, createEffect, createSignal, onCleanup, type ParentComponent, useContext } from "solid-js"
-import { assert } from "@daw-browser/shared"
+import { assertDefined } from "@daw-browser/shared"
 import {
   createMidiAccessController,
   type MidiAccessStatus,
@@ -69,6 +69,5 @@ export const MidiAccessProvider: ParentComponent = (props) => {
 
 export const useMidiAccess = () => {
   const context = useContext(MidiAccessContext)
-  assert(context, "useMidiAccess must be used within MidiAccessProvider.")
-  return context
+  return assertDefined(context, "useMidiAccess must be used within MidiAccessProvider.")
 }

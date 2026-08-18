@@ -1,5 +1,5 @@
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
-import { isExportAudioFormat, type ExportAudioFormat } from '@daw-browser/shared'
+import { isExportAudioFormat, isJsonNumber, isJsonObject, isJsonString, type ExportAudioFormat, type JsonValue } from '@daw-browser/shared'
 
 type LocalExportMetadata = {
   id: string
@@ -14,29 +14,22 @@ type LocalExportMetadata = {
 const EXPORTS_KEY = 'exports'
 const MAX_LOCAL_EXPORTS = 25
 
-const isExportMetadata = (value: unknown): value is LocalExportMetadata => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+const isExportMetadata = (value: JsonValue): value is LocalExportMetadata => {
+  if (!isJsonObject(value)) return false
   return (
-    'id' in value
-    && 'name' in value
-    && 'format' in value
-    && 'durationSec' in value
-    && 'sampleRate' in value
-    && 'sizeBytes' in value
-    && 'createdAt' in value
-    && typeof value.id === 'string'
-    && typeof value.name === 'string'
-    && typeof value.format === 'string'
+    isJsonString(value.id)
+    && isJsonString(value.name)
+    && isJsonString(value.format)
     && isExportAudioFormat(value.format)
-    && typeof value.durationSec === 'number'
-    && typeof value.sampleRate === 'number'
-    && typeof value.sizeBytes === 'number'
-    && typeof value.createdAt === 'number'
+    && isJsonNumber(value.durationSec)
+    && isJsonNumber(value.sampleRate)
+    && isJsonNumber(value.sizeBytes)
+    && isJsonNumber(value.createdAt)
   )
 }
 
 const readExports = async (projectId: string): Promise<LocalExportMetadata[]> => {
-  const rows = await loadLocalProjectState<unknown>(projectId, EXPORTS_KEY)
+  const rows = await loadLocalProjectState<JsonValue>(projectId, EXPORTS_KEY)
   return Array.isArray(rows) ? rows.filter(isExportMetadata) : []
 }
 

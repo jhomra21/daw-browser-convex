@@ -1,7 +1,7 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { assert, isLocalId, parseJsonValue, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
+import { assert, assertDefined, isLocalId, parseJsonValue, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
@@ -292,7 +292,7 @@ export function useTimelineActions(
     await runWithConcurrency(updates, 8, async (update) => {
       if (localTimelineRepository) {
         const row = await localTimelineRepository.updateClip({ clipId: update.clipId, color: update.to })
-        assert(row, 'Failed to assign track color to clip')
+        assertDefined(row, 'Failed to assign track color to clip')
         return
       }
       const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
@@ -306,9 +306,9 @@ export function useTimelineActions(
     }
     return updates.flatMap((update) => {
       const clip = clipById.get(update.clipId)
-      assert(clip, 'Planned clip color update references a missing clip')
-      options.creation.replaceLocalClip(update.trackId, { ...clip, color: update.to })
-      return [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })]
+      const resolvedClip = assertDefined(clip, 'Planned clip color update references a missing clip')
+      options.creation.replaceLocalClip(update.trackId, { ...resolvedClip, color: update.to })
+      return [buildClipColorHistoryEntry({ projectId, clip: resolvedClip, from: update.from, to: update.to })]
     })
   }
 
@@ -462,23 +462,23 @@ export function useTimelineActions(
       const committed = committedValue === undefined
         ? undefined
         : readSharedUngroupResult(committedValue)
-      assert(committed, 'Invalid shared ungroup result')
+      const resolvedCommitted = assertDefined(committed, 'Invalid shared ungroup result')
       const historyEntry = buildCommittedSharedUngroupHistoryEntry({
         projectId,
         tracks,
         groupTrack,
         effects,
         automation,
-        result: committed,
+        result: resolvedCommitted,
       })
       options.creation.pushHistory(historyEntry)
       for (const envelope of historyEntry.data.automation ?? []) {
         options.applyAutomationEnvelope(undefined, envelope.targetKey)
       }
-      for (const update of committed.children) {
+      for (const update of resolvedCommitted.children) {
         const track = trackById.get(update.trackId)
         if (!track) continue
-        applyTrackPatch(track, { groupId: committed.group.parentGroupId, outputTargetId: update.nextOutputTargetId })
+        applyTrackPatch(track, { groupId: resolvedCommitted.group.parentGroupId, outputTargetId: update.nextOutputTargetId })
       }
       options.creation.removeLocalTrack(groupId)
       return
@@ -618,14 +618,18 @@ export function useTimelineActions(
     }
     for (const update of plan.trackUpdates) {
       const track = trackById.get(update.trackId)
-      assert(track, 'Planned track color update references a missing track')
-      applyTrackPatch(track, { color: update.to })
+      const resolvedTrack = assertDefined(track, 'Planned track color update references a missing track')
+      applyTrackPatch(resolvedTrack, { color: update.to })
     }
     for (const update of plan.clipUpdates) {
       const track = trackById.get(update.trackId)
       const clip = track?.clips.find((candidate) => candidate.id === update.clipId)
-      assert(track && clip, 'Planned clip color update references a missing clip')
-      options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
+      const resolvedTrack = assertDefined(track, 'Planned clip color update references a missing track')
+      const resolvedClip = assertDefined(
+        clip,
+        'Planned clip color update references a missing clip',
+      )
+      options.creation.replaceLocalClip(resolvedTrack.id, { ...resolvedClip, color: update.to })
     }
     options.creation.pushHistory(buildTrackColorCascadeHistoryEntry({
       projectId,

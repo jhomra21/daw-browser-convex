@@ -299,7 +299,7 @@ export function useTimelineMixerController(
       writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
     })
     writeQueue.scheduleTrackWrite(routingTimers, trackId, () =>
-      trackWrites.setRouting(trackId, routing).catch((error) => {
+      trackWrites.setRouting(trackId, routing).then(() => undefined).catch((error) => {
         setRawPendingSharedTrackRouting((current) => {
           const pending = current.get(trackId)
           if (!pending || !isTrackRoutingEqual(pending, routing)) return current
@@ -391,7 +391,7 @@ export function useTimelineMixerController(
       writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
     })
     writeQueue.scheduleTrackWrite(volumeTimers, trackId, () =>
-      trackWrites.setVolume(trackId, volume).catch((error) => {
+      trackWrites.setVolume(trackId, volume).then(() => undefined).catch((error) => {
         setRawPendingSharedTrackVolumes((current) => {
           if (current.get(trackId) !== volume) return current
           const next = new Map(current)

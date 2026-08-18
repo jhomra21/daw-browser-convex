@@ -1,4 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import type {
+  RecorderOutboundMessage,
+  WriterInboundMessage,
+  WriterOutboundMessage,
+} from '../../../packages/audio-engine/src/recording/recording-protocol'
+import type { RecordingMessageEndpoint } from '../../../packages/audio-engine/src/recording/recording-runtime'
 import {
   createRecorderSabRingBuffers,
   createRecorderSabRingProducer,
@@ -6,18 +12,27 @@ import {
 import { createRecordingSabTransport } from './recording-sab-transport'
 import { createRecordingWriterHandler } from './recording-writer-core'
 
+type SabNotifyMessage = {
+  type: 'sab-notify'
+  generation: number
+  sessionId: string
+}
+
+type WorkletMessage = Parameters<RecordingMessageEndpoint['postMessage']>[0]
+type WorkerMessage = WriterOutboundMessage | { malformed: boolean }
+
 const endpoint = () => {
-  let handler = (_message: unknown) => {}
-  const messages: unknown[] = []
+  let handler = (_message: RecorderOutboundMessage | SabNotifyMessage | null) => {}
+  const messages: WorkletMessage[] = []
   return {
     messages,
-    postMessage: (message: unknown) => {
+    postMessage: (message: WorkletMessage) => {
       messages.push(message)
     },
-    setMessageHandler: (next: (message: unknown) => void) => {
+    setMessageHandler: (next: (message: RecorderOutboundMessage | SabNotifyMessage | null) => void) => {
       handler = next
     },
-    receive: (message: unknown) => handler(message),
+    receive: (message: RecorderOutboundMessage | SabNotifyMessage) => handler(message),
   }
 }
 
@@ -47,12 +62,12 @@ const storage = (failure?: 'start' | 'append' | 'finalize') => {
 }
 
 const writer = (target: ReturnType<typeof storage>) => {
-  let handler = (_message: unknown) => {}
+  let handler = (_message: WorkerMessage) => {}
   let terminated = false
   const core = createRecordingWriterHandler(target, (message) => handler(message))
   return {
-    postMessage: (message: unknown) => core.handle(message),
-    setMessageHandler: (next: (message: unknown) => void) => {
+    postMessage: (message: WriterInboundMessage) => core.handle(message),
+    setMessageHandler: (next: (message: WorkerMessage) => void) => {
       handler = next
     },
     terminate: () => {

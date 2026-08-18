@@ -5,25 +5,29 @@ import {
   isAutomationInterpolation,
   isAutomationParameterSupportedForTarget,
   normalizeAutomationPoints,
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
   type AutomationEnvelope,
   type AutomationPoint,
   type AutomationTarget,
+  type JsonObject,
+  type JsonValue,
+  type JsonValueInput,
 } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 
 const AUTOMATION_KIND = 'automation-envelope'
 
-const isObject = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const normalizeLocalAutomationPoint = (value: unknown) => {
+const normalizeLocalAutomationPoint = (value: JsonValue): AutomationPoint | null => {
   if (
-    !isObject(value)
-    || typeof value.id !== 'string'
-    || typeof value.timeSec !== 'number'
-    || typeof value.value !== 'number'
+    !isJsonObject(value)
+    || !isJsonString(value.id)
+    || !isJsonNumber(value.timeSec)
+    || !isJsonNumber(value.value)
   ) return null
   return {
     id: value.id,
@@ -33,42 +37,49 @@ const normalizeLocalAutomationPoint = (value: unknown) => {
   }
 }
 
-const normalizeLocalAutomationTarget = (target: Record<string, unknown>): AutomationTarget | null => {
-  const effectInstanceId = typeof target.effectInstanceId === 'string' ? target.effectInstanceId : undefined
-  if (target.kind === 'master') return { kind: 'master', effectInstanceId }
-  if (target.kind === 'track' && typeof target.trackId === 'string') return { kind: 'track', trackId: target.trackId, effectInstanceId }
+const normalizeLocalAutomationTarget = (target: JsonObject): AutomationTarget | null => {
+  const effectInstanceId = isJsonString(target.effectInstanceId) ? target.effectInstanceId : undefined
+  if (target.kind === 'master') {
+    return effectInstanceId ? { kind: 'master', effectInstanceId } : { kind: 'master' }
+  }
+  if (target.kind === 'track' && isJsonString(target.trackId)) {
+    return effectInstanceId
+      ? { kind: 'track', trackId: target.trackId, effectInstanceId }
+      : { kind: 'track', trackId: target.trackId }
+  }
   return null
 }
 
-const normalizeLocalAutomationEnvelope = (value: unknown): AutomationEnvelope | null => {
+const normalizeLocalAutomationEnvelope = (value: JsonValueInput): AutomationEnvelope | null => {
+  const parsed = parseJsonValue(value)
   if (
-    !isObject(value)
-    || typeof value.id !== 'string'
-    || typeof value.projectId !== 'string'
-    || !isObject(value.target)
-    || typeof value.parameterId !== 'string'
-    || typeof value.enabled !== 'boolean'
-    || !Array.isArray(value.points)
-    || typeof value.updatedAt !== 'number'
+    !isJsonObject(parsed)
+    || !isJsonString(parsed.id)
+    || !isJsonString(parsed.projectId)
+    || !isJsonObject(parsed.target)
+    || !isJsonString(parsed.parameterId)
+    || !isJsonBoolean(parsed.enabled)
+    || !Array.isArray(parsed.points)
+    || !isJsonNumber(parsed.updatedAt)
   ) return null
-  const target = normalizeLocalAutomationTarget(value.target)
-  const descriptor = getAutomationParameterDescriptor(value.parameterId)
-  if (!target || !descriptor || !isAutomationParameterSupportedForTarget(value.parameterId, target.kind)) return null
+  const target = normalizeLocalAutomationTarget(parsed.target)
+  const descriptor = getAutomationParameterDescriptor(parsed.parameterId)
+  if (!target || !descriptor || !isAutomationParameterSupportedForTarget(parsed.parameterId, target.kind)) return null
   const points: AutomationPoint[] = []
-  for (const point of value.points) {
+  for (const point of parsed.points) {
     const normalized = normalizeLocalAutomationPoint(point)
     if (!normalized) return null
     points.push(normalized)
   }
   return {
-    id: value.id,
-    projectId: value.projectId,
+    id: parsed.id,
+    projectId: parsed.projectId,
     target,
-    targetKey: automationTargetKey(target, value.parameterId),
-    parameterId: value.parameterId,
-    enabled: value.enabled,
+    targetKey: automationTargetKey(target, parsed.parameterId),
+    parameterId: parsed.parameterId,
+    enabled: parsed.enabled,
     points: normalizeAutomationPoints(points, descriptor),
-    updatedAt: value.updatedAt,
+    updatedAt: parsed.updatedAt,
   }
 }
 
@@ -77,7 +88,7 @@ type RecognizedLocalAutomationEnvelope = {
   logicalKey: string
 }
 
-const recognizeLocalAutomationEnvelope = (value: unknown): RecognizedLocalAutomationEnvelope | null => {
+const recognizeLocalAutomationEnvelope = (value: JsonValueInput): RecognizedLocalAutomationEnvelope | null => {
   const envelope = normalizeLocalAutomationEnvelope(value)
   if (!envelope) return null
   const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
@@ -102,7 +113,7 @@ const preferAutomationEnvelope = (
 )
 
 export const normalizeLocalAutomationEnvelopes = (
-  values: readonly unknown[],
+  values: readonly JsonValueInput[],
 ): AutomationEnvelope[] => {
   const byLogicalKey = new Map<string, AutomationEnvelope>()
   for (const value of values) {

@@ -1,6 +1,11 @@
 import { applyExportNormalization, findAutomaticTailEndFrame, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
 
+type ProcessedRenderedExport = {
+  buffer: AudioBuffer
+  analysis: ExportAnalysisReport
+}
+
 const trimAutomaticTail = (
   rendered: AudioBuffer,
   sourceDurationSec: number,
@@ -27,7 +32,7 @@ export const processRenderedExport = (input: {
   sourceDurationSec: number
   render: ExportRenderSettings
   signal: AbortSignal
-}): { buffer: AudioBuffer; analysis: ExportAnalysisReport } => {
+}): ProcessedRenderedExport => {
   const buffer = trimAutomaticTail(input.rendered, input.sourceDurationSec, input.render.tail, input.signal)
   return {
     buffer,

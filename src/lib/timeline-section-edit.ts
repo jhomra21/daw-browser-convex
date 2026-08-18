@@ -171,15 +171,22 @@ export const buildClipRangeDeletePatch = (input: {
         continue
       }
       if (clip.startSec < input.section.range.startSec && endSec > input.section.range.endSec) {
+        const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
+          startSec: clip.startSec,
+          duration: input.section.range.startSec - clip.startSec,
+        }
+        if (clip.fades) {
+          timing.fades = clipFadesForFragment(
+            clip.fades,
+            clip.duration,
+            input.section.range.startSec - clip.startSec,
+            false,
+            true,
+          )
+        }
         updateClips.push({
           clipId: clip.id,
-          timing: {
-            startSec: clip.startSec,
-            duration: input.section.range.startSec - clip.startSec,
-            ...(clip.fades ? {
-              fades: clipFadesForFragment(clip.fades, clip.duration, input.section.range.startSec - clip.startSec, false, true),
-            } : {}),
-          },
+          timing,
         })
         createClips.push({
           trackId: track.id,
@@ -189,37 +196,45 @@ export const buildClipRangeDeletePatch = (input: {
         continue
       }
       if (clip.startSec < input.section.range.startSec) {
+        const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
+          startSec: clip.startSec,
+          duration: input.section.range.startSec - clip.startSec,
+        }
+        if (clip.fades) {
+          timing.fades = clipFadesForFragment(
+            clip.fades,
+            clip.duration,
+            input.section.range.startSec - clip.startSec,
+            false,
+            true,
+          )
+        }
         updateClips.push({
           clipId: clip.id,
-          timing: {
-            startSec: clip.startSec,
-            duration: input.section.range.startSec - clip.startSec,
-            ...(clip.fades ? {
-              fades: clipFadesForFragment(clip.fades, clip.duration, input.section.range.startSec - clip.startSec, false, true),
-            } : {}),
-          },
+          timing,
         })
         continue
       }
       const offsets = shiftClipOffsets(clip, input.section.range.endSec - clip.startSec, input.bpm)
+      const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
+        startSec: input.section.range.endSec,
+        duration: endSec - input.section.range.endSec,
+        leftPadSec: offsets.leftPadSec,
+        bufferOffsetSec: offsets.bufferOffsetSec,
+        midiOffsetBeats: offsets.midiOffsetBeats,
+        audioWarp: offsets.audioWarp,
+      }
+      if (clip.fades) {
+        timing.fades = transformClipFadesForDuration(
+          clip.fades,
+          clip.duration,
+          endSec - input.section.range.endSec,
+          input.section.range.endSec - clip.startSec,
+        )
+      }
       updateClips.push({
         clipId: clip.id,
-        timing: {
-          startSec: input.section.range.endSec,
-          duration: endSec - input.section.range.endSec,
-          leftPadSec: offsets.leftPadSec,
-          bufferOffsetSec: offsets.bufferOffsetSec,
-          midiOffsetBeats: offsets.midiOffsetBeats,
-          audioWarp: offsets.audioWarp,
-          ...(clip.fades ? {
-            fades: transformClipFadesForDuration(
-              clip.fades,
-              clip.duration,
-              endSec - input.section.range.endSec,
-              input.section.range.endSec - clip.startSec,
-            ),
-          } : {}),
-        },
+        timing,
       })
     }
   }

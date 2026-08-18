@@ -104,13 +104,13 @@ export function calcNonOverlapStartGridAligned(
     }
     // Inside a valid gap: only magnet to an edge when close to it; otherwise respect snapped grid position.
     const leftEdge = Number.isFinite(prevEnd) ? prevEnd : -Infinity
-    const rightEdge = Number.isFinite(nextStart) ? (nextStart as number) - duration : Infinity
+    const rightEdge = Number.isFinite(nextStart) ? nextStart - duration : Infinity
     if (start > leftEdge && start < rightEdge) {
       const threshold = step * 0.5
-      const nearLeft = Number.isFinite(leftEdge) && Math.abs(start - (leftEdge as number)) <= threshold + 1e-7
-      const nearRight = Number.isFinite(rightEdge) && Math.abs((rightEdge as number) - start) <= threshold + 1e-7
-      if (nearLeft) start = leftEdge as number
-      else if (nearRight) start = rightEdge as number
+      const nearLeft = Number.isFinite(leftEdge) && Math.abs(start - leftEdge) <= threshold + 1e-7
+      const nearRight = Number.isFinite(rightEdge) && Math.abs(rightEdge - start) <= threshold + 1e-7
+      if (nearLeft) start = leftEdge
+      else if (nearRight) start = rightEdge
     } else {
       // If snapped just outside the gap, allow snapping to the nearest edge within one grid step
       if (Number.isFinite(rightEdge) && start >= rightEdge && (start - rightEdge) <= step + 1e-7) {

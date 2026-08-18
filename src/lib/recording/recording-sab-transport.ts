@@ -5,16 +5,25 @@ import {
 import {
   readRecorderOutboundMessage,
   readWriterOutboundMessage,
+  type RecorderOutboundMessage,
   type WriterInboundMessage,
+  type WriterOutboundMessage,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
-import type { RecordingCaptureTransport } from '../../../packages/audio-engine/src/recording/recording-runtime'
+import type { RecordingCaptureTransport, RecordingMessageEndpoint } from '../../../packages/audio-engine/src/recording/recording-runtime'
 
-type MessageEndpoint = {
-  postMessage: (message: unknown) => void
-  setMessageHandler: (handler: (message: unknown) => void) => void
+type SabNotifyMessage = {
+  type: 'sab-notify'
+  generation: number
+  sessionId: string
 }
 
-type WorkerEndpoint = MessageEndpoint & {
+type WorkletEndpoint = Pick<RecordingMessageEndpoint, 'postMessage'> & {
+  setMessageHandler: (handler: (message: RecorderOutboundMessage | SabNotifyMessage | null) => void) => void
+}
+
+type WorkerEndpoint = {
+  postMessage: (message: WriterInboundMessage) => void
+  setMessageHandler: (handler: (message: WriterOutboundMessage | null | { malformed: boolean }) => void) => void
   terminate: () => void
 }
 
@@ -23,7 +32,7 @@ type RecordingSabTransportOptions = {
   sessionId: string
   sampleRate: number
   channelCount: number
-  worklet: MessageEndpoint
+  worklet: WorkletEndpoint
   buffers?: RecorderSabRingBuffers
   worker?: WorkerEndpoint
 }
@@ -118,18 +127,8 @@ export const createRecordingSabTransport = (
   })
 
   options.worklet.setMessageHandler((value) => {
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'type' in value &&
-      value.type === 'sab-notify'
-    ) {
-      if (
-        'generation' in value &&
-        value.generation === options.generation &&
-        'sessionId' in value &&
-        value.sessionId === options.sessionId
-      ) {
+    if (value?.type === 'sab-notify') {
+      if (value.generation === options.generation && value.sessionId === options.sessionId) {
         worker.postMessage({
           type: 'wake',
           generation: options.generation,
@@ -209,7 +208,7 @@ const createBrowserRecordingWriter = (): WorkerEndpoint => {
   return {
     postMessage: (message) => worker.postMessage(message),
     setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(event.data)
+      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
     },
     terminate: () => worker.terminate(),
   }

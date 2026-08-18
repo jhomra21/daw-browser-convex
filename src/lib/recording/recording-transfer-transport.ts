@@ -3,14 +3,13 @@ import {
   readRecorderOutboundMessage,
   readWriterOutboundMessage,
   type WriterInboundMessage,
+  type WriterOutboundMessage,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
+import type { RecordingMessageEndpoint } from '../../../packages/audio-engine/src/recording/recording-runtime'
 
-type MessageEndpoint = {
-  postMessage: (message: unknown, transfer?: readonly ArrayBuffer[]) => void
-  setMessageHandler: (handler: (message: unknown) => void) => void
-}
-
-type WorkerEndpoint = MessageEndpoint & {
+type WorkerEndpoint = {
+  postMessage: (message: WriterInboundMessage, transfer?: readonly ArrayBuffer[]) => void
+  setMessageHandler: (handler: (message: WriterOutboundMessage | null | { malformed: boolean }) => void) => void
   terminate: () => void
 }
 
@@ -19,7 +18,7 @@ type RecordingTransferTransportOptions = {
   sessionId: string
   sampleRate: number
   channelCount: number
-  worklet: MessageEndpoint
+  worklet: RecordingMessageEndpoint
   worker?: WorkerEndpoint
   onDiagnostics?: (diagnostics: { queuedFrames: number }) => void
 }
@@ -241,7 +240,7 @@ const createBrowserRecordingWriter = (): WorkerEndpoint => {
   return {
     postMessage: (message, transfer = []) => worker.postMessage(message, [...transfer]),
     setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(event.data)
+      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
     },
     terminate: () => worker.terminate(),
   }

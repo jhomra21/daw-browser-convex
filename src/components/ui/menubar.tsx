@@ -18,7 +18,7 @@ import {
 
 import * as MenubarPrimitive from "@kobalte/core/menubar";
 import type { PolymorphicProps } from "@kobalte/core/polymorphic";
-import { assert } from "@daw-browser/shared";
+import { assertDefined } from "@daw-browser/shared";
 
 import { cn } from "~/lib/utils";
 
@@ -36,14 +36,12 @@ const MenubarMenuValueContext = createContext<Accessor<string | undefined>>();
 
 const useMenubarAnimation = () => {
   const context = useContext(MenubarAnimationContext);
-  assert(context, "MenubarContent must be used within Menubar.");
-  return context;
+  return assertDefined(context, "MenubarContent must be used within Menubar.");
 };
 
 const useMenubarMenuValue = () => {
   const value = useContext(MenubarMenuValueContext);
-  assert(value !== undefined, "MenubarContent must be used within MenubarMenu.");
-  return value;
+  return () => assertDefined(value?.(), "MenubarContent must be used within MenubarMenu.");
 };
 
 type MenubarProps = MenubarPrimitive.MenubarRootProps & {

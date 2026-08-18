@@ -1,5 +1,5 @@
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assert, type JsonValue } from '@daw-browser/shared'
+import { assertDefined, type JsonValue } from '@daw-browser/shared'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { supportsPlanarFloat32WavEncoding } from '@daw-browser/audio-engine/recording-encode-wav'
@@ -73,12 +73,12 @@ export function createStopPromise(): StopPromise {
       reject(cause)
     }
   })
-  assert(resolvePromise, 'Stop promise resolver was not initialized')
-  assert(rejectPromise, 'Stop promise rejecter was not initialized')
+  const resolve = assertDefined(resolvePromise, 'Stop promise resolver was not initialized')
+  const reject = assertDefined(rejectPromise, 'Stop promise rejecter was not initialized')
   return {
     promise,
-    resolve: resolvePromise,
-    reject: rejectPromise,
+    resolve,
+    reject,
   }
 }
 

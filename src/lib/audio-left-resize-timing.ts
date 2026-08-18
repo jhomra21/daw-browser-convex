@@ -2,6 +2,20 @@ import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 import { getAudioClipTimeMap, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 
+type AudioTimelineTrimOffsets = {
+  leftPadSec: number
+  bufferOffsetSec: number
+  audioWarp?: AudioWarp
+}
+
+type AudioLeftResizeTiming = {
+  startSec: number
+  duration: number
+  leftPadSec: number
+  bufferOffsetSec: number
+  audioWarp?: AudioWarp
+}
+
 const getResizeAudioClipTimeMap = (input: {
   clip: Pick<Clip, 'startSec' | 'duration' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceDurationSec' | 'audioWarp'>
   bufferDurationSec: number
@@ -60,7 +74,7 @@ export const calculateAudioTimelineTrimOffsets = (input: {
   bufferDurationSec: number
   timelineTrimSec: number
   projectBpm: number
-}): { leftPadSec: number; bufferOffsetSec: number; audioWarp?: AudioWarp } => {
+}): AudioTimelineTrimOffsets => {
   let nextLeftPad = Math.max(0, input.clip.leftPadSec ?? 0)
   let nextBufOffset = Math.max(0, input.clip.bufferOffsetSec ?? 0)
   let nextAudioWarp: AudioWarp | undefined
@@ -138,7 +152,7 @@ export function calculateAudioLeftResizeTiming(input: {
   newStartSec: number
   bufferDurationSec: number
   projectBpm: number
-}): { startSec: number; duration: number; leftPadSec: number; bufferOffsetSec: number; audioWarp?: AudioWarp } {
+}): AudioLeftResizeTiming {
   const delta = input.newStartSec - input.baselineClip.startSec
   let nextLeftPad = Math.max(0, input.baselineClip.leftPadSec ?? 0)
   let nextBufOffset = Math.max(0, input.baselineClip.bufferOffsetSec ?? 0)

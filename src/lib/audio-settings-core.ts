@@ -3,20 +3,23 @@ import type { AudioRuntimeOptions } from "@daw-browser/audio-engine/audio-engine
 
 export const resolveAudioRuntimeConfiguration = (
   preferences: Pick<AudioPreferences, "sampleRate" | "latencyMode">
-): AudioRuntimeOptions => ({
-  ...(preferences.sampleRate === "default" ? {} : { sampleRate: preferences.sampleRate }),
-  latencyHint: preferences.latencyMode
-})
+): AudioRuntimeOptions => {
+  const options: AudioRuntimeOptions = { latencyHint: preferences.latencyMode }
+  if (preferences.sampleRate !== "default") options.sampleRate = preferences.sampleRate
+  return options
+}
 
 export const buildRecordingConstraints = (
   preferences: AudioPreferences,
   supported: MediaTrackSupportedConstraints
-): MediaTrackConstraints => ({
-  ...(preferences.inputDeviceId ? { deviceId: { exact: preferences.inputDeviceId } } : {}),
-  ...(supported.echoCancellation ? { echoCancellation: preferences.echoCancellation } : {}),
-  ...(supported.noiseSuppression ? { noiseSuppression: preferences.noiseSuppression } : {}),
-  ...(supported.autoGainControl ? { autoGainControl: preferences.autoGainControl } : {})
-})
+): MediaTrackConstraints => {
+  const constraints: MediaTrackConstraints = {}
+  if (preferences.inputDeviceId) constraints.deviceId = { exact: preferences.inputDeviceId }
+  if (supported.echoCancellation) constraints.echoCancellation = preferences.echoCancellation
+  if (supported.noiseSuppression) constraints.noiseSuppression = preferences.noiseSuppression
+  if (supported.autoGainControl) constraints.autoGainControl = preferences.autoGainControl
+  return constraints
+}
 
 export const buildActiveInputProbeConstraints = (
   inputDeviceId: string,

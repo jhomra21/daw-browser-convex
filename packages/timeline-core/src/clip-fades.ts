@@ -13,7 +13,7 @@ export type ClipFadeSide = 'fadeIn' | 'fadeOut'
 export type NormalizedClipFades = Required<ClipFades>
 
 const finite = (value: number | undefined, fallback = 0) => (
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  value !== undefined && Number.isFinite(value) ? value : fallback
 )
 
 const clamp = (value: number, minimum: number, maximum: number) => (

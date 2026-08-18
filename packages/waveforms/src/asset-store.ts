@@ -8,12 +8,6 @@ const assetChunkCache = new Map<string, Uint8Array>()
 const pendingAssetLoads = new Map<string, Promise<void>>()
 const pendingChunkLoads = new Map<string, Promise<Uint8Array | null>>()
 
-function isPeakAssetRecord(value: unknown): value is PeakAssetRecord {
-  if (!value || typeof value !== 'object') return false
-  const record = value as PeakAssetRecord
-  return Array.isArray(record.levels)
-}
-
 async function decodeBufferFromSampleUrl(sampleUrl: string): Promise<AudioBuffer | null> {
   let audioContext: BaseAudioContext | null = null
   let closableContext: AudioContext | null = null
@@ -24,15 +18,17 @@ async function decodeBufferFromSampleUrl(sampleUrl: string): Promise<AudioBuffer
     const arrayBuffer = await response.arrayBuffer()
 
     try {
-      if (typeof OfflineAudioContext !== 'undefined') {
-        audioContext = new OfflineAudioContext(1, 1, 44100)
+      const OfflineAudioContextConstructor = globalThis.OfflineAudioContext
+      if (OfflineAudioContextConstructor) {
+        audioContext = new OfflineAudioContextConstructor(1, 1, 44100)
       }
     } catch {}
 
     if (!audioContext) {
       try {
-        if (typeof AudioContext !== 'undefined') {
-          closableContext = new AudioContext()
+        const AudioContextConstructor = globalThis.AudioContext
+        if (AudioContextConstructor) {
+          closableContext = new AudioContextConstructor()
           audioContext = closableContext
         }
       } catch {}
@@ -110,7 +106,7 @@ export async function ensurePeakAsset(options: EnsureWaveformAssetOptions): Prom
     if (cached && peakAssetMatchesSourceIdentity(cached, sourceIdentity)) return cached
 
     const stored = await loadPeakAssetRecord(assetKey)
-    if (isPeakAssetRecord(stored) && peakAssetMatchesSourceIdentity(stored, sourceIdentity)) {
+    if (stored && peakAssetMatchesSourceIdentity(stored, sourceIdentity)) {
       assetRecordCache.set(assetKey, stored)
       return stored
     }

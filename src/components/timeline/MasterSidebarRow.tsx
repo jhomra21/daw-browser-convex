@@ -2,7 +2,6 @@ import {
   type Component,
   Show,
   createMemo,
-  createSignal,
   onCleanup,
 } from "solid-js";
 import {
@@ -10,12 +9,14 @@ import {
   automationTargetKey,
   type AutomationEnvelope,
   type AutomationParameterSelection,
-  type AutomationTargetDeviceInstance,normalizeMasterVolume
+  type AutomationTargetDeviceInstance,
+  normalizeMasterVolume,
 } from "@daw-browser/shared";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
+import MixerVolumeSlider from "./MixerVolumeSlider";
 import TimelineContextMenu, {
   type TimelineContextMenuItem,
 } from "./context-menu/timeline-context-menu";
@@ -63,10 +64,8 @@ type MasterSidebarRowProps = {
 
 const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const master = () => props.master;
-  const [activeVolume, setActiveVolume] = createSignal<number | undefined>();
   const committedVolume = () => normalizeMasterVolume(master().volume);
   const displayMasterVolume = () =>
-    activeVolume() ??
     props.automation.evaluatedValuesByTargetKey.get(
       automationTargetKey({ kind: "master" }, "volume"),
     ) ??
@@ -74,21 +73,14 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const previewVolume = (volume: number) => {
     if (!master().canEditVolume) return;
     const nextVolume = normalizeMasterVolume(volume);
-    setActiveVolume((current) =>
-      current === nextVolume ? current : nextVolume,
-    );
     master().onVolumePreview(nextVolume);
   };
-  const commitVolume = () => {
+  const commitVolume = (volume: number, previousVolume: number) => {
     if (!master().canEditVolume) return;
-    const nextVolume = activeVolume();
-    if (nextVolume === undefined) return;
-    setActiveVolume(undefined);
-    if (nextVolume === committedVolume()) return;
-    master().onVolumeChange(nextVolume);
+    if (volume === previousVolume || volume === committedVolume()) return;
+    master().onVolumeChange(volume);
   };
   const cancelVolume = () => {
-    setActiveVolume(undefined);
     master().onVolumePreview(committedVolume());
   };
   const toggleAutomationVisibility = () => {
@@ -119,7 +111,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   );
   const volumeRange = () =>
     volumeEnvelope()
-      ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 1 })
+      ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 2 })
       : undefined;
   let cleanupAutomationResize: (() => void) | undefined;
   const startAutomationResize = (event: PointerEvent) => {
@@ -293,37 +285,23 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 <Show when={volumeAutomated()}>
                   <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
                 </Show>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
+                <MixerVolumeSlider
                   value={displayMasterVolume()}
                   disabled={!master().canEditVolume}
-                  style={{
-                    "--track-volume-percent": `${displayMasterVolume() * 100}%`,
-                    "--track-volume-automation-start": `${(volumeRange()?.min ?? 0) * 100}%`,
-                    "--track-volume-automation-end": `${(volumeRange()?.max ?? 0) * 100}%`,
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  onPointerDown={() => {
+                  automated={!!volumeEnvelope()}
+                  automationRange={volumeRange()}
+                  ariaLabel="Master volume"
+                  title="Master volume"
+                  onSelect={() => {
                     props.automation.onSelectParameter({
                       parameterId: "volume",
                     });
                     props.automation.onManualAutomationOverride();
                   }}
-                  onInput={(event) => {
-                    event.stopPropagation();
-                    previewVolume(parseFloat(event.currentTarget.value));
-                  }}
-                  onChange={commitVolume}
-                  onPointerUp={commitVolume}
-                  onPointerCancel={cancelVolume}
-                  class={cn(
-                    "track-volume-slider w-full cursor-pointer disabled:cursor-not-allowed",
-                    volumeEnvelope() && "track-volume-slider-automated",
-                  )}
-                  title="Master volume"
+                  onPreview={previewVolume}
+                  onCommit={commitVolume}
+                  onCancel={cancelVolume}
+                  onReset={() => master().onVolumeChange(1)}
                 />
               </Show>
             </div>

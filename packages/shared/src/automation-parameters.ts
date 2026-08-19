@@ -117,7 +117,7 @@ export const parseExternalAutomationParameterId = (parameterId: string) => {
 }
 
 const staticDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
+  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 2, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
 const effectDescriptors: AutomationParameterDescriptor[] = [

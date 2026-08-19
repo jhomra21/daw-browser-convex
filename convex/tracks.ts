@@ -20,7 +20,7 @@ import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } 
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
-import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, normalizeClipColor, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -439,15 +439,16 @@ export const setTrackVolumeRow = async (
   ctx: MutationCtx,
   input: { projectId: string; trackId: Id<"tracks">; volume: number },
 ) => {
+  const volume = normalizeMixerVolume(input.volume);
   const track = await ctx.db.get(input.trackId);
   if (!track || track.projectId !== input.projectId) {
     return { changed: false, status: "not-found" as const };
   }
   const channel = await ensureMixerChannelForTrack(ctx, track);
-  if (channel.volume === input.volume) {
+  if (channel.volume === volume) {
     return { changed: false, status: "noop" as const };
   }
-  await ctx.db.patch(channel._id, { volume: input.volume });
+  await ctx.db.patch(channel._id, { volume });
   return { changed: true, status: "applied" as const };
 };
 

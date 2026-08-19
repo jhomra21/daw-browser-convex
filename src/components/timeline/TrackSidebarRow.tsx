@@ -29,18 +29,11 @@ import {
 import { cn } from "~/lib/utils";
 import { parseHexColor } from "~/lib/color";
 import { trackColorForClip } from "~/lib/clip-color";
-import { formatTrackVolumeDb } from "~/lib/track-sidebar-mixer";
 import type { TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 import TimelineContextMenu from "./context-menu/timeline-context-menu";
 import AutomationParameterPicker from "./automation-parameter-picker";
+import MixerVolumeSlider from "./MixerVolumeSlider";
 import type { TrackSidebarModel } from "./TrackSidebar";
-
-type ActiveVolumeDrag = {
-  pointerId: number;
-  trackId: Track["id"];
-  startValue: number;
-  value: number;
-};
 
 type TrackSidebarRowModel = {
   sidebar: Accessor<TrackSidebarModel>;
@@ -101,17 +94,6 @@ type TrackSidebarRowModel = {
     volume: number,
     previousVolume: number,
   ) => void;
-  activeVolumeDrag: Accessor<ActiveVolumeDrag | null>;
-  setActiveVolumeDrag: Setter<ActiveVolumeDrag | null>;
-  updateVolumeFromPointer: (
-    track: Track,
-    input: HTMLInputElement,
-    clientX: number,
-  ) => void;
-  releaseVolumePointerCapture: (
-    input: HTMLInputElement,
-    pointerId: number,
-  ) => void;
   startAutomationResize: (
     trackId: Track["id"],
     startHeight: number,
@@ -130,7 +112,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
   const model = untrack(() => props.model);
   const track = untrack(() => props.track);
   const {
-    activeVolumeDrag,
     ancestorGroupColorBandsByTrackId,
     appPreferences,
     automation,
@@ -150,7 +131,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     meters,
     previewTrackVolume,
     quantizeVolume,
-    releaseVolumePointerCapture,
     layoutByTrackId,
     trackNumbersById,
     outputTargetName,
@@ -159,7 +139,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     selectedOutputTargetId,
     selectedSendTargetId,
     sendTargetName,
-    setActiveVolumeDrag,
     startAutomationResize,
     startTrackDrag,
     suppressTrackClickId,
@@ -168,7 +147,6 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     updateTrackDrag,
     finishTrackDrag,
     cancelTrackDrag,
-    updateVolumeFromPointer,
   } = model;
   const sidebar = model.sidebar;
 
@@ -764,119 +742,49 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 <Show when={automationMeta()?.volumeEnvelope}>
                   <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
                 </Show>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
+                <MixerVolumeSlider
                   value={volume()}
                   disabled={volumeDisabled}
-                  style={{
-                    "--track-volume-percent": `${volume() * 100}%`,
-                    "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
-                    "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    automation().actions.selectParameter(track.id, {
-                      parameterId: "volume",
-                    });
-                    if (volumeDisabled) return;
-                    event.preventDefault();
-                    const startValue = quantizeVolume(volume());
-                    automation().actions.overrideTarget(
-                      trackVolumeAutomationTargetKey(track.id),
-                    );
-                    setActiveVolumeDrag({
-                      pointerId: event.pointerId,
-                      trackId: track.id,
-                      startValue,
-                      value: startValue,
-                    });
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    updateVolumeFromPointer(
-                      track,
-                      event.currentTarget,
-                      event.clientX,
-                    );
-                  }}
-                  onPointerMove={(event) => {
-                    const active = activeVolumeDrag();
-                    if (active?.pointerId !== event.pointerId) return;
-                    event.stopPropagation();
-                    updateVolumeFromPointer(
-                      track,
-                      event.currentTarget,
-                      event.clientX,
-                    );
-                  }}
-                  onPointerUp={(event) => {
-                    const active = activeVolumeDrag();
-                    if (active?.pointerId !== event.pointerId) return;
-                    event.stopPropagation();
-                    commitTrackVolume(
-                      active.trackId,
-                      active.value,
-                      active.startValue,
-                    );
-                    setActiveVolumeDrag(null);
-                    releaseVolumePointerCapture(
-                      event.currentTarget,
-                      event.pointerId,
-                    );
-                  }}
-                  onPointerCancel={(event) => {
-                    const active = activeVolumeDrag();
-                    if (active?.pointerId !== event.pointerId) return;
-                    sidebar().onVolumePreview(
-                      active.trackId,
-                      active.startValue,
-                      !!track.muted,
-                    );
-                    setActiveVolumeDrag(null);
-                    releaseVolumePointerCapture(
-                      event.currentTarget,
-                      event.pointerId,
-                    );
-                  }}
-                  onInput={(event) => {
-                    event.stopPropagation();
-                    if (volumeDisabled) return;
-                    const nextVolume = quantizeVolume(
-                      parseFloat(event.currentTarget.value),
-                    );
-                    const active = activeVolumeDrag();
-                    if (active?.trackId === track.id) {
-                      previewTrackVolume(track, nextVolume);
-                      return;
-                    }
-                    commitTrackVolume(
-                      track.id,
-                      nextVolume,
-                      quantizeVolume(track.volume ?? 0.8),
-                    );
-                  }}
-                  class={cn(
-                    "track-volume-slider w-full cursor-pointer",
-                    automationMeta()?.volumeEnvelope &&
-                      "track-volume-slider-automated",
-                    volumeDisabled && "cursor-not-allowed opacity-60",
-                  )}
+                  automated={!!automationMeta()?.volumeEnvelope}
+                  automationRange={automationMeta()?.volumeRange}
+                  ariaLabel={`Track ${trackNumber()} volume`}
                   title={
                     lockedByOther
                       ? "Track locked by another user"
                       : `Track ${trackNumber()} volume`
                   }
-                  aria-label={`Track ${trackNumber()} volume`}
-                  aria-valuetext={formatTrackVolumeDb(volume())}
+                  onSelect={() => {
+                    automation().actions.selectParameter(track.id, {
+                      parameterId: "volume",
+                    });
+                    if (!volumeDisabled) {
+                      automation().actions.overrideTarget(
+                        trackVolumeAutomationTargetKey(track.id),
+                      );
+                    }
+                  }}
+                  onPreview={(nextVolume) =>
+                    previewTrackVolume(track, nextVolume)
+                  }
+                  onCommit={(nextVolume, previousVolume) =>
+                    commitTrackVolume(track.id, nextVolume, previousVolume)
+                  }
+                  onCancel={(previousVolume) =>
+                    sidebar().onVolumePreview(
+                      track.id,
+                      previousVolume,
+                      !!track.muted,
+                    )
+                  }
+                  onReset={() =>
+                    commitTrackVolume(
+                      track.id,
+                      1,
+                      quantizeVolume(track.volume ?? 0.8),
+                    )
+                  }
                 />
-                <output
-                  class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs font-semibold tabular-nums text-foreground"
-                  aria-hidden="true"
-                >
-                  {formatTrackVolumeDb(volume())}
-                </output>
+
               </div>
               <div
                 class="contents"

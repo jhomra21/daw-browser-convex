@@ -46,7 +46,7 @@ import { normalizeSpectralParamsEnvelope, type SpectralParamsEnvelope } from './
 import { normalizeAudioWarp, normalizeClipGain, type AudioWarpPayload } from './audio-warp'
 import { normalizeClipColor, normalizeTrackColor } from './clip-color'
 import { normalizeClipTimingPatch } from './clip-timing'
-import { normalizeMasterVolume } from './master-volume'
+import { normalizeMasterVolume, normalizeMixerVolume } from './master-volume'
 import {
   normalizeTrackInstrumentParams,
   type TrackInstrumentParams,
@@ -1087,7 +1087,7 @@ const parseTrackColorBatch = (payload: JsonObject): SharedTimelineOperation | nu
 
 const parseTrackVolume = (payload: JsonObject): SharedTimelineOperation | null => (
   isJsonString(payload.trackId) && isJsonNumber(payload.volume)
-    ? { kind: 'tracks.setVolume', payload: { trackId: payload.trackId, volume: payload.volume } }
+    ? { kind: 'tracks.setVolume', payload: { trackId: payload.trackId, volume: normalizeMixerVolume(payload.volume) } }
     : null
 )
 

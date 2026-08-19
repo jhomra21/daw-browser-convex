@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { formatTrackVolumeDb, trackNumberById } from "./track-sidebar-mixer";
+import { formatMixerVolumeDb } from "@daw-browser/shared";
+import { trackNumberById } from "./track-sidebar-mixer";
 
 describe("track sidebar mixer helpers", () => {
   test("numbers tracks in their supplied ordering", () => {
@@ -15,9 +16,10 @@ describe("track sidebar mixer helpers", () => {
   });
 
   test("formats linear volume as decibels", () => {
-    expect(formatTrackVolumeDb(0)).toBe("-inf");
-    expect(formatTrackVolumeDb(0.8)).toBe("-1.9");
-    expect(formatTrackVolumeDb(1)).toBe("0.0");
-    expect(formatTrackVolumeDb(Number.NaN)).toBe("-inf");
+    expect(formatMixerVolumeDb(0)).toBe("-inf");
+    expect(formatMixerVolumeDb(0.8)).toBe("-1.9");
+    expect(formatMixerVolumeDb(1)).toBe("0.0");
+    expect(formatMixerVolumeDb(2)).toBe("+6.0");
+    expect(formatMixerVolumeDb(Number.NaN)).toBe("-inf");
   });
 });

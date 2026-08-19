@@ -13,6 +13,7 @@ import {
   assertDefined,
   automationEnvelopeValueRange,
   automationTargetKey,
+  normalizeMixerVolume,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import {
@@ -118,9 +119,7 @@ const displayMeterLevel = (value: number | undefined) => {
   const clamped = clampUnit(value ?? 0);
   return clamped > METER_SILENCE_FLOOR ? clamped : 0;
 };
-const clampVolume = (volume: number) => clampUnit(volume);
-const quantizeVolume = (volume: number) =>
-  Math.round(clampVolume(volume) * 100) / 100;
+const quantizeVolume = normalizeMixerVolume;
 const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) =>
   event.metaKey || event.altKey;
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -319,7 +318,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         existing.volumeEnvelope = envelope;
         existing.volumeRange = automationEnvelopeValueRange(envelope, {
           min: 0,
-          max: 1,
+          max: 2,
         });
       }
       mutable.set(envelope.target.trackId, existing);
@@ -627,22 +626,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     ]);
   };
 
-  const [activeVolumeDrag, setActiveVolumeDrag] = createSignal<{
-    pointerId: number;
-    trackId: Track["id"];
-    startValue: number;
-    value: number;
-  } | null>(null);
-
-  const volumeFromPointer = (input: HTMLInputElement, clientX: number) => {
-    const rect = input.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    return quantizeVolume((clientX - rect.left) / width);
-  };
-
   const displayVolume = (track: Track) => {
-    const active = activeVolumeDrag();
-    if (active?.trackId === track.id) return active.value;
     return (
       props.automation
         .evaluatedValuesByTargetKey()
@@ -658,11 +642,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const previewTrackVolume = (track: Track, volume: number) => {
     const nextVolume = quantizeVolume(volume);
-    setActiveVolumeDrag((active) => {
-      if (!active || active.trackId !== track.id || active.value === nextVolume)
-        return active;
-      return { ...active, value: nextVolume };
-    });
     sidebar().onVolumePreview(track.id, nextVolume, !!track.muted);
   };
 
@@ -704,23 +683,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   };
 
   onCleanup(() => cleanupAutomationResize?.());
-
-  const updateVolumeFromPointer = (
-    track: Track,
-    input: HTMLInputElement,
-    clientX: number,
-  ) => {
-    previewTrackVolume(track, volumeFromPointer(input, clientX));
-  };
-
-  const releaseVolumePointerCapture = (
-    input: HTMLInputElement,
-    pointerId: number,
-  ) => {
-    if (input.hasPointerCapture(pointerId)) {
-      input.releasePointerCapture(pointerId);
-    }
-  };
 
   return (
     <div
@@ -817,10 +779,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 trackVolumeAutomationTargetKey,
                 previewTrackVolume,
                 commitTrackVolume,
-                activeVolumeDrag,
-                setActiveVolumeDrag,
-                updateVolumeFromPointer,
-                releaseVolumePointerCapture,
                 startAutomationResize,
                 handleOutputTargetChange,
                 handleSendTargetChange,

@@ -174,12 +174,10 @@ const MixerVolumeSlider: Component<MixerVolumeSliderProps> = (props) => {
         aria-valuetext={formatMixerVolumeDb(currentValue())}
       />
       <output
-        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs font-semibold tabular-nums text-foreground"
+        class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs font-semibold tabular-nums text-black"
         aria-hidden="true"
       >
-        <span class="mixer-volume-value">
-          {formatMixerVolumeDb(currentValue())}
-        </span>
+        {formatMixerVolumeDb(currentValue())}
       </output>
     </div>
   );

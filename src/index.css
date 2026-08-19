@@ -523,22 +523,6 @@ html {
   outline-offset: 1px;
 }
 
-.mixer-volume-value {
-  display: inline-flex;
-  align-items: center;
-  padding-inline: 2px;
-  border-radius: 2px;
-  background: rgb(255 255 255 / 72%);
-  box-shadow: 0 0 2px rgb(255 255 255 / 85%);
-  line-height: 1;
-}
-
-.dark .mixer-volume-value,
-[data-kb-theme="dark"] .mixer-volume-value {
-  background: rgb(0 0 0 / 58%);
-  box-shadow: 0 0 2px rgb(0 0 0 / 75%);
-}
-
 .track-row-divider button:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;

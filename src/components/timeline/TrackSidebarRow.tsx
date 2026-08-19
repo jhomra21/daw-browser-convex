@@ -643,7 +643,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             >
                 <button
                   class={cn(
-                    "border text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "border-2 text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     "h-5",
                     muteDisabled
                       ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"

@@ -470,18 +470,17 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       </Show>
       <div
         class={cn(
-          "grid items-center gap-x-2",
-          track.collapsed ? "pb-[4.5px] pt-[3.5px] pr-2" : "p-2",
+          "grid items-start gap-x-2",
+          track.collapsed ? "px-2 py-1" : "p-2",
         )}
         style={{
           height: `${clipLaneHeightPx()}px`,
           "padding-left": `${4 + depth() * GROUP_INDENT_PX}px`,
-          "grid-template-columns": track.collapsed
-            ? "minmax(0, 1fr) minmax(0, 1fr) 132px"
-            : "minmax(76px, 1fr) minmax(96px, 1.2fr) 116px",
+          "grid-template-columns":
+            "minmax(76px, 1fr) minmax(96px, 1.2fr) 101px",
         }}
       >
-        <div class="flex min-w-0 items-center gap-1 overflow-hidden">
+        <div class="flex min-w-0 items-start gap-1 overflow-hidden">
           <button
             class={cn(
               "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
@@ -497,19 +496,11 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           </button>
           <button
             class={cn(
-              "flex flex-1 items-center justify-center border px-2 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+              "flex min-w-0 flex-1 items-start justify-start px-0 text-left text-sm font-semibold leading-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
               track.collapsed
-                ? "h-6 leading-none"
-                : "h-full min-h-12 self-stretch",
-              isGroupTrack
-                ? "border-transparent bg-timeline-background text-foreground hover:bg-timeline-surface-muted"
-                : isSelected()
-                  ? "border-border bg-timeline-surface-muted/40"
-                  : "border-border hover:bg-timeline-surface-muted/30",
+                ? "h-6"
+                : "h-7",
             )}
-            style={{
-              "border-width": "0.5px",
-            }}
             type="button"
             data-track-name
             onDblClick={(event) => {
@@ -632,117 +623,28 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           </div>
         </Show>
 
-        <Show when={track.collapsed}>
-          <div class="grid w-full grid-cols-3 gap-1">
-            <button
+        <div class="track-row-control-panel flex items-start gap-2">
+          <div
+            class={cn(
+              "track-row-control-stack shrink-0",
+              track.collapsed ? "grid gap-1" : "flex flex-col gap-1",
+            )}
+            style={
+              track.collapsed
+                ? { "grid-template-columns": "18px 12px 12px 1fr" }
+                : undefined
+            }
+          >
+            <div
               class={cn(
-                "h-6 min-w-0 border text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
-                muteDisabled
-                  ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"
-                  : muted()
-                    ? "border-border bg-timeline-surface-muted text-muted-foreground hover:bg-muted"
-                    : "border-amber-300 bg-amber-400 text-black shadow-inner",
+                track.collapsed ? "contents" : "grid gap-1",
               )}
-              type="button"
-              disabled={muteDisabled}
-              aria-pressed={!muted()}
-              aria-label={
-                muted()
-                  ? `Activate track ${trackNumber()}`
-                  : `Deactivate track ${trackNumber()}`
-              }
-              title={
-                lockedByOther
-                  ? "Track locked by another user"
-                  : muted()
-                    ? `Activate track ${trackNumber()}`
-                    : `Deactivate track ${trackNumber()}`
-              }
-              onClick={(event) => {
-                event.stopPropagation();
-                if (!muteDisabled) sidebar().onToggleMute(track.id);
-              }}
+              style={{ "grid-template-columns": "3fr 1fr 1fr" }}
             >
-              {trackNumber()}
-            </button>
-            <button
-              class={cn(
-                "h-6 min-w-0 border text-xs font-semibold",
-                soloDisabled
-                  ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
-                  : soloed()
-                    ? "border-blue-300 bg-blue-500/90 text-black"
-                    : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
-              )}
-              type="button"
-              aria-pressed={soloed()}
-              aria-label={
-                soloed()
-                  ? `Unsolo track ${trackNumber()}`
-                  : `Solo track ${trackNumber()}`
-              }
-              disabled={soloDisabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (soloDisabled) return;
-                sidebar().onToggleSolo(track.id);
-              }}
-              title={
-                lockedByOther
-                  ? "Track locked by another user"
-                  : soloed()
-                    ? "Unsolo"
-                    : "Solo"
-              }
-            >
-              S
-            </button>
-            <button
-              class={cn(
-                "h-6 min-w-0 border text-xs font-bold transition-colors",
-                recordDisabled
-                  ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
-                  : isRecordArmed()
-                    ? "border-red-400 bg-red-500 text-black shadow-inner"
-                    : "border-red-500 text-red-400 hover:bg-red-500/20",
-              )}
-              type="button"
-              aria-pressed={isRecordArmed()}
-              aria-label={
-                isRecordArmed()
-                  ? `Disarm track ${trackNumber()} for recording`
-                  : `Arm track ${trackNumber()} for recording`
-              }
-              title={
-                lockedByOther
-                  ? "Track locked by another user"
-                  : isReturnTrack
-                    ? "Return tracks cannot be armed for recording"
-                    : isGroupTrack
-                      ? "Group tracks cannot be armed for recording"
-                      : isRecordArmed()
-                          ? "Disarm recording"
-                          : "Arm for recording"
-              }
-              disabled={recordDisabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (recordDisabled) return;
-                sidebar().onToggleRecordArm(track.id);
-              }}
-            >
-              R
-            </button>
-          </div>
-        </Show>
-
-        <div class="track-row-control-panel flex items-center gap-2">
-          <div class="track-row-control-stack flex shrink-0 flex-col gap-1">
-            <Show when={!track.collapsed}>
-              <div class="grid grid-cols-3 gap-1">
                 <button
                   class={cn(
-                    "h-7 border text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "border text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    track.collapsed ? "h-6" : "h-7",
                     muteDisabled
                       ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"
                       : muted()
@@ -773,7 +675,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "h-7 border text-xs font-semibold",
+                    "border text-xs font-semibold",
+                    track.collapsed ? "h-6" : "h-7",
                     soloDisabled
                       ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                       : soloed()
@@ -805,7 +708,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "flex h-7 items-center justify-center border text-xs font-bold transition-colors",
+                    "flex items-center justify-center border text-xs font-bold transition-colors",
+                    track.collapsed ? "h-6" : "h-7",
                     recordDisabled
                       ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                       : isRecordArmed()
@@ -840,131 +744,150 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   R
                 </button>
 
-              </div>
-            </Show>
+            </div>
 
             <div
-              class="relative flex h-6 items-center"
+              class={cn(
+                track.collapsed ? "contents" : "grid gap-1",
+              )}
+              style={{ "grid-template-columns": "3fr 1fr 1fr" }}
             >
-              <Show when={automationMeta()?.volumeEnvelope}>
-                <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
-              </Show>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume()}
-                disabled={volumeDisabled}
-                style={{
-                  "--track-volume-percent": `${volume() * 100}%`,
-                  "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
-                  "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
-                }}
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  automation().actions.selectParameter(track.id, {
-                    parameterId: "volume",
-                  });
-                  if (volumeDisabled) return;
-                  event.preventDefault();
-                  const startValue = quantizeVolume(volume());
-                  automation().actions.overrideTarget(
-                    trackVolumeAutomationTargetKey(track.id),
-                  );
-                  setActiveVolumeDrag({
-                    pointerId: event.pointerId,
-                    trackId: track.id,
-                    startValue,
-                    value: startValue,
-                  });
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  updateVolumeFromPointer(
-                    track,
-                    event.currentTarget,
-                    event.clientX,
-                  );
-                }}
-                onPointerMove={(event) => {
-                  const active = activeVolumeDrag();
-                  if (active?.pointerId !== event.pointerId) return;
-                  event.stopPropagation();
-                  updateVolumeFromPointer(
-                    track,
-                    event.currentTarget,
-                    event.clientX,
-                  );
-                }}
-                onPointerUp={(event) => {
-                  const active = activeVolumeDrag();
-                  if (active?.pointerId !== event.pointerId) return;
-                  event.stopPropagation();
-                  commitTrackVolume(
-                    active.trackId,
-                    active.value,
-                    active.startValue,
-                  );
-                  setActiveVolumeDrag(null);
-                  releaseVolumePointerCapture(
-                    event.currentTarget,
-                    event.pointerId,
-                  );
-                }}
-                onPointerCancel={(event) => {
-                  const active = activeVolumeDrag();
-                  if (active?.pointerId !== event.pointerId) return;
-                  sidebar().onVolumePreview(
-                    active.trackId,
-                    active.startValue,
-                    !!track.muted,
-                  );
-                  setActiveVolumeDrag(null);
-                  releaseVolumePointerCapture(
-                    event.currentTarget,
-                    event.pointerId,
-                  );
-                }}
-                onInput={(event) => {
-                  event.stopPropagation();
-                  if (volumeDisabled) return;
-                  const nextVolume = quantizeVolume(
-                    parseFloat(event.currentTarget.value),
-                  );
-                  const active = activeVolumeDrag();
-                  if (active?.trackId === track.id) {
-                    previewTrackVolume(track, nextVolume);
-                    return;
-                  }
-                  commitTrackVolume(
-                    track.id,
-                    nextVolume,
-                    quantizeVolume(track.volume ?? 0.8),
-                  );
-                }}
+              <div
                 class={cn(
-                  "track-volume-slider w-full cursor-pointer",
-                  automationMeta()?.volumeEnvelope &&
-                    "track-volume-slider-automated",
-                  volumeDisabled && "cursor-not-allowed opacity-60",
+                  "relative flex items-center",
+                  track.collapsed ? "h-4" : "h-6",
+                  track.collapsed && "col-start-4 row-start-1",
                 )}
-                title={
-                  lockedByOther
-                    ? "Track locked by another user"
-                    : `Track ${trackNumber()} volume`
-                }
-                aria-label={`Track ${trackNumber()} volume`}
-                aria-valuetext={formatTrackVolumeDb(volume())}
-              />
-              <output
-                class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs font-semibold tabular-nums text-foreground"
-                aria-hidden="true"
               >
-                {formatTrackVolumeDb(volume())}
-              </output>
+                <Show when={automationMeta()?.volumeEnvelope}>
+                  <span class="track-automation-indicator absolute right-0 top-0 z-10 h-2 w-2 rounded-full bg-red-500" />
+                </Show>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={volume()}
+                  disabled={volumeDisabled}
+                  style={{
+                    "--track-volume-percent": `${volume() * 100}%`,
+                    "--track-volume-automation-start": `${(automationMeta()?.volumeRange?.min ?? 0) * 100}%`,
+                    "--track-volume-automation-end": `${(automationMeta()?.volumeRange?.max ?? 0) * 100}%`,
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    automation().actions.selectParameter(track.id, {
+                      parameterId: "volume",
+                    });
+                    if (volumeDisabled) return;
+                    event.preventDefault();
+                    const startValue = quantizeVolume(volume());
+                    automation().actions.overrideTarget(
+                      trackVolumeAutomationTargetKey(track.id),
+                    );
+                    setActiveVolumeDrag({
+                      pointerId: event.pointerId,
+                      trackId: track.id,
+                      startValue,
+                      value: startValue,
+                    });
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    updateVolumeFromPointer(
+                      track,
+                      event.currentTarget,
+                      event.clientX,
+                    );
+                  }}
+                  onPointerMove={(event) => {
+                    const active = activeVolumeDrag();
+                    if (active?.pointerId !== event.pointerId) return;
+                    event.stopPropagation();
+                    updateVolumeFromPointer(
+                      track,
+                      event.currentTarget,
+                      event.clientX,
+                    );
+                  }}
+                  onPointerUp={(event) => {
+                    const active = activeVolumeDrag();
+                    if (active?.pointerId !== event.pointerId) return;
+                    event.stopPropagation();
+                    commitTrackVolume(
+                      active.trackId,
+                      active.value,
+                      active.startValue,
+                    );
+                    setActiveVolumeDrag(null);
+                    releaseVolumePointerCapture(
+                      event.currentTarget,
+                      event.pointerId,
+                    );
+                  }}
+                  onPointerCancel={(event) => {
+                    const active = activeVolumeDrag();
+                    if (active?.pointerId !== event.pointerId) return;
+                    sidebar().onVolumePreview(
+                      active.trackId,
+                      active.startValue,
+                      !!track.muted,
+                    );
+                    setActiveVolumeDrag(null);
+                    releaseVolumePointerCapture(
+                      event.currentTarget,
+                      event.pointerId,
+                    );
+                  }}
+                  onInput={(event) => {
+                    event.stopPropagation();
+                    if (volumeDisabled) return;
+                    const nextVolume = quantizeVolume(
+                      parseFloat(event.currentTarget.value),
+                    );
+                    const active = activeVolumeDrag();
+                    if (active?.trackId === track.id) {
+                      previewTrackVolume(track, nextVolume);
+                      return;
+                    }
+                    commitTrackVolume(
+                      track.id,
+                      nextVolume,
+                      quantizeVolume(track.volume ?? 0.8),
+                    );
+                  }}
+                  class={cn(
+                    "track-volume-slider w-full cursor-pointer",
+                    automationMeta()?.volumeEnvelope &&
+                      "track-volume-slider-automated",
+                    volumeDisabled && "cursor-not-allowed opacity-60",
+                  )}
+                  title={
+                    lockedByOther
+                      ? "Track locked by another user"
+                      : `Track ${trackNumber()} volume`
+                  }
+                  aria-label={`Track ${trackNumber()} volume`}
+                  aria-valuetext={formatTrackVolumeDb(volume())}
+                />
+                <output
+                  class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs font-semibold tabular-nums text-foreground"
+                  aria-hidden="true"
+                >
+                  {formatTrackVolumeDb(volume())}
+                </output>
+              </div>
+              <div
+                class="col-span-2"
+                classList={{ hidden: track.collapsed }}
+                aria-hidden="true"
+              />
             </div>
             <Show when={!track.collapsed}>
-              <div class="grid grid-cols-2 gap-1">
+              <div
+                class="grid gap-1"
+                style={{ "grid-template-columns": "3fr 1fr 1fr" }}
+              >
+                <div aria-hidden="true" />
                 <button
                   class={cn(
                     "h-6 border text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
@@ -1020,7 +943,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           <div
             class={cn(
               "track-meter-strip relative shrink-0",
-              track.collapsed ? "h-6" : "h-16",
+              track.collapsed ? "h-6" : "h-full",
             )}
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">

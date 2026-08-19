@@ -693,10 +693,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       }}
     >
       <div
-        class="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
+        class="group absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
         onPointerDown={(event) => sidebar().onSidebarPointerDown(event)}
       >
-        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
+        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
       </div>
 
       <div class="sticky top-0 z-40 bg-timeline-surface">

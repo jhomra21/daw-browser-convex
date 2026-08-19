@@ -464,9 +464,11 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
       <button
         type="button"
         aria-label="Resize browser"
-        class="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent hover:bg-sky-500/20"
+        class="group absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent"
         onPointerDown={(event) => props.browser.onResizePointerDown(event)}
-      />
+      >
+        <span class="pointer-events-none absolute right-1/2 top-0 h-full w-1 translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
+      </button>
     </aside>
   );
 };

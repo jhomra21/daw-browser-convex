@@ -40,7 +40,6 @@ type UseTimelineMidiOverlayOptions = {
     stop: (handle: NativeLiveMidiNoteHandle, force?: boolean) => void
     subscribeReset?: (listener: () => void) => () => boolean
   }
-  reportFault?: (message: string) => void
 }
 
 type UseTimelineMidiOverlayReturn = {
@@ -107,7 +106,6 @@ export function useTimelineMidiOverlay(
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     clear: (timer) => window.clearTimeout(timer),
   })
-  let nativeUnavailableReported = false
   let liveTargetKey: string | undefined
   const projectedTracks = createMemo(() => {
     projectionRevision()
@@ -213,12 +211,15 @@ export function useTimelineMidiOverlay(
       }
     },
     start: (note) => {
-      if (nativeMidiReady && options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
+      if (
+        options.nativeLiveMidi
+        && !midiSuspended
+        && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
+      ) {
         const handle = options.nativeLiveMidi.start(note)
         if (handle) return { backend: 'native', handle }
       }
       if (requiresNativeAudio) {
-        reportNativeUnavailable()
         return undefined
       }
       options.audioEngine.ensureAudio()
@@ -262,12 +263,6 @@ export function useTimelineMidiOverlay(
     liveArpeggiator.panic()
   }
 
-  const reportNativeUnavailable = () => {
-    if (nativeUnavailableReported) return
-    nativeUnavailableReported = true
-    options.reportFault?.("Native audio is unavailable for MIDI audition; no browser fallback is used.")
-  }
-
   const stopNativeLiveNotes = () => {
     forceStopAllLiveNotes()
   }
@@ -306,12 +301,15 @@ export function useTimelineMidiOverlay(
           bpm: options.bpm(),
         }),
         start: (note) => {
-          if (nativeMidiReady && options.nativeLiveMidi && shouldUseNativeLiveMidi(options.nativeLiveMidi)) {
+          if (
+            options.nativeLiveMidi
+            && !midiSuspended
+            && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
+          ) {
             const handle = options.nativeLiveMidi.start(note)
             if (handle) return { backend: 'native', handle }
           }
           if (requiresNativeAudio) {
-            reportNativeUnavailable()
             return undefined
           }
           options.audioEngine.ensureAudio()
@@ -338,15 +336,8 @@ export function useTimelineMidiOverlay(
       })
       stopLiveNote(pitch, true)
       if (requiresNativeAudio) {
-        if (!nativeMidiReady || !options.nativeLiveMidi?.isAvailable()) {
-          reportNativeUnavailable()
-          return
-        }
         const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
-        if (sourceId === undefined) {
-          reportNativeUnavailable()
-          return
-        }
+        if (sourceId === undefined) return
         activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
         // UI audition notes have no sustained pointer lifecycle; this bounded
         // one-shot note-off prevents a successful native preview from hanging.

@@ -91,15 +91,15 @@ test("replacing an audition pitch cancels its prior bounded release", () => {
   expect(ownership.size()).toBe(0)
 })
 
-test("native-required MIDI ingress never calls the browser audio engine", async () => {
+test("native-required MIDI ingress stays silent while native preparation is pending", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
   const audition = source.slice(
     source.indexOf("const auditionNote"),
     source.indexOf("const startLiveNote", source.indexOf("const auditionNote")),
   )
   expect(source).toContain("if (requiresNativeAudio)")
-  expect(source).toContain("reportNativeUnavailable")
   expect(source).toContain("options.audioEngine.startLiveMidiNote")
+  expect(source).not.toContain("Native MIDI unavailable")
   expect(audition.indexOf("if (requiresNativeAudio)")).toBeLessThan(audition.indexOf("options.audioEngine.ensureAudio"))
 })
 

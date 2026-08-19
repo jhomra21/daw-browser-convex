@@ -998,7 +998,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     activeRecordingTargetId: activeMidiRecordingTargetId,
     nativeLiveMidi,
-    reportFault: (message) => notify("Native MIDI unavailable", message),
     canOpenMidiEditorFor: (clipId) => clipId !== provisionalMidiClipId(),
   });
   const removeCreatedCloudTrack = (track: Track | undefined) =>

@@ -8,6 +8,7 @@ describe("desktop close flow", () => {
     const close = createCloseHandler({
       prepare: async () => false,
       confirmDiscard: async () => false,
+      beginQuit: () => {},
       destroy: () => { destroyed += 1 },
       finishQuit: async () => { quit += 1 },
     })
@@ -24,6 +25,7 @@ describe("desktop close flow", () => {
     const close = createCloseHandler({
       prepare: async () => false,
       confirmDiscard: async () => true,
+      beginQuit: () => {},
       destroy: () => { destroyed += 1 },
       finishQuit: async () => { quit += 1 },
     })
@@ -32,5 +34,20 @@ describe("desktop close flow", () => {
 
     expect(destroyed).toBe(1)
     expect(quit).toBe(1)
+  })
+
+  test("begins quitting before destroying the window", async () => {
+    const events: string[] = []
+    const close = createCloseHandler({
+      prepare: async () => true,
+      confirmDiscard: async () => false,
+      beginQuit: () => { events.push("beginQuit") },
+      destroy: () => { events.push("destroy") },
+      finishQuit: async () => { events.push("finishQuit") },
+    })
+
+    await close()
+
+    expect(events).toEqual(["beginQuit", "destroy", "finishQuit"])
   })
 })

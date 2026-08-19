@@ -96,6 +96,7 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
+import { deliverToRenderer } from "./renderer-delivery"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -272,6 +273,15 @@ type PendingRendererRequest = {
 type RendererRequestInput = Parameters<typeof desktopRendererRequestSchemaV1.parse>[0]
 type RendererReplyError = Parameters<typeof controlErrorSchemaV1.safeParse>[0]
 let window_: BrowserWindow | undefined
+let finishingQuit = false
+let quitCleanupStarted = false
+const sendRendererMessage = (channel: string, ...args: unknown[]) => deliverToRenderer({
+  getTarget: () => window_?.webContents,
+  channel,
+  args,
+  sameOrigin: sameAppOrigin,
+  isFinishingQuit: () => finishingQuit,
+})
 const applicationMenuCommandChannel = "daw:application-menu:command"
 const applicationMenuStateChannel = "daw:application-menu:state"
 const applicationMenuController = createApplicationMenuController<Menu>({
@@ -281,9 +291,7 @@ const applicationMenuController = createApplicationMenuController<Menu>({
       ? "win32"
       : "linux",
   sendCommand: (command: DesktopApplicationMenuCommand) => {
-    const target = window_?.webContents
-    if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-    target.send(applicationMenuCommandChannel, command)
+    sendRendererMessage(applicationMenuCommandChannel, command)
   },
 })
 let generation = 0
@@ -304,7 +312,6 @@ let registrationPath = ""
 let socketPath = ""
 let socketServer: ReturnType<typeof createServer> | undefined
 const acceptedSockets = new Set<Socket>()
-let finishingQuit = false
 let nativeMediaAvailable = false
 let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
@@ -345,9 +352,7 @@ const settleCapabilityRevocation = (operation: Promise<void>) => {
 }
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
 const publishAudioLifecycle = () => {
-  const target = window_?.webContents
-  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-  target.send("daw:audio-host:lifecycle", audioLifecycle)
+  sendRendererMessage("daw:audio-host:lifecycle", audioLifecycle)
 }
 const recoverAudioHost = (recoveryGeneration: number) => {
   if (audioRecoveryGeneration === recoveryGeneration) return
@@ -408,9 +413,7 @@ const writeSocketFailure = (
 }
 
 const cancelRendererRequest = (id: string, requestGeneration: number) => {
-  const target = window_?.webContents
-  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-  target.send(incomingChannel, {
+  sendRendererMessage(incomingChannel, {
     generation: requestGeneration,
     frame: { version: desktopProtocolVersion, type: "cancel", id },
   })
@@ -420,9 +423,7 @@ const cancelPreparedRendererExport = (id: string) => {
   const mode = preparedExportModes.get(id)
   if (!mode) return
   preparedExportModes.delete(id)
-  const target = window_?.webContents
-  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-  target.send(incomingChannel, {
+  sendRendererMessage(incomingChannel, {
     generation,
     frame: {
       version: desktopProtocolVersion,
@@ -450,18 +451,16 @@ const rejectRendererRequest = (id: string, message: string) => {
 }
 
 const sendToRenderer = (request: DesktopRendererRequestV1 | DesktopTrustedRendererRequestV1) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
-  const target = window_?.webContents
-  if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) {
-    reject(new Error("Renderer unavailable."))
-    return
-  }
   if (rendererPending.has(request.id)) {
     reject(new Error("Duplicate request ID."))
     return
   }
   const expectedGeneration = generation
   rendererPending.set(request.id, { generation: expectedGeneration, resolve, reject })
-  target.send(incomingChannel, { generation: expectedGeneration, frame: request })
+  if (!sendRendererMessage(incomingChannel, { generation: expectedGeneration, frame: request })) {
+    rendererPending.delete(request.id)
+    reject(new Error("Renderer unavailable."))
+  }
 })
 
 const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareToClose", input: RendererRequestInput, id: string, deadlineMs = 10_000, actorSubject?: string) => {
@@ -919,7 +918,7 @@ const registerIpc = () => {
         vstAttachments,
         signal: controller.signal,
         onChunk: (chunk) => {
-          if (!event.sender.isDestroyed()) event.sender.send("daw:audio-host:offline-pcm", { jobId, chunk })
+          sendRendererMessage("daw:audio-host:offline-pcm", { jobId, chunk })
         },
       })
       return { ok: true as const }
@@ -1533,6 +1532,9 @@ const createWindow = () => {
       webSecurity: true,
     },
   })
+  window_?.on("closed", () => {
+    window_ = undefined
+  })
   window_.webContents.on("did-start-navigation", () => {
     abortOfflineRenderJobs()
     applicationMenuController.reset()
@@ -1577,6 +1579,9 @@ const createWindow = () => {
       })
       return choice.response === 1
     },
+    beginQuit: () => {
+      finishingQuit = true
+    },
     destroy: () => window_?.destroy(),
     finishQuit,
   })
@@ -1590,8 +1595,10 @@ const createWindow = () => {
 
 app.setName(appName)
 const finishQuit = async () => {
-  if (finishingQuit) return
+  if (quitCleanupStarted) return
+  quitCleanupStarted = true
   finishingQuit = true
+  await closeSocket()
   preparationRegistry.abortAll()
   rejectRendererPending("Application is closing.")
   activeEditorProjectBindings.clear()
@@ -1607,7 +1614,6 @@ const finishQuit = async () => {
   removeAudioHostSpectrumListener?.()
   removeAudioHostScheduleProgressListener?.()
   removeAudioHostWorkerNotificationListener?.()
-  await closeSocket()
   app.exit()
 }
 const gotLock = app.requestSingleInstanceLock()
@@ -1658,9 +1664,7 @@ else {
       parameterId: number
       normalizedValue: number
     }) => {
-      const target = window_?.webContents
-      if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-      target.send("daw:audio-host:vst-parameter-edit", input)
+      sendRendererMessage("daw:audio-host:vst-parameter-edit", input)
     }
     removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification((notification) => {
       if (notification.kind !== "parameter-edit") return
@@ -1688,9 +1692,7 @@ else {
           target.focus()
         },
         onEditorOpenState: (input) => {
-          const target = window_?.webContents
-          if (!target || target.isDestroyed() || !sameAppOrigin(target.getURL())) return
-          target.send("daw:audio-host:vst-editor-state", input)
+          sendRendererMessage("daw:audio-host:vst-editor-state", input)
         },
         onParameterEdit: (input) => sendVstParameterEdit({
           projectId: input.projectId,
@@ -1721,40 +1723,22 @@ else {
     powerMonitor.on("resume", handleResume)
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
       activeEditorProjectBindings.clear()
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:loss", sanitizeNativeVst3DiagnosticError(error))
-      }
+      sendRendererMessage("daw:audio-host:loss", sanitizeNativeVst3DiagnosticError(error))
     })
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:recording-block", block)
-      }
+      sendRendererMessage("daw:audio-host:recording-block", block)
     })
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:recording-status", status)
-      }
+      sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:meter-batch", batch)
-      }
+      sendRendererMessage("daw:audio-host:meter-batch", batch)
     })
     removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:spectrum-frame", frame)
-      }
+      sendRendererMessage("daw:audio-host:spectrum-frame", frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
-      const target = window_?.webContents
-      if (target && !target.isDestroyed() && sameAppOrigin(target.getURL())) {
-        target.send("daw:audio-host:schedule-progress", progress)
-      }
+      sendRendererMessage("daw:audio-host:schedule-progress", progress)
     })
     protocol.handle("daw", (request) => {
       const rendererRoot = MAIN_WINDOW_VITE_DEV_SERVER_URL

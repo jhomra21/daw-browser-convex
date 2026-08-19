@@ -50,6 +50,7 @@ import {
   getReturnSendTargets,
   resolveSendTargetId,
 } from "./track-send-targets";
+import { trackNumberById } from "~/lib/track-sidebar-mixer";
 import TrackSidebarRow from "./TrackSidebarRow";
 
 export type TrackSidebarProps = {
@@ -214,6 +215,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     ...sidebar().trackLayout.scrollingRows,
     ...sidebar().trackLayout.returnRows,
   ]);
+  const trackNumbersById = createMemo(() =>
+    trackNumberById(sidebar().allTracks),
+  );
   const depthByTrackId = createMemo(
     () => new Map(allTrackLayout().map((row) => [row.trackId, row.depth])),
   );
@@ -786,6 +790,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 appPreferences,
                 depthByTrackId,
                 layoutByTrackId,
+                trackNumbersById,
                 ancestorGroupColorBandsByTrackId,
                 defaultGroupColor,
                 resolveGroupColor,

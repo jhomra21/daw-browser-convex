@@ -462,15 +462,20 @@ html {
 }
 
 .track-volume-slider {
-  height: 1.25rem;
+  position: relative;
+  z-index: 0;
+  height: 1.5rem;
   appearance: none;
   touch-action: none;
-  border: 2px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 0.125rem;
   background: linear-gradient(
     to right,
-    var(--warning-foreground) 0 var(--track-volume-percent),
-    var(--muted-foreground) var(--track-volume-percent) 100%
+    color-mix(in srgb, var(--chart-2) 78%, transparent) 0 var(--track-volume-percent),
+    var(--timeline-background) var(--track-volume-percent) 100%
   );
+  color: var(--foreground);
+  outline: none;
 }
 
 .track-volume-slider-automated {
@@ -483,8 +488,8 @@ html {
     ),
     linear-gradient(
       to right,
-      var(--warning-foreground) 0 var(--track-volume-percent),
-      var(--muted-foreground) var(--track-volume-percent) 100%
+      color-mix(in srgb, var(--chart-2) 78%, transparent) 0 var(--track-volume-percent),
+      var(--timeline-background) var(--track-volume-percent) 100%
     );
   background-position: 0 0, 0 0;
   background-repeat: no-repeat;
@@ -498,22 +503,33 @@ html {
 
 .track-volume-slider::-webkit-slider-thumb {
   width: 0;
-  height: 1.25rem;
+  height: 1.5rem;
   appearance: none;
 }
 
 .track-volume-slider::-moz-range-track {
   height: 100%;
-  background: var(--muted-foreground);
+  background: var(--timeline-background);
 }
 
 .track-volume-slider::-moz-range-progress {
   height: 100%;
-  background: var(--warning-foreground);
+  background: color-mix(in srgb, var(--chart-2) 78%, transparent);
 }
 
 .track-volume-slider::-moz-range-thumb {
   width: 0;
   height: 0;
   border: 0;
+}
+
+.track-volume-slider:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.track-row-divider button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }

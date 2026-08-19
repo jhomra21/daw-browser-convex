@@ -649,7 +649,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                       ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"
                       : muted()
                         ? "border-border bg-timeline-surface-muted text-muted-foreground hover:bg-muted"
-                        : "border-amber-300 bg-amber-400 text-black shadow-inner",
+                        : "border-border bg-amber-400 text-black",
                   )}
                   type="button"
                   disabled={muteDisabled}

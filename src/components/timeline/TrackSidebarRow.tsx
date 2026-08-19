@@ -675,8 +675,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "border text-xs font-semibold",
-                    "h-5",
+                    "h-5 border-2 p-0 text-xs font-semibold",
                     soloDisabled
                       ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                       : soloed()
@@ -708,8 +707,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "flex items-center justify-center border text-xs font-bold transition-colors",
-                    "h-5",
+                    "flex h-5 items-center justify-center border-2 p-0 text-xs font-bold transition-colors",
                     recordDisabled
                       ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                       : isRecordArmed()
@@ -754,8 +752,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             >
               <div
                 class={cn(
-                  "relative flex items-center",
-                  track.collapsed ? "h-5" : "h-6",
+                  "relative flex h-5 items-center",
                   track.collapsed && "col-start-4 row-start-1",
                 )}
               >
@@ -877,20 +874,12 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </output>
               </div>
               <div
-                class="col-span-2"
+                class="contents"
                 classList={{ hidden: track.collapsed }}
-                aria-hidden="true"
-              />
-            </div>
-            <Show when={!track.collapsed}>
-              <div
-                class="grid gap-1"
-                style={{ "grid-template-columns": "3fr 1fr 1fr" }}
               >
-                <div aria-hidden="true" />
                 <button
                   class={cn(
-                    "h-6 border text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "h-5 border-2 p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     displayedAutomationVisible()
                       ? "border-red-400 bg-red-500/90 text-black"
                       : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
@@ -916,7 +905,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "h-6 border text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "h-5 border-2 p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     canAddAutomationLane()
                       ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
                       : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",
@@ -937,7 +926,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   +
                 </button>
               </div>
-            </Show>
+            </div>
           </div>
 
           <div

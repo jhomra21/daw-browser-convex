@@ -644,7 +644,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 <button
                   class={cn(
                     "border text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
-                    track.collapsed ? "h-6" : "h-7",
+                    "h-5",
                     muteDisabled
                       ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"
                       : muted()
@@ -676,7 +676,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 <button
                   class={cn(
                     "border text-xs font-semibold",
-                    track.collapsed ? "h-6" : "h-7",
+                    "h-5",
                     soloDisabled
                       ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                       : soloed()
@@ -709,7 +709,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 <button
                   class={cn(
                     "flex items-center justify-center border text-xs font-bold transition-colors",
-                    track.collapsed ? "h-6" : "h-7",
+                    "h-5",
                     recordDisabled
                       ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                       : isRecordArmed()
@@ -755,7 +755,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               <div
                 class={cn(
                   "relative flex items-center",
-                  track.collapsed ? "h-4" : "h-6",
+                  track.collapsed ? "h-5" : "h-6",
                   track.collapsed && "col-start-4 row-start-1",
                 )}
               >

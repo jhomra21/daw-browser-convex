@@ -648,7 +648,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             >
                 <button
                   class={cn(
-                    "border-2 text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "border-[0.5px] text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     "h-5",
                     muteDisabled
                       ? "cursor-not-allowed border-border bg-timeline-surface-muted text-muted-foreground"
@@ -680,7 +680,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "h-5 border-2 p-0 text-xs font-semibold",
+                    "h-5 border-[0.5px] p-0 text-xs font-semibold",
                     soloDisabled
                       ? "cursor-not-allowed border-border bg-muted/40 text-muted-foreground"
                       : soloed()
@@ -712,7 +712,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "flex h-5 items-center justify-center border-2 p-0 text-xs font-bold transition-colors",
+                    "flex h-5 items-center justify-center border-[0.5px] p-0 text-xs font-bold transition-colors",
                     recordDisabled
                       ? "cursor-not-allowed border-red-900 bg-timeline-surface-muted text-red-900"
                       : isRecordArmed()
@@ -884,7 +884,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
               >
                 <button
                   class={cn(
-                    "h-5 border-2 p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "h-5 border-[0.5px] p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     displayedAutomationVisible()
                       ? "border-red-400 bg-red-500/90 text-black"
                       : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
@@ -910,7 +910,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </button>
                 <button
                   class={cn(
-                    "h-5 border-2 p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
+                    "h-5 border-[0.5px] p-0 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary",
                     canAddAutomationLane()
                       ? "border-border bg-timeline-surface-muted text-red-200 hover:bg-red-500/20"
                       : "cursor-not-allowed border-border bg-timeline-surface text-muted-foreground",

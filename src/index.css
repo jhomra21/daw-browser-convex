@@ -465,7 +465,7 @@ html {
   height: 1.25rem;
   appearance: none;
   touch-action: none;
-  border: 2px solid var(--border);
+  border: 0.5px solid var(--border);
   background: linear-gradient(
     to right,
     var(--warning-foreground) 0 var(--track-volume-percent),

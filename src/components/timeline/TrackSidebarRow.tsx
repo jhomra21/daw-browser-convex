@@ -623,7 +623,12 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           </div>
         </Show>
 
-        <div class="track-row-control-panel flex items-start gap-2">
+        <div
+          class={cn(
+            "track-row-control-panel flex items-start gap-2",
+            track.collapsed && "col-start-3",
+          )}
+        >
           <div
             class={cn(
               "track-row-control-stack shrink-0",

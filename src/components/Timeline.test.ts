@@ -126,3 +126,13 @@ test("offers trusted VST3 catalog recovery without retrying playback automatical
   expect(recovery).not.toContain("requestPlay()");
   expect(source).toContain('notify("Native playback stopped", message);');
 });
+
+test("routes browser keyboard toggles through the extension host exactly once", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  expect(source).toContain("const timelineExtensionHost = createTimelineExtensionHost({");
+  expect(source).toContain("toggle: leftBrowser.toggleOpen,");
+  expect(source).toContain("executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,");
+  expect(source).not.toContain("onToggleBrowser: leftBrowser.toggleOpen");
+  expect(source.match(/createTimelineExtensionHost\(/g)).toHaveLength(1);
+  expect(source.match(/timelineExtensionHost\.dispose\(\)/g)).toHaveLength(1);
+});

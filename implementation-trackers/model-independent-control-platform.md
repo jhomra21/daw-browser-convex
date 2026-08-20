@@ -179,3 +179,28 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Deferred surfaces: browser toggle composition, UI/menu projection,
   persistence, project control facade, external packages, capabilities/grants,
   manifests/discovery, and agent APIs.
+
+## Checkpoint 7 — Browser toggle extension composition
+
+- Composed the built-in `builtin.view.toggle-browser` definition through the
+  app-local extension kernel. It declares the stable `view.toggle-browser`
+  command and `Mod+Alt+B` shortcut with the existing non-editable-target
+  behavior.
+- The extension receives only the narrow `views.browser.toggle()` facade.
+  Browser state, persistence, rendering, and the left-browser controller
+  remain application-owned.
+- Timeline creates one extension host per mounted composition and disposes it
+  on unmount. Shortcut activation has a deterministic synchronous fallback
+  while kernel activation settles; activation failure does not leave a
+  rejected promise or a dead browser shortcut.
+- `useTimelineKeyboard` routes only the existing browser-toggle branch through
+  extension shortcut resolution. All other keyboard branches and their
+  editable-target, exact-chord, `preventDefault`, and `stopPropagation`
+  behavior remain unchanged.
+- Existing desktop application-menu browser entries still select specific
+  browser tabs rather than toggle the browser and were intentionally left
+  unchanged. Native menu projection for extension-owned commands remains
+  deferred to Checkpoint 12.
+- Explicitly out of scope: SDK/client work, menu projection schema work,
+  persistence/preferences, project-control extensions, external extension
+  APIs, menu contribution IPC, and agent command APIs.

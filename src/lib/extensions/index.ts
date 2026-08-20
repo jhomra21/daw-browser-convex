@@ -7,6 +7,12 @@ export {
   isShortcutId,
   normalizeShortcutChord,
 } from './extension-kernel'
+export {
+  builtinViewToggleBrowserCommand,
+  builtinViewToggleBrowserShortcut,
+  createBuiltinViewToggleBrowser,
+} from './builtins/view-toggle-browser'
+export { createTimelineExtensionHost } from './timeline-extension-host'
 export type {
   AppExtensionCommandDeclaration,
   AppExtensionDefinition,
@@ -29,3 +35,4 @@ export type {
   ShortcutId,
   ShortcutResolutionContext,
 } from './extension-kernel'
+export type { BrowserToggleExtensionViews } from './builtins/view-toggle-browser'

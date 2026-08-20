@@ -1,6 +1,7 @@
 import { onMount, onCleanup, type Accessor } from "solid-js";
 
 import { isEditableKeyboardTarget, isLocalTimelineKeyboardTarget } from "~/lib/keyboard-event-target";
+import type { ShortcutChord, ShortcutResolutionContext } from "~/lib/extensions";
 
 type KeyboardHandlers = {
   enabled: Accessor<boolean>;
@@ -16,15 +17,30 @@ type KeyboardHandlers = {
   onUngroupSelectedTrack: () => void;
   onAddInstrumentTrack: () => void;
   onOpenExport: () => void;
-  onToggleBrowser: () => void;
+  executeExtensionShortcut: (
+    chord: ShortcutChord,
+    context: ShortcutResolutionContext,
+  ) => boolean;
   onUndo: () => void;
   onRedo: () => void;
 };
 
-export function useTimelineKeyboard(handlers: KeyboardHandlers) {
-  const captureOptions = { capture: true } as const;
+type TimelineKeyboardEvent = Pick<
+  KeyboardEvent,
+  | "altKey"
+  | "code"
+  | "ctrlKey"
+  | "key"
+  | "metaKey"
+  | "preventDefault"
+  | "shiftKey"
+  | "stopPropagation"
+  | "target"
+>;
 
-  function onKeyDown(e: KeyboardEvent) {
+export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
+  e: TimelineKeyboardEvent,
+) => {
     if (!handlers.enabled()) return;
 
     if (isEditableKeyboardTarget(e.target)) return;
@@ -45,7 +61,10 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      handlers.onToggleBrowser();
+      handlers.executeExtensionShortcut(
+        { mod: true, alt: true, shift: false, key: e.key },
+        { editableTarget: false },
+      );
       return;
     }
     // Add Track
@@ -166,8 +185,11 @@ export function useTimelineKeyboard(handlers: KeyboardHandlers) {
       e.stopPropagation();
       handlers.onDelete();
     }
-  }
+};
 
+export function useTimelineKeyboard(handlers: KeyboardHandlers) {
+  const captureOptions: AddEventListenerOptions = { capture: true };
+  const onKeyDown = createTimelineKeyboardHandler(handlers);
   onMount(() => {
     window.addEventListener("keydown", onKeyDown, captureOptions);
   });

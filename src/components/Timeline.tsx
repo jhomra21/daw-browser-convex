@@ -128,6 +128,7 @@ import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/l
 import { createDesktopNativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
+import { createTimelineExtensionHost } from "~/lib/extensions";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -964,6 +965,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     rightSidebarWidthPx: sidebarWidth,
     getContainerElement: () => containerRef,
   });
+  const timelineExtensionHost = createTimelineExtensionHost({
+    browser: {
+      toggle: leftBrowser.toggleOpen,
+    },
+  });
+  onCleanup(() => {
+    void timelineExtensionHost.dispose();
+  });
   const leftBrowserResize = useTimelineLeftBrowserResize({
     widthPx: leftBrowser.widthPx,
     previewWidthPx: leftBrowser.previewWidthPx,
@@ -1553,7 +1562,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       void addInstrumentTrack().catch(() => {});
     },
     onOpenExport: () => setExportOpen(true),
-    onToggleBrowser: leftBrowser.toggleOpen,
+    executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,
   });
 
   const { onSidebarPointerDown } = useTimelineSidebarResize({

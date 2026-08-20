@@ -111,3 +111,27 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   remain unchanged.
 - Evidence: focused control/core tests passed with contract tests independent
   from core; package checks passed and the application TypeScript graph passed.
+
+## Checkpoint 4 — Canonical operation catalog
+
+- Added the authoritative keyed catalog in `packages/control/src/operations.ts`
+  for project discovery and the canonical control read, preview, approval,
+  commit, history, and recovery operations.
+- Project discovery is strict and bounded: `project.list` accepts only `{}` and
+  returns readonly accessible `{ projectId, name? }` entries; `project.current`
+  returns an explicit `present` or `absent` result and is desktop-only.
+- Catalog descriptors are keyed by the same operation IDs as
+  `ControlOperationMap`, with strict input/output schemas, effect,
+  idempotency, target, and approval metadata. Canonical capabilities and
+  snapshots use the existing V2 aliases; mutation, history, and recovery
+  contracts retain their established V1 schemas.
+- Added schema-validated operation lookup/support helpers and a cast-free,
+  exhaustive-switch dispatch foundation. Dispatch validates target support,
+  input, and output while keeping trusted principal/target metadata in
+  `ControlRequestContext`; no extension provenance or handler implementation
+  was added.
+- Evidence: `packages/control/src/operations.test.ts` covers exact IDs,
+  metadata truthfulness, strict/bounded discovery, input/output validation,
+  unsupported targets, unknown IDs, and complete keyed handler correlation.
+  Existing V1/V2 exports, serialization, durable formats, and adapters remain
+  unchanged. External deployment and consumer evidence remains unresolved.

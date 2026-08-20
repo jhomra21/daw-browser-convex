@@ -8,6 +8,7 @@ import { hostError, type HostErrorV1 } from "@daw-browser/desktop-protocol"
 import { ControlApiError, ControlTransportError } from "@daw-browser/control-sdk"
 import { runAuthCommand } from "./cli-auth"
 import { isCanonicalCommand, runControlCommand } from "./cli-control"
+export { canonicalControlOperations } from "./cli-control"
 import {
   DesktopControlError,
   DesktopHostError,

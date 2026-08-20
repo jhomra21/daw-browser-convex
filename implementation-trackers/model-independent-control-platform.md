@@ -394,3 +394,27 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   migrated: the existing local control service remains the durable mutation
   authority and no existing extension command was suitable for migration
   without expanding UI or introducing ambient project authority.
+
+## Checkpoint 16 — Conformance and compatibility decisions
+
+- Added `src/lib/control-platform-conformance.test.ts`, which asserts exact
+  catalog-to-canonical-client and catalog-to-desktop mappings, schema identity
+  ownership, target support truthfulness, CLI alias coverage, and JSONL
+  discovery behavior.
+- Added the repeatable `bun run test:control-platform` suite covering the
+  conformance assertions plus catalog, SDK/JSONL, CLI, MCP, HTTP equivalence,
+  desktop protocol, and host-operation tests.
+- Compatibility inventory decisions remain evidence-backed:
+  category A generated/source-only surfaces remain preserved unless their
+  repository consumers are proven absent; categories B compatibility entry
+  points remain retained; category C durable V1/V2 rows/markers remain
+  retained; category D `registration-v1.json` remains retained. No external
+  installed-client, deployment, REST consumer, or third-party MCP parity was
+  claimed.
+- No source-only category A deletion was justified by this checkpoint. V1/V2
+  projections, legacy REST/desktop routes, CLI commands, MCP tools, and
+  registration discovery remain additive compatibility surfaces.
+- Conformance evidence covers canonical error normalization, target
+  discovery, strict validation, idempotent/revision/approval/recovery behavior
+  through the existing equivalence and control suites; no durable semantics
+  were rewritten.

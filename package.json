@@ -19,6 +19,7 @@
     "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
     "test": "bun test",
     "test:control-compat": "bun test src/hooks/local-send-reload.integration.test.ts src/lib/desktop/attached-host-controller.test.ts src/lib/local-control/local-control-state.test.ts src/lib/local-control/local-control-service.test.ts",
+    "test:control-platform": "bun test src/lib/control-platform-conformance.test.ts packages/control/src/operations.test.ts packages/control-sdk/src/jsonl.test.ts packages/control-sdk/src/index.test.ts packages/control-cli/src/index.test.ts packages/control-mcp/src/index.test.ts api/control-contract-equivalence.test.ts packages/desktop-protocol/src/index.test.ts apps/desktop/desktop-operations.test.ts",
     "serve": "vite preview",
     "knip": "knip"
   },

@@ -15,10 +15,9 @@ import {
   parseControlPreviewRequestV1,
   parseControlRecoveriesQueryV1,
   parseControlSnapshotQueryV1,
-  projectSnapshotSchemaV1,
+  projectCanonicalProjectSnapshotV1,
   projectSnapshotSchemaV2,
   type ControlErrorV1,
-  type ProjectSnapshotV2,
   type RecoveryPayload,
 } from '@daw-browser/control'
 import {
@@ -156,23 +155,6 @@ const parseRequest = <Value extends { actions: readonly { kind: string; recovery
   if (duplicate !== undefined) fail('validation', 'A recovery can only be restored once per request.', duplicate)
   return request
 }
-
-const projectSnapshotV1 = (snapshot: ProjectSnapshotV2) => (
-  projectSnapshotSchemaV1.parse({
-    ...snapshot,
-    version: 'v1',
-    clips: snapshot.clips.map((clip) => ({
-      ...clip,
-      midi: clip.midi === undefined ? undefined : {
-          wave: clip.midi.wave,
-          gain: clip.midi.gain,
-          notes: clip.midi.notes.map(({ beat, length, pitch, velocity }) => ({
-            beat, length, pitch, velocity,
-          })),
-        },
-    })),
-  })
-)
 
 const loadedRecoveries = (
   rows: readonly LocalControlRecoveryRow[],
@@ -726,7 +708,7 @@ export const createLocalControlService = (input: {
     assertAvailable()
     return withTransaction(request.projectId, (context) => {
       assertAvailable()
-      return projectSnapshotV1(context.snapshot)
+      return projectCanonicalProjectSnapshotV1(context.snapshot)
     })
   }
   const snapshotV2 = async (inputValue: JsonValue) => {

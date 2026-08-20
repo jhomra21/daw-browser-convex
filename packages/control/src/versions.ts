@@ -161,6 +161,15 @@ export const canonicalControlCapabilitiesSchema = controlCapabilitiesSchemaV2
 export const canonicalControlCapabilitiesQuerySchema = controlCapabilitiesQuerySchemaV2
 export const canonicalControlCapabilities = controlCapabilitiesV2
 export const canonicalLocalControlCapabilities = localControlCapabilitiesV2
+
+export const projectCanonicalControlCapabilitiesV1 = (
+  capabilities: ControlCapabilitiesV2,
+): ControlCapabilitiesV1 => controlCapabilitiesSchemaV1.parse({
+  ...capabilities,
+  version: CONTROL_API_VERSION_V1,
+  limits: controlLimitsV1,
+})
+
 export const CONTROL_API_VERSION = canonicalControlApiVersion
 export const controlLimits = canonicalControlLimits
 export const controlCapabilitiesSchema = canonicalControlCapabilitiesSchema

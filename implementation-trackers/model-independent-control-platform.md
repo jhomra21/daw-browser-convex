@@ -230,3 +230,30 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   HTTP SDK compatibility behavior.
 - Deferred: HTTP route unification, desktop routing, CLI/MCP, JSONL, menus,
   project-action extensions, and broad final simplification review.
+
+## Checkpoint 9 — HTTP control execution unification
+
+- Added canonical V1 compatibility projections for capabilities and snapshots
+  in `@daw-browser/control`. The projections preserve the existing V1
+  envelopes and narrow legacy MIDI snapshot shape while taking canonical V2
+  provider output as their input.
+- REST control capabilities, V1/V2 snapshots, preview, approval, commit,
+  history, and recoveries now create one authenticated cloud `ControlInvoker`
+  per request. The invoker binds the bearer-derived principal and delegates
+  through `createCloudControlHandlers` and the operation catalog before
+  reaching Convex.
+- Route parsing, path/query compatibility handling, OAuth scope checks,
+  HTTP error/status translation, no-store headers, and asset/resource routes
+  remain at the HTTP boundary. Asset deletion maps through canonical
+  `control.commit`; upload, content, folder, and resource endpoints remain
+  direct because they are not represented by the canonical control operation
+  catalog.
+- V1 routes project canonical V2 capabilities/snapshots only after canonical
+  dispatch; V2 routes return the canonical V2 result. No project.current
+  cloud endpoint or speculative public operation endpoint was added.
+- Evidence: focused route, handler, contract-equivalence, operation catalog,
+  and control package tests pass; the route suite asserts each canonical
+  control endpoint uses exactly one expected Convex provider reference.
+- Deferred: legacy HTTP SDK transport adapter migration, desktop routing,
+  host operations, menus, JSONL, CLI/MCP migration, extension actions, and
+  broad final simplification review.

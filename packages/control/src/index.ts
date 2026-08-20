@@ -9,6 +9,7 @@ export {
   canonicalControlCapabilitiesQuerySchema,
   canonicalControlCapabilities,
   canonicalLocalControlCapabilities,
+  projectCanonicalControlCapabilitiesV1,
   CONTROL_API_VERSION,
   controlLimits,
   controlCapabilitiesSchema,
@@ -116,6 +117,7 @@ export {
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
   canonicalProjectSnapshotSchema,
+  projectCanonicalProjectSnapshotV1,
   projectSnapshotSchema,
 } from './snapshots'
 export type {

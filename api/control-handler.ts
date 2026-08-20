@@ -11,16 +11,20 @@ import {
   type ControlRequestContext,
 } from '@daw-browser/control'
 import { api as convexApi } from '../convex/_generated/api'
+import type { createControlConvexClient } from './convex-auth'
 
-export type ControlGateway = {
-  query: (reference: unknown, args: unknown) => Promise<unknown>
-  mutation: (reference: unknown, args: unknown) => Promise<unknown>
-}
+export type ControlGateway = Pick<
+  Awaited<ReturnType<typeof createControlConvexClient>>,
+  'query' | 'mutation'
+>
 
 export const createCloudControlHandlers = (input: {
-  gateway: ControlGateway
+  gateway?: ControlGateway
 }) => {
-  const invoke = (_context: ControlRequestContext) => input.gateway
+  const invoke = (_context: ControlRequestContext) => {
+    if (!input.gateway) throw new Error('Cloud control gateway is unavailable.')
+    return input.gateway
+  }
   return {
     'project.list': async (_request, context) => (
       projectListResultSchema.parse({

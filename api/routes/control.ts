@@ -1,15 +1,9 @@
 import {
-  controlCapabilitiesSchemaV1,
-  controlCapabilitiesV1,
-  controlCapabilitiesSchemaV2,
-  controlCapabilitiesV2,
-  controlCommitResultSchemaV1,
-  controlApprovalResultSchemaV1,
+  createDirectControlInvoker,
+  projectCanonicalControlCapabilitiesV1,
+  projectCanonicalProjectSnapshotV1,
   controlErrorSchemaV1,
-  controlHistoryResultSchemaV1,
-  controlRecoveriesResultSchemaV1,
   controlLimitsV1,
-  controlPreviewResultSchemaV1,
   assetFolderResultSchemaV1,
   assetUploadResultSchemaV1,
   parseControlCommitRequestV1,
@@ -18,20 +12,19 @@ import {
   parseControlRecoveriesQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
-  projectSnapshotSchemaV1,
-  projectSnapshotSchemaV2,
 } from "@daw-browser/control"
 import type { JsonValue } from "@daw-browser/shared"
 import { z } from "zod"
 import { api as convexApi } from "../../convex/_generated/api"
 import type { App, ApiContext } from "../app-types"
 import { createControlConvexClient } from "../convex-auth"
+import { createCloudControlHandlers, type ControlGateway } from "../control-handler"
 import {
   resolveControlBearer,
   type ControlBearer,
   type ControlOAuthScope,
 } from "../control-oauth"
-import type { ControlErrorV1 } from "@daw-browser/control"
+import type { ControlErrorV1, ControlInvoker } from "@daw-browser/control"
 import { createR2ObjectResponse } from "../r2-object-response"
 import {
   controlAuthorizationError,
@@ -40,7 +33,8 @@ import {
   controlUnauthorizedHeaders,
 } from "../control-authorization"
 
-type ConvexGateway = Pick<Awaited<ReturnType<typeof createControlConvexClient>>, "query" | "mutation">
+type ConvexGateway = ControlGateway
+type CloudControlInvoker = ControlInvoker<"cloud">
 
 type ControlRouteDependencies = {
   resolveBearer?: (
@@ -54,6 +48,12 @@ type ControlRouteDependencies = {
 type AuthResult = (
   { kind: "authenticated"; bearer: ControlBearer }
   | { kind: "rejected"; error: ControlErrorV1 }
+)
+
+type ParsedWriteRequest = (
+  | { operation: "preview"; request: ReturnType<typeof parseControlPreviewRequestV1> }
+  | { operation: "approval"; request: ReturnType<typeof parseControlApprovalRequestV1> }
+  | { operation: "commit"; request: ReturnType<typeof parseControlCommitRequestV1> }
 )
 
 const noStore = controlNoStore
@@ -134,6 +134,25 @@ const controlGateway = async (context: ApiContext, bearer: ControlBearer) => {
   return await createControlConvexClient(context, bearer)
 }
 
+const createControlInvoker = async (
+  context: ApiContext,
+  bearer: ControlBearer,
+  createGateway?: NonNullable<ControlRouteDependencies["createGateway"]>,
+): Promise<CloudControlInvoker> => {
+  const gateway = createGateway === undefined ? undefined : await createGateway(context, bearer)
+  return createDirectControlInvoker({
+    handlers: createCloudControlHandlers({ gateway }),
+    context: {
+      target: "cloud",
+      principal: {
+        subject: bearer.userId,
+        issuer: bearer.issuer,
+        tokenIdentifier: bearer.tokenIdentifier,
+      },
+    },
+  })
+}
+
 const assetDigest = async (file: File) => {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -193,7 +212,12 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
       return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
-    return context.json(controlCapabilitiesSchemaV1.parse(controlCapabilitiesV1), 200, noStore)
+    try {
+      const invoker = await createControlInvoker(context, bearer.bearer)
+      return context.json(projectCanonicalControlCapabilitiesV1(await invoker.invoke("control.capabilities", {})), 200, noStore)
+    } catch (error) {
+      return respondError(context, readControlError(error))
+    }
   })
 
   app.get("/api/control/v1/projects/:projectId/snapshot", async (context) => {
@@ -204,8 +228,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     }
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId
-      const gateway = await createGateway(context, bearer.bearer)
-      return context.json(projectSnapshotSchemaV1.parse(await gateway.query(convexApi.control.snapshotV1, { projectId })), 200, noStore)
+      const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+      return context.json(projectCanonicalProjectSnapshotV1(await invoker.invoke("control.snapshot", { projectId })), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }
@@ -217,7 +241,12 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
       return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
     }
-    return context.json(controlCapabilitiesSchemaV2.parse(controlCapabilitiesV2), 200, noStore)
+    try {
+      const invoker = await createControlInvoker(context, bearer.bearer)
+      return context.json(await invoker.invoke("control.capabilities", {}), 200, noStore)
+    } catch (error) {
+      return respondError(context, readControlError(error))
+    }
   })
 
   app.get("/api/control/v2/projects/:projectId/snapshot", async (context) => {
@@ -228,8 +257,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     }
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId
-      const gateway = await createGateway(context, bearer.bearer)
-      return context.json(projectSnapshotSchemaV2.parse(await gateway.query(convexApi.control.snapshotV2, { projectId })), 200, noStore)
+      const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+      return context.json(await invoker.invoke("control.snapshot", { projectId }), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }
@@ -247,29 +276,27 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       try {
         const body = await readJsonBody(context)
         if ("error" in body) return context.json(body.error, body.status, noStore)
-        let request
+        let parsedRequest: ParsedWriteRequest | undefined
         try {
-          request = operation === "preview"
-            ? parseControlPreviewRequestV1(body.value)
+          parsedRequest = operation === "preview"
+            ? { operation, request: parseControlPreviewRequestV1(body.value) }
             : operation === "approval"
-              ? parseControlApprovalRequestV1(body.value)
-              : parseControlCommitRequestV1(body.value)
+              ? { operation, request: parseControlApprovalRequestV1(body.value) }
+              : { operation, request: parseControlCommitRequestV1(body.value) }
         } catch {
           return respondError(context, controlError("invalid-request", "Invalid control request."))
         }
-        if (request.projectId !== context.req.param("projectId")) {
+        if (parsedRequest.request.projectId !== context.req.param("projectId")) {
           return respondError(context, controlError("invalid-request", "Path projectId must match body projectId."))
         }
-        const gateway = await createGateway(context, bearer.bearer)
-        const result = operation === "preview"
-          ? await gateway.query(convexApi.control.previewV1, { request })
-          : operation === "approval"
-            ? await gateway.mutation(convexApi.control.requestApprovalV1, { request })
-            : await gateway.mutation(convexApi.control.commitV1, { request })
-        const schema = operation === "preview"
-          ? controlPreviewResultSchemaV1
-          : operation === "approval" ? controlApprovalResultSchemaV1 : controlCommitResultSchemaV1
-        return context.json(schema.parse(result), 200, noStore)
+        const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+        if (parsedRequest.operation === "preview") {
+          return context.json(await invoker.invoke("control.preview", parsedRequest.request), 200, noStore)
+        }
+        if (parsedRequest.operation === "approval") {
+          return context.json(await invoker.invoke("control.requestApproval", parsedRequest.request), 200, noStore)
+        }
+        return context.json(await invoker.invoke("control.commit", parsedRequest.request), 200, noStore)
       } catch (error) {
         return respondError(context, readControlError(error))
       }
@@ -294,8 +321,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
         cursor === undefined ? undefined : { cursor },
         limit === undefined ? undefined : { limit: Number(limit) },
       ))
-      const gateway = await createGateway(context, bearer.bearer)
-      return context.json(controlHistoryResultSchemaV1.parse(await gateway.query(convexApi.control.historyV1, query)), 200, noStore)
+      const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+      return context.json(await invoker.invoke("control.history", query), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }
@@ -315,8 +342,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
         cursor === undefined ? undefined : { cursor },
         limit === undefined ? undefined : { limit: Number(limit) },
       ))
-      const gateway = await createGateway(context, bearer.bearer)
-      return context.json(controlRecoveriesResultSchemaV1.parse(await gateway.query(convexApi.control.recoveriesV1, query)), 200, noStore)
+      const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+      return context.json(await invoker.invoke("control.recoveries", query), 200, noStore)
     } catch (error) {
       return respondError(context, readControlError(error))
     }
@@ -397,7 +424,6 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     if (!idempotencyKey) return respondError(context, controlError("invalid-request", "Idempotency-Key is required."));
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
-      const gateway = await createGateway(context, authorized);
       const expectedRevision = context.req.header("if-match-revision");
       let request
       try {
@@ -409,7 +435,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
       } catch {
         return respondError(context, controlError("invalid-request", "Invalid asset delete request."));
       }
-      return context.json(controlCommitResultSchemaV1.parse(await gateway.mutation(convexApi.control.commitV1, { request })), 200, noStore);
+      const invoker = await createControlInvoker(context, authorized, createGateway)
+      return context.json(await invoker.invoke("control.commit", request), 200, noStore);
     } catch (error) { return respondError(context, readControlError(error)); }
   });
 

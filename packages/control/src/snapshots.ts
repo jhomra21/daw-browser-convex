@@ -15,7 +15,6 @@ import {
   requestDigestSchema,
   secondsSchema,
   stableIdSchema,
-  trackColorSchema,
   trackRoleSchema,
 } from './primitives'
 
@@ -190,6 +189,27 @@ export const projectSnapshotSchemaV2 = projectSnapshotSchemaV1.extend({
 
 export const canonicalProjectSnapshotSchema = projectSnapshotSchemaV2
 export const projectSnapshotSchema = canonicalProjectSnapshotSchema
+
+export const projectCanonicalProjectSnapshotV1 = (
+  snapshot: ProjectSnapshotV2,
+): ProjectSnapshotV1 => projectSnapshotSchemaV1.parse({
+  ...snapshot,
+  version: CONTROL_API_VERSION_V1,
+  clips: snapshot.clips.map((clip) => ({
+    ...clip,
+    midi: clip.midi === undefined ? undefined : {
+      wave: clip.midi.wave,
+      gain: clip.midi.gain,
+      notes: clip.midi.notes.map(({ beat, length, pitch, velocity }) => ({
+        beat,
+        length,
+        pitch,
+        velocity,
+      })),
+    },
+  })),
+})
+
 export type ProjectSnapshotV1 = z.infer<typeof projectSnapshotSchemaV1>
 export type ProjectSnapshotV2 = z.infer<typeof projectSnapshotSchemaV2>
 export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>

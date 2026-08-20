@@ -3,9 +3,13 @@ import { Hono } from "hono"
 import {
   controlCapabilitiesV1,
   controlLimitsV1,
+  createDirectControlInvoker,
 } from "@daw-browser/control"
+import { api as convexApi } from "../../convex/_generated/api"
 import type { ApiBindings } from "../app-types"
+import type { ControlGateway } from "../control-handler"
 import type { ControlBearer } from "../control-oauth"
+import { createCloudControlHandlers } from "../control-handler"
 import { registerControlRoutes } from "./control"
 
 const bearer: ControlBearer = {
@@ -17,7 +21,7 @@ const bearer: ControlBearer = {
 }
 
 const snapshot = {
-  version: "v1",
+  version: "v2",
   project: {
     id: "project-1",
     name: "Project",
@@ -237,5 +241,128 @@ describe("control REST routes", () => {
   test("returns validated canonical capabilities", async () => {
     const response = await app().request("https://control.example/api/control/v1/capabilities")
     expect(await response.json()).toEqual(controlCapabilitiesV1)
+  })
+
+  test("dispatches control routes through the canonical cloud provider handlers", async () => {
+    const queries: unknown[] = []
+    const mutations: unknown[] = []
+    const application = app(
+      async () => bearer,
+      async (reference) => {
+        queries.push(reference)
+        if (reference === convexApi.control.previewV1) return previewResult
+        if (reference === convexApi.control.historyV1) return history
+        if (reference === convexApi.control.recoveriesV1) return { entries: [], continueCursor: "next", isDone: true }
+        return { ...snapshot, version: "v2" }
+      },
+      async (reference) => {
+        mutations.push(reference)
+        if (reference === convexApi.control.requestApprovalV1) {
+          return {
+            version: "v1",
+            approvalToken: "a".repeat(32),
+            requestDigest: "0".repeat(64),
+            baseRevision: 1,
+            actionIndexes: [0],
+            expiresAt: 2,
+          }
+        }
+        return commitResult
+      },
+    )
+
+    await application.request("https://control.example/api/control/v1/capabilities")
+    await application.request("https://control.example/api/control/v2/capabilities")
+    await application.request("https://control.example/api/control/v1/projects/project-1/snapshot")
+    await application.request("https://control.example/api/control/v2/projects/project-1/snapshot")
+    await application.request("https://control.example/api/control/v1/projects/project-1/preview", {
+      method: "POST",
+      body: JSON.stringify(previewRequest),
+    })
+    await application.request("https://control.example/api/control/v1/projects/project-1/approvals", {
+      method: "POST",
+      body: JSON.stringify(previewRequest),
+    })
+    await application.request("https://control.example/api/control/v1/projects/project-1/commit", {
+      method: "POST",
+      body: JSON.stringify(commitRequest),
+    })
+    await application.request("https://control.example/api/control/v1/projects/project-1/history")
+    await application.request("https://control.example/api/control/v1/projects/project-1/recoveries")
+
+    expect(queries).toEqual([
+      convexApi.control.snapshotV2,
+      convexApi.control.snapshotV2,
+      convexApi.control.previewV1,
+      convexApi.control.historyV1,
+      convexApi.control.recoveriesV1,
+    ])
+    expect(mutations).toEqual([
+      convexApi.control.requestApprovalV1,
+      convexApi.control.commitV1,
+    ])
+  })
+
+  test("keeps HTTP results equivalent to direct cloud invocation", async () => {
+    const createGateway = (): ControlGateway => {
+      let queryIndex = 0
+      let mutationIndex = 0
+      const queryResults = [snapshot, previewResult, history, { entries: [], continueCursor: "next", isDone: true }]
+      return {
+        query: async () => {
+          const result = queryResults[queryIndex]
+          queryIndex += 1
+          if (result === undefined) throw new Error("Unexpected query.")
+          return result
+        },
+        mutation: async () => {
+          const result = mutationIndex === 0 ? {
+            version: "v1",
+            approvalToken: "a".repeat(32),
+            requestDigest: "0".repeat(64),
+            baseRevision: 1,
+            actionIndexes: [0],
+            expiresAt: 2,
+          } : commitResult
+          mutationIndex += 1
+          return result
+        },
+      }
+    }
+    const gateway = createGateway()
+    const direct = createDirectControlInvoker({
+      handlers: createCloudControlHandlers({ gateway }),
+      context: { target: "cloud", principal: { subject: "ignored-request-principal" } },
+    })
+    const routeGateway = createGateway()
+    const application = app(async () => bearer, routeGateway.query, routeGateway.mutation)
+
+    const directResults = await Promise.all([
+      direct.invoke("control.capabilities", {}),
+      direct.invoke("control.snapshot", { projectId: "project-1" }),
+      direct.invoke("control.preview", previewRequest),
+      direct.invoke("control.requestApproval", previewRequest),
+      direct.invoke("control.commit", commitRequest),
+      direct.invoke("control.history", { projectId: "project-1", limit: 50 }),
+      direct.invoke("control.recoveries", { projectId: "project-1", limit: 50 }),
+    ])
+    const requests = [
+      "https://control.example/api/control/v2/capabilities",
+      "https://control.example/api/control/v2/projects/project-1/snapshot",
+      "https://control.example/api/control/v1/projects/project-1/preview",
+      "https://control.example/api/control/v1/projects/project-1/approvals",
+      "https://control.example/api/control/v1/projects/project-1/commit",
+      "https://control.example/api/control/v1/projects/project-1/history?limit=50",
+      "https://control.example/api/control/v1/projects/project-1/recoveries?limit=50",
+    ]
+    const bodies = [undefined, undefined, previewRequest, previewRequest, commitRequest, undefined, undefined]
+    for (const [index, url] of requests.entries()) {
+      const response = await application.request(url, bodies[index] === undefined ? undefined : {
+        method: "POST",
+        body: JSON.stringify(bodies[index]),
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(directResults[index])
+    }
   })
 })

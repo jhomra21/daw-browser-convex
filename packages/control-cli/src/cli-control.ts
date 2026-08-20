@@ -10,7 +10,7 @@ import {
 import type {
   desktopControlOperationDescriptorsV1,
 } from "@daw-browser/desktop-protocol"
-import { cloudClient } from "./cli-auth"
+import { cloudCanonicalControlMethods, cloudClient } from "./cli-auth"
 import { jsonRequest, option, type CliIo } from "./input"
 import { requestHostControl, requestHostControlV2 } from "./cli-host"
 
@@ -85,7 +85,8 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
         : await requestHostControl(canonicalControlOperations[command], {})
     } else {
       const client = await cloudClient()
-      data = command === "capabilities" ? await client.capabilities() : await client.capabilitiesV2()
+      const canonical = await cloudCanonicalControlMethods()
+      data = command === "capabilities" ? await client.capabilities() : await canonical.capabilities({})
     }
   } else if (command === "snapshot" || command === "snapshot-v2") {
     if (canonicalArguments.length !== 1) throw new Error(`${command} requires a project ID.`)
@@ -96,7 +97,10 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
         : await requestHostControl(canonicalControlOperations[command], input)
     } else {
       const client = await cloudClient()
-      data = command === "snapshot" ? await client.snapshot(input.projectId) : await client.snapshotV2(input.projectId)
+      const canonical = await cloudCanonicalControlMethods()
+      data = command === "snapshot"
+        ? await client.snapshot(input.projectId)
+        : await canonical.snapshot(input)
     }
   } else if (command === "preview" || command === "approval" || command === "commit") {
     const source = option(canonicalArguments, "--request")
@@ -110,10 +114,10 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
     if (routing.target === "host") {
       data = await requestHostControl(canonicalControlOperations[command], input)
     } else {
-      const client = await cloudClient()
-      if (command === "preview") data = await client.preview(input)
-      else if (command === "approval") data = await client.requestApproval(input)
-      else data = await client.commit(controlCommitRequestSchemaV1.parse(input))
+      const canonical = await cloudCanonicalControlMethods()
+      if (command === "preview") data = await canonical.preview(input)
+      else if (command === "approval") data = await canonical.requestApproval(input)
+      else data = await canonical.commit(controlCommitRequestSchemaV1.parse(input))
     }
   } else {
     const { projectId, cursor, limit } = historyArguments(canonicalArguments)
@@ -128,8 +132,8 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
     if (routing.target === "host") {
       data = await requestHostControl(canonicalControlOperations[command], input)
     } else {
-      const client = await cloudClient()
-      data = command === "history" ? await client.history(input) : await client.recoveries(input)
+      const canonical = await cloudCanonicalControlMethods()
+      data = command === "history" ? await canonical.history(input) : await canonical.recoveries(input)
     }
   }
   io.stdout(canonicalJson(JSON.parse(JSON.stringify({ version: "v1", ok: true, command, data }))))

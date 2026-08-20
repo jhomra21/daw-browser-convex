@@ -353,3 +353,26 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Evidence: JSONL malformed/unknown/unsupported/invalid/recovery,
   sequential-order, discovery, notification/batch, and size-limit tests pass;
   the SDK typecheck passes.
+
+## Checkpoint 14 — CLI and MCP thin adapters
+
+- Added `createCanonicalControlMethodsFromLegacy` in
+  `@daw-browser/control-sdk` as the single compatibility projection from the
+  existing authenticated REST client to canonical control methods. V1
+  capabilities/snapshots remain projected only where legacy callers require
+  them.
+- CLI cloud commands now route represented V2/control operations through that
+  canonical method facade while retaining all command names, target parsing,
+  credential loading, redacted output, desktop negotiation, host errors, and
+  REST compatibility. Host commands continue to use the existing registration
+  and socket adapter.
+- MCP cloud service composition now wraps the same canonical method facade,
+  projecting V1 results at the MCP compatibility boundary. Existing MCP tool
+  names, target routing, authorization, annotations, error redaction, host
+  tools, and lifecycle behavior remain unchanged.
+- No legacy REST routes, desktop adapters, schemas, operation lists, retries,
+  or approval logic were deleted or duplicated. The control service facade
+  owns only compatibility projection; transport and auth remain in their
+  existing layers.
+- Evidence: CLI, MCP, SDK compatibility/equivalence suites pass, along with
+  all workspace package checks.

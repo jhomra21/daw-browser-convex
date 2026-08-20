@@ -11,8 +11,8 @@ import {
   projectSnapshotSchemaV2,
 } from "@daw-browser/control"
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
-import { createControlMcpServer } from "@daw-browser/control-mcp"
-import { ControlTransportError, createControlClient } from "@daw-browser/control-sdk"
+import { controlServiceFromCanonicalMethods, createControlMcpServer } from "@daw-browser/control-mcp"
+import { ControlTransportError, createCanonicalControlMethodsFromLegacy, createControlClient } from "@daw-browser/control-sdk"
 import {
   desktopDiagnosticsSchemaV1,
   desktopHostExportCancelInputSchemaV1,
@@ -101,17 +101,16 @@ export const startControlMcp = async () => {
         throw error
       }
     }
-    return {
-      capabilities: async () => withTransportBoundary(client.capabilities),
-      capabilitiesV2: async () => withTransportBoundary(client.capabilitiesV2),
-      snapshot: async ({ projectId }) => withTransportBoundary(() => client.snapshot(projectId)),
-      snapshotV2: async ({ projectId }) => withTransportBoundary(() => client.snapshotV2(projectId)),
-      preview: async (input) => withTransportBoundary(() => client.preview(input)),
-      requestApproval: async (input) => withTransportBoundary(() => client.requestApproval(input)),
-      commit: async (input) => withTransportBoundary(() => client.commit(input)),
-      history: async (input) => withTransportBoundary(() => client.history(input)),
-      recoveries: async (input) => withTransportBoundary(() => client.recoveries(input)),
-    }
+    const methods = createCanonicalControlMethodsFromLegacy(client)
+    return controlServiceFromCanonicalMethods({
+      capabilities: (input) => withTransportBoundary(() => methods.capabilities(input)),
+      snapshot: (input) => withTransportBoundary(() => methods.snapshot(input)),
+      preview: (input) => withTransportBoundary(() => methods.preview(input)),
+      requestApproval: (input) => withTransportBoundary(() => methods.requestApproval(input)),
+      commit: (input) => withTransportBoundary(() => methods.commit(input)),
+      history: (input) => withTransportBoundary(() => methods.history(input)),
+      recoveries: (input) => withTransportBoundary(() => methods.recoveries(input)),
+    })
   }
   const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {
     const client = await createHostClient()

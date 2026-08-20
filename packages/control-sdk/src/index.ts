@@ -83,7 +83,7 @@ type CanonicalControlClientMethods<
   ) => Promise<ControlOutput<Extract<Operations[Method], ControlOperationId>>>
 }
 
-type CanonicalControlClientControlMethods<
+export type CanonicalControlClientControlMethods<
   Target extends ControlOperationTarget,
 > = CanonicalControlClientMethods<
   typeof canonicalControlClientOperationMap.control,
@@ -181,6 +181,18 @@ export type ControlClient = {
   history: (input: ControlHistoryQueryV1) => Promise<ControlHistoryResultV1>;
   recoveries: (input: ControlRecoveriesQueryV1) => Promise<ControlRecoveriesResultV1>;
 }
+
+export const createCanonicalControlMethodsFromLegacy = (
+  client: ControlClient,
+): CanonicalControlClientControlMethods<"cloud"> => ({
+  capabilities: async () => client.capabilitiesV2(),
+  snapshot: async (input) => client.snapshotV2(input.projectId),
+  preview: client.preview,
+  requestApproval: client.requestApproval,
+  commit: client.commit,
+  history: client.history,
+  recoveries: client.recoveries,
+})
 
 export class ControlApiError extends Error {
   readonly data: ControlErrorV1

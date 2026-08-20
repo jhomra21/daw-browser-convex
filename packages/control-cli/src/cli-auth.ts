@@ -1,5 +1,6 @@
 import { canonicalJson } from "@daw-browser/control"
 import { createControlClient } from "@daw-browser/control-sdk"
+import { createCanonicalControlMethodsFromLegacy } from "@daw-browser/control-sdk"
 import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
 import { credentialIdentity, createCredentialStore } from "./credentials"
 import type { CliIo } from "./input"
@@ -23,6 +24,10 @@ export const cloudClient = async () => {
     accessToken: createAccessTokenProvider(credentialIdentity(credentials), store),
   })
 }
+
+export const cloudCanonicalControlMethods = async () => (
+  createCanonicalControlMethodsFromLegacy(await cloudClient())
+)
 
 export const runAuthCommand = async (command: string, arguments_: string[], io: CliIo) => {
   if (command === "auth login") {

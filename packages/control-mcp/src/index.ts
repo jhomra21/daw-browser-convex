@@ -5,6 +5,7 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js"
 import { z } from "zod"
+import type { CanonicalControlClientControlMethods } from "@daw-browser/control-sdk"
 import {
   canonicalJson,
   controlCapabilitiesQuerySchemaV1,
@@ -40,6 +41,8 @@ import {
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
+  projectCanonicalControlCapabilitiesV1,
+  projectCanonicalProjectSnapshotV1,
 } from "@daw-browser/control"
 import {
   hostErrorSchemaV1,
@@ -59,6 +62,20 @@ export type ControlService = {
   history: (input: ControlHistoryQueryV1) => Promise<ControlHistoryResultV1>;
   recoveries: (input: ControlRecoveriesQueryV1) => Promise<ControlRecoveriesResultV1>;
 }
+
+export const controlServiceFromCanonicalMethods = (
+  methods: CanonicalControlClientControlMethods<"cloud">,
+): ControlService => ({
+  capabilities: async () => projectCanonicalControlCapabilitiesV1(await methods.capabilities({})),
+  capabilitiesV2: async () => methods.capabilities({}),
+  snapshot: async (input) => projectCanonicalProjectSnapshotV1(await methods.snapshot(input)),
+  snapshotV2: async (input) => methods.snapshot(input),
+  preview: methods.preview,
+  commit: methods.commit,
+  requestApproval: methods.requestApproval,
+  history: methods.history,
+  recoveries: methods.recoveries,
+})
 
 export type ControlMcpScope = "control:read" | "control:write"
 export type ControlMcpTarget = "cloud" | "host"

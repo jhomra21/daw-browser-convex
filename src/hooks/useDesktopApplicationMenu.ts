@@ -1,7 +1,8 @@
-import type {
-  DesktopApplicationMenuExtensionContribution,
-  DesktopApplicationMenuMessage,
-  DesktopApplicationMenuState,
+import {
+  desktopApplicationMenuExtensionCommandSchema,
+  type DesktopApplicationMenuExtensionContribution,
+  type DesktopApplicationMenuMessage,
+  type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu";
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
@@ -24,8 +25,9 @@ const dispatchApplicationMenuCommand = (
     subscribe?: (listener: () => void) => () => void
   }>,
 ) => {
-  if (typeof command !== "string") {
-    void extensionMenu?.execute(command.commandId);
+  const extensionCommand = desktopApplicationMenuExtensionCommandSchema.safeParse(command);
+  if (extensionCommand.success) {
+    void extensionMenu?.execute(extensionCommand.data.commandId);
     return;
   }
   const transport = transportProps();

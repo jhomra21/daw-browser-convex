@@ -25,7 +25,7 @@ export type ProjectActionGrant = Readonly<{
   commit: boolean;
 }>;
 
-export type ProjectActionFacade<Target extends "cloud" | "desktop"> = Readonly<{
+export type ProjectActionFacade = Readonly<{
   preview: (request: ControlPreviewRequestV1) => Promise<ControlPreviewResultV1>;
   requestApproval: (request: ControlApprovalRequestV1) => Promise<ControlApprovalResultV1>;
   commit: (request: ControlCommitRequestV1) => Promise<ControlCommitResultV1>;
@@ -48,13 +48,13 @@ const ensureGrant = (
   }
 };
 
-export const createProjectActionFacade = <Target extends "cloud" | "desktop">(
+export const createProjectActionFacade = (
   input: Readonly<{
     client: CanonicalControlClient<"cloud"> | CanonicalControlClient<"desktop">;
     grant: ProjectActionGrant;
     lifecycle: ProjectActionLifecycle;
   }>,
-): ProjectActionFacade<Target> => {
+): ProjectActionFacade => {
   const preview = async (request: ControlPreviewRequestV1) => {
     ensureActive(input.lifecycle);
     const parsed = controlPreviewRequestSchemaV1.parse(request);

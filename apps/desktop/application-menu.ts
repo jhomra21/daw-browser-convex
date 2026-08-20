@@ -1,5 +1,4 @@
 import type {
-  DesktopApplicationMenuExtensionContribution,
   DesktopApplicationMenuMessage,
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"

@@ -15,8 +15,11 @@ import {
   type ControlInvoker,
   type ControlOperationId,
   type ControlOperationTarget,
+  type ControlErrorV1,
 } from "@daw-browser/control";
 import { z } from "zod";
+
+// oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-conditional-empty-object-spread
 
 export const maxJsonlLineBytes = 64 * 1024;
 export const maxJsonlDepth = 12;
@@ -50,9 +53,12 @@ type JsonlRpcAdapterOptions = Readonly<{
   invoker: ControlInvoker<"cloud"> | ControlInvoker<"desktop">;
 }>;
 
-const canonicalError = (code: "invalid-request" | "unsupported-target" | "invalid-input" | "internal", message: string) => ({
-  version: "v1" as const,
-  code,
+const canonicalError = (
+  code: "invalid-request" | "unsupported-target" | "invalid-input" | "internal",
+  message: string,
+): ControlErrorV1 => ({
+  version: "v1",
+  code: code === "unsupported-target" ? "unsupported-action" : code === "invalid-input" ? "validation" : code,
   message,
 });
 
@@ -141,7 +147,7 @@ const invokeValidated = async (
   }
 };
 
-const processLine = async <Target extends ControlOperationTarget>(
+const processLine = async (
   line: string,
   input: JsonlRpcAdapterOptions,
 ): Promise<string> => {

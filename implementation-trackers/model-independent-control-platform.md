@@ -418,3 +418,23 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   discovery, strict validation, idempotent/revision/approval/recovery behavior
   through the existing equivalence and control suites; no durable semantics
   were rewritten.
+
+## Checkpoint 17 — Documentation and implementation-completion architecture audit
+
+- Updated `README.md` and added `docs/control-platform.md` with the control,
+  control-core, SDK, handler/invoker/client, canonical catalog, target and
+  transport ownership, extension trust/lifecycle/replacement/menu/action
+  boundaries, JSONL behavior, compatibility policy, and explicit deferred
+  features.
+- Documentation states the actual current shape: JSONL has a stream-neutral
+  core but no process entrypoint; host runtime operations use a separate
+  desktop-protocol catalog; V1/V2 and registration-v1 compatibility remains
+  retained.
+- Focused architecture assertions are in
+  `src/lib/control-platform-conformance.test.ts`; they verify catalog
+  ownership, canonical client/desktop mappings, target support, CLI aliases,
+  and JSONL discovery. Existing package dependency checks continue to enforce
+  the control/control-core boundary.
+- No broad code review, code-simplifier pass, or unrelated cleanup was
+  performed. Only checkpoint-local documentation and architecture evidence
+  were added.

@@ -1,6 +1,5 @@
 import { canonicalJson } from "@daw-browser/control"
-import { createControlClient } from "@daw-browser/control-sdk"
-import { createCanonicalControlMethodsFromLegacy } from "@daw-browser/control-sdk"
+import { createCanonicalControlMethodsFromLegacy, createControlClient } from "@daw-browser/control-sdk"
 import { createAccessTokenProvider, login, logout, normalizeBaseUrl } from "./auth"
 import { credentialIdentity, createCredentialStore } from "./credentials"
 import type { CliIo } from "./input"

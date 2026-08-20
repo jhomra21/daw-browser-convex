@@ -36,6 +36,47 @@ The codebase is now split around runtime boundaries:
 - `convex/` owns realtime data, role checks, mutations, queries, and backend project state.
 - `packages/` owns reusable pure/domain/runtime packages that are checked independently.
 
+### Control platform
+
+The control platform is split into four deliberate layers:
+
+- **Control** (`@daw-browser/control`) owns versioned V1/V2 contracts,
+  serialization, durable request semantics, and the canonical keyed operation
+  catalog.
+- **Control core** (`@daw-browser/control-core`) owns pure planning and
+  projection behavior. It does not own transport or durable storage.
+- **SDK** (`@daw-browser/control-sdk`) owns transport-neutral clients plus the
+  legacy REST compatibility client and sequential JSONL JSON-RPC adapter.
+- **Handlers, invokers, and clients** are separate boundaries: handlers bind a
+  trusted target implementation, an invoker validates and dispatches one
+  catalog operation, and a client groups typed calls without retries or
+  transport policy.
+
+Canonical project operations support cloud and desktop targets according to the
+catalog. Desktop host/runtime operations (transport, diagnostics, VST
+discovery, import/export, and host status) remain in the separate typed
+desktop-protocol host catalog; Electron lifecycle, paths, capability tokens,
+and native internals are not project-control operations.
+
+Trusted built-in extensions are statically imported and managed by the
+app-local extension kernel. Their lifecycle is generation-safe and
+abort-aware. Extension commands can project only into bounded approved native
+menu slots and route back through the kernel. They cannot load packages,
+access ambient stores, or expose arbitrary invokers. The project-action facade
+requires explicit action grants and separates preview, approval, and commit.
+
+The JSONL adapter is stream-neutral and sequential: one bounded JSON-RPC
+request per line produces one response per line. Notifications and batches are
+rejected. A future stdio/socket entrypoint may compose it without changing
+catalog ownership or authentication.
+
+Compatibility policy is additive. V1/V2 contracts, REST routes, CLI/MCP tools,
+desktop protocol frames, and `registration-v1.json` remain retained while
+external consumer, deployment, and installed-version evidence is unresolved.
+Deferred features include external extension packages/manifests, arbitrary
+package or DSP loading, extension preference persistence, a public operation
+endpoint, and an actual JSONL process transport.
+
 ## Current Highlights
 
 - **Local-first projects**: Local projects are stored in IndexedDB and OPFS, with project-specific entity, asset, history, and sync stores.
@@ -83,6 +124,11 @@ Convex backend
 Workspace packages
   ├─ @daw-browser/shared
   ├─ @daw-browser/control
+  ├─ @daw-browser/control-core
+  ├─ @daw-browser/control-sdk
+  ├─ @daw-browser/control-cli
+  ├─ @daw-browser/control-mcp
+  ├─ @daw-browser/desktop-protocol
   ├─ @daw-browser/timeline-core
   ├─ @daw-browser/waveforms
   └─ @daw-browser/audio-engine

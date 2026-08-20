@@ -184,15 +184,15 @@ export type ControlClient = {
 
 export const createCanonicalControlMethodsFromLegacy = (
   client: ControlClient,
-): CanonicalControlClientControlMethods<"cloud"> => ({
-  capabilities: async () => client.capabilitiesV2(),
+ ) => ({
+  capabilities: async (_input) => client.capabilitiesV2(),
   snapshot: async (input) => client.snapshotV2(input.projectId),
   preview: client.preview,
   requestApproval: client.requestApproval,
   commit: client.commit,
   history: client.history,
   recoveries: client.recoveries,
-})
+}) satisfies CanonicalControlClientControlMethods<"cloud">
 
 export class ControlApiError extends Error {
   readonly data: ControlErrorV1

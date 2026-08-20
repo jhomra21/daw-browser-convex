@@ -497,10 +497,9 @@ export const isDesktopHostOperation = (
 ): operation is DesktopHostOperationV1 => Object.hasOwn(desktopHostOperationCatalog, operation)
 
 export const getDesktopHostOperationDescriptor = (
-  operation: unknown,
+  operation: DesktopHostOperationV1,
 ): DesktopHostOperationDescriptorV1 => {
-  const parsed = desktopHostOperationSchemaV1.parse(operation)
-  return desktopHostOperationCatalog[parsed]
+  return desktopHostOperationCatalog[operation]
 }
 
 export type DesktopOperationMapV1 = {

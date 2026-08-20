@@ -13,6 +13,8 @@ import type {
 import { cloudCanonicalControlMethods, cloudClient } from "./cli-auth"
 import { jsonRequest, option, type CliIo } from "./input"
 import { requestHostControl, requestHostControlV2 } from "./cli-host"
+import { createHostCanonicalClient } from "./rpc-host"
+import { createJsonlRpcAdapter, processJsonlLines } from "@daw-browser/control-sdk"
 
 type ControlTarget = "cloud" | "host"
 
@@ -137,5 +139,47 @@ export const runControlCommand = async (command: CanonicalCommand, arguments_: s
     }
   }
   io.stdout(canonicalJson(JSON.parse(JSON.stringify({ version: "v1", ok: true, command, data }))))
+  return 0
+}
+
+export const runProjectCommand = async (command: "list" | "current", arguments_: string[], io: CliIo) => {
+  const routing = stripTarget(arguments_)
+  if (routing.arguments_.length !== 0) throw new Error(`project ${command} accepts no arguments.`)
+  if (routing.target === "host") {
+    if (command === "current") {
+      const host = await createHostCanonicalClient()
+      try {
+        io.stdout(canonicalJson({ version: "v1", ok: true, command: "project current", data: await host.client.projects.current({}) }))
+      } finally {
+        host.close()
+      }
+      return 0
+    }
+    const host = await createHostCanonicalClient()
+    try {
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: "project list", data: await host.client.projects.list({}) }))
+    } finally {
+      host.close()
+    }
+    return 0
+  }
+  if (command === "current") throw new Error("project current is supported only on the host target.")
+  const client = await cloudClient()
+  io.stdout(canonicalJson({ version: "v1", ok: true, command: "project list", data: await client.projects.list() }))
+  return 0
+}
+
+export const runRpcCommand = async (arguments_: string[], io: CliIo) => {
+  if (arguments_.length !== 2 || arguments_[0] !== "--target" || arguments_[1] !== "host") {
+    throw new Error("rpc requires --target host.")
+  }
+  if (!io.readLines) throw new Error("rpc stdio input is unavailable.")
+  const host = await createHostCanonicalClient()
+  try {
+    const adapter = createJsonlRpcAdapter({ invoker: host.invoker })
+    await processJsonlLines(io.readLines(), adapter, io.stdout)
+  } finally {
+    host.close()
+  }
   return 0
 }

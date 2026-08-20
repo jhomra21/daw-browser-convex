@@ -40,6 +40,8 @@ import {
   type ControlOperationIdsForTarget,
   type ControlOperationTarget,
   type ControlOutput,
+  projectListResultSchema,
+  type ProjectListResult,
 } from "@daw-browser/control"
 
 export const canonicalControlClientOperationMap = {
@@ -171,6 +173,9 @@ export type ControlClientOptions = {
 }
 
 export type ControlClient = {
+  projects: {
+    list: () => Promise<ProjectListResult>;
+  };
   capabilities: () => Promise<ControlCapabilitiesV1>;
   capabilitiesV2: () => Promise<ControlCapabilitiesV2>;
   snapshot: (projectId: string) => Promise<ProjectSnapshotV1>;
@@ -184,15 +189,18 @@ export type ControlClient = {
 
 export const createCanonicalControlMethodsFromLegacy = (
   client: ControlClient,
- ) => ({
-  capabilities: async (_input) => client.capabilitiesV2(),
-  snapshot: async (input) => client.snapshotV2(input.projectId),
-  preview: client.preview,
-  requestApproval: client.requestApproval,
-  commit: client.commit,
-  history: client.history,
-  recoveries: client.recoveries,
-}) satisfies CanonicalControlClientControlMethods<"cloud">
+): CanonicalControlClient<"cloud"> => ({
+  projects: { list: async (_input) => client.projects.list() },
+  control: {
+    capabilities: async (_input) => client.capabilitiesV2(),
+    snapshot: async (input) => client.snapshotV2(input.projectId),
+    preview: client.preview,
+    requestApproval: client.requestApproval,
+    commit: client.commit,
+    history: client.history,
+    recoveries: client.recoveries,
+  },
+})
 
 export class ControlApiError extends Error {
   readonly data: ControlErrorV1
@@ -311,6 +319,7 @@ export const createControlClient = (options: ControlClientOptions): ControlClien
   }
 
   return {
+    projects: { list: (): Promise<ProjectListResult> => request("/projects", projectListResultSchema) },
     capabilities: (): Promise<ControlCapabilitiesV1> => (
       request("/capabilities", controlCapabilitiesSchemaV1)
     ),

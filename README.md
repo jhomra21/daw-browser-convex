@@ -66,16 +66,17 @@ access ambient stores, or expose arbitrary invokers. The project-action facade
 requires explicit action grants and separates preview, approval, and commit.
 
 The JSONL adapter is stream-neutral and sequential: one bounded JSON-RPC
-request per line produces one response per line. Notifications and batches are
-rejected. A future stdio/socket entrypoint may compose it without changing
-catalog ownership or authentication.
+request per line produces one response per line, while notifications execute
+without output. The CLI exposes the authenticated desktop-host adapter through
+`rpc --target host`; cloud JSONL remains intentionally unavailable because it
+has no equivalent secure process authentication path.
 
 Compatibility policy is additive. V1/V2 contracts, REST routes, CLI/MCP tools,
 desktop protocol frames, and `registration-v1.json` remain retained while
 external consumer, deployment, and installed-version evidence is unresolved.
 Deferred features include external extension packages/manifests, arbitrary
 package or DSP loading, extension preference persistence, a public operation
-endpoint, and an actual JSONL process transport.
+endpoint, and a cloud JSONL process transport.
 
 ## Current Highlights
 

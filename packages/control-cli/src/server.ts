@@ -9,6 +9,8 @@ import {
   controlRecoveriesResultSchemaV1,
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
+  projectCurrentResultSchema,
+  projectListResultSchema,
 } from "@daw-browser/control"
 import type { ControlMcpScope, ControlService } from "@daw-browser/control-mcp"
 import { controlServiceFromCanonicalMethods, createControlMcpServer } from "@daw-browser/control-mcp"
@@ -103,18 +105,35 @@ export const startControlMcp = async () => {
     }
     const methods = createCanonicalControlMethodsFromLegacy(client)
     return controlServiceFromCanonicalMethods({
-      capabilities: (input) => withTransportBoundary(() => methods.capabilities(input)),
-      snapshot: (input) => withTransportBoundary(() => methods.snapshot(input)),
-      preview: (input) => withTransportBoundary(() => methods.preview(input)),
-      requestApproval: (input) => withTransportBoundary(() => methods.requestApproval(input)),
-      commit: (input) => withTransportBoundary(() => methods.commit(input)),
-      history: (input) => withTransportBoundary(() => methods.history(input)),
-      recoveries: (input) => withTransportBoundary(() => methods.recoveries(input)),
+      ...methods,
+      control: {
+        capabilities: (input) => withTransportBoundary(() => methods.control.capabilities(input)),
+        snapshot: (input) => withTransportBoundary(() => methods.control.snapshot(input)),
+        preview: (input) => withTransportBoundary(() => methods.control.preview(input)),
+        requestApproval: (input) => withTransportBoundary(() => methods.control.requestApproval(input)),
+        commit: (input) => withTransportBoundary(() => methods.control.commit(input)),
+        history: (input) => withTransportBoundary(() => methods.control.history(input)),
+        recoveries: (input) => withTransportBoundary(() => methods.control.recoveries(input)),
+      },
     })
   }
   const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {
     const client = await createHostClient()
     const service: ControlService = {
+      projects: {
+        list: async () => {
+          const status = desktopHostStatusSchemaV1.parse(await client.request("host.status", {}))
+          return projectListResultSchema.parse({
+            projects: status.project ? [{ projectId: status.project.id }] : [],
+          })
+        },
+        current: async () => {
+          const status = desktopHostStatusSchemaV1.parse(await client.request("host.status", {}))
+          return projectCurrentResultSchema.parse(status.project
+            ? { status: "present", project: { projectId: status.project.id } }
+            : { status: "absent" })
+        },
+      },
       capabilities: async () => controlCapabilitiesSchemaV1.parse(await client.request("control.capabilities", {})),
       capabilitiesV2: async () => controlCapabilitiesSchemaV2.parse(await client.requestV2("control.capabilities", {})),
       snapshot: async (input) => projectSnapshotSchemaV1.parse(await client.request("control.snapshot", input)),

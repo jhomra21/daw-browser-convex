@@ -447,7 +447,17 @@ export const createExtensionKernel = (): ExtensionKernel => {
 
   const notify = (): void => {
     const current = snapshot()
-    for (const listener of subscribers) listener(current)
+    for (const listener of subscribers) {
+      try {
+        listener(current)
+      } catch (error) {
+        addDiagnostic({
+          kind: 'activation',
+          code: 'subscriber-failed',
+          message: error instanceof Error ? error.message.slice(0, MAX_TITLE_LENGTH) : 'Extension subscriber failed.',
+        })
+      }
+    }
   }
 
   const fail = (
@@ -507,20 +517,15 @@ export const createExtensionKernel = (): ExtensionKernel => {
 
   const registryWithoutProvider = (source: Registry, provider: Provider): Registry => {
     const next = copyRegistry(source)
-    for (const [commandId, entry] of provider.commands) {
-      if (next.commands.get(commandId) === entry) next.commands.delete(commandId)
+    for (const [commandId, entry] of next.commands) {
+      if (entry.providerId === provider.definition.id) next.commands.delete(commandId)
     }
-    for (const [shortcutId, entry] of provider.shortcuts) {
-      if (next.shortcuts.get(shortcutId) === entry) next.shortcuts.delete(shortcutId)
+    for (const [shortcutId, entry] of next.shortcuts) {
+      if (entry.providerId === provider.definition.id) next.shortcuts.delete(shortcutId)
     }
     for (const [targetContributionId, previous] of provider.replaced) {
       const current = next.commands.get(previous.declaration.id)
-      const replacement = provider.commands.get(previous.declaration.id)
-      if (
-        current === undefined ||
-        current === replacement ||
-        current.declaration.contributionId === targetContributionId
-      ) {
+      if (current === undefined || current.declaration.contributionId === targetContributionId) {
         next.commands.set(previous.declaration.id, previous)
       }
     }
@@ -718,8 +723,25 @@ export const createExtensionKernel = (): ExtensionKernel => {
             commandId: target.declaration.id,
           })
         }
+        const replacementDeclaration = normalized.commands.find(
+          (command) => command.id === target.declaration.id,
+        )
+        if (
+          replacementDeclaration === undefined
+          || replacementDeclaration.title !== target.declaration.title
+          || replacementDeclaration.replacement !== undefined
+        ) {
+          throw fail('conflict', 'replacement-command-mismatch', 'Replacement must preserve the target command title and contract.', {
+            extensionId: normalized.id,
+            commandId: target.declaration.id,
+            contributionId: replacement.targetContributionId,
+          })
+        }
         provider.replaced.set(replacement.targetContributionId, target)
-        stagedRegistry.commands.set(target.declaration.id, replacementBinding)
+        stagedRegistry.commands.set(target.declaration.id, Object.freeze({
+          ...replacementBinding,
+          declaration: target.declaration,
+        }))
       }
       for (const command of normalized.commands) {
         if (hasContribution(baseRegistry, command.contributionId)) {
@@ -854,8 +876,17 @@ export const createExtensionKernel = (): ExtensionKernel => {
   }
 
   const subscribe = (listener: (current: ExtensionKernelSnapshot) => void): (() => void) => {
+    try {
+      listener(snapshot())
+    } catch (error) {
+      addDiagnostic({
+        kind: 'activation',
+        code: 'subscriber-failed',
+        message: error instanceof Error ? error.message.slice(0, MAX_TITLE_LENGTH) : 'Extension subscriber failed.',
+      })
+      return () => false
+    }
     subscribers.add(listener)
-    listener(snapshot())
     return () => subscribers.delete(listener)
   }
 

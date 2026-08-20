@@ -118,6 +118,7 @@ export {
   projectSnapshotSchemaV2,
   canonicalProjectSnapshotSchema,
   projectCanonicalProjectSnapshotV1,
+  projectCanonicalProjectSnapshotV2,
   projectSnapshotSchema,
 } from './snapshots'
 export type {

@@ -5,6 +5,18 @@ export type CliIo = {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
   readStdin: () => Promise<string>;
+  readLines?: () => AsyncIterable<string>;
+}
+
+const stdinLines = async function* (): AsyncIterable<string> {
+  let pending = ""
+  for await (const chunk of process.stdin) {
+    pending += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)
+    const lines = pending.split(/\r?\n/u)
+    pending = lines.pop() ?? ""
+    for (const line of lines) yield line
+  }
+  if (pending.length > 0) yield pending
 }
 
 export const processIo: CliIo = {
@@ -21,6 +33,7 @@ export const processIo: CliIo = {
     }
     return Buffer.concat(chunks).toString("utf8")
   },
+  readLines: stdinLines,
 }
 
 export const option = (arguments_: string[], name: string) => {

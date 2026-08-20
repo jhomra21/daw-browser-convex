@@ -340,11 +340,11 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   line, preserving ordering and applying backpressure. Lines are bounded to
   64 KiB, JSON depth to 12, and request IDs/methods to bounded validated
   values.
-- Malformed JSON, invalid requests, notifications, batches, unknown methods,
-  unsupported targets, invalid params, and invoker failures return structured
-  JSON-RPC errors without secrets or exception details. A line-local failure
-  does not poison subsequent lines. No eval, package loading, or retry layer
-  was added.
+- Malformed JSON, invalid requests, batches, unknown methods, unsupported
+  targets, invalid params, and invoker failures return structured JSON-RPC
+  errors without secrets or exception details. Notifications execute without
+  responses. A line-local failure does not poison subsequent lines. No eval,
+  package loading, or retry layer was added.
 - The adapter deliberately has no standalone process entrypoint yet:
   existing CLI/MCP authentication and desktop registration lifecycles remain
   owners until their thin-adapter migration checkpoint. The core is directly
@@ -373,7 +373,8 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - No legacy REST routes, desktop adapters, schemas, operation lists, retries,
   or approval logic were deleted or duplicated. The control service facade
   owns only compatibility projection; transport and auth remain in their
-  existing layers.
+  existing layers. Project discovery is additive, with current-project
+  discovery limited to the desktop host.
 - Evidence: CLI, MCP, SDK compatibility/equivalence suites pass, along with
   all workspace package checks.
 
@@ -438,3 +439,29 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - No broad code review, code-simplifier pass, or unrelated cleanup was
   performed. Only checkpoint-local documentation and architecture evidence
   were added.
+
+## Checkpoint 18 — Hardening completion
+
+- Isolated extension subscriber failures and rejected failing initial
+  subscribers without publishing partial state. Replacement snapshots retain
+  the target contribution ID and title while provider behavior changes.
+- Removed post-dispatch lifecycle rechecks from project-action approval and
+  commit calls; the authoritative control operation owns the result after
+  dispatch.
+- Added JSON-RPC notifications, request-ID-preserving responses, bounded
+  canonical domain-error data, sanitized unknown failures, and sequential
+  output behavior.
+- Added authenticated cloud project listing, host project discovery through
+  `host.status`, CLI `project list`/`project current`, MCP discovery tools, and
+  the authenticated desktop-host `rpc --target host` adapter. Cloud
+  `project.current` remains intentionally unavailable.
+- Corrected the duplicate desktop operation branch and retained V1/V2
+  compatibility by projecting legacy host snapshots into the canonical client
+  shape.
+- Persistence and production extension-backed mutation remain deferred:
+  existing preference infrastructure does not own extension enablement, and no
+  suitable production mutation command was identified without expanding
+  ambient authority.
+- Evidence: control package typechecks, desktop protocol typecheck, focused
+  changed tests, `bun run test:control-platform`, and changed-file oxlint all
+  pass. No external deployment or installed-consumer parity is claimed.

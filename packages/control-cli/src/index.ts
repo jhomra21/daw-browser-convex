@@ -7,7 +7,7 @@ import {
 import { hostError, type HostErrorV1 } from "@daw-browser/desktop-protocol"
 import { ControlApiError, ControlTransportError } from "@daw-browser/control-sdk"
 import { runAuthCommand } from "./cli-auth"
-import { isCanonicalCommand, runControlCommand } from "./cli-control"
+import { isCanonicalCommand, runControlCommand, runProjectCommand, runRpcCommand } from "./cli-control"
 export { canonicalControlOperations } from "./cli-control"
 import {
   DesktopControlError,
@@ -19,7 +19,7 @@ import { processIo, type CliIo } from "./input"
 
 const commandNames = [
   "auth login --base-url <origin>", "auth status", "auth logout", "capabilities [--target <cloud|host>]", "capabilities-v2 [--target <cloud|host>]",
-  "snapshot <project-id> [--target <cloud|host>]", "snapshot-v2 <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
+  "project list [--target <cloud|host>]", "project current --target host", "rpc --target host", "snapshot <project-id> [--target <cloud|host>]", "snapshot-v2 <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
   "history <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "host status", "host transport-status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
@@ -60,6 +60,12 @@ export const runCli = async (arguments_: string[], io: CliIo = processIo): Promi
   const { command, arguments_: commandArguments } = parseCommand(arguments_)
   try {
     if (command === "host") return await runHostCommand(commandArguments, io)
+    if (command === "rpc") return await runRpcCommand(commandArguments, io)
+    if (command === "project") {
+      const [projectCommand, ...projectArguments] = commandArguments
+      if (projectCommand !== "list" && projectCommand !== "current") throw new Error("Invalid project command.")
+      return await runProjectCommand(projectCommand, projectArguments, io)
+    }
     const authResult = await runAuthCommand(command, commandArguments, io)
     if (authResult !== undefined) return authResult
     if (!isCanonicalCommand(command)) throw new Error("Unknown command.")

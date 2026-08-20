@@ -3,11 +3,13 @@ import {
   createJsonlRpcAdapter,
   maxJsonlLineBytes,
 } from "./jsonl";
+import { ControlApiError } from "./index";
 import {
   canonicalControlCapabilities,
   createDirectControlInvoker,
   type ControlInvoker,
   type ControlOperationHandlers,
+  type ControlErrorV1,
 } from "@daw-browser/control";
 import { z } from "zod";
 
@@ -32,7 +34,7 @@ const responseSchema = z.object({
   error: z.object({ code: z.number() }).optional(),
 }).passthrough();
 const responseFor = async (line: string) => responseSchema.parse(JSON.parse(
-  await createJsonlRpcAdapter({ invoker }).processLine(line),
+  await createJsonlRpcAdapter({ invoker }).processLine(line) ?? "",
 ));
 
 test("processes valid requests sequentially and exposes target support", async () => {
@@ -53,7 +55,98 @@ test("rejects malformed, unsupported, and invalid requests while recovering", as
   expect((await responseFor("x".repeat(maxJsonlLineBytes + 1)))).toMatchObject({ id: null, error: { code: -32600 } });
 });
 
-test("rejects notifications and batches without leaking failures", async () => {
-  expect((await responseFor('{"jsonrpc":"2.0","method":"project.list","params":{}}'))).toMatchObject({ id: null, error: { code: -32600 } });
+test("executes notifications without responses and rejects batches", async () => {
+  const adapter = createJsonlRpcAdapter({ invoker });
+  await expect(adapter.processLine('{"jsonrpc":"2.0","method":"project.list","params":{}}')).resolves.toBeUndefined();
+  await expect(adapter.processLine('{"jsonrpc":"2.0","method":"missing.method","params":{}}')).resolves.toBeUndefined();
   expect((await responseFor("[]"))).toMatchObject({ id: null, error: { code: -32600 } });
+});
+
+test("preserves every canonical domain error and sanitizes unknown failures", async () => {
+  const errors = [
+    { code: "approval-required", message: "Approval required." },
+    { code: "revision-conflict", message: "Revision changed." },
+    { code: "idempotency-conflict", message: "Idempotency key reused." },
+    { code: "forbidden", message: "Write forbidden." },
+    { code: "validation", message: "Invalid action.", actionIndex: 2, details: { field: "name" } },
+    { code: "not-found", message: "Project not found." },
+  ] as const;
+  for (const [index, error] of errors.entries()) {
+    const details = "details" in error
+      ? { ...error.details, safe: "value", extra: 42 }
+      : { safe: "value", extra: 42 };
+    const domainInvoker: ControlInvoker<"cloud"> = {
+      target: "cloud",
+      invoke: async () => {
+        throw {
+          data: {
+            version: "v1",
+            ...error,
+            secret: "must be removed",
+            details,
+          },
+          stack: "secret stack",
+        };
+      },
+    };
+    const domain = JSON.parse(await createJsonlRpcAdapter({ invoker: domainInvoker }).processLine(
+      `{"jsonrpc":"2.0","id":${index},"method":"project.list","params":{}}`,
+    ) ?? "");
+    expect(domain.error).toEqual({
+      code: -32000,
+      message: "Control operation failed.",
+      data: {
+        version: "v1",
+        ...error,
+        details: "details" in error ? { ...error.details, safe: "value" } : { safe: "value" },
+      },
+    });
+  }
+  const apiErrorInvoker: ControlInvoker<"cloud"> = {
+    target: "cloud",
+    invoke: async () => {
+      throw new ControlApiError(409, {
+        version: "v1",
+        code: "revision-conflict",
+        message: "Revision changed.",
+        actionIndex: 1,
+        details: { field: "expectedRevision" },
+      });
+    },
+  };
+  const apiError = JSON.parse(await createJsonlRpcAdapter({ invoker: apiErrorInvoker }).processLine(
+    '{"jsonrpc":"2.0","id":7,"method":"project.list","params":{}}',
+  ) ?? "");
+  expect(apiError.error.data).toEqual({
+    version: "v1",
+    code: "revision-conflict",
+    message: "Revision changed.",
+    actionIndex: 1,
+    details: { field: "expectedRevision" },
+  });
+  const directError: ControlErrorV1 = {
+    version: "v1",
+    code: "forbidden",
+    message: "Write forbidden.",
+  };
+  const directInvoker: ControlInvoker<"cloud"> = {
+    target: "cloud",
+    invoke: async () => { throw directError; },
+  };
+  const direct = JSON.parse(await createJsonlRpcAdapter({ invoker: directInvoker }).processLine(
+    '{"jsonrpc":"2.0","id":8,"method":"project.list","params":{}}',
+  ) ?? "");
+  expect(direct.error.data).toEqual(directError);
+  const unknownInvoker: ControlInvoker<"cloud"> = {
+    target: "cloud",
+    invoke: async () => { throw new Error("token and transport details"); },
+  };
+  const unknown = JSON.parse(await createJsonlRpcAdapter({ invoker: unknownInvoker }).processLine(
+    '{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}',
+  ) ?? "");
+  expect(unknown.error).toEqual({
+    code: -32603,
+    message: "Internal error.",
+    data: { version: "v1", code: "internal", message: "Control method failed." },
+  });
 });

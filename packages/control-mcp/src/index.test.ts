@@ -28,6 +28,9 @@ const snapshot = {
 }
 
 const service = (overrides: Partial<ControlService> = {}): ControlService => ({
+  projects: {
+    list: async () => ({ projects: [{ projectId: "project-1", name: "Project" }] }),
+  },
   capabilities: async () => controlCapabilitiesV1,
   snapshot: async () => snapshot,
   preview: async () => ({ version: "v1", projectId: "project-1", priorRevision: 1, revision: 2, applied: true, requestDigest: "0".repeat(64), resolvedRefs: [], warnings: [], changeSummary: { actionCount: 1, changes: [] } }),
@@ -289,6 +292,8 @@ describe("control MCP tools", () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
     const tools = response.result.tools
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "project_list",
+      "project_current",
       "control_capabilities",
       "control_snapshot",
       "control_capabilities_v2",
@@ -330,6 +335,44 @@ describe("control MCP tools", () => {
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
+    })
+  })
+
+  test("discovers cloud projects and host projects with host-only current", async () => {
+    const cloudList = await request(call("project_list", {}))
+    expect(cloudList.result.structuredContent).toEqual({
+      projects: [{ projectId: "project-1", name: "Project" }],
+    })
+
+    let closed = 0
+    const hostService: ControlService = {
+      ...service(),
+      projects: {
+        list: async () => ({ projects: [{ projectId: "host-project", name: "Mounted" }] }),
+        current: async () => ({ status: "present", project: { projectId: "host-project" } }),
+      },
+    }
+    const hostList = await request(call("project_list", { target: "host" }), {
+      hostFactory: async () => ({ service: hostService, close: () => { closed += 1 } }),
+    })
+    const hostCurrent = await request(call("project_current", { target: "host" }), {
+      hostFactory: async () => ({ service: hostService, close: () => { closed += 1 } }),
+    })
+    expect(hostList.result.structuredContent).toEqual({
+      projects: [{ projectId: "host-project", name: "Mounted" }],
+    })
+    expect(hostCurrent.result.structuredContent).toEqual({
+      status: "present",
+      project: { projectId: "host-project" },
+    })
+    expect(closed).toBe(2)
+
+    const cloudCurrent = await request(call("project_current", {}))
+    expect(cloudCurrent.result.isError).toBeTrue()
+    expect(JSON.parse(cloudCurrent.result.content[0].text)).toEqual({
+      version: "v1",
+      code: "unsupported-action",
+      message: "Current project discovery is available only on the host.",
     })
   })
 

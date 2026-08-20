@@ -23,10 +23,12 @@ Desktop host/runtime operations use the separate keyed catalog in
 control.
 
 The JSONL adapter accepts one bounded JSON-RPC 2.0 request per line and
-processes lines sequentially. It rejects notifications, batches, malformed
-requests, unknown methods, invalid parameters, unsupported targets, and
-oversized/deep inputs. It is deliberately stream-neutral; stdio/socket
-process ownership remains deferred.
+processes lines sequentially. Notifications execute without a response;
+batches, malformed requests, unknown methods, invalid parameters, unsupported
+targets, and oversized/deep inputs are rejected. The CLI provides
+`rpc --target host` over the authenticated desktop registration/socket path.
+Cloud JSONL remains deferred because no equivalent secure process
+authentication path exists.
 
 ## Extension boundaries
 
@@ -56,7 +58,7 @@ parity is claimed without an installed/deployed consumer matrix.
 
 Deferred features are extension preference persistence, external extension
 packages/manifests, arbitrary package or DSP loading, public operation
-endpoints, and a concrete JSONL process transport.
+endpoints, and cloud JSONL process authentication.
 
 The repeatable focused suite is:
 

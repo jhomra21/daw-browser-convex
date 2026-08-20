@@ -5,7 +5,7 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js"
 import { z } from "zod"
-import type { CanonicalControlClientControlMethods } from "@daw-browser/control-sdk"
+import type { CanonicalControlClient } from "@daw-browser/control-sdk"
 import {
   canonicalJson,
   controlCapabilitiesQuerySchemaV1,
@@ -41,6 +41,10 @@ import {
   type ControlPreviewRequestV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
+  projectCurrentResultSchema,
+  projectListResultSchema,
+  type ProjectCurrentResult,
+  type ProjectListResult,
   projectCanonicalControlCapabilitiesV1,
   projectCanonicalProjectSnapshotV1,
 } from "@daw-browser/control"
@@ -52,6 +56,10 @@ import {
 import { executeHostTool, registerHostTools, type HostToolService } from "./host-tools"
 
 export type ControlService = {
+  projects?: {
+    list: () => Promise<ProjectListResult>;
+    current?: () => Promise<ProjectCurrentResult>;
+  };
   capabilities: () => Promise<ControlCapabilitiesV1>;
   capabilitiesV2: () => Promise<ControlCapabilitiesV2>;
   snapshot: (input: ControlSnapshotQueryV1) => Promise<ProjectSnapshotV1>;
@@ -64,17 +72,18 @@ export type ControlService = {
 }
 
 export const controlServiceFromCanonicalMethods = (
-  methods: CanonicalControlClientControlMethods<"cloud">,
+  methods: CanonicalControlClient<"cloud">,
 ): ControlService => ({
-  capabilities: async () => projectCanonicalControlCapabilitiesV1(await methods.capabilities({})),
-  capabilitiesV2: async () => methods.capabilities({}),
-  snapshot: async (input) => projectCanonicalProjectSnapshotV1(await methods.snapshot(input)),
-  snapshotV2: async (input) => methods.snapshot(input),
-  preview: methods.preview,
-  commit: methods.commit,
-  requestApproval: methods.requestApproval,
-  history: methods.history,
-  recoveries: methods.recoveries,
+  projects: { list: () => methods.projects.list({}) },
+  capabilities: async () => projectCanonicalControlCapabilitiesV1(await methods.control.capabilities({})),
+  capabilitiesV2: async () => methods.control.capabilities({}),
+  snapshot: async (input) => projectCanonicalProjectSnapshotV1(await methods.control.snapshot(input)),
+  snapshotV2: async (input) => methods.control.snapshot(input),
+  preview: methods.control.preview,
+  commit: methods.control.commit,
+  requestApproval: methods.control.requestApproval,
+  history: methods.control.history,
+  recoveries: methods.control.recoveries,
 })
 
 export type ControlMcpScope = "control:read" | "control:write"
@@ -99,6 +108,8 @@ type ControlServiceResult =
   | ControlApprovalResultV1
   | ControlHistoryResultV1
   | ControlRecoveriesResultV1
+  | ProjectListResult
+  | ProjectCurrentResult
 type McpStructuredContent = NonNullable<CallToolResult["structuredContent"]>
 
 const annotations = {
@@ -270,6 +281,40 @@ export const createControlMcpServer = (
   const requestApproval = (input: McpToolInput) => executeRouted(input, controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
   const history = (input: McpToolInput) => executeRouted(input, controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
   const recoveries = (input: McpToolInput) => executeRouted(input, controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
+  const projectsList = (input: McpToolInput) => executeRouted(input, () => ({}), (service_) => {
+    if (!service_.projects) throw new Error("Project discovery is unavailable.")
+    return service_.projects.list()
+  }, projectListResultSchema.parse, false)
+  const projectCurrent = (input: McpToolInput) => {
+    try {
+      if (targetInput(input).target === "cloud") {
+        return Promise.resolve(failure({
+          version: "v1",
+          code: "unsupported-action",
+          message: "Current project discovery is available only on the host.",
+        }))
+      }
+    } catch {
+      return Promise.resolve(failure(invalidRequest()))
+    }
+    return executeRouted(input, () => ({}), (service_) => {
+      if (!service_.projects?.current) throw new Error("Current project discovery is unavailable.")
+      return service_.projects.current()
+    }, projectCurrentResultSchema.parse, false)
+  }
+
+  server.registerTool("project_list", {
+    description: "List projects accessible through the selected control target.",
+    inputSchema: withTarget(z.object({}).strict()),
+    outputSchema: projectListResultSchema,
+    annotations: annotations.read,
+  }, projectsList)
+  server.registerTool("project_current", {
+    description: "Return the currently mounted local project. This is host-only.",
+    inputSchema: withTarget(z.object({}).strict()),
+    outputSchema: projectCurrentResultSchema,
+    annotations: annotations.read,
+  }, projectCurrent)
 
   server.registerTool("control_capabilities", {
     description: "Return the supported DAW control API capabilities.",
@@ -344,6 +389,8 @@ export const createControlMcpServer = (
     if (request.params.name === "control_request_approval") return requestApproval(input)
     if (request.params.name === "control_history") return history(input)
     if (request.params.name === "control_recoveries") return recoveries(input)
+    if (request.params.name === "project_list") return projectsList(input)
+    if (request.params.name === "project_current") return projectCurrent(input)
     if (options.hostTools) {
       return executeHostTool(request.params.name, input, options.hostTools)
     }

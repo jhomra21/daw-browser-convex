@@ -210,6 +210,13 @@ export const projectCanonicalProjectSnapshotV1 = (
   })),
 })
 
+export const projectCanonicalProjectSnapshotV2 = (
+  snapshot: ProjectSnapshotV1,
+): ProjectSnapshotV2 => projectSnapshotSchemaV2.parse({
+  ...snapshot,
+  version: CONTROL_API_VERSION_V2,
+})
+
 export type ProjectSnapshotV1 = z.infer<typeof projectSnapshotSchemaV1>
 export type ProjectSnapshotV2 = z.infer<typeof projectSnapshotSchemaV2>
 export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>

@@ -13,7 +13,5 @@ export const desktopOperations = (nativeMediaAvailable: boolean): DesktopOperati
       && operation !== "host.export.status"
       && operation !== "host.export.cancel"
   ))
-  return nativeMediaAvailable
-    ? [...base, ...desktopControlOperationsV1]
-    : [...base, ...desktopControlOperationsV1]
+  return [...base, ...desktopControlOperationsV1]
 }

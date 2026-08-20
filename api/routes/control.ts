@@ -220,6 +220,20 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     }
   })
 
+  app.get("/api/control/v1/projects", async (context) => {
+    const bearer = await authenticate(context, "control:read")
+    if (bearer.kind === "rejected") {
+      if (bearer.error.code === "forbidden") return respondError(context, bearer.error)
+      return context.json(bearer.error, 401, controlUnauthorizedHeaders(context.req.url))
+    }
+    try {
+      const invoker = await createControlInvoker(context, bearer.bearer, createGateway)
+      return context.json(await invoker.invoke("project.list", {}), 200, noStore)
+    } catch (error) {
+      return respondError(context, readControlError(error))
+    }
+  })
+
   app.get("/api/control/v1/projects/:projectId/snapshot", async (context) => {
     const bearer = await authenticate(context, "control:read")
     if (bearer.kind === "rejected") {

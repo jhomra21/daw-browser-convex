@@ -321,6 +321,53 @@ describe("control CLI output", () => {
 })
 
 describe("canonical CLI target routing", () => {
+  test("lists cloud projects and discovers host list/current", async () => {
+    const directory = await mkdtemp("/tmp/daw-control-cli-")
+    directories.push(directory)
+    process.env.DAW_CONTROL_AUTH_PATH = join(directory, "credentials.json")
+    await createCredentialStore().write(credentials)
+    const cloudRequests: string[] = []
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        cloudRequests.push(url.pathname)
+        return Response.json({ projects: [{ projectId: "cloud-project", name: "Cloud" }] })
+      },
+      { preconnect: previousFetch.preconnect },
+    )
+    const cloudOutput = io()
+    expect(await runCli(["project", "list"], cloudOutput.value)).toBe(0)
+    expect(JSON.parse(cloudOutput.stdout[0]).data).toEqual({
+      projects: [{ projectId: "cloud-project", name: "Cloud" }],
+    })
+
+    await createHost((socket, frame) => {
+      const result = frame.operation === "host.status"
+        ? { project: { id: "host-project", kind: "local" }, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }
+        : controlResultFor(frame.operation)
+      socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result,
+      })))
+    }, ["host.status", "control.capabilities", "control.snapshot"])
+    const hostListOutput = io()
+    const hostCurrentOutput = io()
+    expect(await runCli(["project", "list", "--target", "host"], hostListOutput.value)).toBe(0)
+    expect(await runCli(["project", "current", "--target", "host"], hostCurrentOutput.value)).toBe(0)
+    expect(JSON.parse(hostListOutput.stdout[0]).data).toEqual({
+      projects: [{ projectId: "host-project" }],
+    })
+    expect(JSON.parse(hostCurrentOutput.stdout[0]).data).toEqual({
+      status: "present",
+      project: { projectId: "host-project" },
+    })
+    expect(cloudRequests).toEqual(["/api/control/v1/projects"])
+    expect(hostListOutput.stderr).toEqual([])
+    expect(hostCurrentOutput.stderr).toEqual([])
+  })
+
   test("advertises targets only for canonical control commands", async () => {
     const output = io()
     expect(await runCli(["--help"], output.value)).toBe(0)

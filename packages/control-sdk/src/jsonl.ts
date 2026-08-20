@@ -12,6 +12,8 @@ import {
   controlHistoryQuerySchemaV1,
   controlRecoveriesQuerySchemaV1,
   supportsControlOperation,
+  controlLimitsV1,
+  controlErrorSchemaV1,
   type ControlInvoker,
   type ControlOperationId,
   type ControlOperationTarget,
@@ -28,7 +30,7 @@ export const maxJsonRpcIdLength = 128;
 type JsonRpcId = string | number;
 type JsonRpcRequest = Readonly<{
   jsonrpc: "2.0";
-  id: JsonRpcId;
+  id?: JsonRpcId;
   method: string;
   params?: unknown;
 }>;
@@ -45,7 +47,7 @@ type JsonRpcResponse = Readonly<{
 }>;
 
 export type JsonlRpcAdapter = Readonly<{
-  processLine: (line: string) => Promise<string>;
+  processLine: (line: string) => Promise<string | undefined>;
   methods: () => readonly ControlOperationId[];
 }>;
 
@@ -61,6 +63,42 @@ const canonicalError = (
   code: code === "unsupported-target" ? "unsupported-action" : code === "invalid-input" ? "validation" : code,
   message,
 });
+
+const domainError = (error: unknown): ControlErrorV1 | undefined => {
+  const direct = controlErrorSchemaV1.safeParse(error);
+  const wrapped = z.object({
+    data: z.unknown(),
+    errorData: z.unknown().optional(),
+  }).passthrough().safeParse(error);
+  const candidates = [
+    error,
+    ...(wrapped.success ? [wrapped.data.data, wrapped.data.errorData] : []),
+  ];
+  if (direct.success) return direct.data;
+  for (const candidate of candidates) {
+    const record = z.record(z.string(), z.unknown()).safeParse(candidate);
+    if (!record.success) continue;
+    const detailsRecord = z.record(z.string(), z.unknown()).safeParse(record.data.details);
+    const details: Record<string, string> = {};
+    if (detailsRecord.success) {
+      for (const [key, value] of Object.entries(detailsRecord.data)) {
+        if (key.length <= 64 && typeof value === "string" && value.length <= 1000) {
+          details[key] = value;
+        }
+        if (Object.keys(details).length >= controlLimitsV1.maxErrorDetails) break;
+      }
+    }
+    const parsed = controlErrorSchemaV1.safeParse({
+      version: record.data.version,
+      code: record.data.code,
+      message: record.data.message,
+      ...(typeof record.data.actionIndex === "number" ? { actionIndex: record.data.actionIndex } : {}),
+      ...(Object.keys(details).length > 0 ? { details } : {}),
+    });
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
+};
 
 const response = (id: JsonRpcId | null, value: Omit<JsonRpcResponse, "jsonrpc" | "id">): string =>
   JSON.stringify({ jsonrpc: "2.0", id, ...value });
@@ -91,11 +129,11 @@ const parseRequest = (value: unknown): JsonRpcRequest => {
   const record = recordResult.data;
   if (
     record.jsonrpc !== "2.0"
-    || !validId(record.id)
+    || (Object.hasOwn(record, "id") && !validId(record.id))
     || typeof record.method !== "string"
     || record.method.length === 0
     || record.method.length > 128
-    || (Object.hasOwn(record, "params") && typeof record.params !== "object")
+    || (Object.hasOwn(record, "params") && (typeof record.params !== "object" || record.params === null))
     || Array.isArray(record.params)
   ) throw new Error("Invalid JSON-RPC request.");
   const keys = Object.keys(record);
@@ -104,7 +142,7 @@ const parseRequest = (value: unknown): JsonRpcRequest => {
   }
   return {
     jsonrpc: "2.0",
-    id: record.id,
+    ...(validId(record.id) ? { id: record.id } : {}),
     method: record.method,
     ...(Object.hasOwn(record, "params") ? { params: record.params } : {}),
   };
@@ -150,7 +188,7 @@ const invokeValidated = async (
 const processLine = async (
   line: string,
   input: JsonlRpcAdapterOptions,
-): Promise<string> => {
+): Promise<string | undefined> => {
   if (new TextEncoder().encode(line).byteLength > maxJsonlLineBytes) {
     return response(null, { error: { code: -32600, message: "Line exceeds the JSONL size limit.", data: canonicalError("invalid-request", "Line exceeds the JSONL size limit.") } });
   }
@@ -166,36 +204,44 @@ const processLine = async (
   } catch {
     return response(null, { error: { code: -32600, message: "Invalid Request.", data: canonicalError("invalid-request", "Invalid JSON-RPC request.") } });
   }
+  const notification = request.id === undefined;
+  const reply = (
+    id: JsonRpcId | null,
+    value: Omit<JsonRpcResponse, "jsonrpc" | "id">,
+  ): string | undefined => notification ? undefined : response(id, value);
   let operationId: ControlOperationId;
   try {
     operationId = parseControlOperationId(request.method);
   } catch {
-    return response(request.id, { error: { code: -32601, message: "Method not found.", data: canonicalError("invalid-request", "Unknown control method.") } });
+    return reply(request.id ?? null, { error: { code: -32601, message: "Method not found.", data: canonicalError("invalid-request", "Unknown control method.") } });
   }
   if (!supportsControlOperation(operationId, input.invoker.target)) {
-    return response(request.id, { error: { code: -32601, message: "Method not found.", data: canonicalError("unsupported-target", "Method is not supported by this target.") } });
+    return reply(request.id ?? null, { error: { code: -32601, message: "Method not found.", data: canonicalError("unsupported-target", "Method is not supported by this target.") } });
   }
   const descriptor = controlOperationCatalog[operationId];
   const params = request.params ?? {};
   const parsed = descriptor.input.safeParse(params);
   if (!parsed.success) {
-    return response(request.id, { error: { code: -32602, message: "Invalid params.", data: canonicalError("invalid-input", "Invalid method parameters.") } });
+    return reply(request.id ?? null, { error: { code: -32602, message: "Invalid params.", data: canonicalError("invalid-input", "Invalid method parameters.") } });
   }
   try {
     const result = await invokeValidated(input.invoker, operationId, parsed.data);
-    return response(request.id, { result });
-  } catch {
-    return response(request.id, { error: { code: -32603, message: "Internal error.", data: canonicalError("internal", "Control method failed.") } });
+    return reply(request.id ?? null, { result });
+  } catch (error) {
+    const normalized = domainError(error);
+    return reply(request.id ?? null, normalized
+      ? { error: { code: -32000, message: "Control operation failed.", data: normalized } }
+      : { error: { code: -32603, message: "Internal error.", data: canonicalError("internal", "Control method failed.") } });
   }
 };
 
 export const createJsonlRpcAdapter = (
   input: JsonlRpcAdapterOptions,
 ): JsonlRpcAdapter => {
-  let pending = Promise.resolve("");
+  let pending = Promise.resolve();
   const queued = (line: string) => {
     const result = pending.then(() => processLine(line, input));
-    pending = result.then(() => "", () => "");
+    pending = result.then(() => undefined, () => undefined);
     return result;
   };
   return Object.freeze({
@@ -209,5 +255,8 @@ export const processJsonlLines = async (
   adapter: JsonlRpcAdapter,
   write: (line: string) => void | Promise<void>,
 ): Promise<void> => {
-  for await (const line of lines) await write(await adapter.processLine(line));
+  for await (const line of lines) {
+    const output = await adapter.processLine(line);
+    if (output !== undefined) await write(output);
+  }
 };

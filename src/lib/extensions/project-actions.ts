@@ -68,18 +68,18 @@ export const createProjectActionFacade = (
     ensureActive(input.lifecycle);
     const parsed = controlApprovalRequestSchemaV1.parse(request);
     ensureGrant(parsed, input.grant, "approval");
-    const result = await input.client.control.requestApproval(parsed);
-    ensureActive(input.lifecycle);
-    return result;
+    // Approval issuance creates durable authority. Once dispatched, its result
+    // must not be converted into a lifecycle error after the authority exists.
+    return input.client.control.requestApproval(parsed);
   };
 
   const commit = async (request: ControlCommitRequestV1) => {
     ensureActive(input.lifecycle);
     const parsed = controlCommitRequestSchemaV1.parse(request);
     ensureGrant(parsed, input.grant, "commit");
-    const result = await input.client.control.commit(parsed);
-    ensureActive(input.lifecycle);
-    return result;
+    // Commit is authoritative and idempotent. Lifecycle changes after dispatch
+    // cannot safely turn a successful authority result into an ambiguous failure.
+    return input.client.control.commit(parsed);
   };
 
   return Object.freeze({ preview, requestApproval, commit });

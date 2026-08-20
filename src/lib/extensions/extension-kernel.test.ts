@@ -59,6 +59,7 @@ test('replaces an allowed command and restores it after replacement deactivation
   const kernel = createExtensionKernel()
   let originalSignal: AbortSignal | undefined
   let originalCleanupCount = 0
+  let replacementCleanupCount = 0
   await kernel.activate({
     ...definition('core.base', 'core.command', 'core.contribution', (context) => {
       originalSignal = context.signal
@@ -77,7 +78,10 @@ test('replaces an allowed command and restores it after replacement deactivation
     'other.replacement',
     'core.command',
     'other.contribution',
-    ({ bindCommand }) => { bindCommand('core.command', () => 'replacement') },
+    (context) => {
+      context.addCleanup(() => { replacementCleanupCount += 1 })
+      context.bindCommand('core.command', () => 'replacement')
+    },
     [{ targetContributionId: 'core.contribution', contract: 'command-v1' }],
     [],
   ))
@@ -91,6 +95,13 @@ test('replaces an allowed command and restores it after replacement deactivation
   await expect(kernel.deactivate('core.base')).rejects.toThrow('must remain')
   await kernel.deactivate('other.replacement')
   expect(await kernel.executeCommand('core.command')).toBe('base')
+  expect(kernel.snapshot().commands).toEqual([{
+    id: 'core.command',
+    contributionId: 'core.contribution',
+    providerId: 'core.base',
+    title: 'core.command',
+  }])
+  expect(replacementCleanupCount).toBe(1)
   expect(originalSignal?.aborted).toBeFalse()
   expect(originalCleanupCount).toBe(0)
   await kernel.dispose()
@@ -300,6 +311,91 @@ test('supports subscriber snapshots and idempotent disposal', async () => {
   await kernel.dispose()
   await kernel.dispose()
   expect(generations.length).toBe(3)
+})
+
+test('isolates subscriber failures across every lifecycle transition', async () => {
+  const kernel = createExtensionKernel()
+  const snapshots: Array<{ generation: number; extensions: readonly string[]; commands: readonly string[] }> = []
+  const initialFailingUnsubscribe = kernel.subscribe(() => {
+    throw new Error('subscriber failure')
+  })
+  expect(initialFailingUnsubscribe()).toBeFalse()
+  kernel.subscribe((current) => {
+    snapshots.push({
+      generation: current.generation,
+      extensions: current.extensions.map((extension) => extension.id),
+      commands: current.commands.map((command) => command.providerId),
+    })
+    if (current.generation > 0) throw new Error('transition subscriber failure')
+  })
+  let cleanupCount = 0
+  await kernel.activate({
+    ...definition('core.base', 'core.command', 'core.contribution', (context) => {
+    context.addCleanup(() => { cleanupCount += 1 })
+    context.bindCommand('core.command', () => undefined)
+    }),
+    commands: [{
+      id: 'core.command',
+      contributionId: 'core.contribution',
+      title: 'core.command',
+      replacement: { allowed: true, contract: 'command-v1' },
+    }],
+  })
+  await kernel.replace(definition(
+    'other.replacement',
+    'core.command',
+    'other.contribution',
+    (context) => {
+      context.addCleanup(() => { cleanupCount += 1 })
+      context.bindCommand('core.command', () => 'replacement')
+    },
+    [{ targetContributionId: 'core.contribution', contract: 'command-v1' }],
+    [],
+  ))
+  await kernel.deactivate('other.replacement')
+  await kernel.reload(definition('core.base', 'core.command', 'core.contribution', (context) => {
+    context.addCleanup(() => { cleanupCount += 1 })
+    context.bindCommand('core.command', () => 'reloaded')
+  }, undefined, []))
+  await kernel.deactivate('core.base')
+  await kernel.dispose()
+  expect(snapshots.at(-1)?.extensions).toEqual([])
+  expect(snapshots.some((snapshot) => snapshot.extensions.includes('other.replacement'))).toBeTrue()
+  expect(snapshots.some((snapshot) => snapshot.commands.includes('core.base'))).toBeTrue()
+  expect(cleanupCount).toBe(3)
+  expect(kernel.snapshot().diagnostics.some((entry) => entry.code === 'subscriber-failed')).toBeTrue()
+})
+
+test('replacement keeps the target public contribution identity and title', async () => {
+  const kernel = createExtensionKernel()
+  await kernel.activate({
+    ...definition('core.base', 'core.command', 'core.contribution', ({ bindCommand }) => {
+      bindCommand('core.command', () => 'base')
+    }),
+    commands: [{
+      id: 'core.command',
+      contributionId: 'core.contribution',
+      title: 'Stable title',
+      replacement: { allowed: true, contract: 'command-v1' },
+    }],
+  })
+  await kernel.replace({
+    ...definition('other.replacement', 'core.command', 'other.internal-contribution', ({ bindCommand }) => {
+      bindCommand('core.command', () => 'replacement')
+    }, [{ targetContributionId: 'core.contribution', contract: 'command-v1' }], []),
+    commands: [{
+      id: 'core.command',
+      contributionId: 'other.internal-contribution',
+      title: 'Stable title',
+    }],
+  })
+  expect(kernel.snapshot().commands).toEqual([{
+    id: 'core.command',
+    contributionId: 'core.contribution',
+    providerId: 'other.replacement',
+    title: 'Stable title',
+  }])
+  await kernel.dispose()
 })
 
 test('manages trusted static built-ins with immutable ordered state', async () => {

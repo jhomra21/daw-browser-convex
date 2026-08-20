@@ -25,7 +25,7 @@ export const cloudClient = async () => {
 }
 
 export const cloudCanonicalControlMethods = async () => (
-  createCanonicalControlMethodsFromLegacy(await cloudClient())
+  (createCanonicalControlMethodsFromLegacy(await cloudClient())).control
 )
 
 export const runAuthCommand = async (command: string, arguments_: string[], io: CliIo) => {

@@ -328,3 +328,28 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   was added; persistence remains deferred rather than redesigning settings.
 - Evidence: extension kernel, timeline extension host, and native menu tests
   pass; all workspace package checks and the root application typecheck pass.
+
+## Checkpoint 13 — Sequential JSONL JSON-RPC adapter
+
+- Added the stream/stdio-neutral `createJsonlRpcAdapter` and
+  `processJsonlLines` exports in `@daw-browser/control-sdk`. The adapter
+  discovers methods from the canonical control catalog and target support,
+  validates inputs and outputs through canonical schemas, and invokes one
+  canonical invoker per request.
+- Processing is strictly sequential: each line is queued behind the prior
+  line, preserving ordering and applying backpressure. Lines are bounded to
+  64 KiB, JSON depth to 12, and request IDs/methods to bounded validated
+  values.
+- Malformed JSON, invalid requests, notifications, batches, unknown methods,
+  unsupported targets, invalid params, and invoker failures return structured
+  JSON-RPC errors without secrets or exception details. A line-local failure
+  does not poison subsequent lines. No eval, package loading, or retry layer
+  was added.
+- The adapter deliberately has no standalone process entrypoint yet:
+  existing CLI/MCP authentication and desktop registration lifecycles remain
+  owners until their thin-adapter migration checkpoint. The core is directly
+  consumable by a future stdio or socket entrypoint without coupling it to
+  either transport.
+- Evidence: JSONL malformed/unknown/unsupported/invalid/recovery,
+  sequential-order, discovery, notification/batch, and size-limit tests pass;
+  the SDK typecheck passes.

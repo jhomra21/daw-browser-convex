@@ -1,8 +1,9 @@
 import type {
-  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuExtensionContribution,
+  DesktopApplicationMenuMessage,
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu";
-import { createEffect, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
 import type { TransportControlsProps } from "~/components/timeline/transport-types";
 
@@ -16,9 +17,17 @@ const gridDenominatorForState = (
 };
 
 const dispatchApplicationMenuCommand = (
-  command: DesktopApplicationMenuCommand,
+  command: DesktopApplicationMenuMessage,
   transportProps: Accessor<TransportControlsProps>,
+  extensionMenu?: Readonly<{
+    execute: (commandId: string) => Promise<boolean>
+    subscribe?: (listener: () => void) => () => void
+  }>,
 ) => {
+  if (typeof command !== "string") {
+    void extensionMenu?.execute(command.commandId);
+    return;
+  }
   const transport = transportProps();
   switch (command) {
     case "new-project":
@@ -146,15 +155,25 @@ const dispatchApplicationMenuCommand = (
 
 export const useDesktopApplicationMenu = (
   transportProps: Accessor<TransportControlsProps>,
+  extensionMenu?: Readonly<{
+    contributions: () => readonly DesktopApplicationMenuExtensionContribution[]
+    execute: (commandId: string) => Promise<boolean>
+    subscribe: (listener: () => void) => () => void
+  }>,
 ) => {
   const bridge = window.dawDesktop?.applicationMenu;
   if (!bridge) return;
+  const [extensionVersion, setExtensionVersion] = createSignal(0);
+  const removeExtensionListener = extensionMenu?.subscribe?.(() => {
+    setExtensionVersion((version) => version + 1);
+  });
 
   const removeCommandListener = bridge.onCommand((command) => {
-    dispatchApplicationMenuCommand(command, transportProps);
+    dispatchApplicationMenuCommand(command, transportProps, extensionMenu);
   });
 
   createEffect(() => {
+    extensionVersion();
     const transport = transportProps();
     const state: DesktopApplicationMenuState = {
       ready: true,
@@ -165,12 +184,14 @@ export const useDesktopApplicationMenu = (
       gridEnabled: transport.gridEnabled,
       syncMix: transport.tracksMenu.syncMix,
       gridDenominator: gridDenominatorForState(transport.gridDenominator),
+      extensionContributions: [...(extensionMenu?.contributions() ?? [])],
     };
     bridge.setState(state);
   });
 
   onCleanup(() => {
     removeCommandListener();
+    removeExtensionListener?.();
     bridge.setState({
       ready: false,
       canExportArchive: false,

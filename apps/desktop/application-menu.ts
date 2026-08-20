@@ -1,5 +1,6 @@
 import type {
-  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuExtensionContribution,
+  DesktopApplicationMenuMessage,
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 
@@ -35,6 +36,8 @@ type ApplicationMenuItem = {
   enabled: boolean
   visible: boolean
   checked: boolean
+  label?: string
+  click?: unknown
 }
 
 type ApplicationMenu = {
@@ -48,7 +51,7 @@ type ApplicationMenuInstallBoundary<TMenu extends ApplicationMenu> = {
 
 type ApplicationMenuControllerOptions = {
   platform: DesktopApplicationMenuPlatform
-  sendCommand: (command: DesktopApplicationMenuCommand) => void
+  sendCommand: (command: DesktopApplicationMenuMessage) => void
 }
 
 export const applicationMenuItemIds = {
@@ -91,6 +94,7 @@ export const applicationMenuItemIds = {
   addReturnTrack: "daw-menu-add-return-track",
   addGroupTrack: "daw-menu-add-group-track",
   addInstrumentTrack: "daw-menu-add-instrument-track",
+  extensionSlot: (index: number) => `daw-menu-extension-${index}`,
 } as const
 
 const menuIds = applicationMenuItemIds
@@ -104,13 +108,14 @@ const initialState: DesktopApplicationMenuState = {
   gridEnabled: false,
   syncMix: false,
   gridDenominator: 4,
+  extensionContributions: [],
 }
 
 const commandItem = (
   id: string,
   label: string,
-  command: DesktopApplicationMenuCommand,
-  sendCommand: (command: DesktopApplicationMenuCommand) => void,
+  command: DesktopApplicationMenuMessage,
+  sendCommand: (command: DesktopApplicationMenuMessage) => void,
 ): ApplicationMenuTemplate => ({
   id,
   label,
@@ -119,9 +124,11 @@ const commandItem = (
 
 const separator = (): ApplicationMenuTemplate => ({ type: "separator" })
 
+const extensionMenuSlots = Array.from({ length: 16 }, (_, index) => index)
+
 export const createApplicationMenuTemplate = (
   platform: DesktopApplicationMenuPlatform,
-  sendCommand: (command: DesktopApplicationMenuCommand) => void,
+  sendCommand: (command: DesktopApplicationMenuMessage) => void,
 ): ApplicationMenuTemplate[] => {
   const fileMenu: ApplicationMenuTemplate = {
     label: "File",
@@ -181,6 +188,15 @@ export const createApplicationMenuTemplate = (
           { ...commandItem(menuIds.grid12, "1/12", "set-grid-denominator-12", sendCommand), type: "radio" },
           { ...commandItem(menuIds.grid16, "1/16", "set-grid-denominator-16", sendCommand), type: "radio" },
         ],
+      },
+      {
+        label: "Extension Commands",
+        submenu: extensionMenuSlots.map((index) => ({
+          id: menuIds.extensionSlot(index),
+          label: "",
+          visible: false,
+          enabled: false,
+        })),
       },
       separator(),
       { label: "Full Screen", role: "togglefullscreen" },
@@ -288,6 +304,7 @@ const statefulIds = [
 const applyState = (
   menu: ApplicationMenu,
   state: DesktopApplicationMenuState,
+  sendCommand: (command: DesktopApplicationMenuMessage) => void,
 ) => {
   for (const id of statefulIds) {
     const item = menu.getMenuItemById(id)
@@ -335,6 +352,24 @@ const applyState = (
       item.checked = state.gridDenominator === denominator
     }
   }
+  const contributions = [...(state.extensionContributions ?? [])]
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+  for (const index of extensionMenuSlots) {
+    const item = menu.getMenuItemById(menuIds.extensionSlot(index))
+    if (!item) continue
+    const contribution = contributions[index]
+    item.visible = contribution !== undefined
+    item.enabled = contribution?.enabled ?? false
+    item.checked = contribution?.checked ?? false
+    item.label = contribution?.title ?? ""
+    item.click = contribution === undefined
+      ? undefined
+      : () => sendCommand({
+        kind: "extension",
+        id: contribution.id,
+        commandId: contribution.commandId,
+      })
+  }
 }
 
 export const createApplicationMenuController = <TMenu extends ApplicationMenu = ApplicationMenu>(
@@ -344,9 +379,9 @@ export const createApplicationMenuController = <TMenu extends ApplicationMenu = 
   let state = initialState
 
   const reapplyState = () => {
-    if (menu) applyState(menu, state)
+    if (menu) applyState(menu, state, sendCommand)
   }
-  const sendCommand = (command: DesktopApplicationMenuCommand) => {
+  const sendCommand = (command: DesktopApplicationMenuMessage) => {
     options.sendCommand(command)
     reapplyState()
   }

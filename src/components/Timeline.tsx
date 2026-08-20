@@ -2052,7 +2052,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  useDesktopApplicationMenu(transportProps);
+  useDesktopApplicationMenu(transportProps, timelineExtensionHost.menu);
 
   const dashboardTimelineModel = createMemo<DashboardTimelineModel>(() => ({
     projectMenu: transportProps().projectMenu,

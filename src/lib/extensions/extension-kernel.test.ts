@@ -6,6 +6,7 @@ import {
   normalizeShortcutChord,
   type AppExtensionDefinition,
 } from './index'
+import { createBuiltinExtensionManager } from './builtin-manager'
 
 const definition = (
   id: string,
@@ -299,4 +300,20 @@ test('supports subscriber snapshots and idempotent disposal', async () => {
   await kernel.dispose()
   await kernel.dispose()
   expect(generations.length).toBe(3)
+})
+
+test('manages trusted static built-ins with immutable ordered state', async () => {
+  const kernel = createExtensionKernel()
+  const manager = createBuiltinExtensionManager([
+    definition('builtin.one', 'builtin.one.command', 'builtin.one.contribution', ({ bindCommand }) => {
+      bindCommand('builtin.one.command', () => 'one')
+    }),
+  ], kernel)
+  await manager.enable('builtin.one')
+  const state = manager.snapshot()
+  expect(state.enabled).toEqual(['builtin.one'])
+  expect(Object.isFrozen(state.enabled)).toBeTrue()
+  await manager.disable('builtin.one')
+  expect(manager.snapshot().enabled).toEqual([])
+  await manager.dispose()
 })

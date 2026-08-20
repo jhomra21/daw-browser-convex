@@ -32,7 +32,7 @@ const createFakeMenu = (template: ApplicationMenuTemplate[]) => {
 describe("native application menu", () => {
   test("contains exactly the 39 renderer menu commands", () => {
     for (const platform of ["darwin", "win32"] as const) {
-      const commands: string[] = []
+      const commands: unknown[] = []
       const template = createApplicationMenuTemplate(platform, (command) => commands.push(command))
       for (const item of flatten(template)) item.click?.()
       expect(new Set(commands)).toEqual(new Set(desktopApplicationMenuCommands))
@@ -80,7 +80,7 @@ describe("native application menu", () => {
   })
 
   test("mutates one installed menu for live state", () => {
-    const sent: string[] = []
+    const sent: unknown[] = []
     const controller = createApplicationMenuController({
       platform: "darwin",
       sendCommand: (command) => sent.push(command),
@@ -161,7 +161,7 @@ describe("native application menu", () => {
     expect(mainSource).toContain("sameAppOrigin(event.senderFrame.url)")
     expect(mainSource).toContain("desktopApplicationMenuStateSchema.safeParse(value)")
     expect(mainSource.match(/applicationMenuController\.reset\(\)/g)?.length).toBe(2)
-    expect(preloadSource).toContain("desktopApplicationMenuCommandSchema.safeParse(value)")
+    expect(preloadSource).toContain("desktopApplicationMenuMessageSchema.safeParse(value)")
     expect(preloadSource).toContain("desktopApplicationMenuStateSchema.safeParse(state)")
     expect(preloadSource).toContain("removeListener(applicationMenuCommandChannel, notify)")
     expect(rendererSource).not.toContain("desktopApplicationMenuStateSchema.parse")

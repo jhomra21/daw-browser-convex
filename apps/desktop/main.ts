@@ -34,7 +34,7 @@ import {
 } from "@daw-browser/desktop-protocol"
 import {
   desktopApplicationMenuStateSchema,
-  type DesktopApplicationMenuCommand,
+  type DesktopApplicationMenuMessage,
 } from "@daw-browser/desktop-protocol/application-menu"
 import { controlErrorSchemaV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
@@ -290,7 +290,7 @@ const applicationMenuController = createApplicationMenuController<Menu>({
     : process.platform === "win32"
       ? "win32"
       : "linux",
-  sendCommand: (command: DesktopApplicationMenuCommand) => {
+  sendCommand: (command: DesktopApplicationMenuMessage) => {
     sendRendererMessage(applicationMenuCommandChannel, command)
   },
 })

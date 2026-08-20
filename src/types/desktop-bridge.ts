@@ -19,7 +19,7 @@ import type {
   DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
 import type {
-  DesktopApplicationMenuCommand,
+  DesktopApplicationMenuMessage,
   DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 import type {
@@ -186,7 +186,7 @@ type DesktopBridge = {
     preflightInsertion(input: NativeVst3InsertionPreflightRequest): Promise<NativeVst3InsertionPreflightResult>
   }
   applicationMenu?: {
-    onCommand(listener: (command: DesktopApplicationMenuCommand) => void): () => void
+    onCommand(listener: (command: DesktopApplicationMenuMessage) => void): () => void
     setState(state: DesktopApplicationMenuState): void
   }
 }

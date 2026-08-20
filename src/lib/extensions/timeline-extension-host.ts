@@ -10,6 +10,7 @@ import {
   createBuiltinViewToggleBrowser,
   type BrowserToggleExtensionViews,
 } from "./builtins/view-toggle-browser";
+import { createBuiltinExtensionManager } from "./builtin-manager";
 
 type TimelineExtensionHost = Readonly<{
   shortcuts: Readonly<{
@@ -18,6 +19,17 @@ type TimelineExtensionHost = Readonly<{
       context: ShortcutResolutionContext,
     ) => boolean;
   }>;
+  menu: Readonly<{
+    contributions: () => readonly Readonly<{
+      id: string
+      commandId: string
+      title: string
+      order: number
+      enabled: boolean
+    }>[]
+    execute: (commandId: string) => Promise<boolean>
+    subscribe: (listener: () => void) => () => void
+  }>
   activation: Promise<boolean>;
   dispose: () => Promise<void>;
 }>;
@@ -45,8 +57,9 @@ export const createTimelineExtensionHost = (
   kernel: ExtensionKernel = createExtensionKernel(),
 ): TimelineExtensionHost => {
   const definition = createBuiltinViewToggleBrowser(views);
+  const manager = createBuiltinExtensionManager([definition], kernel);
   let state: "activating" | "active" | "failed" | "disposed" = "activating";
-  const activation = kernel.activate(definition).then(
+  const activation = manager.enable(definition.id).then(
     () => {
       if (state === "activating") state = "active";
       return true;
@@ -76,11 +89,31 @@ export const createTimelineExtensionHost = (
   const dispose = async (): Promise<void> => {
     if (state === "disposed") return;
     state = "disposed";
-    await kernel.dispose();
+    await manager.dispose();
+  };
+
+  const contributions = () => kernel.snapshot().commands.map((command, index) => ({
+    id: command.contributionId,
+    commandId: command.id,
+    title: command.title,
+    order: index,
+    enabled: true,
+  }));
+
+  const executeMenuCommand = async (commandId: string): Promise<boolean> => {
+    const contribution = contributions().find((entry) => entry.commandId === commandId);
+    if (!contribution) return false;
+    await kernel.executeCommand(commandId);
+    return true;
   };
 
   return Object.freeze({
     shortcuts: Object.freeze({ execute }),
+    menu: Object.freeze({
+      contributions,
+      execute: executeMenuCommand,
+      subscribe: (listener: () => void) => kernel.subscribe(() => listener()),
+    }),
     activation,
     dispose,
   });

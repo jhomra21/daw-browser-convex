@@ -13,6 +13,7 @@ export {
   createBuiltinViewToggleBrowser,
 } from './builtins/view-toggle-browser'
 export { createTimelineExtensionHost } from './timeline-extension-host'
+export { createBuiltinExtensionManager } from './builtin-manager'
 export type {
   AppExtensionCommandDeclaration,
   AppExtensionDefinition,

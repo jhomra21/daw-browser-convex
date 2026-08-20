@@ -304,3 +304,27 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Evidence: desktop operation inventory tests and the complete desktop
   protocol schema test file pass; V1/V2 framing, cancellation, deadlines,
   native capability security, and control compatibility remain unchanged.
+
+## Checkpoint 12 — Built-in management and bounded menu projection
+
+- Added `createBuiltinExtensionManager` over the existing extension kernel.
+  It accepts only statically imported trusted definitions and provides
+  deterministic enable, disable, reload, immutable snapshots, bounded
+  diagnostics, and disposal. No extension discovery, package loading, or
+  preference persistence was introduced.
+- Added the approved bounded native-menu projection:
+  `DesktopApplicationMenuExtensionContribution` declarations are limited to
+  16 stable first-level View-menu slots with validated IDs, titles, ordering,
+  enabled state, and optional checked state. Native menus are not regenerated.
+- Extension menu clicks are represented by a validated extension command
+  message and return through the timeline extension host/kernel. The existing
+  browser tab commands remain direct native commands; the browser-toggle
+  extension is available through the kernel path without adding a duplicate
+  native toggle entry.
+- Renderer/main-frame, same-origin, schema validation, and reset behavior
+  remain enforced at the existing IPC boundary.
+- Existing app preference infrastructure was reviewed. It is broad,
+  browser-local UI preference storage and no extension enablement preference
+  was added; persistence remains deferred rather than redesigning settings.
+- Evidence: extension kernel, timeline extension host, and native menu tests
+  pass; all workspace package checks and the root application typecheck pass.

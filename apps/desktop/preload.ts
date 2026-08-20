@@ -10,9 +10,9 @@ import {
   type DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
 import {
-  desktopApplicationMenuCommandSchema,
+  desktopApplicationMenuMessageSchema,
   desktopApplicationMenuStateSchema,
-  type DesktopApplicationMenuCommand,
+  type DesktopApplicationMenuMessage,
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -197,9 +197,9 @@ const desktopBridge = {
     ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
   },
   applicationMenu: {
-    onCommand(listener: (command: DesktopApplicationMenuCommand) => void) {
+      onCommand(listener: (command: DesktopApplicationMenuMessage) => void) {
       const notify = ipcRendererListener((_event, value) => {
-        const parsed = desktopApplicationMenuCommandSchema.safeParse(value)
+        const parsed = desktopApplicationMenuMessageSchema.safeParse(value)
         if (parsed.success) listener(parsed.data)
       })
       ipcRenderer.on(applicationMenuCommandChannel, notify)

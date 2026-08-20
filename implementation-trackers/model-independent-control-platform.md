@@ -135,3 +135,29 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   unsupported targets, unknown IDs, and complete keyed handler correlation.
   Existing V1/V2 exports, serialization, durable formats, and adapters remain
   unchanged. External deployment and consumer evidence remains unresolved.
+
+## Checkpoint 5 — Provider handlers and conformance
+
+- Added `createLocalControlHandlers` in
+  `src/lib/local-control/local-control-handlers.ts`. It binds one local
+  project identity, exposes only that project's discovery metadata, rejects
+  cross-project requests before invoking the existing local service, and
+  delegates capabilities, V2 snapshots, preview, approval, commit, history,
+  and recoveries without duplicating semantic or durable behavior.
+- Added `createCloudControlHandlers` in `api/control-handler.ts`. It receives
+  a trusted Convex gateway, lists only `projects.listMineDetailed`, delegates
+  control reads and writes to the generated Convex control functions, and
+  intentionally omits desktop-only `project.current`.
+- Refined `ControlOperationHandlers` with target-specific keyed handler sets
+  (`ControlOperationIdsForTarget`) while retaining runtime catalog target
+  rejection and cast-free exhaustive dispatch. Missing runtime handlers fail
+  explicitly.
+- Added reusable test-only conformance coverage in
+  `src/lib/control-conformance.ts`, exercised by both local fake-IndexedDB
+  fixtures and the direct Convex test gateway. Coverage includes capabilities,
+  discovery, V2 snapshot fidelity, preview non-mutation, approval issuance and
+  required approval, commit, idempotent replay and conflict, revision
+  conflict, history, recoveries, strict schema validation, unsupported target,
+  and provider-specific missing-project authorization behavior.
+- No REST, SDK, CLI, MCP, desktop protocol, or extension adapter migration was
+  performed. Existing routes and durable authorities remain owners.

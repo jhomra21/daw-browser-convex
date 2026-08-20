@@ -217,5 +217,6 @@ export type {
   ControlOutput,
   ControlRequestContext,
   ControlHandler,
+  ControlOperationIdsForTarget,
   ControlOperationHandlers,
 } from './operations'

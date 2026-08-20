@@ -255,79 +255,90 @@ export type ControlHandler<Id extends ControlOperationId> = (
   context: ControlRequestContext,
 ) => ControlOutput<Id> | PromiseLike<ControlOutput<Id>>
 
-export type ControlOperationHandlers = {
-  [Id in ControlOperationId]: ControlHandler<Id>
+export type ControlOperationIdsForTarget<Target extends ControlOperationTarget> =
+  Target extends 'cloud' ? Exclude<ControlOperationId, 'project.current'> : ControlOperationId
+
+export type ControlOperationHandlers<
+  Target extends ControlOperationTarget = ControlOperationTarget,
+> = {
+  [Id in ControlOperationIdsForTarget<Target>]: ControlHandler<Id>
 }
 
 const invokeControlOperation = async (
-  handlers: ControlOperationHandlers,
+  handlers: Partial<ControlOperationHandlers>,
   operationId: ControlOperationId,
   input: unknown,
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>> => {
+  const missingHandler = (id: ControlOperationId): never => {
+    throw new Error(`No handler is registered for control operation ${id}.`)
+  }
   switch (operationId) {
     case 'project.list':
-      return projectListResultSchema.parse(await handlers[operationId](
+      return projectListResultSchema.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         projectListInputSchema.parse(input),
         context,
       ))
     case 'project.current':
-      return projectCurrentResultSchema.parse(await handlers[operationId](
+      return projectCurrentResultSchema.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         projectCurrentInputSchema.parse(input),
         context,
       ))
     case 'control.capabilities':
-      return canonicalControlCapabilitiesSchema.parse(await handlers[operationId](
+      return canonicalControlCapabilitiesSchema.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         canonicalControlCapabilitiesQuerySchema.parse(input),
         context,
       ))
     case 'control.snapshot':
-      return canonicalProjectSnapshotSchema.parse(await handlers[operationId](
+      return canonicalProjectSnapshotSchema.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         canonicalControlSnapshotQuerySchema.parse(input),
         context,
       ))
     case 'control.preview':
-      return controlPreviewResultSchemaV1.parse(await handlers[operationId](
+      return controlPreviewResultSchemaV1.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         controlPreviewRequestSchemaV1.parse(input),
         context,
       ))
     case 'control.requestApproval':
-      return controlApprovalResultSchemaV1.parse(await handlers[operationId](
+      return controlApprovalResultSchemaV1.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         controlApprovalRequestSchemaV1.parse(input),
         context,
       ))
     case 'control.commit':
-      return controlCommitResultSchemaV1.parse(await handlers[operationId](
+      return controlCommitResultSchemaV1.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         controlCommitRequestSchemaV1.parse(input),
         context,
       ))
     case 'control.history':
-      return controlHistoryResultSchemaV1.parse(await handlers[operationId](
+      return controlHistoryResultSchemaV1.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         controlHistoryQuerySchemaV1.parse(input),
         context,
       ))
     case 'control.recoveries':
-      return controlRecoveriesResultSchemaV1.parse(await handlers[operationId](
+      return controlRecoveriesResultSchemaV1.parse(await (handlers[operationId] ?? missingHandler(operationId))(
         controlRecoveriesQuerySchemaV1.parse(input),
         context,
       ))
   }
 }
 
-export function dispatchControlOperation<Id extends ControlOperationId>(
-  handlers: ControlOperationHandlers,
+export function dispatchControlOperation<
+  Target extends ControlOperationTarget,
+  Id extends ControlOperationIdsForTarget<Target>,
+>(
+  handlers: ControlOperationHandlers<Target>,
   operationId: Id,
   input: unknown,
-  context: ControlRequestContext,
+  context: ControlRequestContext & { target: Target },
 ): Promise<ControlOutput<Id>>
 export function dispatchControlOperation(
-  handlers: ControlOperationHandlers,
+  handlers: Partial<ControlOperationHandlers>,
   operationId: unknown,
   input: unknown,
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>>
 export function dispatchControlOperation(
-  handlers: ControlOperationHandlers,
+  handlers: Partial<ControlOperationHandlers>,
   operationId: unknown,
   input: unknown,
   context: ControlRequestContext,

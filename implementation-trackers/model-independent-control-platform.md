@@ -257,3 +257,27 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Deferred: legacy HTTP SDK transport adapter migration, desktop routing,
   host operations, menus, JSONL, CLI/MCP migration, extension actions, and
   broad final simplification review.
+
+## Checkpoint 10 — Canonical desktop control routing
+
+- Desktop control protocol descriptors now retain explicit V1 compatibility
+  adapters while deriving represented operation schemas and metadata from the
+  canonical catalog. V1 capability/snapshot results continue to project from
+  canonical V2 values; V2 result fidelity and negotiation remain unchanged.
+- Trusted renderer control requests now bind the actor identity in the
+  authority-owning main/preload path and execute through one desktop
+  `ControlInvoker` backed by `createLocalControlHandlers`. The renderer wire
+  `actorSubject` is no longer used as the trusted principal source.
+- External desktop socket requests continue to use the existing protocol
+  framing, discovery, negotiation, queue, deadlines, cancellation, approval,
+  commit, history, recovery, error, and mount-selection behavior. They reach
+  the same trusted renderer/invoker path exactly once.
+- `project.current` remains canonical and local-handler available but is not
+  added to legacy desktop socket or renderer operation frames because additive
+  exposure is not required for this compatibility checkpoint.
+- Host status, transport, diagnostics, VST, import, export, and native audio
+  operations remain explicit host-runtime paths and were not migrated.
+- Evidence: desktop protocol schema/projection tests, desktop operation and
+  request-queue tests, attached controller tests, local handler conformance,
+  and CLI host negotiation tests pass. Remaining full-build/typecheck and
+  lint evidence is recorded with the implementation run.

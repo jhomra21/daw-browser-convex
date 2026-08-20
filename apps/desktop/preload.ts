@@ -54,6 +54,7 @@ const ipcRendererListener = (
 const incomingMessageSchema = z.object({
   generation: z.number().int().safe(),
   frame: z.union([desktopCancelSchemaV1, desktopTrustedRendererRequestSchemaV1]),
+  trustedActorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).optional(),
 }).passthrough()
 const offlinePcmChunkSchema = z.object({
   jobId: z.string(),
@@ -151,7 +152,7 @@ ipcRenderer.on(incomingChannel, (_event, message) => {
     dispatchLifecycle(generation, parsed.data)
     return
   }
-  requestQueue.dispatch(generation, parsed.data)
+  requestQueue.dispatch(generation, parsed.data, incoming.data.trustedActorSubject)
 })
 
 const desktopBridge = {

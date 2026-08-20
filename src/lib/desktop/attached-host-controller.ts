@@ -11,11 +11,13 @@ import {
   desktopRendererImportInputSchemaV1,
   desktopSeekInputSchemaV1,
   desktopJsonValueSchema,
+  type DesktopJsonValue,
   hostError,
   isDesktopControlOperation,
   parseDesktopResult,
   type ControlErrorV1,
   type HostErrorV1,
+  type DesktopControlOperationV1,
   type DesktopOperationMapV1,
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
@@ -27,6 +29,8 @@ import {
   controlPreviewRequestSchemaV1,
   controlRecoveriesQuerySchemaV1,
   projectSnapshotSchemaV2,
+  createDirectControlInvoker,
+  type ControlInvoker,
 } from "@daw-browser/control"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
@@ -34,10 +38,8 @@ import { resetAudioEngine } from "~/lib/audio-engine-singleton"
 import { getLocalProject } from "~/lib/local-project-db"
 import { serializeJsonValue } from "~/lib/json"
 import { listLocalExternalProcessors } from "~/lib/external-plugins"
-import {
-  createLocalControlService,
-  LocalControlServiceError,
-} from "~/lib/local-control/local-control-service"
+import { createLocalControlHandlers } from "~/lib/local-control/local-control-handlers"
+import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import type { ImportSummary } from "~/hooks/useTimelineClipImport"
@@ -56,7 +58,7 @@ type HostRequest = {
   operation: DesktopOperationV1
   input: unknown
   signal: AbortSignal
-  actorSubject?: string
+  trustedActorSubject?: string
 }
 
 type HostResponse = {
@@ -116,6 +118,30 @@ const mountedProjectError = (request: HostRequest, mountedProjectId: string) => 
     ? mountedProjectRequired()
     : mountedProjectMismatch()
 )
+const invokeCanonicalControl = (
+  invoker: ControlInvoker<"desktop">,
+  operation: DesktopControlOperationV1,
+  input: DesktopJsonValue,
+) => {
+  switch (operation) {
+    case "control.capabilities":
+      return invoker.invoke(operation, {})
+    case "control.snapshot":
+      return invoker.invoke(operation, {
+        projectId: desktopRendererControlSnapshotInputSchemaV1.parse(input).projectId,
+      })
+    case "control.preview":
+      return invoker.invoke(operation, controlPreviewRequestSchemaV1.parse(input))
+    case "control.commit":
+      return invoker.invoke(operation, controlCommitRequestSchemaV1.parse(input))
+    case "control.requestApproval":
+      return invoker.invoke(operation, controlApprovalRequestSchemaV1.parse(input))
+    case "control.history":
+      return invoker.invoke(operation, controlHistoryQuerySchemaV1.parse(input))
+    case "control.recoveries":
+      return invoker.invoke(operation, controlRecoveriesQuerySchemaV1.parse(input))
+  }
+}
 const pageValues = <Value>(values: readonly Value[], cursor: string | undefined, limit: number) => {
   const start = cursor === undefined ? 0 : Number(cursor)
   const page = values.slice(start, start + limit)
@@ -273,8 +299,8 @@ export const createAttachedHostController = (input: {
       && input.mountedProjectGeneration() === mountedGeneration
       && project !== undefined
   }
-  const control = async (request_: HostRequest): Promise<HostResponse> => {
-    if (!request_.actorSubject) {
+  const control = async (request_: HostRequest & { operation: DesktopControlOperationV1 }): Promise<HostResponse> => {
+    if (!request_.trustedActorSubject) {
       return {
         id: request_.id,
         error: { version: "v1", code: "authorization", message: "A trusted local control actor is required." },
@@ -291,8 +317,9 @@ export const createAttachedHostController = (input: {
     if (!projectMatchesMount(request_, mountedProjectId)) return { id: request_.id, error: mountedProjectMismatch() }
     try {
       const requestInput = desktopJsonValueSchema.parse(request_.input)
-      const service = createLocalControlService({
-        actor: { subject: request_.actorSubject, issuer: "daw-browser-desktop-host" },
+      const handlers = createLocalControlHandlers({
+        projectId: mountedProjectId,
+        actor: { subject: request_.trustedActorSubject, issuer: "daw-browser-desktop-host" },
         assertAvailable: () => {
           if (
             request_.signal.aborted
@@ -303,23 +330,17 @@ export const createAttachedHostController = (input: {
           ) throw new ControlRequestUnavailableError()
         },
       })
-      const result = request_.operation === "control.capabilities"
-        ? desktopRendererControlCapabilitiesInputSchemaV1.parse(requestInput).readVersion === "v2"
-          ? service.capabilitiesV2()
-          : service.capabilities()
-        : request_.operation === "control.snapshot"
-          ? desktopRendererControlSnapshotInputSchemaV1.parse(requestInput).readVersion === "v2"
-            ? await service.snapshotV2({ projectId: mountedProjectId })
-            : await service.snapshot(desktopRendererControlSnapshotInputSchemaV1.parse(requestInput))
-        : request_.operation === "control.preview"
-            ? await service.preview(requestInput)
-            : request_.operation === "control.commit"
-              ? await service.commit(requestInput)
-              : request_.operation === "control.requestApproval"
-                ? await service.requestApproval(requestInput)
-                : request_.operation === "control.history"
-                  ? await service.history(requestInput)
-                  : await service.recoveries(requestInput)
+      const invoker = createDirectControlInvoker({
+        handlers,
+        context: {
+          target: "desktop",
+          principal: {
+            subject: request_.trustedActorSubject,
+            issuer: "daw-browser-desktop-host",
+          },
+        },
+      })
+      const result = await invokeCanonicalControl(invoker, request_.operation, requestInput)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
@@ -332,7 +353,7 @@ export const createAttachedHostController = (input: {
               .filter((change) => change.kind === "external-plugin.parameters.set")
               .map((change) => change.actionIndex))
             if (changedActionIndexes.size > 0) {
-              const postCommitSnapshot = projectSnapshotSchemaV2.parse(await service.snapshotV2({ projectId: mountedProjectId }))
+              const postCommitSnapshot = projectSnapshotSchemaV2.parse(await invoker.invoke("control.snapshot", { projectId: mountedProjectId }))
               const processorsById = new Map(postCommitSnapshot.processors.map((processor) => [processor.id, processor]))
               if (await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
                 const deliveries: Promise<boolean>[] = []
@@ -469,7 +490,9 @@ export const createAttachedHostController = (input: {
           ),
         }
       }
-      if (isDesktopControlOperation(request_.operation)) return control(request_)
+      if (isDesktopControlOperation(request_.operation)) {
+        return control({ ...request_, operation: request_.operation })
+      }
       if (request_.operation === "host.status") result = status()
       else if (request_.operation === "host.import.audio") {
         const parsedInput = desktopRendererImportInputSchemaV1.safeParse(request_.input)

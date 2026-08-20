@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { localControlCapabilitiesV1, localControlCapabilitiesV2 } from "@daw-browser/control"
+import {
+  canonicalControlCapabilitiesSchema,
+  canonicalProjectSnapshotSchema,
+  controlOperationCatalog,
+  localControlCapabilitiesV1,
+  localControlCapabilitiesV2,
+} from "@daw-browser/control"
 import {
   desktopControlOperationSchemaV1,
+  desktopControlOperationDescriptorsV1,
   desktopHelloSchemaV2,
   desktopHelloAckSchemaV2,
   desktopHelloSchemaV1,
@@ -75,6 +82,24 @@ const planningResult = {
 }
 
 describe("desktop protocol v1", () => {
+  test("projects every represented canonical catalog schema through the legacy desktop adapter", () => {
+    for (const operation of desktopControlOperationSchemaV1.options) {
+      const desktopDescriptor = desktopControlOperationDescriptorsV1[operation]
+      const canonicalDescriptor = controlOperationCatalog[operation]
+      expect(desktopDescriptor.canonicalInput).toBe(canonicalDescriptor.input)
+      expect(desktopDescriptor.canonicalInput.safeParse({}).success).toBe(
+        canonicalDescriptor.input.safeParse({}).success,
+      )
+      expect(desktopDescriptor.canonicalOutput).toBe(
+        operation === "control.capabilities"
+          ? canonicalControlCapabilitiesSchema
+          : operation === "control.snapshot"
+            ? canonicalProjectSnapshotSchema
+            : canonicalDescriptor.output,
+      )
+    }
+  })
+
   test("accepts only declared operations and bounded correlation IDs", () => {
     expect(desktopRequestSchemaV1.safeParse({ version: "v1", type: "request", id: "request-1", operation: "transport.seek", input: { seconds: 1 } }).success).toBe(true)
     expect(desktopRequestSchemaV1.safeParse({ version: "v1", type: "request", id: "request-1", operation: "transport.seek", input: { seconds: 86_401 } }).success).toBe(false)

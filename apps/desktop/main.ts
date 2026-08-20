@@ -450,14 +450,21 @@ const rejectRendererRequest = (id: string, message: string) => {
   pending.reject(new Error(message))
 }
 
-const sendToRenderer = (request: DesktopRendererRequestV1 | DesktopTrustedRendererRequestV1) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
+const sendToRenderer = (
+  request: DesktopRendererRequestV1 | DesktopTrustedRendererRequestV1,
+  trustedActorSubject?: string,
+) => new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((resolve, reject) => {
   if (rendererPending.has(request.id)) {
     reject(new Error("Duplicate request ID."))
     return
   }
   const expectedGeneration = generation
   rendererPending.set(request.id, { generation: expectedGeneration, resolve, reject })
-  if (!sendRendererMessage(incomingChannel, { generation: expectedGeneration, frame: request })) {
+  if (!sendRendererMessage(incomingChannel, {
+    generation: expectedGeneration,
+    frame: request,
+    trustedActorSubject,
+  })) {
     rendererPending.delete(request.id)
     reject(new Error("Renderer unavailable."))
   }
@@ -473,7 +480,7 @@ const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareT
   let deadlineElapsed = false
   try {
     return await Promise.race([
-      sendToRenderer(parsed),
+      sendToRenderer(parsed, actorSubject),
       new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((_resolve, reject) => {
         timeout = setTimeout(() => {
           deadlineElapsed = true

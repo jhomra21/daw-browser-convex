@@ -78,7 +78,7 @@ type DesktopRequest = {
   operation: DesktopOperationV1
   input: unknown
   signal: AbortSignal
-  actorSubject?: string
+  trustedActorSubject?: string
 }
 
 type DesktopResponse = {

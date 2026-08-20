@@ -4,7 +4,7 @@ export type PreloadHostRequest = {
   id: string
   operation: DesktopOperationV1
   input: unknown
-  actorSubject?: string
+  trustedActorSubject?: string
   signal: AbortSignal
 }
 
@@ -18,6 +18,7 @@ type QueuedRequest = {
   generation: number
   request: Exclude<DesktopTrustedRendererRequestV1, { operation: "lifecycle.prepareToClose" }>
   deadlineAt: number
+  trustedActorSubject?: string
 }
 
 type RequestQueueOptions = {
@@ -92,7 +93,7 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
       id: entry.request.id,
       operation: entry.request.operation,
       input: entry.request.input,
-      actorSubject: "actorSubject" in entry.request ? entry.request.actorSubject : undefined,
+      trustedActorSubject: entry.trustedActorSubject,
       signal: controller.signal,
     }).then(
       (response) => {
@@ -107,13 +108,18 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
   }
 
   return {
-    dispatch(generation: number, request: Exclude<DesktopTrustedRendererRequestV1, { operation: "lifecycle.prepareToClose" }>) {
+    dispatch(
+      generation: number,
+      request: Exclude<DesktopTrustedRendererRequestV1, { operation: "lifecycle.prepareToClose" }>,
+      trustedActorSubject?: string,
+    ) {
       if (generation < currentGeneration) return
       advance(generation)
       dispatch({
         generation,
         request,
         deadlineAt: request.deadlineMs === undefined ? Number.POSITIVE_INFINITY : now() + request.deadlineMs,
+        trustedActorSubject,
       })
     },
     reset(nextGeneration: number) {

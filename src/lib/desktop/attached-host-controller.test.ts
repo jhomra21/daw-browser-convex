@@ -179,7 +179,7 @@ const requestControl = (
   operation,
   input,
   signal,
-  actorSubject,
+  trustedActorSubject: actorSubject,
 })
 
 const registrations = new Set<() => void>()

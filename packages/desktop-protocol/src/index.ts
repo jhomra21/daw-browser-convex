@@ -1,11 +1,16 @@
 import { z } from "zod"
 import {
-  controlApprovalRequestSchemaV1, controlApprovalResultSchemaV1, controlCapabilitiesQuerySchemaV1,
-  controlCapabilitiesSchemaV1, controlCommitRequestSchemaV1, controlCommitResultSchemaV1,
+  controlApprovalRequestSchemaV1, type controlApprovalResultSchemaV1, controlCapabilitiesQuerySchemaV1,
+  controlCapabilitiesSchemaV1, controlCommitRequestSchemaV1,
+  type controlCommitResultSchemaV1,
   controlCapabilitiesQuerySchemaV2, controlCapabilitiesSchemaV2,
-  controlErrorSchemaV1, controlHistoryQuerySchemaV1, controlHistoryResultSchemaV1,
-  controlPreviewRequestSchemaV1, controlPreviewResultSchemaV1, controlRecoveriesQuerySchemaV1,
-  controlRecoveriesResultSchemaV1, controlSnapshotQuerySchemaV1,
+  controlErrorSchemaV1, controlHistoryQuerySchemaV1, type controlHistoryResultSchemaV1,
+  controlPreviewRequestSchemaV1, type controlPreviewResultSchemaV1, controlRecoveriesQuerySchemaV1,
+  type controlRecoveriesResultSchemaV1,
+  controlSnapshotQuerySchemaV1,
+  canonicalControlCapabilitiesSchema, canonicalProjectSnapshotSchema,
+  getControlOperationDescriptor, projectCanonicalControlCapabilitiesV1,
+  projectCanonicalProjectSnapshotV1,
   projectIdSchemaV1, projectSnapshotSchemaV1, projectSnapshotSchemaV2,
   type ControlErrorV1,
 } from "@daw-browser/control"
@@ -604,36 +609,46 @@ const nonControlResultSchemas = {
   "diagnostics.snapshot": desktopDiagnosticsSchemaV1,
 } satisfies Partial<Record<DesktopOperationV1, z.ZodType>>
 
+const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {
+  const descriptor = getControlOperationDescriptor(operation)
+  if (operation === "control.capabilities") {
+    return {
+      input: desktopControlCapabilitiesInputSchemaV1,
+      output: controlCapabilitiesSchemaV1,
+      canonicalInput: descriptor.input,
+      canonicalOutput: canonicalControlCapabilitiesSchema,
+    }
+  }
+  if (operation === "control.snapshot") {
+    return {
+      input: desktopControlSnapshotInputSchemaV1,
+      output: projectSnapshotSchemaV1,
+      canonicalInput: descriptor.input,
+      canonicalOutput: canonicalProjectSnapshotSchema,
+    }
+  }
+  return {
+    input: descriptor.input,
+    output: descriptor.output,
+    canonicalInput: descriptor.input,
+    canonicalOutput: descriptor.output,
+  }
+}
+
 export const desktopControlOperationDescriptorsV1 = {
-  "control.capabilities": {
-    input: desktopControlCapabilitiesInputSchemaV1,
-    output: controlCapabilitiesSchemaV1,
-  },
-  "control.snapshot": {
-    input: desktopControlSnapshotInputSchemaV1,
-    output: projectSnapshotSchemaV1,
-  },
-  "control.preview": {
-    input: controlPreviewRequestSchemaV1,
-    output: controlPreviewResultSchemaV1,
-  },
-  "control.commit": {
-    input: controlCommitRequestSchemaV1,
-    output: controlCommitResultSchemaV1,
-  },
-  "control.requestApproval": {
-    input: controlApprovalRequestSchemaV1,
-    output: controlApprovalResultSchemaV1,
-  },
-  "control.history": {
-    input: controlHistoryQuerySchemaV1,
-    output: controlHistoryResultSchemaV1,
-  },
-  "control.recoveries": {
-    input: controlRecoveriesQuerySchemaV1,
-    output: controlRecoveriesResultSchemaV1,
-  },
-} satisfies Record<DesktopControlOperationV1, { input: z.ZodType; output: z.ZodType }>
+  "control.capabilities": desktopControlDescriptor("control.capabilities"),
+  "control.snapshot": desktopControlDescriptor("control.snapshot"),
+  "control.preview": desktopControlDescriptor("control.preview"),
+  "control.commit": desktopControlDescriptor("control.commit"),
+  "control.requestApproval": desktopControlDescriptor("control.requestApproval"),
+  "control.history": desktopControlDescriptor("control.history"),
+  "control.recoveries": desktopControlDescriptor("control.recoveries"),
+} satisfies Record<DesktopControlOperationV1, {
+  input: z.ZodType
+  output: z.ZodType
+  canonicalInput: z.ZodType
+  canonicalOutput: z.ZodType
+}>
 
 export const isDesktopControlOperation = (operation: DesktopOperationV1): operation is DesktopControlOperationV1 => (
   Object.hasOwn(desktopControlOperationDescriptorsV1, operation)
@@ -660,6 +675,18 @@ export const parseDesktopResult = (
   }
   if (protocolVersion === desktopProtocolVersionV2 && operation === "control.snapshot" && desktopControlSnapshotInputSchemaV2.safeParse(input).success) {
     return desktopJsonValueSchema.parse(projectSnapshotSchemaV2.parse(value))
+  }
+  if (operation === "control.capabilities") {
+    const legacy = controlCapabilitiesSchemaV1.safeParse(value)
+    return desktopJsonValueSchema.parse(legacy.success
+      ? legacy.data
+      : projectCanonicalControlCapabilitiesV1(canonicalControlCapabilitiesSchema.parse(value)))
+  }
+  if (operation === "control.snapshot") {
+    const legacy = projectSnapshotSchemaV1.safeParse(value)
+    return desktopJsonValueSchema.parse(legacy.success
+      ? legacy.data
+      : projectCanonicalProjectSnapshotV1(canonicalProjectSnapshotSchema.parse(value)))
   }
   const schema = isDesktopControlOperation(operation)
     ? desktopControlOperationDescriptorsV1[operation].output

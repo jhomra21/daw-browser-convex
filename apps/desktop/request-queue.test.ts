@@ -29,10 +29,31 @@ describe("desktop preload request queue", () => {
       operation: "control.capabilities",
       input: {},
       actorSubject,
-    })
+    }, actorSubject)
     await flushPromises()
 
-    expect(received?.actorSubject).toBe(actorSubject)
+    expect(received?.trustedActorSubject).toBe(actorSubject)
+  })
+
+  test("does not derive trusted control identity from the renderer request body", async () => {
+    let received: PreloadHostRequest | undefined
+    const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
+    queue.setRequestHandler(async (request) => {
+      received = request
+      return { id: request.id, result: {} }
+    })
+
+    queue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "control-override",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+    }, "local:223e4567-e89b-42d3-a456-426614174000")
+    await flushPromises()
+
+    expect(received?.trustedActorSubject).toBe("local:223e4567-e89b-42d3-a456-426614174000")
   })
 
   test("ignores dispatches from an older generation", () => {

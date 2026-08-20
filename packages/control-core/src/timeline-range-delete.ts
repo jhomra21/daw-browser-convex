@@ -4,7 +4,7 @@ import {
 } from '@daw-browser/timeline-core/clip-fades'
 import { calculateAudioTimelineTrimOffsets } from '@daw-browser/timeline-core/audio-timeline-trim'
 import { valueAtAutomationTime } from '@daw-browser/shared'
-import type { ProjectSnapshotV2 } from './snapshots'
+import type { ProjectSnapshotV2 } from '@daw-browser/control'
 
 type SnapshotClip = ProjectSnapshotV2['clips'][number]
 type SnapshotAutomation = ProjectSnapshotV2['automation'][number]

@@ -1,7 +1,6 @@
 import {
   controlCommitResultSchemaV1,
   controlApprovalResultSchemaV1,
-  controlApprovalRequirementV1,
   controlErrorSchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryResultSchemaV1,
@@ -18,18 +17,21 @@ import {
   parseControlApprovalRequestV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
-  planControlRequestV1,
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
   recoveryCapturedPayloadSchemaV2,
-  type ControlPlanV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
   type RecoveryPayload,
   type ResolvedRefV1,
 } from "@daw-browser/control";
+import {
+  controlApprovalRequirementV1,
+  mergeRecoveryTrackOrderV1,
+  planControlRequestV1,
+  type ControlPlanV1,
+} from "@daw-browser/control-core";
 import { isJsonObject, type JsonValue } from "@daw-browser/shared";
-import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
 import { z } from "zod";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";

@@ -28,19 +28,17 @@ import {
 } from '@daw-browser/shared'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { ControlMidiResolutionError, resolveControlMidiActionV1 } from './midi'
-import { collectDeletedTrackIdsV1, collectTrackDeletionAffectedIdsV1 } from './trackDeletion'
-import { recoveryLimitsV1 } from './recovery-limits'
-import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
-import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
+import { recoveryLimitsV1 } from '@daw-browser/control/recovery-limits'
 import type {
   ControlActionV1 as CanonicalControlActionV1,
-} from './actions'
-import type {
   ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
   ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
-} from './snapshots'
-import type { RecoveryPayload } from './recovery'
+  RecoveryPayload,
+} from '@daw-browser/control'
+import { ControlMidiResolutionError, resolveControlMidiActionV1 } from './midi'
+import { collectDeletedTrackIdsV1, collectTrackDeletionAffectedIdsV1 } from './trackDeletion'
+import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
+import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
 
 type ContextualRefV1 = { source: 'persisted'; id: string } | { source: 'client'; clientRef: string }
 type TrackRefV1 = ContextualRefV1

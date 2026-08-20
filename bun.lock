@@ -8,6 +8,7 @@
         "@better-auth/oauth-provider": "1.6.23",
         "@daw-browser/audio-engine": "workspace:*",
         "@daw-browser/control": "workspace:*",
+        "@daw-browser/control-core": "workspace:*",
         "@daw-browser/control-mcp": "workspace:*",
         "@daw-browser/desktop-protocol": "workspace:*",
         "@daw-browser/external-plugins": "workspace:*",
@@ -112,7 +113,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@daw-browser/shared": "workspace:*",
-        "@daw-browser/timeline-core": "workspace:*",
         "@noble/hashes": "^2.0.1",
         "zod": "^4.3.6",
       },
@@ -130,6 +130,17 @@
         "@daw-browser/control-sdk": "workspace:*",
         "@daw-browser/desktop-protocol": "workspace:*",
         "@modelcontextprotocol/sdk": "1.29.0",
+      },
+    },
+    "packages/control-core": {
+      "name": "@daw-browser/control-core",
+      "version": "0.0.0",
+      "dependencies": {
+        "@daw-browser/control": "workspace:*",
+        "@daw-browser/shared": "workspace:*",
+        "@daw-browser/timeline-core": "workspace:*",
+        "@noble/hashes": "^2.0.1",
+        "zod": "^4.3.6",
       },
     },
     "packages/control-mcp": {
@@ -440,6 +451,8 @@
     "@daw-browser/control": ["@daw-browser/control@workspace:packages/control"],
 
     "@daw-browser/control-cli": ["@daw-browser/control-cli@workspace:packages/control-cli"],
+
+    "@daw-browser/control-core": ["@daw-browser/control-core@workspace:packages/control-core"],
 
     "@daw-browser/control-mcp": ["@daw-browser/control-mcp@workspace:packages/control-mcp"],
 

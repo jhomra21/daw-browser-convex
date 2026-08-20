@@ -1,5 +1,4 @@
 import {
-  buildTimelineRangeDeletePatchV1,
   canonicalCapturedRecoveryPayloadV2,
   hashRecoveryPayloadV1,
   isCloudRecoveryAssetV1,
@@ -12,10 +11,13 @@ import {
   type ControlActionV1,
   type ContextualRefV1,
   type RecoveryPayload,
-  type TimelineRangeDeletePatchV1,
-  collectDeletedTrackIdsV1,
 } from "@daw-browser/control";
-import { mergeRecoveryTrackOrderV1 } from "@daw-browser/control/recovery-track-order";
+import {
+  buildTimelineRangeDeletePatchV1,
+  collectDeletedTrackIdsV1,
+  mergeRecoveryTrackOrderV1,
+} from "@daw-browser/control-core";
+import type { TimelineRangeDeletePatchV1 } from "@daw-browser/control-core";
 import {
   automationTargetKey,
   granularAutomationKey,

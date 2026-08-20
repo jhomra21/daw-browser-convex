@@ -1,11 +1,13 @@
 import {
   assetSnapshotSchemaV1,
-  projectControlSnapshotV1,
-  projectControlSnapshotV2,
   stableIdSchemaV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
 } from '@daw-browser/control'
+import {
+  projectControlSnapshotV1,
+  projectControlSnapshotV2,
+} from '@daw-browser/control-core'
 import {
   isJsonBoolean,
   isJsonNumber,

@@ -3,13 +3,15 @@ import {
   hashCanonicalJsonSyncV1,
   findDuplicateRecoveryActionIndexV1,
   parseControlPreviewRequestV1,
-  planControlRequestV1,
   projectSnapshotSchemaV2,
-  rebaseRecoveryAutomationParameterIdV1,
   type ControlActionV1,
-  type ControlPlanV1,
   type RecoveryPayload,
 } from '@daw-browser/control'
+import {
+  planControlRequestV1,
+  rebaseRecoveryAutomationParameterIdV1,
+  type ControlPlanV1,
+} from '@daw-browser/control-core'
 import {
   automationTargetKey,
   createAudioEffectInstanceId,

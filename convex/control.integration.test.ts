@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { canonicalRecoveryPayloadV1, controlCapabilitiesV1, hashRecoveryPayloadSyncV1, parseCapturedRecoveryPayload, parseControlPreviewRequestV1, parseRecoveryPayload, planControlRequestV1, projectSnapshotSchemaV1, type ControlActionV1 } from "@daw-browser/control";
+import { canonicalRecoveryPayloadV1, controlCapabilitiesV1, hashRecoveryPayloadSyncV1, parseCapturedRecoveryPayload, parseControlPreviewRequestV1, parseRecoveryPayload, projectSnapshotSchemaV1, type ControlActionV1 } from "@daw-browser/control";
+import { planControlRequestV1 } from "@daw-browser/control-core";
 import {
   automationTargetKey,
   createDefaultSynthParams,

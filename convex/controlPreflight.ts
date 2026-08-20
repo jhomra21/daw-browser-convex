@@ -1,4 +1,5 @@
-import { collectTrackDeletionAffectedIdsV1, type ControlActionV1 } from "@daw-browser/control";
+import type { ControlActionV1 } from "@daw-browser/control";
+import { collectTrackDeletionAffectedIdsV1 } from "@daw-browser/control-core";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectRole } from "./projectAccess";

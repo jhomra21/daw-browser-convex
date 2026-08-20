@@ -81,3 +81,33 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   operation catalog or control-core extraction was started.
 - Evidence: package typecheck plus focused index/planner tests; canonical
   request serialization and SHA-256 digest fixtures remain unchanged.
+
+## Checkpoint 3 — Control semantic core extraction
+
+- Extracted pure semantic behavior into `@daw-browser/control-core`:
+  planner, projection, MIDI resolution, timeline range deletion, track
+  deletion, and recovery track ordering. Planner recovery limits remain
+  contract-owned in `@daw-browser/control`.
+- `@daw-browser/control-core` depends on `@daw-browser/control`,
+  `@daw-browser/shared`, and `@daw-browser/timeline-core`; `@daw-browser/control`
+  does not depend on core. Contract schemas, serialization, digests, durable
+  recovery readers, and version constants remain in `@daw-browser/control`.
+- Migrated local-control and Convex planner, projection, MIDI, deletion, and
+  recovery consumers to `@daw-browser/control-core`. The repository has no
+  remaining semantic consumer import from `@daw-browser/control`.
+- Semantic root exports were intentionally removed from `@daw-browser/control`.
+  Re-exporting them would create the prohibited `control -> control-core ->
+  control` cycle. This is category A source-only generation/migration work, not
+  proof of external compatibility safety; all repository consumers were
+  migrated, while external-consumer evidence remains unresolved.
+- The former `@daw-browser/control/recovery-track-order` subpath was removed;
+  the canonical semantic subpath is now
+  `@daw-browser/control-core/recovery-track-order`.
+- Split the former mixed test ownership: contract/schema/serialization tests
+  remain in `packages/control/src/index.test.ts`, while semantic MIDI,
+  projection, and policy tests are in
+  `packages/control-core/src/semantic.test.ts`; planner tests remain in
+  `packages/control-core/src/planner.test.ts`. Fixtures and expected outputs
+  remain unchanged.
+- Evidence: focused control/core tests passed with contract tests independent
+  from core; package checks passed and the application TypeScript graph passed.

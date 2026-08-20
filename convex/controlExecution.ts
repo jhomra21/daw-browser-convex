@@ -1,4 +1,5 @@
-import { collectDeletedTrackIdsV1, resolveControlMidiActionV1, type ControlPlanV1 } from "@daw-browser/control";
+import type { ControlPlanV1 } from "@daw-browser/control-core";
+import { collectDeletedTrackIdsV1, resolveControlMidiActionV1 } from "@daw-browser/control-core";
 import {
   createAudioEffectInstanceId,
   createDefaultSynthParams,

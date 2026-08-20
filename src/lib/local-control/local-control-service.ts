@@ -1,5 +1,4 @@
 import {
-  controlApprovalRequirementV1,
   controlApprovalResultSchemaV1,
   controlCommitResultSchemaV1,
   controlErrorSchemaV1,
@@ -16,14 +15,17 @@ import {
   parseControlPreviewRequestV1,
   parseControlRecoveriesQueryV1,
   parseControlSnapshotQueryV1,
-  planControlRequestV1,
   projectSnapshotSchemaV1,
   projectSnapshotSchemaV2,
   type ControlErrorV1,
-  type ControlPlanV1,
   type ProjectSnapshotV2,
   type RecoveryPayload,
 } from '@daw-browser/control'
+import {
+  controlApprovalRequirementV1,
+  planControlRequestV1,
+  type ControlPlanV1,
+} from '@daw-browser/control-core'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { isJsonString, type JsonValue } from '@daw-browser/shared'
 import { z } from 'zod'

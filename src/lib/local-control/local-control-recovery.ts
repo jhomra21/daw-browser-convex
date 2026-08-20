@@ -1,5 +1,4 @@
 import {
-  buildTimelineRangeDeletePatchV1,
   canonicalCapturedRecoveryPayloadV2,
   hashRecoveryPayloadSyncV1,
   recoveryCapturedPayloadSchemaV2,
@@ -10,6 +9,9 @@ import {
   type ProjectSnapshotV2,
   type CapturedRecoveryPayloadV2,
 } from '@daw-browser/control'
+import {
+  buildTimelineRangeDeletePatchV1,
+} from '@daw-browser/control-core'
 import {
   automationTargetKey,
   isJsonObject,

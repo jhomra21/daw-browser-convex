@@ -13,7 +13,7 @@ import {
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
   type RecoveryPayload,
-} from "./index";
+} from "@daw-browser/control";
 
 const snapshot = (): any => ({
   version: "v1",

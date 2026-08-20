@@ -376,3 +376,21 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   existing layers.
 - Evidence: CLI, MCP, SDK compatibility/equivalence suites pass, along with
   all workspace package checks.
+
+## Checkpoint 15 — Capability-scoped extension project actions
+
+- Added `createProjectActionFacade` in `src/lib/extensions/project-actions.ts`.
+  It accepts a canonical client, an explicit action-kind grant, explicit
+  preview/approval/commit grants, and an abort/generation lifecycle. It
+  validates every request, denies ungranted kinds and operations, checks
+  lifecycle freshness before and after each call, and exposes only the three
+  narrow project-action methods.
+- The facade has no raw store/service access, no arbitrary invoker exposure,
+  no secret access, and no external package API. It delegates to the existing
+  canonical client exactly once per operation.
+- A focused trusted/test fixture proves project rename preview, approval, and
+  idempotent commit request boundaries. Tests also cover ungranted actions,
+  abort handling, and lifecycle/error propagation. No production mutation was
+  migrated: the existing local control service remains the durable mutation
+  authority and no existing extension command was suitable for migration
+  without expanding UI or introducing ambient project authority.

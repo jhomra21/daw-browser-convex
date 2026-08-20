@@ -161,3 +161,21 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   and provider-specific missing-project authorization behavior.
 - No REST, SDK, CLI, MCP, desktop protocol, or extension adapter migration was
   performed. Existing routes and durable authorities remain owners.
+
+## Checkpoint 6 — App-local extension kernel
+
+- Added the framework-neutral `src/lib/extensions/` kernel with validated
+  static command/shortcut declarations, staged atomic activation, private
+  provider state, immutable snapshots, bounded diagnostics, abort signals, and
+  deterministic reverse cleanup.
+- Runtime command binding is limited to declarations. Activation failures,
+  duplicate IDs, missing bindings, shortcut conflicts, stale generations, and
+  cleanup failures are isolated without publishing partial registries.
+- Stable contribution IDs support explicit first-level command replacement only
+  when the target opts into a matching contract. Replacement deactivation
+  restores the prior provider automatically; nested/cyclic replacement is
+  rejected.
+- Focused evidence is in `src/lib/extensions/extension-kernel.test.ts`.
+- Deferred surfaces: browser toggle composition, UI/menu projection,
+  persistence, project control facade, external packages, capabilities/grants,
+  manifests/discovery, and agent APIs.

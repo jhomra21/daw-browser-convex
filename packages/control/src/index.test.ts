@@ -9,6 +9,14 @@ import {
   controlCapabilitiesV2,
   controlCapabilitiesSchemaV1,
   controlCapabilitiesSchemaV2,
+  controlSnapshotQuerySchemaV1,
+  canonicalControlApiVersion,
+  canonicalControlLimits,
+  canonicalControlCapabilities,
+  canonicalControlCapabilitiesSchema,
+  canonicalControlCapabilitiesQuerySchema,
+  canonicalControlSnapshotQuerySchema,
+  canonicalProjectSnapshotSchema,
   controlCommitResultSchemaV1,
   controlCommitRequestSchemaV1,
   controlHistoryEntrySchemaV1,
@@ -26,8 +34,10 @@ import {
   parseControlHistoryQueryV1,
   parseControlPreviewRequestV1,
   parseControlSnapshotQueryV1,
+  parseCanonicalControlSnapshotQuery,
   projectControlSnapshotV1,
   projectSnapshotSchemaV1,
+  projectSnapshotSchemaV2,
   hashRecoveryPayloadSyncV1,
   hashRecoveryPayloadV1,
   canonicalRecoveryPayloadV1,
@@ -1232,6 +1242,34 @@ test('keeps V1 capabilities strict and exposes additive MIDI limits in V2', () =
   expect(parsed.limits.maxMidiPerformanceEventsPerClip).toBe(controlLimitsV2.maxMidiPerformanceEventsPerClip)
   expect(parsed.limits.maxMidiEventsPerArray).toBe(controlLimitsV2.maxMidiEventsPerArray)
   expect(parsed.limits.maxMidiMappingsPerClip).toBe(controlLimitsV2.maxMidiMappingsPerClip)
+})
+
+test('exposes canonical aliases over the existing high-fidelity V2 contracts', () => {
+  expect(canonicalControlApiVersion).toBe('v2')
+  expect(canonicalControlLimits).toBe(controlLimitsV2)
+  expect(canonicalControlCapabilities).toBe(controlCapabilitiesV2)
+  expect(canonicalControlCapabilitiesSchema).toBe(controlCapabilitiesSchemaV2)
+  expect(canonicalControlCapabilitiesQuerySchema.parse({})).toEqual({})
+  expect(canonicalControlSnapshotQuerySchema).toBe(controlSnapshotQuerySchemaV1)
+  expect(parseCanonicalControlSnapshotQuery({ projectId: 'project-1' })).toEqual(
+    parseControlSnapshotQueryV1({ projectId: 'project-1' }),
+  )
+
+  const parsedV2 = projectSnapshotSchemaV2.parse({ ...snapshot, version: 'v2' })
+  expect(canonicalProjectSnapshotSchema).toBe(projectSnapshotSchemaV2)
+  expect(canonicalProjectSnapshotSchema.parse({ ...snapshot, version: 'v2' })).toEqual(parsedV2)
+})
+
+test('keeps the canonical request serialization and digest fixture unchanged', () => {
+  const request = parseControlCommitRequestV1(commit([{
+    kind: 'track.rename',
+    track: persisted('track-1'),
+    name: 'Bass',
+  }]))
+  expect(controlRequestDigestInputV1(request)).toBe(
+    '{"actions":[{"kind":"track.rename","name":"Bass","track":{"id":"track-1","source":"persisted"}}],"expectedRevision":0,"projectId":"project-1","version":"v1"}',
+  )
+  expect(controlRequestDigestSyncV1(request)).toBe('792d0816df2a942166689ec8b3ce745ce2c6305bd072e86e2e822dc0e48bad21')
 })
 
 test('rejects duplicate MIDI event and mapping IDs while permitting legacy mapping envelopes', () => {

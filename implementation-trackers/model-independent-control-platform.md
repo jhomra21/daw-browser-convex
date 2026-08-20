@@ -22,7 +22,7 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 | Surface | Surface kind/status | Current owner | Intended canonical owner | Compatibility category | Compatibility requirement / evidence | Migration status | Parity tests | Final disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Generated API and contract source surfaces | source generation; external consumer evidence unresolved | `convex/_generated`, package source, schema definitions | No canonical owner selected; generation remains source-owned | A | Generated output is not itself a compatibility entry point. Regeneration must preserve the checked-in source contracts. | No deletion or generator migration in Checkpoint 1 | package/API/Convex type checks | Preserve generated sources; verify deployment consumers before changing generators |
-| `@daw-browser/control` V1/V2 snapshots, requests, approvals, commits, history, recoveries | versioned package compatibility entry point | `packages/control/src` | Intended schema/parser owner not yet canonicalized | B | V1 remains parseable; V2 snapshot and local control capability are current. Package tests cover canonical JSON, planner, snapshots, and recovery payloads. | Baseline established; no deletion | `packages/control/src/index.test.ts`, local-control service/execution tests | Keep V1 compatibility; canonicalize early before later deletion |
+| `@daw-browser/control` V1/V2 snapshots, requests, approvals, commits, history, recoveries | versioned package compatibility entry point | `packages/control/src/{actions,primitives,recovery,serialization,snapshots,versions}.ts` with root barrel | Focused contract modules; root barrel remains the compatibility entry point | B | V1 remains parseable; V2 snapshot and local control capability remain current. Canonical aliases point to the existing V2 high-fidelity capability/snapshot/query representations. Package tests cover canonical JSON, planner, snapshots, and recovery payloads. | Checkpoint 2 complete; no deletion or durable rewrite | `packages/control/src/index.test.ts`, local-control service/execution tests | Keep V1/V2 exports and durable markers; canonicalize through identity-preserving aliases |
 | `@daw-browser/control-sdk` REST client | versioned REST compatibility entry point | `packages/control-sdk/src/index.ts` | `@daw-browser/control-sdk`; canonical ownership not yet proven externally | B | `/api/control/{v1,v2}` URL construction, bearer transport, response/error parsing, and origin validation are tested. | External consumer evidence unresolved | `packages/control-sdk/src/index.test.ts` | Keep entry point until consumer conformance is proven |
 | `@daw-browser/control-mcp` tools | versioned MCP compatibility entry point | `packages/control-mcp/src` | MCP adapter over control schemas; external ownership unresolved | B | Tool inputs/outputs normalize through control schemas; host/cloud target selection and preview/approval/commit workflow are explicit. | External MCP consumer evidence unresolved | `packages/control-mcp/src/index.test.ts` | Keep adapter; do not duplicate control validation |
 | `@daw-browser/control-cli` REST and desktop host commands | versioned CLI compatibility entry point | `packages/control-cli/src` | CLI layer plus `control-sdk`; canonical split not yet proven | B | CLI auth, redaction, REST calls, desktop negotiation, and host errors are covered. | External installed-version evidence unresolved | `packages/control-cli/src/*.test.ts` | Keep CLI entry points pending consumer matrix |
@@ -61,3 +61,23 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Real installed desktop/CLI version matrix and third-party MCP/REST consumer
   inventory.
 - Production rollout evidence for deleting any V1 surface.
+
+## Checkpoint 2 — Modular contract ownership
+
+- The oversized control barrel was split into focused internal owners for
+  primitives/IDs, versioned limits and capabilities, actions and envelopes,
+  snapshots, recovery payloads, and canonical serialization/digests.
+- `packages/control/src/index.ts` remains the public compatibility barrel, and
+  `packages/control/src/recovery-track-order.ts` remains an independent
+  package export.
+- Canonical aliases are additive and identity-preserving:
+  `canonicalControlApiVersion`, `canonicalControlLimits`,
+  `canonicalControlCapabilitiesSchema`, `canonicalControlCapabilitiesQuerySchema`,
+  `canonicalControlCapabilities`, `canonicalLocalControlCapabilities`,
+  `canonicalControlSnapshotQuerySchema`, and
+  `canonicalProjectSnapshotSchema`, plus the corresponding canonical snapshot
+  query parser and inferred types.
+- No V1/V2 export was removed, no durable V1 data was rewritten, and no
+  operation catalog or control-core extraction was started.
+- Evidence: package typecheck plus focused index/planner tests; canonical
+  request serialization and SHA-256 digest fixtures remain unchanged.

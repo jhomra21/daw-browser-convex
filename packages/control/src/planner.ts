@@ -35,10 +35,12 @@ import { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 import { buildTimelineRangeDeletePatchV1, type TimelineRangeDeletePatchV1 } from './timeline-range-delete'
 import type {
   ControlActionV1 as CanonicalControlActionV1,
+} from './actions'
+import type {
   ProjectSnapshotV1 as CanonicalProjectSnapshotV1,
   ProjectSnapshotV2 as CanonicalProjectSnapshotV2,
-  RecoveryPayload,
-} from './index'
+} from './snapshots'
+import type { RecoveryPayload } from './recovery'
 
 type ContextualRefV1 = { source: 'persisted'; id: string } | { source: 'client'; clientRef: string }
 type TrackRefV1 = ContextualRefV1

@@ -281,3 +281,26 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
   request-queue tests, attached controller tests, local handler conformance,
   and CLI host negotiation tests pass. Remaining full-build/typecheck and
   lint evidence is recorded with the implementation run.
+
+## Checkpoint 11 — Host/runtime operation inventory and catalog
+
+- Inventory confirmed that host status, VST discovery/parameters,
+  import/export, transport, and diagnostics are desktop-runtime operations,
+  not project-control operations.
+- Added the keyed `desktopHostOperationCatalog`,
+  `desktopHostOperationSchemaV1`, `desktopHostOperationIds`,
+  `isDesktopHostOperation`, and `getDesktopHostOperationDescriptor` exports to
+  `@daw-browser/desktop-protocol`. Descriptors own the already versioned
+  request/result schemas and classify safe reads, writes, and runtime
+  operations.
+- Desktop capability advertisement now derives its host-runtime portion from
+  that catalog while preserving native-media gating and the existing control
+  operation list. No Electron paths, lifecycle internals, capability tokens,
+  or renderer details entered the project control catalog.
+- No separate runtime invoker was added: current desktop, CLI, and MCP
+  consumers remain protocol-owned and do not share a second real invoker
+  boundary. This avoids speculative duplication while giving upcoming
+  transports one keyed host metadata source.
+- Evidence: desktop operation inventory tests and the complete desktop
+  protocol schema test file pass; V1/V2 framing, cancellation, deadlines,
+  native capability security, and control compatibility remain unchanged.

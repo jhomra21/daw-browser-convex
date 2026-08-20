@@ -90,6 +90,17 @@ export const desktopOperationSchemaV1 = z.enum([
 ])
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
 
+export const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
+  "control.capabilities",
+  "control.snapshot",
+  "control.preview",
+  "control.commit",
+  "control.requestApproval",
+  "control.history",
+  "control.recoveries",
+])
+export type DesktopHostOperationV1 = z.infer<typeof desktopHostOperationSchemaV1>
+
 export const desktopControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1
 export const desktopControlSnapshotInputSchemaV1 = controlSnapshotQuerySchemaV1
 export const desktopRendererControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1.extend({
@@ -388,6 +399,109 @@ export type DesktopHostVstInstancesResultV1 = z.infer<typeof desktopHostVstInsta
 export type DesktopHostVstParametersResultV1 = z.infer<typeof desktopHostVstParametersResultSchemaV1>
 export type DesktopHostVstIdentityV1 = z.infer<typeof desktopHostVstIdentitySchemaV1>
 export type DesktopHostVstParameterV1 = z.infer<typeof desktopHostVstParameterSchemaV1>
+
+export type DesktopHostOperationDescriptorV1<Operation extends DesktopHostOperationV1 = DesktopHostOperationV1> = {
+  readonly id: Operation
+  readonly input: z.ZodType<DesktopOperationMapV1[Operation]["input"]>
+  readonly output: z.ZodType<DesktopOperationMapV1[Operation]["result"]>
+  readonly effect: "read" | "write" | "runtime"
+}
+
+export const desktopHostOperationCatalog = {
+  "host.status": {
+    id: "host.status",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopHostStatusSchemaV1,
+    effect: "read",
+  },
+  "host.vst.instances": {
+    id: "host.vst.instances",
+    input: desktopHostVstInstancesInputSchemaV1,
+    output: desktopHostVstInstancesResultSchemaV1,
+    effect: "read",
+  },
+  "host.vst.parameters": {
+    id: "host.vst.parameters",
+    input: desktopHostVstParametersInputSchemaV1,
+    output: desktopHostVstParametersResultSchemaV1,
+    effect: "read",
+  },
+  "host.import.audio": {
+    id: "host.import.audio",
+    input: desktopHostImportInputSchemaV1,
+    output: desktopHostImportResultSchemaV1,
+    effect: "write",
+  },
+  "host.export.run": {
+    id: "host.export.run",
+    input: desktopHostExportRunInputSchemaV1,
+    output: desktopHostExportRunResultSchemaV1,
+    effect: "write",
+  },
+  "host.export.status": {
+    id: "host.export.status",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopHostExportStatusSchemaV1,
+    effect: "read",
+  },
+  "host.export.cancel": {
+    id: "host.export.cancel",
+    input: desktopHostExportCancelInputSchemaV1,
+    output: desktopHostExportStatusSchemaV1,
+    effect: "write",
+  },
+  "transport.status": {
+    id: "transport.status",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopTransportStatusSchemaV1,
+    effect: "runtime",
+  },
+  "transport.play": {
+    id: "transport.play",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopTransportStatusSchemaV1,
+    effect: "runtime",
+  },
+  "transport.pause": {
+    id: "transport.pause",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopTransportStatusSchemaV1,
+    effect: "runtime",
+  },
+  "transport.stop": {
+    id: "transport.stop",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopTransportStatusSchemaV1,
+    effect: "runtime",
+  },
+  "transport.seek": {
+    id: "transport.seek",
+    input: desktopSeekInputSchemaV1,
+    output: desktopTransportStatusSchemaV1,
+    effect: "runtime",
+  },
+  "diagnostics.snapshot": {
+    id: "diagnostics.snapshot",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopDiagnosticsSchemaV1,
+    effect: "read",
+  },
+} satisfies Record<DesktopHostOperationV1, DesktopHostOperationDescriptorV1>
+
+export const desktopHostOperationIds = Object.freeze(
+  Object.keys(desktopHostOperationCatalog).map((operation) => desktopHostOperationSchemaV1.parse(operation)),
+)
+
+export const isDesktopHostOperation = (
+  operation: DesktopOperationV1,
+): operation is DesktopHostOperationV1 => Object.hasOwn(desktopHostOperationCatalog, operation)
+
+export const getDesktopHostOperationDescriptor = (
+  operation: unknown,
+): DesktopHostOperationDescriptorV1 => {
+  const parsed = desktopHostOperationSchemaV1.parse(operation)
+  return desktopHostOperationCatalog[parsed]
+}
 
 export type DesktopOperationMapV1 = {
   "host.status": { input: Record<string, never>; result: z.infer<typeof desktopHostStatusSchemaV1> }

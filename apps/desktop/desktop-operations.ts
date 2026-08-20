@@ -1,16 +1,19 @@
 import {
   desktopControlOperationsV1,
+  desktopHostOperationIds,
   type DesktopOperationV1,
 } from "@daw-browser/desktop-protocol"
 
 export const desktopOperations = (nativeMediaAvailable: boolean): DesktopOperationV1[] => {
-  const base: DesktopOperationV1[] = [
-    "host.status",
-    "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek",
-    "diagnostics.snapshot",
-    ...desktopControlOperationsV1,
-  ]
+  const base = desktopHostOperationIds.filter((operation) => (
+    nativeMediaAvailable
+    || !operation.startsWith("host.vst.")
+      && operation !== "host.import.audio"
+      && operation !== "host.export.run"
+      && operation !== "host.export.status"
+      && operation !== "host.export.cancel"
+  ))
   return nativeMediaAvailable
-    ? ["host.vst.instances", "host.vst.parameters", "host.import.audio", "host.export.run", "host.export.status", "host.export.cancel", ...base]
-    : base
+    ? [...base, ...desktopControlOperationsV1]
+    : [...base, ...desktopControlOperationsV1]
 }

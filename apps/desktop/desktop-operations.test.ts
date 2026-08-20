@@ -12,3 +12,12 @@ test("advertises static local control operations independently of native media",
     "control.requestApproval", "control.history", "control.recoveries",
   ])
 })
+
+test("keeps host runtime operations in the host catalog", async () => {
+  const protocol = await import("@daw-browser/desktop-protocol")
+  expect(protocol.desktopHostOperationIds).toContain("host.status")
+  expect(protocol.desktopHostOperationIds).toContain("transport.seek")
+  expect(protocol.desktopHostOperationIds).toContain("diagnostics.snapshot")
+  expect(protocol.desktopHostOperationIds).not.toContain("control.commit")
+  expect(protocol.getDesktopHostOperationDescriptor("host.export.run").effect).toBe("write")
+})

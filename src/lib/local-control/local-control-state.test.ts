@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 
 import {
   createLocalProjectEntityRow,
@@ -11,6 +11,9 @@ import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-build
 import { createMidiEditorPersistence } from '~/lib/midi/editor-persistence'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { withLocalControlTransaction } from './local-control-state'
+import { resetHermeticBrowserEnvironment } from '~/lib/test/hermetic-browser-environment'
+
+afterEach(resetHermeticBrowserEnvironment)
 
 const openNativeDb = (name: string) => new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open(name)
@@ -120,4 +123,33 @@ test('flushes pending MIDI before queuing a generic control transaction', async 
   persistence.dispose()
 
   expect(snapshot.clips[0]?.midi?.notes[0]?.pitch).toBe(64)
+})
+
+test('migrates a matching V1 digest state to V2 without advancing the revision', async () => {
+  const project = await createLocalProject(`Control V1 digest migration ${crypto.randomUUID()}`)
+  const initial = await withLocalControlTransaction(project.id, 'readonly', (result) => result.state)
+  const db = await openLocalProjectDb(project.id)
+  await db.put('controlState', {
+    key: 'snapshot',
+    value: {
+      version: 1,
+      revision: initial.revision,
+      digest: initial.digest,
+      updatedAt: initial.updatedAt,
+    },
+    updatedAt: initial.updatedAt,
+  })
+
+  const migrated = await withLocalControlTransaction(project.id, 'readonly', (result) => result.state)
+  expect(migrated).toEqual({
+    version: 2,
+    revision: initial.revision,
+    digest: initial.digest,
+    updatedAt: initial.updatedAt,
+  })
+  expect(await db.get('controlState', 'snapshot')).toEqual({
+    key: 'snapshot',
+    value: migrated,
+    updatedAt: initial.updatedAt,
+  })
 })

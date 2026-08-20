@@ -7,6 +7,10 @@ import {
 } from "@daw-browser/control"
 import type { DesktopOperationMapV1 } from "@daw-browser/desktop-protocol"
 import { setLocalExternalProcessor } from "~/lib/external-plugins"
+import {
+  installHermeticWindow,
+  resetHermeticBrowserEnvironment,
+} from "~/lib/test/hermetic-browser-environment"
 
 import { createExportQueue } from "~/lib/export/export-queue"
 import { withLocalProjectAssetLock } from "~/lib/local-project-asset-lock"
@@ -84,9 +88,7 @@ const prepared: PreparedTimelineExport = {
 }
 
 const installBridge = (terminalJobs: string[]) => {
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
+  bridgeCleanups.add(installHermeticWindow({
       dawDesktop: {
         setRequestHandler: () => undefined,
         onPrepareToClose: () => undefined,
@@ -108,8 +110,7 @@ const installBridge = (terminalJobs: string[]) => {
           preflightInsertion: async () => ({ ok: false, code: "host-unavailable", message: "unavailable" }),
         },
       },
-    },
-  })
+    }))
 }
 
 const controlActor = "local:00000000-0000-4000-8000-000000000000"
@@ -182,6 +183,7 @@ const requestControl = (
 })
 
 const registrations = new Set<() => void>()
+const bridgeCleanups = new Set<() => void>()
 const registerController = (controller: ReturnType<typeof createController>["controller"]) => {
   const unregister = registerAttachedHostController(controller)
   const cleanup = () => {
@@ -192,8 +194,11 @@ const registerController = (controller: ReturnType<typeof createController>["con
   return cleanup
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const cleanup of registrations) cleanup()
+  for (const cleanup of bridgeCleanups) cleanup()
+  bridgeCleanups.clear()
+  await resetHermeticBrowserEnvironment()
 })
 
 type ControlOperation =

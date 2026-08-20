@@ -18,6 +18,7 @@
     "lint:fix": "oxlint --fix .",
     "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
     "test": "bun test",
+    "test:control-compat": "bun test src/hooks/local-send-reload.integration.test.ts src/lib/desktop/attached-host-controller.test.ts src/lib/local-control/local-control-state.test.ts src/lib/local-control/local-control-service.test.ts",
     "serve": "vite preview",
     "knip": "knip"
   },

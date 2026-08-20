@@ -37,7 +37,11 @@ const configureConvexAuth = () => {
   convex.setAuth(fetchConvexAccessToken);
 };
 
-if (globalThis.window) {
+if (
+  globalThis.window
+  && typeof globalThis.window.addEventListener === "function"
+  && globalThis.window.document !== undefined
+) {
   configureConvexAuth();
 }
 

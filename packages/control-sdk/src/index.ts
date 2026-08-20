@@ -34,7 +34,122 @@ import {
   type ControlPreviewResultV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
+  type ControlInput,
+  type ControlInvoker,
+  type ControlOperationId,
+  type ControlOperationIdsForTarget,
+  type ControlOperationTarget,
+  type ControlOutput,
 } from "@daw-browser/control"
+
+export const canonicalControlClientOperationMap = {
+  projects: {
+    list: "project.list",
+    current: "project.current",
+  },
+  control: {
+    capabilities: "control.capabilities",
+    snapshot: "control.snapshot",
+    preview: "control.preview",
+    requestApproval: "control.requestApproval",
+    commit: "control.commit",
+    history: "control.history",
+    recoveries: "control.recoveries",
+  },
+} satisfies {
+  readonly projects: {
+    readonly list: "project.list"
+    readonly current: "project.current"
+  }
+  readonly control: {
+    readonly capabilities: "control.capabilities"
+    readonly snapshot: "control.snapshot"
+    readonly preview: "control.preview"
+    readonly requestApproval: "control.requestApproval"
+    readonly commit: "control.commit"
+    readonly history: "control.history"
+    readonly recoveries: "control.recoveries"
+  }
+}
+
+type CanonicalControlClientMethods<
+  Operations extends Record<string, ControlOperationId>,
+  Target extends ControlOperationTarget,
+> = {
+  [Method in keyof Operations as Operations[Method] extends ControlOperationIdsForTarget<Target>
+    ? Method
+    : never]: (
+    input: ControlInput<Extract<Operations[Method], ControlOperationId>>,
+  ) => Promise<ControlOutput<Extract<Operations[Method], ControlOperationId>>>
+}
+
+type CanonicalControlClientControlMethods<
+  Target extends ControlOperationTarget,
+> = CanonicalControlClientMethods<
+  typeof canonicalControlClientOperationMap.control,
+  Target
+>
+
+export type CanonicalControlClient<
+  Target extends ControlOperationTarget = ControlOperationTarget,
+> = {
+  projects: CanonicalControlClientMethods<
+    typeof canonicalControlClientOperationMap.projects,
+    Target
+  >
+  control: CanonicalControlClientControlMethods<Target>
+}
+
+export function createCanonicalControlClient(
+  invoker: ControlInvoker<"cloud">,
+): CanonicalControlClient<"cloud">
+export function createCanonicalControlClient(
+  invoker: ControlInvoker<"desktop">,
+): CanonicalControlClient<"desktop">
+export function createCanonicalControlClient(
+  invoker: ControlInvoker<"cloud"> | ControlInvoker<"desktop">,
+): CanonicalControlClient<"cloud"> | CanonicalControlClient<"desktop"> {
+  if (invoker.target === "cloud") {
+    const createMethod = <Id extends ControlOperationIdsForTarget<"cloud">>(operationId: Id) => (
+      input: ControlInput<Id>,
+    ): Promise<ControlOutput<Id>> => invoker.invoke(operationId, input)
+
+    return {
+      projects: {
+        list: createMethod(canonicalControlClientOperationMap.projects.list),
+      },
+      control: {
+        capabilities: createMethod(canonicalControlClientOperationMap.control.capabilities),
+        snapshot: createMethod(canonicalControlClientOperationMap.control.snapshot),
+        preview: createMethod(canonicalControlClientOperationMap.control.preview),
+        requestApproval: createMethod(canonicalControlClientOperationMap.control.requestApproval),
+        commit: createMethod(canonicalControlClientOperationMap.control.commit),
+        history: createMethod(canonicalControlClientOperationMap.control.history),
+        recoveries: createMethod(canonicalControlClientOperationMap.control.recoveries),
+      },
+    }
+  }
+
+  const createMethod = <Id extends ControlOperationIdsForTarget<"desktop">>(operationId: Id) => (
+    input: ControlInput<Id>,
+  ): Promise<ControlOutput<Id>> => invoker.invoke(operationId, input)
+
+  return {
+    projects: {
+      list: createMethod(canonicalControlClientOperationMap.projects.list),
+      current: createMethod(canonicalControlClientOperationMap.projects.current),
+    },
+    control: {
+      capabilities: createMethod(canonicalControlClientOperationMap.control.capabilities),
+      snapshot: createMethod(canonicalControlClientOperationMap.control.snapshot),
+      preview: createMethod(canonicalControlClientOperationMap.control.preview),
+      requestApproval: createMethod(canonicalControlClientOperationMap.control.requestApproval),
+      commit: createMethod(canonicalControlClientOperationMap.control.commit),
+      history: createMethod(canonicalControlClientOperationMap.control.history),
+      recoveries: createMethod(canonicalControlClientOperationMap.control.recoveries),
+    },
+  }
+}
 
 export type ControlAccessTokenResolver = () => string | Promise<string>
 export type ControlAccessToken = string | ControlAccessTokenResolver

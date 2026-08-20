@@ -4,6 +4,7 @@ import {
   assertControlOperationSupported,
   canonicalControlCapabilities,
   controlOperationCatalog,
+  createDirectControlInvoker,
   dispatchControlOperation,
   getControlOperationDescriptor,
   listControlOperationDescriptors,
@@ -145,6 +146,36 @@ test('validates both dispatch inputs and outputs through the catalog', async () 
     ...handlers,
     'project.list': () => ({ projects: [{ projectId: 'project-1', extra: true }] }),
   }, 'project.list', {}, context)).rejects.toThrow()
+})
+
+test('direct invokers bind context and retain catalog validation', async () => {
+  const invoker = createDirectControlInvoker({
+    handlers,
+    context: { target: 'desktop', principal: { subject: 'user-1' } },
+  })
+
+  await expect(invoker.invoke('project.list', {})).resolves.toEqual({
+    projects: [{ projectId: 'project-1', name: 'Project' }],
+  })
+  const invalidInput: unknown = { unexpected: true }
+  await expect(Reflect.apply(invoker.invoke, invoker, ['project.list', invalidInput])).rejects.toThrow()
+  await expect(createDirectControlInvoker({
+    handlers: {
+      ...handlers,
+      'project.list': () => ({ projects: [{ projectId: 'project-1', extra: true }] }),
+    },
+    context: { target: 'desktop' },
+  }).invoke('project.list', {})).rejects.toThrow()
+  expect(invoker.target).toBe('desktop')
+
+  const { 'project.current': _current, ...cloudHandlers } = handlers
+  const cloudInvoker = createDirectControlInvoker({
+    handlers: cloudHandlers,
+    context: { target: 'cloud' },
+  })
+  expect(() => Reflect.apply(cloudInvoker.invoke, cloudInvoker, ['project.current', {}])).toThrow(
+    UnsupportedControlTargetError,
+  )
 })
 
 test('rejects unknown operations and unsupported targets before dispatch', () => {

@@ -200,12 +200,14 @@ export {
   assertControlOperationSupported,
   UnsupportedControlTargetError,
   dispatchControlOperation,
+  createDirectControlInvoker,
 } from './operations'
 export type {
   ControlOperationTarget,
   ControlOperationEffect,
   ControlOperationIdempotency,
   ControlOperationApproval,
+  ControlOperationId,
   ProjectDiscoveryEntry,
   ProjectListInput,
   ProjectListResult,
@@ -219,4 +221,5 @@ export type {
   ControlHandler,
   ControlOperationIdsForTarget,
   ControlOperationHandlers,
+  ControlInvoker,
 } from './operations'

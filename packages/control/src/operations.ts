@@ -264,6 +264,16 @@ export type ControlOperationHandlers<
   [Id in ControlOperationIdsForTarget<Target>]: ControlHandler<Id>
 }
 
+export type ControlInvoker<
+  Target extends ControlOperationTarget = ControlOperationTarget,
+> = {
+  readonly target: Target
+  invoke<Id extends ControlOperationIdsForTarget<Target>>(
+    operationId: Id,
+    input: ControlInput<Id>,
+  ): Promise<ControlOutput<Id>>
+}
+
 const invokeControlOperation = async (
   handlers: Partial<ControlOperationHandlers>,
   operationId: ControlOperationId,
@@ -346,3 +356,21 @@ export function dispatchControlOperation(
   const parsedOperationId = assertControlOperationSupported(operationId, context.target)
   return invokeControlOperation(handlers, parsedOperationId, input, context)
 }
+
+export const createDirectControlInvoker = <
+  Target extends ControlOperationTarget,
+>(input: {
+  readonly handlers: ControlOperationHandlers<Target>
+  readonly context: ControlRequestContext & { readonly target: Target }
+}): ControlInvoker<Target> => ({
+  target: input.context.target,
+  invoke: <Id extends ControlOperationIdsForTarget<Target>>(
+    operationId: Id,
+    operationInput: ControlInput<Id>,
+  ): Promise<ControlOutput<Id>> => dispatchControlOperation(
+    input.handlers,
+    operationId,
+    operationInput,
+    input.context,
+  ),
+})

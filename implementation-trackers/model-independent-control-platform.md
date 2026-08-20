@@ -204,3 +204,29 @@ boundaries, tests, documentation, and unresolved inventory surfaces use
 - Explicitly out of scope: SDK/client work, menu projection schema work,
   persistence/preferences, project-control extensions, external extension
   APIs, menu contribution IPC, and agent command APIs.
+
+## Checkpoint 8 — Transport-neutral control client
+
+- Added `ControlInvoker` beside the canonical operation types. It exposes only
+  the target and typed `invoke(operationId, input)` boundary; handler request
+  context remains private to the direct invoker binding.
+- Added `createDirectControlInvoker`, which binds target-specific handlers and
+  trusted context once and delegates exclusively to canonical
+  `dispatchControlOperation`. Input, output, and target validation therefore
+  remain owned by the catalog dispatch.
+- Added the transport-neutral `CanonicalControlClient` facade and
+  `createCanonicalControlClient` to `@daw-browser/control-sdk`. Its grouped
+  `projects` and `control` methods are typed from canonical operation inputs
+  and outputs, invoke exactly once, and perform no retry or transport work.
+  Cloud clients omit desktop-only `projects.current` both at the type and
+  runtime boundaries.
+- Preserved the legacy HTTP `ControlClient`, `createControlClient`, V1/V2
+  methods, transport/error types, and route behavior unchanged for
+  compatibility. `CanonicalControlClient` naming is an additive
+  compatibility-safe split until the legacy REST entry point can be migrated.
+- Evidence: control operation and SDK tests cover exact catalog-to-client
+  mapping, direct dispatch validation, typed method invocation, unchanged
+  synchronous/asynchronous errors, cloud target boundaries, and all existing
+  HTTP SDK compatibility behavior.
+- Deferred: HTTP route unification, desktop routing, CLI/MCP, JSONL, menus,
+  project-action extensions, and broad final simplification review.

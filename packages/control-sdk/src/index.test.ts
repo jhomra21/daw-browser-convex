@@ -1,8 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { canonicalJson, controlCapabilitiesV1, type ControlPreviewRequestV1 } from "@daw-browser/control"
 import {
+  canonicalControlCapabilities,
+  canonicalJson,
+  controlCapabilitiesV1,
+  controlOperationCatalog,
+  createDirectControlInvoker,
+  type ControlOperationHandlers,
+  type ControlOutput,
+  type ControlPreviewRequestV1,
+} from "@daw-browser/control"
+import {
+  canonicalControlClientOperationMap,
   ControlApiError,
   ControlTransportError,
+  createCanonicalControlClient,
   createControlClient,
   normalizeControlOrigin,
   type ControlAccessToken,
@@ -43,7 +54,7 @@ const preview = {
   resolvedRefs: [],
   warnings: [],
   changeSummary: { actionCount: 1, changes: [] },
-}
+} satisfies ControlOutput<"control.preview">
 
 const request: ControlPreviewRequestV1 = {
   version: "v1",
@@ -51,7 +62,140 @@ const request: ControlPreviewRequestV1 = {
   actions: [{ kind: "project.rename", name: "Renamed" }],
 }
 
+const createOperationHandlers = (calls: string[]) => ({
+  "project.list": () => {
+    calls.push("project.list")
+    return { projects: [{ projectId: "project-1", name: "Project" }] }
+  },
+  "project.current": () => {
+    calls.push("project.current")
+    return { status: "present", project: { projectId: "project-1", name: "Project" } }
+  },
+  "control.capabilities": () => {
+    calls.push("control.capabilities")
+    return canonicalControlCapabilities
+  },
+  "control.snapshot": () => {
+    calls.push("control.snapshot")
+    return { ...snapshot, version: "v2" }
+  },
+  "control.preview": () => {
+    calls.push("control.preview")
+    return preview
+  },
+  "control.requestApproval": () => {
+    calls.push("control.requestApproval")
+    return {
+      version: "v1",
+      approvalToken: "a".repeat(32),
+      requestDigest: "0".repeat(64),
+      baseRevision: 1,
+      actionIndexes: [0],
+      expiresAt: 1,
+    }
+  },
+  "control.commit": () => {
+    calls.push("control.commit")
+    return {
+      ...preview,
+      idempotencyReplay: false,
+      recoveries: [],
+      restored: [],
+    } satisfies ControlOutput<"control.commit">
+  },
+  "control.history": () => {
+    calls.push("control.history")
+    return { entries: [], continueCursor: "next", isDone: true }
+  },
+  "control.recoveries": () => {
+    calls.push("control.recoveries")
+    return { entries: [], continueCursor: "next", isDone: true }
+  },
+} satisfies ControlOperationHandlers<"desktop">)
+
 describe("control SDK", () => {
+  test("maps every catalog operation exactly once", () => {
+    const operationIds: Array<keyof typeof controlOperationCatalog> = [
+      ...Object.values(canonicalControlClientOperationMap.projects),
+      ...Object.values(canonicalControlClientOperationMap.control),
+    ]
+    expect(operationIds).toHaveLength(Object.keys(controlOperationCatalog).length)
+    expect(new Set(operationIds).size).toBe(operationIds.length)
+    expect(operationIds.every((operationId) => Object.hasOwn(controlOperationCatalog, operationId))).toBeTrue()
+  })
+
+  test("invokes each canonical client method once and preserves target boundaries", async () => {
+    const calls: string[] = []
+    const invoker = createDirectControlInvoker({
+      handlers: createOperationHandlers(calls),
+      context: { target: "desktop" },
+    })
+    const client = createCanonicalControlClient(invoker)
+
+    await client.projects.list({})
+    await client.projects.current({})
+    await client.control.capabilities({})
+    await client.control.snapshot({ projectId: "project-1" })
+    await client.control.preview(request)
+    await client.control.requestApproval(request)
+    await client.control.commit({ ...request, idempotencyKey: "request-1" })
+    await client.control.history({ projectId: "project-1", limit: 1 })
+    await client.control.recoveries({ projectId: "project-1", limit: 1 })
+
+    expect(calls).toEqual([
+      ...Object.values(canonicalControlClientOperationMap.projects),
+      ...Object.values(canonicalControlClientOperationMap.control),
+    ])
+  })
+
+  test("propagates synchronous throws and asynchronous rejections unchanged", async () => {
+    const syncError = new Error("sync")
+    const syncClient = createCanonicalControlClient({
+      target: "desktop",
+      invoke: () => {
+        throw syncError
+      },
+    })
+    expect(() => syncClient.projects.list({})).toThrow(syncError)
+
+    const asyncError = new Error("async")
+    const asyncClient = createCanonicalControlClient({
+      target: "desktop",
+      invoke: () => Promise.reject(asyncError),
+    })
+    await expect(asyncClient.projects.list({})).rejects.toBe(asyncError)
+  })
+
+  test("does not expose project.current for cloud clients", () => {
+    const handlers = {
+      "project.list": () => ({ projects: [] }),
+      "control.capabilities": () => canonicalControlCapabilities,
+      "control.snapshot": () => ({ ...snapshot, version: "v2" }),
+      "control.preview": () => preview,
+      "control.requestApproval": () => ({
+        version: "v1",
+        approvalToken: "a".repeat(32),
+        requestDigest: "0".repeat(64),
+        baseRevision: 1,
+        actionIndexes: [0],
+        expiresAt: 1,
+      }),
+      "control.commit": () => ({
+        ...preview,
+        idempotencyReplay: false,
+        recoveries: [],
+        restored: [],
+      }),
+      "control.history": () => ({ entries: [], continueCursor: "next", isDone: true }),
+      "control.recoveries": () => ({ entries: [], continueCursor: "next", isDone: true }),
+    } satisfies ControlOperationHandlers<"cloud">
+    const client = createCanonicalControlClient(createDirectControlInvoker({
+      handlers,
+      context: { target: "cloud" },
+    }))
+    expect(Object.hasOwn(client.projects, "current")).toBeFalse()
+  })
+
   test("calls each endpoint once with a fresh bearer and canonical request body", async () => {
     const urls: string[] = []
     const authorizations: string[] = []

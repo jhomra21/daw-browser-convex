@@ -29,6 +29,7 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  mountedProjectGeneration: Accessor<number>;
   remoteTimelineAvailable: Accessor<boolean>;
   localProjectMode: Accessor<LocalProjectMode | undefined>;
   userId: Accessor<string | undefined>;
@@ -43,6 +44,7 @@ type Input = {
 export const useTimelinePersistenceController = (input: Input) => {
   const mediaRecovery = useMissingMediaRecovery({
     projectId: input.projectId,
+    mountedProjectGeneration: input.mountedProjectGeneration,
     remoteTimelineAvailable: input.remoteTimelineAvailable,
     localTimelineReloadVersion: input.localProject.localTimelineReloadVersion,
     userId: input.userId,
@@ -80,5 +82,12 @@ export const useTimelinePersistenceController = (input: Input) => {
     onCleanup(() => window.removeEventListener("online", flush));
   });
 
-  return { mediaRecovery };
+  return {
+    mediaRecovery,
+    reconcileMountedLocalTimeline: (guard: {
+      projectId: string;
+      mountedProjectGeneration: number;
+      signal: AbortSignal;
+    }) => mediaRecovery.reloadLocalTimeline(guard),
+  };
 };

@@ -120,6 +120,11 @@ const createController = (
   getMountedLocalProject?: typeof getLocalProject,
   mountedProjectGeneration: () => number = () => 0,
   enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>,
+  reconcileMountedLocalTimeline?: (guard: {
+    projectId: string;
+    mountedProjectGeneration: number;
+    signal: AbortSignal;
+  }) => Promise<void>,
 ) => {
   const queue = createExportQueue()
   return {
@@ -162,6 +167,7 @@ const createController = (
       importFiles: async () => ({ outcomes: [] }),
       setPlayhead: () => undefined,
       enqueueNativeVstParameter,
+      reconcileMountedLocalTimeline,
       getMountedLocalProject,
     }),
     dispose: () => queue.dispose(),
@@ -423,6 +429,154 @@ test("runs the complete local control flow with the trusted actor", async () => 
   expect(history.result).toMatchObject({ entries: [expect.objectContaining({ actorSubject: controlActor })] })
   const recoveries = await requestControl(controller, "control.recoveries", { projectId: project.id, limit: 10 }, undefined, controlActor)
   expect(recoveries.result).toMatchObject({ entries: [expect.objectContaining({ kind: "track.delete" })] })
+
+  unregister()
+  dispose()
+})
+
+test("reconciles the mounted timeline once for an applied non-replay commit", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Reconcile external commit ${crypto.randomUUID()}`)
+  const service = createLocalControlService({ actor: { subject: controlActor } })
+  const reconciliations: Array<{ projectId: string; mountedProjectGeneration: number; name: string | undefined }> = []
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => 7,
+    undefined,
+    async (guard) => {
+      const snapshot = await service.snapshot({ projectId: guard.projectId })
+      reconciliations.push({
+        projectId: guard.projectId,
+        mountedProjectGeneration: guard.mountedProjectGeneration,
+        name: snapshot.tracks[0]?.name,
+      })
+    },
+  )
+  const unregister = registerController(controller)
+  const input = {
+    version: "v1" as const,
+    projectId: project.id,
+    idempotencyKey: "reconcile-track-rename",
+    actions: [{ kind: "track.rename" as const, track: { source: "persisted" as const, id: (await service.snapshot({ projectId: project.id })).tracks[0]?.id ?? "" }, name: "Drums Acceptance" }],
+  }
+  expect((await requestControl(controller, "control.preview", {
+    version: "v1",
+    projectId: project.id,
+    actions: input.actions,
+  }, undefined, controlActor)).result).toMatchObject({ applied: true })
+  expect(reconciliations).toEqual([])
+  expect((await requestControl(controller, "control.snapshot", {
+    projectId: project.id,
+  }, undefined, controlActor)).result).toBeDefined()
+  expect(reconciliations).toEqual([])
+
+  expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({
+    applied: true,
+    idempotencyReplay: false,
+  })
+  expect(reconciliations).toEqual([{
+    projectId: project.id,
+    mountedProjectGeneration: 7,
+    name: "Drums Acceptance",
+  }])
+  expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({
+    applied: true,
+    idempotencyReplay: true,
+  })
+  expect(reconciliations).toHaveLength(1)
+
+  expect((await requestControl(controller, "control.commit", {
+    ...input,
+    idempotencyKey: "reconcile-track-rename-failed",
+    expectedRevision: 0,
+  }, undefined, controlActor)).error).toMatchObject({ code: "revision-conflict" })
+  expect(reconciliations).toHaveLength(1)
+
+  unregister()
+  dispose()
+})
+
+test("suppresses reconciliation when native delivery changes the mounted generation", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Stale reconciliation ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected default track.")
+  const instanceId = "00000000-0000-4000-8000-000000000013"
+  await setLocalExternalProcessor(project.id, {
+    instanceId,
+    targetId: track.id,
+    index: 0,
+    manifest: {
+      identity: {
+        format: "vst3",
+        classId: "class-1",
+        vendor: "Vendor",
+        name: "Fixture",
+        version: "1",
+        architecture: "arm64",
+        binaryFingerprint: "a".repeat(64),
+      },
+      role: "effect",
+      audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+      audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+      sidechainInputs: [],
+      parameters: [{
+        id: 1,
+        title: "Gain",
+        unit: "",
+        minimum: 0,
+        maximum: 1,
+        defaultValue: 0.5,
+        stepCount: 100,
+        readOnly: false,
+        hidden: false,
+      }],
+      latencyFrames: 0,
+      tailFrames: 0,
+      supportsBypass: true,
+      supportsEditor: false,
+      supportsState: true,
+    },
+    parameterOverrides: { "1": 0.25 },
+    latencyFrames: 0,
+    tailFrames: 0,
+    bypassed: false,
+    health: { state: "ready", updatedAt: 1 },
+    updatedAt: 1,
+  })
+  let generation = 1
+  let deliveries = 0
+  let reconciliations = 0
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => generation,
+    async () => {
+      generation += 1
+      deliveries += 1
+      return true
+    },
+    async () => {
+      reconciliations += 1
+    },
+  )
+  const unregister = registerController(controller)
+  const result = await requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: "stale-reconciliation",
+    actions: [{
+      kind: "external-plugin.parameters.set" as const,
+      target: { kind: "track" as const, track: { source: "persisted" as const, id: track.id } },
+      processor: { source: "persisted" as const, id: `external-plugin:${instanceId}` },
+      changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+    }],
+  }, undefined, controlActor)
+  expect(result.result).toMatchObject({ applied: true })
+  expect(deliveries).toBe(1)
+  expect(reconciliations).toBe(0)
 
   unregister()
   dispose()

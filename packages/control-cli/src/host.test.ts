@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { createServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -99,9 +99,9 @@ const createHostFixture = async (
 ): Promise<HostFixture> => {
   const userDataDirectory = await temporaryDirectory()
   const hostDirectory = path.join(userDataDirectory, "host")
-  const socketPath = path.join(hostDirectory, "host.sock")
   await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
   await chmod(hostDirectory, 0o700)
+  const socketPath = path.join(await realpath(hostDirectory), "host.sock")
   const server = createServer((socket) => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
@@ -141,9 +141,9 @@ const createV2HostFixture = async (
 ): Promise<HostFixture> => {
   const userDataDirectory = await temporaryDirectory()
   const hostDirectory = path.join(userDataDirectory, "host")
-  const socketPath = path.join(hostDirectory, "host.sock")
   await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
   await chmod(hostDirectory, 0o700)
+  const socketPath = path.join(await realpath(hostDirectory), "host.sock")
   const server = createServer((socket) => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
@@ -236,6 +236,41 @@ describe("desktop host registration paths", () => {
 })
 
 describe("desktop host client", () => {
+  test("canonicalizes socket address parents through a user data directory alias", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+    })
+    const aliasParent = await temporaryDirectory()
+    const aliasedUserDataDirectory = path.join(aliasParent, "user-data")
+    await symlink(fixture.paths.userDataDirectory, aliasedUserDataDirectory, "dir")
+    const aliasedPaths = {
+      ...fixture.paths,
+      userDataDirectory: aliasedUserDataDirectory,
+    }
+    const registration = path.join(fixture.paths.userDataDirectory, "host", "registration-v1.json")
+    const writeRegistration = async (address: string) => {
+      await writeFile(registration, JSON.stringify({
+        version: "v1",
+        instanceId: "a".repeat(32),
+        pid: process.pid,
+        createdAt: Date.now(),
+        address,
+        secret: "b".repeat(64),
+      }), { mode: 0o600 })
+    }
+
+    await writeRegistration(path.join(aliasedUserDataDirectory, "host", "host.sock"))
+    const lexicalAddressClient = await createHostClient({ paths: aliasedPaths })
+    lexicalAddressClient.close()
+
+    await writeRegistration(path.join(await realpath(fixture.paths.userDataDirectory), "host", "host.sock"))
+    const canonicalAddressClient = await createHostClient({ paths: aliasedPaths })
+    canonicalAddressClient.close()
+
+    await writeRegistration(path.join(aliasParent, "outside.sock"))
+    await expect(createHostClient({ paths: aliasedPaths })).rejects.toThrow("Desktop host address is invalid.")
+  })
+
   test("rejects and closes an accepted but silent host before the handshake deadline", async () => {
     const fixture = await createHostFixture(() => undefined)
     await expect(createHostClient({

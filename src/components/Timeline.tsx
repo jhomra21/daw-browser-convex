@@ -294,8 +294,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     const role = currentProjectRole();
     return role === "owner" || role === "editor";
   });
-  const { mediaRecovery } = useTimelinePersistenceController({
+  const {
+    mediaRecovery,
+    reconcileMountedLocalTimeline,
+  } = useTimelinePersistenceController({
     projectId,
+    mountedProjectGeneration,
     remoteTimelineAvailable: () => Boolean(fullView.data),
     localProjectMode: currentLocalProjectMode,
     userId,
@@ -1952,6 +1956,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       enqueueNativeVstParameter: nativeVstParameterQueue
         ? (event) => nativeVstParameterQueue.enqueue(event).then((result) => result === "delivered")
         : undefined,
+      reconcileMountedLocalTimeline,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
     onCleanup(unregisterHostController);

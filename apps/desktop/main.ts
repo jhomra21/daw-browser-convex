@@ -8,7 +8,6 @@ import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import {
   desktopFrameSchemaV1,
-  desktopJsonValueSchema,
   desktopHelloSchemaV1,
   desktopHelloSchemaV2,
   desktopHostExportRunInputSchemaV1,
@@ -24,7 +23,6 @@ import {
   projectIdSchemaV1,
   hostError,
   hostErrorV2,
-  hostErrorSchemaV1,
   isDesktopControlOperation,
   type DesktopFrameV1,
   type DesktopOperationV1,
@@ -36,7 +34,6 @@ import {
   desktopApplicationMenuStateSchema,
   type DesktopApplicationMenuMessage,
 } from "@daw-browser/desktop-protocol/application-menu"
-import { controlErrorSchemaV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
@@ -44,6 +41,7 @@ import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
+import { prepareDesktopReply } from "./renderer-reply"
 import { desktopOperations } from "./desktop-operations"
 import { createContentSecurityPolicy } from "./content-security-policy"
 import { createPluginCatalogStore } from "./plugin-catalog"
@@ -271,7 +269,6 @@ type PendingRendererRequest = {
   reject: (error: Error) => void
 }
 type RendererRequestInput = Parameters<typeof desktopRendererRequestSchemaV1.parse>[0]
-type RendererReplyError = Parameters<typeof controlErrorSchemaV1.safeParse>[0]
 let window_: BrowserWindow | undefined
 let finishingQuit = false
 let quitCleanupStarted = false
@@ -377,16 +374,6 @@ const recoverAudioHost = (recoveryGeneration: number) => {
 }
 const operationFailure = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostError(code, message)
 const operationFailureV2 = (_operation: DesktopOperationV1, code: Parameters<typeof hostError>[0], message: string) => hostErrorV2(code, message)
-const translateRendererError = (
-  operation: DesktopOperationV1,
-  error: RendererReplyError,
-  protocolVersion: DesktopProtocolVersion,
-) => {
-  if (protocolVersion !== desktopProtocolVersionV2) return error
-  if (isDesktopControlOperation(operation) && controlErrorSchemaV1.safeParse(error).success) return error
-  const host = hostErrorSchemaV1.safeParse(error)
-  return host.success ? hostErrorV2(host.data.code, host.data.message) : error
-}
 const writeSocketFailure = (
   socket: Socket,
   protocolVersion: DesktopProtocolVersion,
@@ -740,20 +727,16 @@ const handleSocket = (socket: Socket) => {
         await fileCapabilities.revokeRequest(scope)
       }
       try {
-        const translatedError = translateRendererError(
+        const outboundReply = prepareDesktopReply(
           frame.operation,
-          reply.error,
+          reply,
+          externalId,
           sessionProtocolVersion,
         )
         for (const outbound of serializeDesktopReply(
           frame.operation,
           frame.input,
-          desktopJsonValueSchema.parse({
-            ...reply,
-            error: translatedError,
-            id: externalId,
-            version: sessionProtocolVersion,
-          }),
+          outboundReply,
           sessionProtocolVersion,
         )) {
           socket.write(encodeDesktopFrame(outbound))

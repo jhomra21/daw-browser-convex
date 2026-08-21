@@ -267,6 +267,11 @@ export const createAttachedHostController = (input: {
   importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
   enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
+  reconcileMountedLocalTimeline?: (guard: {
+    projectId: string;
+    mountedProjectGeneration: number;
+    signal: AbortSignal;
+  }) => Promise<void>
   getMountedLocalProject?: typeof getLocalProject
 }): TimelineHostController => {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
@@ -376,6 +381,19 @@ export const createAttachedHostController = (input: {
                 await Promise.all(deliveries)
               }
             }
+          }
+        } catch {}
+      }
+      if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
+        try {
+          const commitResult = controlCommitResultSchemaV1.safeParse(result)
+          if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
+            && await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+            await input.reconcileMountedLocalTimeline({
+              projectId: mountedProjectId,
+              mountedProjectGeneration: mountedGeneration,
+              signal: request_.signal,
+            })
           }
         } catch {}
       }

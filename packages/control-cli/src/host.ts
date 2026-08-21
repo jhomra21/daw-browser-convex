@@ -95,10 +95,12 @@ const privateFile = async (file: string, platform_: HostPlatform) => {
   const resolvedDirectory = await realpath(directoryPath)
   const resolvedFile = await realpath(file)
   if (path.dirname(resolvedFile) !== resolvedDirectory) throw new Error("Desktop host registration is not contained by its directory.")
-  if (platform_ === "win32") return
-  if ((info.mode & 0o077) !== 0) throw new Error("Desktop host registration is not private.")
-  const directory = await stat(directoryPath)
-  if (!directory.isDirectory() || (directory.mode & 0o077) !== 0) throw new Error("Desktop host directory is not private.")
+  if (platform_ !== "win32") {
+    if ((info.mode & 0o077) !== 0) throw new Error("Desktop host registration is not private.")
+    const directory = await stat(directoryPath)
+    if (!directory.isDirectory() || (directory.mode & 0o077) !== 0) throw new Error("Desktop host directory is not private.")
+  }
+  return resolvedDirectory
 }
 
 const readHostRegistration = async (paths?: HostPaths) => {
@@ -110,7 +112,7 @@ const readHostRegistration = async (paths?: HostPaths) => {
     userDataDirectory: process.env.DAW_DESKTOP_USER_DATA,
   }
   const file = registrationFile(resolvedPaths)
-  await privateFile(file, resolvedPaths.platform)
+  const resolvedDirectory = await privateFile(file, resolvedPaths.platform)
   const handle = await open(
     file,
     resolvedPaths.platform === "win32" ? "r" : constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -140,8 +142,16 @@ const readHostRegistration = async (paths?: HostPaths) => {
   const registration = desktopRegistrationSchemaV1.parse(JSON.parse(contents))
   if (resolvedPaths.platform === "win32") {
     if (!registration.address.startsWith("\\\\.\\pipe\\")) throw new Error("Desktop host address is invalid.")
-  } else if (!path.isAbsolute(registration.address) || path.dirname(registration.address) !== path.dirname(file)) {
+  } else if (!path.isAbsolute(registration.address)) {
     throw new Error("Desktop host address is invalid.")
+  } else {
+    let resolvedAddressDirectory: string
+    try {
+      resolvedAddressDirectory = await realpath(path.dirname(registration.address))
+    } catch {
+      throw new Error("Desktop host address is invalid.")
+    }
+    if (resolvedAddressDirectory !== resolvedDirectory) throw new Error("Desktop host address is invalid.")
   }
   return registration
 }

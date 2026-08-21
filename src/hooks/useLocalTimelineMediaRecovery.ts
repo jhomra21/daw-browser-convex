@@ -24,6 +24,7 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  mountedProjectGeneration: Accessor<number>;
   remoteTimelineAvailable: Accessor<boolean>;
   localTimelineReloadVersion: Accessor<number>;
   userId: Accessor<string | undefined>;
@@ -63,21 +64,38 @@ export const useMissingMediaRecovery = (input: Input) => {
     Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
   >(null);
 
-  const reloadLocalTimeline = async () => {
-    const rid = input.projectId();
-    const isLocalProject = isLocalId("project", rid);
-    if (!isLocalProject && input.remoteTimelineAvailable()) {
-      setLocalTimelineSnapshot(null);
-      return;
-    }
-    const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
-    if (input.projectId() === rid) {
-      setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
-    }
+  let reloadTail = Promise.resolve();
+  const reloadLocalTimeline = async (guard?: {
+    projectId?: string;
+    mountedProjectGeneration?: number;
+    signal?: AbortSignal;
+  }) => {
+    const rid = guard?.projectId ?? input.projectId();
+    const generation = guard?.mountedProjectGeneration ?? input.mountedProjectGeneration();
+    const isCurrent = () => (
+      !guard?.signal?.aborted
+      && input.projectId() === rid
+      && input.mountedProjectGeneration() === generation
+    );
+    const operation = reloadTail.catch(() => undefined).then(async () => {
+      const isLocalProject = isLocalId("project", rid);
+      if (!isCurrent()) return;
+      if (!isLocalProject && input.remoteTimelineAvailable()) {
+        setLocalTimelineSnapshot(null);
+        return;
+      }
+      const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
+      if (isCurrent()) {
+        setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+      }
+    });
+    reloadTail = operation.then(() => undefined, () => undefined);
+    await operation;
   };
 
   createEffect(() => {
     const rid = input.projectId();
+    const generation = input.mountedProjectGeneration();
     const isLocalProject = isLocalId("project", rid);
     if (!isLocalProject && input.remoteTimelineAvailable()) {
       setLocalTimelineSnapshot(null);
@@ -85,8 +103,15 @@ export const useMissingMediaRecovery = (input: Input) => {
     }
     input.localTimelineReloadVersion();
     let cancelled = false;
-    void reloadLocalTimeline().catch(() => {
-      if (!cancelled && input.projectId() === rid) setLocalTimelineSnapshot(null);
+    void reloadLocalTimeline({
+      projectId: rid,
+      mountedProjectGeneration: generation,
+    }).catch(() => {
+      if (
+        !cancelled
+        && input.projectId() === rid
+        && input.mountedProjectGeneration() === generation
+      ) setLocalTimelineSnapshot(null);
     });
     onCleanup(() => {
       cancelled = true;

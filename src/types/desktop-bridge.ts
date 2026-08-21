@@ -77,7 +77,6 @@ type DesktopRequest = {
   id: string
   operation: DesktopOperationV1
   input: unknown
-  signal: AbortSignal
   trustedActorSubject?: string
 }
 
@@ -88,6 +87,7 @@ type DesktopResponse = {
 }
 
 type DesktopRequestHandler = (request: DesktopRequest) => Promise<DesktopResponse>
+type DesktopRequestCancellationHandler = (requestId: string) => void
 type DesktopPrepareToCloseHandler = () => Promise<{ flushed: boolean }>
 
 type NativeSessionBridge = {
@@ -139,7 +139,7 @@ export type DesktopAudioLifecycle = {
 }
 
 type DesktopBridge = {
-  setRequestHandler(next: DesktopRequestHandler | undefined): void
+  setRequestHandler(next: DesktopRequestHandler | undefined, onCancel?: DesktopRequestCancellationHandler): void
   onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   prepareToClose(): Promise<{ flushed: boolean }>
   pickOutputFile(

@@ -96,17 +96,15 @@ describe("desktop preload request queue", () => {
     const replies: Reply[] = []
     const oldRequest = Promise.withResolvers<PreloadHostResponse>()
     const newRequest = Promise.withResolvers<PreloadHostResponse>()
-    let oldSignal: AbortSignal | undefined
+    let canceledId: string | undefined
     const queue = createRequestQueue({
       reply: (generation, response) => replies.push({ generation, response }),
       queueLimit: 32,
     })
     queue.setRequestHandler((request) => {
-      if (request.id === "old") {
-        oldSignal = request.signal
-        return oldRequest.promise
-      }
-      return newRequest.promise
+      return request.id === "old" ? oldRequest.promise : newRequest.promise
+    }, (requestId) => {
+      canceledId = requestId
     })
 
     queue.dispatch(1, { version: "v1", type: "request", id: "old", operation: "transport.play", input: {} })
@@ -115,7 +113,7 @@ describe("desktop preload request queue", () => {
     newRequest.resolve({ id: "new", result: {} })
     await flushPromises()
 
-    expect(oldSignal?.aborted).toBe(true)
+    expect(canceledId).toBe("old")
     expect(replies).toEqual([
       {
         generation: 1,
@@ -128,20 +126,21 @@ describe("desktop preload request queue", () => {
   test("reset only advances the generation", async () => {
     const replies: Reply[] = []
     const pending = Promise.withResolvers<PreloadHostResponse>()
-    let signal: AbortSignal | undefined
+    let canceledId: string | undefined
     const queue = createRequestQueue({
       reply: (generation, response) => replies.push({ generation, response }),
       queueLimit: 32,
     })
-    queue.setRequestHandler((request) => {
-      signal = request.signal
+    queue.setRequestHandler((_request) => {
       return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
     })
 
     queue.dispatch(2, { version: "v1", type: "request", id: "active", operation: "transport.status", input: {} })
     queue.reset(1)
     queue.reset(2)
-    expect(signal?.aborted).toBe(false)
+    expect(canceledId).toBeUndefined()
     expect(replies).toEqual([])
 
     queue.reset(3)
@@ -149,7 +148,7 @@ describe("desktop preload request queue", () => {
     pending.resolve({ id: "active", result: {} })
     await flushPromises()
 
-    expect(signal?.aborted).toBe(true)
+    expect(canceledId).toBe("active")
     expect(replies).toEqual([{
       generation: 2,
       response: { id: "active", error: { version: "v1", code: "cancelled", message: "The request was cancelled." } },
@@ -168,20 +167,21 @@ describe("desktop preload request queue", () => {
 
     const activeReplies: PreloadHostResponse[] = []
     const pending = Promise.withResolvers<PreloadHostResponse>()
-    let activeSignal: AbortSignal | undefined
+    let canceledId: string | undefined
     const activeQueue = createRequestQueue({
       reply: (_generation, response) => activeReplies.push(response),
       queueLimit: 32,
     })
-    activeQueue.setRequestHandler((request) => {
-      activeSignal = request.signal
+    activeQueue.setRequestHandler((_request) => {
       return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
     })
     activeQueue.dispatch(1, { version: "v1", type: "request", id: "active", operation: "transport.play", input: {} })
     activeQueue.setRequestHandler(undefined)
     activeQueue.setRequestHandler(undefined)
 
-    expect(activeSignal?.aborted).toBe(true)
+    expect(canceledId).toBe("active")
     expect(queuedReplies).toHaveLength(1)
     expect(activeReplies).toHaveLength(1)
     expect(queuedReplies[0]?.error?.code).toBe("cancelled")
@@ -199,16 +199,17 @@ describe("desktop preload request queue", () => {
     queue.cancel("queued")
 
     const pending = Promise.withResolvers<PreloadHostResponse>()
-    let signal: AbortSignal | undefined
-    queue.setRequestHandler((request) => {
-      signal = request.signal
+    let canceledId: string | undefined
+    queue.setRequestHandler((_request) => {
       return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
     })
     queue.dispatch(1, { version: "v1", type: "request", id: "active", operation: "transport.play", input: {} })
     queue.cancel("active")
     queue.cancel("active")
 
-    expect(signal?.aborted).toBe(true)
+    expect(canceledId).toBe("active")
     expect(replies).toHaveLength(2)
     expect(replies.map((reply) => reply.id)).toEqual(["queued", "active"])
     expect(replies.every((reply) => reply.error?.code === "cancelled")).toBe(true)
@@ -234,6 +235,94 @@ describe("desktop preload request queue", () => {
 
     expect(replies).toHaveLength(2)
     expect(replies.every((reply) => reply.error?.code === "cancelled")).toBe(true)
+  })
+
+  test("allows main to dispatch the final same-id export from the preflight reply", async () => {
+    const replies: PreloadHostResponse[] = []
+    const requests: PreloadHostRequest[] = []
+    let dispatchFinal: (() => void) | undefined
+    const queue = createRequestQueue({
+      reply: (_generation, response) => {
+        replies.push(response)
+        dispatchFinal?.()
+      },
+      queueLimit: 32,
+    })
+    queue.setRequestHandler(async (request) => {
+      requests.push(request)
+      return { id: request.id, result: request.input }
+    })
+    dispatchFinal = () => {
+      dispatchFinal = undefined
+      queue.dispatch(1, {
+        version: "v1",
+        type: "request",
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: false },
+        deadlineMs: 10_000,
+      })
+    }
+
+    queue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "export-request",
+      operation: "host.export.run",
+      input: { preflightOnly: true },
+      deadlineMs: 10_000,
+    })
+    await flushPromises()
+
+    expect(requests).toEqual([
+      {
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: true },
+      },
+      {
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: false },
+      },
+    ])
+    expect(replies).toEqual([
+      { id: "export-request", result: { preflightOnly: true } },
+      { id: "export-request", result: { preflightOnly: false } },
+    ])
+  })
+
+  test("forwards cancellation without exposing AbortSignal across the bridge", async () => {
+    const replies: PreloadHostResponse[] = []
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    let received: PreloadHostRequest | undefined
+    let canceledId: string | undefined
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    queue.setRequestHandler((request) => {
+      received = request
+      return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "import", operation: "host.import.audio", input: { source: { kind: "picker" } } })
+    queue.cancel("import")
+    pending.resolve({ id: "import", result: {} })
+    await flushPromises()
+
+    expect(received).toEqual({
+      id: "import",
+      operation: "host.import.audio",
+      input: { source: { kind: "picker" } },
+    })
+    expect(canceledId).toBe("import")
+    expect(replies).toEqual([{
+      id: "import",
+      error: { version: "v1", code: "cancelled", message: "The request was cancelled." },
+    }])
   })
 
   test("expires queued requests before dispatching them", () => {

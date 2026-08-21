@@ -5,7 +5,6 @@ export type PreloadHostRequest = {
   operation: DesktopOperationV1
   input: unknown
   trustedActorSubject?: string
-  signal: AbortSignal
 }
 
 export type PreloadHostResponse = {
@@ -28,6 +27,7 @@ type RequestQueueOptions = {
 }
 
 type RequestHandler = (request: PreloadHostRequest) => Promise<PreloadHostResponse>
+type RequestCancellationHandler = (requestId: string) => void
 
 const errorFor = (_operation: DesktopOperationV1, code: HostErrorV1["code"], message: string): HostErrorV1 | ControlErrorV1 => hostError(code, message)
 const deadlineExceeded = (id: string, operation: DesktopOperationV1): PreloadHostResponse => ({
@@ -54,12 +54,19 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
   const queued = new Map<string, QueuedRequest>()
   const active = new Map<string, { controller: AbortController; entry: QueuedRequest }>()
   let handler: RequestHandler | undefined
+  let cancelHandler: RequestCancellationHandler | undefined
   let currentGeneration = 0
+  const cancelActive = (id: string, controller: AbortController) => {
+    controller.abort()
+    try {
+      cancelHandler?.(id)
+    } catch {}
+  }
   const cancelAll = () => {
     for (const entry of queued.values()) reply(entry.generation, cancelled(entry.request.id, entry.request.operation))
     queued.clear()
     for (const { controller, entry } of active.values()) {
-      controller.abort()
+      cancelActive(entry.request.id, controller)
       reply(entry.generation, cancelled(entry.request.id, entry.request.operation))
     }
     active.clear()
@@ -89,21 +96,27 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
     }
     const controller = new AbortController()
     active.set(entry.request.id, { controller, entry })
+    const settle = () => {
+      if (active.get(entry.request.id)?.controller === controller) active.delete(entry.request.id)
+    }
     void handler({
       id: entry.request.id,
       operation: entry.request.operation,
       input: entry.request.input,
       trustedActorSubject: entry.trustedActorSubject,
-      signal: controller.signal,
     }).then(
       (response) => {
-        if (!controller.signal.aborted) reply(entry.generation, response)
+        if (controller.signal.aborted) return
+        settle()
+        reply(entry.generation, response)
       },
       () => {
-        if (!controller.signal.aborted) reply(entry.generation, failed(entry.request.id, entry.request.operation))
+        if (controller.signal.aborted) return
+        settle()
+        reply(entry.generation, failed(entry.request.id, entry.request.operation))
       },
     ).finally(() => {
-      if (active.get(entry.request.id)?.controller === controller) active.delete(entry.request.id)
+      settle()
     })
   }
 
@@ -134,16 +147,19 @@ export const createRequestQueue = ({ reply, now = Date.now, queueLimit }: Reques
       }
       const current = active.get(id)
       if (!current) return
-      current.controller.abort()
+      cancelActive(id, current.controller)
       active.delete(id)
       reply(current.entry.generation, cancelled(id, current.entry.request.operation))
     },
-    setRequestHandler(next: RequestHandler | undefined) {
-      handler = next
-      if (!handler) {
+    setRequestHandler(next: RequestHandler | undefined, onCancel?: RequestCancellationHandler) {
+      if (!next) {
+        handler = undefined
         cancelAll()
+        cancelHandler = undefined
         return
       }
+      handler = next
+      cancelHandler = onCancel
       const entries = [...queued.values()]
       queued.clear()
       for (const entry of entries) dispatch(entry)

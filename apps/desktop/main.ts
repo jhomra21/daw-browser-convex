@@ -497,7 +497,12 @@ const prepareRendererInput = async (
       : { canceled: false as const, files: [await fileCapabilities.grantReadFile(scope, request.source.path)] }
     signal.throwIfAborted()
     return desktopRendererImportInputSchemaV1.parse(
-      selection.canceled ? { canceled: true } : { canceled: false, files: selection.files },
+      selection.canceled
+        ? { canceled: true }
+        : {
+          canceled: false,
+          files: selection.files.map(({ token, basename, mime }) => ({ token, basename, mime })),
+        },
     )
   }
   if (operation === "host.export.run") {

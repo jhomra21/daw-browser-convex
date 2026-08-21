@@ -20,6 +20,7 @@ import {
   desktopHostVstParametersResultSchemaV1,
   desktopRendererRequestSchemaV1,
   desktopRendererExportInputSchemaV1,
+  desktopRendererImportInputSchemaV1,
   desktopTrustedRendererRequestSchemaV1,
   desktopVstParameterEditPayloadSchema,
   desktopRequestSchemaV1,
@@ -166,6 +167,22 @@ describe("desktop protocol v1", () => {
       id: "request-1",
       operation: "host.export.run",
       input,
+    }).success).toBe(false)
+  })
+
+  test("keeps renderer import capabilities limited to renderer metadata", () => {
+    const input = {
+      canceled: false,
+      files: [{
+        token: "0".repeat(64),
+        basename: "input.wav",
+        mime: "audio/wav",
+      }],
+    }
+    expect(desktopRendererImportInputSchemaV1.safeParse(input).success).toBe(true)
+    expect(desktopRendererImportInputSchemaV1.safeParse({
+      ...input,
+      files: [{ ...input.files[0], byteLength: 1 }],
     }).success).toBe(false)
   })
 

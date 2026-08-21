@@ -1487,12 +1487,12 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const handleTransportPause = async () => {
     if (isRecording()) await stopRecording();
-    handlePause();
+    return handlePause();
   };
 
   const handleTransportStop = async () => {
     if (isRecording()) await stopRecording();
-    handleStop();
+    return handleStop();
   };
 
   const addAudioTrack = async () => {

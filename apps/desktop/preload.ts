@@ -156,8 +156,11 @@ ipcRenderer.on(incomingChannel, (_event, message) => {
 })
 
 const desktopBridge = {
-  setRequestHandler(next: ((request: PreloadHostRequest) => Promise<PreloadHostResponse>) | undefined) {
-    requestQueue.setRequestHandler(next)
+  setRequestHandler(
+    next: ((request: PreloadHostRequest) => Promise<PreloadHostResponse>) | undefined,
+    onCancel?: (requestId: string) => void,
+  ) {
+    requestQueue.setRequestHandler(next, onCancel)
   },
   onPrepareToClose(next: typeof closeHandler) {
     closeHandler = next

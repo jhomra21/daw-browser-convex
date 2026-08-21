@@ -339,6 +339,59 @@ test("accepted exports outlive the initiating request and remain queryable and c
   queue.dispose()
 })
 
+test("returns the authoritative stopped transport state after stop settles", async () => {
+  installBridge([])
+  let playing = true
+  let playhead = 12
+  const queue = createExportQueue()
+  const controller = createAttachedHostController({
+    projectId: () => "project-1",
+    mountedProjectGeneration: () => 0,
+    isPlaying: () => playing,
+    playheadSec: () => playhead,
+    tracks: () => [],
+    audioEngine: new AudioEngine(),
+    requestPlay: async () => undefined,
+    pause: async () => undefined,
+    stop: async () => {
+      playing = false
+      playhead = 0
+    },
+    finishRecording: async () => undefined,
+    exportService: {
+      enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      submitTimelineExport: async () => { throw new Error("unused") },
+      submitStemExport: async () => { throw new Error("unused") },
+      prepareTimelineExport: async () => { throw new Error("unused") },
+      prepareStemExport: async () => { throw new Error("unused") },
+      submitPreparedTimelineExport: () => { throw new Error("unused") },
+      submitPreparedStemExport: () => { throw new Error("unused") },
+      cancel: () => undefined,
+      status: () => undefined,
+    },
+    exportQueue: queue,
+    importFiles: async () => ({ outcomes: [] }),
+    setPlayhead: () => undefined,
+  })
+  const unregister = registerController(controller)
+  const stop = await controller.request({
+    id: "stop-1",
+    operation: "transport.stop",
+    input: {},
+    signal: new AbortController().signal,
+  })
+  expect(stop.result).toEqual({ state: "stopped", playheadSec: 0 })
+  expect((await controller.request({
+    id: "status-1",
+    operation: "transport.status",
+    input: {},
+    signal: new AbortController().signal,
+  })).result).toEqual({ state: "stopped", playheadSec: 0 })
+  unregister()
+  queue.dispose()
+})
+
 test("attaches control only to an existing mounted local project", async () => {
   installBridge([])
   const project = await createLocalProject(`Attached control ${crypto.randomUUID()}`)

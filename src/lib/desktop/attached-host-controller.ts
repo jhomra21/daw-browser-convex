@@ -241,7 +241,17 @@ const fileFromCapability = async (requestId: string, file: { token: string; base
 export const registerAttachedHostController = (controller: TimelineHostController) => {
   if (activeController) throw new Error("Only one timeline host controller may be attached.")
   activeController = controller
-  window.dawDesktop?.setRequestHandler(controller.request)
+  const requestControllers = new Map<string, AbortController>()
+  const request = async (request_: Omit<HostRequest, "signal">) => {
+    const requestController = new AbortController()
+    requestControllers.set(request_.id, requestController)
+    try {
+      return await controller.request({ ...request_, signal: requestController.signal })
+    } finally {
+      if (requestControllers.get(request_.id) === requestController) requestControllers.delete(request_.id)
+    }
+  }
+  window.dawDesktop?.setRequestHandler(request, (requestId) => requestControllers.get(requestId)?.abort())
   window.dawDesktop?.onPrepareToClose(async () => ({ flushed: await controller.prepareToClose() }))
   return () => {
     if (activeController !== controller) return
@@ -592,7 +602,7 @@ export const createAttachedHostController = (input: {
       } else if (request_.operation === "transport.stop") {
         if (request_.signal.aborted) return cancelled(request_.id)
         await input.stop()
-        result = transport()
+        result = { state: "stopped", playheadSec: 0 }
       } else if (request_.operation === "transport.seek") {
         const parsedInput = desktopSeekInputSchemaV1.safeParse(request_.input)
         if (!parsedInput.success) {

@@ -63,6 +63,32 @@ void WriteU64(std::vector<std::uint8_t>& payload, const std::uint64_t value) {
   }
 }
 
+std::string_view RejectedBlockReasonName(const daw::audio_host_macos::RejectedBlockReason reason) {
+  using Reason = daw::audio_host_macos::RejectedBlockReason;
+  switch (reason) {
+    case Reason::kNotRunningOrCoreUnavailable: return "not-running-or-core-unavailable";
+    case Reason::kInsufficientChannels: return "insufficient-channels";
+    case Reason::kNullChannel: return "null-channel";
+    case Reason::kTransport: return "transport";
+    case Reason::kScratchCapacity: return "scratch-capacity";
+    case Reason::kProcessorEventCapacity: return "processor-event-capacity";
+    case Reason::kInstrumentEventCapacity: return "instrument-event-capacity";
+    case Reason::kSourceSchedule: return "source-schedule";
+    case Reason::kCoreProcess: return "core-process";
+    case Reason::kNone: return "none";
+  }
+  return "unknown";
+}
+
+std::string NativeOfflineFailureMessage(const daw::audio_host_macos::Diagnostics& diagnostics) {
+  return "Native offline rendering failed (reason: "
+    + std::string(RejectedBlockReasonName(diagnostics.last_rejected_reason))
+    + ", core result: " + std::to_string(diagnostics.last_rejected_core_result)
+    + ", frames: " + std::to_string(diagnostics.last_rejected_frame_count)
+    + ", channels: " + std::to_string(diagnostics.last_rejected_channel_count)
+    + ").";
+}
+
 bool WriteFrame(const daw::audio_host_macos::ControlType type, std::span<const std::uint8_t> payload);
 
 bool WriteScheduleProgress(const daw::audio_host_macos::ScheduleProgress& progress) {
@@ -973,7 +999,7 @@ int main() {
       active_session->Stop();
       if (!rendered) {
         std::vector<std::uint8_t> error;
-        WriteString(error, "Native offline rendering failed.");
+        WriteString(error, NativeOfflineFailureMessage(active_session->diagnostics()));
         if (!WriteFrame(daw::audio_host_macos::ControlType::kOfflineError, error)) return EXIT_FAILURE;
         continue;
       }

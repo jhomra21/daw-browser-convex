@@ -110,6 +110,9 @@ const recordingStatus = () => frame(33, Buffer.concat([
 const editorStatus = () => frame(42, Buffer.concat([
   u32(1), u32(1), u32(1), u32(1), u32(640), u32(480),
 ]))
+const offlineChunk = (startFrame, value) => frame(54, Buffer.concat([
+  u64(startFrame), u32(1), u32(1), f32(value),
+]))
 const vstPlaybackFlag = (payload) => {
   let offset = 0
   for (let index = 0; index < 5; index += 1) {
@@ -170,6 +173,16 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(editorStatus())
     } else if (type === 43) {
       process.stdout.write(ack(type))
+    } else if (type === 53 && process.env.MODE === "offline-burst") {
+      process.stdout.write(Buffer.concat([
+        ack(type),
+        offlineChunk(0, 0.1),
+        offlineChunk(1, 0.2),
+        offlineChunk(2, 0.3),
+        offlineChunk(3, 0.4),
+        offlineChunk(4, 0.5),
+        frame(55, u64(5)),
+      ]))
     } else if (type === 26) {
       if (process.env.MODE === "state-rejected") process.stdout.write(ack(type, 0))
       else if (process.env.MODE === "state-malformed") process.stdout.write(frame(27, Buffer.from([1, 2, 3])))
@@ -225,6 +238,37 @@ test("propagates bounded offline renderer stderr and exit diagnostics", async ()
       signal: new AbortController().signal,
       onChunk: () => undefined,
     })).rejects.toThrow("offline child failed to start")
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("consumes offline PCM bursts while waiting for the start acknowledgement", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-burst-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript.replaceAll('process.env.MODE === "offline-burst"', "true"))
+  await writeFile(hostPath, `#!/bin/sh\nexec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 5,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => chunks.push(chunk.startFrame),
+    })
+    expect(chunks).toEqual([0, 1, 2, 3, 4])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

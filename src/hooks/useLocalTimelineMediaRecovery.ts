@@ -1,10 +1,11 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { getAudioSourceMetadata } from "~/lib/audio-source";
-import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
+import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
+import { runWithConcurrency } from "~/lib/run-with-concurrency";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 
 type ProjectionActions = {
@@ -31,10 +32,14 @@ type Input = {
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: ClipBufferWriter;
+  preloadClipBuffer: EnsureClipBuffer;
+  getClipBuffer: (clipId: string) => AudioBuffer | undefined;
   removeClip: (input: { trackId: Track["id"]; clipId: string }) => Promise<boolean>;
   projection: ProjectionActions;
   selection: SelectionActions;
 };
+
+const MAX_CONCURRENT_HYDRATION_LOADS = 4;
 
 const pickReplacementAudioFile = async (): Promise<File | null> => {
   const openFilePicker = window.showOpenFilePicker;
@@ -63,8 +68,54 @@ export const useMissingMediaRecovery = (input: Input) => {
   const [localTimelineSnapshot, setLocalTimelineSnapshot] = createSignal<
     Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
   >(null);
+  const [mountedLocalMediaReady, setMountedLocalMediaReady] = createSignal(false);
 
   let reloadTail = Promise.resolve();
+  let hydrationScope = "";
+  let hydrationController: AbortController | undefined;
+  const hydrateSnapshotMedia = async (
+    snapshot: Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>>,
+    guard: {
+      projectId: string;
+      mountedProjectGeneration: number;
+      signal?: AbortSignal;
+    },
+  ): Promise<boolean> => {
+    const projectId = guard.projectId;
+    const generation = guard.mountedProjectGeneration;
+    const scope = `${projectId}\u0000${generation}`;
+    if (scope !== hydrationScope) {
+      hydrationController?.abort();
+      hydrationController = new AbortController();
+      hydrationScope = scope;
+    }
+    const isCurrent = () => (
+      !hydrationController?.signal.aborted
+      && !guard.signal?.aborted
+      && input.projectId() === projectId
+      && input.mountedProjectGeneration() === generation
+    );
+    if (!isLocalId("project", projectId) || !isCurrent()) return false;
+    const pending = snapshot.clips
+      .filter((clip) => !clip.midi && (clip.sourceAssetKey || clip.sampleUrl));
+    const signal = guard.signal ?? hydrationController?.signal;
+    await runWithConcurrency(pending, MAX_CONCURRENT_HYDRATION_LOADS, async (clip) => {
+      try {
+        await input.preloadClipBuffer(
+          clip.id,
+          clip.sampleUrl,
+          signal,
+          clip.sourceAssetKey,
+          clip.sourceSampleRate,
+        );
+      } catch (error) {
+        if (signal?.aborted) throw error;
+      }
+    });
+    if (!isCurrent()) return false;
+    return pending.every((clip) => input.getClipBuffer(clip.id) !== undefined);
+  };
+  onCleanup(() => hydrationController?.abort());
   const reloadLocalTimeline = async (guard?: {
     projectId?: string;
     mountedProjectGeneration?: number;
@@ -86,7 +137,15 @@ export const useMissingMediaRecovery = (input: Input) => {
       }
       const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
       if (isCurrent()) {
+        setMountedLocalMediaReady(false);
         setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+        await Promise.resolve();
+        const mediaReady = await hydrateSnapshotMedia(snapshot, {
+          projectId: rid,
+          mountedProjectGeneration: generation,
+          signal: guard?.signal,
+        });
+        if (isCurrent()) setMountedLocalMediaReady(mediaReady);
       }
     });
     reloadTail = operation.then(() => undefined, () => undefined);
@@ -98,23 +157,26 @@ export const useMissingMediaRecovery = (input: Input) => {
     const generation = input.mountedProjectGeneration();
     const isLocalProject = isLocalId("project", rid);
     if (!isLocalProject && input.remoteTimelineAvailable()) {
+      setMountedLocalMediaReady(true);
       setLocalTimelineSnapshot(null);
       return;
     }
+    setMountedLocalMediaReady(false);
     input.localTimelineReloadVersion();
-    let cancelled = false;
+    const operationController = new AbortController();
     void reloadLocalTimeline({
       projectId: rid,
       mountedProjectGeneration: generation,
+      signal: operationController.signal,
     }).catch(() => {
       if (
-        !cancelled
+        !operationController.signal.aborted
         && input.projectId() === rid
         && input.mountedProjectGeneration() === generation
       ) setLocalTimelineSnapshot(null);
     });
     onCleanup(() => {
-      cancelled = true;
+      operationController.abort();
     });
   });
 
@@ -188,6 +250,24 @@ export const useMissingMediaRecovery = (input: Input) => {
 
   return {
     localTimelineSnapshot,
+    mountedLocalMediaReady,
+    ensureMountedLocalMedia: async (guard: {
+      projectId: string;
+      mountedProjectGeneration: number;
+      signal: AbortSignal;
+    }) => {
+      if (
+        mountedLocalMediaReady()
+        && input.projectId() === guard.projectId
+        && input.mountedProjectGeneration() === guard.mountedProjectGeneration
+      ) return;
+      await reloadLocalTimeline(guard);
+      if (
+        !mountedLocalMediaReady()
+        && input.projectId() === guard.projectId
+        && input.mountedProjectGeneration() === guard.mountedProjectGeneration
+      ) throw new Error("Mounted local media is unavailable.");
+    },
     reloadLocalTimeline,
     removeMissingMediaClip,
     replaceMissingMediaClip,

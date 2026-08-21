@@ -549,6 +549,28 @@ export class NativeAudioHostCommandError extends Error {
   }
 }
 
+export type NativeOfflineWaitStage =
+  | "host handshake"
+  | "offline configuration"
+  | "asset installation"
+  | "VST attachment"
+  | "graph snapshot"
+  | "instrument state"
+  | "transport"
+  | "schedule window"
+  | "offline start"
+  | "offline completion"
+
+export class NativeOfflineRenderTimeoutError extends Error {
+  readonly stage: NativeOfflineWaitStage
+
+  constructor(stage: NativeOfflineWaitStage) {
+    super(`The native offline renderer timed out during ${stage}.`)
+    this.name = "NativeOfflineRenderTimeoutError"
+    this.stage = stage
+  }
+}
+
 const encodeOfflineConfigure = (plan: NativeOfflineRenderPlan) => {
   const output = Buffer.alloc(16)
   output.writeUInt32BE(plan.sampleRateHz, 0)
@@ -625,6 +647,28 @@ export const renderNativeOffline = async (input: {
       rejectFrame = reject
     })
   }
+  const consumeOfflinePcmChunk = (frame: Buffer) => {
+    const payload = frame.subarray(headerBytes)
+    if (payload.byteLength < 16) throw new Error("The native offline renderer returned an invalid PCM chunk.")
+    const startFrame = Number(frame.readBigUInt64BE(headerBytes))
+    const frameCount = frame.readUInt32BE(headerBytes + 8)
+    const channelCount = frame.readUInt32BE(headerBytes + 12)
+    const sampleBytes = frameCount * channelCount * 4
+    if (
+      channelCount !== input.plan.channelCount
+      || frameCount === 0
+      || payload.byteLength !== 16 + sampleBytes
+      || startFrame + frameCount > input.plan.totalFrames
+    ) throw new Error("The native offline renderer returned an invalid PCM chunk.")
+    const samples = new Float32Array(frameCount * channelCount)
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = payload.readFloatBE(16 + index * Float32Array.BYTES_PER_ELEMENT)
+    }
+    const planes = Array.from({ length: channelCount }, (_, channel) => (
+      samples.subarray(channel * frameCount, (channel + 1) * frameCount)
+    ))
+    input.onChunk({ startFrame, frameCount, channelCount, planes })
+  }
   const onStdoutData = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk])
     while (buffer.byteLength >= headerBytes) {
@@ -639,6 +683,15 @@ export const renderNativeOffline = async (input: {
       if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) {
         fail(new Error("The native offline renderer returned an invalid frame."))
         return
+      }
+      if (frame.readUInt32BE(8) === offlinePcmChunkType) {
+        try {
+          consumeOfflinePcmChunk(frame)
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error("The native offline renderer returned an invalid PCM chunk."))
+          return
+        }
+        continue
       }
       const resolve = resolveFrame
       resolveFrame = undefined
@@ -681,39 +734,20 @@ export const renderNativeOffline = async (input: {
     if (!frame || !child.stdin.writable) throw new Error("The native offline renderer is unavailable.")
     child.stdin.write(frame)
   }
-  const waitFor = async (type: number, acknowledgedType?: number) => {
+  const waitFor = async (
+    type: number,
+    acknowledgedType: number | undefined,
+    stage: NativeOfflineWaitStage,
+  ) => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("The native offline renderer command timed out.")), 10_000)
+      timer = setTimeout(() => reject(new NativeOfflineRenderTimeoutError(stage)), 10_000)
     })
     const receive = async () => {
       while (true) {
         const frame = await nextFrame()
         const frameType = frame.readUInt32BE(8)
         if (frameType === type && frameType !== ackType) return frame
-        if (frameType === offlinePcmChunkType) {
-          const payload = frame.subarray(headerBytes)
-          if (payload.byteLength < 16) throw new Error("The native offline renderer returned an invalid PCM chunk.")
-          const startFrame = Number(frame.readBigUInt64BE(headerBytes))
-          const frameCount = frame.readUInt32BE(headerBytes + 8)
-          const channelCount = frame.readUInt32BE(headerBytes + 12)
-          const sampleBytes = frameCount * channelCount * 4
-          if (
-            channelCount !== input.plan.channelCount
-            || frameCount === 0
-            || payload.byteLength !== 16 + sampleBytes
-            || startFrame + frameCount > input.plan.totalFrames
-          ) throw new Error("The native offline renderer returned an invalid PCM chunk.")
-          const samples = new Float32Array(frameCount * channelCount)
-          for (let index = 0; index < samples.length; index += 1) {
-            samples[index] = payload.readFloatBE(16 + index * Float32Array.BYTES_PER_ELEMENT)
-          }
-          const planes = Array.from({ length: channelCount }, (_, channel) => (
-            samples.subarray(channel * frameCount, (channel + 1) * frameCount)
-          ))
-          input.onChunk({ startFrame, frameCount, channelCount, planes })
-          continue
-        }
         if (frameType === offlineErrorType) {
           const payload = frame.subarray(headerBytes)
           if (payload.byteLength < 4) throw new Error("The native offline renderer failed.")
@@ -740,41 +774,41 @@ export const renderNativeOffline = async (input: {
   }
   try {
     send(hostHelloType)
-    const capabilities = readResponse(await waitFor(hostCapabilitiesType))
+    const capabilities = readResponse(await waitFor(hostCapabilitiesType, undefined, "host handshake"))
     if (!capabilities || !isCompatibleAudioHostHello(capabilities)) {
       throw new Error("The native offline renderer has an incompatible host contract.")
     }
     send(offlineConfigureType, encodeOfflineConfigure(input.plan))
-    await waitFor(ackType, offlineConfigureType)
+    await waitFor(ackType, offlineConfigureType, "offline configuration")
     for (const asset of input.plan.assets) {
       const payload = serializeAssetInstall(asset)
       if (!payload) throw new Error("The native offline asset is invalid.")
       send(assetInstallType, payload)
-      await waitFor(ackType, assetInstallType)
+      await waitFor(ackType, assetInstallType, "asset installation")
     }
     for (const attachment of input.vstAttachments ?? []) {
       const payload = serializeVstAttachment(attachment)
       if (!payload) throw new Error("The native offline VST attachment is invalid.")
       send(vstAttachType, payload)
-      await waitFor(ackType, vstAttachType)
+      await waitFor(ackType, vstAttachType, "VST attachment")
     }
     send(graphSnapshotType, input.plan.graph)
-    await waitFor(ackType, graphSnapshotType)
+    await waitFor(ackType, graphSnapshotType, "graph snapshot")
     if (input.plan.instrumentStates) {
       send(instrumentStatesType, input.plan.instrumentStates)
-      await waitFor(ackType, instrumentStatesType)
+      await waitFor(ackType, instrumentStatesType, "instrument state")
     }
     const transport = serializeTransport(input.plan.transport)
     if (!transport) throw new Error("The native offline transport is invalid.")
     send(transportType, transport)
-    await waitFor(ackType, transportType)
+    await waitFor(ackType, transportType, "transport")
     for (const schedule of input.plan.scheduleWindows ?? [input.plan.schedule]) {
       send(scheduleWindowType, schedule)
-      await waitFor(ackType, scheduleWindowType)
+      await waitFor(ackType, scheduleWindowType, "schedule window")
     }
     send(offlineStartType, encodeOfflineStart(input.plan))
-    await waitFor(ackType, offlineStartType)
-    await waitFor(offlineCompleteType)
+    await waitFor(ackType, offlineStartType, "offline start")
+    await waitFor(offlineCompleteType, undefined, "offline completion")
     finished = true
   } finally {
     finished = true

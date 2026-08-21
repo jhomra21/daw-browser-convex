@@ -293,10 +293,20 @@ test("accepted exports outlive the initiating request and remain queryable and c
 
   jobs.set("job-1", {
     id: "job-1",
-    status: "completed",
-    outcome: { type: "success", outputs: [] },
+    status: "failed",
+    outcome: {
+      type: "error",
+      message: "Native offline rendering failed. Native stderr: /Users/juan/secret-plugin.log",
+      failureOwner: "native",
+      outputs: [],
+    },
   })
-  completions.get("job-1")?.({ type: "success", outputs: [] })
+  completions.get("job-1")?.({
+    type: "error",
+    message: "Native offline rendering failed. Native stderr: /Users/juan/secret-plugin.log",
+    failureOwner: "native",
+    outputs: [],
+  })
   await Promise.resolve()
   expect((await controller.request({
     id: "status-2",
@@ -304,8 +314,13 @@ test("accepted exports outlive the initiating request and remain queryable and c
     input: {},
     signal: new AbortController().signal,
   })).result).toEqual({
-    status: "completed",
-    job: { id: "job-1", outputs: [] },
+    status: "failed",
+    job: {
+      id: "job-1",
+      outputs: [],
+      errorOwner: "native",
+      error: "Native offline rendering failed.",
+    },
   })
   expect(terminalJobs).toEqual(["job-1"])
 

@@ -337,6 +337,26 @@ describe("desktop file capability manager", () => {
     expect(manager.activeCapabilityCount()).toBe(0)
   })
 
+  test("canonicalizes symlinked output parents before granting a file", async () => {
+    const directory = await createTemporaryDirectory()
+    const alias = path.join(directory, "alias")
+    await symlink(directory, alias)
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      randomBytes: createDeterministicRandom(),
+    })
+
+    const capability = await manager.grantOutputFile(scope, path.join(alias, "mix.wav"))
+    const writer = await manager.beginWrite(scope, capability.token)
+    await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([1, 2, 3]))
+    expect(await manager.commitWrite(scope, writer.writerId)).toEqual({
+      basename: "mix.wav",
+      byteLength: 3,
+      mime: "audio/wav",
+    })
+    expect(await readFile(path.join(directory, "mix.wav"))).toEqual(Buffer.from([1, 2, 3]))
+  })
+
   test("releases terminal import capabilities so sequential imports cannot exhaust capacity", async () => {
     const directory = await createTemporaryDirectory()
     const filePath = path.join(directory, "input.wav")

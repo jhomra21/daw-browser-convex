@@ -522,6 +522,12 @@ export const createFileCapabilityManager = ({
     return requireUnchangedRealPath(directoryPath)
   }
 
+  const canonicalOutputPath = async (filePath: string) => {
+    requireAbsoluteNormalizedPath(filePath)
+    const parentPath = await fileSystem.realpath(path.dirname(filePath))
+    return path.join(parentPath, path.basename(filePath))
+  }
+
   const useNativeOutput = (): NativeFileCapabilityHelper => {
     if (nativeHelper && nativeOutputEnabled() && nativeHelper.available()) {
       return nativeHelper
@@ -666,14 +672,14 @@ export const createFileCapabilityManager = ({
       const reservation = reserveCapacity(scope, 1)
       try {
         await pruneExpired()
-        requireAbsoluteNormalizedPath(filePath)
-        const mime = mimeForPath(filePath)
-        const outputGrant = await nativeOutputGrant(filePath, false)
+        const canonicalPath = await canonicalOutputPath(filePath)
+        const mime = mimeForPath(canonicalPath)
+        const outputGrant = await nativeOutputGrant(canonicalPath, false)
         reservation.assertActive()
         const capability: WriteCapability = {
           ...createBase(scope),
           kind: "write",
-          filePath,
+          filePath: canonicalPath,
           mime,
           allowOverwrite: false,
           outputGrant,
@@ -746,16 +752,16 @@ export const createFileCapabilityManager = ({
         if (format && !outputExtensionMatchesFormat(format, selection.filePath)) {
           throw new FileCapabilityError("unsupported-file", "The selected output extension does not match the requested format.")
         }
-        requireAbsoluteNormalizedPath(selection.filePath)
-        const mime = mimeForPath(selection.filePath)
-        const outputGrant = await nativeOutputGrant(selection.filePath, true)
+        const canonicalPath = await canonicalOutputPath(selection.filePath)
+        const mime = mimeForPath(canonicalPath)
+        const outputGrant = await nativeOutputGrant(canonicalPath, true)
         let capability: WriteCapability
         try {
           reservation.assertActive()
           capability = {
             ...createBase(scope),
             kind: "write",
-            filePath: selection.filePath,
+            filePath: canonicalPath,
             mime,
             allowOverwrite: true,
             outputGrant,

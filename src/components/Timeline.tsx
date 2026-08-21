@@ -297,6 +297,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const {
     mediaRecovery,
     reconcileMountedLocalTimeline,
+    ensureMountedLocalMedia,
   } = useTimelinePersistenceController({
     projectId,
     mountedProjectGeneration,
@@ -306,6 +307,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     renderTracks,
     audioEngine,
     audioBufferCache: clipBuffers.writer,
+    preloadClipBuffer: clipBuffers.preload,
+    getClipBuffer: clipBuffers.getBuffer,
     localProject,
     projection,
     selection,
@@ -1957,6 +1960,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         ? (event) => nativeVstParameterQueue.enqueue(event).then((result) => result === "delivered")
         : undefined,
       reconcileMountedLocalTimeline,
+      ensureMountedLocalMedia,
+      isMountedLocalMediaReady: mediaRecovery.mountedLocalMediaReady,
       setPlayhead: (seconds) => setPlayhead(seconds, renderTracks()),
     }));
     onCleanup(unregisterHostController);

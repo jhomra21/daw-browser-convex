@@ -6,6 +6,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
 import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
@@ -576,12 +577,13 @@ test("instrument export preload reads local-asset bytes with the project context
       },
       nativeOfflineRenderer: async (plan) => {
         nativeAssetCount = plan.assets.length
-        throw new Error("render reached with the captured sampled buffer")
+        throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
       },
     })
     expect(nativeOutcome).toEqual({
       type: "error",
       message: "render reached with the captured sampled buffer",
+      failureOwner: "native",
       outputs: [],
     })
     expect(nativeAssetCount).toBeGreaterThan(0)

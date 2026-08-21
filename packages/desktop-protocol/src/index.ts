@@ -348,6 +348,8 @@ export const desktopHostExportStatusSchemaV1 = z.object({
     phase: z.string().min(1).max(32).optional(),
     sizeBytes: z.number().int().nonnegative().max(8 * 1024 * 1024 * 1024).optional(),
     outputs: z.array(safeExportOutputSchema).max(1024).optional(),
+    errorOwner: z.enum(["export", "native"]).optional(),
+    error: z.string().min(1).max(512).optional(),
   }).strict().optional(),
 }).strict()
 export const desktopHostVstIdentitySchemaV1 = z.object({

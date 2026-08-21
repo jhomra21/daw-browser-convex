@@ -1,6 +1,6 @@
 import { createEffect, onCleanup, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
+import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";
 import type { LocalProjectMode } from "~/lib/local-project-db";
 import { flushSharedOutbox } from "~/lib/shared-outbox";
@@ -36,6 +36,8 @@ type Input = {
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: ClipBufferWriter;
+  preloadClipBuffer: EnsureClipBuffer;
+  getClipBuffer: (clipId: string) => AudioBuffer | undefined;
   localProject: LocalProjectActions;
   projection: ProjectionActions;
   selection: SelectionActions;
@@ -51,6 +53,8 @@ export const useTimelinePersistenceController = (input: Input) => {
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,
     audioBufferCache: input.audioBufferCache,
+    preloadClipBuffer: input.preloadClipBuffer,
+    getClipBuffer: input.getClipBuffer,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
       const deletion = await createTimelineClipWriteAdapter({
@@ -89,5 +93,6 @@ export const useTimelinePersistenceController = (input: Input) => {
       mountedProjectGeneration: number;
       signal: AbortSignal;
     }) => mediaRecovery.reloadLocalTimeline(guard),
+    ensureMountedLocalMedia: mediaRecovery.ensureMountedLocalMedia,
   };
 };

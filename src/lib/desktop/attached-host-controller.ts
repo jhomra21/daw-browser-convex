@@ -224,6 +224,17 @@ const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
       name: output.name,
       sizeBytes: output.sizeBytes,
     }))
+    if (job.outcome.type === "error") {
+      safeJob.errorOwner = job.outcome.failureOwner ?? "export"
+      safeJob.error = job.outcome.message
+        .replace(/\s+Native stderr:[\s\S]*$/u, "")
+        .replace(/https?:\/\/\S+/gu, "[url]")
+        .replace(/(?:[A-Za-z]:)?\/[^\s]+/gu, "[path]")
+        .replace(/[\r\n\t]+/gu, " ")
+        .trim()
+        .slice(0, 512)
+      if (safeJob.error.length === 0) safeJob.error = "Export failed."
+    }
   }
   return {
     status: job.status,
@@ -282,6 +293,12 @@ export const createAttachedHostController = (input: {
     mountedProjectGeneration: number;
     signal: AbortSignal;
   }) => Promise<void>
+  ensureMountedLocalMedia?: (guard: {
+    projectId: string;
+    mountedProjectGeneration: number;
+    signal: AbortSignal;
+  }) => Promise<void>
+  isMountedLocalMediaReady?: Accessor<boolean>
   getMountedLocalProject?: typeof getLocalProject
 }): TimelineHostController => {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
@@ -294,7 +311,8 @@ export const createAttachedHostController = (input: {
     const projectId = input.projectId()
     return {
       project: projectId ? { id: projectId, kind: isLocalId("project", projectId) ? "local" as const : "cloud" as const } : null,
-      ready: Boolean(activeController),
+      ready: Boolean(activeController)
+        && (!isLocalId("project", projectId) || input.isMountedLocalMediaReady?.() !== false),
       transport: transport().state,
       capabilities: { playback: true, diagnostics: true },
     }
@@ -308,11 +326,26 @@ export const createAttachedHostController = (input: {
       || !isLocalId("project", mountedProjectId)
     ) return false
     const project = await findMountedLocalProject(mountedProjectId)
-    return !signal.aborted
+    if (project === undefined || !input.ensureMountedLocalMedia) {
+      return !signal.aborted
       && activeController === controller
       && input.projectId() === mountedProjectId
       && input.mountedProjectGeneration() === mountedGeneration
       && project !== undefined
+    }
+    try {
+      await input.ensureMountedLocalMedia({
+        projectId: mountedProjectId,
+        mountedProjectGeneration: mountedGeneration,
+        signal,
+      })
+    } catch {
+      return false
+    }
+    return !signal.aborted
+      && activeController === controller
+      && input.projectId() === mountedProjectId
+      && input.mountedProjectGeneration() === mountedGeneration
   }
   const control = async (request_: HostRequest & { operation: DesktopControlOperationV1 }): Promise<HostResponse> => {
     if (!request_.trustedActorSubject) {
@@ -437,6 +470,12 @@ export const createAttachedHostController = (input: {
   const request = async (request_: HostRequest): Promise<HostResponse> => {
     if (activeController !== controller) return unavailable(request_.id)
     if (request_.signal.aborted) return cancelled(request_.id)
+    const mountedProjectId = input.projectId()
+    const mountedGeneration = input.mountedProjectGeneration()
+    if (isLocalId("project", mountedProjectId) && input.ensureMountedLocalMedia
+      && !await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+      return { id: request_.id, error: request_.signal.aborted ? cancelled(request_.id).error : mountedProjectRequired() }
+    }
     try {
       let result: DesktopOperationMapV1[DesktopOperationV1]["result"]
       if (request_.operation === "host.vst.instances" || request_.operation === "host.vst.parameters") {

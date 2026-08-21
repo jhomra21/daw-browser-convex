@@ -30,7 +30,7 @@ import { listLocalExternalProcessors } from '~/lib/external-plugins'
 import { getLocalProject } from '~/lib/local-project-db'
 import { assertBrowserExportHasNoLiveExternalPlugins } from '@daw-browser/external-plugins'
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
-import type { NativeOfflineRenderer } from '~/lib/export/desktop-native-offline-renderer'
+import { NativeOfflineRenderError, type NativeOfflineRenderer } from '~/lib/export/desktop-native-offline-renderer'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import { nativeAudioHostMaximumInMemoryPcmBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 
@@ -101,7 +101,12 @@ export type ExportOutput =
 export type ExportOutcome =
   | { type: 'success'; outputs: readonly ExportOutput[] }
   | { type: 'canceled'; outputs: readonly ExportOutput[] }
-  | { type: 'error'; message: string; outputs: readonly ExportOutput[] }
+  | {
+    type: 'error'
+    message: string
+    failureOwner?: 'native'
+    outputs: readonly ExportOutput[]
+  }
 
 export const NATIVE_EXPORT_UNAVAILABLE_MESSAGE =
   'Native desktop export is unavailable until native offline rendering is implemented.'
@@ -967,7 +972,12 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       await saveCompletedLocalMetadata()
     } catch {}
     if (isAbortError(err)) return { type: 'canceled', outputs }
-    return { type: 'error', message: err instanceof Error ? err.message : 'Export failed', outputs }
+    return {
+      type: 'error',
+      message: err instanceof Error ? err.message : 'Export failed',
+      failureOwner: err instanceof NativeOfflineRenderError ? err.owner : undefined,
+      outputs,
+    }
   } finally {
     try {
       await outputTarget?.dispose?.()
@@ -1116,6 +1126,10 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
     return { type: 'success', outputs }
   } catch (err) {
     if (isAbortError(err)) return { type: 'canceled', outputs }
-    return { type: 'error', message: err instanceof Error ? err.message : 'Stem export failed', outputs }
+    return {
+      type: 'error',
+      message: err instanceof Error ? err.message : 'Stem export failed',
+      outputs,
+    }
   }
 }

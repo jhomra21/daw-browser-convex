@@ -1,7 +1,13 @@
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type ClipMediaStatus = NonNullable<Clip['mediaStatus']>
-export type EnsureClipBuffer = (clipId: string, sampleUrl?: string) => Promise<void>
+export type EnsureClipBuffer = (
+  clipId: string,
+  sampleUrl?: string,
+  signal?: AbortSignal,
+  sourceAssetKey?: string,
+  sourceSampleRate?: number,
+) => Promise<void>
 
 type ClipBufferCache = {
   readonly size: number

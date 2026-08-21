@@ -147,6 +147,11 @@ describe("control CLI processes", () => {
       assetFolders: [],
     })
     const receivedFrames: string[] = []
+    let releaseFirstRequest: (() => void) | undefined
+    const firstRequest = new Promise<void>((resolve) => { releaseFirstRequest = resolve })
+    let firstRequestStarted: (() => void) | undefined
+    const firstRequestStartedPromise = new Promise<void>((resolve) => { firstRequestStarted = resolve })
+    let delayFirstRequest = true
     const server = createServer((socket: Socket) => {
       const decoder = createDesktopFrameDecoder((frame: DesktopFrame) => {
         receivedFrames.push(`${frame.version}:${frame.type}`)
@@ -172,12 +177,19 @@ describe("control CLI processes", () => {
         const result = frame.operation === "host.status"
           ? { project: { id: "project-1", kind: "local" }, ready: true, transport: "stopped", capabilities: { playback: true, diagnostics: true } }
           : snapshot
-        socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+        const sendReply = () => socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
           version: "v1",
           type: "reply",
           id: frame.id,
           result,
         })))
+        if (delayFirstRequest && frame.operation !== "host.status") {
+          delayFirstRequest = false
+          firstRequestStarted?.()
+          void firstRequest.then(sendReply)
+        } else {
+          sendReply()
+        }
       })
       socket.on("data", decoder)
     })
@@ -210,6 +222,8 @@ describe("control CLI processes", () => {
     child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}\n')
     child.stdin.write('{"jsonrpc":"2.0","id":2,"method":"control.snapshot","params":{"projectId":"project-1"}}\n')
     child.stdin.end()
+    await firstRequestStartedPromise
+    releaseFirstRequest?.()
     const [stdout, stderr] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

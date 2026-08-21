@@ -5,8 +5,6 @@ import {
   instrumentAddPayloadSchema,
   midiClipReadSchema,
   midiNoteSchema,
-  type JsonValue,
-  persistedProcessorSnapshotSchema,
 } from '@daw-browser/shared'
 import {
   CONTROL_API_VERSION_V1,
@@ -21,8 +19,6 @@ import {
   clipColorSchema,
   clipFadesSnapshotSchema,
   clipRefSchemaV1,
-  contextualRefSchemaV1,
-  executionTargetSchemaV1,
   finiteNumberSchema,
   groupRefSchemaV1,
   nameSchema,
@@ -72,15 +68,16 @@ const trackCreateActionSchema = z.object({
 const trackRenameActionSchema = z.object({
   kind: z.literal('track.rename'),
   track: trackRefSchemaV1,
-  name: nameSchema,
-}).strict()
+  name: nameSchema.describe('New track name.'),
+}).strict().describe('Rename a track. Existing tracks use {source:"persisted",id:"<id from snapshot>"}.')
 const trackMixActionSchema = z.object({
   kind: z.literal('track.mix.set'),
   track: trackRefSchemaV1,
-  volume: finiteNumberSchema.min(0).max(2).optional(),
-  muted: z.boolean().optional(),
-  soloed: z.boolean().optional(),
+  volume: finiteNumberSchema.min(0).max(2).optional().describe('Optional linear volume, from 0 through 2.'),
+  muted: z.boolean().optional().describe('Optional mute state.'),
+  soloed: z.boolean().optional().describe('Optional solo state.'),
 }).strict().refine((action) => Object.keys(action).length > 2, 'Track mix action must change a value.')
+  .describe('Set one or more track mix values; provide at least one of volume, muted, or soloed.')
 const trackRoutingActionSchema = z.object({
   kind: z.literal('track.routing.set'),
   track: trackRefSchemaV1,
@@ -107,7 +104,7 @@ const trackGroupActionSchema = z.object({
 const trackDeleteActionSchema = z.object({
   kind: z.literal('track.delete'),
   track: trackRefSchemaV1,
-}).strict()
+}).strict().describe('Destructively delete a track; preview reports whether approval is required.')
 const trackCollapsedSetActionSchema = z.object({
   kind: z.literal('track.collapsed.set'), track: trackRefSchemaV1, collapsed: z.boolean(),
 }).strict()
@@ -401,8 +398,10 @@ const assetDeleteActionSchema = z.object({
 }).strict()
 const recoveryRestoreActionSchema = z.object({
   kind: z.literal('recovery.restore'),
-  recovery: z.object({ id: stableIdSchema }).strict(),
-}).strict()
+  recovery: z.object({
+    id: stableIdSchema.describe('Recovery ID returned by control_recoveries or a prior commit.'),
+  }).strict(),
+}).strict().describe('Restore a recovery by ID returned from the project recoveries list.')
 
 export const controlActionSchemaV1 = z.union([
   projectRenameActionSchema, projectSettingsActionSchema, trackCreateActionSchema,
@@ -502,10 +501,11 @@ export const findDuplicateRecoveryActionIndexV1 = (
 }
 
 const requestBaseFields = {
-  version: z.literal(CONTROL_API_VERSION_V1),
-  projectId: projectIdSchema,
-  expectedRevision: revisionSchema.optional(),
-  actions: z.array(controlActionSchemaV1).min(1).max(controlLimitsV1.maxActions),
+  version: z.literal(CONTROL_API_VERSION_V1).describe('Control request version; use "v1".'),
+  projectId: projectIdSchema.describe('Project ID from project_list or the canonical V2 snapshot.'),
+  expectedRevision: revisionSchema.optional().describe('Revision observed in the latest canonical V2 snapshot.'),
+  actions: z.array(controlActionSchemaV1).min(1).max(controlLimitsV1.maxActions)
+    .describe('Ordered control actions to preview or apply, such as track.rename.'),
 }
 
 export const idempotencyKeySchemaV1 = z.string()
@@ -515,8 +515,8 @@ export const idempotencyKeySchemaV1 = z.string()
 
 export const controlCommitRequestSchemaV1 = z.object({
   ...requestBaseFields,
-  idempotencyKey: idempotencyKeySchemaV1,
-  approvalToken: approvalTokenSchemaV1.optional(),
+  idempotencyKey: idempotencyKeySchemaV1.describe('Stable key reused when retrying this exact commit request.'),
+  approvalToken: approvalTokenSchemaV1.optional().describe('Approval token returned by control_request_approval when preview requires approval.'),
 }).strict().superRefine(addAggregateIssues)
 
 export const controlErrorSchemaV1 = z.object({

@@ -140,9 +140,17 @@ describe("control MCP tools", () => {
         clientInfo: { name: "test-client", version: "1.0.0" },
       },
     })
-    expect(response.result.instructions).toBe(
-      "Workflow: call control_capabilities, observe control_snapshot, and preview every mutation with control_preview. Request approval only when required, then commit the exact previewed request with a stable idempotencyKey. Re-observe control_snapshot and control_history after committing. Use target: \"host\" and host_* tools only for capabilities exposed by an attached desktop host.",
-    )
+    expect(response.result.instructions).toContain("project_list")
+    expect(response.result.instructions).toContain("control_capabilities_v2")
+    expect(response.result.instructions).toContain("control_snapshot_v2")
+    expect(response.result.instructions).toContain("control_preview")
+    expect(response.result.instructions).toContain("control_request_approval")
+    expect(response.result.instructions).toContain("control_commit")
+    expect(response.result.instructions).toContain("control_history")
+    expect(response.result.instructions).toContain("revision-conflict")
+    expect(response.result.instructions).toContain('{source:"persisted",id:"<track id from snapshot>"}')
+    expect(response.result.instructions).toContain('{kind:"track.rename"')
+    expect(response.result.instructions).toContain("legacy V1 compatibility")
   })
 
   test("adds local host tools only when explicitly composed", async () => {
@@ -336,6 +344,21 @@ describe("control MCP tools", () => {
       idempotentHint: true,
       openWorldHint: false,
     })
+    expect(tools.find((tool: { name: string }) => tool.name === "control_snapshot").description).toContain("Legacy V1 compatibility")
+    expect(tools.find((tool: { name: string }) => tool.name === "control_snapshot_v2").description).toContain("Canonical/preferred")
+    expect(tools.find((tool: { name: string }) => tool.name === "control_capabilities").description).toContain("Legacy V1 compatibility")
+    expect(tools.find((tool: { name: string }) => tool.name === "control_capabilities_v2").description).toContain("Canonical/preferred")
+    const preview = tools.find((tool: { name: string }) => tool.name === "control_preview")
+    const commit = tools.find((tool: { name: string }) => tool.name === "control_commit")
+    expect(preview.description).toContain("version")
+    expect(preview.description).toContain("projectId")
+    expect(preview.description).toContain("expectedRevision")
+    expect(preview.description).toContain("track.rename")
+    expect(preview.description).toContain("persisted")
+    expect(preview.description).toContain("id")
+    expect(preview.description).toContain("name")
+    expect(commit.description).toContain("idempotencyKey")
+    expect(commit.description).toContain("approvalToken")
   })
 
   test("discovers cloud projects and host projects with host-only current", async () => {
@@ -412,11 +435,11 @@ describe("control MCP tools", () => {
         params: { name, arguments: arguments_ },
       }, { service: input, write: true })
       expect(response.result.isError).toBeTrue()
-      expect(JSON.parse(response.result.content[0].text)).toEqual({
-        version: "v1",
-        code: "invalid-request",
-        message: "Invalid control tool input.",
-      })
+      const error = JSON.parse(response.result.content[0].text)
+      expect(error.version).toBe("v1")
+      expect(error.code).toBe("invalid-request")
+      expect(error.message).toBe(`Invalid ${name} input.`)
+      expect(Object.keys(error.details).length).toBeGreaterThan(0)
     }
     expect(calls).toBe(0)
   })
@@ -436,11 +459,11 @@ describe("control MCP tools", () => {
       { projectId: "project-1", target: "host", unexpected: true },
     ]) {
       const response = await request(call("control_snapshot", arguments_), { service: cloud, hostFactory })
-      expect(JSON.parse(response.result.content[0].text)).toEqual({
-        version: "v1",
-        code: "invalid-request",
-        message: "Invalid control tool input.",
-      })
+      const error = JSON.parse(response.result.content[0].text)
+      expect(error.version).toBe("v1")
+      expect(error.code).toBe("invalid-request")
+      expect(error.message).toBe("Invalid control_snapshot input.")
+      expect(Object.keys(error.details).length).toBeGreaterThan(0)
     }
     expect(cloudCalls).toBe(0)
     expect(hostCalls).toBe(0)
@@ -463,7 +486,8 @@ describe("control MCP tools", () => {
       expect(JSON.parse(response.result.content[0].text)).toEqual({
         version: "v1",
         code: "invalid-request",
-        message: "Invalid control tool input.",
+        message: `Invalid ${name} input.`,
+        details: { unexpected: "Unexpected field." },
       })
     }
   })
@@ -499,6 +523,29 @@ describe("control MCP tools", () => {
       actionIndex: 0,
       details: { field: "actions.0.name" },
     })
+  })
+
+  test("returns bounded public validation details for malformed preview requests", async () => {
+    const cases = [
+      [{ projectId: "project-1", actions: [{ kind: "track.rename", track: { source: "persisted" }, name: "Drums" }] }, ["version", "track.id"]],
+      [{ version: "v2", projectId: "project-1", actions: [{ kind: "track.rename", track: { source: "persisted", id: "track-1" }, name: "Drums" }] }, ["version"]],
+      [{ version: "v1", projectId: "project-1", actions: [{ kind: "track.rename", track: { source: "persisted", id: "track-1" }, name: "Drums" }], extra: "secret" }, ["extra"]],
+    ] as const
+    for (const [arguments_, expectedKeys] of cases) {
+      const response = await request(call("control_preview", arguments_), { write: true })
+      const error = JSON.parse(response.result.content[0].text)
+      expect(error.version).toBe("v1")
+      expect(error.code).toBe("invalid-request")
+      expect(error.message).toBe("Invalid control_preview input.")
+      expect(Object.keys(error.details)).toEqual(expect.arrayContaining(expectedKeys))
+      expect(Object.keys(error.details).length).toBeLessThanOrEqual(16)
+      for (const [key, value] of Object.entries(error.details)) {
+        expect(key.length).toBeLessThanOrEqual(64)
+        expect(value.length).toBeLessThanOrEqual(1000)
+        expect(value).not.toContain("Zod")
+        expect(value).not.toContain("at ")
+      }
+    }
   })
 
   test("resolves cloud identity before authorizing writes", async () => {

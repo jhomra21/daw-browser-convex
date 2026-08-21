@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const stableIdSchema = z.string().min(1).max(256)
+export const stableIdSchema = z.string().min(1).max(256).describe('Opaque identifier returned by the control API.')
 const hasAsciiControlCharacter = (value: string) => (
   Array.from(value).some((character) => {
     const code = character.charCodeAt(0)
@@ -15,9 +15,9 @@ export const projectIdSchema = stableIdSchema.refine(
     && !/[/\\?#]|%(?:[01][0-9a-f]|7f|2f|5c|3f|23)/i.test(projectId)
   ),
   'Project IDs must be opaque URL-safe identifiers.',
-)
-export const clientRefValueSchema = z.string().min(1).max(256)
-export const nameSchema = z.string().trim().min(1).max(120)
+).describe('Project identifier returned by project discovery or a project snapshot.')
+export const clientRefValueSchema = z.string().min(1).max(256).describe('Client reference used to address an entity created in the same request.')
+export const nameSchema = z.string().trim().min(1).max(120).describe('Non-empty display name.')
 export const finiteNumberSchema = z.number().finite()
 export const secondsSchema = finiteNumberSchema.min(0)
 export const trackColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
@@ -28,12 +28,13 @@ export const clipColorSchema = z.union([
   z.literal('clip-recording'),
 ])
 export const trackRoleSchema = z.enum(['track', 'group', 'return'])
-export const revisionSchema = z.number().int().nonnegative()
+export const revisionSchema = z.number().int().nonnegative().describe('Project revision returned by the latest snapshot or preview.')
 export const requestDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Request digest must be a lowercase SHA-256 hex digest.')
 export const approvalTokenSchemaV1 = z.string()
   .min(32)
   .max(256)
   .regex(/^[A-Za-z0-9_-]+$/, 'Approval tokens must be URL-safe opaque values.')
+  .describe('One-time token returned by control_request_approval for the exact destructive request.')
 export const opaqueCursorSchema = z.string()
   .min(1)
   .max(2_048)
@@ -43,10 +44,16 @@ export const stableIdSchemaV1 = stableIdSchema
 export const projectIdSchemaV1 = projectIdSchema
 export const clientRefSchemaV1 = clientRefValueSchema
 export const contextualRefSchemaV1 = z.discriminatedUnion('source', [
-  z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict(),
-  z.object({ source: z.literal('client'), clientRef: clientRefValueSchema }).strict(),
-])
-export const trackRefSchemaV1 = contextualRefSchemaV1.describe('Track reference')
+  z.object({
+    source: z.literal('persisted').describe('Address an entity already present in the snapshot.'),
+    id: stableIdSchema.describe('Entity ID from the latest snapshot.'),
+  }).strict(),
+  z.object({
+    source: z.literal('client').describe('Address an entity created earlier in this request.'),
+    clientRef: clientRefValueSchema,
+  }).strict(),
+]).describe('Reference by persisted snapshot ID or same-request client reference.')
+export const trackRefSchemaV1 = contextualRefSchemaV1.describe('Track reference: use {source:"persisted",id:"<id from snapshot>"} for an existing track.')
 export const clipRefSchemaV1 = contextualRefSchemaV1.describe('Clip reference')
 export const processorRefSchemaV1 = contextualRefSchemaV1.describe('Effect reference')
 export const assetRefSchemaV1 = z.object({ source: z.literal('persisted'), id: stableIdSchema }).strict()

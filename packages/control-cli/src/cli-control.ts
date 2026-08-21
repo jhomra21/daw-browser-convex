@@ -13,8 +13,13 @@ import type {
 import { cloudCanonicalControlMethods, cloudClient } from "./cli-auth"
 import { jsonRequest, option, type CliIo } from "./input"
 import { requestHostControl, requestHostControlV2 } from "./cli-host"
-import { createHostCanonicalClient } from "./rpc-host"
-import { createJsonlRpcAdapter, processJsonlLines } from "@daw-browser/control-sdk"
+import {
+  createCanonicalControlClient,
+  createJsonlRpcAdapter,
+  processJsonlLines,
+} from "@daw-browser/control-sdk"
+import { connectDesktopControl } from "@daw-browser/control-sdk/desktop"
+import { cliDesktopControlOptions } from "./desktop-options"
 
 type ControlTarget = "cloud" | "host"
 
@@ -147,17 +152,19 @@ export const runProjectCommand = async (command: "list" | "current", arguments_:
   if (routing.arguments_.length !== 0) throw new Error(`project ${command} accepts no arguments.`)
   if (routing.target === "host") {
     if (command === "current") {
-      const host = await createHostCanonicalClient()
+      const host = await connectDesktopControl(cliDesktopControlOptions())
       try {
-        io.stdout(canonicalJson({ version: "v1", ok: true, command: "project current", data: await host.client.projects.current({}) }))
+        const client = createCanonicalControlClient(host.invoker)
+        io.stdout(canonicalJson({ version: "v1", ok: true, command: "project current", data: await client.projects.current({}) }))
       } finally {
         host.close()
       }
       return 0
     }
-    const host = await createHostCanonicalClient()
+    const host = await connectDesktopControl(cliDesktopControlOptions())
     try {
-      io.stdout(canonicalJson({ version: "v1", ok: true, command: "project list", data: await host.client.projects.list({}) }))
+      const client = createCanonicalControlClient(host.invoker)
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: "project list", data: await client.projects.list({}) }))
     } finally {
       host.close()
     }
@@ -174,7 +181,7 @@ export const runRpcCommand = async (arguments_: string[], io: CliIo) => {
     throw new Error("rpc requires --target host.")
   }
   if (!io.readLines) throw new Error("rpc stdio input is unavailable.")
-  const host = await createHostCanonicalClient()
+  const host = await connectDesktopControl(cliDesktopControlOptions())
   try {
     const adapter = createJsonlRpcAdapter({ invoker: host.invoker })
     await processJsonlLines(io.readLines(), adapter, io.stdout)

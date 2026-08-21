@@ -21,16 +21,50 @@ import {
   type ControlInvoker,
   type ControlOperationHandlers,
 } from "@daw-browser/control"
-import { createCanonicalControlClient, type CanonicalControlClient } from "@daw-browser/control-sdk"
-import { desktopHostStatusSchemaV1 } from "@daw-browser/desktop-protocol"
-import { createAvailableHostClient } from "./host"
+import {
+  createAvailableDesktopHostClient,
+  type DesktopHostClientOptions,
+} from "@daw-browser/desktop-protocol/client"
+import { desktopHostStatusSchemaV1, maxDeadlineMs } from "@daw-browser/desktop-protocol"
 
-export const createHostCanonicalClient = async (): Promise<{
-  client: CanonicalControlClient<"desktop">
-  invoker: ControlInvoker<"desktop">
-  close: () => void
-}> => {
-  const host = await createAvailableHostClient()
+export type DesktopControlConnectionOptions = {
+  clientName?: string
+  userDataDirectory?: string
+  actorPath?: string
+  handshakeDeadlineMs?: number
+  requestDeadlineMs?: number
+}
+
+const defaultClientName = "daw-control-sdk"
+const deadline = (value: number | undefined, name: string) => {
+  const resolved = value ?? (name === "handshakeDeadlineMs" ? 5_000 : 10_000)
+  if (!Number.isInteger(resolved) || resolved <= 0 || resolved > maxDeadlineMs) {
+    throw new Error(`${name} must be a positive integer no greater than ${maxDeadlineMs}.`)
+  }
+  return resolved
+}
+
+const clientName = (value: string | undefined) => {
+  const resolved = value ?? defaultClientName
+  if (resolved.length < 1 || resolved.length > 128) {
+    throw new Error("clientName must contain between 1 and 128 characters.")
+  }
+  return resolved
+}
+
+const rawOptions = (options: DesktopControlConnectionOptions): DesktopHostClientOptions => ({
+  clientName: clientName(options.clientName),
+  userDataDirectory: options.userDataDirectory,
+  actorPath: options.actorPath,
+  handshakeDeadlineMs: deadline(options.handshakeDeadlineMs, "handshakeDeadlineMs"),
+  requestDeadlineMs: deadline(options.requestDeadlineMs, "requestDeadlineMs"),
+})
+
+export const connectDesktopControl = async (
+  options: DesktopControlConnectionOptions = {},
+): Promise<{ invoker: ControlInvoker<"desktop">; close: () => void }> => {
+  const host = await createAvailableDesktopHostClient(rawOptions(options))
+  let closed = false
   try {
     const status = async () => host.request("host.status", {})
     const handlers: ControlOperationHandlers<"desktop"> = {
@@ -72,11 +106,16 @@ export const createHostCanonicalClient = async (): Promise<{
         await host.request("control.recoveries", controlRecoveriesQuerySchemaV1.parse(input)),
       ),
     }
-    const invoker: ControlInvoker<"desktop"> = createDirectControlInvoker({
+    const invoker = createDirectControlInvoker({
       handlers,
       context: { target: "desktop", principal: { subject: "daw-control" } },
     })
-    return { client: createCanonicalControlClient(invoker), invoker, close: host.close }
+    const close = () => {
+      if (closed) return
+      closed = true
+      host.close()
+    }
+    return { invoker, close }
   } catch (error) {
     host.close()
     throw error

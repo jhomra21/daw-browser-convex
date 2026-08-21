@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { loadHostActorIdentity } from "./host-identity"
+import { loadDesktopActorIdentity } from "./client-identity"
 
 const directories: string[] = []
 const originalActorPath = process.env.DAW_CONTROL_ACTOR_PATH
@@ -48,8 +48,8 @@ describe("host actor identity", () => {
     const root = await temporaryDirectory()
     const file = path.join(root, "nested", "host-actor-v1.json")
 
-    const first = await loadHostActorIdentity(file)
-    const second = await loadHostActorIdentity(file)
+    const first = await loadDesktopActorIdentity(file)
+    const second = await loadDesktopActorIdentity(file)
 
     expect(second).toBe(first)
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
@@ -69,7 +69,7 @@ describe("host actor identity", () => {
     const file = path.join(directory, "host-actor-v1.json")
 
     const identities = await Promise.all(
-      Array.from({ length: 32 }, () => loadHostActorIdentity(file)),
+      Array.from({ length: 32 }, () => loadDesktopActorIdentity(file)),
     )
 
     expect(new Set(identities).size).toBe(1)
@@ -86,7 +86,7 @@ describe("host actor identity", () => {
     const overrideFile = path.join(root, "override", "host-actor-v1.json")
     process.env.DAW_CONTROL_ACTOR_PATH = overrideFile
 
-    const identity = await loadHostActorIdentity(defaultFile)
+    const identity = await loadDesktopActorIdentity(defaultFile)
 
     expect(JSON.parse(await readFile(overrideFile, "utf8"))).toEqual({
       version: "v1",
@@ -103,7 +103,7 @@ describe("host actor identity", () => {
     await symlink(target, linkedDirectory, "dir")
 
     await expect(
-      loadHostActorIdentity(path.join(linkedDirectory, "host-actor-v1.json")),
+      loadDesktopActorIdentity(path.join(linkedDirectory, "host-actor-v1.json")),
     ).rejects.toThrow("Host actor directory is not private.")
     expect(await readdir(target)).toEqual([])
   })
@@ -114,7 +114,7 @@ describe("host actor identity", () => {
     await writeFile(parent, "unchanged")
 
     await expect(
-      loadHostActorIdentity(path.join(parent, "host-actor-v1.json")),
+      loadDesktopActorIdentity(path.join(parent, "host-actor-v1.json")),
     ).rejects.toThrow("Host actor directory is not private.")
     expect(await readFile(parent, "utf8")).toBe("unchanged")
   })
@@ -127,7 +127,7 @@ describe("host actor identity", () => {
     await chmod(directory, 0o755)
 
     await expect(
-      loadHostActorIdentity(path.join(directory, "host-actor-v1.json")),
+      loadDesktopActorIdentity(path.join(directory, "host-actor-v1.json")),
     ).rejects.toThrow("Host actor directory is not private.")
     expect((await lstat(directory)).mode & 0o777).toBe(0o755)
     expect(await readdir(directory)).toEqual([])
@@ -143,7 +143,7 @@ describe("host actor identity", () => {
     await writeFile(target, "unchanged")
     await symlink(target, file, "file")
 
-    await expect(loadHostActorIdentity(file)).rejects.toThrow(
+    await expect(loadDesktopActorIdentity(file)).rejects.toThrow(
       "Host actor identity is not private.",
     )
     expect(await readFile(target, "utf8")).toBe("unchanged")
@@ -158,7 +158,7 @@ describe("host actor identity", () => {
       await chmod(file, 0o700)
     }
 
-    await expect(loadHostActorIdentity(file)).rejects.toThrow(
+    await expect(loadDesktopActorIdentity(file)).rejects.toThrow(
       "Host actor identity is not private.",
     )
     expect((await lstat(file)).isDirectory()).toBe(true)
@@ -171,7 +171,7 @@ describe("host actor identity", () => {
     const contents = JSON.stringify({ version: "v1", actorId })
     await writeIdentity(file, contents, 0o644)
 
-    await expect(loadHostActorIdentity(file)).rejects.toThrow(
+    await expect(loadDesktopActorIdentity(file)).rejects.toThrow(
       "Host actor identity is not private.",
     )
     expect(await readFile(file, "utf8")).toBe(contents)
@@ -191,7 +191,7 @@ describe("host actor identity", () => {
       const file = path.join(root, "identity", "host-actor-v1.json")
       await writeIdentity(file, contents)
 
-      await expect(loadHostActorIdentity(file)).rejects.toThrow()
+      await expect(loadDesktopActorIdentity(file)).rejects.toThrow()
       expect(await readFile(file, "utf8")).toBe(contents)
     }
   })
@@ -203,7 +203,7 @@ describe("host actor identity", () => {
     const contents = identity.padEnd(1024, " ")
     await writeIdentity(file, contents)
 
-    expect(await loadHostActorIdentity(file)).toBe(actorId)
+    expect(await loadDesktopActorIdentity(file)).toBe(actorId)
     expect(await readFile(file, "utf8")).toBe(contents)
   })
 })

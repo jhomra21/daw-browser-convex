@@ -17,10 +17,12 @@ import {
 } from "@daw-browser/desktop-protocol"
 import { localControlCapabilitiesV2, type ControlErrorV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
-import { createHostClient, DesktopControlError, registrationFile } from "./host"
+import { createDesktopHostClient, DesktopControlError } from "./client"
 
 const originalActorPath = process.env.DAW_CONTROL_ACTOR_PATH
 const originalAuthPath = process.env.DAW_CONTROL_AUTH_PATH
+const originalHome = process.env.HOME
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME
 const directories: string[] = []
 const servers: ReturnType<typeof createServer>[] = []
 const sockets = new Set<Socket>()
@@ -214,25 +216,10 @@ afterEach(async () => {
   else process.env.DAW_CONTROL_ACTOR_PATH = originalActorPath
   if (originalAuthPath === undefined) delete process.env.DAW_CONTROL_AUTH_PATH
   else process.env.DAW_CONTROL_AUTH_PATH = originalAuthPath
-})
-
-describe("desktop host registration paths", () => {
-  test("uses Electron-compatible platform application data directories", () => {
-    expect(registrationFile({
-      platform: "win32",
-      homeDirectory: "C:\\Users\\Daw",
-      appDataDirectory: "C:\\Users\\Daw\\AppData\\Roaming",
-    })).toBe("C:\\Users\\Daw\\AppData\\Roaming/daw-browser/host/registration-v1.json")
-    expect(registrationFile({
-      platform: "darwin",
-      homeDirectory: "/Users/daw",
-    })).toBe("/Users/daw/Library/Application Support/daw-browser/host/registration-v1.json")
-    expect(registrationFile({
-      platform: "linux",
-      homeDirectory: "/home/daw",
-      xdgConfigDirectory: "/config",
-    })).toBe("/config/daw-browser/host/registration-v1.json")
-  })
+  if (originalHome === undefined) delete process.env.HOME
+  else process.env.HOME = originalHome
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome
 })
 
 describe("desktop host client", () => {
@@ -260,20 +247,20 @@ describe("desktop host client", () => {
     }
 
     await writeRegistration(path.join(aliasedUserDataDirectory, "host", "host.sock"))
-    const lexicalAddressClient = await createHostClient({ paths: aliasedPaths })
+    const lexicalAddressClient = await createDesktopHostClient({ paths: aliasedPaths })
     lexicalAddressClient.close()
 
     await writeRegistration(path.join(await realpath(fixture.paths.userDataDirectory), "host", "host.sock"))
-    const canonicalAddressClient = await createHostClient({ paths: aliasedPaths })
+    const canonicalAddressClient = await createDesktopHostClient({ paths: aliasedPaths })
     canonicalAddressClient.close()
 
     await writeRegistration(path.join(aliasParent, "outside.sock"))
-    await expect(createHostClient({ paths: aliasedPaths })).rejects.toThrow("Desktop host address is invalid.")
+    await expect(createDesktopHostClient({ paths: aliasedPaths })).rejects.toThrow("Desktop host address is invalid.")
   })
 
   test("rejects and closes an accepted but silent host before the handshake deadline", async () => {
     const fixture = await createHostFixture(() => undefined)
-    await expect(createHostClient({
+    await expect(createDesktopHostClient({
       paths: fixture.paths,
       handshakeDeadlineMs: 20,
     })).rejects.toThrow("Desktop host handshake deadline exceeded.")
@@ -287,9 +274,9 @@ describe("desktop host client", () => {
       acknowledge(socket, ["host.status"])
     })
 
-    const first = await createHostClient({ paths: fixture.paths })
+    const first = await createDesktopHostClient({ paths: fixture.paths })
     first.close()
-    const second = await createHostClient({ paths: fixture.paths })
+    const second = await createDesktopHostClient({ paths: fixture.paths })
     second.close()
 
     expect(actorIds).toHaveLength(2)
@@ -313,8 +300,27 @@ describe("desktop host client", () => {
     await chmod(path.dirname(actorPath), 0o700)
     await writeFile(actorPath, JSON.stringify({ version: "v1", actorId }), { mode: 0o600 })
     await chmod(actorPath, 0o600)
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(await received.promise).toBe(actorId)
+    client.close()
+  })
+
+  test("uses an explicit actor path without requiring default environment paths", async () => {
+    delete process.env.HOME
+    delete process.env.XDG_CONFIG_HOME
+    delete process.env.DAW_CONTROL_AUTH_PATH
+    delete process.env.DAW_CONTROL_ACTOR_PATH
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, [])
+    })
+    const actorPath = path.join(fixture.paths.userDataDirectory, "explicit-actor", "host-actor-v1.json")
+
+    const client = await createDesktopHostClient({
+      userDataDirectory: fixture.paths.userDataDirectory,
+      actorPath,
+    })
+
+    expect(JSON.parse(await readFile(actorPath, "utf8"))).toMatchObject({ version: "v1" })
     client.close()
   })
 
@@ -330,7 +336,7 @@ describe("desktop host client", () => {
         })
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(await client.request("host.status", {})).toEqual(hostStatus)
     client.close()
   })
@@ -352,7 +358,7 @@ describe("desktop host client", () => {
         })))
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(client.protocolVersion).toBe("v2")
     expect(await client.requestV2("control.capabilities", {})).toEqual(localControlCapabilitiesV2)
     client.close()
@@ -364,7 +370,7 @@ describe("desktop host client", () => {
       if (frame.type === "hello") acknowledge(socket, ["control.capabilities"])
       if (frame.type === "request") requestCount += 1
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(client.protocolVersion).toBe("v1")
     await expect(client.requestV2("control.capabilities", {})).rejects.toMatchObject({
       name: "DesktopHostError",
@@ -386,7 +392,7 @@ describe("desktop host client", () => {
         })))
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     await expect(client.request("host.status", {})).rejects.toThrow("mixed protocol frame")
   })
 
@@ -403,7 +409,7 @@ describe("desktop host client", () => {
         result: hostStatus,
       }, maxDesktopReplyFrameBytes + 1)
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     await expect(client.request("host.status", {})).rejects.toThrow("frame size limit")
     await connectionClosed.promise
   })
@@ -420,7 +426,7 @@ describe("desktop host client", () => {
         })
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     const error = await client.request("host.status", {}).catch((failure) => failure)
     expect(error).toBeInstanceOf(Error)
     expect(error).not.toBeInstanceOf(DesktopControlError)
@@ -452,7 +458,7 @@ describe("desktop host client", () => {
         nextError += 1
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     for (const expected of errors) {
       const error = await client.request("control.capabilities", {}).catch((failure) => failure)
       expect(error).toBeInstanceOf(DesktopControlError)
@@ -474,7 +480,7 @@ describe("desktop host client", () => {
       })
       for (const chunk of chunks) writeFrame(socket, chunk)
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(await client.request("host.status", {})).toEqual(hostStatus)
     client.close()
   })
@@ -494,7 +500,7 @@ describe("desktop host client", () => {
       writeFrame(socket, chunks[0])
       writeFrame(socket, { version: "v1", type: "reply", id: frame.id, result: hostStatus })
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     await expect(client.request("host.status", {})).rejects.toThrow("Mixed desktop reply framing.")
     await connectionClosed.promise
   })
@@ -509,7 +515,7 @@ describe("desktop host client", () => {
       writeFrame(socket, reply)
       writeFrame(socket, reply)
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     expect(await client.request("host.status", {})).toEqual(hostStatus)
     await connectionClosed.promise
     await expect(client.request("host.status", {})).rejects.toThrow("Desktop host connection closed.")
@@ -556,7 +562,7 @@ describe("desktop host client", () => {
         void waitForClose(socket).then(connectionClosed.resolve)
         writeRawFrame(socket, scenario.mutate(chunks))
       })
-      const client = await createHostClient({ paths: fixture.paths })
+      const client = await createDesktopHostClient({ paths: fixture.paths })
       await expect(client.request("host.status", {})).rejects.toBeInstanceOf(Error)
       await connectionClosed.promise
     })
@@ -576,7 +582,7 @@ describe("desktop host client", () => {
         Buffer.from(encodeDesktopFrame(acknowledgement)),
       ]))
     })
-    await expect(createHostClient({ paths: fixture.paths })).rejects.toThrow("Desktop host connection closed.")
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toThrow("Desktop host connection closed.")
   })
 
   test("rejects a non-acknowledgement frame before hello completes", async () => {
@@ -584,7 +590,7 @@ describe("desktop host client", () => {
       if (frame.type !== "hello") return
       writeFrame(socket, { version: "v1", type: "lifecycle", event: "closing" })
     })
-    await expect(createHostClient({ paths: fixture.paths })).rejects.toThrow(
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toThrow(
       "Desktop host sent a frame before the handshake acknowledgement.",
     )
   })
@@ -599,7 +605,7 @@ describe("desktop host client", () => {
         capabilities: ["host.status"],
       })
     })
-    await expect(createHostClient({ paths: fixture.paths })).rejects.toBeInstanceOf(Error)
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toBeInstanceOf(Error)
   })
 
   for (const scenario of [
@@ -630,7 +636,7 @@ describe("desktop host client", () => {
         void waitForClose(socket).then(connectionClosed.resolve)
         writeFrame(socket, { ...scenario.value, id: frame.id })
       })
-      const client = await createHostClient({ paths: fixture.paths })
+      const client = await createDesktopHostClient({ paths: fixture.paths })
       await expect(client.request(scenario.operation, {})).rejects.toBeInstanceOf(Error)
       await connectionClosed.promise
     })
@@ -653,7 +659,7 @@ describe("desktop host client", () => {
         writeFrame(socket, { version: "v1", type: "reply", id: requestId, result: hostStatus })
       }
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     await expect(client.request("host.status", {}, 20)).rejects.toThrow(
       "Desktop host request deadline exceeded.",
     )
@@ -667,7 +673,7 @@ describe("desktop host client", () => {
       if (frame.type === "hello") acknowledge(socket, ["host.status"])
       if (frame.type === "request") socket.end()
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     await expect(client.request("host.status", {})).rejects.toThrow("Desktop host connection closed.")
   })
 
@@ -677,7 +683,7 @@ describe("desktop host client", () => {
       if (frame.type === "hello") acknowledge(socket, ["host.status"])
       if (frame.type === "request") requestReceived.resolve()
     })
-    const client = await createHostClient({ paths: fixture.paths })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
     const request = client.request("host.status", {})
     await requestReceived.promise
     client.close()

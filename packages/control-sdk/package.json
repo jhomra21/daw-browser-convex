@@ -4,13 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./desktop": "./src/desktop.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {
     "@daw-browser/control": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
     "zod": "^4.3.6"
   }
 }

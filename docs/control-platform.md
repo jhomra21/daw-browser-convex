@@ -33,6 +33,8 @@ Host acquisition failures are returned as a stable unavailable error without
 registration, socket, or temporary-directory details. Cloud JSONL remains
 deferred because no equivalent secure process authentication path exists.
 
+Standalone Node consumers use `@daw-browser/control-sdk/desktop` for the same
+authenticated desktop connection and canonical desktop control invoker.
 ## Extension boundaries
 
 Only statically imported trusted built-ins are managed. The extension kernel

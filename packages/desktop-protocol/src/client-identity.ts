@@ -11,6 +11,15 @@ const actorIdentitySchema = z.object({
   actorId: z.string().regex(uuid),
 }).strict()
 
+export const defaultDesktopActorIdentityPath = () => {
+  const configured = process.env.DAW_CONTROL_AUTH_PATH
+  if (configured) return path.join(path.dirname(configured), "host-actor-v1.json")
+  const home = process.env.HOME
+  if (!home) throw new Error("HOME is not set.")
+  const authPath = path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "daw-browser", "control-auth.json")
+  return path.join(path.dirname(authPath), "host-actor-v1.json")
+}
+
 const hasErrorCode = (cause: unknown, code: string): cause is NodeJS.ErrnoException =>
   cause instanceof Error && "code" in cause && cause.code === code
 
@@ -159,7 +168,7 @@ const resolveHostActorPath = (defaultFile: string, configuredPath?: string) => (
   configuredPath ?? process.env.DAW_CONTROL_ACTOR_PATH ?? defaultFile
 )
 
-export const loadHostActorIdentity = (defaultFile: string, configuredPath?: string) => {
+export const loadDesktopActorIdentity = (defaultFile: string, configuredPath?: string) => {
   const file = resolveHostActorPath(defaultFile, configuredPath)
   const directory = path.dirname(file)
   return ensurePrivateDirectory(directory).then(async () => {

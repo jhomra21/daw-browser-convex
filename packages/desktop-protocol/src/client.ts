@@ -26,11 +26,10 @@ import {
 import { controlErrorSchemaV1, type ControlErrorV1 } from "@daw-browser/control"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { createDesktopReplyReassembler, maxDesktopReplyFrameBytes } from "@daw-browser/desktop-protocol/reply-chunks"
-import { loadHostActorIdentity } from "./host-identity"
-import { credentialPath } from "./credentials"
+import { defaultDesktopActorIdentityPath, loadDesktopActorIdentity } from "./client-identity"
 
-type HostPlatform = "darwin" | "win32" | "linux"
-type HostPaths = {
+export type HostPlatform = "darwin" | "win32" | "linux"
+export type HostPaths = {
   platform: HostPlatform
   homeDirectory: string
   appDataDirectory?: string
@@ -80,7 +79,7 @@ const hostDirectory = (paths: HostPaths) => paths.userDataDirectory
       ? path.join(paths.homeDirectory, "Library", "Application Support", "daw-browser", "host")
       : path.join(paths.xdgConfigDirectory ?? path.join(paths.homeDirectory, ".config"), "daw-browser", "host")
 
-export const registrationFile = (paths: HostPaths = {
+const registrationFile = (paths: HostPaths = {
   platform: currentHostPlatform(),
   homeDirectory: homedir(),
   appDataDirectory: process.env.APPDATA,
@@ -156,7 +155,7 @@ const readHostRegistration = async (paths?: HostPaths) => {
   return registration
 }
 
-type HostClient = {
+export type DesktopHostClient = {
   protocolVersion: DesktopProtocolVersion
   capabilities: () => Set<DesktopOperationV1>
   request: (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs?: number) => Promise<DesktopJsonValue>
@@ -164,13 +163,34 @@ type HostClient = {
   close: () => void
 }
 
-export const createHostClient = async (options: { paths?: HostPaths; handshakeDeadlineMs?: number } = {}): Promise<HostClient> => {
-  const registration = await readHostRegistration(options.paths)
-  const actorId = await loadHostActorIdentity(
-    path.join(path.dirname(credentialPath()), "host-actor-v1.json"),
-    options.paths?.actorPath,
+export type DesktopHostClientOptions = {
+  paths?: HostPaths
+  userDataDirectory?: string
+  actorPath?: string
+  clientName?: string
+  handshakeDeadlineMs?: number
+  requestDeadlineMs?: number
+}
+
+export const createDesktopHostClient = async (options: DesktopHostClientOptions = {}): Promise<DesktopHostClient> => {
+  const registration = await readHostRegistration(
+    options.userDataDirectory === undefined
+      ? options.paths
+      : { ...(options.paths ?? {
+          platform: currentHostPlatform(),
+          homeDirectory: homedir(),
+          appDataDirectory: process.env.APPDATA,
+          xdgConfigDirectory: process.env.XDG_CONFIG_HOME,
+          userDataDirectory: process.env.DAW_DESKTOP_USER_DATA,
+        }), userDataDirectory: options.userDataDirectory },
   )
-  const connectWithVersion = async (protocolVersion: DesktopProtocolVersion): Promise<HostClient> => {
+  const configuredActorPath = options.actorPath
+    ?? options.paths?.actorPath
+    ?? process.env.DAW_CONTROL_ACTOR_PATH
+  const actorId = await loadDesktopActorIdentity(
+    configuredActorPath ?? defaultDesktopActorIdentityPath(),
+  )
+  const connectWithVersion = async (protocolVersion: DesktopProtocolVersion): Promise<DesktopHostClient> => {
   const socket = connect(registration.address)
   type PendingRequest = {
     operation: DesktopOperationV1
@@ -321,13 +341,13 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   socket.on("connect", () => {
     socket.write(encodeDesktopFrame(
       protocolVersion === desktopProtocolVersionV2
-        ? { version: desktopProtocolVersionV2, type: "hello", secret: registration.secret, client: "daw-control", actorId, supportedVersions: [desktopProtocolVersion, desktopProtocolVersionV2] }
-        : { version: desktopProtocolVersion, type: "hello", secret: registration.secret, client: "daw-control", actorId },
+        ? { version: desktopProtocolVersionV2, type: "hello", secret: registration.secret, client: options.clientName ?? "daw-control", actorId, supportedVersions: [desktopProtocolVersion, desktopProtocolVersionV2] }
+        : { version: desktopProtocolVersion, type: "hello", secret: registration.secret, client: options.clientName ?? "daw-control", actorId },
     ))
   })
   await hello
   if (closed || socket.destroyed) throw new Error("Desktop host connection closed.")
-  const request = (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs = 10_000): Promise<DesktopJsonValue> => {
+  const request = (operation: DesktopOperationV1, input: DesktopJsonValue, deadlineMs = options.requestDeadlineMs ?? 10_000): Promise<DesktopJsonValue> => {
     if (closed || socket.destroyed) return Promise.reject(new Error("Desktop host connection closed."))
     if (!capabilities.has(operation)) return Promise.reject(new Error(`Desktop host does not advertise ${operation}.`))
     const id = randomBytes(16).toString("hex")
@@ -358,7 +378,7 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     protocolVersion,
     capabilities: () => new Set(capabilities),
     request,
-    requestV2: (operation, input, deadlineMs = 10_000) => {
+    requestV2: (operation, input, deadlineMs = options.requestDeadlineMs ?? 10_000) => {
       if (protocolVersion !== desktopProtocolVersionV2) {
         return Promise.reject(new DesktopHostError({
           version: desktopProtocolVersion,
@@ -390,11 +410,11 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
   }
 }
 
-export const createAvailableHostClient = async (
-  options: { paths?: HostPaths; handshakeDeadlineMs?: number } = {},
-): Promise<HostClient> => {
+export const createAvailableDesktopHostClient = async (
+  options: DesktopHostClientOptions = {},
+): Promise<DesktopHostClient> => {
   try {
-    return await createHostClient(options)
+    return await createDesktopHostClient(options)
   } catch (cause) {
     if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) {
       throw cause

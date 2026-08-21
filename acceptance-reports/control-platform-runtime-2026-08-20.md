@@ -38,6 +38,19 @@ audio assets. Forge packaging hooks completed successfully.
 | MCP/JSONL mutation parity | MCP + JSONL | Yes | PASS | JSONL rename advanced revision 11 to 12; MCP observed the same canonical name and revision |
 | Host status | CLI | Yes | PASS | Mounted local project, ready, stopped |
 | Restart discovery | CLI | Yes | PASS | New registration/socket discovered after package restart |
+| Human/agent concurrency | MCP + Electron | Yes | PASS | Stale agent request refreshed and committed without clobbering the manual unmute |
+| Transport runtime | CLI + Electron | Yes | PASS after fix | Play, seek, pause, stop, and authoritative stopped state verified |
+| Audio import | CLI + Electron | Yes | PASS after fix | Real WAV persisted as canonical asset/clip and appeared in the mounted UI |
+| Restart media hydration | Electron + CLI | Yes | PASS after fix | Fresh imported WAV survived termination, cold restart, reopen, and playback |
+| Mixdown export | CLI | Yes | PASS after fixes | Decodable stereo PCM WAV, 48 kHz, exactly 1 second, 192,044 bytes |
+| Export cancellation | CLI | Yes | PASS | Long export reached `canceled` without publishing an output |
+| JSONL survival matrix | Spawned CLI process | Yes | PASS after fix | Malformed, valid, oversized, valid, notification, split UTF-8, valid; six responses, exit 0 |
+| Registration adversarial matrix | CLI | Yes | PASS | Missing, malformed, dead socket, unsafe permissions, stopped host, and restart recovery fail closed |
+| Standalone TypeScript SDK | Public package imports | Yes | PASS after public adapter | V2 discovery, snapshot, immutable preview, commit, revision advance, and mounted UI reconciliation |
+| Native application menu | macOS menu + Electron | Yes | PASS | Actual View → Assets Browser item reopened the hidden browser sidebar |
+| Installed VST3 scan | Electron | Yes | PARTIAL / PRODUCT SKIP | ValhallaSupermassive 5.0.0 scanned successfully; packaged catalog reported native VST3 hosting inactive, so no instance could be mounted |
+| Extension lifecycle | Electron | Yes | PRODUCT SKIP | No packaged product/debug lifecycle entrypoint or registered extension commands exist |
+| Cloud control | Cloud | No | ENVIRONMENT SKIP | No disposable authenticated cloud environment or credentials were available |
 | Repository-wide lint | Source gate | N/A | FAIL baseline | Existing broad anti-slop violations in unchanged files |
 
 ## Confirmed product bugs fixed
@@ -51,6 +64,25 @@ audio assets. Forge packaging hooks completed successfully.
 4. **ADAPTER BUG:** canonical renderer errors retained optional
    `undefined` properties, causing idempotency conflicts to collapse into
    generic internal serialization failures.
+5. **TRANSPORT BUG:** `transport.stop` returned stale paused state before the
+   mounted timeline's awaited stop result was reflected.
+6. **IMPORT BOUNDARY BUG:** main-process-only file metadata crossed a strict
+   renderer schema, and `AbortSignal` was incorrectly sent across the context
+   bridge.
+7. **EXPORT DISPATCH BUG:** preflight and final export reused one request ID,
+   but active queue state was removed only after the preflight reply callback.
+8. **MEDIA LIFECYCLE BUG:** persisted local audio clips were not proactively
+   hydrated during project mount, allowing canonical state and renderable state
+   to diverge after restart.
+9. **OUTPUT CAPABILITY BUG:** macOS `/tmp` output parents were not canonicalized
+   to `/private/tmp` before capability containment checks.
+10. **NATIVE STREAM BUG:** JavaScript buffered only four native PCM frames;
+    normal native bursts overflowed the queue and made export time out.
+11. **CLI STDIN BUG:** Bun stdin remained flowing while a JSON-RPC host request
+    was awaited, dropping later chunks and preventing oversized-line recovery.
+12. **SDK SURFACE GAP:** secure desktop transport and canonical adaptation were
+    CLI-private, so an external TypeScript SDK consumer could not connect
+    without importing internal modules.
 
 Each bug was reproduced through a public packaged-app boundary, reduced to its
 architectural owner, covered by a focused regression, and rerun against a
@@ -71,22 +103,25 @@ the canonical V2 snapshot, constructed a persisted track reference, previewed,
 committed with an idempotency key, and verified the resulting snapshot. The
 mounted Electron UI also displayed the committed name.
 
-## Not completed in this pass
+## Remaining environmental and product skips
 
-The following scenarios remain unproven at the packaged boundary:
+- **VST3 instance and parameter reads:** the installed ValhallaSupermassive
+  bundle was discovered through the real packaged settings workflow, including
+  class metadata, code-sign verification, architecture, and fingerprinting.
+  The packaged catalog explicitly reported that native VST3 audio hosting was
+  not active, so the product exposed no legitimate way to create a mounted
+  instance. An empty external instance list is recorded as a product skip, not
+  a runtime pass.
+- **Extension lifecycle:** the packaged Extension Commands menu was empty and
+  the repository exposes no product/debug lifecycle entrypoint. No test-only
+  registration surface was invented.
+- **Cloud control:** no disposable authenticated cloud environment or cloud
+  credentials were present. No credentials or test-only cloud route were
+  created.
 
-- native application-menu invocation of the browser toggle;
-- revision conflict with a concurrent manual UI edit;
-- transport play/seek/pause with visible and audible verification;
-- VST3 discovery, no known-good installed instance was selected;
-- real audio import and export/cancel;
-- malformed registration matrix and JSONL memory observation;
-- TypeScript SDK host mutation;
-- cloud acceptance, no disposable authenticated cloud environment was used;
-- extension lifecycle stress, no current product-facing lifecycle surface;
-- sustained human/agent concurrency.
-
-These are skips, not passes.
+Audible transport output was not independently measured. State transitions,
+playhead behavior, restart media playback readiness, and export rendering were
+verified through the packaged product boundaries.
 
 ## Evidence location
 
@@ -97,5 +132,11 @@ Temporary transcripts, snapshots, logs, and screenshots were retained under:
 The focused discoverability transcripts and safety/parity results are under:
 
 `/tmp/daw-control-acceptance-c5c4294/agent-discoverability`
+
+The expanded merge-gate evidence, including media lifecycle, export,
+cancellation, JSONL reduction, registration, standalone SDK, native menu, and
+VST3 catalog results, is under:
+
+`/tmp/daw-control-merge-gate-3fb4ce1/evidence`
 
 No registration secret was copied into this report.

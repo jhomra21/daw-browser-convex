@@ -47,6 +47,10 @@ The control platform is split into four deliberate layers:
   projection behavior. It does not own transport or durable storage.
 - **SDK** (`@daw-browser/control-sdk`) owns transport-neutral clients plus the
   legacy REST compatibility client and sequential JSONL JSON-RPC adapter.
+  Node consumers can import `createCanonicalControlClient` from the root and
+  `connectDesktopControl` from `@daw-browser/control-sdk/desktop`; the latter
+  connects through the authenticated packaged desktop host without entering
+  the browser bundle.
 - **Handlers, invokers, and clients** are separate boundaries: handlers bind a
   trusted target implementation, an invoker validates and dispatches one
   catalog operation, and a client groups typed calls without retries or

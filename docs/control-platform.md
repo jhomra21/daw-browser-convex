@@ -25,10 +25,13 @@ control.
 The JSONL adapter accepts one bounded JSON-RPC 2.0 request per line and
 processes lines sequentially. Notifications execute without a response;
 batches, malformed requests, unknown methods, invalid parameters, unsupported
-targets, and oversized/deep inputs are rejected. The CLI provides
+targets, and oversized/deep inputs are rejected. The process decoder bounds
+UTF-8 input before parsing, discards oversized lines until their newline, and
+continues with following requests. The CLI provides
 `rpc --target host` over the authenticated desktop registration/socket path.
-Cloud JSONL remains deferred because no equivalent secure process
-authentication path exists.
+Host acquisition failures are returned as a stable unavailable error without
+registration, socket, or temporary-directory details. Cloud JSONL remains
+deferred because no equivalent secure process authentication path exists.
 
 ## Extension boundaries
 

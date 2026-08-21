@@ -24,6 +24,8 @@ import { z } from "zod";
 // oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-conditional-empty-object-spread
 
 export const maxJsonlLineBytes = 64 * 1024;
+export const jsonlLineTooLarge: { readonly kind: "too-large" } = Object.freeze({ kind: "too-large" });
+export type JsonlLine = string | typeof jsonlLineTooLarge;
 export const maxJsonlDepth = 12;
 export const maxJsonRpcIdLength = 128;
 
@@ -47,7 +49,7 @@ type JsonRpcResponse = Readonly<{
 }>;
 
 export type JsonlRpcAdapter = Readonly<{
-  processLine: (line: string) => Promise<string | undefined>;
+  processLine: (line: JsonlLine) => Promise<string | undefined>;
   methods: () => readonly ControlOperationId[];
 }>;
 
@@ -186,9 +188,12 @@ const invokeValidated = async (
 };
 
 const processLine = async (
-  line: string,
+  line: JsonlLine,
   input: JsonlRpcAdapterOptions,
 ): Promise<string | undefined> => {
+  if (typeof line !== "string") {
+    return response(null, { error: { code: -32600, message: "Line exceeds the JSONL size limit.", data: canonicalError("invalid-request", "Line exceeds the JSONL size limit.") } });
+  }
   if (new TextEncoder().encode(line).byteLength > maxJsonlLineBytes) {
     return response(null, { error: { code: -32600, message: "Line exceeds the JSONL size limit.", data: canonicalError("invalid-request", "Line exceeds the JSONL size limit.") } });
   }
@@ -239,7 +244,7 @@ export const createJsonlRpcAdapter = (
   input: JsonlRpcAdapterOptions,
 ): JsonlRpcAdapter => {
   let pending = Promise.resolve();
-  const queued = (line: string) => {
+  const queued = (line: JsonlLine) => {
     const result = pending.then(() => processLine(line, input));
     pending = result.then(() => undefined, () => undefined);
     return result;
@@ -251,7 +256,7 @@ export const createJsonlRpcAdapter = (
 };
 
 export const processJsonlLines = async (
-  lines: AsyncIterable<string>,
+  lines: AsyncIterable<JsonlLine>,
   adapter: JsonlRpcAdapter,
   write: (line: string) => void | Promise<void>,
 ): Promise<void> => {
@@ -259,4 +264,60 @@ export const processJsonlLines = async (
     const output = await adapter.processLine(line);
     if (output !== undefined) await write(output);
   }
+};
+
+export const decodeJsonlLines = async function* (
+  chunks: AsyncIterable<Uint8Array>,
+  maxBytes = maxJsonlLineBytes,
+): AsyncIterable<JsonlLine> {
+  const buffer = new Uint8Array(maxBytes);
+  const textDecoder = new TextDecoder();
+  let length = 0;
+  let oversized = false;
+  let carriageReturn = false;
+  const reset = () => {
+    length = 0;
+    oversized = false;
+    carriageReturn = false;
+  };
+  const append = (byte: number) => {
+    if (oversized) return;
+    if (length === maxBytes) {
+      oversized = true;
+      return;
+    }
+    buffer[length] = byte;
+    length += 1;
+  };
+  for await (const chunk of chunks) {
+    for (const byte of chunk) {
+      if (carriageReturn) {
+        carriageReturn = false;
+        if (byte === 0x0A) {
+          if (oversized) yield jsonlLineTooLarge;
+          else yield textDecoder.decode(buffer.subarray(0, length));
+          reset();
+          continue;
+        }
+        append(0x0D);
+      }
+      if (byte === 0x0D) {
+        carriageReturn = true;
+        continue;
+      }
+      if (byte === 0x0A) {
+        if (oversized) {
+          yield jsonlLineTooLarge;
+        } else {
+          yield textDecoder.decode(buffer.subarray(0, length));
+        }
+        reset();
+        continue;
+      }
+      append(byte);
+    }
+  }
+  if (carriageReturn) append(0x0D);
+  if (oversized) yield jsonlLineTooLarge;
+  else if (length > 0) yield textDecoder.decode(buffer.subarray(0, length));
 };

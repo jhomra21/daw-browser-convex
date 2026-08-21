@@ -9,6 +9,7 @@ import {
 } from "@daw-browser/desktop-protocol"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { projectSnapshotSchemaV1 } from "@daw-browser/control"
+import { maxJsonlLineBytes } from "@daw-browser/control-sdk"
 
 const directories: string[] = []
 const servers: ReturnType<typeof createServer>[] = []
@@ -21,6 +22,70 @@ afterEach(async () => {
 })
 
 describe("control CLI processes", () => {
+  test("sanitizes RPC startup failures for missing, malformed, and unreachable registrations", async () => {
+    const cases = [
+      {
+        name: "missing registration",
+        prepare: async (_directory: string) => undefined,
+      },
+      {
+        name: "malformed registration",
+        prepare: async (directory: string) => {
+          const hostDirectory = join(directory, "host")
+          await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+          await chmod(hostDirectory, 0o700)
+          await writeFile(join(hostDirectory, "registration-v1.json"), "{", { mode: 0o600 })
+        },
+      },
+      {
+        name: "unreachable socket",
+        prepare: async (directory: string) => {
+          const hostDirectory = join(directory, "host")
+          const socketPath = join(hostDirectory, "control.sock")
+          await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+          await chmod(hostDirectory, 0o700)
+          await writeFile(join(hostDirectory, "registration-v1.json"), JSON.stringify({
+            version: "v1",
+            instanceId: "a".repeat(32),
+            pid: process.pid,
+            createdAt: Date.now(),
+            address: socketPath,
+            secret: "b".repeat(64),
+          }), { mode: 0o600 })
+          await chmod(join(hostDirectory, "registration-v1.json"), 0o600)
+        },
+      },
+    ] satisfies ReadonlyArray<{ name: string; prepare: (directory: string) => Promise<void> }>
+    for (const scenario of cases) {
+      const directory = await mkdtemp("/tmp/daw-control-cli-")
+      directories.push(directory)
+      await scenario.prepare(directory)
+      const child = Bun.spawn(["bun", entrypoint, "rpc", "--target", "host"], {
+        env: {
+          ...process.env,
+          DAW_DESKTOP_USER_DATA: directory,
+          DAW_CONTROL_AUTH_PATH: join(directory, "credentials.json"),
+        },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      child.stdin.end()
+      const [stdout, stderr] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(await child.exited, scenario.name).toBe(1)
+      expect(stdout, scenario.name).toBe("")
+      expect(JSON.parse(stderr), scenario.name).toMatchObject({
+        error: { code: "unavailable", message: "Desktop control host is unavailable." },
+      })
+      expect(stderr).not.toContain(directory)
+      expect(stderr).not.toContain("registration-v1.json")
+      expect(stderr).not.toContain("control.sock")
+    }
+  })
+
   test("CLI help is human-readable and command failures use stderr JSON only", async () => {
     const help = Bun.spawn(["bun", entrypoint, "--help"], { stdout: "pipe", stderr: "pipe" })
     expect(await new Response(help.stdout).text()).toContain("Usage: daw-control")
@@ -138,6 +203,10 @@ describe("control CLI processes", () => {
       stderr: "pipe",
     })
     child.stdin.write('{"jsonrpc":"2.0","method":"project.current","params":{}}\n')
+    const oversized = `{"jsonrpc":"2.0","id":99,"method":"project.list","params":{"value":"${"x".repeat(maxJsonlLineBytes)}`
+    child.stdin.write(oversized.slice(0, 17))
+    child.stdin.write(oversized.slice(17))
+    child.stdin.write('"}\n')
     child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}\n')
     child.stdin.write('{"jsonrpc":"2.0","id":2,"method":"control.snapshot","params":{"projectId":"project-1"}}\n')
     child.stdin.end()
@@ -150,6 +219,19 @@ describe("control CLI processes", () => {
     expect(stderr).toBe("")
     const responses = stdout.trimEnd().split("\n").map((line) => JSON.parse(line))
     expect(responses).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32600,
+          message: "Line exceeds the JSONL size limit.",
+          data: {
+            version: "v1",
+            code: "invalid-request",
+            message: "Line exceeds the JSONL size limit.",
+          },
+        },
+      },
       {
         jsonrpc: "2.0",
         id: 1,

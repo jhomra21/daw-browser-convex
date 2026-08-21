@@ -10,10 +10,10 @@ import {
   type DesktopControlOperationV1,
   type DesktopOperationMapV1,
 } from "@daw-browser/desktop-protocol"
-import { createHostClient, DesktopControlError, DesktopHostError } from "./host"
+import { createAvailableHostClient, DesktopControlError, DesktopHostError, HostTargetUnavailableError } from "./host"
 import { jsonRequest, option, type CliIo } from "./input"
 
-export { DesktopControlError, DesktopHostError } from "./host"
+export { DesktopControlError, DesktopHostError, HostTargetUnavailableError } from "./host"
 
 const audioExtension = (value: string) => [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm"].includes(path.extname(value).toLowerCase())
 const absoluteAudioPath = (value: string) => path.isAbsolute(value) && path.normalize(value) === value && audioExtension(value)
@@ -29,25 +29,12 @@ const validateHostExportInput = (input: Parameters<typeof desktopHostExportRunIn
   return parsed
 }
 
-export class HostTargetUnavailableError extends Error {
-  readonly data = {
-    version: "v1" as const,
-    code: "unavailable" as const,
-    message: "Desktop control host is unavailable.",
-  }
-
-  constructor() {
-    super("Desktop control host is unavailable.")
-    this.name = "HostTargetUnavailableError"
-  }
-}
-
 export const requestHostControl = async <Operation extends DesktopControlOperationV1>(
   operation: Operation,
   input: DesktopOperationMapV1[Operation]["input"],
 ) => {
   try {
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       return await client.request(operation, JSON.parse(JSON.stringify(input)))
     } finally {
@@ -64,7 +51,7 @@ export const requestHostControlV2 = async <Operation extends "control.capabiliti
   input: DesktopOperationMapV1[Operation]["input"],
 ) => {
   try {
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       return await client.requestV2(operation, JSON.parse(JSON.stringify(input)))
     } finally {
@@ -87,7 +74,7 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
     const input = desktopHostImportInputSchemaV1.parse({
       source: picker ? { kind: "picker" } : { kind: "path", path: pathValue },
     })
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       const data = await client.request("host.import.audio", JSON.parse(JSON.stringify(input)))
       io.stdout(canonicalJson({ version: "v1", ok: true, command: "host import", data }))
@@ -99,7 +86,7 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
     if (!source || arguments_.length !== 3 || arguments_[1] !== "--request") throw new Error("host export requires --request <file|->.")
     const requestInput = await jsonRequest(source, io)
     const input = validateHostExportInput(requestInput)
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       const data = await client.request("host.export.run", input)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: "host export", data }))
@@ -116,7 +103,7 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
       operation,
       input: action === "export-status" ? {} : { jobId: value },
     }).input
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       const data = await client.request(operation, input)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
@@ -138,7 +125,7 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
     version: desktopProtocolVersion, type: "request", id: "cli-validation", operation, input,
   })
   if (!validation.success) throw new Error("Invalid host command.")
-  const client = await createHostClient()
+  const client = await createAvailableHostClient()
   try {
     const data = await client.request(operation, validation.data.input)
     io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))

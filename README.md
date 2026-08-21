@@ -67,9 +67,12 @@ requires explicit action grants and separates preview, approval, and commit.
 
 The JSONL adapter is stream-neutral and sequential: one bounded JSON-RPC
 request per line produces one response per line, while notifications execute
-without output. The CLI exposes the authenticated desktop-host adapter through
-`rpc --target host`; cloud JSONL remains intentionally unavailable because it
-has no equivalent secure process authentication path.
+without output. Its process decoder bounds UTF-8 input, discards oversized
+lines until their newline, and continues with following requests. The CLI
+exposes the authenticated desktop-host adapter through `rpc --target host`;
+host startup failures use a stable unavailable error without registration,
+socket, or temporary-directory details. Cloud JSONL remains intentionally
+unavailable because it has no equivalent secure process authentication path.
 
 Compatibility policy is additive. V1/V2 contracts, REST routes, CLI/MCP tools,
 desktop protocol frames, and `registration-v1.json` remain retained while

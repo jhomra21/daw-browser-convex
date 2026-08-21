@@ -36,7 +36,7 @@ import {
 } from "@daw-browser/desktop-protocol"
 import { createAccessTokenProvider } from "./auth"
 import { credentialIdentity, createCredentialStore, sameCredentialIdentity, type ControlCredentialIdentity, type ControlCredentials } from "./credentials"
-import { createHostClient } from "./host"
+import { createAvailableHostClient } from "./host"
 
 class CloudControlError extends Error {
   readonly data = {
@@ -118,7 +118,7 @@ export const startControlMcp = async () => {
     })
   }
   const hostService = async (): Promise<{ service: ControlService; close: () => void }> => {
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     const service: ControlService = {
       projects: {
         list: async () => {
@@ -154,7 +154,7 @@ export const startControlMcp = async () => {
     input: DesktopJsonValue,
     parseResult: (value: DesktopJsonValue) => Value,
   ) => {
-    const client = await createHostClient()
+    const client = await createAvailableHostClient()
     try {
       return parseResult(await client.request(operation, input))
     } finally {

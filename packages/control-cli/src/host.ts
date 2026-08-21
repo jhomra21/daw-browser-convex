@@ -50,6 +50,18 @@ export class DesktopHostError extends Error {
     this.name = "DesktopHostError"
   }
 }
+export class HostTargetUnavailableError extends Error {
+  readonly data = {
+    version: "v1" as const,
+    code: "unavailable" as const,
+    message: "Desktop control host is unavailable.",
+  }
+
+  constructor() {
+    super("Desktop control host is unavailable.")
+    this.name = "HostTargetUnavailableError"
+  }
+}
 
 const maxRegistrationBytes = 4 * 1024
 
@@ -365,5 +377,18 @@ export const createHostClient = async (options: { paths?: HostPaths; handshakeDe
     return await connectWithVersion(desktopProtocolVersionV2)
   } catch {
     return connectWithVersion(desktopProtocolVersion)
+  }
+}
+
+export const createAvailableHostClient = async (
+  options: { paths?: HostPaths; handshakeDeadlineMs?: number } = {},
+): Promise<HostClient> => {
+  try {
+    return await createHostClient(options)
+  } catch (cause) {
+    if (cause instanceof DesktopControlError || cause instanceof DesktopHostError || cause instanceof HostTargetUnavailableError) {
+      throw cause
+    }
+    throw new HostTargetUnavailableError()
   }
 }

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   createJsonlRpcAdapter,
+  decodeJsonlLines,
   maxJsonlLineBytes,
 } from "./jsonl";
 import { ControlApiError } from "./index";
@@ -60,6 +61,29 @@ test("executes notifications without responses and rejects batches", async () =>
   await expect(adapter.processLine('{"jsonrpc":"2.0","method":"project.list","params":{}}')).resolves.toBeUndefined();
   await expect(adapter.processLine('{"jsonrpc":"2.0","method":"missing.method","params":{}}')).resolves.toBeUndefined();
   expect((await responseFor("[]"))).toMatchObject({ id: null, error: { code: -32600 } });
+});
+
+test("decodes bounded UTF-8 JSONL lines across chunks and recovers after oversize", async () => {
+  const chunks = [
+    new Uint8Array(Buffer.from('{"jsonrpc":"2.0","id":"é', "utf8").subarray(0, -1)),
+    new Uint8Array(Buffer.concat([
+      Buffer.from('é', "utf8").subarray(1),
+      Buffer.from('"}\r\n', "utf8"),
+    ])),
+    new Uint8Array(Buffer.from("x".repeat(maxJsonlLineBytes), "utf8")),
+    new Uint8Array(Buffer.from("y\n", "utf8")),
+    new Uint8Array(Buffer.from('{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}', "utf8")),
+  ];
+  const lines = [];
+  async function* inputChunks() {
+    yield* chunks;
+  }
+  for await (const line of decodeJsonlLines(inputChunks())) lines.push(line);
+  expect(lines).toEqual([
+    '{"jsonrpc":"2.0","id":"é"}',
+    { kind: "too-large" },
+    '{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}',
+  ]);
 });
 
 test("preserves every canonical domain error and sanitizes unknown failures", async () => {

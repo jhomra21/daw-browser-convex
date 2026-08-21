@@ -155,12 +155,15 @@ export function createCanonicalControlClient(
 
 export {
   createJsonlRpcAdapter,
+  decodeJsonlLines,
+  jsonlLineTooLarge,
   maxJsonlDepth,
   maxJsonlLineBytes,
   maxJsonRpcIdLength,
   processJsonlLines,
 } from "./jsonl"
 export type { JsonlRpcAdapter } from "./jsonl"
+export type { JsonlLine } from "./jsonl"
 
 export type ControlAccessTokenResolver = () => string | Promise<string>
 export type ControlAccessToken = string | ControlAccessTokenResolver

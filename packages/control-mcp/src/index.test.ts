@@ -446,6 +446,28 @@ describe("control MCP tools", () => {
     expect(hostCalls).toBe(0)
   })
 
+  test("rejects extra project discovery arguments before target semantics or dispatch", async () => {
+    const cases = [
+      ["project_list", { target: "host", unexpected: true }],
+      ["project_list", { target: "cloud", unexpected: true }],
+      ["project_current", { target: "host", unexpected: true }],
+      ["project_current", { target: "cloud", unexpected: true }],
+    ] as const
+    for (const [name, arguments_] of cases) {
+      const response = await request(call(name, arguments_), {
+        hostFactory: async () => ({
+          service: service(),
+          close: () => undefined,
+        }),
+      })
+      expect(JSON.parse(response.result.content[0].text)).toEqual({
+        version: "v1",
+        code: "invalid-request",
+        message: "Invalid control tool input.",
+      })
+    }
+  })
+
   test("preserves actual SDK canonical errors and action indexes", async () => {
     const response = await request({
       jsonrpc: "2.0",

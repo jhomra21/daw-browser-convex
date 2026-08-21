@@ -208,6 +208,7 @@ const execute = async <Output extends object>(
 }
 
 const targetSchema = z.enum(["cloud", "host"]).default("cloud")
+const projectDiscoveryInputSchema = z.object({}).strict()
 const withTarget = <Schema extends z.ZodObject>(schema: Schema) => schema.extend({ target: targetSchema })
 const targetInput = (input: McpToolInput) => {
   if (!isRecord(input)) throw new Error("Invalid control tool input.")
@@ -281,13 +282,15 @@ export const createControlMcpServer = (
   const requestApproval = (input: McpToolInput) => executeRouted(input, controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
   const history = (input: McpToolInput) => executeRouted(input, controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
   const recoveries = (input: McpToolInput) => executeRouted(input, controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
-  const projectsList = (input: McpToolInput) => executeRouted(input, () => ({}), (service_) => {
+  const projectsList = (input: McpToolInput) => executeRouted(input, (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
     if (!service_.projects) throw new Error("Project discovery is unavailable.")
     return service_.projects.list()
   }, projectListResultSchema.parse, false)
   const projectCurrent = (input: McpToolInput) => {
     try {
-      if (targetInput(input).target === "cloud") {
+      const routing = targetInput(input)
+      projectDiscoveryInputSchema.parse(routing.canonicalInput)
+      if (routing.target === "cloud") {
         return Promise.resolve(failure({
           version: "v1",
           code: "unsupported-action",
@@ -297,7 +300,7 @@ export const createControlMcpServer = (
     } catch {
       return Promise.resolve(failure(invalidRequest()))
     }
-    return executeRouted(input, () => ({}), (service_) => {
+    return executeRouted(input, (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
       if (!service_.projects?.current) throw new Error("Current project discovery is unavailable.")
       return service_.projects.current()
     }, projectCurrentResultSchema.parse, false)
@@ -305,13 +308,13 @@ export const createControlMcpServer = (
 
   server.registerTool("project_list", {
     description: "List projects accessible through the selected control target.",
-    inputSchema: withTarget(z.object({}).strict()),
+    inputSchema: withTarget(projectDiscoveryInputSchema),
     outputSchema: projectListResultSchema,
     annotations: annotations.read,
   }, projectsList)
   server.registerTool("project_current", {
     description: "Return the currently mounted local project. This is host-only.",
-    inputSchema: withTarget(z.object({}).strict()),
+    inputSchema: withTarget(projectDiscoveryInputSchema),
     outputSchema: projectCurrentResultSchema,
     annotations: annotations.read,
   }, projectCurrent)

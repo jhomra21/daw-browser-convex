@@ -321,6 +321,58 @@ describe("control CLI output", () => {
 })
 
 describe("canonical CLI target routing", () => {
+  test("sanitizes host discovery startup failures for list and current", async () => {
+    const cases = [
+      {
+        name: "missing registration",
+        prepare: async (_directory: string) => undefined,
+      },
+      {
+        name: "malformed registration",
+        prepare: async (directory: string) => {
+          const hostDirectory = join(directory, "host")
+          await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+          await chmod(hostDirectory, 0o700)
+          await writeFile(join(hostDirectory, "registration-v1.json"), "{", { mode: 0o600 })
+        },
+      },
+      {
+        name: "unreachable socket",
+        prepare: async (directory: string) => {
+          const hostDirectory = join(directory, "host")
+          const socketPath = join(hostDirectory, "control.sock")
+          await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+          await chmod(hostDirectory, 0o700)
+          await writeFile(join(hostDirectory, "registration-v1.json"), JSON.stringify({
+            version: "v1",
+            instanceId: "a".repeat(32),
+            pid: process.pid,
+            createdAt: Date.now(),
+            address: socketPath,
+            secret: "b".repeat(64),
+          }), { mode: 0o600 })
+          await chmod(join(hostDirectory, "registration-v1.json"), 0o600)
+        },
+      },
+    ] satisfies ReadonlyArray<{ name: string; prepare: (directory: string) => Promise<void> }>
+    for (const scenario of cases) {
+      const directory = await mkdtemp("/tmp/daw-control-cli-")
+      directories.push(directory)
+      process.env.DAW_DESKTOP_USER_DATA = directory
+      await scenario.prepare(directory)
+      for (const command of [["project", "list", "--target", "host"], ["project", "current", "--target", "host"]]) {
+        const output = io()
+        expect(await runCli(command, output.value), scenario.name).toBe(1)
+        expect(JSON.parse(output.stderr[0])).toMatchObject({
+          error: { code: "unavailable", message: "Desktop control host is unavailable." },
+        })
+        expect(output.stderr[0]).not.toContain(directory)
+        expect(output.stderr[0]).not.toContain("registration-v1.json")
+        expect(output.stderr[0]).not.toContain("control.sock")
+      }
+    }
+  })
+
   test("lists cloud projects and discovers host list/current", async () => {
     const directory = await mkdtemp("/tmp/daw-control-cli-")
     directories.push(directory)

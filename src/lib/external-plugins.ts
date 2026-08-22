@@ -9,6 +9,13 @@ import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { mixedOrderFromRows, normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
+import {
+  localVstStateArtifactLocation,
+  localVstStateOwnerId,
+  validateLocalVstStateBytes,
+  readLocalExternalPluginState,
+} from '~/lib/external-plugin-artifacts'
+import { maxVst3WorkerStateBytes, type OpaquePluginStateMetadata } from '@daw-browser/plugin-host-protocol'
 import { z } from 'zod'
 
 const externalProcessorRowId = (instanceId: string) => `external-plugin:${instanceId}`
@@ -73,6 +80,96 @@ export type LocalExternalProcessorCommit = {
   previous: ExternalProcessor
   current: ExternalProcessor
 }
+
+export type CapturedLocalExternalProcessorState = {
+  bytes: Uint8Array
+  sha256: string
+}
+
+export const readLocalExternalProcessorState = async (
+  projectId: string,
+  processor: Pick<ExternalProcessor, 'instanceId' | 'state' | 'launchReference'>,
+  ownerId?: string,
+): Promise<{ bytes: Uint8Array; sha256: string } | undefined> => {
+  const metadata = processor.state ?? processor.launchReference?.state
+  if (!metadata) return undefined
+  if (ownerId !== undefined && metadata.ownerId !== ownerId) {
+    throw new Error(`Native VST state owner mismatch for "${processor.instanceId}".`)
+  }
+  return readLocalExternalPluginState(projectId, metadata, metadata.ownerId)
+}
+
+export const persistLocalExternalProcessorState = async (
+  projectId: string,
+  instanceId: string,
+  capturedState: CapturedLocalExternalProcessorState,
+  ownerId?: string,
+): Promise<ExternalProcessor | undefined> => withExternalProcessorWriteLock(
+  projectId,
+  instanceId,
+  async () => {
+    const state = validateLocalVstStateBytes(capturedState.bytes, capturedState.sha256)
+    if (state.bytes.byteLength > maxVst3WorkerStateBytes) {
+      throw new Error('Native VST state exceeds the shared limit.')
+    }
+    const db = await openLocalProjectDb(projectId)
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const rowId = externalProcessorRowId(instanceId)
+    const row = await tx.objectStore('entities').get([externalPluginEntityKind, rowId])
+    if (!row) {
+      await tx.done
+      return undefined
+    }
+    const current = parseExternalProcessorValue(parseExternalPluginJsonValue(row.value))
+    if (!current.success || current.data.instanceId !== instanceId) {
+      await tx.done
+      return undefined
+    }
+    const previous = current.data
+    const priorState = previous.state ?? previous.launchReference?.state
+    const resolvedOwnerId = priorState?.ownerId ?? localVstStateOwnerId(projectId, ownerId)
+    const artifactId = priorState?.artifactId ?? crypto.randomUUID()
+    const metadata: OpaquePluginStateMetadata = {
+      artifactId,
+      sha256: state.sha256,
+      byteLength: state.bytes.byteLength,
+      artifactKind: 'plugin-state',
+      ownerId: resolvedOwnerId,
+      acl: 'owner',
+      bucket: 'local',
+      location: localVstStateArtifactLocation(artifactId),
+    }
+    const updatedAt = Math.max(Date.now(), previous.updatedAt + 1)
+    const launchReference = previous.launchReference
+      ? { ...previous.launchReference, stateHash: metadata.sha256, state: metadata }
+      : undefined
+    const nextValue = launchReference
+      ? { ...previous, state: metadata, launchReference, updatedAt }
+      : { ...previous, state: metadata, updatedAt }
+    const next = pathFreeExternalProcessor(externalProcessorSchema.parse(nextValue))
+    await tx.objectStore('externalPluginArtifacts').put({
+      id: metadata.artifactId,
+      sha256: metadata.sha256,
+      byteLength: metadata.byteLength,
+      kind: metadata.artifactKind,
+      ownerId: metadata.ownerId,
+      acl: metadata.acl,
+      bucket: metadata.bucket,
+      location: metadata.location,
+      payload: state.bytes,
+      updatedAt,
+    })
+    await tx.objectStore('entities').put(createLocalProjectEntityRow(
+      externalPluginEntityKind,
+      rowId,
+      next,
+      updatedAt,
+    ))
+    await tx.done
+    notifyLocalProjectChanged(projectId)
+    return next
+  },
+)
 
 type ExternalProcessorPatch = Partial<Pick<ExternalProcessor, 'parameterOverrides' | 'bypassed'>>
 
@@ -278,20 +375,24 @@ export const deleteLocalExternalProcessor = async (
 ): Promise<void> => {
   await withExternalProcessorWriteLock(projectId, instanceId, async () => {
     const db = await openLocalProjectDb(projectId)
-    const tx = db.transaction('entities', 'readwrite')
-    const rows = await tx.store.getAll()
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const rows = await tx.objectStore('entities').getAll()
     const rowId = externalProcessorRowId(instanceId)
     const target = rows.find((row) => row.kind === externalPluginEntityKind && row.id === rowId)
     if (!target) {
       await tx.done
       return
     }
-    parseExternalProcessor(parseExternalPluginJsonValue(target.value), target.id)
-    await tx.store.delete([externalPluginEntityKind, rowId])
+    const targetProcessor = parseExternalProcessor(parseExternalPluginJsonValue(target.value), target.id)
+    const state = targetProcessor.state ?? targetProcessor.launchReference?.state
+    if (state?.bucket === 'local') {
+      await tx.objectStore('externalPluginArtifacts').delete(state.artifactId)
+    }
+    await tx.objectStore('entities').delete([externalPluginEntityKind, rowId])
     const normalized = normalizeMixedEffectEntityRows(jsonEntityRows(rows.filter((row) => (
       row.kind !== externalPluginEntityKind || row.id !== rowId
     ))))
-    for (const row of normalized) await tx.store.put(row)
+    for (const row of normalized) await tx.objectStore('entities').put(row)
     await tx.done
     notifyLocalProjectChanged(projectId)
   })

@@ -48,7 +48,7 @@ audio assets. Forge packaging hooks completed successfully.
 | Registration adversarial matrix | CLI | Yes | PASS | Missing, malformed, dead socket, unsafe permissions, stopped host, and restart recovery fail closed |
 | Standalone TypeScript SDK | Public package imports | Yes | PASS after public adapter | V2 discovery, snapshot, immutable preview, commit, revision advance, and mounted UI reconciliation |
 | Native application menu | macOS menu + Electron | Yes | PASS | Actual View → Assets Browser item reopened the hidden browser sidebar |
-| Installed VST3 scan | Electron | Yes | PARTIAL / PRODUCT SKIP | ValhallaSupermassive 5.0.0 scanned successfully; packaged catalog reported native VST3 hosting inactive, so no instance could be mounted |
+| Installed VST3 lifecycle | Electron + MCP + CLI | Yes | PASS after fixes | Standard-directory discovery, trust-gated automatic scan, Valhalla insertion, 19 parameters, native editor launch, playback, worker-loss recovery, restart persistence, stale-catalog auto-heal, and reliable export passed |
 | Extension lifecycle | Electron | Yes | PRODUCT SKIP | No packaged product/debug lifecycle entrypoint or registered extension commands exist |
 | Cloud control | Cloud | No | ENVIRONMENT SKIP | No disposable authenticated cloud environment or credentials were available |
 | Repository-wide lint | Source gate | N/A | FAIL baseline | Existing broad anti-slop violations in unchanged files |
@@ -83,6 +83,17 @@ audio assets. Forge packaging hooks completed successfully.
 12. **SDK SURFACE GAP:** secure desktop transport and canonical adaptation were
     CLI-private, so an external TypeScript SDK consumer could not connect
     without importing internal modules.
+13. **VST3 CATALOG LIFECYCLE BUG:** standard installation directories were not
+    initialized automatically, persisted scans lost process-local launch
+    eligibility, and trusted stale metadata required a manual Settings rescan.
+14. **VST3 STATE LIFECYCLE BUG:** opaque processor state was not durably captured
+    and restored across playback rebuilds, editor sessions, export, and restart.
+15. **VST3 RECOVERY BUG:** worker or native-host loss left the mounted graph
+    terminally unavailable instead of allowing one bounded canonical rebuild.
+16. **VST3 OFFLINE COMPLETION BUG:** native export withheld the terminal frame
+    until synchronous plug-in teardown completed, so a completed render could
+    intermittently time out; offline workers also initialized unused AppKit
+    editor state.
 
 Each bug was reproduced through a public packaged-app boundary, reduced to its
 architectural owner, covered by a focused regression, and rerun against a
@@ -103,15 +114,35 @@ the canonical V2 snapshot, constructed a persisted track reference, previewed,
 committed with an idempotency key, and verified the resulting snapshot. The
 mounted Electron UI also displayed the committed name.
 
+## VST3 packaged acceptance
+
+The installed ValhallaSupermassive 5.0.0 arm64 bundle passed the complete
+packaged lifecycle through normal product and public control boundaries:
+
+- The standard system and user VST3 directories appeared automatically.
+- First trust acknowledgement triggered scanning without a separate Rescan.
+- Valhalla became ready and enabled on a supported audio track, inserted
+  successfully, mounted in the native host, and exposed 19 real parameters.
+- The Mix parameter changed from `0.50` to `0.51`; the public MCP read agreed.
+- The native editor worker launched, playback reached authoritative `playing`,
+  and killing the playback worker caused the next Play action to rebuild once
+  and return to `playing`.
+- A cold restart preserved the mounted instance, Mix `0.51`, activation state,
+  and playback readiness.
+- Three consecutive one-second exports completed after the native finalization
+  fix. Each output was a stereo 48 kHz PCM WAV of exactly 192,044 bytes.
+- The catalog was then deliberately reduced to filesystem-only metadata.
+  Reopening the project directly, without visiting Settings or pressing Rescan,
+  automatically restored `ready/scanned`, trusted launch eligibility, and the
+  Valhalla class. Playback and another 192,044-byte export passed afterward.
+
+The first-ever native execution remains trust-gated. Process-local launch
+eligibility is still revalidated rather than persisted as authority, scanner
+diagnostics remain path-redacted at renderer/control boundaries, and recovery
+is bounded without polling.
+
 ## Remaining environmental and product skips
 
-- **VST3 instance and parameter reads:** the installed ValhallaSupermassive
-  bundle was discovered through the real packaged settings workflow, including
-  class metadata, code-sign verification, architecture, and fingerprinting.
-  The packaged catalog explicitly reported that native VST3 audio hosting was
-  not active, so the product exposed no legitimate way to create a mounted
-  instance. An empty external instance list is recorded as a product skip, not
-  a runtime pass.
 - **Extension lifecycle:** the packaged Extension Commands menu was empty and
   the repository exposes no product/debug lifecycle entrypoint. No test-only
   registration surface was invented.
@@ -138,5 +169,10 @@ cancellation, JSONL reduction, registration, standalone SDK, native menu, and
 VST3 catalog results, is under:
 
 `/tmp/daw-control-merge-gate-3fb4ce1/evidence`
+
+The final installed-Valhalla lifecycle, recovery, restart, stale-catalog, and
+export evidence is under:
+
+`/tmp/daw-vst3-acceptance-final-qwk44i/evidence`
 
 No registration secret was copied into this report.

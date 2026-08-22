@@ -29,16 +29,41 @@ import type {
 import type { ExportAudioFormat } from "@daw-browser/shared"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
-type NativeVstEditorReply = { ok: true; status: { success: boolean; owned: boolean; supported: boolean; open: boolean; width: number; height: number } } | { ok: false; error: string }
+type NativeVstEditorReply = {
+  ok: true
+  status: {
+    success: boolean
+    owned: boolean
+    supported: boolean
+    open: boolean
+    width: number
+    height: number
+    capturedState?: { bytes: Uint8Array; sha256: string }
+    closeError?: string
+    teardownError?: string
+  }
+} | { ok: false; error: string }
 export type DesktopVstEditorState = { projectId: string; instanceId: string; open: boolean }
+export type DesktopVstEditorCapturedState = {
+  requestId: string
+  projectId: string
+  instanceId: string
+  state: { bytes: Uint8Array; sha256: string }
+}
 type NativeVstEditorAnchor = { x: number; y: number }
-type NativeVstAttachmentCoordinationInput = { projectId: string; serializedPlan: string; sampleRateHz: number }
+type NativeVstAttachmentCoordinationInput = {
+  projectId: string
+  serializedPlan: string
+  sampleRateHz: number
+  requiredVstStateInstanceIds?: readonly string[]
+  capturedVstStates?: readonly { instanceId: string; bytes: Uint8Array; sha256: string }[]
+}
 export type DesktopPluginCatalogEntry = {
   displayName: string
   discoveredAtMs: number
   architecture: "unknown"
-  hostingStatus: "unavailable"
-  unavailableReason: string
+  hostingStatus: "discovered" | "scanning" | "ready" | "failed"
+  unavailableReason?: string
   classes: Array<{
     classId: string
     vendor: string
@@ -100,7 +125,19 @@ type NativeSessionBridge = {
     | { ok: true; bytes: Uint8Array; sha256: string }
     | { ok: false; error: string }
   >
-  editor(input: { projectId: string; instanceId: string; command: "open" | "close" | "focus" | "resize" | "status"; serializedPlan?: string; width?: number; height?: number; anchor?: NativeVstEditorAnchor; transactionToken?: string }): Promise<NativeVstEditorReply>
+  editor(input: {
+    projectId: string
+    instanceId: string
+    command: "open" | "close" | "focus" | "resize" | "status"
+    serializedPlan?: string
+    initialState?: { bytes: Uint8Array; sha256: string }
+    requiresState?: boolean
+    captureState?: boolean
+    width?: number
+    height?: number
+    anchor?: NativeVstEditorAnchor
+    transactionToken?: string
+  }): Promise<NativeVstEditorReply>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
@@ -170,6 +207,7 @@ type DesktopBridge = {
       cancel(jobId: string): Promise<{ accepted: boolean }>
     }
     onVstEditorState(listener: (payload: DesktopVstEditorState) => void): () => void
+    onVstEditorCapturedState(listener: (payload: DesktopVstEditorCapturedState) => Promise<void> | void): () => void
     getLifecycle(): Promise<DesktopAudioLifecycle>
     onLifecycle(listener: (lifecycle: DesktopAudioLifecycle) => void): () => void
     completeRecovery(

@@ -283,6 +283,7 @@ export const createAttachedHostController = (input: {
   pause: () => Promise<void>
   stop: () => Promise<void>
   finishRecording: () => Promise<void>
+  captureNativeVstStates?: (capture?: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   exportService: TimelineExportService
   exportQueue: ExportQueue
   importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
@@ -666,6 +667,7 @@ export const createAttachedHostController = (input: {
   }
   const prepareToClose = async () => {
     try {
+      await input.captureNativeVstStates?.()
       await input.stop()
       input.exportQueue.dispose()
       await input.finishRecording()

@@ -975,7 +975,7 @@ test('native-required play retries failed recovery and stays stopped while recov
       expect(retries).toBe(1)
       expect(playback.isPlaying()).toBeFalse()
       expect(faults).toEqual([])
-      expect(acknowledgements).toContainEqual({ generation: 2, result: "ready" })
+      expect(acknowledgements).toEqual([])
       expect(playback.isNativePlaybackPrepared()).toBeTrue()
       dispose()
     })
@@ -1302,6 +1302,50 @@ test('cancels delayed native startup and disposes the late backend', async () =>
         expect(playback.backendDiagnostics().activeBackend).toBe("idle")
         expect(fake.scheduleCalls).toEqual([])
         expect(fixture.calls).toContain("teardown")
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('settles a cancelled native start before replacement playback can rebuild', async () => {
+  const previousWindow = globalThis.window
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
+  const fixture = createNativeHookBridge(undefined, undefined, beginGate.promise)
+  const [nativeEnabled, setNativeEnabled] = createSignal(false)
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: nativeEnabled,
+          projectId: () => "project",
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        setNativeEnabled(true)
+        const firstPlay = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+
+        await playback.handleStop()
+        const replacementPlay = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+        await firstPlay
+        await replacementPlay
+
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+        expect(playback.isPlaying()).toBeTrue()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
         dispose()
       })
     })
@@ -2702,7 +2746,7 @@ test('reports native faults and stops active playback', async () => {
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe('idle')
         expect(faults).toEqual(['Native playback host connection was lost.'])
-        expect(fixture.calls).toContain('stop')
+        expect(fixture.calls).not.toContain('stop')
         dispose()
       })
     })
@@ -3335,5 +3379,129 @@ test('serializes stop teardown before a paused structural insertion', async () =
     })
   } finally {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('disposes the native backend even when state persistence fails', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      const faults: string[] = []
+      let failCapture = false
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          undefined,
+          {
+            enabled: () => true,
+            projectId: () => "project",
+            compileSnapshot: nativeRequiredSnapshot,
+            captureNativeVstStates: async () => {
+              if (failCapture) throw new Error("state persistence failed")
+            },
+            reportFault: (message) => faults.push(message),
+          },
+        )
+        await playback.handlePlay([track])
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+
+        failCapture = true
+        await expect(playback.handleStop()).rejects.toThrow("state persistence failed")
+        expect(fixture.calls).toContain("teardown")
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        expect(faults).toEqual([])
+        failCapture = false
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('captures a prepared native graph against its original project after navigation', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const captureStarted = Promise.withResolvers<void>()
+  const captureFinished = Promise.withResolvers<void>()
+  let currentProject = 'project-a'
+  const captured: Array<{ projectId: string; instanceIds: readonly string[] }> = []
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          undefined,
+          {
+            enabled: () => true,
+            projectId: () => currentProject,
+            compileSnapshot: nativeRequiredSnapshot,
+            captureNativeVstStates: async (capture) => {
+              captured.push(capture)
+              captureStarted.resolve()
+              await captureFinished.promise
+            },
+          },
+        )
+        await playback.handlePlay([track])
+        const stop = playback.handleStop()
+        await captureStarted.promise
+        currentProject = 'project-b'
+        captureFinished.resolve()
+        await stop
+        expect(captured).toEqual([{ projectId: 'project-a', instanceIds: [] }])
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('serializes play behind capture and disposal of the previous native session', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const captureGate = Promise.withResolvers<void>()
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          undefined,
+          {
+            enabled: () => true,
+            projectId: () => "project",
+            compileSnapshot: nativeRequiredSnapshot,
+            captureNativeVstStates: async () => captureGate.promise,
+          },
+        )
+        await playback.handlePlay([track])
+        const stop = playback.handleStop()
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
+        captureGate.resolve()
+        await Promise.all([stop, play])
+        expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+        expect(playback.isPlaying()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
   }
 })

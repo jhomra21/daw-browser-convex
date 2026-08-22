@@ -111,6 +111,7 @@ export type LocalProjectSyncStateRow = {
   updatedAt: number
 }
 export type LocalProjectExternalPluginArtifactRow = ProjectManifestPluginArtifact & {
+  payload?: Uint8Array
   updatedAt: number
 }
 export type LocalControlStateRow = LocalProjectStateRow

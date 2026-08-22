@@ -6,6 +6,7 @@ import {
   saveVst3TrustAcknowledgement,
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui"
+import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal"
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared"
 
 const initialCatalog: DesktopPluginCatalog = {
@@ -31,28 +32,55 @@ export function DashboardPluginsView() {
     hasVst3TrustAcknowledgement(localStorage),
   )
   const bridge = window.dawDesktop?.pluginCatalog
+  let activeUpdate: Promise<void> | undefined
+  let activeScan: Promise<void> | undefined
 
-  const update = async (action: () => ReturnType<NonNullable<typeof bridge>["read"]>) => {
-    if (!bridge || busy()) return
-    setBusy(true)
-    try {
-      const result = await action()
-      if ("catalog" in result) {
-        setCatalog(result.catalog)
-        setMessage("")
-        window.dispatchEvent(new Event("daw-plugin-catalog-changed"))
-      } else if (!result.ok) {
-        setMessage(result.error)
+  const update = (
+    action: () => ReturnType<NonNullable<typeof bridge>["read"]>,
+    autoHeal = false,
+  ) => {
+    const pluginCatalogBridge = bridge
+    if (!pluginCatalogBridge || busy()) return Promise.resolve()
+    const shouldAutoHeal = autoHeal && trustAcknowledged()
+    const run = async () => {
+      setBusy(true)
+      try {
+        const result = await action()
+        if ("catalog" in result) {
+          setCatalog(result.catalog)
+          setMessage("")
+          window.dispatchEvent(new Event("daw-plugin-catalog-changed"))
+          if (shouldAutoHeal) {
+            const healed = await autoHealStaleVst3Catalog({
+              catalog: result.catalog,
+              bridge: pluginCatalogBridge,
+              trustAcknowledged: true,
+              onCatalog: setCatalog,
+            })
+            if (healed && !healed.ok) setMessage(healed.error)
+          }
+        } else if (!result.ok) {
+          setMessage(result.error)
+        }
+      } catch {
+        setMessage("The plug-in catalog could not be updated.")
+      } finally {
+        setBusy(false)
       }
-    } catch {
-      setMessage("The plug-in catalog could not be updated.")
-    } finally {
-      setBusy(false)
     }
+    const promise = run()
+    activeUpdate = promise
+    void promise.finally(() => {
+      if (activeUpdate === promise) activeUpdate = undefined
+    })
+    return promise
   }
 
   onMount(() => {
-    void update(() => bridge?.read() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }))
+    void update(
+      () => bridge?.read() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }),
+      true,
+    )
   })
 
   const addDirectory = async () => {
@@ -62,7 +90,18 @@ export function DashboardPluginsView() {
 
   const rescan = async () => {
     if (!canUseVst3CatalogAction("scan", trustAcknowledged())) return
-    await update(() => bridge?.scan() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }))
+    if (activeScan) return activeScan
+    const run = async () => {
+      await activeUpdate
+      await update(() => bridge?.scan() ?? Promise.resolve({ ok: false, error: "The desktop plug-in catalog is unavailable." }))
+    }
+    const promise = run()
+    activeScan = promise
+    try {
+      await promise
+    } finally {
+      if (activeScan === promise) activeScan = undefined
+    }
   }
 
   return (
@@ -85,6 +124,7 @@ export function DashboardPluginsView() {
                   if (!event.currentTarget.checked) return
                   saveVst3TrustAcknowledgement(localStorage)
                   setTrustAcknowledged(true)
+                  void rescan()
                 }}
               />
               <span>{vst3TrustDisclosure.acknowledgement}</span>

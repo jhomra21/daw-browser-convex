@@ -210,8 +210,10 @@ int main(const int argc, char* argv[]) {
       .classId = startup->classId,
       .setup = startup->setup,
     };
-    if (!plugin.Instantiate(instance) || !plugin.ConfigureTransport(*transport)
-      || (startup->state && !plugin.SetState(*startup->state))) {
+    if (!plugin.Instantiate(instance) || !plugin.ConfigureTransport(
+      *transport,
+      startup->state ? &*startup->state : nullptr
+    )) {
       transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
       static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault}));
       return EXIT_FAILURE;

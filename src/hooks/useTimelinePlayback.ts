@@ -26,6 +26,7 @@ type NativePlaybackOptions = {
   projectId?: Accessor<string>
   projectGeneration?: Accessor<number>
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
+  captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   reportFault?: (message: string) => void
 }
 
@@ -274,6 +275,30 @@ export function useTimelinePlayback(
       nativeOptions?.reportFault?.(message)
     },
   })
+  const capturePreparedNativeVstStates = async () => {
+    if (!nativePlayback.isPrepared()) return
+    const capture = nativePlayback.preparedVstCapture()
+    if (capture) await nativeOptions?.captureNativeVstStates?.(capture)
+  }
+  const disposeNativeAfterCapture = async () => {
+    let captureError: unknown
+    let disposeError: unknown
+    try {
+      await capturePreparedNativeVstStates()
+    } catch (error) {
+      captureError = error
+    }
+    try {
+      await nativePlayback.dispose()
+    } catch (error) {
+      disposeError = error
+    }
+    if (captureError !== undefined) throw captureError
+    if (disposeError !== undefined) throw disposeError
+  }
+  const reportNativeStateCaptureFailure = (error: Error) => {
+    nativeOptions?.reportFault?.(error.message || "Native VST state capture failed.")
+  }
   const portableBrowserPlayback = createPortableBrowserPlaybackController({
     compileSnapshot: portableBrowserOptions?.compileSnapshot ?? (async () => ({
       supported: false,
@@ -538,6 +563,10 @@ export function useTimelinePlayback(
   const handlePlay = async (tracks: Track[], compileContext?: LivePlaybackCompileContext) => {
     const stop = pendingStop
     if (stop) await stop.catch(() => undefined)
+    const pendingDispose = preparedBackendDisposePromise
+    if (pendingDispose && preparedBackendDisposeHasPendingNativeStart) {
+      await pendingDispose.catch(() => undefined)
+    }
     if (!mounted || audioLifecycleState() === "suspended") {
       reportNativePlaySkip("Playback became unavailable while waiting for the previous stop to finish.")
       return
@@ -643,7 +672,7 @@ export function useTimelinePlayback(
         return
       }
       if (!nativeLifecycleReady && nativePlayback.isPrepared()) {
-        await nativePlayback.dispose()
+        await disposeNativeAfterCapture()
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback preparation was superseded during disposal.")
           return
@@ -846,7 +875,7 @@ export function useTimelinePlayback(
     const hadPendingPlay = playAttempt !== undefined
     invalidatePlayAttempt()
     if (!isPlaying()) {
-      if (hadPendingPlay) await disposePreparedBackends()
+      if (hadPendingPlay) void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
       return
     }
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
@@ -902,11 +931,16 @@ export function useTimelinePlayback(
 
   const handleStop = () => {
     transportIntentToken += 1
+    const hadPendingPlay = playAttempt !== undefined || nativePlayback.getPendingStart() !== undefined
     invalidatePlayAttempt()
     if (pendingStop) return pendingStop
     const stop = (async () => {
       await handlePause()
-      await disposePreparedBackends()
+      if (hadPendingPlay) {
+        void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
+      } else {
+        await disposePreparedBackends()
+      }
       lastPublishedPlayheadSec = 0
       lastPlayheadUiUpdateMs = 0
       setPlayheadSec(0)
@@ -1073,7 +1107,7 @@ export function useTimelinePlayback(
       if (isPlaying()) {
         setIsPlaying(false)
         cancelRaf()
-        void nativePlayback.dispose()
+        void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
         setActiveBackend('idle')
       } else if (nativePlayback.isPrepared()) {
         const seekReconciliationToken = nativeLifecycleToken
@@ -1142,7 +1176,7 @@ export function useTimelinePlayback(
     if (nativePlayback.isPrepared() || portableBrowserPlayback.isPrepared()) {
       setIsPlaying(false)
       cancelRaf()
-      void nativePlayback.dispose()
+      void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
       disposePortableBrowserPlayback()
       setActiveBackend('idle')
       return
@@ -1161,18 +1195,28 @@ export function useTimelinePlayback(
   }
   const disposePreparedBackends = async () => {
     if (preparedBackendDisposePromise) return preparedBackendDisposePromise
-    const dispose = (requiresNativeAudio
-      ? Promise.allSettled([nativePlayback.dispose()])
-      : Promise.allSettled([
-        nativePlayback.dispose(),
-        Promise.resolve(disposePortableBrowserPlayback()),
-      ])).then(() => {
+    preparedBackendDisposeHasPendingNativeStart = nativePlayback.getPendingStart() !== undefined
+    const dispose = (async () => {
+      let captureError: unknown
+      try {
+        await capturePreparedNativeVstStates()
+      } catch (error) {
+        captureError = error
+      } finally {
+        const pendingStart = nativePlayback.cancelPendingStart()
+        const disposal = requiresNativeAudio
+          ? [nativePlayback.dispose(), pendingStart]
+          : [nativePlayback.dispose(), Promise.resolve(disposePortableBrowserPlayback()), pendingStart]
+        await Promise.allSettled(disposal)
+      }
       if (!untrack(isPlaying)) setActiveBackend('idle')
-    })
+      if (captureError !== undefined) throw captureError
+    })()
     preparedBackendDisposePromise = dispose
     void dispose.finally(() => {
       if (preparedBackendDisposePromise === dispose) preparedBackendDisposePromise = undefined
-    })
+      preparedBackendDisposeHasPendingNativeStart = false
+    }).catch(() => undefined)
     return dispose
   }
   const handleAudioLifecycle = (lifecycle: DesktopAudioLifecycle) => {
@@ -1239,7 +1283,7 @@ export function useTimelinePlayback(
       if (recoveryAttempt) recoveryAttempt.cancelled = true
       cancelRaf()
       setIsPlaying(false)
-      void nativePlayback.dispose()
+      void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
       setActiveBackend("idle")
     }
   }
@@ -1332,7 +1376,7 @@ export function useTimelinePlayback(
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
       setIsPlaying(false)
       cancelRaf()
-      void nativePlayback.dispose()
+      void disposePreparedBackends().catch(reportNativeStateCaptureFailure)
       if (!requiresNativeAudio) disposePortableBrowserPlayback()
       setActiveBackend('idle')
       return
@@ -1454,7 +1498,7 @@ export function useTimelinePlayback(
           return
         }
       } else if (requestedOwner === 'portable-browser') {
-        await nativePlayback.dispose()
+        await disposePreparedBackends()
         await pendingNativeDispose
       }
       if (isSuperseded()) {
@@ -1538,7 +1582,8 @@ export function useTimelinePlayback(
       if (nativeDispose !== pendingNativeDispose) await pendingNativeDispose
       if (isSuperseded() || !isCurrentPausedIntent()) return
       if ((requestedOwner === 'native' || nativePlayback.isPrepared()) && nativePlayback.isPrepared()) {
-        const result = await nativePlayback.rebuildPrepared(sec, requestedIntent?.instrumentOverride ? { instrumentOverride: requestedIntent.instrumentOverride } : undefined)
+        await disposePreparedBackends()
+        const result = await nativePlayback.ensureLivePreview(sec, requestedIntent?.instrumentOverride ? { instrumentOverride: requestedIntent.instrumentOverride } : undefined)
         if (!isCurrentPausedIntent()) {
           await disposePreparedBackends()
           return
@@ -1647,7 +1692,7 @@ export function useTimelinePlayback(
         return
       }
     } else if (requestedOwner === 'portable-browser') {
-      await nativePlayback.dispose()
+      await disposePreparedBackends()
       await pendingNativeDispose
     }
     rebuildStartingPlay = true
@@ -1679,6 +1724,7 @@ export function useTimelinePlayback(
   let mountedProjectId = nativeOptions?.projectId?.()
   let nativeLifecycleToken = 0
   let pendingNativeDispose: Promise<void> = Promise.resolve()
+  let preparedBackendDisposeHasPendingNativeStart = false
   let nativePreviewRequested = false
   let nativePreviewTrackFingerprint: string | undefined
   const bufferFingerprints = new WeakMap<object, number>()
@@ -1719,7 +1765,8 @@ export function useTimelinePlayback(
   )
   const disposeNativePreview = () => {
     nativeLifecycleToken += 1
-    const request = pendingNativeDispose.then(() => nativePlayback.dispose())
+    const request = pendingNativeDispose
+      .then(() => disposePreparedBackends())
     pendingNativeDispose = request.catch(() => undefined)
     return request
   }

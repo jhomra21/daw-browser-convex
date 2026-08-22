@@ -78,7 +78,10 @@ export const nativeVst3InsertionAvailability = (input: {
   }
   if (!input.canWrite) return unavailable("project-unavailable", "The selected track is read-only.")
   if (input.busy) return unavailable("host-unavailable", "Native VST3 preflight is already running.")
-  if (input.selection.entry.scanHealth === "scan-failed") return unavailable("stale-catalog", "The VST3 scan failed and must be refreshed.")
+  if (input.selection.entry.hostingStatus === "failed") {
+    return unavailable("stale-catalog", input.selection.entry.unavailableReason ?? "The VST3 scan failed and must be refreshed.")
+  }
+  if (input.selection.entry.scanHealth === "scan-failed") return unavailable("stale-catalog", input.selection.entry.unavailableReason ?? "The VST3 scan failed and must be refreshed.")
   if (
     input.selection.entry.scanHealth !== "scanned"
     || !input.selection.entry.catalogReference

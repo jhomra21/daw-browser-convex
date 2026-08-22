@@ -21,6 +21,7 @@ type Options = {
     projectId?: Accessor<string>
     projectGeneration?: Accessor<number>
     compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
+    captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
     reportFault?: (message: string) => void
   }
   portableBrowserPlayback?: {

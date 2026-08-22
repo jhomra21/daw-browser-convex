@@ -44,7 +44,7 @@ import { createPreparationRegistry } from "./preparation-registry"
 import { prepareDesktopReply } from "./renderer-reply"
 import { desktopOperations } from "./desktop-operations"
 import { createContentSecurityPolicy } from "./content-security-policy"
-import { createPluginCatalogStore } from "./plugin-catalog"
+import { canonicalVst3SearchPaths, createPluginCatalogStore } from "./plugin-catalog"
 import { createVst3ScannerSupervisor, packagedVst3ScannerPath } from "./vst3-scanner"
 import { catalogViewForRenderer } from "./vst3-attachment"
 import { preflightVst3Insertion } from "./vst3-insertion-preflight"
@@ -62,6 +62,7 @@ import {
   packagedAudioHostPath,
   type NativeVstEditorAnchor,
   type NativeVstEditorCommand,
+  type NativeWorkerNotification,
 } from "./audio-host"
 import { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
 import {
@@ -182,6 +183,12 @@ const nativeEditorCommandSchema = z.object({
   instanceId: uuidSchema,
   command: z.enum(["open", "close", "focus", "resize", "status"]),
   serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576).optional(),
+  initialState: z.object({
+    bytes: z.instanceof(Uint8Array).refine((value) => value.byteLength <= 512 * 1024),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict().optional(),
+  requiresState: z.boolean().optional(),
+  captureState: z.boolean().optional(),
   width: unsigned32Schema.max(8192).optional(),
   height: unsigned32Schema.max(8192).optional(),
   anchor: nativeEditorAnchorSchema.optional(),
@@ -201,6 +208,12 @@ const nativeAttachmentCoordinationSchema = z.object({
   projectId: projectIdSchemaV1,
   serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576),
   sampleRateHz: z.number().finite().positive().max(384_000),
+  requiredVstStateInstanceIds: z.array(uuidSchema).max(64).optional(),
+  capturedVstStates: z.array(z.object({
+    instanceId: uuidSchema,
+    bytes: z.instanceof(Uint8Array).refine((value) => value.byteLength <= 512 * 1024),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()).max(64).optional(),
 }).passthrough()
 const nativeSessionEnvelopeSchema = <Schema extends z.ZodType>(valueSchema: Schema) => (
   z.object({
@@ -246,6 +259,11 @@ const capabilityWriterSchema = z.object({
   writerId: z.string(),
 }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
+const editorStateAckSchema = z.object({
+  requestId: uuidSchema,
+  ok: z.boolean(),
+  error: z.string().optional(),
+}).strict()
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
@@ -272,6 +290,10 @@ type RendererRequestInput = Parameters<typeof desktopRendererRequestSchemaV1.par
 let window_: BrowserWindow | undefined
 let finishingQuit = false
 let quitCleanupStarted = false
+const pendingEditorStateAcks = new Map<string, {
+  resolve: () => void
+  reject: (error: Error) => void
+}>()
 const sendRendererMessage = (channel: string, ...args: unknown[]) => deliverToRenderer({
   getTarget: () => window_?.webContents,
   channel,
@@ -428,6 +450,10 @@ const rejectRendererPending = (message: string) => {
     pending.reject(new Error(message))
   }
   rendererPending.clear()
+}
+const rejectEditorStateAcks = (message: string) => {
+  for (const pending of pendingEditorStateAcks.values()) pending.reject(new Error(message))
+  pendingEditorStateAcks.clear()
 }
 const rejectRendererRequest = (id: string, message: string) => {
   const pending = rendererPending.get(id)
@@ -774,7 +800,7 @@ const handleSocket = (socket: Socket) => {
 }
 
 const registerIpc = () => {
-  const applicationMenuStateAllowed = (event: Electron.IpcMainEvent) => (
+  const applicationMenuStateAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
     window_ !== undefined
     && event.sender.id === window_.webContents.id
     && event.senderFrame !== null
@@ -785,6 +811,17 @@ const registerIpc = () => {
     if (!applicationMenuStateAllowed(event)) return
     const parsed = desktopApplicationMenuStateSchema.safeParse(value)
     if (parsed.success) applicationMenuController.setState(parsed.data)
+  })
+  ipcMain.handle("daw:audio-host:vst-editor-captured-state-ack", (event, value) => {
+    if (!applicationMenuStateAllowed(event)) return { accepted: false }
+    const parsed = editorStateAckSchema.safeParse(value)
+    if (!parsed.success) return { accepted: false }
+    const pending = pendingEditorStateAcks.get(parsed.data.requestId)
+    if (!pending) return { accepted: false }
+    pendingEditorStateAcks.delete(parsed.data.requestId)
+    if (parsed.data.ok) pending.resolve()
+    else pending.reject(new Error(parsed.data.error ?? "Editor state persistence failed."))
+    return { accepted: true }
   })
   ipcMain.handle("daw:audio-host:lifecycle", (event) => {
     if (!audioHostAllowed(event)) return { state: "failed" as const, powerGeneration: audioLifecycle.powerGeneration }
@@ -1155,6 +1192,9 @@ const registerIpc = () => {
         instanceId: value.instanceId,
         command: editorCommand,
         serializedPlan: value.serializedPlan,
+        initialState: value.initialState,
+        requiresState: value.requiresState,
+        captureState: value.captureState,
         width: value.width,
         height: value.height,
         anchor,
@@ -1181,11 +1221,34 @@ const registerIpc = () => {
             envelope.data.transactionToken,
           )
           if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
-          const { projectId: _projectId, ...nativeCommand } = command
-          const status = command.command === "status"
+          const {
+            projectId: _projectId,
+            initialState: _initialState,
+            requiresState: _requiresState,
+            captureState: _captureState,
+            ...nativeCommand
+          } = command
+          const capturedState = command.command === "close"
+            ? await activeHostCandidate.getVstState(command.instanceId)
+            : undefined
+          let status = command.command === "status"
             ? ownership
-            : await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
-          return { ok: true as const, status }
+            : undefined
+          if (status === undefined) {
+            try {
+              status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
+            } catch (error) {
+              if (command.command !== "close") throw error
+              status = {
+                ...ownership,
+                success: false,
+                open: false,
+                closeError: error instanceof Error ? error.message : "The native editor close command failed.",
+              }
+            }
+          }
+          if (command.command !== "close") return { ok: true as const, status }
+          return { ok: true as const, status: { ...status, capturedState } }
         } catch (error) {
           console.error("[native-vst3] editor active route failed", {
             error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
@@ -1223,6 +1286,10 @@ const registerIpc = () => {
       catalogStore: pluginCatalogStore,
       audioHost: supervisor,
       transactionToken: envelope.data.transactionToken,
+      capturedVstStates: new Map(
+        (sessionValue.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
+      ),
+      requiredVstStateInstanceIds: new Set(sessionValue.requiredVstStateInstanceIds ?? []),
     })
     if (!result.ok) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
@@ -1414,8 +1481,7 @@ const registerIpc = () => {
     const scanner = vst3ScannerSupervisor
     if (!store || !scanner) return catalogFailure("The desktop plug-in catalog is unavailable.")
     try {
-      const catalog = await store.load()
-      return { ok: true, catalog: catalogViewForRenderer(await store.scan((entry) => scanner.scan(entry, catalog.directories))) }
+      return { ok: true, catalog: catalogViewForRenderer(await store.scan((entry, directories) => scanner.scan(entry, directories))) }
     } catch {
       return catalogFailure("The plug-in catalog could not be scanned.")
     }
@@ -1430,16 +1496,27 @@ const registerIpc = () => {
     if (!audioHostAllowed(event) || !audioHostPath || !workerPath) {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host is unavailable." }
     }
+    const scanner = vst3ScannerSupervisor
+    if (!scanner) {
+      return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 scanner is unavailable." }
+    }
     try {
       const device = await probeNativeAudioOutputDevice(audioHostPath)
       if (!device?.available) {
         return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
       }
-      return await preflightVst3Insertion({
+      const preflightInput = {
         request: request.data,
         catalog: await store.load(),
         workerPath,
         sampleRateHz: device.nominalSampleRateHz,
+      }
+      const first = await preflightVst3Insertion(preflightInput)
+      if (first.ok || first.code !== "stale-catalog") return first
+      await store.revalidate((entry, directories) => scanner.scan(entry, directories))
+      return preflightVst3Insertion({
+        ...preflightInput,
+        catalog: await store.load(),
       })
     } catch {
       return { ok: false as const, code: "host-unavailable" as const, message: "The native VST3 host preflight failed." }
@@ -1528,9 +1605,11 @@ const createWindow = () => {
     },
   })
   window_?.on("closed", () => {
+    rejectEditorStateAcks("Renderer destroyed.")
     window_ = undefined
   })
   window_.webContents.on("did-start-navigation", () => {
+    rejectEditorStateAcks("Renderer reloaded.")
     abortOfflineRenderJobs()
     applicationMenuController.reset()
     preparationRegistry.abortAll()
@@ -1539,6 +1618,7 @@ const createWindow = () => {
     rejectRendererPending("Renderer reloaded.")
   })
   window_.webContents.on("render-process-gone", () => {
+    rejectEditorStateAcks("Renderer crashed.")
     abortOfflineRenderJobs()
     applicationMenuController.reset()
     preparationRegistry.abortAll()
@@ -1557,6 +1637,7 @@ const createWindow = () => {
     prepare: async () => {
       try {
         const reply = await renderRequest("lifecycle.prepareToClose", {}, randomUUID(), 10_000)
+        await nativeVst3EditorSessionManager?.captureAll()
         return closePreparationResultSchema.safeParse(reply.result).success
       } catch {
         return false
@@ -1592,14 +1673,14 @@ app.setName(appName)
 const finishQuit = async () => {
   if (quitCleanupStarted) return
   quitCleanupStarted = true
+  await nativeVst3EditorSessionManager?.teardownAll().catch(() => undefined)
   finishingQuit = true
   await closeSocket()
   preparationRegistry.abortAll()
   rejectRendererPending("Application is closing.")
   activeEditorProjectBindings.clear()
   await fileCapabilities.revokeAll()
-  await nativeVst3EditorSessionManager?.teardownAll()
-  await audioHostSupervisor?.teardown()
+  await audioHostSupervisor?.teardown().catch(() => undefined)
   powerMonitor.removeAllListeners("suspend")
   powerMonitor.removeAllListeners("resume")
   removeAudioHostLossListener?.()
@@ -1651,7 +1732,44 @@ else {
     pluginCatalogStore = createPluginCatalogStore({
       filePath: path.join(app.getPath("userData"), "plugin-catalog-v1.json"),
     })
+    if (process.platform === "darwin") {
+      const startupScanner = vst3ScannerSupervisor
+      await pluginCatalogStore.initialize(
+        canonicalVst3SearchPaths(app.getPath("home")),
+        startupScanner
+          ? (entry, directories) => startupScanner.scan(entry, directories)
+          : undefined,
+      )
+    }
     audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath) : undefined
+    let nativeWorkerReady = false
+    let nativeSessionIncidentGeneration = 0
+    let publishedNativeSessionLossGeneration = -1
+    let workerIncidentOpen = false
+    const publishNativeSessionLoss = (
+      error: string,
+      source: "host" | "worker",
+    ) => {
+      if (source === "host") {
+        nativeWorkerReady = false
+        if (workerIncidentOpen) {
+          workerIncidentOpen = false
+          return
+        }
+        nativeSessionIncidentGeneration += 1
+      }
+      if (publishedNativeSessionLossGeneration === nativeSessionIncidentGeneration) return
+      publishedNativeSessionLossGeneration = nativeSessionIncidentGeneration
+      activeEditorProjectBindings.clear()
+      sendRendererMessage("daw:audio-host:loss", error)
+    }
+    const workerLossMessage = (notification: NativeWorkerNotification) => (
+      notification.kind === "miss"
+        ? "Native VST3 worker missed its deadline."
+        : notification.kind === "restart"
+          ? "Native VST3 worker requested an unsupported restart."
+          : "Native VST3 worker faulted."
+    )
     const sendVstParameterEdit = (input: {
       projectId: string
       source: "active-playback" | "editor-session"
@@ -1662,6 +1780,28 @@ else {
       sendRendererMessage("daw:audio-host:vst-parameter-edit", input)
     }
     removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification((notification) => {
+      if (notification.kind === "buses") {
+        if (!nativeWorkerReady) {
+          nativeWorkerReady = true
+          nativeSessionIncidentGeneration += 1
+        }
+        workerIncidentOpen = false
+        return
+      }
+      // The worker reports plugin-requested restart without performing a
+      // replacement itself; playback must rebuild the worker transaction.
+      if (
+        notification.kind === "fault"
+        || notification.kind === "miss"
+        || notification.kind === "restart"
+      ) {
+        if (workerIncidentOpen) return
+        workerIncidentOpen = true
+        nativeWorkerReady = false
+        nativeSessionIncidentGeneration += 1
+        publishNativeSessionLoss(workerLossMessage(notification), "worker")
+        return
+      }
       if (notification.kind !== "parameter-edit") return
       const projectId = activeEditorProjectBindings.projectFor(notification.instanceId)
       if (!projectId) return
@@ -1689,6 +1829,28 @@ else {
         onEditorOpenState: (input) => {
           sendRendererMessage("daw:audio-host:vst-editor-state", input)
         },
+        onCapturedState: (input) => new Promise<void>((resolve, reject) => {
+          const requestId = randomUUID()
+          const timeout = setTimeout(() => {
+            if (!pendingEditorStateAcks.delete(requestId)) return
+            reject(new Error("Renderer editor state persistence timed out."))
+          }, 10_000)
+          pendingEditorStateAcks.set(requestId, {
+            resolve: () => {
+              clearTimeout(timeout)
+              resolve()
+            },
+            reject: (error) => {
+              clearTimeout(timeout)
+              reject(error)
+            },
+          })
+          if (!sendRendererMessage("daw:audio-host:vst-editor-captured-state", { ...input, requestId })) {
+            pendingEditorStateAcks.delete(requestId)
+            clearTimeout(timeout)
+            reject(new Error("Renderer unavailable."))
+          }
+        }),
         onParameterEdit: (input) => sendVstParameterEdit({
           projectId: input.projectId,
           source: "editor-session",
@@ -1717,8 +1879,7 @@ else {
     powerMonitor.on("suspend", handleSuspend)
     powerMonitor.on("resume", handleResume)
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
-      activeEditorProjectBindings.clear()
-      sendRendererMessage("daw:audio-host:loss", sanitizeNativeVst3DiagnosticError(error))
+      publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
     })
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
       sendRendererMessage("daw:audio-host:recording-block", block)

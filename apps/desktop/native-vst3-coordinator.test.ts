@@ -41,8 +41,7 @@ const catalog = (): PluginCatalogData => ({
     configuredDirectory: "/Library/Audio/Plug-Ins/VST3",
     discoveredAtMs: 1,
     architecture: "unknown",
-    hostingStatus: "unavailable",
-    unavailableReason: "VST3 discovery is available, but native VST3 audio hosting is not active.",
+    hostingStatus: "ready",
     classes: [
       {
         classId: "0123456789abcdef0123456789abcdef",
@@ -244,6 +243,50 @@ test("requires and validates live state capture for stateful VST3 attachments", 
     stateReader: async () => { throw new Error("live capture failed") },
     preflight: async () => available(stateful, { supportsState: true }),
   })).rejects.toThrow("state capture failed. live capture failed")
+})
+
+test("bootstraps a new stateful attachment when no persisted state is required", async () => {
+  const calls: string[] = []
+  const result = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() },
+    audioHost: {
+      attachVst: async (input) => {
+        calls.push(input.initialState ? "attach-with-state" : "attach-default")
+      },
+    },
+    capturedVstStates: new Map(),
+    requiredVstStateInstanceIds: new Set(),
+    preflight: async () => available(first, { supportsState: true }),
+  })
+  expect(result).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual(["attach-default"])
+})
+
+test("fails closed when an existing stateful attachment has no captured state", async () => {
+  const calls: string[] = []
+  const result = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() },
+    audioHost: {
+      attachVst: async () => {
+        calls.push("attach")
+      },
+    },
+    requiredVstStateInstanceIds: new Set([first.instanceId]),
+    preflight: async () => available(first, { supportsState: true }),
+  })
+  expect(result).toEqual({
+    ok: false,
+    code: "state-invalid",
+    message: "The captured VST3 state is missing.",
+    instanceId: first.instanceId,
+  })
+  expect(calls).toEqual([])
 })
 
 const host = (calls: string[]) => ({

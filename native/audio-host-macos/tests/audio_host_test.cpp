@@ -621,6 +621,23 @@ void TestControlFrames() {
   assert(!daw::audio_host_macos::DecodeControlFrame(oversized));
 }
 
+void TestOfflineTerminalIsPublishedBeforeStop() {
+  std::vector<std::string> events;
+  const auto published = daw::audio_host_macos::detail::PublishOfflineTerminalBeforeStop(
+    [&] {
+      events.push_back("terminal");
+      return true;
+    },
+    [&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      events.push_back("stop");
+      return false;
+    }
+  );
+  assert(published);
+  assert((events == std::vector<std::string>{"terminal", "stop"}));
+}
+
 void TestCallbackPlanarBuffersAndSplitting() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1416,6 +1433,7 @@ void TestWorkerNotificationQueuePolicy() {
 int main() {
   TestDeviceNamespace();
   TestControlFrames();
+  TestOfflineTerminalIsPublishedBeforeStop();
   TestNativeVstEventScheduler();
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();

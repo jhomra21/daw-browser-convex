@@ -2393,7 +2393,85 @@ test("host loss reports the fault without starting another backend", async () =>
   expect(faults).toEqual(["Native playback host connection was lost."])
   expect(controller.isAvailable()).toBeFalse()
   expect(controller.startLiveMidiNote({ trackId: "instrument", pitch: 60, velocity: 0.8 })).toBeUndefined()
-  expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport", "stop"])
+  expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport"])
+})
+
+test("rebuilds the full native session on the next start after host loss", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await controller.start(input().transport)
+  fixture.emitLoss("The native audio host stopped.")
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+  expect(fixture.calls.filter((call) => call === "graph")).toHaveLength(2)
+  expect(fixture.calls.filter((call) => call === "install")).toHaveLength(2)
+  expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(0)
+  expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(0)
+  await controller.dispose()
+})
+
+test("terminates recovery when the rebuilt host is lost again", async () => {
+  const fixture = createBridge()
+  let recoveryStartCount = 0
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await controller.start(input().transport)
+  fixture.emitLoss()
+  const originalStart = fixture.bridge.session.start
+  fixture.bridge.session.start = async () => {
+    const reply = await originalStart()
+    recoveryStartCount += 1
+    if (recoveryStartCount === 1) fixture.emitLoss("The native audio host stopped again.")
+    return reply
+  }
+  const first = controller.start(input().transport)
+  const second = controller.start(input().transport)
+  expect(second).toBe(first)
+
+  await expect(first).resolves.toBe("unavailable")
+  expect(recoveryStartCount).toBe(1)
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+  expect(controller.isPrepared()).toBeFalse()
+  await controller.dispose()
+})
+
+test("keeps an in-flight start coalesced while host loss invalidates its first generation", async () => {
+  const fixture = createBridge()
+  const startGate = Promise.withResolvers<void>()
+  const originalStart = fixture.bridge.session.start
+  fixture.bridge.session.start = async () => {
+    fixture.calls.push("start-gate")
+    await startGate.promise
+    return originalStart()
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  const first = controller.start(input().transport)
+  for (let index = 0; index < 20 && !fixture.calls.includes("start-gate"); index += 1) {
+    await Promise.resolve()
+  }
+  expect(fixture.calls).toContain("start-gate")
+  fixture.emitLoss("The native audio host stopped.")
+  const second = controller.start(input().transport)
+  expect(second).toBe(first)
+  startGate.resolve()
+
+  await expect(first).resolves.toBe("started")
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
+  expect(fixture.calls).not.toContain("rollback")
+  expect(fixture.calls).not.toContain("teardown")
+  await controller.dispose()
 })
 
 test("preserves the native host loss reason in the playback fault", async () => {

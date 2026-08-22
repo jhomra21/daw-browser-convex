@@ -27,12 +27,18 @@ type FakeSupervisor = {
     width: number
     height: number
   }>
+  getVstState?(): Promise<{ bytes: Uint8Array; sha256: string }>
   teardown(): Promise<void>
   attachVst(): Promise<void>
   onWorkerNotification(listener: (notification: NativeWorkerNotification) => void): () => void
 }
 
-const fakeSupervisor = (calls: string[], failAt?: string, readyInstance = firstInstance): FakeSupervisor => {
+const fakeSupervisor = (
+  calls: string[],
+  failAt?: string,
+  readyInstance = firstInstance,
+  state = { bytes: new Uint8Array([1, 2, 3]), sha256: "a".repeat(64) },
+): FakeSupervisor => {
   const step = (name: string) => {
     calls.push(name)
     if (failAt === name) throw new Error(`${name} failed`)
@@ -62,6 +68,10 @@ const fakeSupervisor = (calls: string[], failAt?: string, readyInstance = firstI
       if (input.anchor) this.anchors.push(input.anchor)
       return { success: true, owned: true, supported: true, open: input.command !== "close", width: 640, height: 480 }
     },
+    async getVstState() {
+      calls.push("get-state")
+      return state
+    },
     async teardown() { step("teardown") },
     async attachVst() {},
     onWorkerNotification(listener) {
@@ -74,11 +84,16 @@ const fakeSupervisor = (calls: string[], failAt?: string, readyInstance = firstI
 const managerFor = (input: {
   supervisors?: FakeSupervisor[]
   calls?: string[]
-  coordinate?: (input: { serializedPlan: string }) => Promise<
+  coordinate?: (input: {
+    serializedPlan: string
+    capturedVstStates?: ReadonlyMap<string, { bytes: Uint8Array; sha256: string }>
+    requiredVstStateInstanceIds?: ReadonlySet<string>
+  }) => Promise<
     { ok: true; attached: number } | { ok: false; code: "invalid-plan"; message: string }
   >
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void
   onEditorOpenState?: (input: { projectId: string; instanceId: string; open: boolean }) => void
+  onCapturedState?: (input: { projectId: string; instanceId: string; state: { bytes: Uint8Array; sha256: string } }) => Promise<void> | void
   onParameterEdit?: (input: { projectId: string; instanceId: string; parameterId: number; normalizedValue: number }) => void
 } = {}): NativeVst3EditorSessionManager => {
   const calls = input.calls ?? []
@@ -96,11 +111,12 @@ const managerFor = (input: {
     createSupervisor: () => {
       return supervisors.shift() ?? fakeSupervisor(calls)
     },
-    coordinate: async ({ serializedPlan }) => input.coordinate
-      ? input.coordinate({ serializedPlan })
+    coordinate: async ({ serializedPlan, capturedVstStates, requiredVstStateInstanceIds }) => input.coordinate
+      ? input.coordinate({ serializedPlan, capturedVstStates, requiredVstStateInstanceIds })
       : { ok: true, attached: 1 },
     onEditorInteraction: input.onEditorInteraction,
     onEditorOpenState: input.onEditorOpenState,
+    onCapturedState: input.onCapturedState,
     onParameterEdit: input.onParameterEdit,
   })
 }
@@ -123,6 +139,42 @@ test("initializes before editor open and uses the diagnostic host configuration"
     "diagnostic-start",
     "editor:open",
   ])
+})
+
+test("restores initial state before opening and captures state before closing", async () => {
+  const calls: string[] = []
+  const state = { bytes: new Uint8Array([4, 5, 6]), sha256: "b".repeat(64) }
+  const supervisor = fakeSupervisor(calls, undefined, firstInstance, state)
+  let coordinatedState: Uint8Array | undefined
+  const manager = managerFor({
+    calls,
+    supervisors: [supervisor],
+    coordinate: async ({ capturedVstStates, requiredVstStateInstanceIds }) => {
+      coordinatedState = capturedVstStates?.get(firstInstance)?.bytes
+      expect(requiredVstStateInstanceIds?.has(firstInstance)).toBeTrue()
+      return { ok: true, attached: 1 }
+    },
+  })
+
+  await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+    initialState: state,
+    requiresState: true,
+    captureState: true,
+  })
+  const status = await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "close",
+    captureState: true,
+  })
+
+  expect(coordinatedState).toEqual(state.bytes)
+  expect(status.capturedState).toEqual(state)
+  expect(calls.slice(-3)).toEqual(["get-state", "editor:close", "teardown"])
 })
 
 test("waits for the worker-ready notification before opening the editor", async () => {
@@ -189,6 +241,57 @@ test("waits for the requested editor worker when another attachment becomes read
   await expect(opening).resolves.toMatchObject({ success: true, open: true })
 })
 
+test("suspendAll cancels an editor initialization waiting for worker readiness", async () => {
+  const calls: string[] = []
+  const startReached = Promise.withResolvers<void>()
+  const supervisor = fakeSupervisor(calls)
+  supervisor.startDiagnosticAudio = async () => {
+    calls.push("diagnostic-start")
+    startReached.resolve()
+  }
+  const manager = managerFor({ calls, supervisors: [supervisor, fakeSupervisor(calls)] })
+  const opening = manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+  })
+  await startReached.promise
+  const suspended = manager.suspendAll()
+  await expect(opening).rejects.toThrow("suspended")
+  await expect(suspended).resolves.toBeUndefined()
+  expect(calls.filter((call) => call === "teardown")).toHaveLength(1)
+
+  await expect(manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+  })).resolves.toMatchObject({ open: true })
+})
+
+test("teardownAll cancels an editor initialization waiting for worker readiness", async () => {
+  const calls: string[] = []
+  const startReached = Promise.withResolvers<void>()
+  const supervisor = fakeSupervisor(calls)
+  supervisor.startDiagnosticAudio = async () => {
+    calls.push("diagnostic-start")
+    startReached.resolve()
+  }
+  const manager = managerFor({ calls, supervisors: [supervisor] })
+  const opening = manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+  })
+  await startReached.promise
+  const teardown = manager.teardownAll()
+  await expect(opening).rejects.toThrow("suspended")
+  await expect(teardown).resolves.toBeUndefined()
+  expect(calls.filter((call) => call === "teardown")).toHaveLength(1)
+})
+
 test("rolls back and tears down a failed initialization", async () => {
   const calls: string[] = []
   const supervisor = fakeSupervisor(calls)
@@ -207,16 +310,132 @@ test("rolls back and tears down a failed initialization", async () => {
   expect(calls).toEqual(["begin", "configure:coreaudio:editor", "rollback", "teardown"])
 })
 
-test("closes and removes an editor host even when the close command fails", async () => {
+test("returns captured state and close failure while removing an editor host", async () => {
   const calls: string[] = []
-  const supervisor = fakeSupervisor(calls, "editor:close")
+  const state = { bytes: new Uint8Array([7, 8, 9]), sha256: "c".repeat(64) }
+  const supervisor = fakeSupervisor(calls, "editor:close", firstInstance, state)
   const manager = managerFor({ calls, supervisors: [supervisor, fakeSupervisor(calls)] })
-  await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })
+  await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+    captureState: true,
+  })
 
-  await expect(manager.execute({ projectId, instanceId: firstInstance, command: "close" })).rejects.toThrow("editor:close failed")
+  await expect(manager.execute({ projectId, instanceId: firstInstance, command: "close" })).resolves.toMatchObject({
+    capturedState: state,
+    closeError: "editor:close failed",
+  })
   expect(calls.slice(-2)).toEqual(["editor:close", "teardown"])
   await expect(manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })).resolves.toMatchObject({ open: true })
   expect(calls).toContain("diagnostic-start")
+})
+
+test("returns captured state when editor teardown fails after close", async () => {
+  const calls: string[] = []
+  const state = { bytes: new Uint8Array([10, 11]), sha256: "d".repeat(64) }
+  const supervisor = fakeSupervisor(calls, "teardown", firstInstance, state)
+  const manager = managerFor({ calls, supervisors: [supervisor] })
+  await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+    captureState: true,
+  })
+
+  await expect(manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "close",
+  })).resolves.toMatchObject({
+    capturedState: state,
+    teardownError: "teardown failed",
+  })
+})
+
+test("retries after host loss even when cleanup fails", async () => {
+  const calls: string[] = []
+  const firstSupervisor = fakeSupervisor(calls)
+  const originalExecute = firstSupervisor.executeVstEditorCommand
+  let failed = false
+  firstSupervisor.executeVstEditorCommand = async (input) => {
+    if (input.command === "open" && !failed) {
+      failed = true
+      throw new Error("Native audio host stopped.")
+    }
+    return originalExecute(input)
+  }
+  firstSupervisor.teardown = async () => {
+    calls.push("teardown")
+    throw new Error("cleanup failed")
+  }
+  const manager = managerFor({
+    calls,
+    supervisors: [firstSupervisor, fakeSupervisor(calls)],
+  })
+
+  await expect(manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+  })).resolves.toMatchObject({ open: true })
+  expect(calls).toContain("teardown")
+})
+
+test("captures editor state through the renderer callback before suspension teardown", async () => {
+  const calls: string[] = []
+  const captured: Array<{ projectId: string; instanceId: string; state: { bytes: Uint8Array; sha256: string } }> = []
+  const supervisor = fakeSupervisor(calls)
+  const manager = managerFor({
+    calls,
+    supervisors: [supervisor],
+    onCapturedState: (input) => {
+      captured.push(input)
+    },
+  })
+  await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+    captureState: true,
+  })
+
+  await manager.suspendAll()
+
+  expect(captured).toHaveLength(1)
+  expect(captured[0]?.projectId).toBe(projectId)
+  expect(captured[0]?.instanceId).toBe(firstInstance)
+  expect(calls.slice(-2)).toEqual(["get-state", "teardown"])
+})
+
+test("captures all editor state before quit and still tears down after capture failure", async () => {
+  const calls: string[] = []
+  const captured: string[] = []
+  const supervisor = fakeSupervisor(calls)
+  let failCapture = false
+  const manager = managerFor({
+    calls,
+    supervisors: [supervisor],
+    onCapturedState: async ({ instanceId }) => {
+      captured.push(instanceId)
+      if (failCapture) throw new Error("state persistence failed")
+    },
+  })
+  await manager.execute({
+    projectId,
+    instanceId: firstInstance,
+    command: "open",
+    serializedPlan: "plan",
+    captureState: true,
+  })
+  failCapture = true
+  await expect(manager.teardownAll()).resolves.toBeUndefined()
+  expect(captured).toEqual([firstInstance])
+  expect(calls).toContain("teardown")
 })
 
 test("tears down each supervisor across queued close and reopen cycles", async () => {

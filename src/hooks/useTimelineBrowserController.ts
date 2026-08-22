@@ -32,7 +32,8 @@ import {
   type NativeVst3CatalogSelection,
 } from "~/lib/desktop/native-vst3-insertion";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
-import { vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
 import type { TimelinePlaybackRebuildIntent } from "./useTimelinePlayback";
 
 type Options = {
@@ -146,7 +147,21 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     if (!bridge) return
     try {
       const result = await bridge.read()
-      if ("catalog" in result) setDesktopPluginEntries(result.catalog.entries)
+      if ("catalog" in result) {
+        setDesktopPluginEntries(result.catalog.entries)
+        let storage: Storage | undefined
+        try {
+          storage = window.localStorage
+        } catch {
+          storage = undefined
+        }
+        void autoHealStaleVst3Catalog({
+          catalog: result.catalog,
+          bridge,
+          trustAcknowledged: hasVst3TrustAcknowledgement(storage),
+          onCatalog: (catalog) => setDesktopPluginEntries(catalog.entries),
+        }).catch(() => {})
+      }
     } catch {
       setDesktopPluginEntries([])
     }

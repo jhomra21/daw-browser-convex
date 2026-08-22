@@ -183,6 +183,18 @@ process.stdin.on("data", (chunk) => {
         offlineChunk(4, 0.5),
         frame(55, u64(5)),
       ]))
+    } else if (type === 53 && process.env.MODE === "offline-periodic") {
+      process.stdout.write(ack(type))
+      let startFrame = 0
+      const sendChunk = () => {
+        process.stdout.write(offlineChunk(startFrame, 0.1 + startFrame / 100))
+        startFrame += 1
+        if (startFrame < 10) setTimeout(sendChunk, 15)
+        else process.stdout.write(frame(55, u64(10)))
+      }
+      sendChunk()
+    } else if (type === 53 && process.env.MODE === "offline-stalled") {
+      process.stdout.write(ack(type))
     } else if (type === 26) {
       if (process.env.MODE === "state-rejected") process.stdout.write(ack(type, 0))
       else if (process.env.MODE === "state-malformed") process.stdout.write(frame(27, Buffer.from([1, 2, 3])))
@@ -269,6 +281,128 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
       onChunk: (chunk) => chunks.push(chunk.startFrame),
     })
     expect(chunks).toEqual([0, 1, 2, 3, 4])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("allows offline completion after the aggregate deadline while valid PCM continues", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-periodic-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-periodic exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    let stageCount = 0
+    const schedule = (callback: () => void, delayMs: number) => {
+      if (delayMs !== 10_000) return setTimeout(callback, delayMs)
+      stageCount += 1
+      return setTimeout(callback, stageCount >= 7 ? 50 : 500)
+    }
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 10,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => chunks.push(chunk.startFrame),
+      completionInactivityMs: 50,
+      schedule,
+    })
+    expect(chunks).toEqual([...Array(10).keys()])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("times out stalled offline completion with the completion stage", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-stalled-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-stalled exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    await expect(renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+      completionInactivityMs: 20,
+    })).rejects.toThrow("timed out during offline completion")
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("cleans the offline completion watchdog on abort", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-abort-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-stalled exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const controller = new AbortController()
+    const completionWatchdog = Promise.withResolvers<void>()
+    const canceled: ReturnType<typeof setTimeout>[] = []
+    let completionTimer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (callback: () => void, delayMs: number) => {
+      const timer = setTimeout(callback, delayMs === 20 ? 1_000 : delayMs)
+      if (delayMs === 20) {
+        completionTimer = timer
+        completionWatchdog.resolve()
+      }
+      return timer
+    }
+    const cancelScheduled = (timer: ReturnType<typeof setTimeout>) => {
+      canceled.push(timer)
+      clearTimeout(timer)
+    }
+    const render = renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: controller.signal,
+      onChunk: () => undefined,
+      completionInactivityMs: 20,
+      schedule,
+      cancelScheduled,
+    })
+    await completionWatchdog.promise
+    controller.abort()
+    await expect(render).rejects.toMatchObject({ name: "AbortError" })
+    expect(completionTimer).toBeDefined()
+    expect(completionTimer === undefined ? false : canceled.includes(completionTimer)).toBeTrue()
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

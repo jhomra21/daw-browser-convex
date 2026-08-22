@@ -317,7 +317,11 @@ export const createNativePlaybackController = (input: {
   let nativeHostConnectionLost = false
   let nativeHostLossProjectGeneration: number | undefined
   let nativeHostLossReason: string | undefined
+  let nativeHostRecoveryAvailable = false
+  let nativeHostRecoveryUsed = false
+  let nativeHostLossReported = false
   let intentionalHostTransitionDepth = 0
+  let preparedProjectId: string | undefined
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
@@ -538,6 +542,9 @@ export const createNativePlaybackController = (input: {
       nativeHostConnectionLost = false
       nativeHostLossProjectGeneration = undefined
       nativeHostLossReason = undefined
+      nativeHostRecoveryAvailable = false
+      nativeHostRecoveryUsed = false
+      nativeHostLossReported = false
       return false
     }
     return true
@@ -556,15 +563,43 @@ export const createNativePlaybackController = (input: {
   }
 
   const markNativeHostConnectionLost = (reason?: string) => {
+    if (nativeHostConnectionLost) return false
     nativeHostConnectionLost = true
     nativeHostLossProjectGeneration = resolveProjectGeneration()
     nativeHostLossReason = reason ?? nativeHostConnectionLossMessage()
+    nativeHostRecoveryAvailable = !nativeHostRecoveryUsed
+    nativeHostLossReported = false
+    return true
+  }
+
+  const beginNativeHostRecovery = () => {
+    if (!hasNativeHostConnectionLoss() || !nativeHostRecoveryAvailable) return false
+    nativeHostRecoveryAvailable = false
+    nativeHostRecoveryUsed = true
+    nativeHostConnectionLost = false
+    nativeHostLossProjectGeneration = undefined
+    nativeHostLossReason = undefined
+    nativeHostLossReported = false
+    return true
+  }
+
+  const completeNativeHostRecovery = () => {
+    nativeHostRecoveryUsed = false
+  }
+
+  const reportNativeHostLossFault = (message: string) => {
+    if (nativeHostLossReported) return
+    nativeHostLossReported = true
+    reportFault(message)
   }
 
   const resetNativeHostConnectionLoss = () => {
     nativeHostConnectionLost = false
     nativeHostLossProjectGeneration = undefined
     nativeHostLossReason = undefined
+    nativeHostRecoveryAvailable = false
+    nativeHostRecoveryUsed = false
+    nativeHostLossReported = false
   }
 
   const createCoordinatorForEpoch = (options: {
@@ -620,53 +655,70 @@ export const createNativePlaybackController = (input: {
     })
   }
 
+  const invalidateNativeOwnership = (hostLost = false, preservePendingStart = false) => {
+    lifecycleGeneration += 1
+    preparedTransportTransitionGeneration += 1
+    nativeSessionGeneration += 1
+    for (const waiter of processorSequenceWaiters) waiter.resolve(false)
+    processorSequenceWaiters.clear()
+    latestScheduleProgress = undefined
+    for (const pending of pendingStatePatches.values()) pending.resolve({ handled: true })
+    pendingStatePatches.clear()
+    statePatchPumpScheduled = false
+    liveInstrumentQueueGeneration += 1
+    liveInstrumentEventTail = Promise.resolve()
+    if (!preservePendingStart) {
+      pendingStart = undefined
+      pendingStartMode = undefined
+    }
+    stretchPreparationAbortController?.abort()
+    stretchPreparationAbortController = undefined
+    const hadSession = prepared
+      || nativeSessionStarted
+      || active
+      || livePreviewActive
+      || scheduleCoordinator !== undefined
+      || recording !== undefined
+    if (hostLost && recording) {
+      recording.terminal = true
+      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()))
+      recording.unsubscribeBlock()
+      recording.unsubscribeStatus()
+      recording.writer.terminate()
+      recording = undefined
+    }
+    active = false
+    prepared = false
+    nativeSessionStarted = false
+    livePreviewActive = false
+    for (const listener of nativeLiveMidiResetListeners) listener()
+    liveNoteReadiness.clear()
+    liveMidiTailOwned = false
+    scheduleCoordinator?.dispose()
+    scheduleCoordinator = undefined
+    clearNativeMeters()
+    clearNativeSpectrum()
+    preparedProjectGeneration = undefined
+    preparedProjectId = undefined
+    preparedSnapshot = undefined
+    preparedGraph = undefined
+    installedAssets = []
+    installedAssetIds = []
+    preparedStretchAssetsForSession = []
+    sampleRate = 0
+    maximumFramesPerBlock = 0
+    transportFrame = 0
+    if (hadSession) transportEpoch += 1
+  }
+
   const dispose = async () => {
     intentionalHostTransitionDepth += 1
     try {
-      lifecycleGeneration += 1
-      preparedTransportTransitionGeneration += 1
-      nativeSessionGeneration += 1
-      for (const waiter of processorSequenceWaiters) waiter.resolve(false)
-      processorSequenceWaiters.clear()
-      latestScheduleProgress = undefined
-      const hadSession = prepared
-        || nativeSessionStarted
-        || active
-        || livePreviewActive
-        || scheduleCoordinator !== undefined
-      for (const pending of pendingStatePatches.values()) pending.resolve({ handled: true })
-      pendingStatePatches.clear()
-      statePatchPumpScheduled = false
-      liveInstrumentQueueGeneration += 1
-      liveInstrumentEventTail = Promise.resolve()
-      pendingStart = undefined
-      pendingStartMode = undefined
-      stretchPreparationAbortController?.abort()
-      stretchPreparationAbortController = undefined
       const bridge = input.bridge
       const assetIds = installedAssetIds
-      installedAssetIds = []
-      active = false
-      prepared = false
-      nativeSessionStarted = false
-      livePreviewActive = false
-      for (const listener of nativeLiveMidiResetListeners) listener()
-      liveNoteReadiness.clear()
-      liveMidiTailOwned = false
-      scheduleCoordinator?.dispose()
-      scheduleCoordinator = undefined
-      clearNativeMeters()
-      clearNativeSpectrum()
-      preparedProjectGeneration = undefined
-      preparedSnapshot = undefined
-      preparedGraph = undefined
-      installedAssets = []
-      preparedStretchAssetsForSession = []
-      sampleRate = 0
-      maximumFramesPerBlock = 0
-      transportFrame = 0
-      if (hadSession) transportEpoch += 1
-      if (!bridge) return
+      const hostLost = hasNativeHostConnectionLoss()
+      invalidateNativeOwnership()
+      if (!bridge || hostLost) return
       const stopPromise = bridge.session.stop()
       await cancelRecording().catch(() => undefined)
       await Promise.allSettled([
@@ -678,7 +730,12 @@ export const createNativePlaybackController = (input: {
       intentionalHostTransitionDepth -= 1
     }
   }
-
+  const cancelPendingStart = () => {
+    const request = pendingStart
+    if (!request) return Promise.resolve()
+    invalidateNativeOwnership()
+    return request.catch(() => undefined)
+  }
   const handleNativeHostLoss = (error?: string) => {
     if (intentionalHostTransitionDepth > 0) return
     const ownsNativeSession = prepared
@@ -689,10 +746,9 @@ export const createNativePlaybackController = (input: {
       || recording !== undefined
     if (!ownsNativeSession) return
     const message = error ?? "Native playback host connection was lost."
-    markNativeHostConnectionLost(message)
-    if (recording) failRecording(recording, new Error(message))
-    void dispose().catch(() => undefined)
-    reportFault(message)
+    if (!markNativeHostConnectionLost(message)) return
+    invalidateNativeOwnership(true, true)
+    reportNativeHostLossFault(message)
   }
 
   const startAttempt = async (
@@ -704,6 +760,7 @@ export const createNativePlaybackController = (input: {
   ): Promise<NativeStartResult> => {
     const bridge = input.bridge
     if (!bridge) return "unavailable"
+    const preparedProjectIdForAttempt = input.getProjectId?.()
     if (hasNativeHostConnectionLoss()) {
       reportBlockedByNativeHostConnectionLoss()
       return "unavailable"
@@ -801,13 +858,16 @@ export const createNativePlaybackController = (input: {
             error: sanitizeNativeVst3DiagnosticError(diagnosticError),
           })
         }
-        if (!cancelled() && ownsAttemptedCoordinator && indicatesNativeHostConnectionLoss(diagnosticError)) {
+        if (ownsAttemptedCoordinator && indicatesNativeHostConnectionLoss(diagnosticError)) {
           markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
         }
-        if (!cancelled() && ownsAttemptedCoordinator) {
+        if (!cancelled() && ownsAttemptedCoordinator && !indicatesNativeHostConnectionLoss(diagnosticError)) {
           reportFault(error instanceof Error ? error.message : "Native playback could not resume.")
         }
-        if (ownsAttemptedCoordinator) await dispose()
+        if (ownsAttemptedCoordinator) {
+          if (hasNativeHostConnectionLoss()) invalidateNativeOwnership(true, true)
+          else await dispose()
+        }
         return "unavailable"
       }
     }
@@ -825,6 +885,7 @@ export const createNativePlaybackController = (input: {
       livePreviewActive = false
       liveInstrumentQueueGeneration += 1
       preparedProjectGeneration = undefined
+      preparedProjectId = undefined
       preparedSnapshot = undefined
       preparedGraph = undefined
       installedAssets = []
@@ -973,12 +1034,13 @@ export const createNativePlaybackController = (input: {
       if (attachmentPlan) {
         const coordinateVstAttachments = bridge.session.coordinateVstAttachments
         if (!coordinateVstAttachments) throw new Error("The native VST3 attachment coordinator is unavailable.")
-        const projectId = input.getProjectId?.()
-        if (!projectId) throw new Error("The native VST3 attachment project is unavailable.")
+        if (!preparedProjectIdForAttempt) throw new Error("The native VST3 attachment project is unavailable.")
         const coordination = await coordinateVstAttachments({
-          projectId,
+          projectId: preparedProjectIdForAttempt,
           serializedPlan: encodeNativeExternalAttachmentPlan(attachmentPlan),
           sampleRateHz: deviceReply.device.nominalSampleRateHz,
+          capturedVstStates: runtimeSnapshot.nativeExternalAttachmentStates,
+          requiredVstStateInstanceIds: runtimeSnapshot.nativeExternalAttachmentStateRequirements,
         }, transactionToken)
         assertReply(coordination)
       }
@@ -1067,6 +1129,7 @@ export const createNativePlaybackController = (input: {
       maximumFramesPerBlock = runtimeMaximumFrames
       transportFrame = Math.round(snapshot.transport.playheadSec * sampleRate)
       prepared = true
+      preparedProjectId = preparedProjectIdForAttempt
       preparedProjectGeneration = projectGeneration
       configureNativeMeters(snapshot.revision, snapshot.tracks)
       configureNativeSpectrum(snapshot.tracks)
@@ -1100,33 +1163,34 @@ export const createNativePlaybackController = (input: {
       return "started"
     } catch (error) {
       const wasCancelled = cancelled()
-      if (transactionOpen) {
-        if (transactionToken) await bridge.session.rollbackTransaction(transactionToken)
-        await dispose()
-      }
-      else if (!wasCancelled) await dispose()
-      const result = requiresNative ? "blocked" : "unavailable"
       const diagnosticError = error === null || error === undefined
         ? undefined
         : error instanceof Error ? error : String(error)
+      const connectionLoss = indicatesNativeHostConnectionLoss(diagnosticError)
+      if (connectionLoss) {
+        markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
+      }
+      const hostLost = hasNativeHostConnectionLoss()
+      if (transactionOpen && !hostLost) {
+        if (transactionToken) await bridge.session.rollbackTransaction(transactionToken)
+        if (!wasCancelled) await dispose()
+      }
+      else if (!wasCancelled && !hostLost) await dispose()
+      else if (hostLost) invalidateNativeOwnership(true, true)
+      const result = requiresNative ? "blocked" : "unavailable"
       console.error("[native-vst3] native start failed", {
         result,
         stage: startStage,
         error: sanitizeNativeVst3DiagnosticError(diagnosticError),
       })
-      if (!wasCancelled && indicatesNativeHostConnectionLoss(diagnosticError)) {
-        markNativeHostConnectionLost(error instanceof Error ? error.message : undefined)
+      if (!wasCancelled && !connectionLoss) {
+        reportFault(error instanceof Error ? error.message : "Native playback could not start.")
       }
-      if (!wasCancelled) reportFault(error instanceof Error ? error.message : "Native playback could not start.")
       return result
     }
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (hasNativeHostConnectionLoss()) {
-      reportBlockedByNativeHostConnectionLoss()
-      return Promise.resolve("unavailable")
-    }
     if (active) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -1148,7 +1212,24 @@ export const createNativePlaybackController = (input: {
     }
     const generation = lifecycleGeneration
     const projectGeneration = resolveProjectGeneration()
-    const request = startAttempt(transport, generation, projectGeneration, true, compileContext)
+    const request = (async () => {
+      beginNativeHostRecovery()
+      let result = await startAttempt(transport, generation, projectGeneration, true, compileContext)
+      if (result !== "started" && hasNativeHostConnectionLoss() && beginNativeHostRecovery()) {
+        result = await startAttempt(
+          transport,
+          lifecycleGeneration,
+          projectGeneration,
+          true,
+          compileContext,
+        )
+      }
+      if (result !== "started" && hasNativeHostConnectionLoss() && !nativeHostLossReported) {
+        reportNativeHostLossFault(nativeHostConnectionLossMessage())
+      }
+      if (result === "started") completeNativeHostRecovery()
+      return result
+    })()
     pendingStart = request
     pendingStartMode = "play"
     void request.finally(() => {
@@ -1162,23 +1243,37 @@ export const createNativePlaybackController = (input: {
 
   const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
     if (!input.bridge) return Promise.resolve("unavailable")
-    if (hasNativeHostConnectionLoss()) {
-      reportBlockedByNativeHostConnectionLoss()
-      return Promise.resolve("unavailable")
-    }
     if (livePreviewActive) return Promise.resolve("started")
     if (pendingStart) {
       return pendingStart
     }
     const generation = lifecycleGeneration
     const projectGeneration = resolveProjectGeneration()
-    const request = startAttempt({
-      state: "paused",
-      playheadSec,
-      loopEnabled: false,
-      loopStartSec: 0,
-      loopEndSec: 0,
-    }, generation, projectGeneration, false, compileContext)
+    const request = (async () => {
+      beginNativeHostRecovery()
+      const transport: LivePlaybackTransport = {
+        state: "paused",
+        playheadSec,
+        loopEnabled: false,
+        loopStartSec: 0,
+        loopEndSec: 0,
+      }
+      let result = await startAttempt(transport, generation, projectGeneration, false, compileContext)
+      if (result !== "started" && hasNativeHostConnectionLoss() && beginNativeHostRecovery()) {
+        result = await startAttempt(
+          transport,
+          lifecycleGeneration,
+          projectGeneration,
+          false,
+          compileContext,
+        )
+      }
+      if (result !== "started" && hasNativeHostConnectionLoss() && !nativeHostLossReported) {
+        reportNativeHostLossFault(nativeHostConnectionLossMessage())
+      }
+      if (result === "started") completeNativeHostRecovery()
+      return result
+    })()
     pendingStart = request
     pendingStartMode = "preview"
     void request.finally(() => {
@@ -1188,12 +1283,6 @@ export const createNativePlaybackController = (input: {
       }
     })
     return request
-  }
-
-  const rebuildPrepared = async (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (!prepared) return "unavailable"
-    await dispose()
-    return ensureLivePreview(playheadSec, compileContext)
   }
 
   let preparedTransportTransition = Promise.resolve()
@@ -1881,6 +1970,7 @@ export const createNativePlaybackController = (input: {
     getPendingStart: () => pendingStart
       ? { mode: pendingStartMode, promise: pendingStart }
       : undefined,
+    cancelPendingStart,
     resetNativeHostConnectionLoss,
     start,
     pause,
@@ -1890,6 +1980,14 @@ export const createNativePlaybackController = (input: {
     canProcessLiveMidi: () => livePreviewActive,
     hasLiveMidiTails: () => liveMidiTailOwned,
     isPrepared: () => prepared,
+    preparedVstCapture: () => {
+      const instanceIds = preparedSnapshot?.nativeExternalAttachmentPlan?.attachments
+        .filter((attachment) => !attachment.bypassed)
+        .map((attachment) => attachment.instanceId) ?? []
+      return preparedProjectId
+        ? { projectId: preparedProjectId, instanceIds }
+        : undefined
+    },
     startRecording,
     stopRecording,
     cancelRecording,
@@ -1897,7 +1995,6 @@ export const createNativePlaybackController = (input: {
     sampleRate: () => sampleRate,
     currentPositionSec,
     ensureLivePreview,
-    rebuildPrepared,
     seekPrepared,
     queueBuiltInParameterEvents,
     liveProcessorControl,

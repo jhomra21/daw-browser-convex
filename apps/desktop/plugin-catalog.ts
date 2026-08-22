@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
@@ -25,14 +25,15 @@ export type Vst3CatalogEntry = {
   configuredDirectory: string
   discoveredAtMs: number
   architecture: "unknown"
-  hostingStatus: "unavailable"
-  unavailableReason: "VST3 discovery is available, but native VST3 audio hosting is not active."
+  hostingStatus: "discovered" | "scanning" | "ready" | "failed"
+  unavailableReason?: string
   classes: Vst3CatalogClass[]
   scanHealth: "filesystem-only" | "scanned" | "scan-failed"
   scannerVersion?: string
   sdkVersion?: string
   binaryFingerprint?: string
   launchEligibility?: Vst3WorkerLaunchEligibility
+  hasTrustedScan?: true
 }
 
 export type Vst3WorkerLaunchEligibility = {
@@ -97,6 +98,53 @@ const filesystemOnlyEntry = (entry: Omit<Vst3CatalogEntry, "classes" | "scanHeal
   classes: [],
   scanHealth: "filesystem-only",
 })
+
+const processLocalCatalog = (catalog: PluginCatalogData): PluginCatalogData => ({
+  ...catalog,
+  entries: catalog.entries.map((entry) => {
+    const processLocalEntry = {
+      ...entry,
+      launchEligibility: undefined,
+    }
+    if (entry.hasTrustedScan === true || (entry.scanHealth === "scanned" && entry.launchEligibility !== undefined)) {
+      processLocalEntry.hasTrustedScan = true
+    }
+    return processLocalEntry
+  }),
+})
+
+const scanFailureReasons = {
+  failed: "The VST3 scanner failed.",
+  invalidResult: "The VST3 scanner returned an invalid result.",
+} as const
+
+export const safeVst3CatalogReason = (reason: string | undefined) => (
+  reason === scanFailureReasons.invalidResult
+    ? scanFailureReasons.invalidResult
+    : reason === undefined
+      ? undefined
+      : scanFailureReasons.failed
+)
+
+const safeDiagnosticMessage = (message: string) => {
+  if (
+    message === "The configured directory is unavailable."
+    || message === "The directory could not be read."
+    || message === "Directory traversal limit reached."
+    || message === "Directory entry traversal limit reached."
+    || message === "Directory traversal depth limit reached."
+    || message === "The VST3 bundle resolves outside its configured directory."
+    || message === "The VST3 bundle is unavailable."
+  ) return message
+  return "The plug-in directory could not be scanned."
+}
+
+export const safePluginCatalogDiagnostics = (diagnostics: readonly PluginCatalogDiagnostic[]): PluginCatalogDiagnostic[] => (
+  diagnostics.map((diagnostic) => ({
+    directory: "configured-directory",
+    message: safeDiagnosticMessage(diagnostic.message),
+  }))
+)
 
 const isInsideDirectory = (candidate: string, directory: string) => (
   candidate === directory || candidate.startsWith(`${directory}${path.sep}`)
@@ -192,8 +240,7 @@ export const discoverVst3Bundles = async (
                 configuredDirectory: root,
                 discoveredAtMs: now(),
                 architecture: "unknown",
-                hostingStatus: "unavailable",
-                unavailableReason: "VST3 discovery is available, but native VST3 audio hosting is not active.",
+                hostingStatus: "discovered",
               }))
             }
           } catch {
@@ -255,9 +302,14 @@ const isValidEntry = (value: DesktopJsonValue): value is DesktopJsonValue & Vst3
     && "architecture" in record
     && record.architecture === "unknown"
     && "hostingStatus" in record
-    && record.hostingStatus === "unavailable"
-    && "unavailableReason" in record
-    && record.unavailableReason === "VST3 discovery is available, but native VST3 audio hosting is not active."
+    && (
+      record.hostingStatus === "discovered"
+      || record.hostingStatus === "scanning"
+      || record.hostingStatus === "ready"
+      || record.hostingStatus === "failed"
+      || record.hostingStatus === "unavailable"
+    )
+    && (!("unavailableReason" in record) || record.unavailableReason === undefined || typeof record.unavailableReason === "string")
     && "classes" in record
     && Array.isArray(record.classes)
     && record.classes.length <= 1024
@@ -268,6 +320,10 @@ const isValidEntry = (value: DesktopJsonValue): value is DesktopJsonValue & Vst3
     && (!("sdkVersion" in record) || record.sdkVersion === undefined || typeof record.sdkVersion === "string")
     && (!("binaryFingerprint" in record) || record.binaryFingerprint === undefined || (typeof record.binaryFingerprint === "string" && /^[a-f0-9]{64}$/.test(record.binaryFingerprint)))
     && (!("launchEligibility" in record) || record.launchEligibility === undefined || isValidLaunchEligibility(record.launchEligibility, record))
+    && (!("hasTrustedScan" in record)
+      || record.hasTrustedScan === undefined
+      || (record.hasTrustedScan === true
+        && (record.scanHealth === "scanned" || record.scanHealth === "scan-failed")))
 }
 
 const isValidLaunchEligibility = (
@@ -313,7 +369,10 @@ const isValidDiagnostic = (
     && typeof value.message === "string"
 }
 
-export const parsePluginCatalogData = (value: DesktopJsonValue): PluginCatalogData | undefined => {
+export const parsePluginCatalogData = (
+  value: DesktopJsonValue,
+  preserveLaunchEligibility = false,
+): PluginCatalogData | undefined => {
   if (!isJsonObject(value)) return undefined
   const directories = "directories" in value && isStringArray(value.directories) ? value.directories : undefined
   if (
@@ -330,9 +389,10 @@ export const parsePluginCatalogData = (value: DesktopJsonValue): PluginCatalogDa
     || !("scannedAtMs" in value)
     || (value.scannedAtMs !== null && !isNumber(value.scannedAtMs))
   ) return undefined
+  const rawEntries = value.entries
   if (value.version === 1) {
     const entries: LegacyVst3CatalogEntry[] = []
-    for (const entry of value.entries) {
+    for (const entry of rawEntries) {
       if (!isLegacyEntry(entry)
         || !directories.includes(entry.configuredDirectory)
         || !isInsideDirectory(entry.bundlePath, entry.configuredDirectory)) return undefined
@@ -341,13 +401,17 @@ export const parsePluginCatalogData = (value: DesktopJsonValue): PluginCatalogDa
     return {
       version: catalogVersion,
       directories,
-      entries: entries.map(filesystemOnlyEntry),
-      diagnostics: value.diagnostics,
+    entries: entries.map((entry) => filesystemOnlyEntry({
+      ...entry,
+      hostingStatus: "discovered",
+      unavailableReason: undefined,
+    })),
+      diagnostics: safePluginCatalogDiagnostics(value.diagnostics),
       scannedAtMs: value.scannedAtMs,
     }
   }
   const entries: Vst3CatalogEntry[] = []
-  for (const entry of value.entries) {
+  for (const entry of rawEntries) {
     if (!isValidEntry(entry)
       || !directories.includes(entry.configuredDirectory)
       || !isInsideDirectory(entry.bundlePath, entry.configuredDirectory)) return undefined
@@ -356,11 +420,17 @@ export const parsePluginCatalogData = (value: DesktopJsonValue): PluginCatalogDa
   return {
     version: catalogVersion,
     directories,
-    entries: entries.map((entry) => ({
-      ...entry,
-      launchEligibility: undefined,
-    })),
-    diagnostics: value.diagnostics,
+    entries: entries.map((entry, index) => {
+      const rawEntry = rawEntries[index]
+      const legacyUnavailable = isJsonObject(rawEntry) && rawEntry.hostingStatus === "unavailable"
+      return {
+        ...entry,
+        hostingStatus: legacyUnavailable ? "discovered" : entry.hostingStatus,
+        unavailableReason: legacyUnavailable ? undefined : safeVst3CatalogReason(entry.unavailableReason),
+        launchEligibility: preserveLaunchEligibility ? entry.launchEligibility : undefined,
+      }
+    }),
+      diagnostics: safePluginCatalogDiagnostics(value.diagnostics),
     scannedAtMs: value.scannedAtMs,
   }
 }
@@ -376,8 +446,9 @@ const isLegacyEntry = (
     && "configuredDirectory" in record && typeof record.configuredDirectory === "string" && path.isAbsolute(record.configuredDirectory)
     && "discoveredAtMs" in record && typeof record.discoveredAtMs === "number"
     && "architecture" in record && record.architecture === "unknown"
-    && "hostingStatus" in record && record.hostingStatus === "unavailable"
-    && "unavailableReason" in record && record.unavailableReason === "VST3 discovery is available, but native VST3 audio hosting is not active."
+    && "hostingStatus" in record
+    && (record.hostingStatus === "unavailable" || record.hostingStatus === "discovered")
+    && (!("unavailableReason" in record) || record.unavailableReason === undefined || typeof record.unavailableReason === "string")
 }
 
 export const createPluginCatalogStore = (options: {
@@ -388,67 +459,216 @@ export const createPluginCatalogStore = (options: {
   const fileSystem = options.fileSystem ?? nodePluginCatalogFileSystem
   const now = options.now ?? Date.now
   let data: PluginCatalogData | undefined
-  const load = async (): Promise<PluginCatalogData> => {
-    if (data) return data
+  let operationTail = Promise.resolve()
+  let revalidationPromise: Promise<PluginCatalogData> | undefined
+  const readPersisted = async (): Promise<PluginCatalogData> => {
     try {
       const contents = await fileSystem.readFile(options.filePath, "utf8")
-      const parsed = parsePluginCatalogData(JSON.parse(contents))
-      data = parsed ?? emptyCatalog()
+      return parsePluginCatalogData(JSON.parse(contents), true) ?? emptyCatalog()
     } catch {
-      data = emptyCatalog()
+      return emptyCatalog()
     }
+  }
+  const loadInternal = async (): Promise<PluginCatalogData> => {
+    if (data) return data
+    data = processLocalCatalog(await readPersisted())
     return data
   }
-  const reload = async (): Promise<PluginCatalogData> => {
-    data = undefined
-    return load()
-  }
-  const save = async (next: PluginCatalogData) => {
+  const saveInternal = async (next: PluginCatalogData) => {
     const directory = path.dirname(options.filePath)
-    const temporaryPath = `${options.filePath}.tmp`
+    const temporaryPath = `${options.filePath}.${randomUUID()}.tmp`
     await fileSystem.mkdir(directory, { recursive: true })
     await fileSystem.writeFile(temporaryPath, JSON.stringify(next), "utf8")
     await fileSystem.rename(temporaryPath, options.filePath)
     data = next
     return next
   }
-  const addDirectory = async (candidate: string) => {
-    const current = await load()
+  const serialize = <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const result = operationTail.then(operation, operation)
+    operationTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+  const load = () => serialize(loadInternal)
+  const reload = () => serialize(async () => {
+    data = undefined
+    return loadInternal()
+  })
+  const addDirectory = (candidate: string) => serialize(async () => {
+    const current = await loadInternal()
     const directory = await normalizeConfiguredDirectory(candidate, fileSystem)
     if (!current.directories.includes(directory) && current.directories.length >= maxConfiguredDirectories) {
       throw new Error("Too many configured plug-in directories.")
     }
-    const directories = await normalizeConfiguredDirectories([...current.directories, directory], fileSystem)
-    return save({ ...current, directories })
-  }
-  const removeDirectory = async (candidate: string) => {
-    const current = await load()
+    const directories = current.directories.includes(directory)
+      ? current.directories
+      : [...current.directories, directory]
+    return saveInternal({ ...current, directories })
+  })
+  const removeDirectory = (candidate: string) => serialize(async () => {
+    const current = await loadInternal()
     if (!path.isAbsolute(candidate) || candidate.length > maxDirectoryPathLength) {
       throw new Error("A configured plug-in directory must be an absolute path.")
     }
     const directories = current.directories.filter((directory) => directory !== candidate)
-    return save({
+    return saveInternal({
       ...current,
       directories,
       entries: current.entries.filter((entry) => entry.configuredDirectory !== candidate),
     })
+  })
+  const isTrusted = (entry: Vst3CatalogEntry | undefined) => (
+    entry?.hasTrustedScan === true
+    || (entry?.scanHealth === "scanned" && entry.launchEligibility !== undefined)
+  )
+  const trustedMarker = (entry: Vst3CatalogEntry | undefined) => (
+    isTrusted(entry) ? { hasTrustedScan: true as const } : {}
+  )
+  const validEligibility = (
+    entry: Vst3CatalogEntry,
+    eligibility: Vst3WorkerLaunchEligibility | undefined,
+  ) => (
+    eligibility !== undefined
+    && eligibility.canonicalBundlePath === entry.bundlePath
+    && path.isAbsolute(eligibility.canonicalExecutablePath)
+    && isInsideDirectory(eligibility.canonicalExecutablePath, entry.bundlePath)
+    && /^[a-f0-9]{64}$/.test(eligibility.bundleFingerprint)
+    && /^[a-f0-9]{64}$/.test(eligibility.binaryFingerprint)
+    && eligibility.binaryFingerprint === entry.binaryFingerprint
+    && eligibility.architecture === "arm64"
+    && eligibility.quarantinePresent === false
+    && eligibility.scannerProtocolVersion === 2
+  )
+  const applyScan = (
+    entry: Vst3CatalogEntry,
+    scanned: Partial<Vst3CatalogEntry>,
+    previous: Vst3CatalogEntry | undefined,
+  ): Vst3CatalogEntry => {
+    const next = { ...entry, ...scanned }
+    if (next.scanHealth === "scanned" && validEligibility(next, next.launchEligibility)) {
+      return {
+        ...next,
+        hostingStatus: "ready",
+        unavailableReason: undefined,
+        hasTrustedScan: true,
+      }
+    }
+    return {
+      ...next,
+      hostingStatus: "failed",
+      scanHealth: "scan-failed",
+      unavailableReason: scanFailureReasons.invalidResult,
+      hasTrustedScan: isTrusted(previous) ? true : undefined,
+      launchEligibility: undefined,
+    }
   }
-  const scan = async (scanBundle?: (entry: Vst3CatalogEntry) => Promise<Partial<Vst3CatalogEntry>>) => {
-    const current = await load()
+  const scanInternal = async (scanBundle?: (entry: Vst3CatalogEntry, directories: readonly string[]) => Promise<Partial<Vst3CatalogEntry>>) => {
+    const current = await loadInternal()
     const directories = current.directories
     const discovery = await discoverVst3Bundles(directories, now, fileSystem)
+    const previousEntries = new Map(current.entries.map((entry) => [entry.bundlePath, entry]))
     const entries = scanBundle
       ? await Promise.all(discovery.entries.map(async (entry) => {
         try {
-          return { ...entry, ...await scanBundle(entry) }
+          const scanned = await scanBundle(entry, directories)
+          return applyScan(entry, scanned, previousEntries.get(entry.bundlePath))
         } catch {
-          return { ...entry, scanHealth: "scan-failed" as const }
+          return {
+            ...entry,
+            hostingStatus: "failed" as const,
+            scanHealth: "scan-failed" as const,
+            unavailableReason: scanFailureReasons.failed,
+            ...trustedMarker(previousEntries.get(entry.bundlePath)),
+          }
         }
       }))
-      : discovery.entries
-    return save({ version: catalogVersion, directories, ...discovery, entries })
+      : discovery.entries.map((entry) => ({
+        ...entry,
+        ...trustedMarker(previousEntries.get(entry.bundlePath)),
+      }))
+    return saveInternal({
+      version: catalogVersion,
+      directories,
+      ...discovery,
+      diagnostics: safePluginCatalogDiagnostics(discovery.diagnostics),
+      entries,
+    })
   }
-  return { addDirectory, load, reload, removeDirectory, scan }
+  const revalidateInternal = async (
+    scanBundle?: (entry: Vst3CatalogEntry, directories: readonly string[]) => Promise<Partial<Vst3CatalogEntry>>,
+  ) => {
+    const persisted = await readPersisted()
+    const trustedPaths = new Set(
+      persisted.entries
+        .filter((entry) => isTrusted(entry))
+        .map((entry) => entry.bundlePath),
+    )
+    const current = await loadInternal()
+    const discovery = await discoverVst3Bundles(current.directories, now, fileSystem)
+    const previousEntries = new Map(current.entries.map((entry) => [entry.bundlePath, entry]))
+    const entries = scanBundle
+      ? await Promise.all(discovery.entries.map(async (entry) => {
+        if (!trustedPaths.has(entry.bundlePath)) return entry
+        try {
+          const scanned = await scanBundle(entry, current.directories)
+          return applyScan(entry, scanned, previousEntries.get(entry.bundlePath))
+        } catch {
+          return {
+            ...entry,
+            hostingStatus: "failed" as const,
+            scanHealth: "scan-failed" as const,
+            unavailableReason: scanFailureReasons.failed,
+            hasTrustedScan: true as const,
+          }
+        }
+      }))
+      : (() => {
+        const entriesByPath = new Map(current.entries.map((entry) => [entry.bundlePath, entry]))
+        for (const entry of discovery.entries) {
+          if (!entriesByPath.has(entry.bundlePath)) entriesByPath.set(entry.bundlePath, entry)
+        }
+        return [...entriesByPath.values()]
+      })()
+    return saveInternal({
+      version: catalogVersion,
+      directories: current.directories,
+      ...discovery,
+      diagnostics: safePluginCatalogDiagnostics(discovery.diagnostics),
+      entries,
+    })
+  }
+  const scan = (scanBundle?: (entry: Vst3CatalogEntry, directories: readonly string[]) => Promise<Partial<Vst3CatalogEntry>>) => (
+    serialize(() => scanInternal(scanBundle))
+  )
+  const revalidate = (
+    scanBundle?: (entry: Vst3CatalogEntry, directories: readonly string[]) => Promise<Partial<Vst3CatalogEntry>>,
+  ) => {
+    if (revalidationPromise) return revalidationPromise
+    const promise = serialize(() => revalidateInternal(scanBundle))
+    const shared = promise.finally(() => {
+      if (revalidationPromise === shared) revalidationPromise = undefined
+    })
+    revalidationPromise = shared
+    return shared
+  }
+  const initialize = (standardDirectories: readonly string[], scanBundle?: (entry: Vst3CatalogEntry, directories: readonly string[]) => Promise<Partial<Vst3CatalogEntry>>) => serialize(async () => {
+    const persisted = await readPersisted()
+    const current = processLocalCatalog(persisted)
+    const directories = [...current.directories]
+    for (const candidate of standardDirectories) {
+      if (directories.length >= maxConfiguredDirectories) break
+      try {
+        const directory = await normalizeConfiguredDirectory(candidate, fileSystem)
+        if (!directories.includes(directory)) directories.push(directory)
+      } catch {
+        continue
+      }
+    }
+    if (directories.length !== current.directories.length) {
+      await saveInternal({ ...current, directories })
+    }
+    return revalidateInternal(scanBundle)
+  })
+  return { addDirectory, initialize, load, reload, removeDirectory, revalidate, scan }
 }
 
 export const canonicalVst3SearchPaths = (homeDirectory: string) => [

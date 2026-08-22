@@ -143,7 +143,7 @@ export const buildProjectManifest = async (
     assets,
     projectState,
     syncState: archivedSyncState,
-    externalPluginArtifacts: rows.externalPluginArtifacts.map(({ updatedAt: _updatedAt, ...artifact }) => (
+    externalPluginArtifacts: rows.externalPluginArtifacts.map(({ payload: _payload, updatedAt: _updatedAt, ...artifact }) => (
       normalizeProjectManifestPluginArtifact(artifact)
     )),
   }

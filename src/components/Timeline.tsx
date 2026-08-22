@@ -95,7 +95,13 @@ import {
   saveVst3TrustAcknowledgement,
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
-import { listLocalExternalProcessors } from "~/lib/external-plugins";
+import {
+  deleteLocalExternalProcessor,
+  listLocalExternalProcessors,
+  persistLocalExternalProcessorState,
+  readLocalExternalProcessorState,
+} from "~/lib/external-plugins";
+import { localVstStateOwnerId } from "~/lib/external-plugin-artifacts";
 import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
@@ -170,6 +176,33 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [vst3TrustAcknowledged, setVst3TrustAcknowledged] = createSignal(
     hasVst3TrustAcknowledgement(vst3TrustStorage),
   );
+  let vst3ScanPromise: Promise<void> | undefined;
+  const scanVst3Catalog = async () => {
+    if (vst3ScanPromise) return vst3ScanPromise;
+    const scan = async () => {
+      const bridge = window.dawDesktop?.pluginCatalog;
+      if (!bridge) {
+        throw new Error("Plug-in rescanning requires the desktop app.");
+      }
+      if (!canUseVst3CatalogAction("scan", vst3TrustAcknowledged())) {
+        throw new Error("Acknowledge the VST3 plug-in disclosure before rescanning.");
+      }
+      const result = await bridge.scan();
+      if ("catalog" in result) {
+        window.dispatchEvent(new Event("daw-plugin-catalog-changed"));
+        setAppMessage(null);
+        return;
+      }
+      if (!result.ok) throw new Error(result.error);
+    };
+    const promise = scan();
+    vst3ScanPromise = promise;
+    try {
+      await promise;
+    } finally {
+      vst3ScanPromise = undefined;
+    }
+  };
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
   >(null);
@@ -423,11 +456,28 @@ const Timeline: Component<TimelineProps> = (props) => {
         },
       };
     }
+    const nativeExternalAttachmentStates = await Promise.all(attachmentPlan.plan.attachments
+      .filter((attachment) => !attachment.bypassed)
+      .map(async (attachment) => {
+        const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
+        if (!processor?.manifest.supportsState) return undefined
+        const state = processor
+          ? await readLocalExternalProcessorState(projectId(), processor)
+          : undefined
+        return state ? { instanceId: attachment.instanceId, ...state } : undefined
+      }))
+    const nativeExternalAttachmentStateRequirements = processors
+      .filter((processor) => !processor.bypassed
+        && processor.manifest.supportsState
+        && (processor.state !== undefined || processor.launchReference?.state !== undefined))
+      .map((processor) => processor.instanceId)
     return {
       supported: true as const,
       snapshot: {
         ...result.snapshot,
         nativeExternalAttachmentPlan: attachmentPlan.plan,
+        nativeExternalAttachmentStates: nativeExternalAttachmentStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
+        nativeExternalAttachmentStateRequirements,
         requiresNativePlayback: true,
       },
     };
@@ -471,12 +521,23 @@ const Timeline: Component<TimelineProps> = (props) => {
       const capturedVstStates = await Promise.all(attachmentPlan.plan.attachments
         .filter((attachment) => !attachment.bypassed)
         .map(async (attachment) => {
-          const result = await window.dawDesktop?.audioHost?.session.captureVstState(attachment.instanceId)
-          return result?.ok ? {
-            instanceId: attachment.instanceId,
-            bytes: result.bytes,
-            sha256: result.sha256,
-          } : undefined
+          const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
+          if (!processor) throw new Error(`Native VST3 processor "${attachment.instanceId}" is missing.`)
+          if (!processor.manifest.supportsState) return undefined
+          const capture = await window.dawDesktop?.audioHost?.session.captureVstState(attachment.instanceId)
+          if (capture?.ok) {
+            const persisted = await persistLocalExternalProcessorState(
+              capturedProjectId,
+              attachment.instanceId,
+              capture,
+              userId() ?? processor.state?.ownerId ?? processor.launchReference?.state?.ownerId ?? "",
+            )
+            if (!persisted) throw new Error(`Native VST3 processor "${attachment.instanceId}" was deleted during export.`)
+            return { instanceId: attachment.instanceId, bytes: capture.bytes, sha256: capture.sha256 }
+          }
+          const persisted = await readLocalExternalProcessorState(capturedProjectId, processor)
+          if (persisted) return { instanceId: attachment.instanceId, ...persisted }
+          throw new Error(`Native VST3 attachment "${attachment.instanceId}" live state capture failed${capture?.error ? `: ${capture.error}` : "."}`)
         }))
       return {
         plan: attachmentPlan.plan,
@@ -587,6 +648,24 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId,
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: compilePlaybackSnapshot,
+      captureNativeVstStates: async ({ projectId: capturedProjectId, instanceIds }) => {
+        const bridge = window.dawDesktop?.audioHost?.session
+        if (!bridge || instanceIds.length === 0) return
+        if (!isLocalId("project", capturedProjectId)) return
+        const processors = await listLocalExternalProcessors(capturedProjectId)
+        for (const instanceId of instanceIds) {
+          const processor = processors.find((candidate) => candidate.instanceId === instanceId)
+          if (!processor?.manifest.supportsState) continue
+          const capture = await bridge.captureVstState(instanceId)
+          if (!capture.ok) throw new Error(`Native VST3 state capture failed for "${instanceId}": ${capture.error}`)
+          await persistLocalExternalProcessorState(
+            capturedProjectId,
+            instanceId,
+            capture,
+            localVstStateOwnerId(capturedProjectId, userId()),
+          )
+        }
+      },
       reportFault: (message) => {
         if (classifyNativeVst3PlaybackFault(message) === "launch-authorization-required") {
           setAppMessage({
@@ -596,29 +675,25 @@ const Timeline: Component<TimelineProps> = (props) => {
               label: "Rescan plug-ins",
               busyLabel: "Rescanning…",
               enabled: () => canUseVst3CatalogAction("scan", vst3TrustAcknowledged()),
-              onAction: async () => {
-                const bridge = window.dawDesktop?.pluginCatalog;
-                if (!bridge) {
-                  throw new Error("Plug-in rescanning requires the desktop app.");
-                }
-                if (!canUseVst3CatalogAction("scan", vst3TrustAcknowledged())) {
-                  throw new Error("Acknowledge the VST3 plug-in disclosure before rescanning.");
-                }
-                const result = await bridge.scan();
-                if ("catalog" in result) {
-                  window.dispatchEvent(new Event("daw-plugin-catalog-changed"));
-                  setAppMessage(null);
-                  return;
-                }
-                if (!result.ok) throw new Error(result.error);
-              },
+              onAction: scanVst3Catalog,
             },
             cancelLabel: "Cancel",
             trustAcknowledgement: {
               acknowledged: vst3TrustAcknowledged,
               onChange: (acknowledged) => {
                 setVst3TrustAcknowledged(acknowledged);
-                if (acknowledged) saveVst3TrustAcknowledgement(vst3TrustStorage);
+                if (!acknowledged) return;
+                saveVst3TrustAcknowledgement(vst3TrustStorage);
+                void scanVst3Catalog().catch((error) => {
+                  setAppMessage((current) => current
+                    ? {
+                        ...current,
+                        message: error instanceof Error
+                          ? error.message
+                          : "The plug-in catalog could not be updated.",
+                      }
+                    : current);
+                });
               },
               disclosure: vst3TrustDisclosure,
             },
@@ -1860,6 +1935,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     onExternalPluginInserted: async (processor, playbackIntent) => {
       openEffectsForTarget(processor.targetId);
       const intent = playbackIntent ?? captureStructuralPlaybackIntent();
+      const insertedProjectId = intent.projectId ?? projectId();
       const request: ExternalProcessorEditorRequest = {
         instanceId: processor.instanceId,
         projectId: intent.projectId ?? projectId(),
@@ -1878,6 +1954,18 @@ const Timeline: Component<TimelineProps> = (props) => {
       });
       try {
         await rebuildPlaybackBackend(renderTracks(), intent);
+        if (processor.manifest.supportsState) {
+          const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
+          if (!capture?.ok) {
+            throw new Error(`Native VST3 baseline state capture failed${capture?.error ? `: ${capture.error}` : "."}`);
+          }
+          await persistLocalExternalProcessorState(
+            insertedProjectId,
+            processor.instanceId,
+            capture,
+            localVstStateOwnerId(insertedProjectId, userId()),
+          );
+        }
         console.info("[native-vst3] rebuild succeeded", {
           instanceId: processor.instanceId,
           targetId: processor.targetId,
@@ -1889,9 +1977,30 @@ const Timeline: Component<TimelineProps> = (props) => {
           ? error.message
           : "The active native playback graph could not be rebuilt.";
         console.error("[native-vst3] active rebuild failed", { error: message });
+        let rollbackMessage = "The VST3 insertion was rolled back.";
+        try {
+          await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);
+          await rebuildPlaybackBackend(renderTracks(), {
+            ...intent,
+            resumePlayback: intent.resumePlayback,
+            projectId: insertedProjectId,
+            projectGeneration: intent.projectGeneration,
+          });
+        } catch (rollbackError) {
+          const detail = rollbackError instanceof Error
+            ? rollbackError.message
+            : "The previous native playback graph could not be restored.";
+          rollbackMessage = `VST3 insertion rollback failed: ${detail}`;
+          console.error("[native-vst3] insertion rollback failed", {
+            error: detail,
+            insertionError: message,
+          });
+        }
         notify(
-          "Native playback rebuild failed",
-          message,
+          rollbackMessage === "The VST3 insertion was rolled back."
+            ? "Native playback rebuild failed"
+            : "Native VST3 rollback failed",
+          `${message} ${rollbackMessage}`,
         );
         if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
           setPendingExternalProcessorEditorRequest();
@@ -1940,6 +2049,23 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   if (window.dawDesktop) {
+    const unsubscribeCapturedEditorState = window.dawDesktop.audioHost?.onVstEditorCapturedState(async (payload) => {
+      const persisted = await persistLocalExternalProcessorState(
+        payload.projectId,
+        payload.instanceId,
+        payload.state,
+        localVstStateOwnerId(payload.projectId, userId()),
+      ).catch((error) => {
+        console.error("[native-vst3] editor teardown state persistence failed", {
+          projectId: payload.projectId,
+          instanceId: payload.instanceId,
+          error: error instanceof Error ? error.message : "unknown error",
+        });
+        throw error;
+      });
+      if (!persisted) throw new Error(`The captured native VST editor processor "${payload.instanceId}" no longer exists.`);
+    });
+    if (unsubscribeCapturedEditorState) onCleanup(unsubscribeCapturedEditorState);
     const unregisterHostController = registerAttachedHostController(createAttachedHostController({
       projectId,
       mountedProjectGeneration,
@@ -1952,6 +2078,29 @@ const Timeline: Component<TimelineProps> = (props) => {
       stop: handleTransportStop,
       finishRecording: async () => {
         if (isRecording()) await stopRecording();
+      },
+      captureNativeVstStates: async (capture) => {
+        const bridge = window.dawDesktop?.audioHost?.session
+        if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
+        const capturedProjectId = capture?.projectId ?? projectId()
+        if (!isLocalId("project", capturedProjectId)) return
+        const processors = (await listLocalExternalProcessors(capturedProjectId))
+          .filter((processor) => !processor.bypassed && processor.manifest.supportsState)
+        const selected = capture === undefined
+          ? processors
+          : processors.filter((processor) => capture.instanceIds.includes(processor.instanceId))
+        for (const processor of selected) {
+          const capture = await bridge.captureVstState(processor.instanceId)
+          if (!capture.ok) {
+            throw new Error(`Native VST3 teardown state capture failed for "${processor.instanceId}": ${capture.error}`)
+          }
+          await persistLocalExternalProcessorState(
+            capturedProjectId,
+            processor.instanceId,
+            capture,
+            localVstStateOwnerId(capturedProjectId, userId()),
+          )
+        }
       },
       exportQueue,
       exportService,

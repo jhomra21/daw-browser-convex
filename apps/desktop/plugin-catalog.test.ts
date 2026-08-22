@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -82,7 +82,7 @@ test('discovers VST3 bundles deterministically without descending into bundles o
     const catalog = await discoverVst3Bundles(directories, () => 123)
     expect(catalog.entries.map((entry) => path.basename(entry.bundlePath))).toEqual(['Beta.vst3', 'Alpha.vst3'])
     expect(catalog.entries.map((entry) => entry.displayName)).toEqual(['Beta', 'Alpha'])
-    expect(catalog.entries.every((entry) => entry.hostingStatus === 'unavailable')).toBe(true)
+    expect(catalog.entries.every((entry) => entry.hostingStatus === 'discovered')).toBe(true)
     expect(catalog.entries.every((entry) => entry.discoveredAtMs === 123)).toBe(true)
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -95,6 +95,20 @@ test('records unavailable configured directories and bounds configured directory
   expect(catalog.entries).toEqual([])
   expect(catalog.diagnostics[0]?.message).toContain('unavailable')
   await expect(normalizeConfiguredDirectories([`/${'a'.repeat(4097)}`])).resolves.toEqual([])
+})
+
+test('bounds persisted diagnostics to stable path-free messages', () => {
+  const catalog = parsePluginCatalogData({
+    version: 3,
+    directories: ['/Plugins'],
+    entries: [],
+    diagnostics: [{ directory: '/private/secret', message: 'native scanner leaked /private/secret' }],
+    scannedAtMs: null,
+  })
+  expect(catalog?.diagnostics).toEqual([{
+    directory: 'configured-directory',
+    message: 'The plug-in directory could not be scanned.',
+  }])
 })
 
 test('falls back to an empty catalog for corrupt persisted data and persists scans atomically', async () => {
@@ -130,7 +144,7 @@ test('falls back to an empty catalog for corrupt persisted data and persists sca
   }
 })
 
-test('migrates V2 catalogs without eligibility and persists only validated unavailable eligibility', () => {
+test('migrates persisted catalogs without trusting invalid eligibility', () => {
   const legacy = {
     version: 2,
     directories: ['/Plugins'],
@@ -140,8 +154,7 @@ test('migrates V2 catalogs without eligibility and persists only validated unava
       configuredDirectory: '/Plugins',
       discoveredAtMs: 1,
       architecture: 'unknown',
-      hostingStatus: 'unavailable',
-      unavailableReason: 'VST3 discovery is available, but native VST3 audio hosting is not active.',
+      hostingStatus: 'discovered',
       classes: [],
       scanHealth: 'scanned',
       binaryFingerprint: 'a'.repeat(64),
@@ -171,7 +184,7 @@ test('migrates V2 catalogs without eligibility and persists only validated unava
     }],
   }
   const catalog = parsePluginCatalogData(valid)
-  expect(catalog?.entries[0]?.hostingStatus).toBe('unavailable')
+  expect(catalog?.entries[0]?.hostingStatus).toBe('discovered')
   expect(parsePluginCatalogData({
     ...valid,
     entries: [{ ...valid.entries[0], launchEligibility: { ...valid.entries[0].launchEligibility, quarantinePresent: true } }],
@@ -230,6 +243,293 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
 
     const rescanned = await freshStore.scan(scanBundle)
     expect(resolveVst3Attachment(rescanned, reference)).toBeDefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('seeds standard directories and revalidates trusted entries during initialization', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  const filePath = path.join(directory, 'plugin-catalog-v1.json')
+  const bundlePath = path.join(directory, 'Example.vst3')
+  try {
+    await mkdir(bundlePath)
+    const store = createPluginCatalogStore({ filePath })
+    await store.addDirectory(directory)
+    const fingerprint = 'a'.repeat(64)
+    await store.scan(async (entry) => ({
+      classes: [{
+        classId: 'example',
+        vendor: 'Vendor',
+        name: 'Example',
+        version: '1',
+        role: 'effect',
+        source: 'factory',
+      }],
+      scanHealth: 'scanned',
+      binaryFingerprint: fingerprint,
+      launchEligibility: {
+        canonicalBundlePath: entry.bundlePath,
+        canonicalExecutablePath: `${entry.bundlePath}/Contents/MacOS/Example`,
+        bundleFingerprint: 'b'.repeat(64),
+        binaryFingerprint: fingerprint,
+        architecture: 'arm64',
+        codeSignVerifiedAtMs: 1,
+        quarantinePresent: false,
+        scannerProtocolVersion: 2,
+      },
+    }))
+    const restarted = createPluginCatalogStore({ filePath })
+    const result = await restarted.initialize([directory], async (entry) => ({
+      classes: [{
+        classId: 'example',
+        vendor: 'Vendor',
+        name: 'Example',
+        version: '1',
+        role: 'effect',
+        source: 'factory',
+      }],
+      scanHealth: 'scanned',
+      binaryFingerprint: fingerprint,
+      launchEligibility: {
+        canonicalBundlePath: entry.bundlePath,
+        canonicalExecutablePath: `${entry.bundlePath}/Contents/MacOS/Example`,
+        bundleFingerprint: 'b'.repeat(64),
+        binaryFingerprint: fingerprint,
+        architecture: 'arm64',
+        codeSignVerifiedAtMs: 2,
+        quarantinePresent: false,
+        scannerProtocolVersion: 2,
+      },
+    }))
+    expect(result.directories).toContain(await realpath(directory))
+    expect(result.entries[0]?.hostingStatus).toBe('ready')
+    expect(result.entries[0]?.launchEligibility).toBeDefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('preserves a concrete scan failure reason without launch eligibility', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  try {
+    await mkdir(path.join(directory, 'Broken.vst3'))
+    const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
+    await store.addDirectory(directory)
+    const catalog = await store.scan(async () => {
+      throw new Error('Code signing verification failed.')
+    })
+    expect(catalog.entries[0]?.hostingStatus).toBe('failed')
+    expect(catalog.entries[0]?.unavailableReason).toBe('The VST3 scanner failed.')
+    expect(catalog.entries[0]?.launchEligibility).toBeUndefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('initialization skips missing and non-directory standard paths', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  const customDirectory = path.join(directory, 'custom')
+  const filePath = path.join(directory, 'catalog.json')
+  const fileCandidate = path.join(directory, 'not-a-directory')
+  try {
+    await mkdir(customDirectory)
+    await writeFile(fileCandidate, 'not a directory')
+    const store = createPluginCatalogStore({ filePath })
+    await store.addDirectory(customDirectory)
+    const result = await store.initialize([
+      path.join(directory, 'missing'),
+      fileCandidate,
+    ])
+    expect(result.directories).toEqual([await realpath(customDirectory)])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('preserves trusted entries and custom directories when initialization has no scanner', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  const customDirectory = path.join(directory, 'custom')
+  const bundlePath = path.join(customDirectory, 'Example.vst3')
+  const filePath = path.join(directory, 'catalog.json')
+  try {
+    await mkdir(bundlePath, { recursive: true })
+    const store = createPluginCatalogStore({ filePath })
+    await store.addDirectory(customDirectory)
+    const scanBundle = async (entry: Vst3CatalogEntry) => ({
+      scanHealth: 'scanned' as const,
+      binaryFingerprint: 'a'.repeat(64),
+      launchEligibility: {
+        canonicalBundlePath: entry.bundlePath,
+        canonicalExecutablePath: path.join(entry.bundlePath, 'Contents', 'MacOS', 'Example'),
+        bundleFingerprint: 'b'.repeat(64),
+        binaryFingerprint: 'a'.repeat(64),
+        architecture: 'arm64' as const,
+        codeSignVerifiedAtMs: 1,
+        quarantinePresent: false as const,
+        scannerProtocolVersion: 2 as const,
+      },
+    })
+    await store.scan(scanBundle)
+    const canonicalBundlePath = await realpath(bundlePath)
+    await rm(bundlePath, { recursive: true, force: true })
+
+    const restarted = createPluginCatalogStore({ filePath })
+    const initialized = await restarted.initialize([])
+    expect(initialized.directories).toEqual([await realpath(customDirectory)])
+    expect(initialized.entries).toHaveLength(1)
+    expect(initialized.entries[0]?.launchEligibility).toBeUndefined()
+    expect(initialized.entries[0]?.hasTrustedScan).toBe(true)
+
+    const freshStore = createPluginCatalogStore({ filePath })
+    const persisted = await freshStore.load()
+    expect(persisted.directories).toEqual([await realpath(customDirectory)])
+    expect(persisted.entries).toHaveLength(1)
+    expect(persisted.entries[0]?.bundlePath).toBe(canonicalBundlePath)
+
+    await mkdir(bundlePath)
+    const recovered = await freshStore.revalidate(scanBundle)
+    expect(recovered.entries[0]?.hostingStatus).toBe('ready')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('revalidates a previously trusted entry after a transient scan failure', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  const bundlePath = path.join(directory, 'Example.vst3')
+  try {
+    await mkdir(bundlePath)
+    const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
+    await store.addDirectory(directory)
+    const scanBundle = async (entry: Vst3CatalogEntry) => ({
+      classes: [{
+        classId: 'example',
+        vendor: 'Vendor',
+        name: 'Example',
+        version: '1',
+        role: 'effect' as const,
+        source: 'factory' as const,
+      }],
+      scanHealth: 'scanned' as const,
+      binaryFingerprint: 'a'.repeat(64),
+      launchEligibility: {
+        canonicalBundlePath: entry.bundlePath,
+        canonicalExecutablePath: path.join(entry.bundlePath, 'Contents', 'MacOS', 'Example'),
+        bundleFingerprint: 'b'.repeat(64),
+        binaryFingerprint: 'a'.repeat(64),
+        architecture: 'arm64' as const,
+        codeSignVerifiedAtMs: 1,
+        quarantinePresent: false as const,
+        scannerProtocolVersion: 2 as const,
+      },
+    })
+    await store.scan(scanBundle)
+    await expect(store.scan(async () => { throw new Error('temporary') })).resolves.toMatchObject({
+      entries: [{ hostingStatus: 'failed', hasTrustedScan: true }],
+    })
+    let calls = 0
+    const result = await store.revalidate(async (entry) => {
+      calls += 1
+      return scanBundle(entry)
+    })
+    expect(calls).toBe(1)
+    expect(result.entries[0]?.hostingStatus).toBe('ready')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('serializes scans and shares concurrent revalidation work', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  try {
+    await mkdir(path.join(directory, 'Example.vst3'))
+    const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
+    await store.addDirectory(directory)
+    let active = 0
+    let maximumActive = 0
+    let releaseScan: (() => void) | undefined
+    const scanBlocked = new Promise<void>((resolve) => {
+      releaseScan = resolve
+    })
+    const scanBundle = async (entry: Vst3CatalogEntry) => {
+      active += 1
+      maximumActive = Math.max(maximumActive, active)
+      await scanBlocked
+      active -= 1
+      return {
+        scanHealth: 'scanned' as const,
+        binaryFingerprint: 'a'.repeat(64),
+        launchEligibility: {
+          canonicalBundlePath: entry.bundlePath,
+          canonicalExecutablePath: path.join(entry.bundlePath, 'Contents', 'MacOS', 'Example'),
+          bundleFingerprint: 'b'.repeat(64),
+          binaryFingerprint: 'a'.repeat(64),
+          architecture: 'arm64' as const,
+          codeSignVerifiedAtMs: 1,
+          quarantinePresent: false as const,
+          scannerProtocolVersion: 2 as const,
+        },
+      }
+    }
+    const firstScan = store.scan(scanBundle)
+    const secondScan = store.scan(scanBundle)
+    releaseScan?.()
+    await Promise.all([firstScan, secondScan])
+    expect(maximumActive).toBe(1)
+
+    const restarted = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
+    let revalidateCalls = 0
+    await Promise.all([
+      restarted.revalidate(async (entry) => {
+        revalidateCalls += 1
+        return scanBundle(entry)
+      }),
+      restarted.revalidate(async (entry) => {
+        revalidateCalls += 1
+        return scanBundle(entry)
+      }),
+    ])
+    expect(revalidateCalls).toBe(1)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('never marks an unscanned or ineligible result ready and preserves the directory cap', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+  try {
+    await mkdir(path.join(directory, 'Example.vst3'))
+    const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
+    await store.addDirectory(directory)
+    await expect(store.scan(async () => ({
+      scanHealth: 'scanned' as const,
+      binaryFingerprint: 'a'.repeat(64),
+    }))).resolves.toMatchObject({
+      entries: [{ hostingStatus: 'failed', scanHealth: 'scan-failed' }],
+    })
+    const empty = await store.scan()
+    expect(empty.entries[0]?.hostingStatus).toBe('discovered')
+
+    const cappedDirectories = await Promise.all(
+      Array.from({ length: 64 }, async (_, index) => {
+        const candidate = path.join(directory, `directory-${index}`)
+        await mkdir(candidate)
+        return realpath(candidate)
+      }),
+    )
+    await writeFile(path.join(directory, 'capped.json'), JSON.stringify({
+      version: 3,
+      directories: cappedDirectories,
+      entries: [],
+      diagnostics: [],
+      scannedAtMs: null,
+    }))
+    const capped = createPluginCatalogStore({ filePath: path.join(directory, 'capped.json') })
+    await capped.initialize([directory])
+    expect((await capped.load()).directories).toHaveLength(64)
+    await expect(capped.addDirectory(directory)).rejects.toThrow('Too many configured')
+    expect((await capped.load()).directories).toHaveLength(64)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

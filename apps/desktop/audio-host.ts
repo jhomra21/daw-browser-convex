@@ -108,6 +108,8 @@ const requiredHostCapabilities = 0x000003ff
 const nativeAudioHostArtifactId = "daw-audio-host-macos/v4"
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
+const nativeOfflineStageTimeoutMs = 10_000
+const nativeOfflineCompletionInactivityTimeoutMs = 10_000
 
 const deviceState = (value: number): AudioHostHello["deviceState"] | undefined => {
   if (value === 0) return "idle"
@@ -488,6 +490,9 @@ export type NativeVstEditorStatus = {
   open: boolean
   width: number
   height: number
+  capturedState?: { bytes: Uint8Array; sha256: string }
+  closeError?: string
+  teardownError?: string
 }
 
 type NativeHostRequestType =
@@ -594,6 +599,9 @@ export const renderNativeOffline = async (input: {
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
   onChunk: (chunk: NativeOfflinePcmChunk) => void
+  completionInactivityMs?: number
+  schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
 }): Promise<void> => {
   if (!nativeOfflineRenderPlanSchema.safeParse(input.plan).success || (
     input.plan.version !== 1
@@ -616,6 +624,10 @@ export const renderNativeOffline = async (input: {
   let finished = false
   let resolveFrame: ((frame: Buffer) => void) | undefined
   let rejectFrame: ((error: Error) => void) | undefined
+  let refreshCompletionWatchdog: (() => void) | undefined
+  const schedule = input.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs))
+  const cancelScheduled = input.cancelScheduled ?? ((timer) => clearTimeout(timer))
+  const completionInactivityMs = input.completionInactivityMs ?? nativeOfflineCompletionInactivityTimeoutMs
   const terminate = () => {
     if (!child.killed) child.kill()
   }
@@ -668,6 +680,7 @@ export const renderNativeOffline = async (input: {
       samples.subarray(channel * frameCount, (channel + 1) * frameCount)
     ))
     input.onChunk({ startFrame, frameCount, channelCount, planes })
+    refreshCompletionWatchdog?.()
   }
   const onStdoutData = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk])
@@ -740,9 +753,19 @@ export const renderNativeOffline = async (input: {
     stage: NativeOfflineWaitStage,
   ) => {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let rejectTimeout: ((error: Error) => void) | undefined
+    const isCompletion = stage === "offline completion"
+    const timeoutDelay = isCompletion ? completionInactivityMs : nativeOfflineStageTimeoutMs
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new NativeOfflineRenderTimeoutError(stage)), 10_000)
+      rejectTimeout = reject
+      timer = schedule(() => reject(new NativeOfflineRenderTimeoutError(stage)), timeoutDelay)
     })
+    const refresh = () => {
+      if (!isCompletion || rejectTimeout === undefined) return
+      if (timer !== undefined) cancelScheduled(timer)
+      timer = schedule(() => rejectTimeout?.(new NativeOfflineRenderTimeoutError(stage)), completionInactivityMs)
+    }
+    if (isCompletion) refreshCompletionWatchdog = refresh
     const receive = async () => {
       while (true) {
         const frame = await nextFrame()
@@ -769,7 +792,8 @@ export const renderNativeOffline = async (input: {
     try {
       return await Promise.race([receive(), timeout])
     } finally {
-      if (timer !== undefined) clearTimeout(timer)
+      if (timer !== undefined) cancelScheduled(timer)
+      if (isCompletion && refreshCompletionWatchdog === refresh) refreshCompletionWatchdog = undefined
     }
   }
   try {

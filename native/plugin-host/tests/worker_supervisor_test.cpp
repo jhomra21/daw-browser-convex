@@ -208,6 +208,10 @@ int main(int argc, char* argv[]) {
   eligibility.scannerProtocolVersion = 1;
   if (!Check(!IsWorkerLaunchEligible(eligibility), "old scanner protocol was accepted")) return EXIT_FAILURE;
   if (!Check(daw::plugin_host::IsValidWorkerStartupRequest(NoPluginStartup()), "no-plugin CTest startup was rejected")) return EXIT_FAILURE;
+  if (!Check(daw::plugin_host::WorkerProcessModeUsesEditorRuntime(WorkerProcessSetup::Mode::kRealtime),
+    "realtime worker incorrectly disables editor runtime")) return EXIT_FAILURE;
+  if (!Check(!daw::plugin_host::WorkerProcessModeUsesEditorRuntime(WorkerProcessSetup::Mode::kOffline),
+    "offline worker enables editor runtime")) return EXIT_FAILURE;
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";
   if (!Check(!daw::plugin_host::IsValidWorkerStartupRequest(invalidStartup), "no-plugin startup accepted plugin data")) return EXIT_FAILURE;

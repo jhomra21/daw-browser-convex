@@ -14,6 +14,7 @@ import {
 import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
 import EffectShell from "~/components/effects/EffectShell";
 import { compileNativeExternalEditorPlan } from "~/lib/desktop/native-external-attachment-plan";
+import { readLocalExternalProcessorState, persistLocalExternalProcessorState } from "~/lib/external-plugins";
 
 type ExternalPluginParametersProps = {
   processor: ExternalProcessor;
@@ -183,6 +184,12 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
     if (!bridge || !editorAvailable() || !props.projectId) return false;
     try {
       let serializedPlan: string | undefined;
+      const initialState = command === "open" || command === "focus"
+        ? await readLocalExternalProcessorState(
+          props.projectId,
+          props.processor,
+        )
+        : undefined;
       if (command !== "close") {
         const compilation = compileNativeExternalEditorPlan({
           processor: props.processor,
@@ -199,6 +206,11 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         instanceId: props.processor.instanceId,
         command,
         serializedPlan,
+        initialState,
+        requiresState: props.processor.manifest.supportsState && (
+          props.processor.state !== undefined || props.processor.launchReference?.state !== undefined
+        ),
+        captureState: props.processor.manifest.supportsState,
         anchor: command === "open" || command === "focus" ? props.editorAnchor?.() : undefined,
       });
       if (!result.ok) {
@@ -209,8 +221,19 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
       // it is not a capability probe and must not hide Open UI.
       if (command !== "close") setLiveEditorSupported(result.status.supported);
       setEditorOpen(result.status.open);
+      if (command === "close" && result.status.capturedState) {
+        await persistLocalExternalProcessorState(
+          props.projectId,
+          props.processor.instanceId,
+          result.status.capturedState,
+        )
+      }
       if (!result.status.success) {
         if (result.status.supported) setEditorMessage("The native editor command was rejected.");
+        return false;
+      }
+      if (command === "close" && result.status.closeError) {
+        setEditorMessage(`The native VST editor closed with an error: ${result.status.closeError}`);
         return false;
       }
       setEditorMessage();

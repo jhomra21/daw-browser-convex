@@ -29,6 +29,7 @@ export type NativeVst3CoordinatorFailureCode =
   | "worker-crashed"
   | "worker-invalid-response"
   | "manifest-mismatch"
+  | "state-invalid"
   | "native-transaction-failed"
 
 export type NativeVst3CoordinatorResult =
@@ -643,6 +644,8 @@ export const coordinateNativeVst3Attachments = async (input: {
   catalogStore: { load(): Promise<PluginCatalogData> }
   audioHost: Pick<NativeAudioHostSupervisor, "attachVst">
   transactionToken?: string
+  capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
+  requiredVstStateInstanceIds?: ReadonlySet<string>
   preflight?: typeof preflightNativeVst3Worker
 }): Promise<NativeVst3CoordinatorResult> => {
   let plan: NativeExternalAttachmentPlan
@@ -658,6 +661,7 @@ export const coordinateNativeVst3Attachments = async (input: {
     return { ok: false, code: "catalog-unavailable", message: "The trusted native plug-in catalog is unavailable." }
   }
   const resolved: Array<{ attachment: Attachment; native: PreflightAttachment }> = []
+  const stateRequired = new Set<string>()
   for (const attachment of canonicalAttachments(plan.attachments)) {
     const native = resolveAttachment(catalog, attachment)
     if (!native) {
@@ -693,6 +697,38 @@ export const coordinateNativeVst3Attachments = async (input: {
         instanceId: candidate.attachment.instanceId,
       }
     }
+    if (
+      !candidate.attachment.bypassed
+      && result.hello.manifest.supportsState === true
+      && (input.requiredVstStateInstanceIds === undefined
+        || input.requiredVstStateInstanceIds.has(candidate.attachment.instanceId))
+    ) {
+      stateRequired.add(candidate.attachment.instanceId)
+    }
+  }
+  const validatedStates = new Map<string, CapturedVst3State>()
+  for (const candidate of resolved) {
+    const captured = input.capturedVstStates?.get(candidate.attachment.instanceId)
+    if (!captured) {
+      if (stateRequired.has(candidate.attachment.instanceId)) {
+        return {
+          ok: false,
+          code: "state-invalid",
+          message: "The captured VST3 state is missing.",
+          instanceId: candidate.attachment.instanceId,
+        }
+      }
+      continue
+    }
+    if (!decodeCapturedVst3State(captured)) {
+      return {
+        ok: false,
+        code: "state-invalid",
+        message: "The captured VST3 state is malformed.",
+        instanceId: candidate.attachment.instanceId,
+      }
+    }
+    validatedStates.set(candidate.attachment.instanceId, captured)
   }
   try {
     // The playback controller owns the encompassing graph transaction. Attach
@@ -700,7 +736,11 @@ export const coordinateNativeVst3Attachments = async (input: {
     // atomically as one native session.
     for (const candidate of resolved) {
       const { stateRevision: _stateRevision, ...attachment } = candidate.native
-      await input.audioHost.attachVst(attachment, input.transactionToken)
+      const state = validatedStates.get(candidate.attachment.instanceId)
+      await input.audioHost.attachVst(
+        state ? { ...attachment, initialState: state } : attachment,
+        input.transactionToken,
+      )
     }
     return { ok: true, attached: resolved.length }
   } catch {

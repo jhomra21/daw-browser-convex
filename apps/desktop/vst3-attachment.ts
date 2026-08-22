@@ -1,5 +1,10 @@
 import type { VstLaunchReference } from "@daw-browser/external-plugins"
-import type { PluginCatalogData, Vst3CatalogEntry } from "./plugin-catalog"
+import {
+  safePluginCatalogDiagnostics,
+  safeVst3CatalogReason,
+  type PluginCatalogData,
+  type Vst3CatalogEntry,
+} from "./plugin-catalog"
 
 export type ResolvedVst3Eligibility = {
   classId: string
@@ -13,7 +18,7 @@ export type ResolvedVst3Eligibility = {
 }
 
 export type Vst3CatalogView = Omit<PluginCatalogData, "entries"> & {
-  entries: Array<Omit<Vst3CatalogEntry, "bundlePath" | "configuredDirectory" | "launchEligibility"> & {
+  entries: Array<Omit<Vst3CatalogEntry, "bundlePath" | "configuredDirectory" | "launchEligibility" | "hasTrustedScan"> & {
     catalogReference?: {
       version: 1
       architecture: "arm64"
@@ -26,14 +31,16 @@ export type Vst3CatalogView = Omit<PluginCatalogData, "entries"> & {
 
 export const catalogViewForRenderer = (catalog: PluginCatalogData): Vst3CatalogView => ({
   ...catalog,
-  entries: catalog.entries.map(({ bundlePath: _bundlePath, configuredDirectory: _configuredDirectory, launchEligibility, ...entry }) => ({
+  diagnostics: safePluginCatalogDiagnostics(catalog.diagnostics),
+  entries: catalog.entries.map(({ bundlePath: _bundlePath, configuredDirectory: _configuredDirectory, launchEligibility: _launchEligibility, hasTrustedScan: _hasTrustedScan, ...entry }) => ({
     ...entry,
-    catalogReference: launchEligibility === undefined ? undefined : {
+    unavailableReason: safeVst3CatalogReason(entry.unavailableReason),
+    catalogReference: _launchEligibility === undefined ? undefined : {
         version: 1,
-        architecture: launchEligibility.architecture,
-        bundleFingerprint: launchEligibility.bundleFingerprint,
-        binaryFingerprint: launchEligibility.binaryFingerprint,
-        scannerCatalogVersion: launchEligibility.scannerProtocolVersion,
+        architecture: _launchEligibility.architecture,
+        bundleFingerprint: _launchEligibility.bundleFingerprint,
+        binaryFingerprint: _launchEligibility.binaryFingerprint,
+        scannerCatalogVersion: _launchEligibility.scannerProtocolVersion,
       },
   })),
 })

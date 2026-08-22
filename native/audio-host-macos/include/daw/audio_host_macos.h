@@ -32,6 +32,13 @@ constexpr std::size_t kMaximumScheduleInstanceIdBytes = 256;
 
 namespace detail {
 
+template <typename PublishTerminal, typename Stop>
+bool PublishOfflineTerminalBeforeStop(PublishTerminal&& publish_terminal, Stop&& stop) {
+  const auto published = publish_terminal();
+  stop();
+  return published;
+}
+
 constexpr bool NativeVstWatchdogShouldMiss(
   const bool realtime_started,
   const std::uint32_t sample_rate_hz,

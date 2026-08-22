@@ -12,8 +12,7 @@ const selection = (role: "effect" | "instrument" = "effect"): NativeVst3CatalogS
     displayName: "Example",
     discoveredAtMs: 1,
     architecture: "unknown",
-    hostingStatus: "unavailable",
-    unavailableReason: "Native graph activation is available after preflight.",
+    hostingStatus: "ready",
     classes: [{
       classId: `example-${role}`,
       vendor: "Example Vendor",

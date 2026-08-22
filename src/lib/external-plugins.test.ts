@@ -9,11 +9,14 @@ import {
   listLocalExternalProcessors,
   mergeLocalExternalProcessorParameterOverride,
   mergeLocalExternalProcessorParameterOverrides,
+  persistLocalExternalProcessorState,
+  readLocalExternalProcessorState,
   setLocalExternalProcessor,
   setLocalExternalProcessorBypassed,
 } from './external-plugins'
 import { reorderLocalMixedEffects, setLocalEffectInstance } from './local-effects'
 import { z } from 'zod'
+import { sha256 } from '@noble/hashes/sha2.js'
 
 const storedObjectSchema = z.record(z.string(), z.custom<LocalProjectStoredValue>())
 const indexedStoredObjectSchema = z.object({ index: z.number() }).passthrough()
@@ -198,6 +201,72 @@ test('preserves concurrent parameter and bypass patches from the latest committe
   expect(row?.value).toMatchObject({
     parameterOverrides: { '1': 0.875, '9': 0.75 },
     bypassed: true,
+  })
+})
+
+test('persists VST state atomically and removes its artifact on processor deletion', async () => {
+  const project = await createLocalProject(`VST persistence ${crypto.randomUUID()}`)
+  const processor = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
+  const bytes = new Uint8Array([5, 8, 13])
+  const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
+  const persisted = await persistLocalExternalProcessorState(project.id, processor.instanceId, { bytes, sha256: hash }, 'user-1')
+  expect(persisted?.state).toMatchObject({ sha256: hash, byteLength: bytes.byteLength })
+  expect(await readLocalExternalProcessorState(project.id, persisted ?? processor, 'user-1')).toEqual({ bytes, sha256: hash })
+
+  const db = await openLocalProjectDb(project.id)
+  expect(await db.get('externalPluginArtifacts', persisted?.state?.artifactId ?? '')).toBeDefined()
+  await deleteLocalExternalProcessor(project.id, processor.instanceId)
+  expect(await db.get('externalPluginArtifacts', persisted?.state?.artifactId ?? '')).toBeUndefined()
+})
+
+test('preserves persisted state ownership across auth transitions', async () => {
+  const project = await createLocalProject(`Stable VST state owner ${crypto.randomUUID()}`)
+  const processor = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
+  const firstBytes = new Uint8Array([1, 2, 3])
+  const firstHash = Array.from(sha256(firstBytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const first = await persistLocalExternalProcessorState(
+    project.id,
+    processor.instanceId,
+    { bytes: firstBytes, sha256: firstHash },
+    'user-1',
+  )
+  if (!first) throw new Error('Expected first VST state persistence.')
+
+  const nextBytes = new Uint8Array([4, 5, 6])
+  const nextHash = Array.from(sha256(nextBytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const next = await persistLocalExternalProcessorState(
+    project.id,
+    processor.instanceId,
+    { bytes: nextBytes, sha256: nextHash },
+    'user-2',
+  )
+
+  expect(next?.state?.ownerId).toBe('user-1')
+  await expect(readLocalExternalProcessorState(project.id, next ?? processor)).resolves.toEqual({
+    bytes: nextBytes,
+    sha256: nextHash,
+  })
+  await expect(readLocalExternalProcessorState(project.id, next ?? processor, 'user-2')).rejects.toThrow('owner mismatch')
+})
+
+test('uses the local project as stable VST state ownership when signed out', async () => {
+  const project = await createLocalProject(`Signed-out VST persistence ${crypto.randomUUID()}`)
+  const processor = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
+  const bytes = new Uint8Array([21, 34, 55])
+  const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
+  const persisted = await persistLocalExternalProcessorState(
+    project.id,
+    processor.instanceId,
+    { bytes, sha256: hash },
+  )
+
+  if (!persisted) throw new Error('Expected signed-out VST state to persist.')
+  expect(persisted.state?.ownerId).toBe(project.id)
+  await expect(readLocalExternalProcessorState(project.id, persisted, undefined)).resolves.toEqual({
+    bytes,
+    sha256: hash,
   })
 })
 

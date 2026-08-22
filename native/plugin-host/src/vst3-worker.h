@@ -49,7 +49,7 @@ class Vst3Worker {
 
   [[nodiscard]] bool Instantiate(const WorkerInstanceRequest& request);
   [[nodiscard]] std::optional<WorkerManifest> PreflightManifest(const WorkerTransportRequest& transport, std::uint32_t stateRevision);
-  [[nodiscard]] bool ConfigureTransport(WorkerTransport& transport);
+  [[nodiscard]] bool ConfigureTransport(WorkerTransport& transport, const WorkerState* initialState = nullptr);
   [[nodiscard]] bool ProcessSubmittedSlot(std::size_t slotIndex);
   [[nodiscard]] bool PeekEditorParameterFeedback(PendingEditorParameterEdit& edit) const;
   [[nodiscard]] bool AckEditorParameterFeedback(
@@ -75,6 +75,7 @@ class Vst3Worker {
 
  private:
   class Implementation;
+  [[nodiscard]] bool ApplyState(const WorkerState& state);
   Implementation* implementation_;
 };
 

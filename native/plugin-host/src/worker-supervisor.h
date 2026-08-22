@@ -125,6 +125,10 @@ struct WorkerProcessSetup {
   Mode mode = Mode::kRealtime;
 };
 
+constexpr bool WorkerProcessModeUsesEditorRuntime(const WorkerProcessSetup::Mode mode) noexcept {
+  return mode == WorkerProcessSetup::Mode::kRealtime;
+}
+
 struct WorkerState {
   std::vector<std::uint8_t> bytes;
   std::string sha256;

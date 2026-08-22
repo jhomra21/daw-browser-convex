@@ -21,8 +21,7 @@ const catalog = (role: "effect" | "instrument" = "effect"): PluginCatalogData =>
     configuredDirectory: "/Library/Audio/Plug-Ins/VST3",
     discoveredAtMs: 1,
     architecture: "unknown",
-    hostingStatus: "unavailable",
-    unavailableReason: "VST3 discovery is available, but native VST3 audio hosting is not active.",
+    hostingStatus: "ready",
     classes: [{
       classId: reference.classId,
       vendor: reference.vendorId,

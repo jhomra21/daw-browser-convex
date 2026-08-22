@@ -45,6 +45,12 @@ export type LivePlaybackSnapshot = {
     sidechainRoutes: readonly ExternalSidechainRoute[]
   }
   nativeExternalAttachmentPlan?: NativeExternalAttachmentPlan
+  nativeExternalAttachmentStates?: readonly {
+    instanceId: string
+    bytes: Uint8Array
+    sha256: string
+  }[]
+  nativeExternalAttachmentStateRequirements?: readonly string[]
   requiresNativePlayback?: boolean
 }
 

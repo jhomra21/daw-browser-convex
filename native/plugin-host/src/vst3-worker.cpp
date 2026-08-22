@@ -536,7 +536,9 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
   }
   const auto classId = VST3::UID::fromString(request.classId);
   if (!classId) return false;
-  static_cast<void>(PrepareVst3EditorRuntime());
+  if (WorkerProcessModeUsesEditorRuntime(request.setup.mode)) {
+    static_cast<void>(PrepareVst3EditorRuntime());
+  }
   std::string error;
   implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
   if (!implementation_->module) return false;
@@ -719,7 +721,8 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   BoundedStateStream stateProbe;
   const bool supportsState = implementation_->component->getState(&stateProbe) == Steinberg::kResultOk;
   bool supportsEditor = false;
-  if (implementation_->controller && PrepareVst3EditorRuntime()) {
+  if (WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode)
+    && implementation_->controller && PrepareVst3EditorRuntime()) {
     auto* editorView = implementation_->controller->createView(Steinberg::Vst::ViewType::kEditor);
     supportsEditor = editorView != nullptr;
     if (editorView != nullptr) editorView->release();
@@ -749,7 +752,7 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   return IsValidWorkerManifest(manifest) ? std::optional<WorkerManifest>(std::move(manifest)) : std::nullopt;
 }
 
-bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
+bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerState* initialState) {
   if (!implementation_->component || !implementation_->processor || transport.maximumFrames() < implementation_->setup.maximumBlockFrames
     || transport.inputChannels() != implementation_->setup.inputChannels || transport.outputChannels() != implementation_->setup.outputChannels) {
     return false;
@@ -822,7 +825,7 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
     }
     return channels == expectedChannels;
   };
-  if (implementation_->controller) {
+  if (WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode) && implementation_->controller) {
     // Some VST3 controllers only create their view before realtime processing
     // starts. Keep that first view alive so an editor open command can attach
     // it after the worker becomes ready, and so reopening does not require a
@@ -833,6 +836,10 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport) {
   }
   if (!prepare(Steinberg::Vst::kInput, implementation_->inputs, implementation_->inputPointers, transport.inputChannels())
     || !prepare(Steinberg::Vst::kOutput, implementation_->outputs, implementation_->outputPointers, transport.outputChannels())) {
+    implementation_->editorView = nullptr;
+    return false;
+  }
+  if (initialState && !ApplyState(*initialState)) {
     implementation_->editorView = nullptr;
     return false;
   }
@@ -1087,10 +1094,30 @@ std::optional<WorkerState> Vst3Worker::GetState() {
   return WorkerState{.bytes = bytes, .sha256 = Sha256(bytes)};
 }
 
-bool Vst3Worker::SetState(const WorkerState& state) {
-  if (!ready() || !IsValidWorkerState(state)) return false;
+bool Vst3Worker::ApplyState(const WorkerState& state) {
+  if (!implementation_->component || !IsValidWorkerState(state)) return false;
   BoundedStateStream stream{state.bytes};
   if (implementation_->component->setState(&stream) != Steinberg::kResultOk) return false;
+  if (implementation_->controller) {
+    BoundedStateStream controllerStream{state.bytes};
+    if (implementation_->controller->setComponentState(&controllerStream) != Steinberg::kResultOk) return false;
+  }
+  return true;
+}
+
+bool Vst3Worker::SetState(const WorkerState& state) {
+  if (!ready()) return false;
+  const auto wasActive = implementation_->active;
+  const auto wasProcessing = implementation_->processing;
+  if (wasProcessing && !IsAcceptedWorkerProcessingTransitionResult(implementation_->processor->setProcessing(false))) return false;
+  implementation_->processing = false;
+  if (wasActive && implementation_->component->setActive(false) != Steinberg::kResultOk) return false;
+  implementation_->active = false;
+  if (!ApplyState(state)) return false;
+  if (wasActive && implementation_->component->setActive(true) != Steinberg::kResultOk) return false;
+  implementation_->active = wasActive;
+  if (wasProcessing && !IsAcceptedWorkerProcessingTransitionResult(implementation_->processor->setProcessing(true))) return false;
+  implementation_->processing = wasProcessing;
   RefreshLifecycleMetadata();
   return true;
 }
@@ -1109,7 +1136,8 @@ void Vst3Worker::RefreshLifecycleMetadata() {
 }
 
 bool Vst3Worker::EditorCommandSupported() const {
-  return ready() && implementation_->controller && !implementation_->editorUnsupported;
+  return WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode)
+    && ready() && implementation_->controller && !implementation_->editorUnsupported;
 }
 
 WorkerEditorStatus Vst3Worker::EditorStatus() const {
@@ -1124,7 +1152,8 @@ bool Vst3Worker::ExecuteEditorCommand(
   const std::uint32_t height,
   const std::optional<WorkerEditorAnchor> anchor
 ) {
-  if (!ready() || !implementation_->controller) {
+  if (!WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode)
+    || !ready() || !implementation_->controller) {
     return false;
   }
   const auto resetEditor = [&](const bool clearView) {

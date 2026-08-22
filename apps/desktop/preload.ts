@@ -37,7 +37,7 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
 import { z } from "zod"
-import type { DesktopBridge, DesktopVstEditorState } from "../../src/types/desktop-bridge"
+import type { DesktopBridge, DesktopVstEditorCapturedState, DesktopVstEditorState } from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 
 const incomingChannel = "daw:host-request"
@@ -70,6 +70,15 @@ const vstEditorStateSchema = z.object({
   instanceId: z.string(),
   open: z.boolean(),
 }).passthrough()
+const vstEditorCapturedStateSchema = z.object({
+  requestId: z.string().uuid(),
+  projectId: z.string(),
+  instanceId: z.string(),
+  state: z.object({
+    bytes: z.instanceof(Uint8Array),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
+}).strict()
 const audioLifecycleSchema = z.object({
   state: z.enum(["suspended", "recovering", "ready", "failed"]),
   powerGeneration: z.number(),
@@ -321,6 +330,26 @@ const desktopBridge = {
         })
         ipcRenderer.on("daw:audio-host:vst-editor-state", notify)
         return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-state", notify)
+      },
+      onVstEditorCapturedState: (listener: (payload: DesktopVstEditorCapturedState) => Promise<void> | void) => {
+        const notify = ipcRendererListener((_event, value) => {
+          const parsed = vstEditorCapturedStateSchema.safeParse(value)
+          if (parsed.success) {
+            void Promise.resolve(listener(parsed.data)).then(
+              () => ipcRenderer.invoke("daw:audio-host:vst-editor-captured-state-ack", {
+                requestId: parsed.data.requestId,
+                ok: true,
+              }),
+              (error) => ipcRenderer.invoke("daw:audio-host:vst-editor-captured-state-ack", {
+                requestId: parsed.data.requestId,
+                ok: false,
+                error: error instanceof Error ? error.message : "Editor state persistence failed.",
+              }),
+            )
+          }
+        })
+        ipcRenderer.on("daw:audio-host:vst-editor-captured-state", notify)
+        return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-captured-state", notify)
       },
       getLifecycle: () => ipcRenderer.invoke("daw:audio-host:lifecycle"),
       completeRecovery: (powerGeneration: number, result: "ready" | "failed") => (

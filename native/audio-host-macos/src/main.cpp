@@ -996,16 +996,23 @@ int main() {
       const auto block_frames = ReadU32(payload.data() + 8);
       const auto channel_count = ReadU32(payload.data() + 12);
       const auto rendered = RenderOffline(*active_session, total_frames, block_frames, channel_count);
-      active_session->Stop();
-      if (!rendered) {
-        std::vector<std::uint8_t> error;
-        WriteString(error, NativeOfflineFailureMessage(active_session->diagnostics()));
-        if (!WriteFrame(daw::audio_host_macos::ControlType::kOfflineError, error)) return EXIT_FAILURE;
-        continue;
-      }
-      std::vector<std::uint8_t> complete;
-      WriteU64(complete, total_frames);
-      if (!WriteFrame(daw::audio_host_macos::ControlType::kOfflineComplete, complete)) return EXIT_FAILURE;
+      const auto terminal_written = daw::audio_host_macos::detail::PublishOfflineTerminalBeforeStop(
+        [&] {
+          if (!rendered) {
+            std::vector<std::uint8_t> error;
+            WriteString(error, NativeOfflineFailureMessage(active_session->diagnostics()));
+            return WriteFrame(daw::audio_host_macos::ControlType::kOfflineError, error);
+          }
+          std::vector<std::uint8_t> complete;
+          WriteU64(complete, total_frames);
+          return WriteFrame(daw::audio_host_macos::ControlType::kOfflineComplete, complete);
+        },
+        [&] {
+          active_session->Stop();
+          active_session->Teardown();
+        }
+      );
+      if (!terminal_written) return EXIT_FAILURE;
     }
   }
 }

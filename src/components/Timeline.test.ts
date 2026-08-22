@@ -41,6 +41,19 @@ test("scopes effect history to the committed project and keeps patch failures si
   expect(source.slice(patchStart, patchEnd)).not.toContain("notify(");
 });
 
+test("persists captured editor state using its bound project after navigation", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const unsubscribeCapturedEditorState");
+  const end = source.indexOf("\n    });", start);
+  if (start < 0 || end < 0) throw new Error("Expected the captured editor state handler.");
+  const handler = source.slice(start, end);
+  expect(handler).toContain("persistLocalExternalProcessorState(");
+  expect(handler).toContain("payload.projectId");
+  expect(handler).toContain("localVstStateOwnerId(payload.projectId, userId())");
+  expect(handler).toContain("if (!persisted) throw new Error");
+  expect(handler).not.toContain("payload.projectId !== projectId()");
+});
+
 test("bypasses degraded external processors and excludes persisted degraded rows from playback", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
 
@@ -120,9 +133,15 @@ test("offers trusted VST3 catalog recovery without retrying playback automatical
   expect(recovery).toContain('cancelLabel: "Cancel"');
   expect(recovery).toContain("canUseVst3CatalogAction");
   expect(recovery).toContain("saveVst3TrustAcknowledgement");
-  expect(recovery).toContain("await bridge.scan()");
-  expect(recovery).toContain('new Event("daw-plugin-catalog-changed")');
-  expect(recovery).toContain("setAppMessage(null)");
+  expect(source).toContain("await bridge.scan()");
+  expect(source).toContain('new Event("daw-plugin-catalog-changed")');
+  expect(source).toContain("setAppMessage(null)");
+  expect(recovery).toContain("onAction: scanVst3Catalog");
+  expect(recovery).toContain("void scanVst3Catalog().catch");
+  expect(recovery).toContain("setVst3TrustAcknowledged(acknowledged);");
+  expect(recovery).toContain("saveVst3TrustAcknowledgement(vst3TrustStorage);");
+  expect(source).toContain("vst3ScanPromise");
+  expect(recovery.match(/scanVst3Catalog\(\)/g)).toHaveLength(1);
   expect(recovery).not.toContain("requestPlay()");
   expect(source).toContain('notify("Native playback stopped", message);');
 });

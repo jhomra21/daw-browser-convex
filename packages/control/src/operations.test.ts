@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import type { JsonValue } from '@daw-browser/shared'
 
 import {
   assertControlOperationSupported,
@@ -157,8 +158,13 @@ test('direct invokers bind context and retain catalog validation', async () => {
   await expect(invoker.invoke('project.list', {})).resolves.toEqual({
     projects: [{ projectId: 'project-1', name: 'Project' }],
   })
-  const invalidInput: unknown = { unexpected: true }
-  await expect(Reflect.apply(invoker.invoke, invoker, ['project.list', invalidInput])).rejects.toThrow()
+  const invalidInput = { unexpected: true } satisfies JsonValue
+  await expect(dispatchControlOperation(
+    handlers,
+    'project.list',
+    invalidInput,
+    { target: 'desktop' },
+  )).rejects.toThrow()
   await expect(createDirectControlInvoker({
     handlers: {
       ...handlers,
@@ -169,11 +175,12 @@ test('direct invokers bind context and retain catalog validation', async () => {
   expect(invoker.target).toBe('desktop')
 
   const { 'project.current': _current, ...cloudHandlers } = handlers
-  const cloudInvoker = createDirectControlInvoker({
-    handlers: cloudHandlers,
-    context: { target: 'cloud' },
-  })
-  expect(() => Reflect.apply(cloudInvoker.invoke, cloudInvoker, ['project.current', {}])).toThrow(
+  expect(() => dispatchControlOperation(
+    cloudHandlers,
+    'project.current',
+    {},
+    { target: 'cloud' },
+  )).toThrow(
     UnsupportedControlTargetError,
   )
 })

@@ -37,11 +37,20 @@ const configureConvexAuth = () => {
   convex.setAuth(fetchConvexAccessToken);
 };
 
-if (
-  globalThis.window
-  && typeof globalThis.window.addEventListener === "function"
-  && globalThis.window.document !== undefined
-) {
+type BrowserWindow = Window & {
+  readonly document: Document
+  readonly addEventListener: Window['addEventListener']
+}
+
+const hasBrowserWindowCapabilities = (
+  value: Window | undefined,
+): value is BrowserWindow => (
+  value !== undefined
+  && 'addEventListener' in value
+  && 'document' in value
+)
+
+if (hasBrowserWindowCapabilities(globalThis.window)) {
   configureConvexAuth();
 }
 

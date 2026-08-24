@@ -211,6 +211,8 @@ export type {
   ControlOperationIdempotency,
   ControlOperationApproval,
   ControlOperationId,
+  ControlOperationIdInput,
+  ControlOperationInput,
   ProjectDiscoveryEntry,
   ProjectListInput,
   ProjectListResult,

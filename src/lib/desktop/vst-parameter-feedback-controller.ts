@@ -1,4 +1,4 @@
-import { isLocalId } from "@daw-browser/shared"
+import { automationTargetKey, externalAutomationParameterId, isLocalId } from "@daw-browser/shared"
 import type { DesktopVstParameterEditPayload } from "@daw-browser/desktop-protocol"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import type { NativeVstParameterQueue } from "./native-vst-parameter-queue"
@@ -70,8 +70,7 @@ export const createVstParameterFeedbackController = (
         if (!commit || disposed) continue
         if (input.projectId() !== first.projectId || input.mountedProjectGeneration() !== first.generation) continue
         for (const { payload } of snapshot) {
-          if (payload.source === "editor-session") {
-            if (!input.isNativePlaybackPrepared?.()) continue
+          if (payload.source === "editor-session" && input.isNativePlaybackPrepared?.()) {
             const delivery = await input.nativeVstParameterQueue?.enqueue({
               instanceId,
               id: payload.parameterId,
@@ -81,6 +80,24 @@ export const createVstParameterFeedbackController = (
             if (delivery !== "delivered") {
               throw new Error("The native VST parameter feedback queue rejected delivery.")
             }
+          }
+          if (
+            disposed
+            || input.projectId() !== first.projectId
+            || input.mountedProjectGeneration() !== first.generation
+          ) continue
+          const parameterId = externalAutomationParameterId(instanceId, payload.parameterId)
+          const targetKey = automationTargetKey(
+            commit.current.targetId === "master"
+              ? { kind: "master", effectInstanceId: instanceId }
+              : { kind: "track", trackId: commit.current.targetId, effectInstanceId: instanceId },
+            parameterId,
+          )
+          try {
+            input.overrideTarget(targetKey)
+          } catch {
+            // Persistence and native delivery remain authoritative when the
+            // local automation controller is unavailable during teardown.
           }
         }
       }

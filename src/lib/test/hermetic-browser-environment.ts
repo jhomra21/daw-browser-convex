@@ -18,6 +18,16 @@ type HermeticWindow = {
   clearEventListeners: () => void
 }
 
+type IndexedDbWithDatabases = IDBFactory & {
+  databases: () => Promise<readonly IDBDatabaseInfo[]>
+}
+
+const hasDatabaseEnumeration = (
+  value: IDBFactory,
+): value is IndexedDbWithDatabases => (
+  typeof value.databases === 'function'
+)
+
 export const installHermeticWindow = <Value extends object>(value: Value): (() => void) => {
   const listeners = new Map<string, Set<EventListenerLike>>()
   const browserWindow = Object.assign(value, {
@@ -94,7 +104,7 @@ export const resetHermeticBrowserEnvironment = async (): Promise<void> => {
   globalThis.fetch = originalFetch
   clearStorage(globalThis.localStorage)
   clearStorage(globalThis.sessionStorage)
-  if (typeof indexedDB.databases !== 'function') return
+  if (!hasDatabaseEnumeration(indexedDB)) return
   const databases = await indexedDB.databases()
   await Promise.all(databases.flatMap((database) => (
     database.name === undefined || !relevantDatabase(database.name) ? [] : [clearDatabase(database.name)]

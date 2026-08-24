@@ -32,6 +32,7 @@ import {
   controlNoStore,
   controlUnauthorizedHeaders,
 } from "../control-authorization"
+import { inspectControlUploadAudioMetadata } from "../control-upload-audio-metadata"
 
 type ConvexGateway = ControlGateway
 type CloudControlInvoker = ControlInvoker<"cloud">
@@ -43,6 +44,7 @@ type ControlRouteDependencies = {
     requiredScope: ControlOAuthScope,
   ) => Promise<ControlBearer | null>;
   createGateway?: (context: ApiContext, bearer: ControlBearer) => Promise<ConvexGateway>;
+  inspectAudioMetadata?: typeof inspectControlUploadAudioMetadata;
 }
 
 type AuthResult = (
@@ -186,6 +188,7 @@ const readAssetUpload = async (context: ApiContext) => {
 export function registerControlRoutes(app: App, dependencies: ControlRouteDependencies = {}) {
   const resolveBearer = dependencies.resolveBearer ?? resolveControlBearer
   const createGateway = dependencies.createGateway ?? controlGateway
+  const inspectAudioMetadata = dependencies.inspectAudioMetadata ?? inspectControlUploadAudioMetadata
 
   const authenticate = async (context: ApiContext, scope: ControlOAuthScope): Promise<AuthResult> => {
     const bearer = await resolveBearer(context.req.raw, context.env, scope)
@@ -381,6 +384,15 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
       const upload = await readAssetUpload(context);
+      let metadata;
+      try {
+        metadata = await inspectAudioMetadata({
+          file: upload.file,
+          declaredMimeType: upload.file.type,
+        });
+      } catch (error) {
+        throw controlError("validation", error instanceof Error ? error.message : "Uploaded audio could not be parsed.");
+      }
       const gateway = await createGateway(context, authorized);
       const begun = z.object({
         r2Key: z.string(),
@@ -388,7 +400,8 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
         status: z.string(),
       }).passthrough().parse(await gateway.mutation(convexApi.assets.beginUpload, Object.assign({
         projectId, idempotencyKey, contentSha256: upload.contentSha256, name: upload.name, mimeType: upload.file.type,
-        sizeBytes: upload.file.size,
+        sizeBytes: upload.file.size, durationSec: metadata.durationSec, sampleRate: metadata.sampleRate,
+        channelCount: metadata.channelCount,
       }, upload.folderId === undefined ? undefined : { folderId: upload.folderId })));
       if (begun.status !== "completed") {
         try {

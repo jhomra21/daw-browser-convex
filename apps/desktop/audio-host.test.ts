@@ -200,6 +200,12 @@ process.stdin.on("data", (chunk) => {
       else if (process.env.MODE === "state-malformed") process.stdout.write(frame(27, Buffer.from([1, 2, 3])))
       else if (process.env.MODE === "state-mismatch") process.stdout.write(vstState("22222222-2222-4222-8222-222222222222"))
       else process.stdout.write(vstState())
+    } else if (type === 20 && process.env.MODE === "begin-delayed") {
+      setTimeout(() => process.stdout.write(ack(type)), 30)
+    } else if (type === 21 && process.env.MODE === "commit-delayed") {
+      setTimeout(() => process.stdout.write(ack(type)), 30)
+    } else if (type === 22 && process.env.MODE === "rollback-rejected") {
+      process.stdout.write(ack(type, 0))
     } else if (type === 10 && vstPlaybackFlag(payload) !== 0) {
       process.exit(2)
     } else {
@@ -409,7 +415,7 @@ test("cleans the offline completion watchdog on abort", async () => {
 })
 
 const fixtureSupervisor = async (
-  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown",
+  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed",
   onSpawn?: () => void,
   supervisorOptions?: NativeAudioHostSupervisorOptions,
   onChild?: (child: ChildProcessWithoutNullStreams) => void,
@@ -673,6 +679,129 @@ test("serializes scoped native host transactions and remains usable after rollba
     await expect(fixture.supervisor.runTransaction(async (transaction) => {
       await transaction.attachVst(vstAttachment("44444444-4444-4444-8444-444444444444"))
     })).resolves.toBeUndefined()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("manual transaction invalidation is a no-op without spawning a host", async () => {
+  let spawnCount = 0
+  const fixture = await fixtureSupervisor(undefined, () => {
+    spawnCount += 1
+  })
+  try {
+    await fixture.supervisor.invalidateManualTransaction()
+    expect(spawnCount).toBe(0)
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("manual invalidation after host loss does not respawn", async () => {
+  let spawnCount = 0
+  let child: ChildProcessWithoutNullStreams | undefined
+  const fixture = await fixtureSupervisor(undefined, () => {
+    spawnCount += 1
+  }, undefined, (current) => {
+    child = current
+  })
+  try {
+    const lost = new Promise<void>((resolve) => fixture.supervisor.onLoss(() => resolve()))
+    await fixture.supervisor.start()
+    await fixture.supervisor.beginTransaction()
+    child?.kill("SIGKILL")
+    await lost
+    await fixture.supervisor.invalidateManualTransaction()
+    expect(spawnCount).toBe(1)
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("invalidates an open manual transaction and allows a fresh transaction", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    await fixture.supervisor.start()
+    const first = await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.invalidateManualTransaction()
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+    await expect(fixture.supervisor.commitTransaction(first)).rejects.toThrow("stale")
+    const second = await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.rollbackTransaction(second)
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("rollback failure still releases manual transaction ownership", async () => {
+  const fixture = await fixtureSupervisor("rollback-rejected")
+  try {
+    await fixture.supervisor.start()
+    await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.invalidateManualTransaction()
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+    const next = await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.commitTransaction(next)
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("invalidating an in-flight begin cannot publish a token", async () => {
+  const fixture = await fixtureSupervisor("begin-delayed")
+  try {
+    await fixture.supervisor.start()
+    const beginning = fixture.supervisor.beginTransaction()
+    await Promise.resolve()
+    await fixture.supervisor.invalidateManualTransaction()
+    await expect(beginning).rejects.toThrow("cancelled")
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+    const next = await fixture.supervisor.beginTransaction()
+    await fixture.supervisor.rollbackTransaction(next)
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("invalidating an in-flight commit cannot publish a committed renderer state", async () => {
+  const fixture = await fixtureSupervisor("commit-delayed")
+  try {
+    await fixture.supervisor.start()
+    const token = await fixture.supervisor.beginTransaction()
+    const committing = fixture.supervisor.commitTransaction(token)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await fixture.supervisor.invalidateManualTransaction()
+    await expect(committing).rejects.toThrow("cancelled")
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("manual invalidation does not interrupt an internal transaction", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const transaction = fixture.supervisor.runTransaction(async () => {
+      entered.resolve()
+      await release.promise
+    })
+    await entered.promise
+    await fixture.supervisor.invalidateManualTransaction()
+    expect(fixture.supervisor.transactionOpen()).toBeTrue()
+    release.resolve()
+    await expect(transaction).resolves.toBeUndefined()
+    expect(fixture.supervisor.transactionOpen()).toBeFalse()
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

@@ -230,6 +230,7 @@ struct NativeVstAttachment {
   bool render_enabled = true;
   std::vector<std::uint8_t> initial_state;
   std::string initial_state_sha256;
+  std::vector<std::uint32_t> parameter_ids;
   std::vector<std::pair<std::uint32_t, double>> initial_parameter_values;
   NativeVstWorkerTransportConfig transport{};
 };

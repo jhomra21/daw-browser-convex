@@ -548,6 +548,17 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
     attachment.initial_parameter_values.emplace_back(parameter_id, value);
     offset += 12;
   }
+  if (offset == payload.size()) return host.AttachNativeVst(attachment);
+  if (payload.size() < offset + 4) return false;
+  const auto parameter_id_count = ReadU32(payload.data() + offset);
+  offset += 4;
+  if (parameter_id_count > 16'384
+    || payload.size() != offset + static_cast<std::size_t>(parameter_id_count) * 4) return false;
+  attachment.parameter_ids.reserve(parameter_id_count);
+  for (std::uint32_t index = 0; index < parameter_id_count; ++index) {
+    attachment.parameter_ids.push_back(ReadU32(payload.data() + offset));
+    offset += 4;
+  }
   return host.AttachNativeVst(attachment);
 }
 

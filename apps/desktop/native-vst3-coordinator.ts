@@ -275,6 +275,9 @@ const resolveAttachment = (
     stateRevision: attachment.stateRevision,
     renderEnabled: !attachment.bypassed,
     workerEnabled: true,
+    parameterIds: (attachment.parameters ?? [])
+      .filter((parameter) => !parameter.readOnly)
+      .map((parameter) => parameter.id),
     initialParameterValues: Object.entries(attachment.parameterOverrides ?? {}).map(([id, value]) => ({
       id: Number(id),
       value,

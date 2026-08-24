@@ -3,17 +3,22 @@ import { z } from 'zod'
 import {
   UnsupportedControlTargetError,
   controlErrorSchemaV1,
+  type ControlOperationId,
+  type ControlOperationIdInput,
+  type ControlOperationInput,
   type ControlErrorV1,
+  type ControlOutput,
   type ControlOperationTarget,
+  type ControlPreviewRequestV1,
 } from '@daw-browser/control'
 
 export type ControlConformanceInvoker = (
-  operation: string,
-  input: unknown,
+  operation: ControlOperationIdInput,
+  input: ControlOperationInput,
   target: ControlOperationTarget,
-) => Promise<unknown>
+) => Promise<ControlOutput<ControlOperationId>>
 
-export const normalizeControlError = (error: unknown): ControlErrorV1 | undefined => {
+export const normalizeControlError = <Input>(error: Input): ControlErrorV1 | undefined => {
   const direct = controlErrorSchemaV1.safeParse(error)
   if (direct.success) return direct.data
   const envelope = z.object({ data: z.unknown() }).safeParse(error)
@@ -36,16 +41,16 @@ export const normalizeControlError = (error: unknown): ControlErrorV1 | undefine
 
 const expectErrorCode = async (
   invoke: ControlConformanceInvoker,
-  operation: string,
-  request: unknown,
+  operation: ControlOperationIdInput,
+  request: ControlOperationInput,
   target: ControlOperationTarget,
   expected: readonly string[],
 ) => {
-  let failure: unknown
+  let failure: ControlErrorV1 | undefined
   try {
     await invoke(operation, request, target)
   } catch (error) {
-    failure = error
+    failure = normalizeControlError(error)
   }
   expect(failure).toBeDefined()
   const normalized = controlErrorSchemaV1.safeParse(failure)
@@ -60,11 +65,7 @@ export const runControlConformance = async (input: {
   projectId: string
   target: ControlOperationTarget
   missingProjectErrorCode: ControlErrorV1['code']
-  destructiveRequest: {
-    version: 'v1'
-    projectId: string
-    actions: readonly unknown[]
-  }
+  destructiveRequest: ControlPreviewRequestV1
 }) => {
   const initial = await input.invoke('control.snapshot', { projectId: input.projectId }, input.target)
   expect(initial).toMatchObject({ version: 'v2', project: { id: input.projectId } })
@@ -79,15 +80,11 @@ export const runControlConformance = async (input: {
     executionTarget: expect.any(String),
   })
 
-  const renameRequest: {
-    version: 'v1'
-    projectId: string
-    actions: readonly { kind: string; name: string }[]
-  } = {
+  const renameRequest = {
     version: 'v1',
     projectId: input.projectId,
     actions: [{ kind: 'project.rename', name: 'Conformance rename' }],
-  }
+  } satisfies ControlPreviewRequestV1
   const beforePreview = JSON.stringify(initial)
   const preview = await input.invoke('control.preview', renameRequest, input.target)
   expect(preview).toMatchObject({ projectId: input.projectId, applied: true })

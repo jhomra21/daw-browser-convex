@@ -913,6 +913,7 @@ void TestNativeVstRuntimeControlBounds() {
   };
   attachment.bundle_fingerprint.fill(1);
   attachment.binary_fingerprint.fill(2);
+  attachment.parameter_ids = {7, 8};
   assert(host.AttachNativeVst(attachment));
   std::vector<std::uint8_t> malformed_state_request{0};
   assert(!host.GetNativeVstState(malformed_state_request));
@@ -928,6 +929,16 @@ void TestNativeVstRuntimeControlBounds() {
     "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2",
     daw::audio_host_macos::NativeVstEditorCommand::kStatus
   ));
+  std::vector<std::uint8_t> unknown_parameter;
+  AppendInstanceId(unknown_parameter, instance_id);
+  AppendLeU32(unknown_parameter, 2);
+  AppendLeU32(unknown_parameter, 7);
+  AppendLeU32(unknown_parameter, 0);
+  AppendLeDouble(unknown_parameter, 0.25);
+  AppendLeU32(unknown_parameter, 9);
+  AppendLeU32(unknown_parameter, 0);
+  AppendLeDouble(unknown_parameter, 0.5);
+  assert(!host.QueueNativeVstParameterEvents(unknown_parameter));
   std::vector<std::uint8_t> parameters;
   AppendInstanceId(parameters, instance_id);
   AppendLeU32(parameters, 2);
@@ -1136,6 +1147,7 @@ void TestVstAutomationSegmentsReclaimWithinEpoch() {
   };
   attachment.bundle_fingerprint = Fingerprint("0db70288522e217dd5a3c3690e3d9da2416a0019aa2def7e956e938af35a0a16");
   attachment.binary_fingerprint = Fingerprint("6e45a98e5da42ad8bcbfb7096debc5dddda111a710f28efb439fa8048c139b7d");
+  attachment.parameter_ids = {7, 8};
   assert(host.AttachNativeVst(attachment));
   const auto graph_status = host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F, 2));
   assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);

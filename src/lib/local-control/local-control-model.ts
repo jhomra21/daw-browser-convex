@@ -136,6 +136,7 @@ export const materializeLocalControlSnapshot = (
   migratedLegacySynthIds: ReadonlySet<string> = new Set(),
   sampleUrlFallbacks: ReadonlyMap<string, string> = new Map(),
   historyRefFallbacks: ReadonlyMap<string, string> = new Map(),
+  externalProcessorFallbacks: ReadonlyMap<string, ExternalProcessor> = new Map(),
 ): MaterializedLocalControlModel => {
   const tracks = rowsByKind(model.entities, 'track')
   const clips = rowsByKind(model.entities, 'clip')
@@ -240,14 +241,18 @@ export const materializeLocalControlSnapshot = (
   for (const item of snapshot.processors) {
     if (item.processor.kind === 'external-vst3') {
       const existingValue = externalProcessors.get(item.id)?.value
-      const existing = existingValue === undefined
-        ? undefined
-        : parseExternalProcessorValue(parseExternalPluginJsonValue(existingValue))
-      if (!existing?.success) {
+      let existingProcessor: ExternalProcessor | undefined
+      if (existingValue === undefined) {
+        existingProcessor = externalProcessorFallbacks.get(item.id)
+      } else {
+        const existing = parseExternalProcessorValue(parseExternalPluginJsonValue(existingValue))
+        if (existing.success) existingProcessor = existing.data
+      }
+      if (!existingProcessor) {
         throw new Error(`External plugin row "${item.id}" is missing or corrupt.`)
       }
       const next: ExternalProcessor = {
-        ...existing.data,
+        ...existingProcessor,
         parameterOverrides: item.processor.params.parameterOverrides,
         updatedAt: timestamp,
       }

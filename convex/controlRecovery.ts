@@ -11,13 +11,16 @@ import {
   type ControlActionV1,
   type ContextualRefV1,
   type RecoveryPayload,
+  type RecoveryOwnershipV1,
 } from "@daw-browser/control";
 import {
   buildTimelineRangeDeletePatchV1,
   collectDeletedTrackIdsV1,
+  deriveTrackDeletionAfterStatesV1,
+  deriveTrackUngroupAfterStatesV1,
   mergeRecoveryTrackOrderV1,
 } from "@daw-browser/control-core";
-import type { TimelineRangeDeletePatchV1 } from "@daw-browser/control-core";
+import type { NormalizedTrackControlStateV1, TimelineRangeDeletePatchV1 } from "@daw-browser/control-core";
 import {
   automationTargetKey,
   granularAutomationKey,
@@ -60,12 +63,34 @@ type EffectBundle = Extract<RecoveryPayload, {
   kind: "effect.remove" | "instrument.remove" | "arpeggiator.remove"
 }>["data"];
 type RecoveryEffect = EffectBundle["effects"][number]["effect"];
+type TrackRecoveryData = Extract<RecoveryPayload, {
+  kind: "track.delete" | "track.ungroup";
+}>["data"];
+type RecoveryTrackState = TrackRecoveryData["tracks"][number]["track"];
+type RecoveryTrackTransition = {
+  id: string;
+  before: RecoveryTrackState;
+  after: RecoveryTrackState;
+};
+type RecoveryRoutingState = {
+  index: number;
+  groupId?: string;
+  outputTargetId?: string;
+  sends: RecoveryTrackState["mixer"]["sends"];
+};
+type TrackBundleRecoveryData = Extract<RecoveryPayload, {
+  kind: "track.delete" | "track.ungroup";
+}>["data"];
+type MergedRecoveryTrack = Doc<"tracks"> & Pick<
+  Doc<"mixerChannels">,
+  "volume" | "muted" | "soloed" | "channelRole" | "outputTargetId" | "sends"
+>;
 
-const trackStatePayload = (row: any) => ({
+const trackStatePayload = (row: MergedRecoveryTrack): RecoveryTrackState => ({
   projectId: row.projectId,
   name: row.name,
   index: row.index,
-  kind: row.kind,
+  kind: row.kind === "audio" || row.kind === "instrument" ? row.kind : undefined,
   historyRef: row.historyRef,
   groupId: row.groupId === undefined ? undefined : String(row.groupId),
   collapsed: row.collapsed,
@@ -74,9 +99,11 @@ const trackStatePayload = (row: any) => ({
     volume: row.volume,
     muted: row.muted,
     soloed: row.soloed,
-    channelRole: row.channelRole,
+    channelRole: row.channelRole === "track" || row.channelRole === "group" || row.channelRole === "return"
+      ? row.channelRole
+      : "track",
     outputTargetId: row.outputTargetId === undefined ? undefined : String(row.outputTargetId),
-    sends: row.sends.map((send: any) => ({
+    sends: row.sends.map((send) => ({
       targetId: String(send.targetId),
       amount: send.amount,
       tap: send.tap,
@@ -84,20 +111,37 @@ const trackStatePayload = (row: any) => ({
   },
 });
 
-const recoverySurvivorState = (row: any) => ({
+const recoverySurvivorState = (row: RecoveryTrackState): RecoveryRoutingState => ({
   index: row.index,
-  groupId: row.groupId === undefined ? undefined : String(row.groupId),
-  outputTargetId: row.mixer?.outputTargetId === undefined && row.outputTargetId === undefined ? undefined : String(row.mixer?.outputTargetId ?? row.outputTargetId),
-  sends: (row.mixer?.sends ?? row.sends).map((send: any) => ({
+  groupId: row.groupId,
+  outputTargetId: row.mixer.outputTargetId,
+  sends: row.mixer.sends.map((send) => ({ ...send })),
+});
+
+const sameRecoverySurvivorState = (left: RecoveryRoutingState, right: RecoveryRoutingState) => (
+  JSON.stringify(left) === JSON.stringify(right)
+);
+
+const mergedRecoveryRoutingState = (
+  track: Doc<"tracks">,
+  channel: Doc<"mixerChannels">,
+): RecoveryRoutingState => ({
+  index: track.index,
+  groupId: track.groupId === undefined ? undefined : String(track.groupId),
+  outputTargetId: channel.outputTargetId === undefined ? undefined : String(channel.outputTargetId),
+  sends: channel.sends.map((send) => ({
     targetId: String(send.targetId),
     amount: send.amount,
     tap: send.tap,
   })),
 });
 
-const sameRecoverySurvivorState = (left: any, right: any) => (
-  JSON.stringify(recoverySurvivorState(left)) === JSON.stringify(recoverySurvivorState(right))
-);
+const requireCloudRecoveryOwnership = (ownership: RecoveryOwnershipV1, actionIndex: number) => {
+  if (!isCloudRecoveryOwnershipV1(ownership)) {
+    throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", actionIndex);
+  }
+  return ownership;
+};
 
 const rebasedAutomationParameterId = (parameterId: string, trackId: string | undefined) => {
   if (trackId === undefined) return parameterId;
@@ -122,20 +166,17 @@ const requireRecoveryTrackTarget = async (
   return track;
 };
 
-const postDeleteTrackState = (row: any, deletedIds: Set<string>, index: number) => ({
-  ...trackStatePayload(row),
-  index,
-  groupId: deletedIds.has(String(row.groupId)) ? undefined : undefined,
+const postDeleteTrackState = (
+  before: RecoveryTrackState,
+  after: NormalizedTrackControlStateV1,
+): RecoveryTrackState => ({
+  ...before,
+  index: after.index,
+  groupId: after.groupId,
   mixer: {
-    ...trackStatePayload(row).mixer,
-    outputTargetId: deletedIds.has(String(row.outputTargetId)) ? undefined : undefined,
-    sends: row.sends
-      .filter((send: any) => !deletedIds.has(String(send.targetId)))
-      .map((send: any) => ({
-        targetId: String(send.targetId),
-        amount: send.amount,
-        tap: send.tap,
-      })),
+    ...before.mixer,
+    outputTargetId: after.outputTargetId,
+    sends: after.sends.map((send) => ({ ...send })),
   },
 });
 
@@ -377,9 +418,20 @@ export const captureRecoveryPayload = async (
       ? collectDeletedTrackIdsV1(merged.map((track) => ({
           id: String(track._id), index: track.index, groupId: track.groupId ? String(track.groupId) : undefined,
           outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
-          sends: track.sends.map((send: any) => ({ targetTrackId: String(send.targetId) })),
+          sends: track.sends.map((send) => ({ targetTrackId: String(send.targetId) })),
         })), String(rootId))
       : new Set([String(rootId)]);
+    const normalizedStates = merged.map((track): NormalizedTrackControlStateV1 => ({
+      id: String(track._id),
+      index: track.index,
+      groupId: track.groupId ? String(track.groupId) : undefined,
+      outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
+      sends: track.sends.map((send) => ({
+        targetId: String(send.targetId),
+        amount: send.amount,
+        tap: send.tap,
+      })),
+    }));
     const selected = merged.filter((track) => selectedIds.has(String(track._id)));
     const clips = (await ctx.db.query("clips").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
       .filter((clip) => selectedIds.has(String(clip.trackId)));
@@ -405,16 +457,20 @@ export const captureRecoveryPayload = async (
       sidechains: sidechains.map((row) => ({ id: String(row._id), sidechain: sidechainPayload(row) })),
     };
     if (action.kind === "track.delete") {
-      const survivors = merged
-        .filter((track) => !selectedIds.has(String(track._id)))
-        .sort((left, right) => left.index - right.index || String(left._id).localeCompare(String(right._id)));
+      const afterById = new Map(
+        deriveTrackDeletionAfterStatesV1(normalizedStates, selectedIds)
+          .map((state) => [state.id, state]),
+      );
       return {
         rootTrackId: String(rootId),
         ...entityBundle,
-        survivors: survivors.flatMap((track, index) => {
+        survivors: merged.flatMap((track): RecoveryTrackTransition[] => {
+          if (selectedIds.has(String(track._id))) return [];
           const before = trackStatePayload(track);
-          const after = postDeleteTrackState(track, selectedIds, index);
-          return sameRecoverySurvivorState(before, after)
+          const afterState = afterById.get(String(track._id));
+          if (!afterState) throw new Error("Track deletion recovery state is unavailable.");
+          const after = postDeleteTrackState(before, afterState);
+          return sameRecoverySurvivorState(recoverySurvivorState(before), recoverySurvivorState(after))
             ? []
             : [{ id: String(track._id), before, after }];
         }),
@@ -422,24 +478,26 @@ export const captureRecoveryPayload = async (
     }
     if (root.channelRole !== "group" || clips.length > 0) return null;
     const children = merged.filter((track) => String(track.groupId) === String(rootId));
+    const afterById = new Map(
+      deriveTrackUngroupAfterStatesV1(normalizedStates, {
+        groupId: String(rootId),
+        groupIndex: root.index,
+        parentGroupId: root.groupId ? String(root.groupId) : undefined,
+      }).map((state) => [state.id, state]),
+    );
     return {
       groupId: String(rootId),
       ...entityBundle,
-      children: children.map((child) => ({
-        id: String(child._id),
-        before: trackStatePayload(child),
-        after: {
-          ...trackStatePayload(child),
-          index: child.index > root.index ? child.index - 1 : child.index,
-          groupId: root.groupId ? String(root.groupId) : undefined,
-          mixer: {
-            ...trackStatePayload(child).mixer,
-            outputTargetId: String(child.outputTargetId) === String(rootId)
-              ? root.groupId ? String(root.groupId) : undefined
-              : undefined,
-          },
-        },
-      })),
+      children: children.map((child) => {
+        const before = trackStatePayload(child);
+        const afterState = afterById.get(String(child._id));
+        if (!afterState) throw new Error("Track ungroup recovery state is unavailable.");
+        return {
+          id: String(child._id),
+          before,
+          after: postDeleteTrackState(before, afterState),
+        };
+      }),
     };
   }
   if (action.kind === "clip.delete") {
@@ -716,8 +774,8 @@ const restoreTrackBundle = async (
   ctx: RecoveryCtx,
   input: {
     projectId: string;
-    data: any;
-    survivors: Array<{ id: string; before: any; after: any }>;
+    data: TrackBundleRecoveryData;
+    survivors: RecoveryTrackTransition[];
     actionIndex: number;
   },
   mappings: Mapping[],
@@ -734,12 +792,12 @@ const restoreTrackBundle = async (
   for (const survivor of input.survivors) {
     const track = existingTracks.find((entry) => String(entry._id) === survivor.id);
     const channel = track ? channelByTrackId.get(survivor.id) : undefined;
-    if (!track || !channel || !sameRecoverySurvivorState({ ...track, ...channel, sends: channel.sends }, survivor.after)) {
+    if (!track || !channel || !sameRecoverySurvivorState(mergedRecoveryRoutingState(track, channel), recoverySurvivorState(survivor.after))) {
       throw new ControlDomainError("validation", "Recovery state has drifted.", input.actionIndex);
     }
   }
-  const restoredSourceIds = new Set(input.data.tracks.map((entry: any) => entry.id));
-  const validateRoutingTargets = async (state: any) => {
+  const restoredSourceIds = new Set(input.data.tracks.map((entry) => entry.id));
+  const validateRoutingTargets = async (state: RecoveryTrackState) => {
     const validate = async (targetId: string | undefined, message: string, groupOnly = false) => {
       if (!targetId || restoredSourceIds.has(targetId)) return;
       const target = await requireRecoveryTrackTarget(
@@ -763,14 +821,14 @@ const restoreTrackBundle = async (
   const trackIds = new Map<string, Id<"tracks">>();
   const mergedOrder = mergeRecoveryTrackOrderV1(
     existingTracks.map((track) => ({ id: String(track._id), index: track.index })),
-    input.data.tracks.map((entry: any) => ({ id: entry.id, index: entry.track.index })),
+    input.data.tracks.map((entry) => ({ id: entry.id, index: entry.track.index })),
   );
   const finalIndexById = new Map(mergedOrder.map((entry) => [entry.id, entry.index]));
   for (const track of existingTracks) {
     const index = finalIndexById.get(String(track._id));
     if (index !== undefined && track.index !== index) await ctx.db.patch(track._id, { index });
   }
-  for (const entry of [...input.data.tracks].sort((left: any, right: any) => left.track.index - right.track.index || left.id.localeCompare(right.id))) {
+  for (const entry of [...input.data.tracks].sort((left, right) => left.track.index - right.track.index || left.id.localeCompare(right.id))) {
     const index = finalIndexById.get(entry.id);
     if (index === undefined) throw new Error("Recovery track order is unavailable.");
     const id = await ctx.db.insert("tracks", {
@@ -791,7 +849,7 @@ const restoreTrackBundle = async (
     if (!id) throw new Error("Recovery track mapping is unavailable.");
     const groupId = resolve(entry.track.groupId);
     const outputTargetId = resolve(entry.track.mixer.outputTargetId);
-    const sends = entry.track.mixer.sends.map((send: any) => {
+    const sends = entry.track.mixer.sends.map((send) => {
       const targetId = resolve(send.targetId);
       if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
       return { targetId, amount: send.amount, tap: send.tap };
@@ -807,9 +865,11 @@ const restoreTrackBundle = async (
       outputTargetId,
       sends,
     });
+    const ownership = requireCloudRecoveryOwnership(entry.ownership, input.actionIndex);
     await ctx.db.insert("ownerships", {
-      projectId: entry.ownership.projectId, ownerUserId: entry.ownership.ownerUserId,
-      role: entry.ownership.role, trackId: id,
+      projectId: ownership.projectId,
+      ownerUserId: ownership.ownerUserId,
+      role: ownership.role, trackId: id,
     });
   }
   for (const survivor of input.survivors) {
@@ -818,7 +878,7 @@ const restoreTrackBundle = async (
     if (!id || !channel) throw new Error("Recovery survivor mapping is unavailable.");
     const groupId = resolve(survivor.before.groupId);
     const outputTargetId = resolve(survivor.before.mixer.outputTargetId);
-    const sends = survivor.before.mixer.sends.map((send: any) => {
+    const sends = survivor.before.mixer.sends.map((send) => {
       const targetId = resolve(send.targetId);
       if (!targetId) throw new ControlDomainError("not-found", "Recovery routing target is unavailable.", input.actionIndex);
       return { targetId, amount: send.amount, tap: send.tap };
@@ -842,7 +902,7 @@ const restoreTrackBundle = async (
         ? row.type === effect.processor.kind || effect.processor.kind === "instrument" && row.type === "synth"
         : effect.instanceId !== undefined && row.instanceId === effect.instanceId
     ))) throw new ControlDomainError("validation", "Recovery processor collides with current state.", input.actionIndex);
-    const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId, effect.processor.params);
+    const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId ?? null, effect.processor.params);
     const id = await ctx.db.insert("effects", {
       projectId: effect.projectId, targetType: effect.target.kind, trackId,
       index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
@@ -857,9 +917,11 @@ const restoreTrackBundle = async (
     if (!trackId) throw new ControlDomainError("not-found", "Recovery clip target is unavailable.", input.actionIndex);
     const normalizedClip = clip.midi === undefined ? clip : { ...clip, midi: normalizeLegacyMidiClip(clip.midi) };
     const id = await ctx.db.insert("clips", { ...normalizedClip, trackId });
+    const ownership = requireCloudRecoveryOwnership(item.ownership, input.actionIndex);
     await ctx.db.insert("ownerships", {
-      projectId: item.ownership.projectId, ownerUserId: item.ownership.ownerUserId,
-      role: item.ownership.role, clipId: id,
+      projectId: ownership.projectId,
+      ownerUserId: ownership.ownerUserId,
+      role: ownership.role, clipId: id,
     });
     mappings.push({ entity: "clip", sourceId: item.id, restoredId: String(id) });
   }

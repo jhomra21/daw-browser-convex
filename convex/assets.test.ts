@@ -7,6 +7,7 @@ import { enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
 const projectId = "project-assets";
 const owner = "asset-owner";
 const digest = "a".repeat(64);
+const audioMetadata = { durationSec: 1, sampleRate: 44_100, channelCount: 2 };
 const controlIdentity = {
   subject: owner,
   dawControlActorIssuer: "https://control.example",
@@ -31,7 +32,7 @@ const setup = async () => {
 
 const begin = (t: Awaited<ReturnType<typeof setup>>, idempotencyKey = "asset-key-1") => (
   t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
-    projectId, idempotencyKey, contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12,
+    projectId, idempotencyKey, contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
   })
 );
 
@@ -41,17 +42,118 @@ test("asset receipts replay deterministically and finalize exactly once", async 
   const replay = await begin(t);
   expect(replay).toEqual(first);
   await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
-    projectId, idempotencyKey: "asset-key-1", contentSha256: "b".repeat(64), name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12,
+    projectId, idempotencyKey: "asset-key-1", contentSha256: "b".repeat(64), name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
   })).rejects.toThrow("Idempotency key");
   const finalized = await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
     projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
   });
   expect(finalized.idempotencyReplay).toBe(false);
+  expect(finalized.asset).toMatchObject({
+    durationSec: 1,
+    sampleRate: 44_100,
+    channelCount: 2,
+  });
   expect((await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
     projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
   })).idempotencyReplay).toBe(true);
   expect((await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique()))?.revision).toBe(1);
+});
+
+test("receipt replay rejects trusted metadata drift", async () => {
+  const t = await setup();
+  await begin(t);
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "asset-key-1",
+    contentSha256: digest,
+    name: "Kick.wav",
+    mimeType: "audio/wav",
+    sizeBytes: 12,
+    durationSec: 2,
+    sampleRate: 44_100,
+    channelCount: 2,
+  })).rejects.toThrow("Idempotency key");
+});
+
+test("legacy upload receipts fail closed until restarted", async () => {
+  const t = await setup();
+  await t.run(async (ctx) => {
+    await ctx.db.insert("assetUploadReceipts", {
+      projectId,
+      actorUserId: owner,
+      idempotencyKey: "legacy-key",
+      contentSha256: digest,
+      assetKey: "legacy-asset",
+      r2Key: "asset-namespaces/legacy/samples/legacy",
+      semanticDigest: "legacy",
+      status: "pending",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      name: "Legacy.wav",
+      createdAt: 1,
+      updatedAt: 1,
+      attempts: 0,
+    });
+  });
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "legacy-key",
+    contentSha256: digest,
+    name: "Legacy.wav",
+    mimeType: "audio/wav",
+    sizeBytes: 12,
+    ...audioMetadata,
+  })).rejects.toThrow("legacy upload receipt");
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "legacy-key", contentSha256: digest,
+  })).rejects.toThrow("Legacy upload receipt metadata");
+});
+
+test("stale legacy receipts backfill metadata from completed samples", async () => {
+  const t = await setup();
+  await t.run(async (ctx) => {
+    await ctx.db.insert("assetUploadReceipts", {
+      projectId,
+      actorUserId: owner,
+      idempotencyKey: "legacy-reconcile",
+      contentSha256: digest,
+      assetKey: "legacy-reconcile-asset",
+      r2Key: "asset-namespaces/legacy/samples/reconcile",
+      semanticDigest: "legacy",
+      status: "pending",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      name: "Legacy.wav",
+      createdAt: 1,
+      updatedAt: 1,
+      attempts: 0,
+    });
+    await ctx.db.insert("samples", {
+      projectId,
+      assetKey: "legacy-reconcile-asset",
+      sourceKind: "upload",
+      name: "Legacy.wav",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      contentSha256: digest,
+      r2Key: "asset-namespaces/legacy/samples/reconcile",
+      duration: 2,
+      sampleRate: 48_000,
+      channelCount: 1,
+      ownerUserId: owner,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+  });
+  await t.withIdentity({ subject: "worker", dawWorker: true, tokenIdentifier: "worker-assets" })
+    .mutation(api.assets.reconcileStalePending, { before: Date.now(), limit: 10 });
+  expect(await t.run(async (ctx) => await ctx.db.query("assetUploadReceipts").first())).toMatchObject({
+    status: "completed",
+    durationSec: 2,
+    sampleRate: 48_000,
+    channelCount: 1,
+  });
 });
 
 test("folders have material revisions and cannot delete nonempty contents", async () => {
@@ -83,7 +185,7 @@ test("failed receipts retry only with the same full request metadata", async () 
   })).queued).toBe(true);
   expect((await begin(t)).status).toBe("pending");
   await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
-    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Other.wav", mimeType: "audio/wav", sizeBytes: 12,
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Other.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
   })).rejects.toThrow("Idempotency key");
 });
 
@@ -152,7 +254,7 @@ test("failed uploads protect their folders until retried", async () => {
   const t = await setup();
   const folder = await t.withIdentity(controlIdentity).mutation(api.assets.createFolder, { projectId, name: "Drums" });
   await t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
-    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12,
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
     folderId: folder.folder.id,
   });
   await t.withIdentity(controlIdentity).mutation(api.assets.failUpload, {
@@ -162,7 +264,7 @@ test("failed uploads protect their folders until retried", async () => {
     projectId, folderId: folder.folder.id,
   })).rejects.toThrow("retryable");
   await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
-    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12,
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
     folderId: folder.folder.id,
   })).resolves.toMatchObject({ status: "pending" });
 });

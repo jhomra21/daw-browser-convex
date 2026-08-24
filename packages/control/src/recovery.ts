@@ -5,6 +5,8 @@ import {
   midiPerformanceEventCount,
   normalizeLegacyMidiClip,
   normalizeMidiClip,
+  persistedProcessorSnapshotSchema,
+  isJsonObject,
   type JsonValue,
   type NormalizedLegacyMidiClip,
   type NormalizedMidiClip,
@@ -25,8 +27,6 @@ import {
   assetMimeTypeSchema,
   assetSourceKindSchema,
 } from './snapshots'
-import { persistedProcessorSnapshotSchema } from '@daw-browser/shared'
-import { isJsonObject } from '@daw-browser/shared'
 import { canonicalJson } from './serialization'
 
 const recoveryPointSchemaV1 = z.object({

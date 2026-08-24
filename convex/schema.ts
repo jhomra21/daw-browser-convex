@@ -111,6 +111,9 @@ export default defineSchema({
     status: v.union(v.literal("pending"), v.literal("completed"), v.literal("failed")),
     mimeType: v.string(),
     sizeBytes: v.number(),
+    durationSec: v.optional(v.number()),
+    sampleRate: v.optional(v.number()),
+    channelCount: v.optional(v.number()),
     name: v.string(),
     folderId: v.optional(v.string()),
     createdAt: v.number(),
@@ -203,7 +206,9 @@ export default defineSchema({
     .index("by_status_due", ["status", "nextAttemptAt"])
     .index("by_status_claimedAt", ["status", "claimedAt"])
     .index("by_room", ["projectId"])
-    .index("by_room_status_due", ["projectId", "status", "nextAttemptAt"]),
+    .index("by_room_status_due", ["projectId", "status", "nextAttemptAt"])
+    .index("by_room_kind_status_due", ["projectId", "kind", "status", "nextAttemptAt"])
+    .index("by_room_kind_claimedAt", ["projectId", "kind", "status", "claimedAt"]),
 
   sharedOperationResults: defineTable({
     projectId: v.string(),

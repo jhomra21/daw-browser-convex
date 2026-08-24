@@ -19,7 +19,10 @@ export type { TimelineRangeDeletePatchV1 } from './timeline-range-delete'
 export {
   collectDeletedTrackIdsV1,
   collectTrackDeletionAffectedIdsV1,
+  deriveTrackDeletionAfterStatesV1,
+  deriveTrackUngroupAfterStatesV1,
 } from './trackDeletion'
+export type { NormalizedTrackControlStateV1 } from './trackDeletion'
 export { mergeRecoveryTrackOrderV1 } from './recovery-track-order'
 
 export {

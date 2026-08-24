@@ -193,6 +193,9 @@ export const controlOperationIdSchema = z.string().refine(
   (operationId): operationId is ControlOperationId => Object.hasOwn(controlOperationCatalog, operationId),
   'Unknown control operation.',
 )
+export type ControlOperationIdInput = z.input<typeof controlOperationIdSchema>
+const controlOperationInputSchema = z.unknown()
+export type ControlOperationInput = z.input<typeof controlOperationInputSchema>
 
 export const parseControlOperationId = <Input>(input: Input): ControlOperationId => (
   controlOperationIdSchema.parse(input)
@@ -203,14 +206,14 @@ export const listControlOperationDescriptors = (): readonly ControlOperationDesc
 )
 
 export const getControlOperationDescriptor = (
-  operationId: unknown,
+  operationId: ControlOperationIdInput,
 ): ControlOperationDescriptor => {
   const parsedOperationId = parseControlOperationId(operationId)
   return controlOperationCatalog[parsedOperationId]
 }
 
 export const supportsControlOperation = (
-  operationId: unknown,
+  operationId: ControlOperationIdInput,
   target: ControlOperationTarget,
 ): boolean => {
   const parsedOperationId = controlOperationIdSchema.safeParse(operationId)
@@ -231,7 +234,7 @@ export class UnsupportedControlTargetError extends Error {
 }
 
 export const assertControlOperationSupported = (
-  operationId: unknown,
+  operationId: ControlOperationIdInput,
   target: ControlOperationTarget,
 ): ControlOperationId => {
   const parsedOperationId = parseControlOperationId(operationId)
@@ -277,7 +280,7 @@ export type ControlInvoker<
 const invokeControlOperation = async (
   handlers: Partial<ControlOperationHandlers>,
   operationId: ControlOperationId,
-  input: unknown,
+  input: ControlOperationInput,
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>> => {
   const missingHandler = (id: ControlOperationId): never => {
@@ -338,19 +341,19 @@ export function dispatchControlOperation<
 >(
   handlers: ControlOperationHandlers<Target>,
   operationId: Id,
-  input: unknown,
+  input: ControlInput<Id>,
   context: ControlRequestContext & { target: Target },
 ): Promise<ControlOutput<Id>>
 export function dispatchControlOperation(
   handlers: Partial<ControlOperationHandlers>,
-  operationId: unknown,
-  input: unknown,
+  operationId: ControlOperationIdInput,
+  input: ControlOperationInput,
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>>
 export function dispatchControlOperation(
   handlers: Partial<ControlOperationHandlers>,
-  operationId: unknown,
-  input: unknown,
+  operationId: ControlOperationIdInput,
+  input: ControlOperationInput,
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>> {
   const parsedOperationId = assertControlOperationSupported(operationId, context.target)

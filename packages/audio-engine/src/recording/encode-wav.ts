@@ -35,7 +35,6 @@ export const encodePlanarFloat32Wav = async (input: {
   })
   const source = new AudioSampleSource({
     codec: 'pcm-f32',
-    bitrate: 32 * input.sampleRate * input.channelCount,
   })
   output.addAudioTrack(source)
   let encodedFrames = 0

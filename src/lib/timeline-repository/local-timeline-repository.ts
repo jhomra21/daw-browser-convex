@@ -31,6 +31,10 @@ import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 import { externalPluginEntityKind } from '@daw-browser/external-plugins'
+import {
+  applyLocalExternalProcessorDeletionPlanToStores,
+  planLocalExternalProcessorDeletion,
+} from '~/lib/external-plugins'
 import { z } from 'zod'
 
 const TRACK_KIND = 'track'
@@ -47,6 +51,13 @@ let lifecycleFlushAttached = false
 const now = () => Date.now()
 
 type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValue }
+
+const abortLocalTimelineTransaction = (tx: { abort: () => void; done: Promise<unknown> }) => {
+  try {
+    tx.abort()
+  } catch {}
+  void tx.done.catch(() => undefined)
+}
 
 const isLocalProjectStoredObject = (
   value: LocalProjectStoredValue,
@@ -597,64 +608,75 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const deleteTrack = async (trackId: TimelineTrackId): Promise<void> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
-      tx.store.index('by-kind').getAll(TRACK_KIND),
-      tx.store.index('by-kind').getAll(CLIP_KIND),
-      tx.store.index('by-kind').getAll(EFFECT_KIND),
-      tx.store.index('by-kind').getAll(externalPluginEntityKind),
-      tx.store.index('by-kind').getAll(AUTOMATION_KIND),
-      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
-    ])
-    const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
-    const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
-    const timestamp = now()
-    const remainingTracks = trackValues(trackRows).filter((row) => row.id !== trackId)
-    await Promise.all([
-      tx.store.delete([TRACK_KIND, trackId]),
-      ...clipRows
-        .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...effectRows
-        .filter((row) => isEffectForTrack(row.value, trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...externalPluginRows
-        .filter((row) => isEffectForTrack(row.value, trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...automationRows
-        .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...sidechainRows
-        .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === trackId || row.value.targetTrackId === trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...remainingTracks.map((row) => {
-        const routing = normalizeTrackRouting({
-          track: row,
-          sends: row.sends,
-          outputTargetId: row.outputTargetId,
-          tracks: remainingTracks,
-        })
-        const track: TimelineTrackRow = {
-          ...row,
-          index: deletedIndex !== null && row.index > deletedIndex ? row.index - 1 : row.index,
-          groupId: row.groupId === trackId ? undefined : row.groupId,
-          sends: routing.sends,
-          outputTargetId: routing.outputTargetId,
-          updatedAt: timestamp,
-        }
-        if (
-          track.index === row.index
-          && track.groupId === row.groupId
-          && track.outputTargetId === row.outputTargetId
-          && sendsEqual(track.sends, row.sends)
-        ) {
-          return Promise.resolve()
-        }
-        return tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))
-      }),
-    ])
-    await tx.done
-    markChanged()
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const entities = tx.objectStore('entities')
+    try {
+      const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
+        entities.index('by-kind').getAll(TRACK_KIND),
+        entities.index('by-kind').getAll(CLIP_KIND),
+        entities.index('by-kind').getAll(EFFECT_KIND),
+        entities.index('by-kind').getAll(externalPluginEntityKind),
+        entities.index('by-kind').getAll(AUTOMATION_KIND),
+        entities.index('by-kind').getAll(SIDECHAIN_KIND),
+      ])
+      const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
+      const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
+      const timestamp = now()
+      const remainingTracks = trackValues(trackRows).filter((row) => row.id !== trackId)
+      await Promise.all([
+        entities.delete([TRACK_KIND, trackId]),
+        ...clipRows
+          .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...effectRows
+          .filter((row) => isEffectForTrack(row.value, trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...automationRows
+          .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...sidechainRows
+          .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === trackId || row.value.targetTrackId === trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...remainingTracks.map((row) => {
+          const routing = normalizeTrackRouting({
+            track: row,
+            sends: row.sends,
+            outputTargetId: row.outputTargetId,
+            tracks: remainingTracks,
+          })
+          const track: TimelineTrackRow = {
+            ...row,
+            index: deletedIndex !== null && row.index > deletedIndex ? row.index - 1 : row.index,
+            groupId: row.groupId === trackId ? undefined : row.groupId,
+            sends: routing.sends,
+            outputTargetId: routing.outputTargetId,
+            updatedAt: timestamp,
+          }
+          if (
+            track.index === row.index
+            && track.groupId === row.groupId
+            && track.outputTargetId === row.outputTargetId
+            && sendsEqual(track.sends, row.sends)
+          ) {
+            return Promise.resolve()
+          }
+          return entities.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))
+        }),
+      ])
+      const deletionPlan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: externalPluginRows.filter((row) => isEffectForTrack(row.value, trackId)),
+        retainedMixedEffectRows: [...effectRows, ...externalPluginRows],
+      })
+      applyLocalExternalProcessorDeletionPlanToStores(deletionPlan, {
+        entities,
+        externalPluginArtifacts: tx.objectStore('externalPluginArtifacts'),
+      })
+      await tx.done
+      markChanged()
+    } catch (error) {
+      abortLocalTimelineTransaction(tx)
+      throw error
+    }
   }
 
   const deleteClip = async (clipId: string): Promise<void> => {
@@ -805,19 +827,21 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const ungroupTrack = async (groupId: TimelineTrackId): Promise<void> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
-      tx.store.index('by-kind').getAll(TRACK_KIND),
-      tx.store.index('by-kind').getAll(CLIP_KIND),
-      tx.store.index('by-kind').getAll(EFFECT_KIND),
-      tx.store.index('by-kind').getAll(AUTOMATION_KIND),
-      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
-    ])
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const entities = tx.objectStore('entities')
+    try {
+      const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
+        entities.index('by-kind').getAll(TRACK_KIND),
+        entities.index('by-kind').getAll(CLIP_KIND),
+        entities.index('by-kind').getAll(EFFECT_KIND),
+        entities.index('by-kind').getAll(externalPluginEntityKind),
+        entities.index('by-kind').getAll(AUTOMATION_KIND),
+        entities.index('by-kind').getAll(SIDECHAIN_KIND),
+      ])
     const tracks = trackValues(trackRows)
     const group = tracks.find((track) => track.id === groupId)
     if (!group || group.channelRole !== 'group') {
-      await tx.done
-      throw new Error('Failed to ungroup local timeline because the group track was not found.')
+        throw new Error('Failed to ungroup local timeline because the group track was not found.')
     }
     requireUngroupable(group, tracks, clipValues(clipRows))
     const timestamp = now()
@@ -834,20 +858,32 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         : [{ ...track, index, groupId: nextGroupId, outputTargetId, updatedAt: timestamp }]
     })
     await Promise.all([
-      tx.store.delete([TRACK_KIND, groupId]),
+      entities.delete([TRACK_KIND, groupId]),
       ...effectRows
         .filter((row) => isEffectForTrack(row.value, groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
+        .map((row) => entities.delete([row.kind, row.id])),
       ...automationRows
         .filter((row) => isAutomationEnvelopeForTrack(row.value, groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
+        .map((row) => entities.delete([row.kind, row.id])),
       ...sidechainRows
         .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === groupId || row.value.targetTrackId === groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
+        .map((row) => entities.delete([row.kind, row.id])),
+      ...changedTracks.map((track) => entities.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
     ])
-    await tx.done
-    markChanged()
+      const deletionPlan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: externalPluginRows.filter((row) => isEffectForTrack(row.value, groupId)),
+        retainedMixedEffectRows: [...effectRows, ...externalPluginRows],
+      })
+      applyLocalExternalProcessorDeletionPlanToStores(deletionPlan, {
+        entities,
+        externalPluginArtifacts: tx.objectStore('externalPluginArtifacts'),
+      })
+      await tx.done
+      markChanged()
+    } catch (error) {
+      abortLocalTimelineTransaction(tx)
+      throw error
+    }
   }
 
   const restoreUngroup = async (input: RestoreUngroupInput): Promise<void> => {

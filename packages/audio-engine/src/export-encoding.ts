@@ -7,7 +7,11 @@ import {
   type Target,
 } from 'mediabunny'
 import { getExportAudioFormatMetadata, type ExportAudioFormat } from '@daw-browser/shared'
-import { createExportAudioOutputFormat, getExportAudioCodec, getExportAudioDefaultBitrate } from './export-audio-support'
+import {
+  createExportAudioOutputFormat,
+  getExportAudioCodec,
+  getExportAudioQuality,
+} from './export-audio-support'
 import { createWavQuantizer, type WavEncodingSettings } from './export-fidelity'
 
 export type EncodeAudioBufferTarget =
@@ -103,15 +107,15 @@ export async function encodeAudioBuffer(buffer: AudioBuffer, options: EncodeAudi
   const encodeTarget = createEncodeTarget(options.target)
   const output = new Output({ format: createExportAudioOutputFormat(format), target: encodeTarget.target })
   let sizeBytes = 0
-  encodeTarget.target.onwrite = (_start, end) => {
+  encodeTarget.target.on('write', ({ end }) => {
     throwIfAborted(options.signal)
     sizeBytes = Math.max(sizeBytes, end)
     options.onWrite?.(sizeBytes)
-  }
+  })
   const wav = options.wav ?? { codec: 'pcm-s16', dither: 'none' }
   const src = new AudioBufferSource({
     codec: format === 'wav' ? wav.codec : getExportAudioCodec(format),
-    bitrate: options.bitrate ?? getExportAudioDefaultBitrate(format),
+    quality: getExportAudioQuality(format, options.bitrate),
   })
   try {
     throwIfAborted(options.signal)

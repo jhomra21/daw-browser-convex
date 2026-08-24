@@ -96,6 +96,7 @@ import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
 import { deliverToRenderer } from "./renderer-delivery"
+import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -313,7 +314,8 @@ const applicationMenuController = createApplicationMenuController<Menu>({
     sendRendererMessage(applicationMenuCommandChannel, command)
   },
 })
-let generation = 0
+const rendererLifecycle = createRendererLifecycleOwner()
+let generation = rendererLifecycle.generation()
 const rendererPending = new Map<string, PendingRendererRequest>()
 const preparationRegistry = createPreparationRegistry()
 const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
@@ -356,6 +358,7 @@ let removeAudioHostSpectrumListener: (() => void) | undefined
 let removeAudioHostScheduleProgressListener: (() => void) | undefined
 let removeAudioHostWorkerNotificationListener: (() => void) | undefined
 const activeEditorProjectBindings = createNativeVstProjectBindings()
+const activeRendererTransactions = new Map<string, { generation: number; senderId: number }>()
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
 const fileCapabilities = createFileCapabilityManager({
   dialog: {
@@ -454,6 +457,28 @@ const rejectRendererPending = (message: string) => {
 const rejectEditorStateAcks = (message: string) => {
   for (const pending of pendingEditorStateAcks.values()) pending.reject(new Error(message))
   pendingEditorStateAcks.clear()
+}
+const invalidateRendererGeneration = (message: string) => {
+  const invalidation = rendererLifecycle.invalidate()
+  if (!invalidation) return
+  const previousGeneration = invalidation.previousGeneration
+  generation = invalidation.generation
+  rejectEditorStateAcks(message)
+  abortOfflineRenderJobs()
+  applicationMenuController.reset()
+  preparationRegistry.abortAll()
+  settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(previousGeneration))
+  for (const [token, transaction] of activeRendererTransactions) {
+    if (transaction.generation !== previousGeneration) continue
+    activeRendererTransactions.delete(token)
+    try {
+      activeEditorProjectBindings.rollback(token)
+    } catch {
+      // A newer staged transaction owns the binding registry.
+    }
+  }
+  rejectRendererPending(message)
+  settleCapabilityRevocation(audioHostSupervisor?.invalidateManualTransaction() ?? Promise.resolve())
 }
 const rejectRendererRequest = (id: string, message: string) => {
   const pending = rendererPending.get(id)
@@ -1394,9 +1419,21 @@ const registerIpc = () => {
   ipcMain.handle("daw:audio-host:session:begin-transaction", async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     if (!supervisor || !nativeUndefinedEnvelopeSchema.safeParse(value).success) return nativeSessionFailure()
+    const requestGeneration = generation
+    const senderId = event.sender.id
     try {
       const transactionToken = await supervisor.beginTransaction()
+      if (
+        generation !== requestGeneration
+        || !window_
+        || window_.webContents.id !== senderId
+        || !audioHostAllowed(event)
+      ) {
+        await supervisor.invalidateManualTransaction()
+        return nativeSessionFailure()
+      }
       activeEditorProjectBindings.stageEmpty(transactionToken)
+      activeRendererTransactions.set(transactionToken, { generation: requestGeneration, senderId })
       return { ok: true as const, transactionToken }
     } catch {
       return nativeSessionFailure()
@@ -1406,11 +1443,20 @@ const registerIpc = () => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
+    const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+    if (
+      !transaction
+      || transaction.generation !== generation
+      || transaction.senderId !== event.sender.id
+      || !audioHostAllowed(event)
+    ) return nativeSessionFailure()
     try {
       await supervisor.commitTransaction(envelope.data.transactionToken)
+      activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
       return { ok: true as const }
     } catch {
+      activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
       return nativeSessionFailure()
     }
@@ -1419,12 +1465,20 @@ const registerIpc = () => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeUndefinedEnvelopeSchema.safeParse(value)
     if (!supervisor || !envelope.success || !envelope.data.transactionToken) return nativeSessionFailure()
+    const transaction = activeRendererTransactions.get(envelope.data.transactionToken)
+    if (
+      !transaction
+      || transaction.generation !== generation
+      || transaction.senderId !== event.sender.id
+      || !audioHostAllowed(event)
+    ) return nativeSessionFailure()
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
       return { ok: true as const }
     } catch {
       return nativeSessionFailure()
     } finally {
+      activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
     }
   })
@@ -1605,27 +1659,12 @@ const createWindow = () => {
     },
   })
   window_?.on("closed", () => {
-    rejectEditorStateAcks("Renderer destroyed.")
+    invalidateRendererGeneration("Renderer destroyed.")
     window_ = undefined
   })
-  window_.webContents.on("did-start-navigation", () => {
-    rejectEditorStateAcks("Renderer reloaded.")
-    abortOfflineRenderJobs()
-    applicationMenuController.reset()
-    preparationRegistry.abortAll()
-    settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
-    generation += 1
-    rejectRendererPending("Renderer reloaded.")
-  })
-  window_.webContents.on("render-process-gone", () => {
-    rejectEditorStateAcks("Renderer crashed.")
-    abortOfflineRenderJobs()
-    applicationMenuController.reset()
-    preparationRegistry.abortAll()
-    settleCapabilityRevocation(fileCapabilities.revokeRendererGeneration(generation))
-    generation += 1
-    rejectRendererPending("Renderer crashed.")
-  })
+  window_.webContents.on("did-start-navigation", () => invalidateRendererGeneration("Renderer reloaded."))
+  window_.webContents.on("render-process-gone", () => invalidateRendererGeneration("Renderer crashed."))
+  window_.webContents.on("did-finish-load", () => rendererLifecycle.markDocumentLoaded())
   window_.webContents.setWindowOpenHandler(({ url }) => {
     if (externalUrl(url)) void shell.openExternal(url)
     return { action: "deny" }
@@ -1677,6 +1716,7 @@ const finishQuit = async () => {
   finishingQuit = true
   await closeSocket()
   preparationRegistry.abortAll()
+  invalidateRendererGeneration("Application is closing.")
   rejectRendererPending("Application is closing.")
   activeEditorProjectBindings.clear()
   await fileCapabilities.revokeAll()

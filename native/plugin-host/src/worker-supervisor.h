@@ -289,6 +289,7 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kParameterEdit,
   kTail,
   kEditorState,
+  kParameterEditBegin,
 };
 
 struct WorkerDiagnostic {

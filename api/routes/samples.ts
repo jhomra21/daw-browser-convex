@@ -4,6 +4,7 @@ import { createR2ObjectResponse } from '../r2-object-response'
 import { fetchFallbackDefaultSample, listDefaultSamples } from '../default-samples'
 import { hashFile } from '../hash-file'
 import { requireProjectRoleContextForApi } from '../project-access'
+import { inspectControlUploadAudioMetadata } from '../control-upload-audio-metadata'
 import { controlErrorSchemaV1 } from '@daw-browser/control'
 import { z } from 'zod'
 
@@ -131,9 +132,14 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
       const access = await requireProjectRoleContext(c, projectId, ['owner', 'editor'])
       if (!access) return c.json({ error: 'Forbidden' }, 403)
       const contentSha256 = await hashFile(file)
+      const metadata = await inspectControlUploadAudioMetadata({
+        file,
+        declaredMimeType: file.type,
+      })
       const idempotencyKey = await browserIdempotencyKey(clientAssetKey)
       const begun = await access.convex.mutation(convexApi.assets.beginUpload, {
         projectId, idempotencyKey, contentSha256, name: file.name, mimeType: file.type, sizeBytes: file.size,
+        durationSec: metadata.durationSec, sampleRate: metadata.sampleRate, channelCount: metadata.channelCount,
       })
       if (begun.status !== 'completed') {
         try {

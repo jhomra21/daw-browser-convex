@@ -1,4 +1,5 @@
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
+import { hasActiveR2DeleteRows } from "./r2Deletes";
 
 type ProjectRowReadCtx = { db: DatabaseReader };
 
@@ -49,6 +50,9 @@ export async function ensureOwnedProjectRow(
     return { status: "exists" as const, project };
   }
 
+  if (await hasActiveR2DeleteRows(ctx, projectId)) {
+    throw new Error("Project storage cleanup is still pending.");
+  }
   const now = Date.now();
   const projectIdRow = await ctx.db.insert("projects", {
     projectId,

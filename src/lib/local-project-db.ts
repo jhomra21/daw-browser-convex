@@ -114,6 +114,11 @@ export type LocalProjectExternalPluginArtifactRow = ProjectManifestPluginArtifac
   payload?: Uint8Array
   updatedAt: number
 }
+export type LocalExternalProcessorRecoveryBundle = {
+  version: 1
+  entity: LocalProjectEntityRow
+  artifacts: LocalProjectExternalPluginArtifactRow[]
+}
 export type LocalControlStateRow = LocalProjectStateRow
 export type LocalControlCommitRow = {
   id: string
@@ -157,6 +162,8 @@ export type LocalControlRecoveryRow = {
   kind: string
   payload: string
   payloadHash: string
+  externalProcessors?: LocalExternalProcessorRecoveryBundle[]
+  externalProcessorsHash?: string
   localSampleUrls?: Record<string, string>
   consumedAt?: number
 }

@@ -18,6 +18,7 @@ import schema from "./schema";
 
 const modules = {
   "./_generated/api.ts": () => import("./_generated/api"),
+  "./assets.ts": () => import("./assets"),
   "./control.ts": () => import("./control"),
   "./projects.ts": () => import("./projects"),
   "./r2Deletes.ts": () => import("./r2Deletes"),
@@ -48,6 +49,21 @@ const setup = async () => {
   const t = convexTest(schema, modules);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
   return t;
+};
+
+const completeR2Deletes = async (t: Awaited<ReturnType<typeof setup>>) => {
+  const rows = await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue").collect());
+  if (rows.length === 0) return;
+  const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+  const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId,
+    ids: rows.map((row) => row._id),
+    now: Date.now(),
+  });
+  await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
+    projectId,
+    claims: claimed.flatMap((row) => row.claimToken === undefined ? [] : [{ id: row._id, claimToken: row.claimToken }]),
+  });
 };
 
 const addTrack = async (
@@ -563,6 +579,140 @@ test("restores an ungrouped group and its direct child transitions through recov
   });
 });
 
+test("captures canonical delete after-state for unrelated survivor routing and restores exact state", async () => {
+  const t = await setup();
+  const keptGroup = await addTrack(t, { name: "Kept group", index: 0, channelRole: "group" });
+  const deletedGroup = await addTrack(t, { name: "Deleted group", index: 1, channelRole: "group" });
+  await addTrack(t, { name: "Deleted child", index: 2, groupId: deletedGroup });
+  const survivor = await addTrack(t, { name: "Survivor", index: 3, groupId: keptGroup });
+  await t.run(async (ctx) => {
+    const track = await ctx.db.get(survivor);
+    const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+    if (!track || !channel) throw new Error("Delete recovery fixture is unavailable.");
+    await ctx.db.patch(channel._id, {
+      outputTargetId: keptGroup,
+      sends: [{ targetId: keptGroup, amount: 0.25, tap: "pre-fader" }],
+    });
+  });
+  const before = await t.run(async (ctx) => {
+    const track = await ctx.db.get(survivor);
+    const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+    if (!track || !channel) throw new Error("Delete recovery fixture is unavailable.");
+    return { index: track.index, groupId: track.groupId, outputTargetId: channel.outputTargetId, sends: channel.sends };
+  });
+  const deleted = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{
+      kind: "track.delete",
+      track: { source: "persisted", id: String(deletedGroup) },
+    }], "delete-unrelated-routing"),
+  });
+  const descriptor = deleted.recoveries[0];
+  if (!descriptor) throw new Error("Expected delete recovery.");
+  const immediate = await t.run(async (ctx) => {
+    const track = await ctx.db.get(survivor);
+    const channel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", survivor)).unique();
+    const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+    const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+    if (!track || !channel || !recovery) throw new Error("Delete recovery state is unavailable.");
+    return { track, channel, payload: parseCapturedRecoveryPayload(recovery.payload) };
+  });
+  if (immediate.payload.kind !== "track.delete") throw new Error("Expected track delete payload.");
+  const survivorEntry = immediate.payload.data.survivors.find((entry) => entry.id === String(survivor));
+  expect(survivorEntry?.after).toMatchObject({
+    index: immediate.track.index,
+    groupId: String(immediate.track.groupId),
+    mixer: {
+      outputTargetId: String(immediate.channel.outputTargetId),
+      sends: [{ targetId: String(keptGroup), amount: 0.25, tap: "pre-fader" }],
+    },
+  });
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "delete-unrelated-routing-restore"),
+  });
+  const restored = await t.run(async (ctx) => {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const track = tracks.find((entry) => entry.name === "Survivor");
+    const channel = track
+      ? await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", track._id)).unique()
+      : null;
+    return { track, channel };
+  });
+  expect(restored.track?.index).toBe(before.index);
+  expect(String(restored.track?.groupId)).toBe(String(before.groupId));
+  expect(String(restored.channel?.outputTargetId)).toBe(String(before.outputTargetId));
+  expect(restored.channel?.sends).toEqual(before.sends);
+});
+
+test("captures canonical ungroup after-state for unrelated and rebound child routing", async () => {
+  const t = await setup();
+  const parent = await addTrack(t, { name: "Parent", index: 0, channelRole: "group" });
+  const group = await addTrack(t, { name: "Group", index: 1, channelRole: "group", groupId: parent });
+  const unrelatedOutput = await addTrack(t, { name: "Unrelated output", index: 2, channelRole: "group" });
+  const unrelatedChild = await addTrack(t, { name: "Unrelated child", index: 3, groupId: group });
+  const reboundChild = await addTrack(t, { name: "Rebound child", index: 4, groupId: group });
+  await t.run(async (ctx) => {
+    const unrelatedChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", unrelatedChild)).unique();
+    const reboundChannel = await ctx.db.query("mixerChannels").withIndex("by_track", (q) => q.eq("trackId", reboundChild)).unique();
+    if (!unrelatedChannel || !reboundChannel) throw new Error("Ungroup recovery fixture is unavailable.");
+    await ctx.db.patch(unrelatedChannel._id, { outputTargetId: unrelatedOutput });
+    await ctx.db.patch(reboundChannel._id, { outputTargetId: group });
+  });
+  const before = await t.run(async (ctx) => {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    return {
+      tracks: tracks.filter((track) => track.name.endsWith("child")).map((track) => ({
+        name: track.name, index: track.index, groupId: track.groupId,
+      })),
+      channels: channels.filter((channel) => [unrelatedChild, reboundChild].some((id) => String(id) === String(channel.trackId))),
+    };
+  });
+  const ungrouped = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: await approvedRequest(t, [{
+      kind: "track.ungroup",
+      group: { source: "persisted", id: String(group) },
+    }], "ungroup-routing-regression"),
+  });
+  const descriptor = ungrouped.recoveries[0];
+  if (!descriptor) throw new Error("Expected ungroup recovery.");
+  const immediate = await t.run(async (ctx) => {
+    const tracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect();
+    const recoveryId = ctx.db.normalizeId("controlRecoveries", descriptor.id);
+    const recovery = recoveryId ? await ctx.db.get(recoveryId) : null;
+    if (!recovery) throw new Error("Ungroup recovery is unavailable.");
+    return { tracks, channels, payload: parseCapturedRecoveryPayload(recovery.payload) };
+  });
+  if (immediate.payload.kind !== "track.ungroup") throw new Error("Expected track ungroup payload.");
+  for (const child of [unrelatedChild, reboundChild]) {
+    const track = immediate.tracks.find((entry) => String(entry._id) === String(child));
+    const channel = immediate.channels.find((entry) => String(entry.trackId) === String(child));
+    const entry = immediate.payload.data.children.find((candidate) => candidate.id === String(child));
+    expect(entry?.after).toMatchObject({
+      index: track?.index,
+      groupId: track?.groupId === undefined ? undefined : String(track.groupId),
+      mixer: { outputTargetId: channel?.outputTargetId === undefined ? undefined : String(channel.outputTargetId) },
+    });
+  }
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: descriptor.id } }], "ungroup-routing-regression-restore"),
+  });
+  const restored = await t.run(async (ctx) => ({
+    tracks: await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
+    channels: await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
+  }));
+  const restoredGroup = restored.tracks.find((track) => track.name === "Group");
+  for (const expected of before.tracks) {
+    const actual = restored.tracks.find((track) => track.name === expected.name);
+    expect(actual?.index).toBe(expected.index);
+    expect(String(actual?.groupId)).toBe(String(restoredGroup?._id));
+  }
+  expect(String(restored.channels.find((channel) => String(channel.trackId) === String(unrelatedChild))?.outputTargetId))
+    .toBe(String(unrelatedOutput));
+  expect(String(restored.channels.find((channel) => String(channel.trackId) === String(reboundChild))?.outputTargetId))
+    .toBe(String(restoredGroup?._id));
+});
+
 test("lists only active recovery descriptors without private payload data", async () => {
   const t = await setup();
   const track = await addTrack(t, { name: "Recovery list", index: 0 });
@@ -609,6 +759,9 @@ test("project deletion removes recoveries before a project ID is recreated", asy
   });
   await t.withIdentity({ subject: owner }).mutation(api.projects.prepareCloudRoomDeleteAsOwner, { projectId });
   await t.withIdentity({ subject: owner }).mutation(api.projects.finalizeCloudRoomDeleteAsOwner, { projectId });
+  await expect(t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId }))
+    .rejects.toThrow("cleanup");
+  await completeR2Deletes(t);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
   expect(await t.run(async (ctx) => await ctx.db.query("sharedOperationResults").collect())).toEqual([]);
   expect(await t.run(async (ctx) => await ctx.db.query("clipDeletionRecoveryReceipts").collect())).toEqual([]);
@@ -633,6 +786,9 @@ test("project deletion preserves R2 jobs for prior storage lifecycles", async ()
   });
   await t.withIdentity({ subject: owner }).mutation(api.projects.prepareCloudRoomDeleteAsOwner, { projectId });
   await t.withIdentity({ subject: owner }).mutation(api.projects.finalizeCloudRoomDeleteAsOwner, { projectId });
+  await expect(t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId }))
+    .rejects.toThrow("cleanup");
+  await completeR2Deletes(t);
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
   const second = await t.run(async (ctx) => await ctx.db.query("projects")
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
@@ -653,11 +809,13 @@ test("project deletion preserves R2 jobs for prior storage lifecycles", async ()
   const rows = await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue").collect());
   const firstPrefixKey = `asset-namespaces/${first.storageNamespace}/`;
   const secondPrefixKey = `asset-namespaces/${second.storageNamespace}/`;
+  const projectPrefixKey = `projects/${projectId}/`;
   expect(rows.map((row) => row.r2Key).sort()).toEqual([
     firstExactKey,
     firstPrefixKey,
     secondExactKey,
     secondPrefixKey,
+    projectPrefixKey,
   ].sort());
   const oldRows = rows.filter((row) => row.r2Key.startsWith(firstPrefixKey));
   const newRows = rows.filter((row) => row.r2Key.startsWith(secondPrefixKey));
@@ -1638,5 +1796,44 @@ test("every advertised action has an authenticated preview and commit endpoint f
     expect(automation).toEqual([]);
     expect(sidechains).toEqual([]);
     expect(master?.masterVolume).toBe(0.7);
+  });
+});
+
+test("a finalized uploaded asset supplies trusted metadata to canonical clip creation", async () => {
+  const t = await setup();
+  const audio = await addTrack(t, { name: "Uploaded audio", index: 0 });
+  const contentSha256 = "c".repeat(64);
+  const begun = await t.withIdentity({ subject: owner }).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "uploaded-asset-1",
+    contentSha256,
+    name: "Uploaded.wav",
+    mimeType: "audio/wav",
+    sizeBytes: 128,
+    durationSec: 1.25,
+    sampleRate: 44_100,
+    channelCount: 2,
+  });
+  const finalized = await t.withIdentity({ subject: owner }).mutation(api.assets.finalizeUpload, {
+    projectId,
+    idempotencyKey: "uploaded-asset-1",
+    contentSha256,
+  });
+  expect(finalized.asset.id).toBe(begun.assetKey);
+  const committed = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{
+      kind: "clip.audio.create",
+      track: { source: "persisted", id: String(audio) },
+      asset: { source: "persisted", id: finalized.asset.id },
+    }], "uploaded-asset-clip"),
+  });
+  expect(committed.applied).toBe(true);
+  const clip = await t.run(async (ctx) => await ctx.db.query("clips")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  expect(clip).toMatchObject({
+    sourceAssetKey: finalized.asset.id,
+    sourceDurationSec: 1.25,
+    sourceSampleRate: 44_100,
+    sourceChannelCount: 2,
   });
 });

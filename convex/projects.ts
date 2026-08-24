@@ -1,5 +1,6 @@
 import { mutation, query, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { projectR2DeletePrefixes } from "@daw-browser/shared";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 import { enqueueR2DeleteRows } from "./r2Deletes";
@@ -248,7 +249,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     await deleteRoomRows(ctx, projectId);
     await enqueueR2DeleteRows(ctx, {
       projectId, storageNamespace: ownerProject.storageNamespace,
-      keys: [`asset-namespaces/${ownerProject.storageNamespace}/`], kind: "project-prefix",
+      keys: [...projectR2DeletePrefixes(projectId, ownerProject.storageNamespace)], kind: "project-prefix",
     });
     return statusResult("deleted");
   },

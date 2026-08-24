@@ -150,6 +150,68 @@ describe("control REST routes", () => {
     expect(response.headers.get("www-authenticate")).toContain('error="insufficient_scope"')
   })
 
+test("inspects upload bytes before beginning the receipt or writing R2", async () => {
+  const events: string[] = []
+  const application = new Hono<ApiBindings>()
+  registerControlRoutes(application, {
+    resolveBearer: async () => bearer,
+    inspectAudioMetadata: async () => {
+      events.push("inspect")
+      return {
+        durationSec: 1,
+        sampleRate: 44_100,
+        channelCount: 2,
+        detectedFormat: "WAVE",
+        detectedMimeType: "audio/wav",
+        detectedCodec: "pcm-s16",
+      }
+    },
+    createGateway: async () => ({
+      query: async () => snapshot,
+      mutation: async (_reference) => {
+        if (!events.includes("begin")) {
+          events.push("begin")
+          return { status: "pending", assetKey: "asset-1", r2Key: "asset-1/object" }
+        }
+        events.push("finalize")
+        return {
+          asset: {
+            id: "asset-1",
+            name: "Kick.wav",
+            sourceKind: "upload",
+            mimeType: "audio/wav",
+            sizeBytes: 4,
+            contentSha256: "0".repeat(64),
+            durationSec: 1,
+            sampleRate: 44_100,
+            channelCount: 2,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          idempotencyReplay: false,
+        }
+      },
+    }),
+  })
+  const form = new FormData()
+  const bytes = new Uint8Array([1, 2, 3, 4])
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  form.append("file", new File([bytes], "Kick.wav", { type: "audio/wav" }))
+  const response = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+    method: "POST",
+    headers: { "Idempotency-Key": "asset-key-1", "Content-Length": "1000", "x-content-sha256": digest },
+    body: form,
+  }, {
+    daw_audio_samples: {
+      put: async () => {
+        events.push("put")
+      },
+    },
+  } satisfies ApiBindings["Bindings"])
+  expect(response.status).toBe(201)
+  expect(events).toEqual(["inspect", "begin", "put", "finalize"])
+})
+
   test("rejects mismatched, malformed, and oversized write requests", async () => {
     const application = app()
     expect((await application.request("https://control.example/api/control/v1/projects/project-2/preview", {

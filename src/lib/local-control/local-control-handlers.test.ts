@@ -3,6 +3,10 @@ import { test } from 'bun:test'
 import {
   canonicalProjectSnapshotSchema,
   dispatchControlOperation,
+  type ControlOperationId,
+  type ControlOperationIdInput,
+  type ControlOperationInput,
+  type ControlOutput,
   type ControlOperationTarget,
 } from '@daw-browser/control'
 import { createLocalProject } from '~/lib/local-project-db'
@@ -18,7 +22,11 @@ test('local canonical handlers conform to the control operation contract', async
     projectId: project.id,
     actor: { subject: 'local:conformance-user' },
   })
-  const invoke = async (operation: string, input: unknown, target: ControlOperationTarget) => {
+  const invoke = async (
+    operation: ControlOperationIdInput,
+    input: ControlOperationInput,
+    target: ControlOperationTarget,
+  ): Promise<ControlOutput<ControlOperationId>> => {
     try {
       return await dispatchControlOperation(
         handlers,

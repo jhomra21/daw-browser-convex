@@ -59,7 +59,7 @@ const withExternalProcessorWriteLock = async <Value>(
   withWriteChain(externalProcessorWriteChains, `${projectId}:${instanceId}`, callback)
 ))
 
-const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProcessor => {
+export const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProcessor => {
   const { discoveredPath: _discoveredPath, ...identity } = processor.manifest.identity
   return externalProcessorSchema.parse({
     ...processor,
@@ -68,6 +68,92 @@ const pathFreeExternalProcessor = (processor: ExternalProcessor): ExternalProces
       identity,
     },
   })
+}
+
+type ExternalProcessorEntityStore = {
+  delete: (key: [string, string]) => void
+  put: (row: LocalProjectEntityRow) => void
+}
+
+type ExternalProcessorArtifactStore = {
+  delete: (key: string) => void
+}
+
+export type LocalExternalProcessorDeletionPlan = {
+  entityKeys: readonly [string, string][]
+  artifactIds: readonly string[]
+  retainedRows: readonly LocalProjectEntityRow[]
+}
+
+const abortExternalProcessorTransaction = (tx: { abort: () => void; done: Promise<unknown> }) => {
+  try {
+    tx.abort()
+  } catch {}
+  void tx.done.catch(() => undefined)
+}
+
+export const planLocalExternalProcessorDeletion = (input: {
+  selectedExternalRows: readonly LocalProjectEntityRow[]
+  retainedMixedEffectRows: readonly LocalProjectEntityRow[]
+}): LocalExternalProcessorDeletionPlan => {
+  const deletedKeys = new Set(input.selectedExternalRows.map((row) => `${row.kind}\u0000${row.id}`))
+  const retainedArtifactIds = new Set<string>()
+  const retainedRows = normalizeMixedEffectEntityRows(jsonEntityRows(input.retainedMixedEffectRows)
+    .filter((row) => !deletedKeys.has(`${row.kind}\u0000${row.id}`)))
+  for (const row of retainedRows.filter((entry) => entry.kind === externalPluginEntityKind)) {
+    const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(row.value))
+    if (!parsed.success) throw new Error(`External plugin row "${row.id}" is incompatible or corrupt.`)
+    for (const metadata of [parsed.data.state, parsed.data.launchReference?.state]) {
+      if (metadata?.bucket === 'local') retainedArtifactIds.add(metadata.artifactId)
+    }
+  }
+  const artifactIds = new Set<string>()
+  for (const row of input.selectedExternalRows) {
+    if (row.kind !== externalPluginEntityKind) throw new Error(`Cannot delete non-external processor row "${row.id}".`)
+    const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(row.value))
+    if (!parsed.success) continue
+    for (const metadata of [parsed.data.state, parsed.data.launchReference?.state]) {
+      if (
+        metadata?.bucket === 'local'
+        && metadata.artifactKind === 'plugin-state'
+        && metadata.location === localVstStateArtifactLocation(metadata.artifactId)
+        && metadata.byteLength <= maxVst3WorkerStateBytes
+        && !retainedArtifactIds.has(metadata.artifactId)
+      ) {
+        artifactIds.add(metadata.artifactId)
+      }
+    }
+  }
+  return {
+    entityKeys: input.selectedExternalRows.map((row) => [row.kind, row.id]),
+    artifactIds: [...artifactIds],
+    retainedRows,
+  }
+}
+
+export const applyLocalExternalProcessorDeletionPlanToStores = (
+  plan: LocalExternalProcessorDeletionPlan,
+  stores: {
+    entities: ExternalProcessorEntityStore
+    externalPluginArtifacts: ExternalProcessorArtifactStore
+  },
+): void => {
+  for (const key of plan.entityKeys) stores.entities.delete(key)
+  for (const artifactId of plan.artifactIds) stores.externalPluginArtifacts.delete(artifactId)
+  for (const row of plan.retainedRows) stores.entities.put(row)
+}
+
+export const applyLocalExternalProcessorDeletionPlanToLocalControl = (
+  plan: LocalExternalProcessorDeletionPlan,
+  writer: {
+    deleteEntity: (kind: string, id: string) => void
+    deleteArtifact: (id: string) => void
+    putEntity: (row: LocalProjectEntityRow) => void
+  },
+): void => {
+  for (const [kind, id] of plan.entityKeys) writer.deleteEntity(kind, id)
+  for (const artifactId of plan.artifactIds) writer.deleteArtifact(artifactId)
+  for (const row of plan.retainedRows) writer.putEntity(row)
 }
 
 const parseExternalProcessor = (value: ExternalPluginJsonValue, rowId: string): ExternalProcessor => {
@@ -383,17 +469,22 @@ export const deleteLocalExternalProcessor = async (
       await tx.done
       return
     }
-    const targetProcessor = parseExternalProcessor(parseExternalPluginJsonValue(target.value), target.id)
-    const state = targetProcessor.state ?? targetProcessor.launchReference?.state
-    if (state?.bucket === 'local') {
-      await tx.objectStore('externalPluginArtifacts').delete(state.artifactId)
+    try {
+      const plan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: [target],
+        retainedMixedEffectRows: rows.filter((row) => (
+          row.kind === 'effect' || row.kind === externalPluginEntityKind
+        )),
+      })
+      applyLocalExternalProcessorDeletionPlanToStores(plan, {
+        entities: tx.objectStore('entities'),
+        externalPluginArtifacts: tx.objectStore('externalPluginArtifacts'),
+      })
+      await tx.done
+      notifyLocalProjectChanged(projectId)
+    } catch (error) {
+      abortExternalProcessorTransaction(tx)
+      throw error
     }
-    await tx.objectStore('entities').delete([externalPluginEntityKind, rowId])
-    const normalized = normalizeMixedEffectEntityRows(jsonEntityRows(rows.filter((row) => (
-      row.kind !== externalPluginEntityKind || row.id !== rowId
-    ))))
-    for (const row of normalized) await tx.objectStore('entities').put(row)
-    await tx.done
-    notifyLocalProjectChanged(projectId)
   })
 }

@@ -20,6 +20,11 @@ import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } 
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { advanceProjectRevision } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
+import {
+  deriveTrackDeletionAfterStatesV1,
+  deriveTrackUngroupAfterStatesV1,
+  type NormalizedTrackControlStateV1,
+} from "@daw-browser/control-core";
 import { automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
@@ -231,16 +236,28 @@ async function deleteTrackSubtreeFromPreflights(
     await deleteTrackEntitiesFromPreflight(ctx, preflight);
   }
 
-  const remaining = await ctx.db
+  const remaining: Doc<"tracks">[] = await ctx.db
     .query("tracks")
     .withIndex("by_room_index", (q: any) => q.eq("projectId", projectId))
     .collect();
-  const orderedRemaining = remaining.sort((left: any, right: any) => left.index - right.index);
-  for (let index = 0; index < orderedRemaining.length; index += 1) {
-    const track = orderedRemaining[index];
-    const nextGroupId = deletedTrackIds.has(String(track.groupId)) ? undefined : track.groupId;
+  const afterStates = deriveTrackDeletionAfterStatesV1(
+    remaining.map((track): NormalizedTrackControlStateV1 => ({
+      id: String(track._id),
+      index: track.index,
+      groupId: track.groupId ? String(track.groupId) : undefined,
+      sends: [],
+    })),
+    deletedTrackIds,
+  );
+  const trackById = new Map(remaining.map((track) => [String(track._id), track]));
+  for (const after of afterStates) {
+    const track = trackById.get(after.id);
+    if (!track) continue;
+    const nextGroupId = after.groupId
+      ? ctx.db.normalizeId("tracks", after.groupId) ?? undefined
+      : undefined;
     const patch: Partial<Pick<Doc<"tracks">, "index" | "groupId">> = {};
-    if (track.index !== index) patch.index = index;
+    if (track.index !== after.index) patch.index = after.index;
     if (track.groupId !== nextGroupId) patch.groupId = nextGroupId;
     if (Object.keys(patch).length === 0) continue;
     await ctx.db.patch(track._id, patch);
@@ -1357,7 +1374,7 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
     return { status: "rejected" as const };
   }
 
-  const tracks = await listProjectTracksWithMixerChannels(ctx, groupAccess.track.projectId);
+  const tracks = await listProjectTracksWithMixerChannels(ctx, groupAccess.track.projectId, true);
   const group = tracks.find((track) => String(track._id) === String(normalizedGroupId));
   if (!group || group.channelRole !== "group" || await isTrackLockedByOther(ctx, group, userId)) return { status: "rejected" as const };
   const directChildren = tracks.filter((track) => String(track.groupId) === String(normalizedGroupId));
@@ -1376,16 +1393,43 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
   ));
   if (hasExternalReference) return { status: "rejected" as const };
 
+  const afterStates = deriveTrackUngroupAfterStatesV1(
+    tracks.map((track): NormalizedTrackControlStateV1 => ({
+      id: String(track._id),
+      index: track.index,
+      groupId: track.groupId ? String(track.groupId) : undefined,
+      outputTargetId: track.outputTargetId ? String(track.outputTargetId) : undefined,
+      sends: track.sends.map((send) => ({
+        targetId: String(send.targetId),
+        amount: send.amount,
+        tap: send.tap,
+      })),
+    })),
+    {
+      groupId: String(normalizedGroupId),
+      groupIndex: group.index,
+      parentGroupId: group.groupId ? String(group.groupId) : undefined,
+    },
+  );
+  const afterStateById = new Map(afterStates.map((state) => [state.id, state]));
+  const childPatches: Promise<unknown>[] = [];
   for (const child of directChildren) {
-    const groupIdForChild = group.groupId;
+    const after = afterStateById.get(String(child._id));
+    if (!after) continue;
+    const groupIdForChild = after.groupId
+      ? ctx.db.normalizeId("tracks", after.groupId) ?? undefined
+      : undefined;
     if (String(child.groupId) !== String(groupIdForChild)) {
-      await ctx.db.patch(child._id, { groupId: groupIdForChild });
+      childPatches.push(ctx.db.patch(child._id, { groupId: groupIdForChild }));
     }
-    const channel = await ensureMixerChannelForTrack(ctx, child);
-    if (String(channel.outputTargetId) === String(normalizedGroupId)) {
-      await ctx.db.patch(channel._id, { outputTargetId: groupIdForChild });
+    const outputTargetId = after.outputTargetId
+      ? ctx.db.normalizeId("tracks", after.outputTargetId) ?? undefined
+      : undefined;
+    if (String(child.outputTargetId) !== String(outputTargetId)) {
+      childPatches.push(ctx.db.patch(child.mixerChannelId, { outputTargetId }));
     }
   }
+  await Promise.all(childPatches);
   const automation = await ctx.db
     .query("automationEnvelopes")
     .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
@@ -1453,7 +1497,8 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
   await ctx.db.delete(normalizedGroupId);
   const remaining = tracks.filter((track) => String(track._id) !== String(normalizedGroupId));
   for (const track of remaining) {
-    if (track.index > group.index) await ctx.db.patch(track._id, { index: track.index - 1 });
+    const after = afterStateById.get(String(track._id));
+    if (after && track.index !== after.index) await ctx.db.patch(track._id, { index: after.index });
   }
   return result;
 };

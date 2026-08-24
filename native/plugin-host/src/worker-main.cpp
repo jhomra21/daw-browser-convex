@@ -239,6 +239,8 @@ int main(const int argc, char* argv[]) {
           ? daw::plugin_host::WorkerDiagnosticKind::kTail
         : notification.kind == daw::plugin_host::WorkerNotificationKind::kEditorState
           ? daw::plugin_host::WorkerDiagnosticKind::kEditorState
+        : notification.kind == daw::plugin_host::WorkerNotificationKind::kParameterEditBegin
+          ? daw::plugin_host::WorkerDiagnosticKind::kParameterEditBegin
           : daw::plugin_host::WorkerDiagnosticKind::kFault;
       static_cast<void>(transport->PublishDiagnostic({
         .kind = kind,

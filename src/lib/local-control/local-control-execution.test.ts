@@ -17,7 +17,8 @@ import {
   openLocalProjectDb,
 } from '~/lib/local-project-db'
 import { z } from 'zod'
-import { setLocalExternalProcessor } from '~/lib/external-plugins'
+import { listLocalExternalProcessors, persistLocalExternalProcessorState, setLocalExternalProcessor } from '~/lib/external-plugins'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
 import { executeLocalControlRequestV1 } from './local-control-execution'
 import { withLocalControlTransaction } from './local-control-state'
@@ -1052,4 +1053,82 @@ test('preserves every earlier deletion across cumulative local actions', async (
       targetTrackId: ids.return, amount: 0.5,
     }])
   }
+})
+
+test('deletes and immediately recovers a local external processor artifact exactly', async () => {
+  const { projectId, ids } = await seedActionFixture()
+  const externalId = ids.external
+  const targetId = ids.target
+  if (!externalId || !targetId) throw new Error('Expected external fixture IDs.')
+  const bytes = new Uint8Array([3, 1, 4, 1, 5, 9])
+  const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const processor = await persistLocalExternalProcessorState(projectId, externalId.slice('external-plugin:'.length), { bytes, sha256: hash })
+  if (!processor?.state) throw new Error('Expected persisted external processor state.')
+  const db = await openLocalProjectDb(projectId)
+  await executeLocalControlRequestV1({
+    projectId,
+    actions: [{ kind: 'track.delete', track: { source: 'persisted', id: targetId } }],
+  })
+  expect(await db.get('entities', ['external-plugin', externalId])).toBeUndefined()
+  expect(await db.get('externalPluginArtifacts', processor.state.artifactId)).toBeUndefined()
+  const recovery = (await db.getAll('controlRecoveries')).at(-1)
+  if (!recovery) throw new Error('Expected external processor recovery.')
+  expect(recovery.externalProcessors).toHaveLength(1)
+  await executeLocalControlRequestV1({
+    projectId,
+    actions: [{ kind: 'recovery.restore', recovery: { id: recovery.id } }],
+  })
+  const restored = await db.get('entities', ['external-plugin', externalId])
+  expect(restored?.value).toMatchObject({ instanceId: processor.instanceId, state: processor.state })
+  expect(await db.get('externalPluginArtifacts', processor.state.artifactId)).toMatchObject({
+    sha256: hash,
+    payload: bytes,
+  })
+})
+
+test('keeps mixed external parameter edits and unrelated VST deletion recovery aligned', async () => {
+  const { projectId, ids } = await seedActionFixture()
+  const targetExternalId = ids.external
+  const targetTrackId = ids.target
+  const sourceTrackId = ids.source
+  if (!targetExternalId || !targetTrackId || !sourceTrackId) throw new Error('Expected external fixture IDs.')
+  const targetExternal = (await listLocalExternalProcessors(projectId)).find(
+    (processor) => `external-plugin:${processor.instanceId}` === targetExternalId,
+  )
+  if (!targetExternal) throw new Error('Expected target external processor.')
+  const sourceExternalInstanceId = crypto.randomUUID()
+  await setLocalExternalProcessor(projectId, {
+    ...targetExternal,
+    instanceId: sourceExternalInstanceId,
+    targetId: sourceTrackId,
+    parameterOverrides: { '1': 0.5 },
+    updatedAt: 2,
+  })
+
+  const mixed = await executeLocalControlRequestV1({
+    projectId,
+    actions: [
+      {
+        kind: 'external-plugin.parameters.set',
+        target: { kind: 'track', track: { source: 'persisted', id: targetTrackId } },
+        processor: { source: 'persisted', id: targetExternalId },
+        changes: [{ parameterId: 1, normalizedValue: 0.9 }],
+      },
+      { kind: 'track.delete', track: { source: 'persisted', id: sourceTrackId } },
+    ],
+  })
+  expect((await snapshot(projectId)).processors.find((processor) => processor.id === targetExternalId)
+    ?.processor).toMatchObject({ kind: 'external-vst3', params: { parameterOverrides: { '1': 0.9 } } })
+  const recovery = mixed.recoveries.find((entry) => entry.kind === 'track.delete')
+  if (!recovery) throw new Error('Expected VST deletion recovery.')
+  const recoveryRow = (await openLocalProjectDb(projectId).then((db) => db.get('controlRecoveries', recovery.id)))
+  expect(recoveryRow?.externalProcessors).toHaveLength(1)
+
+  await executeLocalControlRequestV1({
+    projectId,
+    actions: [{ kind: 'recovery.restore', recovery: { id: recovery.id } }],
+  })
+  expect((await snapshot(projectId)).processors.some((processor) => (
+    processor.id === `external-plugin:${sourceExternalInstanceId}`
+  ))).toBe(true)
 })

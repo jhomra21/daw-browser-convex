@@ -220,6 +220,25 @@ test('persists VST state atomically and removes its artifact on processor deleti
   expect(await db.get('externalPluginArtifacts', persisted?.state?.artifactId ?? '')).toBeUndefined()
 })
 
+test('preserves a shared local artifact until its last processor is deleted', async () => {
+  const project = await createLocalProject(`Shared VST state ${crypto.randomUUID()}`)
+  const first = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
+  const second = await setLocalExternalProcessor(project.id, {
+    ...createProcessor(crypto.randomUUID()),
+    targetId: first.targetId,
+  })
+  const bytes = new Uint8Array([8, 13, 21])
+  const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const persisted = await persistLocalExternalProcessorState(project.id, first.instanceId, { bytes, sha256: hash })
+  if (!persisted?.state) throw new Error('Expected shared VST state.')
+  await setLocalExternalProcessor(project.id, { ...second, state: persisted.state })
+  const db = await openLocalProjectDb(project.id)
+  await deleteLocalExternalProcessor(project.id, first.instanceId)
+  expect(await db.get('externalPluginArtifacts', persisted.state.artifactId)).toBeDefined()
+  await deleteLocalExternalProcessor(project.id, second.instanceId)
+  expect(await db.get('externalPluginArtifacts', persisted.state.artifactId)).toBeUndefined()
+})
+
 test('preserves persisted state ownership across auth transitions', async () => {
   const project = await createLocalProject(`Stable VST state owner ${crypto.randomUUID()}`)
   const processor = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))

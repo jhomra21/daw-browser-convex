@@ -1,6 +1,11 @@
 import { hashRecoveryPayloadSyncV1, parseStoredRecoveryPayload, type RecoveryPayload } from '@daw-browser/control'
 import { z } from 'zod'
-import type { LocalControlRecoveryRow } from '~/lib/local-project-db'
+import type { LocalControlRecoveryRow, LocalExternalProcessorRecoveryBundle } from '~/lib/local-project-db'
+import {
+  hashLocalExternalProcessorRecoveryBundles,
+  localExternalRecoveryUsage,
+  validateLocalExternalProcessorRecoveryBundles,
+} from './local-control-recovery'
 
 const localControlRecoveryRowSchema = z.object({
   version: z.literal(1),
@@ -14,6 +19,8 @@ const localControlRecoveryRowSchema = z.object({
   kind: z.string(),
   payload: z.string(),
   payloadHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  externalProcessors: z.custom<LocalExternalProcessorRecoveryBundle[]>().optional(),
+  externalProcessorsHash: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   localSampleUrls: z.record(z.string(), z.string()).optional(),
   consumedAt: z.number().int().nonnegative().optional(),
 }).passthrough()
@@ -24,6 +31,17 @@ export const parseLocalControlRecoveryRow = <Value>(
   try {
     const row = localControlRecoveryRowSchema.parse(value)
     if (hashRecoveryPayloadSyncV1(row.payload) !== row.payloadHash) return undefined
+    const externalProcessors = row.externalProcessors === undefined
+      ? undefined
+      : validateLocalExternalProcessorRecoveryBundles(row.externalProcessors)
+    if (externalProcessors !== undefined) localExternalRecoveryUsage(externalProcessors)
+    if (
+      externalProcessors !== undefined
+      && (
+        row.externalProcessorsHash === undefined
+        || hashLocalExternalProcessorRecoveryBundles(externalProcessors) !== row.externalProcessorsHash
+      )
+    ) return undefined
     const recovery = parseStoredRecoveryPayload(row.payload)
     return recovery.kind === row.kind
       ? {
@@ -38,6 +56,8 @@ export const parseLocalControlRecoveryRow = <Value>(
           kind: row.kind,
           payload: row.payload,
           payloadHash: row.payloadHash,
+          externalProcessors,
+          externalProcessorsHash: row.externalProcessorsHash,
           localSampleUrls: row.localSampleUrls,
           consumedAt: row.consumedAt,
           recovery,

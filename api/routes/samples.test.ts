@@ -4,7 +4,28 @@ import { z } from "zod";
 import type { ApiBindings } from "../app-types";
 import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
 
-const file = (contents = "audio") => new File([contents], "Kick.wav", { type: "audio/wav" });
+const file = (contents = "audio") => {
+  const sampleBytes = new Uint8Array(contents.length * 2)
+  const view = new DataView(sampleBytes.buffer)
+  for (let index = 0; index < contents.length; index += 1) view.setInt16(index * 2, contents.charCodeAt(index), true)
+  const bytes = new Uint8Array(44 + sampleBytes.byteLength)
+  const header = new DataView(bytes.buffer)
+  header.setUint32(0, 0x52494646)
+  header.setUint32(4, bytes.byteLength - 8, true)
+  header.setUint32(8, 0x57415645)
+  header.setUint32(12, 0x666d7420)
+  header.setUint32(16, 16, true)
+  header.setUint16(20, 1, true)
+  header.setUint16(22, 1, true)
+  header.setUint32(24, 44_100, true)
+  header.setUint32(28, 88_200, true)
+  header.setUint16(32, 2, true)
+  header.setUint16(34, 16, true)
+  header.setUint32(36, 0x64617461)
+  header.setUint32(40, sampleBytes.byteLength, true)
+  bytes.set(sampleBytes, 44)
+  return new File([bytes], "Kick.wav", { type: "audio/wav" })
+};
 
 const request = (assetKey: string, contents = "audio") => {
   const form = new FormData();

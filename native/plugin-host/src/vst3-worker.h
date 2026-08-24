@@ -20,6 +20,7 @@ enum class WorkerNotificationKind {
   kFault,
   kEditorInteraction,
   kParameterEdit,
+  kParameterEditBegin,
   kTail,
   kEditorState,
 };

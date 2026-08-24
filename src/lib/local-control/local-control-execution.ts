@@ -22,20 +22,35 @@ import {
   isJsonString,
   type JsonValue,
 } from '@daw-browser/shared'
+import {
+  externalPluginEntityKind,
+  externalProcessorSchema,
+  type ExternalProcessor,
+} from '@daw-browser/external-plugins'
+import {
+  applyLocalExternalProcessorDeletionPlanToLocalControl,
+  planLocalExternalProcessorDeletion,
+} from '~/lib/external-plugins'
 import { z } from 'zod'
 import {
   localEffectRowId,
   localSidechainRouteRowId,
   type LocalEffectKind,
 } from '~/lib/local-effects'
-import type { LocalControlRecoveryRow, LocalProjectStoredValue } from '~/lib/local-project-db'
+import type { LocalControlRecoveryRow, LocalProjectEntityRow, LocalProjectStoredValue } from '~/lib/local-project-db'
 import { materializeLocalControlSnapshot, parseLocalProjectStoredJsonValue } from './local-control-model'
 import { withLocalControlTransaction, type LocalControlTransactionResult } from './local-control-state'
 import {
+  captureLocalExternalProcessorRecoveryBundles,
   captureLocalRecoveryPayload,
+  collectLocalDeletedTrackIds,
+  hashLocalExternalProcessorRecoveryBundles,
   localRecoveryLifetimeMs,
+  localExternalRecoveryUsage,
   resolveLocalRecoveryAssets,
   serializeLocalRecoveryPayload,
+  validateLocalProjectExternalRecoveryBytes,
+  validateLocalExternalProcessorRecoveryBundles,
 } from './local-control-recovery'
 import { projectLocalControlSnapshotV2 } from './local-control-projector'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
@@ -343,12 +358,107 @@ const canonicalEntityKeys = (snapshot: ControlPlanV1['snapshot']) => new Set([
   )}`),
 ])
 
+const externalProcessorSnapshot = (processor: ExternalProcessor, id: string): ControlPlanV1['snapshot']['processors'][number] => ({
+  id,
+  target: processor.targetId === 'master' ? { master: true } : { trackId: processor.targetId },
+  instanceId: processor.instanceId,
+  index: processor.index,
+  processor: {
+    kind: 'external-vst3',
+    params: {
+      identity: {
+        name: processor.manifest.identity.name,
+        vendor: processor.manifest.identity.vendor,
+        classId: processor.manifest.identity.classId,
+        role: processor.manifest.role,
+      },
+      bypassed: processor.bypassed,
+      parameterOverrides: processor.parameterOverrides,
+      parameters: processor.manifest.parameters.map((parameter) => ({
+        id: parameter.id,
+        readOnly: parameter.readOnly,
+      })),
+    },
+  },
+})
+
+const localExternalRecoveryTrackIds = (
+  snapshot: ControlPlanV1['snapshot'],
+  action: ControlActionV1,
+) => {
+  if (action.kind === 'track.ungroup') {
+    return action.group.source === 'persisted' ? new Set([action.group.id]) : new Set<string>()
+  }
+  if (action.kind !== 'track.delete' || action.track.source !== 'persisted') return new Set<string>()
+  const rootId = action.track.id
+  const root = snapshot.tracks.find((track) => track.id === rootId)
+  if (!root) return new Set<string>()
+  return collectLocalDeletedTrackIds(snapshot.tracks, root.id)
+}
+
+export const localRecoveryPlannerSnapshot = (
+  snapshot: ControlPlanV1['snapshot'],
+  actions: readonly ControlActionV1[],
+) => {
+  const affected = new Set(actions.flatMap((action) => (
+    action.kind === 'track.delete' || action.kind === 'track.ungroup'
+      ? Array.from(localExternalRecoveryTrackIds(snapshot, action))
+      : []
+  )))
+  return affected.size === 0
+    ? snapshot
+    : {
+        ...snapshot,
+        processors: snapshot.processors.filter((processor) => (
+          processor.processor.kind !== 'external-vst3'
+          || !('trackId' in processor.target)
+          || !affected.has(processor.target.trackId)
+        )),
+      }
+}
+
 const removedCanonicalEntityKeys = (
   before: ControlPlanV1['snapshot'],
   after: ControlPlanV1['snapshot'],
 ) => {
   const afterKeys = canonicalEntityKeys(after)
   return new Set(Array.from(canonicalEntityKeys(before)).filter((key) => !afterKeys.has(key)))
+}
+
+export const snapshotWithPersistedExternalProcessors = (
+  snapshot: ControlPlanV1['snapshot'],
+  persistedSnapshot: ControlPlanV1['snapshot'],
+) => ({
+  ...snapshot,
+  processors: [
+    ...snapshot.processors,
+    ...persistedSnapshot.processors.filter((processor) => (
+      processor.processor.kind === 'external-vst3'
+      && !snapshot.processors.some((entry) => entry.id === processor.id)
+      && ('master' in processor.target || snapshot.tracks.some((track) => (
+        'trackId' in processor.target && track.id === processor.target.trackId
+      )))
+    )),
+  ],
+})
+
+const restorePlannerOmittedExternalProcessors = (
+  before: ControlPlanV1['snapshot'],
+  after: ControlPlanV1['snapshot'],
+  action: ControlActionV1,
+) => {
+  const deletedTrackIds = localExternalRecoveryTrackIds(before, action)
+  return {
+    ...after,
+    processors: [
+      ...after.processors,
+      ...before.processors.filter((processor) => (
+        processor.processor.kind === 'external-vst3'
+        && !after.processors.some((entry) => entry.id === processor.id)
+        && !('trackId' in processor.target && deletedTrackIds.has(processor.target.trackId))
+      )),
+    ],
+  }
 }
 
 export const executeLocalControlRequestInTransactionV1 = (
@@ -372,14 +482,22 @@ export const executeLocalControlRequestInTransactionV1 = (
   const recoveryRows: LocalControlRecoveryRow[] = []
   const restored: Array<{ actionIndex: number; recoveryId: string; entities: Array<{ entity: string; sourceId: string; restoredId: string }> }> = []
   const assetFallbacks = new Map<string, typeof context.rows.assets[number]>()
-  const restoredRecoveries = new Map<string, { payload: RecoveryPayload }>()
+  const restoredRecoveries = new Map<string, { payload: RecoveryPayload; externalProcessors?: LocalControlRecoveryRow['externalProcessors'] }>()
   const sampleUrlFallbacks = new Map<string, string>()
   const historyRefFallbacks = new Map<string, string>()
+  const restoredExternalEntities = new Map<string, LocalProjectEntityRow>()
+  const restoredExternalArtifacts = new Set<string>()
   const sampleUrlByClipId = localSampleUrls(context.rows.entities)
   let current = context.snapshot
   let changed = false
   const invalidRecoveryIds = new Set<string>()
   const migratedLegacySynthIds = new Set<string>()
+  let retainedExternalRecoveryBytes = context.rows.recoveries.reduce((total, row) => {
+    if (row.projectId !== request.projectId || row.consumedAt !== undefined || row.expiresAt <= Date.now()) return total
+    const parsed = parseLocalControlRecoveryRow(row)
+    if (!parsed?.externalProcessors) return total
+    return total + localExternalRecoveryUsage(parsed.externalProcessors).byteLength
+  }, 0)
   const recoveryById = new Map(context.rows.recoveries.flatMap((row) => {
     const parsed = parseLocalControlRecoveryRow(row)
     if (!parsed) {
@@ -390,7 +508,11 @@ export const executeLocalControlRequestInTransactionV1 = (
       return []
     }
     if (parsed.projectId !== request.projectId || parsed.consumedAt !== undefined || parsed.expiresAt <= Date.now()) return []
-    return [[parsed.id, { payload: parsed.recovery, localSampleUrls: parsed.localSampleUrls }] as const]
+    return [[parsed.id, {
+      payload: parsed.recovery,
+      externalProcessors: parsed.externalProcessors,
+      localSampleUrls: parsed.localSampleUrls,
+    }] as const]
   }))
   for (const action of request.actions) {
     if (action.kind === 'recovery.restore' && invalidRecoveryIds.has(action.recovery.id)) {
@@ -401,7 +523,18 @@ export const executeLocalControlRequestInTransactionV1 = (
     changed: boolean
     afterSnapshot: ControlPlanV1['snapshot']
   }>()
-  const fullPlan = planControlRequestV1(context.snapshot, request, recoveryById, {
+  const localExternalRecoveryPlanning = request.actions.some((action) => {
+      const affected = localExternalRecoveryTrackIds(context.snapshot, action)
+      return affected.size > 0 && context.snapshot.processors.some((processor) => (
+        processor.processor.kind === 'external-vst3'
+        && 'trackId' in processor.target
+        && affected.has(processor.target.trackId)
+      ))
+    })
+  const plannerSnapshot = localExternalRecoveryPlanning
+    ? localRecoveryPlannerSnapshot(context.snapshot, request.actions)
+    : context.snapshot
+  const fullPlan = planControlRequestV1(plannerSnapshot, request, recoveryById, {
     onActionPlanned: (entry) => {
       fullActionSnapshots.set(entry.actionIndex, {
         changed: entry.changed,
@@ -415,7 +548,7 @@ export const executeLocalControlRequestInTransactionV1 = (
     }
     const action = rewriteLocalControlActionReferences(originalAction, ids, clientRefs)
     const stepPlan = planControlRequestV1(
-      current,
+      localExternalRecoveryPlanning ? localRecoveryPlannerSnapshot(current, request.actions) : current,
       { projectId: request.projectId, actions: [action] },
       recoveryById,
       undefined,
@@ -463,9 +596,41 @@ export const executeLocalControlRequestInTransactionV1 = (
           kind: payload.kind,
           payload: serialized.payload,
           payloadHash: serialized.payloadHash,
-        localSampleUrls: Object.fromEntries(localSampleUrls(context.rows.entities)),
+          localSampleUrls: Object.fromEntries(localSampleUrls(context.rows.entities)),
           createdAt,
           expiresAt,
+        }
+        if (action.kind === 'track.delete' || action.kind === 'track.ungroup') {
+          const externalProcessors = captureLocalExternalProcessorRecoveryBundles({
+            action,
+            snapshot: snapshotWithPersistedExternalProcessors(current, context.snapshot),
+            entities: context.rows.entities,
+            artifacts: context.rows.externalPluginArtifacts,
+          })
+          if (externalProcessors.length > 0) {
+            let usage: ReturnType<typeof localExternalRecoveryUsage>
+            try {
+              usage = localExternalRecoveryUsage(externalProcessors)
+            } catch {
+              throw {
+                code: 'limit-exceeded',
+                message: 'Recovery external artifact limits exceeded.',
+                actionIndex,
+              }
+            }
+            try {
+              validateLocalProjectExternalRecoveryBytes(retainedExternalRecoveryBytes + usage.byteLength)
+            } catch {
+              throw {
+                code: 'limit-exceeded',
+                message: 'Local project external recovery bytes exceeded.',
+                actionIndex,
+              }
+            }
+            recoveryRow.externalProcessors = externalProcessors
+            recoveryRow.externalProcessorsHash = hashLocalExternalProcessorRecoveryBundles(externalProcessors)
+            retainedExternalRecoveryBytes += usage.byteLength
+          }
         }
         context.write.recovery(recoveryRow)
         recoveryRows.push(recoveryRow)
@@ -547,12 +712,20 @@ export const executeLocalControlRequestInTransactionV1 = (
       if (!id) throw new Error('Local effect ID is unavailable.')
       clientRefs.set(ref.clientRef, id)
     }
-    const next = materializedSnapshot(stepPlan.snapshot, ids, instanceIds)
+    const next = materializedSnapshot(
+      restorePlannerOmittedExternalProcessors(current, stepPlan.snapshot, action),
+      ids,
+      instanceIds,
+    )
     const traced = fullActionSnapshots.get(actionIndex)
     if (!traced || traced.changed !== entry.changed) {
       throw new Error(`Local control planner trace disagrees for action ${actionIndex}.`)
     }
-    const expected = materializedSnapshot(traced.afterSnapshot, ids, instanceIds)
+    const expected = materializedSnapshot(
+      restorePlannerOmittedExternalProcessors(current, traced.afterSnapshot, action),
+      ids,
+      instanceIds,
+    )
     if (digestFor(next) !== digestFor(expected)) {
       throw new Error(`Local control sequential parity disagrees for action ${actionIndex}.`)
     }
@@ -570,6 +743,38 @@ export const executeLocalControlRequestInTransactionV1 = (
       }
       if (originalAction.kind === 'recovery.restore') {
         const recovery = recoveryById.get(originalAction.recovery.id)
+        if (recovery?.externalProcessors) {
+          const trackMappings = new Map(
+            recoveryMappings(recovery.payload, originalAction.recovery.id, ids, instanceIds)
+              .filter((mapping) => mapping.entity === 'track')
+              .map((mapping) => [mapping.sourceId, mapping.restoredId]),
+          )
+          for (const bundle of validateLocalExternalProcessorRecoveryBundles(recovery.externalProcessors)) {
+            const processor = externalProcessorSchema.parse(bundle.entity.value)
+            const entity = {
+              ...bundle.entity,
+              value: {
+                ...processor,
+                targetId: trackMappings.get(processor.targetId) ?? processor.targetId,
+              },
+            }
+            if (context.rows.entities.some((row) => row.kind === entity.kind && row.id === entity.id)
+              || restoredExternalEntities.has(entity.id)) {
+              throw new Error(`External processor "${entity.id}" already exists during recovery.`)
+            }
+            restoredExternalEntities.set(entity.id, entity)
+            for (const artifact of bundle.artifacts) {
+              if (
+                context.rows.externalPluginArtifacts.some((row) => row.id === artifact.id)
+                || restoredExternalArtifacts.has(artifact.id)
+              ) {
+                throw new Error(`External processor artifact "${artifact.id}" already exists during recovery.`)
+              }
+              restoredExternalArtifacts.add(artifact.id)
+              context.write.externalPluginArtifact(artifact)
+            }
+          }
+        }
         if (recovery?.localSampleUrls) {
           for (const [sourceId, sampleUrl] of Object.entries(recovery.localSampleUrls)) {
             const restoredId = ids.get(`recovery:clip:${originalAction.recovery.id}:${sourceId}`)
@@ -585,14 +790,29 @@ export const executeLocalControlRequestInTransactionV1 = (
           }
         }
       }
+      const projectedNext = originalAction.kind === 'recovery.restore'
+        ? materializedSnapshot({
+            ...next,
+            processors: [...next.processors, ...Array.from(restoredExternalEntities.values()).flatMap((row) => {
+              const parsed = externalProcessorSchema.safeParse(row.value)
+              return parsed.success ? [externalProcessorSnapshot(parsed.data, row.id)] : []
+            }).filter((processor) => !next.processors.some((entry) => entry.id === processor.id))],
+          }, new Map(), new Map())
+        : next
       const materialized = materializeLocalControlSnapshot({
-        entities: context.rows.entities,
+        entities: [...context.rows.entities, ...restoredExternalEntities.values()],
         assets: context.rows.assets,
         projectState: context.rows.projectState,
-      }, next, Date.now(), new Map(), new Set(context.snapshot.assets
-        .filter((asset) => !next.assets.some((entry) => entry.id === asset.id))
+      }, projectedNext, Date.now(), new Map(), new Set(context.snapshot.assets
+        .filter((asset) => !projectedNext.assets.some((entry) => entry.id === asset.id))
         .map((asset) => asset.id)), new Set([
-        ...removedCanonicalEntityKeys(context.snapshot, next),
+        ...removedCanonicalEntityKeys(context.snapshot, projectedNext),
+        ...context.snapshot.processors
+          .filter((processor) => (
+            processor.processor.kind === 'external-vst3'
+            && !projectedNext.processors.some((entry) => entry.id === processor.id)
+          ))
+          .map((processor) => `${externalPluginEntityKind}:${processor.id}`),
         ...Array.from(migratedLegacySynthIds, (id) => `effect:${id}`),
       ]), migratedLegacySynthIds, sampleUrlFallbacks, historyRefFallbacks)
       const projected = projectLocalControlSnapshotV2({
@@ -608,11 +828,14 @@ export const executeLocalControlRequestInTransactionV1 = (
         projectState: materialized.projectState,
         revision: context.snapshot.project.revision,
       })
-      if (digestFor(next) !== digestFor(projected)) throw new Error(`Local control projection disagrees for action ${actionIndex}.`)
+      if (digestFor(projectedNext) !== digestFor(projected)) throw new Error(`Local control projection disagrees for action ${actionIndex}.`)
     }
     if (originalAction.kind === 'recovery.restore' && entry.changed) {
       const recovery = recoveryById.get(originalAction.recovery.id)
       if (!recovery) throw new Error('Recovery is unavailable.')
+      if (recovery.externalProcessors) {
+        retainedExternalRecoveryBytes -= localExternalRecoveryUsage(recovery.externalProcessors).byteLength
+      }
       const gc = context.rows.assetGc.find((row) => row.recoveryId === originalAction.recovery.id)
       if (gc?.claimedAt !== undefined && gc.claimedAt > Date.now() - localControlAssetGcLeaseMs) {
         throw {
@@ -656,9 +879,17 @@ export const executeLocalControlRequestInTransactionV1 = (
         entities: recoveryMappings(recovery.payload, originalAction.recovery.id, ids, instanceIds),
       })
     }
+    const localExternalProcessors = Array.from(restoredExternalEntities.values()).flatMap((row) => {
+      const parsed = externalProcessorSchema.safeParse(row.value)
+      return parsed.success ? [externalProcessorSnapshot(parsed.data, row.id)] : []
+    })
     current = {
       ...current,
       ...next,
+      processors: [
+        ...next.processors,
+        ...localExternalProcessors.filter((processor) => !next.processors.some((entry) => entry.id === processor.id)),
+      ],
       version: 'v2',
       project: { ...next.project, revision: context.snapshot.project.revision },
     }
@@ -674,14 +905,40 @@ export const executeLocalControlRequestInTransactionV1 = (
       .filter((asset) => !finalSnapshot.assets.some((entry) => entry.id === asset.id))
       .map((asset) => asset.id))
     const model = materializeLocalControlSnapshot({
-      entities: [...context.rows.entities],
+      entities: [...context.rows.entities, ...restoredExternalEntities.values()],
       assets: [...context.rows.assets],
       projectState: [...context.rows.projectState],
     }, finalSnapshot, Date.now(), assetFallbacks, removedAssetIds, new Set([
       ...removedCanonicalEntityKeys(context.snapshot, finalSnapshot),
       ...Array.from(migratedLegacySynthIds, (id) => `effect:${id}`),
-    ]), migratedLegacySynthIds, sampleUrlFallbacks, historyRefFallbacks)
-    for (const row of model.replaced.entities) context.remove.entity(row.kind, row.id)
+    ]), migratedLegacySynthIds, sampleUrlFallbacks, historyRefFallbacks, new Map(
+      Array.from(restoredExternalEntities.values()).flatMap((row) => {
+        const parsed = externalProcessorSchema.safeParse(row.value)
+        return parsed.success ? [[row.id, parsed.data] as const] : []
+      }),
+    ))
+    const retainedExternalKeys = new Set(model.entities
+      .filter((row) => row.kind === externalPluginEntityKind)
+      .map((row) => `${row.kind}\u0000${row.id}`))
+    const removedExternalRows = context.rows.entities.filter((row) => (
+      row.kind === externalPluginEntityKind
+      && !retainedExternalKeys.has(`${row.kind}\u0000${row.id}`)
+    ))
+    if (removedExternalRows.length > 0) {
+      const deletionPlan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: removedExternalRows,
+        retainedMixedEffectRows: [...context.rows.entities, ...restoredExternalEntities.values()]
+          .filter((row) => row.kind === 'effect' || row.kind === externalPluginEntityKind),
+      })
+      applyLocalExternalProcessorDeletionPlanToLocalControl(deletionPlan, {
+        deleteEntity: (kind, id) => context.remove.entity(kind, id),
+        deleteArtifact: (id) => context.remove.externalPluginArtifact(id),
+        putEntity: (row) => context.write.entity(row),
+      })
+    }
+    for (const row of model.replaced.entities) {
+      if (row.kind !== externalPluginEntityKind) context.remove.entity(row.kind, row.id)
+    }
     for (const id of model.replaced.assets) context.remove.asset(id)
     for (const key of model.replaced.projectState) context.remove.projectState(key)
     for (const row of model.entities) context.write.entity(row)

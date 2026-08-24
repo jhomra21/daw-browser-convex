@@ -15,6 +15,7 @@ import {
   type LocalControlProjectMetadata,
   type LocalProjectAssetRow,
   type LocalProjectEntityRow,
+  type LocalProjectExternalPluginArtifactRow,
   type LocalProjectStateRow,
   type LocalProjectStoredValue,
   type LocalProjectSyncStateRow,
@@ -47,6 +48,7 @@ export type LocalControlTransactionResult = {
   state: LocalControlSnapshotState
   rows: {
     entities: readonly LocalProjectEntityRow[]
+    externalPluginArtifacts: readonly LocalProjectExternalPluginArtifactRow[]
     assets: readonly LocalProjectAssetRow[]
     projectState: readonly LocalProjectStateRow[]
     syncState: readonly LocalProjectSyncStateRow[]
@@ -58,6 +60,7 @@ export type LocalControlTransactionResult = {
   write: {
     controlState: (state: LocalControlSnapshotState) => void
     entity: (row: LocalProjectEntityRow) => void
+    externalPluginArtifact: (row: LocalProjectExternalPluginArtifactRow) => void
     asset: (row: LocalProjectAssetRow) => void
     projectState: (row: LocalProjectStateRow) => void
     syncState: (row: LocalProjectSyncStateRow) => void
@@ -68,6 +71,7 @@ export type LocalControlTransactionResult = {
   }
   remove: {
     entity: (kind: string, id: string) => void
+    externalPluginArtifact: (id: string) => void
     asset: (id: string) => void
     projectState: (key: string) => void
     syncState: (key: string) => void
@@ -167,9 +171,10 @@ const runLocalControlTransaction = async <Value>(
   const project = await getLocalProject(projectId)
   if (!project) throw new LocalControlTransactionError('not-found')
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
-  const [entities, assets, projectState, syncState, currentRow, commits, approvals, recoveries, assetGc] = await Promise.all([
+  const tx = db.transaction(['entities', 'externalPluginArtifacts', 'assets', 'projectState', 'syncState', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
+  const [entities, externalPluginArtifacts, assets, projectState, syncState, currentRow, commits, approvals, recoveries, assetGc] = await Promise.all([
     tx.objectStore('entities').getAll(),
+    tx.objectStore('externalPluginArtifacts').getAll(),
     tx.objectStore('assets').getAll(),
     tx.objectStore('projectState').getAll(),
     tx.objectStore('syncState').getAll(),
@@ -264,7 +269,7 @@ const runLocalControlTransaction = async <Value>(
   const context: LocalControlTransactionResult = {
     snapshot,
     state,
-    rows: { entities, assets, projectState: projectedProjectState, syncState, commits, approvals, recoveries, assetGc },
+    rows: { entities, externalPluginArtifacts, assets, projectState: projectedProjectState, syncState, commits, approvals, recoveries, assetGc },
     write: {
       controlState: (nextState) => { writes.push(() => { tx.objectStore('controlState').put({
         key: CONTROL_SNAPSHOT_STATE_KEY,
@@ -272,6 +277,7 @@ const runLocalControlTransaction = async <Value>(
         updatedAt: nextState.updatedAt,
       }) }) },
       entity: (row) => { writes.push(() => { tx.objectStore('entities').put(row) }) },
+      externalPluginArtifact: (row) => { writes.push(() => { tx.objectStore('externalPluginArtifacts').put(row) }) },
       asset: (row) => { writes.push(() => { tx.objectStore('assets').put(row) }) },
       projectState: (row) => { writes.push(() => { tx.objectStore('projectState').put(row) }) },
       syncState: (row) => { writes.push(() => { tx.objectStore('syncState').put(row) }) },
@@ -282,6 +288,7 @@ const runLocalControlTransaction = async <Value>(
     },
     remove: {
       entity: (kind, id) => { removals.push(() => { tx.objectStore('entities').delete([kind, id]) }) },
+      externalPluginArtifact: (id) => { removals.push(() => { tx.objectStore('externalPluginArtifacts').delete(id) }) },
       asset: (id) => { removals.push(() => { tx.objectStore('assets').delete(id) }) },
       projectState: (key) => { removals.push(() => { tx.objectStore('projectState').delete(key) }) },
       syncState: (key) => { removals.push(() => { tx.objectStore('syncState').delete(key) }) },

@@ -40,11 +40,20 @@ import type {
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import {
   executeLocalControlRequestInTransactionV1,
+  localRecoveryPlannerSnapshot,
   rewriteLocalControlActionReferences,
+  snapshotWithPersistedExternalProcessors,
 } from './local-control-execution'
 import { localControlAssetGcLeaseMs, runLocalControlAssetGc } from './local-control-asset-gc'
 import { parseLocalControlCursor, encodeLocalControlCursor } from './local-control-cursor'
-import { captureLocalRecoveryPayload, resolveLocalRecoveryAssets, serializeLocalRecoveryPayload } from './local-control-recovery'
+import {
+  captureLocalExternalProcessorRecoveryBundles,
+  captureLocalRecoveryPayload,
+  localExternalRecoveryUsage,
+  resolveLocalRecoveryAssets,
+  serializeLocalRecoveryPayload,
+  validateLocalProjectExternalRecoveryBytes,
+} from './local-control-recovery'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
 import {
   LocalControlTransactionError,
@@ -184,7 +193,7 @@ const plan = (
   recoveries: ReadonlyMap<string, { payload: RecoveryPayload }>,
 ) => {
   try {
-    return planControlRequestV1(snapshot, request, recoveries)
+    return planControlRequestV1(localRecoveryPlannerSnapshot(snapshot, request.actions), request, recoveries)
   } catch (error) {
     const parsedError = controlPlanningErrorSchema.safeParse(error)
     if (parsedError.success) {
@@ -347,12 +356,23 @@ const validateLocalDestructivePreflight = (
   validateProjectedAssetGcLimit(context.rows.assetGc.length, controlPlan, request.actions, recoveries)
   const plannedRefs = new Map(controlPlan.resolvedRefs.map((ref) => [ref.clientRef, ref.id]))
   try {
+    let retainedExternalRecoveryBytes = context.rows.recoveries.reduce((total, row) => {
+      if (row.projectId !== request.projectId || row.consumedAt !== undefined || row.expiresAt <= Date.now()) return total
+      const parsed = parseLocalControlRecoveryRow(row)
+      if (!parsed?.externalProcessors) return total
+      return total + localExternalRecoveryUsage(parsed.externalProcessors).byteLength
+    }, 0)
     const restoredRecoveries = new Map<string, { payload: RecoveryPayload }>()
-    planControlRequestV1(context.snapshot, request, recoveries, {
+    planControlRequestV1(localRecoveryPlannerSnapshot(context.snapshot, request.actions), request, recoveries, {
       onActionPlanned: (entry) => {
         if (!entry.changed) return
         const action = entry.action
         if (action.kind === 'recovery.restore') {
+          const recoveryRow = context.rows.recoveries.find((row) => row.id === action.recovery.id)
+          const parsedRecovery = recoveryRow === undefined ? undefined : parseLocalControlRecoveryRow(recoveryRow)
+          if (parsedRecovery?.externalProcessors) {
+            retainedExternalRecoveryBytes -= localExternalRecoveryUsage(parsedRecovery.externalProcessors).byteLength
+          }
           const gc = context.rows.assetGc.find((row) => row.recoveryId === action.recovery.id)
           if (gc?.claimedAt !== undefined && gc.claimedAt > Date.now() - localControlAssetGcLeaseMs) {
             fail('validation', 'Recovery asset bytes are being deleted.', entry.actionIndex)
@@ -379,6 +399,29 @@ const validateLocalDestructivePreflight = (
         })
         if (payload !== undefined) {
           serializeLocalRecoveryPayload(payload)
+          if (
+            rewrittenAction.kind === 'track.delete'
+            || rewrittenAction.kind === 'track.ungroup'
+          ) {
+            const externalProcessors = captureLocalExternalProcessorRecoveryBundles({
+              action: rewrittenAction,
+              snapshot: snapshotWithPersistedExternalProcessors(
+                projectSnapshotSchemaV2.parse({ ...entry.beforeSnapshot, version: 'v2' }),
+                context.snapshot,
+              ),
+              entities: context.rows.entities,
+              artifacts: context.rows.externalPluginArtifacts,
+            })
+            if (externalProcessors.length > 0) {
+              const usage = localExternalRecoveryUsage(externalProcessors)
+              try {
+                validateLocalProjectExternalRecoveryBytes(retainedExternalRecoveryBytes + usage.byteLength)
+              } catch {
+                fail('limit-exceeded', 'Local project external recovery bytes exceeded.', entry.actionIndex)
+              }
+              retainedExternalRecoveryBytes += usage.byteLength
+            }
+          }
           return
         }
         fail('limit-exceeded', 'Recovery payload cannot be captured.', entry.actionIndex)

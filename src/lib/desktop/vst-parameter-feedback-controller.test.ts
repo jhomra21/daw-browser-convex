@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 import type { DesktopVstParameterEditPayload } from '@daw-browser/desktop-protocol'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
+import { automationTargetKey, externalAutomationParameterId } from '@daw-browser/shared'
 import { createLocalProject, openLocalProjectDb } from '~/lib/local-project-db'
 import {
   mergeLocalExternalProcessorParameterOverride,
@@ -10,6 +11,10 @@ import {
 import { createVstParameterFeedbackController } from './vst-parameter-feedback-controller'
 
 const instanceId = '11111111-1111-4111-8111-111111111111'
+const targetKey = automationTargetKey(
+  { kind: 'track', trackId: 'track-1', effectInstanceId: instanceId },
+  externalAutomationParameterId(instanceId, 1),
+)
 
 const createProcessor = () => externalProcessorSchema.parse({
   instanceId,
@@ -130,7 +135,7 @@ test.serial('persists active playback feedback without suppressing automation or
     expect(bridge.emit(payload(project.id, 'active-playback', 1, 0.75))).toBeTrue()
     await flushAsyncWork()
 
-    expect(targets).toEqual([])
+    expect(targets).toEqual([targetKey])
     expect(queued).toEqual([])
     controller?.dispose()
   } finally {
@@ -143,12 +148,13 @@ test.serial('persists idle editor-session feedback without enqueueing or faultin
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
   const queued: unknown[] = []
+  const targets: string[] = []
   const faults: string[] = []
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
-      overrideTarget: () => undefined,
+      overrideTarget: (target) => targets.push(target),
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
@@ -165,6 +171,7 @@ test.serial('persists idle editor-session feedback without enqueueing or faultin
     const row = await db.get('entities', ['external-plugin', `external-plugin:${instanceId}`])
     expect(row?.value).toMatchObject({ parameterOverrides: { '1': 0.875 } })
     expect(queued).toEqual([])
+    expect(targets).toEqual([targetKey])
     expect(faults).toEqual([])
     controller?.dispose()
   } finally {
@@ -194,7 +201,7 @@ test.serial('persists prepared editor-session feedback and enqueues exactly once
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
     await flushAsyncWork()
 
-    expect(targets).toHaveLength(0)
+    expect(targets).toEqual([targetKey])
     expect(queued).toEqual([{ instanceId, id: 1, value: 0.875 }])
     controller?.dispose()
   } finally {
@@ -206,12 +213,13 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
   const project = await createLocalProject(`Feedback burst ${crypto.randomUUID()}`)
   await setLocalExternalProcessor(project.id, createProcessor())
   const bridge = installSubscription()
+  const targets: string[] = []
   const queued: unknown[] = []
   try {
     const controller = createVstParameterFeedbackController({
       projectId: () => project.id,
       mountedProjectGeneration: () => 0,
-      overrideTarget: () => undefined,
+      overrideTarget: (target) => targets.push(target),
       nativeVstParameterQueue: {
         enqueue: async (event) => {
           queued.push(event)
@@ -225,6 +233,7 @@ test.serial('coalesces a burst to the latest value before one editor enqueue', a
     bridge.emit(payload(project.id, 'editor-session', 1, 0.875))
     await flushAsyncWork()
     expect(queued).toEqual([{ instanceId, id: 1, value: 0.875 }])
+    expect(targets).toEqual([targetKey])
     controller?.dispose()
   } finally {
     bridge.restore()

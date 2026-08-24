@@ -1,5 +1,6 @@
 import {
   canonicalCapturedRecoveryPayloadV2,
+  hashCanonicalJsonSyncV1,
   hashRecoveryPayloadSyncV1,
   recoveryCapturedPayloadSchemaV2,
   timelineRangeRecoveryAutomationDigestV2,
@@ -11,6 +12,7 @@ import {
 } from '@daw-browser/control'
 import {
   buildTimelineRangeDeletePatchV1,
+  collectDeletedTrackIdsV1,
 } from '@daw-browser/control-core'
 import {
   automationTargetKey,
@@ -21,11 +23,228 @@ import {
   parseSynthAutomationKey,
 } from '@daw-browser/shared'
 import { z } from 'zod'
-import type { LocalProjectAssetRow } from '~/lib/local-project-db'
+import type {
+  LocalProjectAssetRow,
+  LocalProjectEntityRow,
+  LocalProjectExternalPluginArtifactRow,
+  LocalExternalProcessorRecoveryBundle,
+} from '~/lib/local-project-db'
+import {
+  externalPluginEntityKind,
+  externalProcessorSchema,
+  parseExternalProcessorValue,
+  type ExternalProcessor,
+} from '@daw-browser/external-plugins'
+import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
+import { pathFreeExternalProcessor } from '~/lib/external-plugins'
+import {
+  localVstStateArtifactLocation,
+  validateLocalVstStateBytes,
+} from '~/lib/external-plugin-artifacts'
+import { maxVst3WorkerStateBytes, opaquePluginStateMetadataSchema } from '@daw-browser/plugin-host-protocol'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 
 export const localRecoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000
+export const maxLocalRecoveryExternalArtifactCount = 16
+export const maxLocalRecoveryExternalArtifactBytes = 2 * maxVst3WorkerStateBytes
+export const maxLocalProjectExternalRecoveryBytes = 16 * maxVst3WorkerStateBytes
 const jsonValueSchema = z.json()
+
+export const collectLocalDeletedTrackIds = (
+  tracks: readonly ProjectSnapshotV2['tracks'][number][],
+  rootTrackId: string,
+) => collectDeletedTrackIdsV1(
+  tracks.map((track) => ({
+    id: track.id,
+    index: track.index,
+    groupId: track.groupId,
+    outputTargetId: track.outputTargetId,
+    sends: track.sends.map((send) => ({ targetTrackId: send.targetTrackId })),
+  })),
+  rootTrackId,
+)
+
+const externalProcessorStateMetadata = (processor: ExternalProcessor) => [
+  processor.state,
+  processor.launchReference?.state,
+].filter((metadata) => metadata !== undefined)
+
+const externalRecoveryHashValue = (bundles: readonly LocalExternalProcessorRecoveryBundle[]) => (
+  JSON.parse(JSON.stringify({
+    version: 1,
+    bundles: bundles.map((bundle) => ({
+      version: bundle.version,
+      entity: bundle.entity,
+      artifacts: bundle.artifacts.map(({ payload: _payload, ...artifact }) => artifact),
+    })),
+  }))
+)
+
+export const hashLocalExternalProcessorRecoveryBundles = (
+  bundles: readonly LocalExternalProcessorRecoveryBundle[],
+) => hashCanonicalJsonSyncV1(externalRecoveryHashValue(bundles))
+
+export const localExternalRecoveryUsage = (
+  bundles: readonly LocalExternalProcessorRecoveryBundle[],
+) => {
+  const artifactCount = bundles.reduce((count, bundle) => count + bundle.artifacts.length, 0)
+  const byteLength = bundles.reduce(
+    (total, bundle) => total + bundle.artifacts.reduce((bytes, artifact) => bytes + artifact.byteLength, 0),
+    0,
+  )
+  if (
+    artifactCount > maxLocalRecoveryExternalArtifactCount
+    || byteLength > maxLocalRecoveryExternalArtifactBytes
+  ) throw new Error('Recovery external artifact limits exceeded.')
+  return { artifactCount, byteLength }
+}
+
+export const validateLocalProjectExternalRecoveryBytes = (byteLength: number) => {
+  if (byteLength > maxLocalProjectExternalRecoveryBytes) {
+    throw new Error('Local project external recovery bytes exceeded.')
+  }
+}
+
+const validateLocalExternalProcessorRecoveryArtifact = (
+  artifact: LocalProjectExternalPluginArtifactRow,
+): LocalProjectExternalPluginArtifactRow => {
+  if (!(artifact.payload instanceof Uint8Array)) {
+    throw new Error(`Local external processor recovery artifact "${artifact.id}" is invalid.`)
+  }
+  const metadata = opaquePluginStateMetadataSchema.parse({
+    artifactId: artifact.id,
+    sha256: artifact.sha256,
+    byteLength: artifact.byteLength,
+    artifactKind: artifact.kind,
+    ownerId: artifact.ownerId,
+    acl: artifact.acl,
+    bucket: artifact.bucket,
+    location: artifact.location,
+  })
+  if (
+    metadata.artifactKind !== 'plugin-state'
+    || metadata.bucket !== 'local'
+    || metadata.location !== localVstStateArtifactLocation(metadata.artifactId)
+    || metadata.byteLength > maxVst3WorkerStateBytes
+  ) throw new Error(`Local external processor recovery artifact "${artifact.id}" metadata is invalid.`)
+  const bytes = validateLocalVstStateBytes(artifact.payload, metadata.sha256)
+  if (bytes.bytes.byteLength !== metadata.byteLength) {
+    throw new Error(`Local external processor recovery artifact "${artifact.id}" length is invalid.`)
+  }
+  return { ...artifact, payload: bytes.bytes }
+}
+
+const validateLocalExternalProcessorRecoveryBundle = (
+  bundle: LocalExternalProcessorRecoveryBundle,
+  allArtifacts: ReadonlyMap<string, LocalProjectExternalPluginArtifactRow>,
+): LocalExternalProcessorRecoveryBundle => {
+  if (bundle.version !== 1) {
+    throw new Error('Local external processor recovery bundle version is invalid.')
+  }
+  if (bundle.entity.kind !== externalPluginEntityKind) {
+    throw new Error('Local external processor recovery entity kind is invalid.')
+  }
+  const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(bundle.entity.value))
+  if (!parsed.success) throw new Error(`Local external processor recovery row "${bundle.entity.id}" is invalid.`)
+  const processor = pathFreeExternalProcessor(externalProcessorSchema.parse(parsed.data))
+  if (bundle.entity.id !== `external-plugin:${processor.instanceId}`) {
+    throw new Error('Local external processor recovery entity identity is invalid.')
+  }
+  const artifacts = new Map<string, LocalProjectExternalPluginArtifactRow>()
+  for (const artifact of bundle.artifacts) {
+    if (artifacts.has(artifact.id)) {
+      throw new Error(`Local external processor recovery artifact "${artifact.id}" is duplicated.`)
+    }
+    artifacts.set(artifact.id, validateLocalExternalProcessorRecoveryArtifact(artifact))
+  }
+  for (const metadata of externalProcessorStateMetadata(processor)) {
+    if (metadata.bucket !== 'local') continue
+    const artifact = artifacts.get(metadata.artifactId) ?? allArtifacts.get(metadata.artifactId)
+    if (!artifact
+      || artifact.sha256 !== metadata.sha256
+      || artifact.byteLength !== metadata.byteLength
+      || artifact.ownerId !== metadata.ownerId
+      || artifact.kind !== metadata.artifactKind
+      || artifact.acl !== metadata.acl
+      || artifact.location !== metadata.location
+    ) throw new Error(`Local external processor recovery artifact "${metadata.artifactId}" does not match its processor.`)
+  }
+  return {
+    version: 1,
+    entity: { ...bundle.entity, value: processor },
+    artifacts: [...artifacts.values()],
+  }
+}
+
+export const validateLocalExternalProcessorRecoveryBundles = (
+  bundles: readonly LocalExternalProcessorRecoveryBundle[],
+) => {
+  const allArtifacts = new Map<string, LocalProjectExternalPluginArtifactRow>()
+  for (const bundle of bundles) {
+    for (const artifact of bundle.artifacts) {
+      if (allArtifacts.has(artifact.id)) {
+        throw new Error(`Local external processor recovery artifact "${artifact.id}" is duplicated.`)
+      }
+      allArtifacts.set(artifact.id, validateLocalExternalProcessorRecoveryArtifact(artifact))
+    }
+  }
+  const validated = bundles.map((bundle) => validateLocalExternalProcessorRecoveryBundle(bundle, allArtifacts))
+  const entityIds = new Set<string>()
+  const artifactIds = new Set<string>()
+  for (const bundle of validated) {
+    if (entityIds.has(bundle.entity.id)) throw new Error('Local external processor recovery entities must be unique.')
+    entityIds.add(bundle.entity.id)
+    for (const artifact of bundle.artifacts) {
+      if (artifactIds.has(artifact.id)) throw new Error('Local external processor recovery artifacts must be unique.')
+      artifactIds.add(artifact.id)
+    }
+  }
+  return validated
+}
+
+export const captureLocalExternalProcessorRecoveryBundles = (input: {
+  action: Extract<ControlActionV1, { kind: 'track.delete' | 'track.ungroup' }>
+  snapshot: ProjectSnapshotV2
+  entities: readonly LocalProjectEntityRow[]
+  artifacts: readonly LocalProjectExternalPluginArtifactRow[]
+}) => {
+  const rootId = input.action.kind === 'track.delete' ? input.action.track : input.action.group
+  if (rootId.source !== 'persisted') return []
+  const root = input.snapshot.tracks.find((track) => track.id === rootId.id)
+  if (!root) return []
+  const selected = input.action.kind === 'track.ungroup'
+    ? new Set([root.id])
+    : collectLocalDeletedTrackIds(input.snapshot.tracks, root.id)
+  const entityById = new Map(input.entities
+    .filter((row) => row.kind === externalPluginEntityKind)
+    .map((row) => [row.id, row]))
+  const artifactById = new Map(input.artifacts.map((artifact) => [artifact.id, artifact]))
+  const capturedArtifactIds = new Set<string>()
+  const bundles: LocalExternalProcessorRecoveryBundle[] = input.snapshot.processors.flatMap((entry) => {
+    if (
+      entry.processor.kind !== 'external-vst3'
+      || !('trackId' in entry.target)
+      || !selected.has(entry.target.trackId)
+    ) return []
+    const entity = entityById.get(entry.id)
+    if (!entity) throw new Error(`Local external processor row "${entry.id}" is missing.`)
+    const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(entity.value))
+    if (!parsed.success) throw new Error(`Local external processor row "${entry.id}" is invalid.`)
+    const artifacts = externalProcessorStateMetadata(pathFreeExternalProcessor(parsed.data)).flatMap((metadata) => {
+      if (metadata.bucket !== 'local' || capturedArtifactIds.has(metadata.artifactId)) return []
+      const artifact = artifactById.get(metadata.artifactId)
+      if (!artifact) throw new Error(`Local external processor artifact "${metadata.artifactId}" is missing.`)
+      capturedArtifactIds.add(metadata.artifactId)
+      return [artifact]
+    })
+    return [{
+      version: 1,
+      entity: { ...entity, value: pathFreeExternalProcessor(parsed.data) },
+      artifacts,
+    }]
+  })
+  return validateLocalExternalProcessorRecoveryBundles(bundles)
+}
 
 const ownership = (projectId: string, localActorSubject: string) => ({ projectId, localActorSubject })
 const recoveryAssetRow = (asset: Extract<CapturedRecoveryPayloadV2, { kind: 'asset.delete' }>['data']['asset']): LocalProjectAssetRow => {
@@ -380,16 +599,7 @@ export const captureLocalRecoveryPayload = (input: {
     const root = snapshot.tracks.find((track) => track.id === rootId.id)
     if (!root) return undefined
     const selected = action.kind === 'track.delete'
-      ? new Set(snapshot.tracks.filter((track) => {
-        let current = track
-        while (current.groupId !== undefined) {
-          if (current.groupId === root.id) return true
-          const parent = snapshot.tracks.find((candidate) => candidate.id === current.groupId)
-          if (!parent) break
-          current = parent
-        }
-        return track.id === root.id
-      }).map((track) => track.id))
+      ? collectLocalDeletedTrackIds(snapshot.tracks, root.id)
       : new Set([root.id])
     const tracks = snapshot.tracks.filter((track) => selected.has(track.id))
     const bundle = {

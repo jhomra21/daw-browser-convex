@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test'
 import { convexTest } from 'convex-test'
-import { dispatchControlOperation } from '@daw-browser/control'
-import { createCloudControlHandlers } from './control-handler'
+import {
+  dispatchControlOperation,
+  type ControlOperationId,
+  type ControlOperationIdInput,
+  type ControlOperationInput,
+  type ControlOutput,
+} from '@daw-browser/control'
+import type { FunctionArgs, FunctionReference, FunctionReturnType } from 'convex/server'
+import { createCloudControlHandlers, type ControlGateway } from './control-handler'
 import {
   normalizeControlError,
   runControlConformance,
@@ -45,16 +52,26 @@ test('cloud canonical handlers conform to the control operation contract', async
     await ctx.db.insert('ownerships', { projectId, ownerUserId: owner, trackId: track })
     return track
   })
-  const gateway = {
-    query: (reference: unknown, args: unknown) => (
+  const gateway: ControlGateway = {
+    query: <Query extends FunctionReference<'query'>>(
+      reference: Query,
+      args: FunctionArgs<Query>,
+    ): Promise<FunctionReturnType<Query>> => (
       convex.withIdentity({ subject: owner }).query(reference, args)
     ),
-    mutation: (reference: unknown, args: unknown) => (
+    mutation: <Mutation extends FunctionReference<'mutation'>>(
+      reference: Mutation,
+      args: FunctionArgs<Mutation>,
+    ): Promise<FunctionReturnType<Mutation>> => (
       convex.withIdentity({ subject: owner }).mutation(reference, args)
     ),
   }
   const handlers = createCloudControlHandlers({ gateway })
-  const invoke = async (operation: string, input: unknown, target: 'cloud' | 'desktop') => {
+  const invoke = async (
+    operation: ControlOperationIdInput,
+    input: ControlOperationInput,
+    target: 'cloud' | 'desktop',
+  ): Promise<ControlOutput<ControlOperationId>> => {
     try {
       return await dispatchControlOperation(
         handlers,

@@ -82,6 +82,16 @@ export const hasR2DeleteRow = async (
   return row?.projectId === input.projectId && row.status !== "deleted";
 };
 
+export const hasActiveR2DeleteRows = async (
+  ctx: Pick<MutationCtx, "db">,
+  projectId: string,
+) => {
+  const rows = await ctx.db.query("r2DeleteQueue")
+    .withIndex("by_room", (q) => q.eq("projectId", projectId))
+    .collect();
+  return rows.some((row) => row.status !== "deleted");
+};
+
 export const listDue = query({
   args: {
     projectId: v.string(),
@@ -125,26 +135,30 @@ export const listDueAny = query({
   },
 });
 
-export const findDueProjectPrefix = query({
+export const listDueProjectPrefixes = query({
   args: {
     projectId: v.string(),
     now: v.number(),
+    limit: v.number(),
   },
-  handler: async (ctx, { projectId, now }) => {
+  handler: async (ctx, { projectId, now, limit }) => {
     await requireWorkerQueueAccess(ctx);
-    const rows = await ctx.db
-      .query("r2DeleteQueue")
-      .withIndex("by_room_status_due", (q) => q.eq("projectId", projectId).eq("status", "pending").lte("nextAttemptAt", now))
-      .take(100);
+    const queueLimit = clampQueueLimit(limit);
+    const rows = await ctx.db.query("r2DeleteQueue")
+      .withIndex("by_room_kind_status_due", (q) => q
+        .eq("projectId", projectId)
+        .eq("kind", "project-prefix")
+        .eq("status", "pending")
+        .lte("nextAttemptAt", now))
+      .take(queueLimit);
     const stale = await ctx.db.query("r2DeleteQueue")
-      .withIndex("by_room", (q) => q.eq("projectId", projectId))
-      .filter((q) => q.and(
-        q.eq(q.field("kind"), "project-prefix"),
-        q.eq(q.field("status"), "claimed"),
-        q.lte(q.field("claimedAt"), now - claimLeaseMs),
-      ))
-      .take(1);
-    return rows.find((row) => row.kind === "project-prefix") ?? stale[0] ?? null;
+      .withIndex("by_room_kind_claimedAt", (q) => q
+        .eq("projectId", projectId)
+        .eq("kind", "project-prefix")
+        .eq("status", "claimed")
+        .lte("claimedAt", now - claimLeaseMs))
+      .take(queueLimit - rows.length);
+    return [...rows, ...stale];
   },
 });
 

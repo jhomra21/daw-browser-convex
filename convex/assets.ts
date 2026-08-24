@@ -8,6 +8,8 @@ import { findSampleRow, insertSampleRow, moveSampleFolderRow } from "./sampleRow
 
 const maxNameLength = 120;
 const maxUploadBytes = 10 * 1024 * 1024;
+const maxSampleRate = 384_000;
+const maxChannelCount = 64;
 const digestPattern = /^[0-9a-f]{64}$/;
 const mimeTypes = new Set([
   "audio/mpeg", "audio/wav", "audio/x-wav", "audio/flac",
@@ -37,6 +39,18 @@ const validMimeType = (value: string) => {
   return value;
 };
 
+const validAudioMetadata = (input: { durationSec: number; sampleRate: number; channelCount: number }) => {
+  if (!Number.isFinite(input.durationSec) || input.durationSec <= 0) {
+    fail("validation", "Asset duration must be finite and greater than zero.");
+  }
+  if (!Number.isInteger(input.sampleRate) || input.sampleRate <= 0 || input.sampleRate > maxSampleRate) {
+    fail("validation", "Asset sample rate is unsupported.");
+  }
+  if (!Number.isInteger(input.channelCount) || input.channelCount <= 0 || input.channelCount > maxChannelCount) {
+    fail("validation", "Asset channel count is unsupported.");
+  }
+};
+
 const assetObjectKey = (
   storageNamespace: string,
   assetKey: string,
@@ -48,7 +62,8 @@ const assetObjectKey = (
 );
 
 const assetSemanticDigest = async (input: {
-  projectId: string; contentSha256: string; name: string; mimeType: string; sizeBytes: number; folderId?: string;
+  projectId: string; contentSha256: string; name: string; mimeType: string; sizeBytes: number;
+  durationSec: number; sampleRate: number; channelCount: number; folderId?: string;
 }) => {
   const bytes = new TextEncoder().encode(canonicalJson({ version: "v1", ...input }));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -143,7 +158,8 @@ export const listFoldersByProject = query({
 export const beginUpload = mutation({
   args: {
     projectId: v.string(), idempotencyKey: v.string(), contentSha256: v.string(), name: v.string(),
-    mimeType: v.string(), sizeBytes: v.number(), folderId: v.optional(v.string()),
+    mimeType: v.string(), sizeBytes: v.number(), durationSec: v.number(), sampleRate: v.number(),
+    channelCount: v.number(), folderId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
@@ -155,6 +171,7 @@ export const beginUpload = mutation({
     if (!Number.isInteger(input.sizeBytes) || input.sizeBytes < 1 || input.sizeBytes > maxUploadBytes) {
       fail("limit-exceeded", "Asset upload exceeds the 10 MiB limit.");
     }
+    validAudioMetadata(input);
     const project = await requireProjectRow(ctx, input.projectId);
     const semanticDigest = await assetSemanticDigest({
       projectId: input.projectId,
@@ -162,6 +179,9 @@ export const beginUpload = mutation({
       name,
       mimeType,
       sizeBytes: input.sizeBytes,
+      durationSec: input.durationSec,
+      sampleRate: input.sampleRate,
+      channelCount: input.channelCount,
       folderId: input.folderId,
     });
     if (input.folderId && !await readFolder(ctx, input.projectId, input.folderId)) fail("not-found", "Asset folder not found.");
@@ -170,6 +190,13 @@ export const beginUpload = mutation({
         .eq("projectId", input.projectId).eq("actorUserId", userId).eq("idempotencyKey", input.idempotencyKey))
       .unique();
     if (prior) {
+      if (
+        prior.durationSec === undefined
+        || prior.sampleRate === undefined
+        || prior.channelCount === undefined
+      ) {
+        fail("idempotency-conflict", "Idempotency key is bound to a legacy upload receipt.");
+      }
       if (prior.semanticDigest !== semanticDigest) fail("idempotency-conflict", "Idempotency key is already bound to another request.");
       if (prior.status === "failed") {
         const attempts = prior.attempts + 1;
@@ -180,9 +207,23 @@ export const beginUpload = mutation({
           attempts,
           updatedAt: Date.now(),
         });
-        return { status: "pending" as const, assetKey: prior.assetKey, r2Key };
+        return {
+          status: "pending" as const,
+          assetKey: prior.assetKey,
+          r2Key,
+          durationSec: prior.durationSec,
+          sampleRate: prior.sampleRate,
+          channelCount: prior.channelCount,
+        };
       }
-      return { status: prior.status, assetKey: prior.assetKey, r2Key: prior.r2Key };
+      return {
+        status: prior.status,
+        assetKey: prior.assetKey,
+        r2Key: prior.r2Key,
+        durationSec: prior.durationSec,
+        sampleRate: prior.sampleRate,
+        channelCount: prior.channelCount,
+      };
     }
     if ((await ctx.db.query("samples").withIndex("by_room", (query) => query.eq("projectId", input.projectId)).take(1_000)).length >= 1_000) {
       fail("limit-exceeded", "Project asset limit reached.");
@@ -193,10 +234,18 @@ export const beginUpload = mutation({
     await ctx.db.insert("assetUploadReceipts", {
       projectId: input.projectId, actorUserId: userId, idempotencyKey: input.idempotencyKey,
       contentSha256, semanticDigest, assetKey, r2Key, status: "pending", mimeType, sizeBytes: input.sizeBytes, name,
+      durationSec: input.durationSec, sampleRate: input.sampleRate, channelCount: input.channelCount,
       folderId: input.folderId,
       createdAt: now, updatedAt: now, attempts: 1,
     });
-    return { status: "pending" as const, assetKey, r2Key };
+    return {
+      status: "pending" as const,
+      assetKey,
+      r2Key,
+      durationSec: input.durationSec,
+      sampleRate: input.sampleRate,
+      channelCount: input.channelCount,
+    };
   },
 });
 
@@ -214,6 +263,13 @@ export const finalizeUpload = mutation({
     const existing = await findSampleRow(ctx, { projectId: input.projectId, assetKey: receipt.assetKey });
     if (receipt.status === "completed" && existing) return { asset: controlAssetView(existing), idempotencyReplay: true };
     if (receipt.status !== "pending") fail("validation", "Upload receipt is not pending.");
+    if (
+      receipt.durationSec === undefined
+      || receipt.sampleRate === undefined
+      || receipt.channelCount === undefined
+    ) {
+      fail("validation", "Legacy upload receipt metadata is unavailable; the upload must be restarted.");
+    }
     const uploadedObjectStorageKey = receipt.r2Key;
     if (await hasR2DeleteRow(ctx, { projectId: input.projectId, r2Key: uploadedObjectStorageKey })) {
       fail("validation", "Upload object cleanup is pending.");
@@ -227,7 +283,8 @@ export const finalizeUpload = mutation({
     const rowId = await insertSampleRow(ctx, {
       projectId: input.projectId, assetKey: receipt.assetKey, sourceKind: "upload", ownerUserId: userId,
       name: receipt.name, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, contentSha256: receipt.contentSha256,
-      r2Key: uploadedObjectStorageKey, folderId: receipt.folderId,
+      r2Key: uploadedObjectStorageKey, duration: receipt.durationSec, sampleRate: receipt.sampleRate,
+      channelCount: receipt.channelCount, folderId: receipt.folderId,
     });
     const asset = await ctx.db.get(rowId);
     if (asset === null) throw new Error("Asset finalization failed.");
@@ -373,7 +430,15 @@ export const reconcileStalePending = mutation({
     for (const receipt of receipts) {
       const completed = await findSampleRow(ctx, { projectId: receipt.projectId, assetKey: receipt.assetKey });
       if (completed) {
-        await ctx.db.patch(receipt._id, { status: "completed", completedAt: Date.now(), updatedAt: Date.now() });
+        const now = Date.now();
+        await ctx.db.patch(receipt._id, {
+          status: "completed",
+          completedAt: now,
+          updatedAt: now,
+        });
+        if (completed.duration !== undefined) await ctx.db.patch(receipt._id, { durationSec: completed.duration });
+        if (completed.sampleRate !== undefined) await ctx.db.patch(receipt._id, { sampleRate: completed.sampleRate });
+        if (completed.channelCount !== undefined) await ctx.db.patch(receipt._id, { channelCount: completed.channelCount });
         continue;
       }
       await ctx.db.patch(receipt._id, { status: "failed", updatedAt: Date.now() });

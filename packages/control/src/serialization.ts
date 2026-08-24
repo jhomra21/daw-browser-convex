@@ -10,7 +10,6 @@ import {
 } from '@daw-browser/shared'
 import {
   controlLimitsV1,
-  CONTROL_API_VERSION_V1,
 } from './versions'
 import {
   controlApprovalRequestSchemaV1,
@@ -20,16 +19,12 @@ import {
   controlRecoveriesQuerySchemaV1,
   canonicalControlSnapshotQuerySchema,
   controlSnapshotQuerySchemaV1,
-  controlSnapshotQuerySchemaV2,
   type ControlApprovalRequestV1,
   type ControlCommitRequestV1,
   type ControlPreviewRequestV1,
   type CanonicalControlSnapshotQuery,
 } from './actions'
-import {
-  projectSnapshotSchemaV2,
-  type ProjectSnapshotV2,
-} from './snapshots'
+import type { ProjectSnapshotV2 } from './snapshots'
 import type { RecoveryOwnershipV1 } from './recovery'
 
 const isPlainObject = (value: JsonValue): value is JsonObject => {

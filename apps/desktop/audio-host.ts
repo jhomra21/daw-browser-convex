@@ -292,6 +292,7 @@ export type ResolvedVst3Attachment = {
     outputChannels: number
     maximumEventsPerBlock: number
   }
+  parameterIds?: readonly number[]
   initialParameterValues?: readonly { id: number; value: number }[]
   initialState?: { bytes: Uint8Array; sha256: string }
   renderEnabled?: boolean
@@ -331,6 +332,7 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     || !unsigned32(input.workerTransport.maximumEventsPerBlock)
     || input.workerTransport.maximumEventsPerBlock === 0
     || input.workerTransport.maximumEventsPerBlock > maxVst3WorkerEventsPerBlock
+    || (input.parameterIds?.length ?? 0) > 16_384
   ) return undefined
   const bundleFingerprint = fingerprintBytes(input.bundleFingerprint)
   const binaryFingerprint = fingerprintBytes(input.binaryFingerprint)
@@ -351,6 +353,15 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     if (!unsigned32(parameter.id) || !Number.isFinite(parameter.value) || parameter.value < 0 || parameter.value > 1) return undefined
     parameterBytes.writeUInt32BE(parameter.id, index * 12)
     parameterBytes.writeDoubleBE(parameter.value, index * 12 + 4)
+  }
+  const parameterIds = input.parameterIds ?? []
+  if (
+    new Set(parameterIds).size !== parameterIds.length
+    || parameterIds.some((parameterId) => !unsigned32(parameterId))
+  ) return undefined
+  const parameterIdBytes = Buffer.alloc(parameterIds.length * 4)
+  for (const [index, parameterId] of parameterIds.entries()) {
+    parameterIdBytes.writeUInt32BE(parameterId, index * 4)
   }
   return Buffer.concat([
     ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
@@ -382,6 +393,8 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     Buffer.from(stateHash),
     writeUnsigned32(input.initialParameterValues?.length ?? 0),
     parameterBytes,
+    writeUnsigned32(parameterIds.length),
+    parameterIdBytes,
   ])
 }
 
@@ -963,6 +976,7 @@ export type NativeAudioHostSupervisorOptions = {
 export type NativeAudioHostSupervisor = {
   start(): Promise<AudioHostHello>
   runTransaction<T>(operation: (transaction: Pick<NativeAudioHostSupervisor, "attachVst">) => Promise<T>): Promise<T>
+  invalidateManualTransaction(): Promise<void>
   configure(input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<void>
   beginTransaction(): Promise<string>
   commitTransaction(transactionToken: string): Promise<void>
@@ -1038,6 +1052,8 @@ export const createNativeAudioHostSupervisor = (
   let transactionOwner: symbol | undefined
   let manualTransactionToken: string | undefined
   let manualTransactionGeneration = 0
+  let manualTransactionInvalidationVersion = 0
+  let manualInvalidationPromise: Promise<void> | undefined
   let nextTransportTransitionId = 0n
   const lossListeners = new Set<(error: Error) => void>()
   const recordingBlockListeners = new Set<(block: NativeHostRecordingBlock) => void>()
@@ -1650,6 +1666,11 @@ export const createNativeAudioHostSupervisor = (
     }
     dispatchNext()
   })
+  const enqueueTransaction = <T>(operation: () => Promise<T>) => {
+    const result = transactionTail.then(operation)
+    transactionTail = result.then(() => undefined, () => undefined)
+    return result
+  }
   const request = async (type: NativeHostRequestType, payload?: Buffer, token?: string) => {
     await supervisor.start()
     await send(type, payload, assertTransactionAccess(token))
@@ -1750,7 +1771,7 @@ export const createNativeAudioHostSupervisor = (
       return attempt
     },
     runTransaction(operation) {
-      const result = transactionTail.then(async () => {
+      return enqueueTransaction(async () => {
         const generation = lifecycleGeneration
         await supervisor.start()
         if (generation !== lifecycleGeneration || teardownPromise) {
@@ -1782,8 +1803,6 @@ export const createNativeAudioHostSupervisor = (
           if (transactionOwner === owner) transactionOwner = undefined
         }
       })
-      transactionTail = result.then(() => undefined, () => undefined)
-      return result
     },
     async configure(input, transactionToken) {
       const payload = serializeDeviceConfiguration(input)
@@ -1791,50 +1810,145 @@ export const createNativeAudioHostSupervisor = (
       await request(deviceConfigureType, payload, transactionToken)
     },
     async beginTransaction() {
-      if (transactionOwner) throw new Error("The native audio host transaction is unavailable.")
-      await supervisor.start()
-      const owner = Symbol("native-audio-host-manual-transaction")
-      const token = randomBytes(32).toString("base64url")
-      transactionOwner = owner
-      manualTransactionToken = token
-      manualTransactionGeneration = lifecycleGeneration
-      try {
-        await send(transactionBeginType, undefined, owner)
-        return token
-      } catch (error) {
-        if (transactionOwner === owner) {
-          transactionOwner = undefined
-          manualTransactionToken = undefined
-          manualTransactionGeneration = -1
+      const invalidationVersion = manualTransactionInvalidationVersion
+      return enqueueTransaction(async () => {
+        if (invalidationVersion !== manualTransactionInvalidationVersion || transactionOwner) {
+          throw new Error("The native audio host transaction is unavailable.")
         }
-        throw error
-      }
+        const generation = lifecycleGeneration
+        await supervisor.start()
+        if (
+          invalidationVersion !== manualTransactionInvalidationVersion
+          || generation !== lifecycleGeneration
+          || teardownPromise
+          || suspended
+        ) throw new Error("The native audio host transaction was cancelled.")
+        const owner = Symbol("native-audio-host-manual-transaction")
+        const token = randomBytes(32).toString("base64url")
+        transactionOwner = owner
+        manualTransactionToken = token
+        manualTransactionGeneration = generation
+        let nativeTransactionOpen = false
+        try {
+          await send(transactionBeginType, undefined, owner)
+          nativeTransactionOpen = true
+          if (
+            invalidationVersion !== manualTransactionInvalidationVersion
+            || generation !== lifecycleGeneration
+            || transactionOwner !== owner
+            || manualTransactionToken !== token
+          ) throw new Error("The native audio host transaction was cancelled.")
+          return token
+        } catch (error) {
+          if (nativeTransactionOpen) {
+            try {
+              await send(transactionRollbackType, undefined, owner)
+            } catch {
+              // A lost host may reject the best-effort cleanup.
+            }
+          }
+          if (transactionOwner === owner && manualTransactionToken === token) {
+            transactionOwner = undefined
+            manualTransactionToken = undefined
+            manualTransactionGeneration = -1
+          }
+          throw error
+        }
+      })
+    },
+    async invalidateManualTransaction() {
+      manualTransactionInvalidationVersion += 1
+      if (manualInvalidationPromise) return manualInvalidationPromise
+      const owner = transactionOwner
+      const token = manualTransactionToken
+      if (!owner || !token) return
+      const generation = manualTransactionGeneration
+      manualTransactionToken = undefined
+      manualTransactionGeneration = -1
+      const operation = transactionTail.then(async () => {
+        const current = child
+        const shouldRollback = (
+          generation === lifecycleGeneration
+          && current !== undefined
+          && hello !== undefined
+          && !suspended
+          && teardownPromise === undefined
+          && transactionOwner === owner
+        )
+        try {
+          if (shouldRollback) {
+            try {
+              await send(transactionRollbackType, undefined, owner)
+            } catch {
+              // Renderer loss must release local ownership even if rollback fails.
+            }
+          }
+        } finally {
+          if (transactionOwner === owner) transactionOwner = undefined
+        }
+      })
+      manualInvalidationPromise = operation
+      transactionTail = operation.then(() => undefined, () => undefined)
+      void operation.then(
+        () => {
+          if (manualInvalidationPromise === operation) manualInvalidationPromise = undefined
+        },
+        () => {
+          if (manualInvalidationPromise === operation) manualInvalidationPromise = undefined
+        },
+      )
+      return operation
     },
     async commitTransaction(transactionToken) {
-      const owner = assertTransactionAccess(transactionToken)
-      if (!owner) throw new Error("The native audio host transaction is unavailable.")
-      try {
-        await send(transactionCommitType, undefined, owner)
-      } finally {
-        if (transactionOwner === owner) {
-          transactionOwner = undefined
-          manualTransactionToken = undefined
-          manualTransactionGeneration = -1
+      const invalidationVersion = manualTransactionInvalidationVersion
+      return enqueueTransaction(async () => {
+        const owner = assertTransactionAccess(transactionToken)
+        if (!owner) throw new Error("The native audio host transaction is unavailable.")
+        try {
+          await send(transactionCommitType, undefined, owner)
+          if (
+            invalidationVersion !== manualTransactionInvalidationVersion
+            || manualTransactionToken !== transactionToken
+            || manualTransactionGeneration !== lifecycleGeneration
+          ) {
+            try {
+              await send(transactionRollbackType, undefined, owner)
+            } catch {
+              lost("The native audio host transaction was committed after renderer invalidation.")
+            }
+            throw new Error("The native audio host transaction was cancelled.")
+          }
+        } finally {
+          if (transactionOwner === owner) {
+            transactionOwner = undefined
+            manualTransactionToken = undefined
+            manualTransactionGeneration = -1
+          }
         }
-      }
+      })
     },
     async rollbackTransaction(transactionToken) {
-      const owner = assertTransactionAccess(transactionToken)
-      if (!owner) throw new Error("The native audio host transaction is unavailable.")
-      try {
-        await send(transactionRollbackType, undefined, owner)
-      } finally {
-        if (transactionOwner === owner) {
-          transactionOwner = undefined
-          manualTransactionToken = undefined
-          manualTransactionGeneration = -1
+      const invalidationVersion = manualTransactionInvalidationVersion
+      return enqueueTransaction(async () => {
+        const owner = assertTransactionAccess(transactionToken)
+        if (!owner) throw new Error("The native audio host transaction is unavailable.")
+        try {
+          await send(transactionRollbackType, undefined, owner)
+          if (
+            invalidationVersion !== manualTransactionInvalidationVersion
+            || manualTransactionToken !== transactionToken
+            || manualTransactionGeneration !== lifecycleGeneration
+          ) {
+            throw new Error("The native audio host transaction was cancelled.")
+          }
+        } finally {
+          if (transactionOwner === owner) {
+            transactionOwner = undefined
+            manualTransactionToken = undefined
+            manualTransactionGeneration = -1
+          }
         }
-      }
+      })
     },
     async attachVst(input, transactionToken) {
       await attachVst(input, transactionToken)

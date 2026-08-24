@@ -157,7 +157,14 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
     }
     return Steinberg::kResultFalse;
   }
-  Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
+  Steinberg::tresult PLUGIN_API beginEdit(const Steinberg::Vst::ParamID id) override {
+    if (notifications_.size() >= notifications_.capacity()) return Steinberg::kResultFalse;
+    notifications_.push_back({
+      .kind = WorkerNotificationKind::kParameterEditBegin,
+      .parameter_id = id,
+    });
+    return Steinberg::kResultOk;
+  }
   Steinberg::tresult PLUGIN_API performEdit(
     const Steinberg::Vst::ParamID id,
     const Steinberg::Vst::ParamValue value

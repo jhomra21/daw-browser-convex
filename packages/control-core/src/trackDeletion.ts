@@ -1,5 +1,17 @@
 import { collectTrackDescendantIds } from '@daw-browser/shared'
 
+export type NormalizedTrackControlStateV1 = {
+  id: string
+  index: number
+  groupId?: string
+  outputTargetId?: string
+  sends: readonly {
+    targetId: string
+    amount: number
+    tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
+  }[]
+}
+
 type TrackDeletionTrackV1 = {
   id: string
   index: number
@@ -52,3 +64,29 @@ export const collectTrackDeletionAffectedIdsV1 = (
   }
   return affectedTrackIds
 }
+
+export const deriveTrackDeletionAfterStatesV1 = (
+  tracks: readonly NormalizedTrackControlStateV1[],
+  deletedTrackIds: ReadonlySet<string>,
+) => tracks
+  .filter((track) => !deletedTrackIds.has(track.id))
+  .sort((left, right) => left.index - right.index)
+  .map((track, index) => ({
+    ...track,
+    index,
+    groupId: deletedTrackIds.has(track.groupId ?? '') ? undefined : track.groupId,
+    outputTargetId: deletedTrackIds.has(track.outputTargetId ?? '') ? undefined : track.outputTargetId,
+    sends: track.sends.filter((send) => !deletedTrackIds.has(send.targetId)),
+  }))
+
+export const deriveTrackUngroupAfterStatesV1 = (
+  tracks: readonly NormalizedTrackControlStateV1[],
+  input: { groupId: string; groupIndex: number; parentGroupId?: string },
+) => tracks
+  .filter((track) => track.id !== input.groupId)
+  .map((track) => ({
+    ...track,
+    index: track.index > input.groupIndex ? track.index - 1 : track.index,
+    groupId: track.groupId === input.groupId ? input.parentGroupId : track.groupId,
+    outputTargetId: track.outputTargetId === input.groupId ? input.parentGroupId : track.outputTargetId,
+  }))

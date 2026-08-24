@@ -53,12 +53,12 @@ audio assets. Forge packaging hooks completed successfully.
 | Cloud control | Cloud | No | ENVIRONMENT SKIP | No disposable authenticated cloud environment or credentials were available |
 | Repository-wide lint | Source gate | N/A | PASS | Oxlint completed with zero warnings and zero errors |
 
-## Blocker-remediation addendum, 2026-08-23
+## Blocker-remediation addendum, 2026-08-24
 
-The merge candidate was rebuilt from certified baseline
-`aea600f6d3af479a96d1b095c82d1697126be0a8` after the Mediabunny 1.55.1
-upgrade, repository-gate repair, and the nine reviewed blocker fixes. The final
-unsigned package remained at:
+The blocker-fix commit
+`e8f7795843352a73249c88bbf256f3aba7c691bd` was treated as the review baseline.
+The seven findings in its review-fix delta were corrected and independently
+reviewed before rebuilding the unsigned package at:
 
 `apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app`
 
@@ -67,44 +67,49 @@ unsigned package remained at:
 | Scenario | Result | Evidence |
 | --- | --- | --- |
 | Isolated package launch | PASS | Fresh temporary Electron profile and live CDP target |
-| Renderer reload with an active manual native transaction | PASS | Transaction opened, renderer reloaded, and a fresh transaction opened and rolled back successfully |
+| Renderer reload with an active manual native transaction | PASS | Old transaction became stale; a fresh transaction opened and rolled back successfully |
+| Renderer crash with an active manual native transaction | PASS | Renderer-only CDP crash invalidated the old transaction; main/native host survived and a fresh transaction succeeded |
 | Post-Mediabunny one-second mixdown | PASS | Stereo 48 kHz, 16-bit PCM WAV, exactly 192,044 bytes |
 | Basic packaged host continuity | PASS | Mounted local project remained ready through the public desktop control boundary |
 
-The acceptance run used `/tmp/daw-blocker-acceptance-9f33ZP`. It includes the
-launch and final screenshots, transaction results, export request/status
-transcripts, application log, and exported WAV.
+The corrected package acceptance evidence is under
+`/tmp/daw-corrected-package-acceptance-8TBGT2/evidence`.
 
-The complete installed-Valhalla discovery, editor, playback recovery,
-persistence, stale-catalog repair, and export campaign was not repeated. The
-new automation-override behavior was instead covered at its touched renderer
-and native boundaries, including stale generations, rejected delivery,
-read-only/invalid parameters, editor ownership, schedule re-enable, queue
-failure rollback, and concurrent native slot publication. Stateful local VST
-artifact deletion and immediate restoration were likewise covered through the
-local transaction/recovery boundary with exact opaque-state assertions.
+The complete installed-Valhalla campaign was not repeated. A real Mix edit was
+visible through MCP, but the isolated native host remained
+`device-not-configured`, so active attachment, schedule suppression, and
+re-enable could not be demonstrated through that runtime profile. The installed
+Valhalla also reports `supportsState: false`, so the shared opaque-artifact
+topology cannot be constructed through its normal product surface. Those two
+paths are certified through focused renderer/native and transactional local
+recovery tests instead. The local import runtime was not used as evidence for
+the cloud upload inspector because it is a separate metadata path.
 
 ### Final source and native evidence
 
 - Anti-slop RuleTester gate: 12 suites passed.
 - Repository lint: zero warnings and zero errors.
 - TypeScript checks: passed.
-- Control platform: 160 passed.
+- Control platform: 161 passed.
 - Control compatibility: 40 passed.
 - Production build: passed.
 - Native debug build and CTest: 6 of 6 passed.
 - Final unsigned Electron package: passed.
 - `git diff --check`: passed.
-- Full Bun suite: 2,400 passed, 1 skipped, 10 failed. The failures remain the
-  known five-second exhaustive local-control threshold and stale
-  MIDI-expression/automation expectations; affected blocker tests pass in
-  their focused suites.
+- Full Bun suite: 2,426 passed, 1 skipped, 0 failed.
 
-The final correctness/security review reported no P0 or P1 findings. A
-code-quality reviewer recommended extracting responsibilities from three
-pre-existing files over 1,000 lines. That broader structural refactor was not
-mixed into this correctness patch because the new logic already has focused
-tests and extraction would materially widen the reviewed lifecycle diff.
+The previous ten root-suite failures were compared against `origin/master` and
+`aea600f6d3af479a96d1b095c82d1697126be0a8`. Nine were stale expectations for
+the canonical `0..2` volume range already present at the certified baseline.
+The exhaustive 40-action local-control test exceeded Bun's default five-second
+test limit after the added recovery coverage and now has a narrowly scoped
+ten-second timeout; its runtime remains approximately 4.3 seconds.
+
+The final Thermos correctness and structural passes both reported LGTM. The
+certified delta uses explicit renderer document/navigation sequencing, a
+canonical planner options object and immutable capability policies, typed
+media validation errors with bounded duration fallback, one authoritative
+native automation-override insertion path, and exact shared-artifact reuse.
 
 ## Confirmed product bugs fixed
 

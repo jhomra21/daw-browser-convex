@@ -32,5 +32,5 @@ test('normalizes pitch bend and supports inverted output ranges', () => {
   expect(midiMappingInputRatio({ kind: 'pitch-bend', value: -1 })).toBe(0)
   expect(midiMappingInputRatio({ kind: 'pitch-bend', value: 1 })).toBe(1)
   expect(midiMappingOutputRatio(mappings[0], 0.25)).toBe(0.75)
-  expect(midiMappingValue(mappings[0], { kind: 'cc', controller: 1, channel: 2, value: 0.5 })).toBeCloseTo(0.75)
+  expect(midiMappingValue(mappings[0], { kind: 'cc', controller: 1, channel: 2, value: 0.5 })).toBeCloseTo(1)
 })

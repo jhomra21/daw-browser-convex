@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { ApiBindings } from "../app-types";
+import { AudioUploadValidationError } from "../control-upload-audio-metadata";
 import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
 
 const file = (contents = "audio") => {
@@ -120,6 +121,38 @@ test("an outbox retry with changed bytes conflicts before writing another object
   const response = await application.request(request("client-stable-asset-key", "changed-audio"));
   expect(response.status).toBe(409);
   expect(puts).toBe(0);
+});
+
+test("maps known invalid sample media to a validation response", async () => {
+  const application = new Hono<ApiBindings>();
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => ({
+      user: { id: "user-1" },
+      convex: { query: async () => null, mutation: async () => ({}) },
+    }),
+    inspectAudioMetadata: async () => {
+      throw new AudioUploadValidationError("Uploaded audio could not be parsed.");
+    },
+  });
+
+  const response = await application.request(request("invalid-media"));
+  expect(response.status).toBe(422);
+});
+
+test("keeps unexpected sample backend failures as internal errors", async () => {
+  const application = new Hono<ApiBindings>();
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => ({
+      user: { id: "user-1" },
+      convex: { query: async () => null, mutation: async () => ({}) },
+    }),
+    inspectAudioMetadata: async () => {
+      throw new Error("backend failure");
+    },
+  });
+
+  const response = await application.request(request("backend-failure"));
+  expect(response.status).toBe(500);
 });
 
 test("default sample catalog CORS only permits trusted Electron origins", async () => {

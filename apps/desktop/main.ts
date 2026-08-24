@@ -459,8 +459,14 @@ const rejectEditorStateAcks = (message: string) => {
   pendingEditorStateAcks.clear()
 }
 const invalidateRendererGeneration = (message: string) => {
-  const invalidation = rendererLifecycle.invalidate()
+  const invalidation = rendererLifecycle.invalidateActiveDocument()
   if (!invalidation) return
+  applyRendererInvalidation(invalidation, message)
+}
+const applyRendererInvalidation = (
+  invalidation: { previousGeneration: number; generation: number },
+  message: string,
+) => {
   const previousGeneration = invalidation.previousGeneration
   generation = invalidation.generation
   rejectEditorStateAcks(message)
@@ -827,6 +833,7 @@ const handleSocket = (socket: Socket) => {
 const registerIpc = () => {
   const applicationMenuStateAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
     window_ !== undefined
+    && rendererLifecycle.acceptsPrivilegedRequests()
     && event.sender.id === window_.webContents.id
     && event.senderFrame !== null
     && event.senderFrame === event.sender.mainFrame
@@ -894,6 +901,7 @@ const registerIpc = () => {
   })
   const scopeAllowed = (event: Electron.IpcMainInvokeEvent) => (
     window_ !== undefined
+    && rendererLifecycle.acceptsPrivilegedRequests()
     && event.sender.id === window_.webContents.id
     && event.senderFrame !== null
     && event.senderFrame === event.sender.mainFrame
@@ -905,6 +913,7 @@ const registerIpc = () => {
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
     process.platform === "darwin"
     && window_ !== undefined
+    && rendererLifecycle.acceptsPrivilegedRequests()
     && event.sender.id === window_.webContents.id
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
@@ -918,6 +927,7 @@ const registerIpc = () => {
     process.platform === "darwin"
     && process.arch === "arm64"
     && window_ !== undefined
+    && rendererLifecycle.acceptsPrivilegedRequests()
     && event.sender.id === window_.webContents.id
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
@@ -1662,9 +1672,28 @@ const createWindow = () => {
     invalidateRendererGeneration("Renderer destroyed.")
     window_ = undefined
   })
-  window_.webContents.on("did-start-navigation", () => invalidateRendererGeneration("Renderer reloaded."))
-  window_.webContents.on("render-process-gone", () => invalidateRendererGeneration("Renderer crashed."))
-  window_.webContents.on("did-finish-load", () => rendererLifecycle.markDocumentLoaded())
+  window_.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      const invalidation = rendererLifecycle.beginMainFrameNavigation(details.url)
+      if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
+    }
+  })
+  window_.webContents.on("did-navigate", (_event, url) => {
+    rendererLifecycle.commitMainFrameNavigation(url)
+  })
+  window_.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return
+    rendererLifecycle.failMainFrameNavigation(validatedURL)
+  })
+  window_.webContents.on("did-stop-loading", () => {
+    // Electron 43 has no navigationId in these typings; this boundary confirms
+    // a previously committed, non-ambiguous attempt before privileged IPC resumes.
+    rendererLifecycle.confirmMainFrameNavigation()
+  })
+  window_.webContents.on("render-process-gone", () => {
+    const invalidation = rendererLifecycle.invalidateAfterCrash()
+    if (invalidation) applyRendererInvalidation(invalidation, "Renderer crashed.")
+  })
   window_.webContents.setWindowOpenHandler(({ url }) => {
     if (externalUrl(url)) void shell.openExternal(url)
     return { action: "deny" }

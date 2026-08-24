@@ -30,7 +30,7 @@ test('schedules expression values and restores at the clip boundary', () => {
   })
   expect(events[0]?.timeSec).toBe(1)
   expect(events[0]?.phase).toBe('set')
-  expect(events[0]?.value).toBe(0.75)
+  expect(events[0]?.value).toBe(1)
   expect(events[1]?.timeSec).toBe(4)
   expect(events[1]?.phase).toBe('restore')
 })
@@ -44,7 +44,7 @@ test('seeds mapped expression on a mid-clip seek', () => {
   })[0]
   expect(event?.timeSec).toBe(2)
   expect(event?.phase).toBe('set')
-  expect(event?.value).toBe(0.75)
+  expect(event?.value).toBe(1)
 })
 
 test('applies a clip-start expression during a zero-length seek', () => {
@@ -61,7 +61,7 @@ test('applies a clip-start expression during a zero-length seek', () => {
     rangeEndSec: 0,
   })
   expect(events).toHaveLength(1)
-  expect(events[0]).toMatchObject({ timeSec: 0, phase: 'set', value: 0.75 })
+  expect(events[0]).toMatchObject({ timeSec: 0, phase: 'set', value: 1 })
 })
 
 test('seeds a trimmed clip from the latest pre-trim state without replaying older events', () => {
@@ -85,9 +85,9 @@ test('seeds a trimmed clip from the latest pre-trim state without replaying olde
 
   expect(events).toHaveLength(3)
   expect(events[0]).toMatchObject({ timeSec: 0, phase: 'set', eventId: 'seed:before-latest' })
-  expect(events[0]?.value).toBeCloseTo(1.2)
+  expect(events[0]?.value).toBeCloseTo(1.6)
   expect(events[1]).toMatchObject({ timeSec: 1, phase: 'set', eventId: 'visible' })
-  expect(events[1]?.value).toBeCloseTo(0.6)
+  expect(events[1]?.value).toBeCloseTo(0.8)
   expect(events[2]).toMatchObject({ timeSec: 4, phase: 'restore' })
 })
 
@@ -132,7 +132,7 @@ test('uses the latest pre-trim event per target when mappings sort differently',
     mappingId: 'mapping-a',
     eventId: 'seed:late-a-mapping',
   })
-  expect(events[0]?.value).toBeCloseTo(1.2)
+  expect(events[0]?.value).toBeCloseTo(1.6)
   expect(events[1]).toMatchObject({ timeSec: 4, phase: 'restore' })
 })
 
@@ -155,7 +155,7 @@ test('applies an exact trim-boundary event after its pre-trim seed despite lexic
   })
 
   expect(events[0]).toMatchObject({ timeSec: 0, eventId: 'seed:a-boundary' })
-  expect(events[0]?.value).toBeCloseTo(1.2)
+  expect(events[0]?.value).toBeCloseTo(1.6)
 })
 
 test('applies a real boundary event after a pre-trim seed from another clip', () => {
@@ -185,5 +185,5 @@ test('applies a real boundary event after a pre-trim seed from another clip', ()
   })
 
   expect(events[0]).toMatchObject({ timeSec: 0, eventId: 'seed:real-boundary' })
-  expect(events[0]?.value).toBeCloseTo(1.2)
+  expect(events[0]?.value).toBeCloseTo(1.6)
 })

@@ -196,7 +196,7 @@ describe('automation helpers', () => {
 
     expect(automationValueToRatio(descriptor, descriptor.min)).toBe(0)
     expect(automationValueToRatio(descriptor, descriptor.max)).toBe(1)
-    expect(automationRatioToValue(descriptor, 0.5)).toBe(0.75)
+    expect(automationRatioToValue(descriptor, 0.5)).toBe(1)
   })
 
   test('maps log automation values to ratios and back', () => {

@@ -11,6 +11,7 @@ import type { ControlGateway } from "../control-handler"
 import type { ControlBearer } from "../control-oauth"
 import { createCloudControlHandlers } from "../control-handler"
 import { registerControlRoutes } from "./control"
+import { AudioUploadValidationError } from "../control-upload-audio-metadata"
 
 const bearer: ControlBearer = {
   userId: "user-1",
@@ -210,6 +211,33 @@ test("inspects upload bytes before beginning the receipt or writing R2", async (
   } satisfies ApiBindings["Bindings"])
   expect(response.status).toBe(201)
   expect(events).toEqual(["inspect", "begin", "put", "finalize"])
+})
+
+test("maps invalid control upload media to validation and parser failures to internal", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4])
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  const request = async (inspectAudioMetadata: NonNullable<Parameters<typeof registerControlRoutes>[1]>["inspectAudioMetadata"]) => {
+    const application = new Hono<ApiBindings>()
+    registerControlRoutes(application, {
+      resolveBearer: async () => bearer,
+      inspectAudioMetadata,
+    })
+    const form = new FormData()
+    form.append("file", new File([bytes], "Kick.wav", { type: "audio/wav" }))
+    return application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+      method: "POST",
+      headers: { "Idempotency-Key": "asset-key-1", "Content-Length": "1000", "x-content-sha256": digest },
+      body: form,
+    })
+  }
+  const invalid = await request(async () => {
+    throw new AudioUploadValidationError("Uploaded audio could not be parsed.")
+  })
+  expect(invalid.status).toBe(422)
+  const unexpected = await request(async () => {
+    throw new Error("unexpected parser failure")
+  })
+  expect(unexpected.status).toBe(500)
 })
 
   test("rejects mismatched, malformed, and oversized write requests", async () => {

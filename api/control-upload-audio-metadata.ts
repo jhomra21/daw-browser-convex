@@ -7,6 +7,7 @@ import {
   MP3,
   MP4,
   OGG,
+  UnsupportedInputFormatError,
   WAVE,
   WEBM,
 } from 'mediabunny'
@@ -35,8 +36,28 @@ export type TrustedAudioMetadata = {
   detectedCodec: string | null
 }
 
+export class AudioUploadValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AudioUploadValidationError'
+  }
+}
+
 const fail = (message: string): never => {
-  throw new Error(message)
+  throw new AudioUploadValidationError(message)
+}
+
+const knownMediaValidationMessage = (error: Error) => {
+  if (error instanceof UnsupportedInputFormatError) return error.message
+  if (/^Invalid (?:RF64|WAVE) file(?:\b|:)/.test(error.message)) return error.message
+  if (/^Unsupported WAVE (?:codec|PCM|float) /.test(error.message)) return error.message
+  if (error.message === 'No valid MP3 frame found.') return error.message
+  if (error.message === 'Missing STREAMINFO metadata block! Corrupted FLAC file.') return error.message
+  if (/^(?:Metadata block|StreamInfo block) at position .* is too small! Corrupted FLAC file\.$/.test(error.message)) {
+    return error.message
+  }
+  if (error.message === 'Invalid page with granule position: no packets end on this page.') return error.message
+  return undefined
 }
 
 export const inspectControlUploadAudioMetadata = async (input: {
@@ -59,7 +80,7 @@ export const inspectControlUploadAudioMetadata = async (input: {
       fail('Asset bytes do not match the declared audio MIME type.')
     }
     if (!(await mediaInput.canRead())) {
-      fail('Uploaded audio could not be parsed.')
+      fail('Uploaded audio has an unsupported or unrecognizable format.')
     }
     const audioTracks = await mediaInput.getAudioTracks()
     if (audioTracks.length !== 1) {
@@ -67,14 +88,17 @@ export const inspectControlUploadAudioMetadata = async (input: {
     }
     const audioTrack = audioTracks[0]
     if (!audioTrack) fail('Uploaded audio does not contain an audio track.')
-    const [durationSec, sampleRate, channelCount, detectedCodec] = await Promise.all([
-      audioTrack.getDurationFromMetadata({ skipLiveWait: true }),
+    const metadataDuration = await audioTrack.getDurationFromMetadata({ skipLiveWait: true })
+    const durationSec = metadataDuration ?? await audioTrack.computeDuration({
+      metadataOnly: true,
+      skipLiveWait: true,
+    })
+    const [sampleRate, channelCount, detectedCodec] = await Promise.all([
       audioTrack.getSampleRate(),
       audioTrack.getNumberOfChannels(),
       audioTrack.getCodec(),
     ])
-    const trustedDurationSec = durationSec ?? fail('Uploaded audio has invalid duration metadata.')
-    if (!Number.isFinite(trustedDurationSec) || trustedDurationSec <= 0) {
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
       fail('Uploaded audio has invalid duration metadata.')
     }
     if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > maxSampleRate) {
@@ -84,13 +108,20 @@ export const inspectControlUploadAudioMetadata = async (input: {
       fail('Uploaded audio has an unsupported channel count.')
     }
     return {
-      durationSec: trustedDurationSec,
+      durationSec,
       sampleRate,
       channelCount,
       detectedFormat: detectedFormat.name,
       detectedMimeType: detectedFormat.mimeType,
       detectedCodec,
     }
+  } catch (error) {
+    if (error instanceof AudioUploadValidationError) throw error
+    if (error instanceof Error) {
+      const message = knownMediaValidationMessage(error)
+      if (message) fail(message)
+    }
+    throw error
   } finally {
     mediaInput.dispose()
   }

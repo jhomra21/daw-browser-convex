@@ -32,7 +32,10 @@ import {
   controlNoStore,
   controlUnauthorizedHeaders,
 } from "../control-authorization"
-import { inspectControlUploadAudioMetadata } from "../control-upload-audio-metadata"
+import {
+  AudioUploadValidationError,
+  inspectControlUploadAudioMetadata,
+} from "../control-upload-audio-metadata"
 
 type ConvexGateway = ControlGateway
 type CloudControlInvoker = ControlInvoker<"cloud">
@@ -391,7 +394,10 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
           declaredMimeType: upload.file.type,
         });
       } catch (error) {
-        throw controlError("validation", error instanceof Error ? error.message : "Uploaded audio could not be parsed.");
+        if (error instanceof AudioUploadValidationError) {
+          throw controlError("validation", error.message);
+        }
+        throw error;
       }
       const gateway = await createGateway(context, authorized);
       const begun = z.object({

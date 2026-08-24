@@ -1,4 +1,5 @@
 #include "daw/audio_host_macos.h"
+#include "daw/audio_host_automation_override.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
 #include "daw/audio_core_instrument_wire.h"
@@ -554,6 +555,43 @@ void TestNativeVstEventScheduler() {
     assert(PrepareSchedulerBlock(scheduler, 512, block_events) == 0);
     scheduler.CommitBlock(true);
   }
+}
+
+void TestNativeVstAutomationOverrideTable() {
+  daw::audio_host_macos::NativeVstAutomationOverrideTable table;
+  assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kAlreadyPresent);
+  for (std::uint32_t id = 0; id < daw::audio_host_macos::NativeVstAutomationOverrideTable::kCapacity; ++id) {
+    if (id != 7) {
+      assert(table.Set(id) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+    }
+  }
+  assert(table.Set(100'000) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kFull);
+  assert(table.Has(7));
+  for (std::uint32_t id = 0; id < daw::audio_host_macos::NativeVstAutomationOverrideTable::kCapacity; id += 2) {
+    table.Clear(id);
+  }
+  assert(table.Has(7));
+  assert(!table.Has(8));
+  for (std::uint32_t id = 0; id < daw::audio_host_macos::NativeVstAutomationOverrideTable::kCapacity / 2; ++id) {
+    assert(table.Set(100'000 + id) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  }
+  assert(table.Has(7));
+  daw::audio_host_macos::NativeVstAutomationOverrideTable rollback;
+  assert(rollback.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  assert(rollback.Set(8) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  rollback.Clear(8);
+  assert(rollback.Has(7));
+  assert(!rollback.Has(8));
+
+  daw::audio_host_macos::NativeVstAutomationOverrideTable collision;
+  assert(collision.Set(0) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  assert(collision.Set(4'096) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
+  collision.Clear(0);
+  assert(collision.Set(4'096) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kAlreadyPresent);
+  assert(collision.Has(4'096));
+  collision.Clear(4'096);
+  assert(!collision.Has(4'096));
 }
 
 void TestDeviceNamespace() {
@@ -1447,6 +1485,7 @@ int main() {
   TestControlFrames();
   TestOfflineTerminalIsPublishedBeforeStop();
   TestNativeVstEventScheduler();
+  TestNativeVstAutomationOverrideTable();
   TestCallbackPlanarBuffersAndSplitting();
   TestOfflineStartProcessesWithoutDevice();
   TestEmptyGranularInstrumentState();

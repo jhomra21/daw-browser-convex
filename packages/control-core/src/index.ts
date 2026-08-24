@@ -1,10 +1,12 @@
 export {
   controlApprovalRequirementV1,
+  defaultControlPlannerCapabilities,
   destructiveControlActionKindsV1,
   planControlRequestV1,
   rebaseRecoveryAutomationParameterIdV1,
 } from './planner'
 export type {
+  ControlPlannerCapabilities,
   ControlPlanError,
   ControlPlanV1,
   PlannedControlActionV1,

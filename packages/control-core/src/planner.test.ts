@@ -349,7 +349,7 @@ test("traces canonically ordered snapshots for every action and the final plan",
         ],
       },
     ],
-  }, new Map(), { onActionPlanned: (entry) => traces.push(entry) })
+  }, new Map(), { trace: { onActionPlanned: (entry) => traces.push(entry) } })
 
   expect(traces).toHaveLength(plan.actions.length)
   for (const entry of traces) {

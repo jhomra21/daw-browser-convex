@@ -134,6 +134,28 @@ const validateLocalExternalProcessorRecoveryArtifact = (
   return { ...artifact, payload: bytes.bytes }
 }
 
+export const localRecoveryArtifactsMatch = (
+  left: LocalProjectExternalPluginArtifactRow,
+  right: LocalProjectExternalPluginArtifactRow,
+) => {
+  if (
+    left.id !== right.id
+    || left.sha256 !== right.sha256
+    || left.byteLength !== right.byteLength
+    || left.kind !== right.kind
+    || left.ownerId !== right.ownerId
+    || left.acl !== right.acl
+    || left.bucket !== right.bucket
+    || left.location !== right.location
+    || !(left.payload instanceof Uint8Array)
+    || !(right.payload instanceof Uint8Array)
+    || left.payload.byteLength !== right.payload.byteLength
+  ) return false
+  const leftPayload = left.payload
+  const rightPayload = right.payload
+  return leftPayload.every((byte, index) => byte === rightPayload[index])
+}
+
 const validateLocalExternalProcessorRecoveryBundle = (
   bundle: LocalExternalProcessorRecoveryBundle,
   allArtifacts: ReadonlyMap<string, LocalProjectExternalPluginArtifactRow>,

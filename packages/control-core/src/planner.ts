@@ -61,6 +61,12 @@ type CanonicalPlannerRequest = { projectId: string; actions: CanonicalControlAct
 type CanonicalProjectSnapshot = CanonicalProjectSnapshotV1 | CanonicalProjectSnapshotV2
 type PlannerRecovery = { payload: RecoveryPayload }
 type Entity = 'track' | 'clip' | 'effect'
+export type ControlPlannerCapabilities = {
+  externalVstRecovery: 'unsupported' | 'supported'
+}
+export const defaultControlPlannerCapabilities: Readonly<ControlPlannerCapabilities> = Object.freeze({
+  externalVstRecovery: 'unsupported',
+})
 export type ControlPlanError = {
   code: 'validation' | 'not-found' | 'limit-exceeded'
   message: string
@@ -166,6 +172,14 @@ export const controlApprovalRequirementV1 = (plan: ControlPlanV1, requestDigest:
     baseRevision: plan.priorRevision,
     expiresInSeconds: 600 as const,
   }
+}
+
+type ControlPlannerOptionsV1<
+  Snapshot extends CanonicalProjectSnapshot = CanonicalProjectSnapshotV1,
+> = {
+  trace?: ControlPlannerTraceV1<Snapshot>
+  actionIndexOffset?: number
+  capabilities?: Readonly<ControlPlannerCapabilities>
 }
 
 const planError = (actionIndex: number, code: ControlPlanError['code'], message: string): never => {
@@ -279,7 +293,9 @@ const validateExternalVstRecovery = (
   actionIndex: number,
   snapshot: ProjectSnapshotV1,
   affectedTrackIds: ReadonlySet<string>,
+  capabilities: Readonly<ControlPlannerCapabilities>,
 ) => {
+  if (capabilities.externalVstRecovery === 'supported') return
   if (snapshot.processors.some((processor) => (
     processor.processor.kind === 'external-vst3'
     && 'trackId' in processor.target
@@ -555,16 +571,17 @@ export function planControlRequestV1<
   base: Snapshot,
   request: CanonicalPlannerRequest,
   trustedRecoveries?: ReadonlyMap<string, PlannerRecovery>,
-  trace?: ControlPlannerTraceV1<Snapshot>,
-  actionIndexOffset?: number,
+  options?: ControlPlannerOptionsV1<Snapshot>,
 ): ControlPlanV1<Snapshot>
 export function planControlRequestV1(
   base: ProjectSnapshotV1,
   request: PlannerRequest,
   trustedRecoveries: ReadonlyMap<string, PlannerRecovery> = new Map(),
-  trace?: ControlPlannerTraceV1<CanonicalProjectSnapshot>,
-  actionIndexOffset = 0,
+  options: ControlPlannerOptionsV1<CanonicalProjectSnapshot> = {},
 ) {
+  const capabilities = options.capabilities ?? defaultControlPlannerCapabilities
+  const trace = options.trace
+  const actionIndexOffset = options.actionIndexOffset ?? 0
   if (base.project.id !== request.projectId) {
     planError(0, 'not-found', 'Project snapshot does not match the request project.')
   }
@@ -805,7 +822,7 @@ export function planControlRequestV1(
           snapshot.sidechains,
           track.id,
         )
-        validateExternalVstRecovery(actionIndex, snapshot, affectedTrackIds)
+        validateExternalVstRecovery(actionIndex, snapshot, affectedTrackIds, capabilities)
         const deletedTrackIds = collectDeletedTrackIdsV1(Array.from(tracks.values()), track.id)
         const survivors = Array.from(tracks.values())
           .filter((entry) => !deletedTrackIds.has(entry.id))
@@ -884,7 +901,7 @@ export function planControlRequestV1(
         const group = requireTrack(action.group, tracks, trackRefs, actionIndex)
         if (group.channelRole !== 'group') planError(actionIndex, 'validation', 'Only group tracks can be ungrouped.')
         const children = Array.from(tracks.values()).filter((track) => track.groupId === group.id)
-        validateExternalVstRecovery(actionIndex, snapshot, new Set([group.id]))
+        validateExternalVstRecovery(actionIndex, snapshot, new Set([group.id]), capabilities)
         validateRecoveryLimits(actionIndex, snapshot, new Set([group.id]), children)
         if (Array.from(clips.values()).some((clip) => clip.trackId === group.id)) planError(actionIndex, 'validation', 'Cannot ungroup a group with clips.')
         const childIds = new Set(children.map((child) => child.id))

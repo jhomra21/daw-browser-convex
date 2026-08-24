@@ -4,7 +4,10 @@ import { createR2ObjectResponse } from '../r2-object-response'
 import { fetchFallbackDefaultSample, listDefaultSamples } from '../default-samples'
 import { hashFile } from '../hash-file'
 import { requireProjectRoleContextForApi } from '../project-access'
-import { inspectControlUploadAudioMetadata } from '../control-upload-audio-metadata'
+import {
+  AudioUploadValidationError,
+  inspectControlUploadAudioMetadata,
+} from '../control-upload-audio-metadata'
 import { controlErrorSchemaV1 } from '@daw-browser/control'
 import { z } from 'zod'
 
@@ -18,6 +21,7 @@ const trustedDesktopSampleOrigins = new Set([
 type SampleRouteDependencies = {
   requireProjectRoleContext?: typeof requireProjectRoleContextForApi
   putObject?: (key: string, file: File, contentSha256: string) => Promise<void>
+  inspectAudioMetadata?: typeof inspectControlUploadAudioMetadata
 }
 
 type PublicSampleRouteDependencies = {
@@ -36,6 +40,7 @@ const uploadErrorEnvelopeSchema = z.object({
 }).passthrough()
 
 const sampleUploadErrorStatus = (error: Error | z.infer<typeof uploadErrorEnvelopeSchema>) => {
+  if (error instanceof AudioUploadValidationError) return 422
   const envelope = uploadErrorEnvelopeSchema.safeParse(error)
   const candidates = [error, envelope.success ? envelope.data.data : undefined, envelope.success ? envelope.data.errorData : undefined]
   for (const candidate of candidates) {
@@ -114,6 +119,7 @@ export function registerPublicSampleRoutes(app: App, dependencies: PublicSampleR
 
 export function registerSampleRoutes(app: App, dependencies: SampleRouteDependencies = {}) {
   const requireProjectRoleContext = dependencies.requireProjectRoleContext ?? requireProjectRoleContextForApi
+  const inspectAudioMetadata = dependencies.inspectAudioMetadata ?? inspectControlUploadAudioMetadata
   app.post('/api/samples', async (c) => {
     const contentLength = c.req.header('content-length')
     if (!contentLength) return c.json({ error: 'Content-Length is required' }, 411)
@@ -132,7 +138,7 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
       const access = await requireProjectRoleContext(c, projectId, ['owner', 'editor'])
       if (!access) return c.json({ error: 'Forbidden' }, 403)
       const contentSha256 = await hashFile(file)
-      const metadata = await inspectControlUploadAudioMetadata({
+      const metadata = await inspectAudioMetadata({
         file,
         declaredMimeType: file.type,
       })

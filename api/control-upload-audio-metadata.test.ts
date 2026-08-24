@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { InputTrack } from 'mediabunny'
-import { inspectControlUploadAudioMetadata } from './control-upload-audio-metadata'
+import { Input, InputTrack } from 'mediabunny'
+import { AudioUploadValidationError, inspectControlUploadAudioMetadata } from './control-upload-audio-metadata'
 
 const wavFile = (sampleRate = 44_100, channelCount = 2) => {
   const frames = 441
@@ -72,6 +72,27 @@ test('does not traverse packets to obtain upload duration', async () => {
   }
 })
 
+test('falls back to metadata-only packet duration when container metadata is absent', async () => {
+  const originalGetDurationFromMetadata = InputTrack.prototype.getDurationFromMetadata
+  const originalComputeDuration = InputTrack.prototype.computeDuration
+  let options: Parameters<InputTrack['computeDuration']>[0]
+  InputTrack.prototype.getDurationFromMetadata = async () => null
+  InputTrack.prototype.computeDuration = async (nextOptions) => {
+    options = nextOptions
+    return 1.55
+  }
+  try {
+    await expect(inspectControlUploadAudioMetadata({
+      file: wavFile(),
+      declaredMimeType: 'audio/wav',
+    })).resolves.toMatchObject({ durationSec: 1.55 })
+    expect(options).toEqual({ metadataOnly: true, skipLiveWait: true })
+  } finally {
+    InputTrack.prototype.getDurationFromMetadata = originalGetDurationFromMetadata
+    InputTrack.prototype.computeDuration = originalComputeDuration
+  }
+})
+
 test('rejects spoofed MIME, malformed bytes, and media without audio', async () => {
   const valid = wavFile()
   await expect(inspectControlUploadAudioMetadata({
@@ -86,6 +107,25 @@ test('rejects spoofed MIME, malformed bytes, and media without audio', async () 
     file: wavFile(44_100, 0),
     declaredMimeType: 'audio/wav',
   })).rejects.toThrow()
+})
+
+test('propagates an unexpected Mediabunny parser failure', async () => {
+  const originalGetFormat = Input.prototype.getFormat
+  Input.prototype.getFormat = async () => {
+    throw new Error('unexpected parser failure')
+  }
+  try {
+    await expect(inspectControlUploadAudioMetadata({
+      file: wavFile(),
+      declaredMimeType: 'audio/wav',
+    })).rejects.toThrow('unexpected parser failure')
+    await expect(inspectControlUploadAudioMetadata({
+      file: wavFile(),
+      declaredMimeType: 'audio/wav',
+    })).rejects.not.toBeInstanceOf(AudioUploadValidationError)
+  } finally {
+    Input.prototype.getFormat = originalGetFormat
+  }
 })
 
 test('rejects unsupported decoded metadata', async () => {

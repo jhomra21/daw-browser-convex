@@ -1,4 +1,5 @@
 #include "daw/audio_host_macos.h"
+#include "daw/audio_host_automation_override.h"
 #include "daw/native-schedule-state.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
@@ -236,11 +237,7 @@ bool ValidNativeSampleSourceEvent(const daw_audio_sample_source_event& event) {
 using NativeVstAutomationSegment = NativeScheduleAutomationSegment;
 
 struct NativeVstWorkerAttachment {
-  enum class AutomationOverrideSetResult : std::uint8_t {
-    kAlreadyPresent,
-    kInserted,
-    kFull,
-  };
+  using AutomationOverrideSetResult = NativeVstAutomationOverrideTable::SetResult;
   struct ActiveNote {
     std::uint64_t note_id = 0;
     std::uint32_t channel = 0;
@@ -279,88 +276,21 @@ struct NativeVstWorkerAttachment {
   std::atomic<std::uint32_t> automation_epoch = 0;
   mutable std::atomic<bool> automation_callback_reading = false;
   mutable std::atomic<std::uint32_t> automation_callback_buffer = 0;
-  static constexpr std::size_t kAutomationOverrideSlots = 4'096;
-  static constexpr std::uint8_t kAutomationOverrideEmpty = 0;
-  static constexpr std::uint8_t kAutomationOverrideOccupied = 1;
-  static constexpr std::uint8_t kAutomationOverrideTombstone = 2;
-  static constexpr std::uint8_t kAutomationOverrideReserved = 3;
-  std::array<std::atomic<std::uint32_t>, kAutomationOverrideSlots> automation_override_ids{};
-  std::array<std::atomic<std::uint8_t>, kAutomationOverrideSlots> automation_override_state{};
+  NativeVstAutomationOverrideTable automation_overrides{};
   std::array<ActiveNote, kActiveNoteCapacity> arranged_notes{};
   std::array<ActiveNote, kActiveNoteCapacity> live_notes{};
   std::atomic<std::uint32_t> note_epoch = 0;
 
-  static std::size_t OverrideSlot(const std::uint32_t parameter_id) noexcept {
-    return (static_cast<std::uint64_t>(parameter_id) * 2'654'435'761ULL) % kAutomationOverrideSlots;
-  }
-
   bool HasAutomationOverride(const std::uint32_t parameter_id) const noexcept {
-    std::size_t slot = OverrideSlot(parameter_id);
-    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
-      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
-      if (state == kAutomationOverrideEmpty) return false;
-      if (state == kAutomationOverrideOccupied
-        && automation_override_ids[slot].load(std::memory_order_relaxed) == parameter_id) return true;
-      slot = (slot + 1) % kAutomationOverrideSlots;
-    }
-    return false;
+    return automation_overrides.Has(parameter_id);
   }
 
   AutomationOverrideSetResult SetAutomationOverride(const std::uint32_t parameter_id) noexcept {
-    std::size_t slot = OverrideSlot(parameter_id);
-    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
-      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
-      if (state == kAutomationOverrideOccupied
-        && automation_override_ids[slot].load(std::memory_order_relaxed) == parameter_id) {
-        return AutomationOverrideSetResult::kAlreadyPresent;
-      }
-      if (state == kAutomationOverrideReserved) return AutomationOverrideSetResult::kFull;
-      if (state == kAutomationOverrideEmpty || state == kAutomationOverrideTombstone) {
-        auto expected = state;
-        if (!automation_override_state[slot].compare_exchange_weak(
-          expected,
-          kAutomationOverrideReserved,
-          std::memory_order_acq_rel,
-          std::memory_order_acquire
-        )) continue;
-        automation_override_ids[slot].store(parameter_id, std::memory_order_relaxed);
-        automation_override_state[slot].store(kAutomationOverrideOccupied, std::memory_order_release);
-        return AutomationOverrideSetResult::kInserted;
-      }
-      slot = (slot + 1) % kAutomationOverrideSlots;
-    }
-    return AutomationOverrideSetResult::kFull;
-  }
-
-  bool CanSetAutomationOverride(const std::uint32_t parameter_id) const noexcept {
-    std::size_t slot = OverrideSlot(parameter_id);
-    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
-      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
-      if (state == kAutomationOverrideEmpty) return true;
-      if (state == kAutomationOverrideOccupied
-        && automation_override_ids[slot].load(std::memory_order_relaxed) == parameter_id) return true;
-      slot = (slot + 1) % kAutomationOverrideSlots;
-    }
-    return false;
+    return automation_overrides.Set(parameter_id);
   }
 
   void ClearAutomationOverride(const std::uint32_t parameter_id) noexcept {
-    std::size_t slot = OverrideSlot(parameter_id);
-    for (std::size_t probe = 0; probe < kAutomationOverrideSlots; ++probe) {
-      const auto state = automation_override_state[slot].load(std::memory_order_acquire);
-      if (state == kAutomationOverrideEmpty) return;
-      if (state == kAutomationOverrideOccupied
-        && automation_override_ids[slot].load(std::memory_order_relaxed) == parameter_id) {
-        auto expected = kAutomationOverrideOccupied;
-        if (automation_override_state[slot].compare_exchange_weak(
-          expected,
-          kAutomationOverrideTombstone,
-          std::memory_order_acq_rel,
-          std::memory_order_acquire
-        )) return;
-      }
-      slot = (slot + 1) % kAutomationOverrideSlots;
-    }
+    automation_overrides.Clear(parameter_id);
   }
 
   bool QueueEvents(const std::span<const daw::plugin_host::WorkerTransportEvent> events) {
@@ -2920,10 +2850,15 @@ bool AudioHost::QueueNativeVstParameterEvents(const std::span<const std::uint8_t
   if (attachment == impl_->native_vst_attachments.end() || !attachment->second->metadata.playback_enabled
     || count > attachment->second->metadata.transport.maximum_events_per_block) return false;
   std::array<daw::plugin_host::WorkerTransportEvent, daw::plugin_host::kMaximumWorkerEvents> events{};
-  std::array<std::uint32_t, daw::plugin_host::kMaximumWorkerEvents> new_override_ids{};
-  std::array<NativeVstWorkerAttachment::AutomationOverrideSetResult,
-    daw::plugin_host::kMaximumWorkerEvents> override_results{};
-  std::size_t new_override_count = 0;
+  std::array<std::uint32_t, daw::plugin_host::kMaximumWorkerEvents> candidate_override_ids{};
+  std::array<std::uint32_t, daw::plugin_host::kMaximumWorkerEvents> inserted_override_ids{};
+  std::size_t candidate_override_count = 0;
+  std::size_t inserted_override_count = 0;
+  const auto rollback_overrides = [&]() noexcept {
+    for (std::size_t index = 0; index < inserted_override_count; ++index) {
+      attachment->second->ClearAutomationOverride(inserted_override_ids[index]);
+    }
+  };
   for (std::uint32_t index = 0; index < count; ++index) {
     const auto* bytes = payload.data() + offset + index * 16;
     const auto parameter_id = ReadLeU32(bytes);
@@ -2936,35 +2871,28 @@ bool AudioHost::QueueNativeVstParameterEvents(const std::span<const std::uint8_t
           attachment->second->metadata.parameter_ids.end(),
           parameter_id
         ) == attachment->second->metadata.parameter_ids.end())) return false;
-    if (!attachment->second->HasAutomationOverride(parameter_id)
-      && std::find(new_override_ids.begin(), new_override_ids.begin() + static_cast<std::ptrdiff_t>(new_override_count), parameter_id)
-        == new_override_ids.begin() + static_cast<std::ptrdiff_t>(new_override_count)) {
-      if (!attachment->second->CanSetAutomationOverride(parameter_id)
-        || new_override_count >= new_override_ids.size()) return false;
-      new_override_ids[new_override_count++] = parameter_id;
+    if (std::find(candidate_override_ids.begin(), candidate_override_ids.begin() + static_cast<std::ptrdiff_t>(candidate_override_count), parameter_id)
+      == candidate_override_ids.begin() + static_cast<std::ptrdiff_t>(candidate_override_count)) {
+      if (candidate_override_count >= candidate_override_ids.size()) return false;
+      candidate_override_ids[candidate_override_count++] = parameter_id;
     }
     events[index] = {.kind = daw::plugin_host::WorkerEventKind::kParameter, .sampleOffset = ReadLeU32(bytes + 4),
       .parameterId = parameter_id, .parameterValue = value};
   }
-  for (std::size_t index = 0; index < new_override_count; ++index) {
-    override_results[index] = attachment->second->SetAutomationOverride(new_override_ids[index]);
-    if (override_results[index] == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
-      for (std::size_t rollback = 0; rollback < index; ++rollback) {
-        if (override_results[rollback] == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
-          attachment->second->ClearAutomationOverride(new_override_ids[rollback]);
-        }
-      }
+  for (std::size_t index = 0; index < candidate_override_count; ++index) {
+    const auto result = attachment->second->SetAutomationOverride(candidate_override_ids[index]);
+    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
+      rollback_overrides();
       return false;
+    }
+    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
+      inserted_override_ids[inserted_override_count++] = candidate_override_ids[index];
     }
   }
   if (!attachment->second->QueueEvents(
     std::span<const daw::plugin_host::WorkerTransportEvent>(events.data(), count)
   )) {
-    for (std::size_t index = 0; index < new_override_count; ++index) {
-      if (override_results[index] == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
-        attachment->second->ClearAutomationOverride(new_override_ids[index]);
-      }
-    }
+    rollback_overrides();
     return false;
   }
   return true;

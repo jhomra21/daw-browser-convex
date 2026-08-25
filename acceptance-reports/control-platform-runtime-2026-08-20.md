@@ -288,9 +288,9 @@ Two existing product boundaries were observed and retained:
   independently validated VST export passed before automation was added; the
   optional post-restart export correctly reported this boundary.
 
-Final certification after the runtime fix:
+Final certification after the runtime and renderer-lifecycle fixes:
 
-- Full Bun suite: 2,429 passed, 1 skipped, 0 failed.
+- Full Bun suite: 2,433 passed, 1 skipped, 0 failed.
 - Control platform: 161 passed.
 - Control compatibility: 40 passed.
 - Anti-slop gate: 12 suites passed.
@@ -302,6 +302,34 @@ Final certification after the runtime fix:
   passed.
 - `git diff --check`: passed.
 
-The final correctness, structural, simplification, and defensive-code reviews
-found no remaining blocker after document activation was folded into the
-canonical navigation-commit boundary.
+The final lifecycle delta retires ambiguous same-URL navigation batches at the
+confirmed loading boundary without activating them. Retired identities remain
+quarantined across consecutive ambiguous batches so delayed outcomes cannot be
+misclassified as a clean navigation's redirected completion. The quarantine is
+bounded at 128 identities; overflow remains allocation-free and fail-closed
+until renderer crash recovery. The public test-only
+`activateCommittedDocument()` entrypoint was removed, and tests now initialize
+ownership through the production navigation-commit boundary.
+
+Focused lifecycle certification:
+
+- Renderer lifecycle: 18 passed.
+- Native session bridge: 5 passed.
+- Packaged cold launch and native manual transaction: passed.
+- Packaged normal reload and fresh native manual transaction: passed.
+- The exact final package delivered a renderer-only `Page.crash` while main and
+  native host processes survived. The local crash harness timed out before the
+  post-crash transaction assertion, so it does not claim a new complete
+  crash-recovery pass. The earlier complete packaged crash/recovery campaign
+  remains the authoritative end-to-end evidence.
+- Exact ambiguous Electron event delivery remains a permitted runtime SKIP
+  because CDP cannot prove that Electron delivered both same-URL starts to the
+  lifecycle owner. The executable state-machine matrix is authoritative.
+
+Focused packaged lifecycle evidence:
+
+`/private/tmp/daw-packaged-lifecycle-final.9RAqI6`
+
+The final correctness and structural Thermos reviews found no remaining
+blockers after stale-event quarantine, consecutive-batch retention, and bounded
+overflow handling were added.

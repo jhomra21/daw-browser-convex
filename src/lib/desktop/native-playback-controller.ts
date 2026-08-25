@@ -1035,6 +1035,7 @@ export const createNativePlaybackController = (input: {
         const coordinateVstAttachments = bridge.session.coordinateVstAttachments
         if (!coordinateVstAttachments) throw new Error("The native VST3 attachment coordinator is unavailable.")
         if (!preparedProjectIdForAttempt) throw new Error("The native VST3 attachment project is unavailable.")
+        startStage = "coordinate-vst-attachments"
         const coordination = await coordinateVstAttachments({
           projectId: preparedProjectIdForAttempt,
           serializedPlan: encodeNativeExternalAttachmentPlan(attachmentPlan),

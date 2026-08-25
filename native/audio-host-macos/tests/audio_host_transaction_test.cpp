@@ -135,6 +135,12 @@ std::vector<std::uint8_t> Attachment() {
   AppendU32(payload, 2);
   AppendU32(payload, 2);
   AppendU32(payload, 128);
+  AppendU32(payload, 0);
+  AppendU32(payload, 0);
+  AppendU32(payload, 0);
+  AppendU32(payload, 2);
+  AppendU32(payload, 7);
+  AppendU32(payload, 8);
   return payload;
 }
 

@@ -234,3 +234,74 @@ export evidence is under:
 `/tmp/daw-vst3-acceptance-final-qwk44i/evidence`
 
 No registration secret was copied into this report.
+
+## Final browser and packaged-VST merge gate, 2026-08-25
+
+The current branch was rebuilt and tested on both supported runtime surfaces:
+
+- Browser: the current branch's local production build, using a project with no
+  VST3 or external processors.
+- Desktop: the packaged Electron application, using an isolated copy of a real
+  local project containing ValhallaSupermassive.
+
+The browser campaign passed track editing, mixer/routing, WAV import,
+playback/seek, built-in EQ and Synth, reload and cold-session media hydration,
+settings, keyboard shortcuts, and an independently verified one-second export.
+The export was stereo 44.1 kHz, 16-bit PCM, 176,444 bytes, with nonzero signal.
+Evidence is under:
+
+`/tmp/daw-browser-acceptance-3fb6ae9-20260824-181043`
+
+The first packaged VST campaign exposed a real protocol compatibility bug.
+The TypeScript attachment serializer always emitted the parameter-ID extension,
+but the native host decoder required the payload to end immediately after the
+initial parameter values. Native VST attach request 10 was therefore rejected
+before graph configuration. The decoder now accepts the bounded extension and
+the transaction-host regression sends the current serializer-shaped payload.
+
+The corrected packaged campaign passed:
+
+- Cold native Valhalla attachment and all 19 public parameters.
+- Play, pause, stop, editor open/close, and distinct playback/editor workers.
+- Manual Mix editing with independent public MCP verification and cold-restart
+  persistence.
+- Manual automation override and explicit re-enable after stopping transport.
+- A one-second VST WAV export independently verified as RIFF/WAVE, stereo
+  48 kHz, 16-bit PCM, 48,000 frames, 192,044 bytes, with nonzero signal.
+- Proven playback-worker loss, bounded rebuild, replacement worker creation,
+  resumed playback, and surviving editor/control access.
+- Renderer reload and renderer-only CDP crash during active playback, including
+  stale-operation invalidation, main-process survival, reconnect, persisted VST
+  state, and successful fresh controls.
+- Full application termination and same-profile cold relaunch, including
+  attachment, parameter and automation persistence, playback, and editor.
+
+Evidence and the step-by-step result report are under:
+
+`/tmp/daw-vst-fixed-acceptance-JQ3GNl`
+
+Two existing product boundaries were observed and retained:
+
+- Automation re-enable is rejected while native playback is live and succeeds
+  after transport stops.
+- Native Phase A export rejects projects containing automation. The required
+  independently validated VST export passed before automation was added; the
+  optional post-restart export correctly reported this boundary.
+
+Final certification after the runtime fix:
+
+- Full Bun suite: 2,429 passed, 1 skipped, 0 failed.
+- Control platform: 161 passed.
+- Control compatibility: 40 passed.
+- Anti-slop gate: 12 suites passed.
+- Repository lint: zero warnings and zero errors.
+- Workspace, root, API, and desktop TypeScript checks: passed.
+- Production build: passed.
+- Native debug build and CTest: 6 of 6 passed.
+- Packaged native manifest, hashes, release byte parity, and host diagnostics:
+  passed.
+- `git diff --check`: passed.
+
+The final correctness, structural, simplification, and defensive-code reviews
+found no remaining blocker after document activation was folded into the
+canonical navigation-commit boundary.

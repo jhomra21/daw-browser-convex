@@ -23,6 +23,7 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
 
   let currentGeneration = initialGeneration
   let activeGeneration: number | undefined
+  let hasCommittedDocument = false
   let navigationSequence = 0
   let pendingMainFrameNavigations: Array<NavigationAttempt & { sequence: number }> = []
   let navigationBoundaryObserved = false
@@ -31,6 +32,10 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
   let hadOverlappingNavigation = false
   let crashed = false
 
+  const activateCurrentDocument = () => {
+    activeGeneration = currentGeneration
+    hasCommittedDocument = true
+  }
   const pendingNavigations = () => pendingMainFrameNavigations.filter(({ status }) => status === "pending")
   const matchingNavigation = (identity: string) => {
     const pending = pendingNavigations()
@@ -59,7 +64,7 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
     if (newest?.status === "committed") {
       pendingMainFrameNavigations = []
       hadOverlappingNavigation = false
-      activeGeneration = currentGeneration
+      activateCurrentDocument()
       return true
     }
     if (newest?.status === "failed") {
@@ -108,14 +113,22 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
         return
       }
       const match = matchResult.attempt
-      if (!match || match.status !== "pending") return
+      if (!match) {
+        if (
+          !hasCommittedDocument
+          && navigationSequence === 0
+          && pendingMainFrameNavigations.length === 0
+        ) activateCurrentDocument()
+        return
+      }
+      if (match.status !== "pending") return
       if (newestNavigation()?.sequence === match.sequence) markOlderNavigationsStale(match.sequence)
       match.status = "committed"
       if (pendingNavigations().length === 0 && pendingMainFrameNavigations.length === 1) {
         pendingMainFrameNavigations = []
         restoreAfterNavigationFailure = false
         hadOverlappingNavigation = false
-        activeGeneration = currentGeneration
+        activateCurrentDocument()
       }
     },
     failMainFrameNavigation(identity) {
@@ -139,7 +152,7 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
         pendingMainFrameNavigations = []
         restoreAfterNavigationFailure = false
         hadOverlappingNavigation = false
-        activeGeneration = currentGeneration
+        activateCurrentDocument()
         return true
       }
       return false
@@ -174,7 +187,7 @@ export const createRendererLifecycleOwner = (initialGeneration = 0): RendererLif
       restoreAfterNavigationFailure = false
       ambiguousNavigationOutcome = false
       hadOverlappingNavigation = false
-      activeGeneration = currentGeneration
+      activateCurrentDocument()
     },
     acceptsPrivilegedRequests: () => activeGeneration === currentGeneration,
   }

@@ -540,7 +540,8 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   offset += state_hash_bytes;
   const auto parameter_count = ReadU32(payload.data() + offset);
   offset += 4;
-  if (parameter_count > 2'048 || payload.size() != offset + static_cast<std::size_t>(parameter_count) * 12) return false;
+  if (parameter_count > 2'048
+    || payload.size() < offset + static_cast<std::size_t>(parameter_count) * 12) return false;
   for (std::uint32_t index = 0; index < parameter_count; ++index) {
     const auto parameter_id = ReadU32(payload.data() + offset);
     const auto value = ReadDouble(payload.data() + offset + 4);

@@ -66,3 +66,14 @@ test("routes editor commands through the isolated session before the playback ho
   expect(isolatedRoute).toBeGreaterThanOrEqual(0)
   expect(playbackRoute).toBeGreaterThan(isolatedRoute)
 })
+
+test("commits renderer navigation before native transaction registration", async () => {
+  const main = await readFile(mainPath, "utf8")
+  const didNavigate = main.indexOf('window_.webContents.on("did-navigate"')
+  const didFailLoad = main.indexOf('window_.webContents.on("did-fail-load"', didNavigate)
+  const navigationHandler = main.slice(didNavigate, didFailLoad)
+  expect(didNavigate).toBeGreaterThanOrEqual(0)
+  expect(navigationHandler).toContain("rendererLifecycle.commitMainFrameNavigation(url)")
+  expect(navigationHandler).not.toContain("activateInitialCommittedDocument")
+  expect(main).toContain('ipcMain.handle("daw:audio-host:session:begin-transaction"')
+})

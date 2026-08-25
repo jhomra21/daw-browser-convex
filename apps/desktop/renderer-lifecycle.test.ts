@@ -27,6 +27,21 @@ test("committing a document does not change its generation or reactivate a dead 
   expect(lifecycle.acceptsPrivilegedRequests()).toBe(true)
 })
 
+test("the initial did-navigate commit activates the first document without a pending attempt", () => {
+  const lifecycle = createRendererLifecycleOwner()
+  lifecycle.commitMainFrameNavigation("https://app.test/initial")
+  expect(lifecycle.acceptsPrivilegedRequests()).toBe(true)
+  expect(lifecycle.generation()).toBe(0)
+})
+
+test("an unmatched did-navigate after activation cannot reactivate a dead document", () => {
+  const lifecycle = createRendererLifecycleOwner()
+  lifecycle.commitMainFrameNavigation("https://app.test/initial")
+  lifecycle.invalidateActiveDocument()
+  lifecycle.commitMainFrameNavigation("https://app.test/stale")
+  expect(lifecycle.acceptsPrivilegedRequests()).toBe(false)
+})
+
 test("failed main-frame navigation restores the live document without restoring its old generation", () => {
   const lifecycle = createRendererLifecycleOwner()
   lifecycle.activateCommittedDocument()
@@ -70,6 +85,7 @@ test("a failed initial navigation does not activate an uncommitted document", ()
   const lifecycle = createRendererLifecycleOwner()
   expect(lifecycle.beginMainFrameNavigation("https://app.test/initial")).toBeUndefined()
   expect(lifecycle.failMainFrameNavigation("https://app.test/initial")).toBe(false)
+  lifecycle.commitMainFrameNavigation("https://app.test/stale")
   expect(lifecycle.acceptsPrivilegedRequests()).toBe(false)
 })
 

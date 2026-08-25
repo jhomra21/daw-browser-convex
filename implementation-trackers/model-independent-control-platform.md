@@ -1,5 +1,14 @@
 # Model-Independent Control Platform Compatibility Tracker
 
+> **Status: COMPLETED / HISTORICAL**
+>
+> Current architecture references: [control platform](../docs/control-platform.md),
+> [agent control](../docs/agent-control.md), and
+> [native VST3](../docs/native-vst3.md). Runtime acceptance evidence:
+> [control-platform-runtime-2026-08-20](../acceptance-reports/control-platform-runtime-2026-08-20.md).
+> Checkpoint statements below describe historical implementation evidence and
+> may be superseded by the current source and documentation.
+
 ## Checkpoint 1 — Compatibility baseline
 
 This tracker records the current compatibility surfaces before any executor

@@ -39,3 +39,8 @@ Thumbs.db
 .wrangler
 
 .factory/*
+!.factory/skills/
+.factory/skills/*
+!.factory/skills/*/
+.factory/skills/*/*
+!.factory/skills/*/SKILL.md

@@ -333,3 +333,35 @@ Focused packaged lifecycle evidence:
 The final correctness and structural Thermos reviews found no remaining
 blockers after stale-event quarantine, consecutive-batch retention, and bounded
 overflow handling were added.
+
+## Documentation and agent-discoverability finalization
+
+- Runtime-certified ancestor:
+  `37e400e42bcde874926d45e952a91ceb5080c94d`.
+- Documentation, shared-skill, and repository-hygiene cleanup commit:
+  `485ad9e`.
+- The final PR head adds this acceptance-report record to that cleanup commit;
+  it does not change production behavior.
+- Updated current guidance: `README.md`, `AGENTS.md`,
+  `docs/control-platform.md`, `docs/agent-control.md`, and
+  `docs/native-vst3.md`.
+- Added shared Factory skills:
+  `.factory/skills/daw-project-control/SKILL.md`,
+  `.factory/skills/daw-desktop-runtime/SKILL.md`, and
+  `.factory/skills/daw-vst3/SKILL.md`.
+- Updated repository hygiene: `.gitignore` exposes only repo skill
+  `SKILL.md` files, the model-independent control tracker is labeled completed
+  and historical, obsolete advisor plans were removed, and the stale
+  working-tree `security-findings.json` scan was removed.
+- No files under `src/`, `api/`, `convex/`, `packages/`, `apps/`, `native/`,
+  `migrations/`, or other production runtime paths changed in this pass.
+- The packaged browser, native audio, and VST3 evidence certified at the
+  runtime ancestor remains applicable. No new packaged-runtime campaign is
+  claimed.
+- Final repository gates for the documentation-only head: lint, 12 anti-slop
+  suites, typecheck, 2,433 Bun tests with 1 skip and 0 failures, 161 control
+  platform tests, 40 control compatibility tests, production build, relative
+  documentation links, Factory skill frontmatter, strict diff scope, and
+  `git diff --check` all passed.
+- Focused correctness and repository-hygiene reviews found no remaining
+  documentation blocker.

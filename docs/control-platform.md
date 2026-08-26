@@ -1,22 +1,21 @@
 # Control platform architecture
 
-This is the authoritative architecture reference for project control and its
-public adapters. Exact schemas remain owned by `@daw-browser/control`; this
-document explains ownership, transport boundaries, and safe usage.
+This document explains how project control is split across contracts, pure project logic, trusted project owners, and transport adapters. The schemas in `@daw-browser/control` are the source of truth.
 
-## Contract ownership
+## Who owns what
 
-`@daw-browser/control` owns versioned schemas, serialization, request digests,
-durable request metadata, recovery payloads, and the keyed operation catalog.
-`@daw-browser/control-core` owns pure semantic planning and projection. It
-does not own transport or durable storage and does not create a second
-validation authority.
+`@daw-browser/control` owns versioned schemas, operation IDs, request envelopes, snapshots, serialization, request digests, recovery payloads, limits, and capabilities.
 
-A `ControlInvoker` binds one target and trusted principal, then dispatches
-through the catalog. REST, desktop, CLI, SDK, and MCP are adapters around
-these owners.
+`@daw-browser/control-core` owns pure project planning and projection. It also owns MIDI resolution, destructive transforms, and recovery ordering. It does not own transport, authentication, or storage.
 
-## Canonical operation catalog
+A project owner binds those contracts to real state:
+
+- local desktop control uses the mounted local project
+- cloud control uses the authenticated Worker and Convex path
+
+`ControlInvoker` checks that an operation is allowed for the selected target and validates its input and output. REST, desktop, CLI, SDK, JSONL, and MCP all sit outside that boundary.
+
+## Operation catalog
 
 | Operation | Targets | Effect | Idempotency | Approval |
 | --- | --- | --- | --- | --- |
@@ -30,18 +29,15 @@ these owners.
 | `control.history` | cloud, desktop | read | safe | never |
 | `control.recoveries` | cloud, desktop | read | safe | never |
 
-Capabilities and snapshots are canonical V2 representations. Preview,
-approval, commit, history, and recovery envelopes remain V1 compatibility
-contracts. V1 adapters project from canonical provider values; they are not a
-second semantic implementation.
+`project.current` is desktop-only because it refers to the project mounted in the Electron app.
 
-## Targets and runtime separation
+Capabilities and snapshots use the V2 representation for current integrations. The existing mutation, approval, history, and recovery requests keep their V1 compatibility envelope. This keeps older callers working while new callers get the richer read model.
 
-Project control targets are `cloud` and `desktop`. `project.current` is
-desktop-only because it describes the mounted local project.
+## Project control and desktop runtime are different APIs
 
-Desktop runtime IDs are owned by `@daw-browser/desktop-protocol` and are not
-project semantic actions:
+Project control changes durable project state. Desktop runtime operations control the attached Electron host.
+
+The desktop runtime catalog is owned by `@daw-browser/desktop-protocol`:
 
 ```text
 host.status
@@ -59,29 +55,27 @@ transport.seek
 diagnostics.snapshot
 ```
 
-Do not add runtime IDs to `controlActionSchemaV1` or infer project mutations
-from host capabilities. The public VST parameter write is the local
-`external-plugin.parameters.set` project action, not generic runtime RPC.
+Do not add these IDs to `controlActionSchemaV1`. Playing the transport or asking for host diagnostics is not a project mutation.
 
-## Public TypeScript SDK
+VST parameter writes follow the opposite rule. `external-plugin.parameters.set` is a project-control action because the value belongs to project state. It is available only when local capabilities advertise it.
+
+## TypeScript SDK
 
 `@daw-browser/control-sdk` exports:
 
-- `createCanonicalControlClient`, a typed transport-neutral client grouped as
-  `projects` and `control`.
-- `createJsonlRpcAdapter`, a bounded sequential JSONL adapter.
-- The retained REST compatibility client with V1 methods plus
-  `capabilitiesV2` and `snapshotV2`.
+- `createCanonicalControlClient` for typed project discovery and control
+- `createJsonlRpcAdapter` for sequential JSON-RPC over JSONL
+- the retained REST compatibility client with V1 methods plus `capabilitiesV2` and `snapshotV2`
 
-The `@daw-browser/control-sdk/desktop` entry point exports
-`connectDesktopControl`. It discovers and authenticates the packaged desktop
-host through the existing registration/socket adapter, then returns a typed
-desktop invoker and `close`. The SDK does not expose raw stores or an
-arbitrary invoker.
+`@daw-browser/control-sdk/desktop` exports `connectDesktopControl`. It discovers the packaged desktop registration, authenticates the local connection, and returns a typed desktop invoker plus `close()`.
 
-## CLI surface
+The desktop SDK does not expose raw stores, registration secrets, socket internals, or arbitrary Electron IPC.
 
-`@daw-browser/control-cli` provides the `daw-control` executable:
+## CLI
+
+`@daw-browser/control-cli` provides the `daw-control` executable.
+
+Project-control commands:
 
 ```text
 auth login --base-url <origin>
@@ -101,9 +95,9 @@ recoveries <project-id> [--cursor <cursor>] [--limit <number>]
 rpc --target host
 ```
 
-`rpc --target host` is the canonical project-control JSONL adapter over the
-authenticated desktop host, not generic runtime RPC. Host commands remain
-separate:
+`rpc --target host` carries project-control JSONL over the authenticated desktop connection. It is not a generic host command channel.
+
+Desktop runtime commands are separate:
 
 ```text
 host status
@@ -119,26 +113,25 @@ host export-status
 host export-cancel <job-id>
 ```
 
-## MCP surface
+## MCP
 
-`@daw-browser/control-mcp` registers project workflow tools and separately
-named host tools.
+`@daw-browser/control-mcp` exposes project-control tools and desktop runtime tools under different names.
 
-Preferred canonical reads for new integrations:
+New integrations should prefer these read tools:
 
 ```text
 control_capabilities_v2
 control_snapshot_v2
 ```
 
-V1 compatibility reads:
+V1 compatibility reads remain available:
 
 ```text
 control_capabilities
 control_snapshot
 ```
 
-Workflow tools:
+Project workflow tools:
 
 ```text
 project_list
@@ -150,7 +143,7 @@ control_history
 control_recoveries
 ```
 
-Host tools:
+Desktop runtime tools:
 
 ```text
 host_status
@@ -168,15 +161,13 @@ host_vst_instances
 host_vst_parameters
 ```
 
-MCP control reads use `control:read`; preview, approval, and commit use
-`control:write`. `target:"cloud"` is the default route. `target:"host"` needs
-an attached desktop host and its advertised capabilities.
-`project_current` is host-only. `offline_access` is an OAuth credential scope,
-not a project action permission.
+MCP reads use `control:read`. Preview, approval, and commit use `control:write`. `target:"cloud"` is the default. `target:"host"` requires an attached desktop app. `project_current` works only on the host target.
 
-## REST surface
+`offline_access` is an OAuth credential scope. It is not permission to mutate a project.
 
-The Worker exposes retained control routes under `/api/control`:
+## HTTP routes
+
+The Worker keeps the versioned control routes under `/api/control`:
 
 ```text
 GET  /api/control/v1/capabilities
@@ -191,14 +182,11 @@ GET  /api/control/v1/projects/:projectId/history
 GET  /api/control/v1/projects/:projectId/recoveries
 ```
 
-Bearer OAuth resources are `${origin}/api`. `control:read` authorizes reads;
-`control:write` authorizes preview, approval, commit, and write-side resource
-operations. The API enforces project access and role checks.
+OAuth bearer tokens target `${origin}/api`. The Worker checks `control:read` or `control:write`, project access, and project role before it calls the project owner.
 
-### Asset and resource routes
+## Asset routes
 
-Assets are not control actions. They are project-scoped resources whose R2
-locators remain behind the Worker/Convex boundary:
+Assets are project resources. They are not extra control actions.
 
 ```text
 POST   /api/control/v1/projects/:projectId/assets
@@ -210,14 +198,11 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Multipart asset upload requires `Content-Length`, `Idempotency-Key`, and
-`x-content-sha256`, then validates bounded size, MIME/extension, and audio
-metadata before the Convex/R2 begin-upload and finalize-upload sequence.
-Content reads require project read access and may pass range headers through to
-R2. Asset deletes use the canonical `asset.delete` commit path and its normal
-revision/idempotency/approval behavior.
+Multipart upload requires `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The Worker checks file size, MIME type, extension, digest, and audio metadata before the Convex and R2 upload is finalized.
 
-Separate sample, export, and cloud-backup resource families are:
+An action may refer to a persisted asset ID returned by project state. It must not invent an R2 object key.
+
+Other resource routes include:
 
 ```text
 POST   /api/samples
@@ -230,42 +215,50 @@ POST   /api/cloud-backups
 GET    /api/cloud-backups/:projectId
 ```
 
-An agent may reference a persisted asset ID in a project action, but must not
-invent an R2 key or treat a resource route as raw storage access.
+## Request lifecycle
 
-## Safe workflow
+A normal project mutation should follow this order:
 
-1. Discover with `project.list`; on desktop use `project.current` when the
-   mounted project is needed.
-2. Read `control.capabilities` and use its action list and limits.
-3. Read the canonical V2 `control.snapshot`.
-4. Build references from snapshot IDs:
-   `{ "source": "persisted", "id": "<id>" }`.
+1. Discover the project with `project.list`. Use `project.current` only for the mounted desktop project.
+2. Read `control.capabilities` and use the returned action list and limits.
+3. Read the V2 `control.snapshot` and note its revision.
+4. Build references from IDs in that snapshot.
 5. Preview the exact V1 request.
-6. Request approval for the exact request when required.
-7. Commit the exact request with `version: "v1"` and a stable idempotency key.
-8. Fetch a fresh V2 snapshot and verify the result.
+6. Request approval only if preview requires it.
+7. Commit the same request with a stable idempotency key.
+8. Read a fresh snapshot or history to confirm the result.
 
-On `revision-conflict`, fetch a new snapshot and rebuild all references and
-actions. Never commit a stale request unchanged. Recoveries expire after seven
-days.
+A persisted reference looks like this:
 
-## Compatibility and deferred boundaries
+```json
+{"source":"persisted","id":"track-1"}
+```
 
-V1/V2 contracts, REST routes, desktop frames, CLI commands, MCP tools, durable
-rows, and `registration-v1.json` remain retained. No external deployed or
-installed-consumer parity is claimed by this document.
+If the commit returns `revision-conflict`, discard the stale request. Fetch a new snapshot, rebuild the references and actions, preview again, and then commit.
 
-There is no public arbitrary operation endpoint, external extension package
-loader, arbitrary package/DSP loader, or cloud JSONL process transport.
+Recoveries expire after seven days.
 
-For agent-facing examples and the complete action inventory, see
-[agent-control.md](agent-control.md). For native trust and VST3 lifecycle, see
-[native-vst3.md](native-vst3.md).
+## Compatibility rules
 
-## Validation
+The merge kept these compatibility contracts:
 
-The focused control-platform suite is:
+- V1 and V2 control contracts
+- versioned REST routes
+- desktop protocol framing
+- CLI commands
+- MCP compatibility tools
+- durable control, history, and recovery records
+- `registration-v1.json`
+
+Do not remove one of these because a newer path exists in this repository. Deletion needs evidence that deployed or installed consumers no longer depend on it.
+
+There is no public arbitrary-operation endpoint, cloud JSONL process transport, external extension package loader, or arbitrary DSP/package loader.
+
+For action schemas and examples, read [agent-control.md](agent-control.md). For native plugin behavior, read [native-vst3.md](native-vst3.md).
+
+## Test
+
+Run the focused control-platform suite with:
 
 ```sh
 bun run test:control-platform

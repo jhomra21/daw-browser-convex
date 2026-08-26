@@ -1,62 +1,49 @@
-# Agent control operating manual
+# Agent control manual
 
-This is the operating manual for an agent or automation client using the
-public DAW control surfaces. The schemas in `@daw-browser/control` are
-authoritative. This document explains the safe workflow; it is not a
-replacement validator.
+Use this document when an agent or external program needs to read or change DAW project state. The schemas in `@daw-browser/control` decide what is valid.
 
-## Golden workflow
+The first rule is simple: trust the capabilities response, not assumptions about the UI, package names, or a previous run.
 
-1. Discover a project with `project.list`; on desktop, use
-   `project.current` only to identify the mounted project.
-2. Call `control.capabilities` and use the returned canonical V2 capabilities
-   object as the authority for supported actions, limits, targets, and
-   local-only support.
-3. Call `control.snapshot` and use the canonical V2 snapshot and its revision.
-4. Build V1 actions and references from the returned capabilities and snapshot.
-5. Call `control.preview` with the exact V1 request.
-6. If preview says approval is required, call `control.requestApproval` for
-   that exact request.
-7. Call `control.commit` with the exact request, a stable idempotency key, and
-   the approval token when required.
-8. Re-observe with a fresh V2 snapshot and inspect `control.history` when an
-   audit record is needed.
+## Standard workflow
 
-**THE RETURNED CAPABILITIES OBJECT IS AUTHORITATIVE.** Do not infer support
-from UI labels, package names, host status, cloud assumptions, or prior
-responses.
+1. Discover the project with `project.list`. On desktop, `project.current` can identify the mounted project.
+2. Read `control.capabilities`.
+3. Read `control.snapshot` and keep its revision.
+4. Build V1 actions from IDs in that snapshot.
+5. Preview the exact request with `control.preview`.
+6. If preview requires approval, request it with `control.requestApproval`.
+7. Commit the same request with a stable idempotency key.
+8. Fetch a fresh snapshot. Use history when you need an audit record.
 
-## Choose the boundary
+Capabilities and snapshots use the V2 representation. Mutation, approval, history, and recovery requests keep the V1 compatibility envelope.
 
-Project control changes semantic project state through the canonical operation
-catalog. Desktop runtime operations are a separate catalog for the
-authenticated Electron host.
+## Pick the right target
 
-Project targets are:
+Project control has two targets.
 
-- `cloud`: an authenticated shared project through the Worker/Convex boundary.
-- `desktop`: the authenticated packaged host and its mounted local project.
+`cloud` addresses an authenticated shared project through the Worker and Convex.
 
-`project.current` is desktop-only. Cloud discovery uses `project.list`.
-Runtime IDs such as transport, diagnostics, import/export, and VST discovery
-are not project semantic actions.
+`desktop` addresses the project mounted in the Electron app. Desktop can also advertise local-only project actions such as VST parameter changes.
 
-## Discover and inspect
+`project.current` works only on desktop. Cloud discovery uses `project.list`.
 
-Use bounded discovery and never guess an ID from a filename, URL, or runtime
-status:
+Transport, diagnostics, import/export, and VST discovery are desktop runtime operations. They are not project actions.
+
+## Discover before you write
+
+Do not guess IDs from filenames, URLs, UI labels, or host status.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}
 ```
 
-For a mounted desktop project:
+For the mounted desktop project:
 
 ```json
 {"jsonrpc":"2.0","id":2,"method":"project.current","params":{}}
 ```
 
-Then call canonical capabilities and snapshot operations:
+Then read capabilities and the snapshot:
 
 ```json
 {"jsonrpc":"2.0","id":3,"method":"control.capabilities","params":{}}
@@ -66,81 +53,57 @@ Then call canonical capabilities and snapshot operations:
 {"jsonrpc":"2.0","id":4,"method":"control.snapshot","params":{"projectId":"project-1"}}
 ```
 
-The canonical capabilities and snapshot representations are V2. Preview,
-approval, commit, history, and recovery envelopes remain V1 compatibility
-contracts. The request `version` is therefore `"v1"` even when its
-`expectedRevision` came from a V2 snapshot.
+Cloud capabilities currently list 39 action kinds. Desktop project control lists those 39 plus `external-plugin.parameters.set` when the local project supports it.
 
-Cloud capabilities advertise 39 action kinds. Local project capabilities
-advertise those 39 plus the local-only
-`external-plugin.parameters.set`, for 40 total. Never infer local-only
-support from cloud capabilities or a desktop runtime ID.
+## References
 
-## References and actions
-
-An existing entity is addressed with its ID from the latest snapshot:
+Use a persisted ID from the latest snapshot:
 
 ```json
 {"source":"persisted","id":"track-1"}
 ```
 
-A client reference is allowed only where the schema supports it and only for
-an entity created earlier in the same request:
+A client reference is only for an entity created earlier in the same request, and only where the schema allows it:
 
 ```json
 {"source":"client","clientRef":"new-track"}
 ```
 
-Client references are request-local. Do not invent them for persisted
-entities, reuse them across requests, or use them to avoid a fresh snapshot.
-Actions are ordered, schema-validated V1 values; package schemas enforce
-names, IDs, numeric ranges, array bounds, and action-specific invariants.
+Client references do not survive across requests. Do not use them as a substitute for a fresh snapshot.
 
 ## Preview, approval, and commit
 
 ### Preview
 
-Call `control.preview` before every mutation. Preview is non-mutating and
-returns the request digest, resolved references, warnings, change summary,
-base/current revisions, and whether approval is required. Do not alter the
-request after preview.
+Run `control.preview` before every mutation. Preview validates the request without changing project state. It returns the digest, resolved references, warnings, change summary, revisions, and approval requirement.
+
+Do not edit the request after preview. If the payload changes, preview again.
 
 ### Approval
 
-When `preview.approval.required` is true, call `control.requestApproval` with
-the same project, revision, and ordered actions. Approval is bound to the
-request digest and selected action indexes and expires after 600 seconds.
+If `preview.approval.required` is true, call `control.requestApproval` with the same project, revision, and ordered actions.
+
+Approval is tied to the request digest and selected action indexes. It expires after 600 seconds. A token for one request cannot authorize another request.
 
 ### Commit
 
-Call `control.commit` with the exact previewed request, a stable idempotency
-key, and the approval token only when required. Reusing a key is safe only for
-the same request. An idempotent replay does not create a second mutation.
-Never silently change a payload or key after an idempotency conflict.
+Send the exact previewed request to `control.commit`. Include a stable `idempotencyKey` and the approval token only when approval is required.
 
-After a successful or idempotent commit, fetch a fresh V2 snapshot and verify
-the intended result.
+Replaying the same request with the same key is safe. Sending a different request with the same key returns an idempotency conflict.
 
-## Idempotency
-
-Every commit request must carry a stable `idempotencyKey`. Reuse that key only
-for the identical project, revision, ordered actions, and approval context.
-An identical replay is safe and does not apply a second mutation; a changed
-request with the same key is an idempotency conflict. Do not rotate the key
-to conceal a changed payload or retry a request whose original outcome is
-unknown without first inspecting the returned error and re-observing state.
+After commit, read a fresh snapshot and verify the result.
 
 ## Revision conflicts
 
-On `revision-conflict`, discard the stale request. Fetch a fresh V2 snapshot,
-re-resolve every persisted reference, rebuild the V1 request, preview again,
-request approval again when required, and commit only the rebuilt request.
-Never retry a stale request unchanged. A client reference from the old request
-cannot be carried into the rebuilt request.
+If commit returns `revision-conflict`, throw away the stale request.
 
-## Complete action inventory
+Fetch a new snapshot. Resolve IDs again. Rebuild the actions. Preview again. Request approval again if needed. Then commit the rebuilt request.
 
-The cloud catalog contains exactly these 39 action kinds:
+Do not retry the old request unchanged.
+
+## Action inventory
+
+Cloud project control currently exposes these 39 action kinds.
 
 ### Project and tracks
 
@@ -216,42 +179,40 @@ asset.delete
 recovery.restore
 ```
 
-Local project control adds exactly one separate local-only action:
+Desktop project control can add one local-only action:
 
 ```text
 external-plugin.parameters.set
 ```
 
-## Things agents must never do
+This list is documentation. The capabilities response is the authority for the current project.
 
-- Directly mutate Convex instead of using the public control client.
-- Directly change IndexedDB entities or project history.
-- Send raw native frames when a public client exists.
-- Bypass preview or required approval.
-- Invent project, entity, processor, asset, or recovery IDs.
-- Assume local-only actions are available from cloud capabilities.
-- Log secrets, approval tokens, registration tokens, bearer tokens, actor
-  credentials, socket paths, or private object keys.
-- Manually mutate plugin state artifacts.
-- Claim VST workers are a hostile-code sandbox.
+## VST parameters
 
-## VST agent workflow
+VST3 runs only in the desktop app.
 
-1. Confirm the target is an attached desktop host; browser and cloud targets
-   do not load native VST3 binaries.
-2. Read advertised local capabilities and use
-   `external-plugin.parameters.set` only when that exact action is present.
-3. Use `host.vst.instances` and `host.vst.parameters` for bounded reads.
-4. Do not use public control to insert/remove plugins, control processes, or
-   manipulate arbitrary editors.
-5. For native lifecycle, follow [native-vst3.md](native-vst3.md): standard
-   discovery, user trust/consent, scanner and fingerprint checks, packaged
-   worker preflight, bounded state, editor separation, recovery, and export
-   constraints.
+Use these runtime reads to inspect the native host:
 
-## Host runtime operations
+```text
+host.vst.instances
+host.vst.parameters
+```
 
-The exact desktop runtime IDs are:
+To change a VST parameter, first confirm that local project capabilities include:
+
+```text
+external-plugin.parameters.set
+```
+
+Then build the processor and target references from the latest project snapshot and use the normal preview and commit flow.
+
+Public control does not currently provide arbitrary plugin insertion, removal, scanner control, worker process control, or arbitrary editor-window control. Do not reach into Electron or native internals to fake those operations.
+
+Read [native-vst3.md](native-vst3.md) before working on plugin trust, state, recovery, or packaged acceptance.
+
+## Desktop runtime operations
+
+The desktop runtime catalog is:
 
 ```text
 host.status
@@ -269,17 +230,15 @@ transport.seek
 diagnostics.snapshot
 ```
 
-The CLI command `daw-control rpc --target host` is canonical **PROJECT
-CONTROL JSONL**, not generic runtime RPC. Host status, playback, pause, stop,
-seek, diagnostics, local import, local export, and VST reads remain separate
-runtime operations. VST parameter writes belong to canonical project control.
-Do not access registration/socket internals manually.
+These commands act on the attached host. They do not replace project control.
 
-## Cloud asset resources
+`daw-control rpc --target host` carries project-control JSONL. Use the named host commands or MCP host tools for transport, diagnostics, import/export, and VST reads.
 
-Assets are project-scoped resources, not additional project actions. A control
-action can reference a persisted asset ID, but never grants direct R2 access
-and never permits an agent to invent an object key.
+Do not read registration files or socket paths by hand when the desktop client can connect for you.
+
+## Cloud assets
+
+Assets are project resources, not extra action kinds.
 
 ```text
 POST   /api/control/v1/projects/:projectId/assets
@@ -291,22 +250,17 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Asset upload is multipart, capped at 10 MiB, and requires project write
-access, `Content-Length`, `Idempotency-Key`, and the lowercase
-`x-content-sha256` header. The route validates MIME type and matching file
-extension, verifies the digest against uploaded bytes, and derives audio
-metadata from the bytes before beginning the Convex/R2 upload.
+Upload is multipart and capped at 10 MiB. It requires project write access, `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The Worker checks the digest, MIME type, extension, and audio metadata from the uploaded bytes before finalizing the Convex and R2 records.
 
-Content reads require project read access and preserve range handling through
-the object response. Folder creation, rename, deletion, and asset moves are
-resource routes, not additions to the action catalog. Other resource families
-include `/api/samples`, `/api/exports`, `/api/export/:projectId`, and
-`/api/cloud-backups`.
+A project action may refer to an asset ID returned by project state. It must not invent an R2 key.
+
+Other project resource routes include `/api/samples`, `/api/exports`, `/api/export/:projectId`, and `/api/cloud-backups`.
 
 ## Recoveries
 
-Destructive commits may return a persisted recovery ID. Recoveries are listed
-by `control.recoveries` and expire after seven days. Supported kinds are:
+`control.recoveries` lists active recovery records. They expire after seven days.
+
+Current recovery kinds are:
 
 ```text
 clip.delete
@@ -321,21 +275,29 @@ track.ungroup
 timeline.range.delete
 ```
 
-Restore with `recovery.restore` using the persisted recovery ID returned by
-the recovery list or commit result. Re-observe after restoring.
+Restore one with `recovery.restore` and the persisted recovery ID returned by the recovery list or a commit result. Read a fresh snapshot after restore.
+
+## Do not bypass the control path
+
+Do not:
+
+- mutate Convex directly instead of using project control
+- edit IndexedDB project records directly
+- send raw native frames when a public client exists
+- skip preview or required approval
+- invent project, track, clip, processor, asset, or recovery IDs
+- assume a local-only action exists on cloud
+- mutate VST state artifacts by hand
+- log approval tokens, bearer tokens, registration secrets, actor credentials, socket paths, or private object keys
+- describe VST worker processes as a security sandbox
 
 ## Examples
 
-The following examples use IDs returned by discovery/snapshot calls. They are
-documentation fixtures, not live credentials or live project requests.
+The IDs below are examples. A real client must use IDs from discovery and the latest snapshot.
 
-### Project discovery
+### Rename a track
 
-```json
-{"jsonrpc":"2.0","id":1,"method":"project.list","params":{}}
-```
-
-### Rename preview and commit without approval
+Preview this request first:
 
 ```json
 {
@@ -351,6 +313,8 @@ documentation fixtures, not live credentials or live project requests.
   ]
 }
 ```
+
+If preview succeeds without approval, commit the same actions with an idempotency key:
 
 ```json
 {
@@ -368,10 +332,7 @@ documentation fixtures, not live credentials or live project requests.
 }
 ```
 
-The second request is committed only after the first request previews
-successfully. It intentionally has no `approvalToken`.
-
-### Destructive track delete preview, approval, and commit
+### Delete a track with approval
 
 Preview:
 
@@ -389,23 +350,7 @@ Preview:
 }
 ```
 
-Approval request:
-
-```json
-{
-  "version":"v1",
-  "projectId":"project-1",
-  "expectedRevision":8,
-  "actions":[
-    {
-      "kind":"track.delete",
-      "track":{"source":"persisted","id":"track-2"}
-    }
-  ]
-}
-```
-
-Commit with a schema-valid documentation placeholder:
+Request approval with the same project, revision, and actions. Commit only with the returned token:
 
 ```json
 {
@@ -423,13 +368,11 @@ Commit with a schema-valid documentation placeholder:
 }
 ```
 
-The placeholder is not a real token and must never be transmitted. A real
-client passes only the token returned for this exact request.
+The placeholder is not a real token. Never transmit it.
 
-### External-plugin parameter edit on a host
+### Change a VST parameter
 
-Use this only when local V2 capabilities advertise
-`external-plugin.parameters.set`:
+Use this only when local capabilities include `external-plugin.parameters.set`:
 
 ```json
 {
@@ -447,10 +390,9 @@ Use this only when local V2 capabilities advertise
 }
 ```
 
-Preview and commit this as canonical project control; it is not a raw host
-runtime write.
+Preview and commit it like any other project mutation.
 
-### Recovery restore
+### Restore a recovery
 
 ```json
 {
@@ -466,20 +408,12 @@ runtime write.
 }
 ```
 
-The recovery ID must come from `control.recoveries` or a prior commit result.
+The recovery ID must come from `control.recoveries` or a previous commit result.
 
-## Public adapters
+## Public clients
 
-`@daw-browser/control-sdk` exports `createCanonicalControlClient`,
-`createJsonlRpcAdapter`, and the retained REST compatibility client.
-`@daw-browser/control-sdk/desktop` exports `connectDesktopControl`.
+`@daw-browser/control-sdk` provides the typed project client, JSONL adapter, and REST compatibility client. `@daw-browser/control-sdk/desktop` provides `connectDesktopControl`.
 
-The `daw-control` CLI exposes cloud/host discovery, V2 reads, preview,
-approval, commit, history, recoveries, and separate host runtime commands.
-MCP prefers `control_capabilities_v2` and `control_snapshot_v2`; unsuffixed
-reads are V1 compatibility tools. MCP reads use `control:read`; preview,
-approval, and commit use `control:write`.
+The `daw-control` CLI supports cloud and desktop project control plus separate host commands. MCP prefers `control_capabilities_v2` and `control_snapshot_v2` for reads. The unsuffixed read tools remain for V1 compatibility.
 
-Use the existing authenticated adapters. Never print, persist, or transmit
-registration secrets, bearer tokens, actor credentials, socket paths, or
-private object keys.
+Use the supported authenticated clients. Do not print or persist credentials, registration secrets, socket paths, or private object keys.

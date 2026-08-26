@@ -2,56 +2,41 @@
 
 **Last updated: 2026-08-26**
 
-DAW Browser Convex is a local-first digital audio workstation with a portable
-browser core, optional authenticated cloud collaboration, and an Electron/macOS
-runtime for native audio and VST3 features.
+DAW Browser Convex is a local-first digital audio workstation. The browser runs the portable editor and Web Audio engine. The Electron app adds native audio, local host control, and VST3 support on macOS. Cloud projects use Convex and Cloudflare for sharing, realtime state, assets, backups, and exports.
 
-The project follows Ableton-style interaction patterns while keeping browser,
-cloud, desktop, native, and automation responsibilities explicit. Project
-semantics are now exposed through one model-independent control platform so the
-UI, agents, CLI, MCP, SDK consumers, and cloud/desktop authorities do not need
-separate mutation models.
+The project follows Ableton-style interaction patterns. Browser, cloud, desktop, native audio, and automation code have separate owners so one layer does not quietly become the API for another.
 
-## Major platform update
+## What changed recently
 
-PR #47 landed the model-independent control platform, authenticated desktop
-control, packaged native VST3 lifecycle, recovery hardening, agent-facing
-surfaces, and the related documentation/tooling work.
+PR #47 replaced the old collection of control paths with one model-independent project-control system. It also finished the authenticated desktop adapter and the packaged VST3 lifecycle.
 
-**[Read the complete “what changed” article](docs/changes/2026-08-26-model-independent-control-platform.md).**
+[Read the full change record](docs/changes/2026-08-26-model-independent-control-platform.md). It covers the 132-commit merge, the bugs found during packaged testing, the runtime evidence, and the compatibility decisions that stayed in place.
 
-That article is the durable high-level change record for the 132-commit merge
-and links to the lower-level architecture, implementation, and acceptance
-evidence.
+For current behavior, start with these docs:
 
-## Start here
-
-- **[What changed in the model-independent control platform merge](docs/changes/2026-08-26-model-independent-control-platform.md)**
 - [Control platform architecture](docs/control-platform.md)
-- [Agent control operating manual](docs/agent-control.md)
+- [Agent control manual](docs/agent-control.md)
 - [Native VST3 architecture](docs/native-vst3.md)
 - [Packaged runtime acceptance](acceptance-reports/control-platform-runtime-2026-08-20.md)
-- [Completed implementation tracker](implementation-trackers/model-independent-control-platform.md)
 
-## What the project supports today
+## What runs where
 
-| Surface | Responsibilities |
+| Target | What it owns |
 | --- | --- |
-| **Browser/local** | SolidJS DAW UI, local projects, timeline editing, audio/MIDI project state, Web Audio playback/DSP, recording, waveform work, MediaBunny import/export, IndexedDB history/entities, and OPFS media. |
-| **Cloud/shared** | Authenticated project access, Convex realtime state, sharing/collaboration, project control, backups, assets, exports, and Cloudflare R2 storage behind API/role boundaries. |
-| **Desktop/native** | Electron project mounting, authenticated local control, transport, diagnostics, import/export, native CoreAudio hosting, packaged native artifacts, and trust-gated VST3 hosting. |
-| **Agent/automation** | Capability-driven project discovery, canonical snapshots, preview/approval/commit, history/recovery, plus bounded desktop runtime operations through SDK, CLI, JSONL, MCP, REST, and the authenticated desktop adapter. |
+| Browser and local projects | SolidJS editor, timeline state, IndexedDB history and entities, OPFS media, Web Audio playback and DSP, recording, waveform work, built-in processors, and MediaBunny import/export. |
+| Cloud projects | Authenticated project access, Convex realtime state, sharing, project control, R2 assets, backups, and exports. |
+| Electron desktop | Local project mounting, authenticated host control, transport, diagnostics, file capabilities, native import/export, CoreAudio hosting, and VST3. |
+| Agents and external tools | Project discovery and mutation through the control SDK, CLI, MCP, JSONL, REST, or the authenticated desktop client. |
 
-The browser remains the portable product surface. Native VST3 binaries are not
-loaded by browser or cloud targets.
+The browser and cloud targets never load native VST3 binaries.
 
-## Model-independent project control
+## Project control
 
-Project semantic control is owned by one canonical operation catalog:
+Project changes go through one operation catalog:
 
 ```text
 project.list
-project.current            # desktop only
+project.current
 control.capabilities
 control.snapshot
 control.preview
@@ -61,206 +46,151 @@ control.history
 control.recoveries
 ```
 
-The canonical workflow is:
+`project.current` exists only on desktop because it refers to the mounted local project.
+
+A normal write follows this order:
 
 ```text
-discover
-  → capabilities
-  → snapshot
-  → preview exact request
-  → approval when required
-  → keyed commit
-  → fresh snapshot / history
+project discovery
+  -> capabilities
+  -> snapshot
+  -> preview
+  -> approval if preview requires it
+  -> commit with an idempotency key
+  -> fresh snapshot or history
 ```
 
-Capabilities and snapshots are canonical V2 representations. Preview,
-approval, commit, history, and recovery retain the V1 compatibility request
-contracts. A revision conflict means the stale plan must be discarded and
-rebuilt from a fresh snapshot.
+Capabilities and snapshots use the V2 representation. Existing mutation, approval, history, and recovery requests keep their V1 compatibility envelope. If a commit hits `revision-conflict`, fetch a new snapshot and rebuild the request. Do not retry the stale request unchanged.
 
-Cloud project control currently exposes 39 semantic action kinds. Local desktop
-project control exposes those actions plus the local-only
-`external-plugin.parameters.set` action when advertised by capabilities.
-Exact schemas and limits are source-owned by `@daw-browser/control`; do not
-infer support from UI labels or host status.
+Cloud capabilities currently advertise 39 project action kinds. Desktop project control adds `external-plugin.parameters.set` when the local capabilities include it. The returned capabilities object decides what a client may do. UI labels and host status do not.
 
-Read [docs/control-platform.md](docs/control-platform.md) for ownership and
-transport details and [docs/agent-control.md](docs/agent-control.md) for the
-complete action inventory and safe workflow.
+See [docs/control-platform.md](docs/control-platform.md) for ownership and transport details. See [docs/agent-control.md](docs/agent-control.md) for the complete action list and request examples.
 
-## Agent and automation discoverability
+## Agents and automation
 
-Repository-scoped Factory skills describe the supported control boundaries:
+The repository includes three Factory skills for DAW-specific work:
 
-- [`daw-project-control`](.factory/skills/daw-project-control/SKILL.md) — discover,
-  inspect, preview, approve, commit, recover, and audit semantic project changes.
-- [`daw-desktop-runtime`](.factory/skills/daw-desktop-runtime/SKILL.md) — host
-  status, transport, diagnostics, local import/export, and bounded VST reads.
-- [`daw-vst3`](.factory/skills/daw-vst3/SKILL.md) — VST discovery/trust,
-  parameters, packaged native lifecycle, recovery, and acceptance boundaries.
+- [`daw-project-control`](.factory/skills/daw-project-control/SKILL.md) covers semantic project reads and writes.
+- [`daw-desktop-runtime`](.factory/skills/daw-desktop-runtime/SKILL.md) covers host status, transport, diagnostics, local import/export, and VST reads.
+- [`daw-vst3`](.factory/skills/daw-vst3/SKILL.md) covers plugin trust, discovery, parameters, recovery, and packaged VST testing.
 
-Agents and integrations should use the public adapters rather than raw Convex,
-IndexedDB, native frames, registration/socket internals, or plugin state
-artifacts.
+Use the public clients. Do not mutate Convex rows, IndexedDB records, native host state, registration files, sockets, or plugin state artifacts when a supported control path exists.
 
-Public integration entry points include:
+Public entry points include:
 
-- `@daw-browser/control-sdk` → `createCanonicalControlClient`,
-  `createJsonlRpcAdapter`, and retained REST compatibility APIs.
-- `@daw-browser/control-sdk/desktop` → `connectDesktopControl`.
-- `daw-control` CLI → cloud/desktop project control plus separate `host ...`
-  runtime commands.
-- MCP → canonical V2 reads, preview/approval/commit/history/recovery, and
-  separately named host tools.
-- Worker REST → retained `/api/control/v1` and canonical V2 read routes.
+- `@daw-browser/control-sdk` with `createCanonicalControlClient` and `createJsonlRpcAdapter`
+- `@daw-browser/control-sdk/desktop` with `connectDesktopControl`
+- the `daw-control` CLI
+- `@daw-browser/control-mcp`
+- Worker routes under `/api/control`
 
-`daw-control rpc --target host` is project-control JSONL over the authenticated
-desktop host. It is not a generic native/runtime RPC escape hatch.
+`daw-control rpc --target host` carries project-control JSONL over the authenticated desktop connection. It is not a generic native RPC channel.
 
-## Desktop and native VST3
+## Desktop VST3 support
 
-The Electron desktop runtime adds native capabilities without moving project
-semantics into the native layer.
+The macOS desktop app discovers the standard VST3 directories and requires trust acknowledgement before the first native scan. Before launch, the app checks the bundle path, quarantine state, code signature, arm64 support, scanner result, fingerprints, packaged artifacts, protocol versions, and bus layout.
 
-On macOS, VST3 hosting includes:
+Playback workers and editor workers are separate native processes. That separation helps contain crashes. It is not a security sandbox for malicious plugins. VST3 plugins are native code running with the desktop user's authority, so only load plugins you trust.
 
-- automatic discovery of standard system/user VST3 directories;
-- explicit trust acknowledgement before first native scan/execution;
-- canonical-path, quarantine, code-signing, architecture, scanner, fingerprint,
-  packaged-artifact, protocol, and bus-layout validation;
-- isolated playback and editor worker lifecycles;
-- bounded public instance/parameter reads;
-- normalized parameter writes through canonical project control;
-- bounded opaque state capture with SHA-256 validation when supported;
-- cold-restart restoration and stale-catalog revalidation;
-- bounded worker/native-host recovery;
-- manual parameter automation overrides and explicit schedule re-enable;
-- native playback and WAV export through the packaged host.
-
-Worker isolation is a crash/availability boundary, not a malicious-code
-sandbox. Arbitrary plugin insertion/removal, process control, raw native calls,
-and arbitrary package/DSP loading are deliberately not public operations.
-
-Current native Phase A export rejects projects containing automation. The
-certified product flow also requires stopped transport before automation
-re-enable succeeds. See [docs/native-vst3.md](docs/native-vst3.md) for exact
-current behavior and limits.
-
-## Runtime architecture
-
-### Browser/local and cloud
+Current public VST operations are intentionally small:
 
 ```text
-SolidJS app
-  ├─ local project repositories
-  │    └─ IndexedDB entities/history + OPFS assets
-  ├─ authenticated cloud adapters
-  │    └─ Hono Worker API
-  │         ├─ Better Auth / OAuth
-  │         ├─ Convex realtime/project state
-  │         └─ Cloudflare R2 assets/backups/exports
-  └─ portable audio
-       └─ Web Audio API + MediaBunny + workspace audio packages
+host.vst.instances
+host.vst.parameters
+external-plugin.parameters.set
 ```
 
-### Desktop/native
+The first two are desktop runtime reads. `external-plugin.parameters.set` is a project-control action and only exists when local capabilities advertise it.
+
+Public control does not currently expose arbitrary plugin insertion, removal, scanner commands, editor-window commands, or worker process control.
+
+Read [docs/native-vst3.md](docs/native-vst3.md) before changing the native plugin path.
+
+## Architecture
+
+```text
+SolidJS UI / agent / CLI / MCP
+            |
+       ControlClient
+            |
+       ControlInvoker
+       /     |     \
+     HTTP  Desktop  Direct
+       \     |     /
+        ControlHandler
+            |
+        control-core
+            |
+      project authority
+```
+
+Browser and cloud authorities store project state. The desktop authority wraps the mounted local project and also exposes a separate runtime catalog for transport, diagnostics, import/export, and VST reads.
+
+The native path is separate from project semantics:
 
 ```text
 Electron renderer
-  └─ typed preload / desktop protocol
-       └─ Electron main authority
-            ├─ private authenticated registration/socket host
-            ├─ local project-control authority
-            ├─ transport / diagnostics / import / export
-            └─ native audio host
-                 ├─ VST3 scanner/catalog/trust checks
-                 ├─ playback workers
-                 └─ editor workers/windows
+      |
+Electron main and preload
+      |
+native audio host
+  |       |        |
+scanner  playback  editor
+         workers   workers
 ```
 
-### Control path
+## Main packages
 
-```text
-UI / Extension / Agent / SDK / CLI / MCP / REST
-                      │
-                ControlClient
-                      │
-                ControlInvoker
-             ┌────────┼────────┐
-            HTTP    Desktop   Direct
-             └────────┼────────┘
-                ControlHandler
-                      │
-                 control-core
-                      │
-             canonical project state
-```
+| Package | Job |
+| --- | --- |
+| `@daw-browser/control` | Versioned control schemas, actions, snapshots, serialization, recoveries, capabilities, and operation IDs. |
+| `@daw-browser/control-core` | Pure planning, projection, MIDI resolution, destructive transforms, and recovery ordering. |
+| `@daw-browser/control-sdk` | TypeScript client, REST compatibility client, JSONL adapter, and desktop client entry point. |
+| `@daw-browser/control-cli` | `daw-control`, OAuth credentials, cloud commands, desktop host commands, and MCP startup. |
+| `@daw-browser/control-mcp` | MCP tools for project control and desktop runtime operations. |
+| `@daw-browser/desktop-protocol` | Desktop framing, registration discovery, authenticated socket client, runtime operation schemas, native bridge contracts, and menu protocol. |
+| `@daw-browser/plugin-host-protocol` | VST worker startup, control, transport, state, editor, and preflight protocol. |
+| `@daw-browser/external-plugins` | Shared external-plugin metadata and project-control schemas. |
+| `@daw-browser/audio-engine` | Browser audio scheduling, mixing, effects, metering, portable runtimes, and MediaBunny export. |
+| `@daw-browser/audio-core-contract` | Shared native and WASM audio-core contracts plus generated processor metadata. |
+| `@daw-browser/audio-core-wasm` | WASM audio-core implementation. |
+| `@daw-browser/timeline-core` | Timeline types, clip placement, routing, fades, and time mapping. |
+| `@daw-browser/waveforms` | Waveform peak extraction, persistence, resampling, and rendering helpers. |
+| `@daw-browser/shared` | Cross-runtime project, media, timeline, and routing schemas and helpers. |
 
-Desktop runtime IDs such as transport, diagnostics, import/export, and VST
-reads remain owned by `@daw-browser/desktop-protocol`; they are not project
-semantic actions.
-
-## Technology stack
+## Stack
 
 | Area | Technology |
 | --- | --- |
 | UI | SolidJS, Tailwind CSS v4, Kobalte, TanStack Router |
-| Client state | Solid signals/stores, TanStack Solid Query, IndexedDB via `idb` |
-| Audio | Web Audio API, MediaBunny 1.55.1, portable WASM/native audio contracts |
+| Local data | Solid signals and stores, TanStack Solid Query, IndexedDB, OPFS |
+| Audio | Web Audio API, MediaBunny, native and WASM audio-core packages |
 | Cloud API | Hono on Cloudflare Workers |
-| Realtime/backend | Convex |
-| Auth | Better Auth, OAuth, D1, KV, Convex JWT bridge |
-| Storage | OPFS locally; Cloudflare R2 for cloud assets, backups, and exports |
+| Realtime data | Convex |
+| Auth | Better Auth and OAuth |
+| Cloud storage | R2, D1, KV |
+| Desktop | Electron |
+| Native audio and VST3 | C++, CMake, CoreAudio, VST3 SDK |
 | Tooling | Bun, TypeScript, Vite, Wrangler, Oxlint, Knip |
-| Desktop/native | Electron, C++/CMake native hosts, CoreAudio, VST3 SDK |
 
-## Workspace packages
-
-All packages are private Bun workspaces. Package manifests remain the source of
-truth for exports and scripts.
-
-| Package | Responsibility |
-| --- | --- |
-| `@daw-browser/shared` | Cross-runtime schemas and pure helpers for project, media, timeline, and routing contracts. |
-| `@daw-browser/control` | Versioned control contracts, actions, snapshots, capabilities, serialization, recovery payloads, and the keyed operation catalog. |
-| `@daw-browser/control-core` | Pure semantic planning, projection, MIDI, destructive transforms, and recovery ordering. |
-| `@daw-browser/control-sdk` | Transport-neutral canonical client, REST compatibility client, JSONL adapter, and desktop client entry point. |
-| `@daw-browser/control-cli` | `daw-control`, OAuth credentials, cloud control commands, desktop host commands, JSONL, and MCP startup. |
-| `@daw-browser/control-mcp` | MCP tools over canonical project control plus bounded desktop runtime tools. |
-| `@daw-browser/desktop-protocol` | Desktop wire frames, registration/socket discovery, host-runtime schemas, native audio bridge contracts, and menu protocol. |
-| `@daw-browser/timeline-core` | Pure timeline types, clip placement, track indexing, routing, fades, and audio time mapping. |
-| `@daw-browser/waveforms` | Peak extraction, persistence, resampling, viewport selection, and waveform rendering helpers. |
-| `@daw-browser/audio-engine` | Web Audio facade, scheduling, mixing/effects, metering, portable runtimes, and MediaBunny export support. |
-| `@daw-browser/audio-core-contract` | Generated processor metadata and shared native/WASM audio-core contracts plus native test/build scripts. |
-| `@daw-browser/audio-core-wasm` | WASM-facing audio-core implementation over the audio-core contract. |
-| `@daw-browser/plugin-host-protocol` | Typed native VST3 worker startup, control, transport, state, editor, and preflight protocol. |
-| `@daw-browser/external-plugins` | Browser-safe/native-boundary schemas and helpers for external plugin metadata and control. |
-
-The Electron app under `apps/desktop` owns main/preload lifecycle, release
-packaging, native artifact selection, and desktop runtime authority.
-
-## Repository structure
+## Repository layout
 
 ```text
-api/                     Hono Worker routes, auth, control, assets, exports
-convex/                  Convex schema, queries, mutations, access checks
-apps/desktop/            Electron main/preload, packaging, native orchestration
-packages/                Control, protocol, audio, timeline, and shared packages
-src/                     Solid app, repositories, controllers, and adapters
-native/                  C++ audio/VST3 hosts, workers, scanner, and tests
-docs/                    Current architecture, operations, and change articles
-.factory/skills/         Repo-scoped agent operating skills
-acceptance-reports/      Packaged/runtime certification evidence
-implementation-trackers/ Historical implementation evidence
+api/                     Worker routes and auth
+convex/                  Convex schema and project data functions
+apps/desktop/            Electron main, preload, packaging, and native orchestration
+packages/                Shared packages for control, audio, timeline, and protocols
+src/                     SolidJS app and local/cloud adapters
+native/                  Audio hosts, VST scanner/workers, and native tests
+docs/                    Current architecture and operating docs
+acceptance-reports/      Packaged and runtime evidence
+implementation-trackers/ Historical implementation notes
+.factory/skills/         Repo-scoped Factory skills
 ```
 
-## Installation
+## Setup
 
-Prerequisites depend on the surface being exercised. Browser/local development
-needs Bun and Node.js ecosystem compatibility. Cloud development additionally
-needs the applicable Convex/Cloudflare/Auth configuration. Native VST3
-packaging additionally needs the macOS native toolchain and explicitly enabled
-release artifacts.
+Requirements depend on what you are running. Browser-only work needs Bun and the normal web dependencies. Cloud work also needs the project credentials for Convex and Cloudflare. Native VST work requires macOS and the packaged native toolchain.
 
 ```sh
 git clone https://github.com/jhomra21/daw-browser-convex.git
@@ -269,94 +199,41 @@ bun install
 cp example.env .env
 ```
 
-Fill only the environment values needed for the flow being exercised. Common
-cloud values include `VITE_CONVEX_URL`, `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`, OAuth credentials, Convex signing keys, and the R2
-maintenance token.
+Fill only the environment variables needed for the task. Do not commit credentials.
 
-Do not start a development server merely to run static checks or documentation
-work.
+## Checks
 
-## Development and quality gates
-
-Core repository gates:
+The main repository checks are:
 
 ```sh
-bun run check:packages
-bun run typecheck
-bun run test
+bun run lint
 bun run test:anti-slop
+bun run typecheck
+bun test
 bun run test:control-platform
 bun run test:control-compat
-bun run lint
-bun run knip
 bun run build
 ```
 
-Desktop-specific checks and packaging:
+The merge certification for PR #47 reported 2,433 passing Bun tests, 1 intentional skip, 0 failures, 161 control-platform tests, 40 compatibility tests, 12 anti-slop RuleTester suites, and 6 of 6 native CTests at the runtime-certified commit. Packaged Electron and real ValhallaSupermassive acceptance also passed.
 
-```sh
-bun --cwd apps/desktop run check
-bun --cwd apps/desktop run test:portable-wasm-worklet
-bun --cwd apps/desktop run package
-bun --cwd apps/desktop run make
-```
+See the [acceptance report](acceptance-reports/control-platform-runtime-2026-08-20.md) for the exact runtime matrix and the cases that remain environment or product skips.
 
-Native audio/VST3 build and CTest commands live with the scripts under
-`native/` and `@daw-browser/audio-core-contract`. Packaged VST3 hosting requires
-the explicit native release/artifact gate; a normal browser build does not
-automatically enable it.
+## Current limits
 
-Opt-in development servers include `bun dev`, `bunx convex dev`, and
-`wrangler dev` when the task actually requires a running browser/cloud session.
+- Native VST3 runs only in the macOS desktop app.
+- Public control does not expose arbitrary plugin insertion, removal, editor control, or worker process control.
+- Native Phase A export rejects projects that contain automation.
+- The current product flow requires stopped transport before automation re-enable succeeds.
+- Cloud JSONL process transport is not implemented.
+- External extension packages and arbitrary DSP/package loading are not implemented.
+- VST worker processes do not make untrusted plugins safe.
 
-## Latest merge certification
+## Docs and history
 
-The model-independent control platform was runtime-certified before merge and
-then followed only by documentation/repository-guidance changes before the
-final PR head. The accepted merge evidence records:
-
-- **2,433 passed, 1 skipped, 0 failed** in the full Bun suite;
-- **161 passed** in the focused control-platform suite;
-- **40 passed** in control compatibility;
-- **18 passed** in renderer lifecycle coverage;
-- **5 passed** in the native session bridge coverage;
-- **12/12 anti-slop RuleTester suites passed**;
-- **0 Oxlint warnings/errors**;
-- TypeScript checks passed;
-- native CTest **6/6 passed** at the runtime-certified ancestor;
-- production build and final unsigned Electron package passed;
-- packaged browser/native VST3 acceptance, worker-loss recovery, renderer
-  reload/crash recovery, cold restart, and verified WAV export passed.
-
-See the [acceptance report](acceptance-reports/control-platform-runtime-2026-08-20.md)
-for the exact evidence, environmental skips, and known boundaries.
-
-## Compatibility policy
-
-V1/V2 control contracts, REST routes, desktop protocol frames, CLI commands,
-MCP tools, durable rows, and `registration-v1.json` remain compatibility
-surfaces. Canonicalization is additive; older surfaces are not removed merely
-because a newer canonical owner exists.
-
-Current intentionally narrow boundaries include:
-
-- no public arbitrary operation endpoint;
-- no public arbitrary native/runtime RPC;
-- no external extension package loader;
-- no arbitrary VST3 insertion/removal API;
-- no arbitrary DSP/package loader;
-- no cloud JSONL process transport;
-- no claim that native worker isolation makes third-party plugins safe;
-- portable/cloud opaque VST state transport remains separate future scope.
-
-## Change history and evidence
-
-For the platform transition that produced the current architecture:
-
-- [Model-independent control platform: what changed](docs/changes/2026-08-26-model-independent-control-platform.md)
+- [What changed in PR #47](docs/changes/2026-08-26-model-independent-control-platform.md)
 - [Control platform architecture](docs/control-platform.md)
-- [Agent control operating manual](docs/agent-control.md)
+- [Agent control manual](docs/agent-control.md)
 - [Native VST3 architecture](docs/native-vst3.md)
 - [Packaged runtime acceptance](acceptance-reports/control-platform-runtime-2026-08-20.md)
 - [Completed implementation tracker](implementation-trackers/model-independent-control-platform.md)

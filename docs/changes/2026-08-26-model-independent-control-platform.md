@@ -6,41 +6,37 @@
 **Runtime-certified ancestor:** `37e400e42bcde874926d45e952a91ceb5080c94d`  
 **Final reviewed PR head:** `3cff4bf5af63a8eb8fd6823babd0c119d1bb3d67`
 
-PR #47 is not a small feature addition. It changes how this repository exposes project state, how desktop-native capabilities are owned, how external tools and agents interact with the DAW, and how native VST3 hosting is packaged, trusted, recovered, and tested.
+PR #47 changed the control architecture, the Electron host, native VST3 support, cloud asset handling, agent integration, and the test gates around all of them. It was 132 commits across 926 files, so this document records the behavior that changed instead of asking readers to reconstruct the story from the diff.
 
-The branch touched 926 files and merged 132 commits. This article is the durable behavior/architecture-level record of that change. The exact schemas and public APIs remain source-authoritative, but the sections below enumerate the important product, protocol, integration, runtime, safety, testing, and documentation changes that landed with the merge.
-
-For current operating documentation, also read:
+Current docs:
 
 - [Control platform architecture](../control-platform.md)
-- [Agent control operating manual](../agent-control.md)
+- [Agent control manual](../agent-control.md)
 - [Native VST3 architecture](../native-vst3.md)
-- [Packaged runtime acceptance report](../../acceptance-reports/control-platform-runtime-2026-08-20.md)
+- [Packaged runtime acceptance](../../acceptance-reports/control-platform-runtime-2026-08-20.md)
 - [Completed implementation tracker](../../implementation-trackers/model-independent-control-platform.md)
 
-## The short version
+## What changed in practical terms
 
-Before this merge, the repository had several ways to manipulate DAW state, but there was no single model-independent semantic control platform that worked consistently across cloud and local desktop authorities. Desktop/native functionality also did not yet have the complete authenticated public adapter, native VST3 lifecycle, packaged recovery, and agent-discoverability surface that exists now.
+Before this merge, the repository had several ways to change DAW state. They did not share one operation catalog, one request lifecycle, or one set of semantics across cloud and desktop.
 
-After this merge:
+After the merge:
 
-- project control is defined by one canonical operation catalog;
-- cloud and desktop implementations conform to the same semantic contracts;
-- agents and external programs can use SDK, CLI, MCP, JSONL, REST, and authenticated desktop adapters without reaching into app internals;
-- preview, approval, keyed idempotency, revision checks, history, and recoveries are first-class behavior;
-- the Electron app owns a typed and authenticated desktop runtime boundary;
-- macOS native audio and VST3 hosting are packaged product capabilities rather than loose internal experiments;
-- VST3 discovery, trust, scanning, attachment, parameters, editor workers, state persistence, worker recovery, automation override, export, and restart behavior are defined and tested;
-- renderer lifecycle and native transaction ownership fail closed across navigation, reload, crash, and ambiguous event sequences;
-- cloud asset upload now validates real audio metadata from uploaded bytes and participates in the control/resource model;
-- repository linting, anti-slop enforcement, compatibility tests, conformance tests, acceptance evidence, and agent skills were expanded to make these boundaries durable.
+- project control uses one operation catalog for cloud and desktop
+- the SDK, CLI, MCP, JSONL, REST, and Electron adapters all route into the same project-control model
+- writes use preview, optional approval, revision checks, keyed idempotency, history, and recoveries
+- the Electron app exposes an authenticated local host instead of relying on internal renderer access
+- macOS VST3 discovery, trust checks, workers, parameters, state, editor windows, export, and recovery are packaged product behavior
+- renderer reload, crash, and ambiguous navigation events cannot keep stale privileged ownership
+- cloud audio upload checks metadata from the uploaded bytes instead of trusting caller metadata
+- Factory skills and current docs tell agents which APIs they may use and which internals they must not touch
 
-## 1. One canonical project-control architecture
+## Control ownership
 
-The central architectural change is the split between contracts, pure semantics, target authorities, and adapters.
+The control code is split by job.
 
 ```text
-UI / Extension / Agent / CLI / MCP
+UI / extension / agent / CLI / MCP
               |
         ControlClient
               |
@@ -52,61 +48,57 @@ UI / Extension / Agent / CLI / MCP
               |
           control-core
               |
-     canonical project state
+        project authority
 ```
 
-The major ownership rules are now:
+`@daw-browser/control` owns the schemas, operation IDs, request envelopes, snapshots, serialization, digests, recovery contracts, limits, capabilities, and compatibility aliases.
 
-- `@daw-browser/control` owns versioned schemas, operation IDs, request envelopes, snapshots, serialization/digests, approval/recovery contracts, limits, capabilities, and compatibility aliases.
-- `@daw-browser/control-core` owns pure planning and projection behavior, MIDI resolution, destructive transforms, and recovery ordering. It does not own transport or persistence.
-- provider handlers bind the canonical semantics to a trusted authority: local desktop project state or authenticated cloud/Convex state.
-- `ControlInvoker` validates target support and operation input/output at one catalog boundary.
-- SDK, CLI, MCP, REST, JSONL, Electron, and extensions are adapters. They do not get to invent a second mutation language.
+`@daw-browser/control-core` owns pure project planning and projection. It also owns MIDI resolution, destructive transforms, and recovery ordering. It has no transport or storage authority.
 
-This separation is important because future UI, agent, extension, and automation work can target the same semantic layer instead of separately reproducing DAW mutation logic.
+Local and cloud handlers connect that logic to real project state. `ControlInvoker` validates the selected target plus operation input and output. The public adapters stay outside that logic.
 
-## 2. Canonical operation catalog
+## Operation catalog
 
-The project-control catalog now has nine operations:
+Project control has nine operations:
 
 | Operation | Targets | Purpose | Idempotency |
 | --- | --- | --- | --- |
-| `project.list` | cloud, desktop | discover accessible projects | safe |
-| `project.current` | desktop | identify the currently mounted local project | safe |
-| `control.capabilities` | cloud, desktop | discover supported actions and limits | safe |
-| `control.snapshot` | cloud, desktop | read canonical project state and revision | safe |
-| `control.preview` | cloud, desktop | validate and project a mutation without committing | safe |
-| `control.requestApproval` | cloud, desktop | obtain bounded approval for a destructive request | none |
-| `control.commit` | cloud, desktop | apply the exact previewed request | keyed |
-| `control.history` | cloud, desktop | inspect committed control history | safe |
-| `control.recoveries` | cloud, desktop | inspect active recovery records | safe |
+| `project.list` | cloud, desktop | discover projects | safe |
+| `project.current` | desktop | identify the mounted project | safe |
+| `control.capabilities` | cloud, desktop | read supported actions and limits | safe |
+| `control.snapshot` | cloud, desktop | read project state and revision | safe |
+| `control.preview` | cloud, desktop | validate and project a write | safe |
+| `control.requestApproval` | cloud, desktop | approve a destructive request | none |
+| `control.commit` | cloud, desktop | apply the exact request | keyed |
+| `control.history` | cloud, desktop | read committed control history | safe |
+| `control.recoveries` | cloud, desktop | read active recovery records | safe |
 
-`project.current` is deliberately desktop-only. It describes a mounted local project and is not a cloud concept.
+`project.current` stays desktop-only because it refers to a mounted local project.
 
-Capabilities and snapshots use the canonical V2 representation for new integrations. Existing V1 compatibility surfaces remain available. Mutation, approval, history, and recovery request envelopes retain their established V1 contracts so the migration is additive instead of destructive.
+Capabilities and snapshots use the V2 read model. Existing mutation, approval, history, and recovery requests keep their V1 compatibility envelope.
 
-## 3. Capability-first control replaces guessed behavior
+## Capability-first writes
 
-A client is no longer supposed to infer what it can do from UI labels, package names, or prior knowledge.
+A client should not guess what it can do.
 
-The expected workflow is now:
+The expected write flow is:
 
-1. discover the project;
-2. request V2 capabilities;
-3. request a V2 snapshot and revision;
-4. construct schema-valid V1 actions from returned IDs and capabilities;
-5. preview the exact request;
-6. request approval if preview says approval is required;
-7. commit the exact request with a stable idempotency key;
-8. fetch a fresh snapshot and optionally history/recoveries.
+1. discover the project
+2. read capabilities
+3. read the V2 snapshot and revision
+4. build V1 actions from returned IDs
+5. preview the exact request
+6. request approval if preview requires it
+7. commit with a stable idempotency key
+8. read a fresh snapshot, history, or recoveries
 
-On `revision-conflict`, the stale request must be discarded and rebuilt from a fresh snapshot. The platform does not encourage blind retries against stale IDs or revisions.
+A `revision-conflict` means the request is stale. The client must fetch a new snapshot and rebuild the request.
 
-## 4. Complete project-action inventory
+## Project action inventory
 
-Cloud project control currently advertises these 39 semantic action kinds.
+Cloud project control advertises 39 action kinds.
 
-### Project and track actions
+### Project and tracks
 
 ```text
 project.rename
@@ -124,7 +116,7 @@ track.color.cascade
 track.ungroup
 ```
 
-### Clip and timeline actions
+### Clips and timeline
 
 ```text
 clip.midi.create
@@ -141,7 +133,7 @@ clip.delete
 timeline.range.delete
 ```
 
-### Mixer and built-in processor actions
+### Mixer and built-in processors
 
 ```text
 master.volume.set
@@ -154,7 +146,7 @@ arpeggiator.set
 arpeggiator.remove
 ```
 
-### Automation, routing, resources, and recovery
+### Automation, routing, assets, and recovery
 
 ```text
 automation.set
@@ -165,41 +157,25 @@ asset.delete
 recovery.restore
 ```
 
-Local desktop project control adds one currently local-only semantic action when advertised by capabilities:
+Desktop project control can add one local-only action:
 
 ```text
 external-plugin.parameters.set
 ```
 
-That VST3 parameter action is intentionally not available on cloud projects and must never be assumed merely because a desktop host exists.
+That action is available only when the local capabilities report it.
 
-## 5. Preview, approval, idempotency, revisions, history, and recovery
+## Preview, approval, idempotency, and recovery
 
-The control platform makes mutation lifecycle behavior explicit.
+`control.preview` validates references and ordering, projects the change, returns warnings and revision data, and reports whether approval is required. It does not mutate the project.
 
-### Preview
+`control.requestApproval` binds approval to the exact request digest and action selection. Approval expires after 600 seconds.
 
-`control.preview` resolves references, validates action ordering and limits, projects the expected change, returns warnings/change summaries, and determines whether approval is required. Preview is non-mutating.
+`control.commit` uses a stable idempotency key. Replaying the same request with the same key does not apply the mutation twice. Reusing the key for a different request returns an idempotency conflict.
 
-### Approval
+Successful writes appear in control history. Idempotent replays do not create duplicate history entries.
 
-Destructive operations use `control.requestApproval`. Approval is tied to the exact request digest/action selection and expires after the bounded approval lifetime. A token for one request cannot authorize a different request.
-
-### Keyed commits
-
-Every commit uses a stable idempotency key. Replaying the same semantic request with the same key is safe and does not create another mutation. Reusing the key for a different request is an idempotency conflict rather than a silent second operation.
-
-### Revision conflicts
-
-Snapshots carry revision state. Commits can require an expected revision. A stale revision fails explicitly instead of applying against unexpectedly changed project state.
-
-### History
-
-Successful canonical commits are recorded in bounded chronological history. An idempotent replay does not create duplicate history.
-
-### Recoveries
-
-Destructive operations can produce persisted recovery records. Current recovery-capable destructive kinds include:
+Destructive writes can create recovery records. Current recovery kinds are:
 
 ```text
 clip.delete
@@ -214,28 +190,19 @@ track.ungroup
 timeline.range.delete
 ```
 
-Recoveries expire after seven days and are restored through the canonical `recovery.restore` action.
+Recoveries expire after seven days and restore through `recovery.restore`.
 
-Local recovery was extended to preserve native external-processor state references, shared opaque VST state artifacts, routing, grouping, and other affected project state without leaking implementation details into the public request format.
+Local recovery also preserves VST processor references, shared state artifacts, routing, grouping, and the other project data needed to reconstruct destructive edits correctly.
 
-## 6. Public TypeScript SDK
+## SDK, CLI, JSONL, and MCP
 
-`@daw-browser/control-sdk` is now the programmatic integration layer rather than requiring consumers to import CLI internals.
+`@daw-browser/control-sdk` became the public TypeScript entry point instead of forcing consumers to import CLI internals.
 
-Important public surfaces include:
+It exports `createCanonicalControlClient`, `createJsonlRpcAdapter`, the REST compatibility client, and the desktop entry point `connectDesktopControl`.
 
-- `createCanonicalControlClient` for transport-neutral project discovery and canonical control;
-- `createJsonlRpcAdapter` for bounded sequential JSON-RPC over JSONL;
-- retained REST compatibility client behavior;
-- `@daw-browser/control-sdk/desktop` with `connectDesktopControl(options?)` for authenticated packaged-desktop discovery and connection.
+The desktop client discovers and authenticates the packaged host. It does not expose registration secrets, raw sockets, project stores, or arbitrary Electron IPC.
 
-The desktop connection returns a typed invoker plus `close()`. It does not expose raw project stores, registration secrets, socket implementation details, or unrestricted Electron/native IPC.
-
-## 7. CLI: `daw-control`
-
-The CLI now exposes the canonical project workflow across cloud and attached desktop targets.
-
-Project/control commands include:
+The `daw-control` CLI supports cloud and desktop project control:
 
 ```text
 auth login --base-url <origin>
@@ -247,15 +214,15 @@ project list [--target <cloud|host>]
 project current --target host
 snapshot <project-id> [--target <cloud|host>]
 snapshot-v2 <project-id> [--target <cloud|host>]
-preview --request <file|-> [--target <cloud|host>]
-approval --request <file|-> [--target <cloud|host>]
-commit --request <file|-> [--target <cloud|host>]
-history <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]
-recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]
+preview --request <file|->
+approval --request <file|->
+commit --request <file|->
+history <project-id> [--cursor <cursor>] [--limit <number>]
+recoveries <project-id> [--cursor <cursor>] [--limit <number>]
 rpc --target host
 ```
 
-Host runtime commands remain intentionally separate:
+Host commands stay separate:
 
 ```text
 host status
@@ -271,29 +238,25 @@ host export-status
 host export-cancel <job-id>
 ```
 
-`rpc --target host` is canonical **project-control JSONL** over the authenticated desktop connection. It is not a generic escape hatch into host runtime/native commands.
+`rpc --target host` carries project-control JSONL. It is not generic native RPC.
 
-The JSONL process path was hardened for malformed input, oversized lines, split UTF-8, notifications, sequential request ordering, and stdin flow behavior.
+The JSONL process path gained regression coverage for malformed input, oversized lines, split UTF-8, notifications, sequential requests, and Bun stdin flow.
 
-## 8. MCP support and agent discoverability
-
-`@daw-browser/control-mcp` now exposes a model-friendly tool surface without adding convenience mutation APIs that bypass the canonical contracts.
-
-Preferred V2 read tools:
+MCP prefers these V2 reads:
 
 ```text
 control_capabilities_v2
 control_snapshot_v2
 ```
 
-Compatibility reads:
+Compatibility reads remain:
 
 ```text
 control_capabilities
 control_snapshot
 ```
 
-Project workflow tools:
+Project tools:
 
 ```text
 project_list
@@ -323,13 +286,11 @@ host_vst_instances
 host_vst_parameters
 ```
 
-The MCP server instructions and schema descriptions now teach agents how to discover a project, prefer V2 reads, construct persisted references, preview, approve, commit, and recover without protocol-specific prompting.
+Two protocol-naive model runs were part of packaged acceptance. Each model discovered the mounted project, chose the V2 snapshot, built a persisted track reference, previewed, committed, and verified the new revision without DAW protocol instructions in the prompt.
 
-Packaged acceptance included protocol-naive autonomous model runs. Two models independently discovered the mounted project, used the canonical V2 snapshot, built a persisted track reference, previewed, committed, and verified the resulting revision without being given DAW protocol instructions.
+## Cloud control and assets
 
-## 9. Cloud REST/OAuth control boundary
-
-The Worker now exposes retained versioned control routes backed by the canonical handler/invoker semantics.
+The Worker keeps versioned control routes under `/api/control` and checks OAuth scope, project access, and project role before it reaches Convex.
 
 Core routes include:
 
@@ -346,13 +307,7 @@ GET  /api/control/v1/projects/:projectId/history
 GET  /api/control/v1/projects/:projectId/recoveries
 ```
 
-OAuth control scopes distinguish reads from writes. Project access and role checks remain enforced at the Worker/Convex boundary. A bearer token is not permission to address arbitrary projects.
-
-## 10. Cloud asset/resource control
-
-Project assets remain resource APIs rather than pretending every storage operation is a project action.
-
-The control resource family now includes:
+Assets remain project resources instead of becoming fake project actions:
 
 ```text
 POST   /api/control/v1/projects/:projectId/assets
@@ -364,50 +319,21 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Important upload behavior now includes:
+Upload checks changed in several important ways. The Worker requires `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. It verifies size, authorization, MIME type, matching extension, SHA-256, and audio metadata from the uploaded bytes. It persists sample rate and channel count and uses MediaBunny for duration inspection when header metadata is not enough.
 
-- required bounded `Content-Length`;
-- project write authorization;
-- stable `Idempotency-Key`;
-- lowercase `x-content-sha256` verification against actual bytes;
-- supported audio MIME and extension matching;
-- maximum upload size enforcement;
-- audio metadata inspection from actual file bytes;
-- duration metadata fast path with bounded MediaBunny duration fallback;
-- sample rate/channel count persistence;
-- begin-upload / R2 upload / finalize-upload coordination;
-- typed user-media validation errors rather than mapping every parser/runtime failure to a client error.
+Known user-media validation failures return a client error. Unexpected parser, storage, Convex, or runtime failures stay server errors instead of being mislabeled as bad input.
 
-The MediaBunny dependency was upgraded from the older branch baseline to `1.55.1`, including migration to the current quality API where encoding bitrate is specified while preserving existing target bitrate semantics.
+MediaBunny moved to `1.55.1`, including the current `Quality` API for encoding bitrate.
 
-Project deletion and resource cleanup were also tightened so both the asset-namespace prefix and project-owned backup/export prefix are queued through exact, fail-closed R2 prefix validation rather than leaving orphaned objects or authorizing overly broad prefixes.
+Project deletion also cleans both the asset namespace and the project-owned backup/export prefix. R2 prefix validation fails closed so a cleanup request cannot widen into an unrelated delete.
 
-## 11. Desktop protocol and authenticated host
+## Desktop host and runtime commands
 
-Electron is now a real public authority boundary, not simply the browser app wrapped in a desktop window.
+The Electron app became an authenticated local host with a versioned protocol. The protocol covers request and reply framing, registration discovery, socket authentication, request correlation, size limits, lifecycle generation, host runtime status, native bridge contracts, menu commands, file capabilities, and VST reads.
 
-The desktop protocol owns:
+`registration-v1.json` remains a compatibility contract. Packaged tests covered private permissions plus missing, malformed, dead-socket, unsafe-permission, stopped-host, and restart cases.
 
-- strict versioned request/reply framing;
-- typed operation maps;
-- registration discovery;
-- authenticated local socket negotiation;
-- request correlation;
-- chunking/size limits;
-- generation/lifecycle handling;
-- host runtime status;
-- native audio bridge contracts;
-- application menu protocol;
-- file capability boundaries;
-- VST instance/parameter read schemas.
-
-`registration-v1.json` remains a compatibility/discovery contract. Packaged acceptance verified private registration/socket permissions and adversarial cases including missing registration, malformed content, dead sockets, unsafe permissions, stopped hosts, and restart discovery.
-
-The public SDK and CLI use the protocol client instead of manually reading socket internals.
-
-## 12. Desktop runtime operation catalog
-
-Desktop runtime operations are deliberately separate from semantic project control:
+Desktop runtime operations are separate from project control:
 
 ```text
 host.status
@@ -425,214 +351,147 @@ transport.seek
 diagnostics.snapshot
 ```
 
-This split prevents a transport command such as Play from masquerading as a durable project mutation and prevents project-control adapters from becoming generic native RPC tunnels.
+This keeps playback and diagnostics out of durable project history and prevents the desktop adapter from becoming an unrestricted native command tunnel.
 
-## 13. Local desktop import, playback, export, and media hydration
+## Import, playback, export, and media hydration
 
-The packaged desktop host gained validated public runtime flows for:
+The packaged desktop app gained public flows for transport, local audio import, project media persistence, restart hydration, export, cancellation, output path capabilities, and diagnostics.
 
-- transport status/play/pause/stop/seek;
-- local audio import through picker or absolute bounded media path;
-- mounted-project media persistence;
-- cold-restart media hydration;
-- native/portable export dispatch;
-- export status and cancellation;
-- safe output path capabilities;
-- host diagnostics.
+Packaged testing found and fixed several bugs in these paths:
 
-Several packaged bugs were found and fixed while proving those boundaries, including canonical `/tmp` versus `/private/tmp` path handling, renderer reply serialization of optional errors, stale transport-stop responses, file metadata/context-bridge incompatibility, duplicate export request IDs, missing-media hydration after restart, output capability path canonicalization, native PCM queue overflow, and Bun stdin chunk loss in JSONL mode.
+- `/tmp` and `/private/tmp` path equivalence broke socket and output capability checks
+- renderer replies included optional `undefined` fields that failed serialization
+- `transport.stop` could return stale paused state
+- main-process file metadata and `AbortSignal` crossed the context bridge incorrectly
+- export preflight and final export reused one request ID before queue cleanup
+- persisted local audio clips were not hydrated early enough after restart
+- the native PCM queue was too small for normal export bursts
+- Bun stdin flow could drop later JSONL chunks
 
-## 14. Native VST3 hosting is now a first-class desktop capability
+The final one-second desktop export was independently decoded as stereo 48 kHz 16-bit PCM, 192,044 bytes.
 
-The merge introduces the complete macOS packaged VST3 path.
+## Native VST3
 
-### Discovery
+The merge completed the macOS packaged VST3 path.
 
-Standard VST3 directories are initialized automatically:
+Standard discovery roots are:
 
 ```text
 /Library/Audio/Plug-Ins/VST3
 ~/Library/Audio/Plug-Ins/VST3
 ```
 
-Catalog entries are revalidated rather than treated as permanent launch permission.
+First native execution requires trust acknowledgement. Scanner and launch checks verify canonical location, executable presence, quarantine state, strict code signing, arm64 support, scanner compatibility, and bundle/executable fingerprints.
 
-### Trust and scanning
+A previously trusted catalog record is not permanent launch permission. Startup revalidates it, and stale entries can be repaired by rescanning the current files.
 
-First native execution is consent/trust-gated. The scanner/launch path validates canonical bundle placement, executable existence, quarantine state, strict code signing, arm64 compatibility, protocol-compatible scanner output, and bundle/executable fingerprints.
+The native process layout separates Electron main, the audio host, the scanner, playback workers, and editor workers. Worker isolation helps with crashes. It does not sandbox malicious plugin code.
 
-Trusted stale catalog entries self-heal by revalidation/rescan when possible. A changed bundle is not launched simply because an older record was once trusted.
+Attachment checks include packaged artifact IDs, protocol and ABI versions, class ID, bus layout, parameter manifest, state revision, and transport limits. The graph publishes only after the native transaction is ready.
 
-### Process model
+The real packaged campaign found a TypeScript/native attachment mismatch. TypeScript emitted the parameter-ID extension, while the native decoder expected the payload to stop after initial values. The decoder now accepts the current extension with limits.
 
-The desktop/native architecture separates:
-
-- Electron main/preload authority;
-- native audio host;
-- VST scanner;
-- realtime playback workers;
-- editor workers/windows;
-- bounded control/shared-memory transport.
-
-Playback and editor lifecycles are separate so opening a native editor does not make the Electron renderer the owner of foreign plugin UI or DSP execution.
-
-### Attachment and graph publication
-
-VST attachments are resolved from trusted catalog identity, preflighted against packaged artifact/protocol/ABI/class/bus/parameter/state expectations, and committed through the native transaction/graph publication path.
-
-The final packaged campaign also uncovered and fixed a real TypeScript/native protocol mismatch: the TypeScript attachment serializer emitted the extended parameter-ID payload while the native decoder previously required the payload to stop after initial values. The decoder now accepts and bounds the current extension rather than rejecting valid packaged attachments.
-
-### Parameters
-
-Public reads:
+Public VST reads are:
 
 ```text
 host.vst.instances
 host.vst.parameters
 ```
 
-Public semantic write, only when local capabilities advertise it:
+The public write is:
 
 ```text
 external-plugin.parameters.set
 ```
 
-The platform intentionally does not expose public arbitrary plugin insertion/removal, scanner control, worker process control, or arbitrary native editor manipulation.
+It is a local project action, not a host runtime write.
 
-### State and persistence
+Public control still does not expose arbitrary plugin insertion, removal, scanner commands, worker control, or arbitrary editor-window commands.
 
-Opaque VST state is bounded and hash-validated. Stateful attachments persist/capture supported state for rebuilds, editor lifecycle, export, and cold restart. Stateless plugins are recreated from defaults plus persisted parameters.
+Opaque VST state is capped at 512 KiB and checked with SHA-256. Stateful plugins can persist captured state for rebuild, editor teardown, export, and restart. Stateless plugins use defaults plus persisted parameters.
 
-Shared local state artifacts are reference-aware: deleting one processor does not destroy an artifact still referenced by another processor, and recovery can reuse an existing identical immutable artifact while failing closed on same-ID/different-content corruption.
+Shared local state artifacts are reference-aware. Deleting one processor cannot remove state still referenced by another processor. Recovery only reuses an existing artifact when the stored metadata and bytes match.
 
-### Worker loss and native host recovery
+Worker or native-host loss can trigger a limited rebuild. Recovery keeps the normal trust, fingerprint, manifest, protocol, and state checks. The worker supervisor allows at most three restarts.
 
-Worker/native-host loss no longer leaves the mounted graph permanently dead. The supervisor supports bounded canonical rebuild behavior, stale generation rejection, process cleanup, and restart limits while preserving trust/preflight requirements.
+Editor-capable plugins run their editor in a separate native worker. Open, close, focus, resize, and status use typed commands and notifications.
 
-### Editor lifecycle
+Manual parameter edits override scheduled automation for the addressed parameter. Native override insertion handles tombstones, preserves existing overrides, and rolls back a newly reserved override if event queuing fails. The current product flow requires stopped transport before automation re-enable succeeds.
 
-Editor-capable plugins can open, close, focus, and resize worker-local native editor windows. Parameter/editor events return through typed notifications. Editor state capture and teardown are generation-safe.
+Native export resolves and preflights attachments again. The render result is finalized before plugin teardown, and offline workers no longer initialize unused AppKit editor state.
 
-### Automation override
+Current limitation: Native Phase A export rejects projects that contain automation.
 
-Manual VST parameter edits now override scheduled automation at both renderer and native layers. Native override reservation uses one authoritative insertion path, handles tombstones correctly, preserves existing overrides, and rolls back only newly-added overrides if queueing fails.
+## Real VST acceptance
 
-Explicit automation re-enable clears the selected override. The certified product flow currently requires stopped transport before re-enable succeeds.
+ValhallaSupermassive 5.0.0 arm64 was the installed plugin used for the packaged merge gate.
 
-### Export
+The campaign verified:
 
-Native export resolves and preflights attachments again rather than trusting the live graph. The export lifecycle was fixed so completed renders are not held hostage by synchronous plugin teardown and offline workers do not initialize unused AppKit editor state.
+- standard-directory discovery and trust-gated scan
+- successful attachment
+- all 19 reported parameters
+- native editor launch
+- Mix change from 0.50 to 0.51 with independent MCP verification
+- playback
+- deliberate playback-worker termination and recovery
+- cold restart with plugin and parameter state preserved
+- stale catalog corruption followed by automatic repair
+- repeated one-second stereo 48 kHz PCM exports of 192,044 bytes
+- manual automation override and re-enable
+- renderer reload and crash recovery
 
-Current Native Phase A export remains intentionally limited: projects containing automation are rejected. A VST project without automation was independently exported successfully in packaged acceptance.
+The browser campaign separately covered non-VST editing, routing, import, playback and seek, built-in EQ and Synth, restart media hydration, settings, keyboard shortcuts, and a one-second nonzero export.
 
-## 15. Real packaged VST3 acceptance
+## Renderer lifecycle
 
-ValhallaSupermassive 5.0.0 arm64 was used as the real installed plugin acceptance target.
+Renderer lifetime is treated as privileged ownership, not just a UI lifecycle.
 
-Verified behavior included:
+A full main-frame navigation invalidates privileged requests and active manual native transactions. A committed document gets a new generation. Failed or cancelled navigation can restore the previous document only when the outcome is unambiguous. Renderer crash invalidates ownership immediately.
 
-- standard-directory discovery;
-- trust-gated scan;
-- readiness and insertion;
-- 19 real parameters;
-- native editor launch;
-- Mix parameter edit from 0.50 to 0.51 with independent public MCP verification;
-- playback;
-- deliberate playback-worker termination and bounded replacement/recovery;
-- cold restart with plugin/parameter state preserved;
-- stale-catalog corruption followed by automatic self-heal;
-- repeated one-second stereo 48 kHz PCM WAV exports of 192,044 bytes;
-- manual automation override and explicit re-enable;
-- renderer reload/crash recovery while native state remained usable.
+Electron does not expose a reliable navigation ID for every overlapping same-URL case. The lifecycle code therefore fails closed when it cannot correlate events. Retired navigation identities stay quarantined so a late event cannot be mistaken for the next clean navigation. That quarantine is capped at 128 identities. Overflow stops retaining new identities and remains fail closed until crash recovery.
 
-The final browser acceptance also covered non-VST project editing, routing, import, playback/seek, built-in EQ/Synth, reload/cold-session media hydration, settings, shortcuts, and a one-second nonzero export.
+A test-only shortcut that activated a document outside the real commit path was removed.
 
-## 16. Renderer lifecycle and transaction ownership hardening
+## Local and cloud conformance
 
-Electron renderer lifetime is now treated as a security/correctness boundary.
+The branch added one conformance suite for local IndexedDB control and cloud Convex control. It checks discovery, capabilities, V2 snapshots, preview non-mutation, approval, commit, idempotency, revision conflicts, history, recoveries, schema rejection, target rules, and project authorization.
 
-The renderer lifecycle owner tracks committed document generations and full main-frame navigation attempts instead of using a simple reload flag. Important behaviors include:
+Cloud track-delete and ungroup recovery were fixed to preserve survivor grouping and output routing.
 
-- same-document and subframe navigations do not invalidate ownership;
-- a full outgoing navigation invalidates privileged requests and active manual native transactions;
-- a committed new document activates a fresh generation;
-- failed/cancelled navigation can restore the still-live prior document only when the outcome is unambiguous;
-- renderer crash invalidates ownership and cannot be undone by late navigation events;
-- stale generations cannot commit old native transactions;
-- overlapping same-URL navigations fail closed because Electron does not provide a reliable navigation ID for correlation;
-- retired ambiguous navigation identities are quarantined so delayed outcomes cannot be mistaken for a later redirect/commit;
-- quarantine state is bounded; overflow becomes an allocation-free fail-closed state until renderer crash recovery;
-- the public/test-only shortcut for activating a document outside the real commit boundary was removed.
+Local destructive recovery gained VST-aware behavior through an explicit planner capability instead of presenting the planner with a fake snapshot.
 
-This work prevents dead renderers or ambiguous navigation events from retaining privileged native transaction ownership.
+## Built-in extension kernel
 
-## 17. Local/cloud semantic parity and conformance
+A trusted app-local extension kernel now handles statically imported built-ins. It validates command and shortcut declarations, stages activation before publishing it, cleans up by generation, exposes limited diagnostics and abort signals, and supports controlled command replacement.
 
-The branch added reusable conformance coverage so local IndexedDB authority and cloud/Convex authority are tested against the same project-control expectations.
+The existing browser toggle was routed through the kernel without moving browser state into the extension system.
 
-Conformance includes:
+Project actions contributed by built-ins still use normal preview, approval, and commit rules.
 
-- discovery;
-- capabilities;
-- canonical snapshots;
-- preview non-mutation;
-- approval requirements;
-- commit behavior;
-- idempotent replay/conflict;
-- revision conflicts;
-- history;
-- recoveries;
-- schema rejection;
-- target restrictions;
-- project authorization differences.
+External extension packages, arbitrary DSP/package loading, and a public arbitrary-operation endpoint remain out of scope.
 
-Cloud track-delete/ungroup recovery was corrected to preserve survivor group/output routing instead of reconstructing partial state by hand. Local destructive recovery gained VST-aware behavior through an explicit planner capability rather than falsifying the planner snapshot.
+## Security fixes and trust rules
 
-## 18. Built-in extension kernel
+The merge tightened several paths that carry authority or untrusted input:
 
-The branch introduced a trusted app-local extension kernel for statically imported built-ins.
+- one operation catalog validates project-control inputs and outputs
+- project access stays behind local authority or authenticated Worker and Convex checks
+- OAuth read and write scopes are separate
+- approval tokens are request-bound and expire
+- desktop registration and sockets use private validated discovery
+- renderer requests carry document-generation ownership
+- import and output paths use file capabilities and canonical path checks
+- R2 deletion prefixes must match allowed project prefixes
+- audio upload checks the actual bytes and SHA-256
+- native frames, parameter counts, state size, deadlines, worker limits, and packaged manifests have explicit limits
+- VST bundle identity, signature, quarantine state, architecture, and fingerprints are rechecked before launch
 
-It provides:
+VST worker processes are crash isolation, not hostile-code containment. Plugins still run as native code with the desktop user's authority.
 
-- validated command/shortcut declarations;
-- atomic staged activation;
-- generation-safe cleanup;
-- bounded diagnostics;
-- abort signals;
-- stable contribution IDs;
-- controlled command replacement;
-- narrow application facades;
-- project-action grants that still route through preview/approval/commit.
+## Tests and review gates
 
-The existing browser toggle shortcut was composed through the kernel while preserving application-owned state and keyboard behavior.
-
-External extension packages, arbitrary package/DSP loading, and a public arbitrary operation endpoint remain explicitly out of scope.
-
-## 19. Security and trust-boundary changes
-
-The control/native work tightened several security-sensitive boundaries:
-
-- control actions are schema-validated through a single catalog;
-- project access stays behind local authority or authenticated Worker/Convex authority;
-- OAuth read/write scopes are explicit;
-- approval tokens are exact-request bound and expiring;
-- desktop registration/socket discovery is private and validated;
-- renderer privileged requests are generation-bound;
-- output/import paths use capability checks and canonicalization;
-- R2 deletion prefixes are exact/fail-closed;
-- uploaded audio is byte-validated instead of trusting caller metadata;
-- native frames, shared memory, state size, parameter counts, worker limits, deadlines, and artifact manifests are bounded;
-- VST catalog identity is revalidated at launch;
-- plugin fingerprints/signatures/quarantine/architecture are checked at the native boundary;
-- worker crashes are contained/recovered instead of making stale state authoritative.
-
-One trust statement is especially important: VST3 worker processes are primarily crash/availability isolation. Third-party plugins are native code running with the desktop user's authority; this merge does **not** claim malicious plugins are safely sandboxed. Users should install and run only trusted plugins.
-
-## 20. Tooling, linting, tests, and review gates
-
-This branch substantially expanded repository quality enforcement.
-
-Important gates now include:
+The merge gate included:
 
 ```text
 bun run lint
@@ -643,37 +502,35 @@ bun run test:control-platform
 bun run test:control-compat
 bun run build
 native CTest
-Electron package/release artifact verification
+Electron packaging and native artifact checks
 ```
 
-Anti-slop rules are wired into Oxlint and the RuleTester suites run under Node where required. Root `bun test` was restored to zero failures rather than accepting a red repository gate.
+Final reported results:
 
-The final certified state reported:
+- 2,433 Bun tests passed
+- 1 intentional skip
+- 0 Bun test failures
+- 161 control-platform tests passed
+- 40 control-compatibility tests passed
+- 12 anti-slop RuleTester suites passed
+- Oxlint reported 0 warnings and 0 errors
+- TypeScript checks passed
+- native CTest passed 6 of 6 at the runtime-certified commit
+- production build passed
+- Electron packaging and native artifact checks passed during runtime certification
+- final correctness, structure, simplification, defensive, and security reviews found no merge blocker
 
-- 2,433 Bun tests passed;
-- 1 intentional skip;
-- 0 Bun test failures;
-- 161 control-platform tests passed;
-- 40 control-compatibility tests passed;
-- 12 anti-slop RuleTester suites passed;
-- repository Oxlint: 0 warnings, 0 errors;
-- TypeScript checks passed;
-- native CTest: 6/6 passed at the runtime-certified ancestor;
-- production build passed;
-- final Electron packaging and native artifact checks passed during runtime certification;
-- final correctness, structural, simplification, defensive, and security review passes found no merge blocker.
+## Agent docs and Factory skills
 
-## 21. Agent-facing repository documentation and shared skills
+Current operating docs are:
 
-The repository now contains current agent operating documentation instead of relying on hidden implementation knowledge.
+```text
+docs/control-platform.md
+docs/agent-control.md
+docs/native-vst3.md
+```
 
-New/current docs:
-
-- `docs/control-platform.md`
-- `docs/agent-control.md`
-- `docs/native-vst3.md`
-
-Repo-scoped Factory skills were added for discovery by future coding agents:
+Repo-scoped Factory skills are:
 
 ```text
 .factory/skills/daw-project-control/SKILL.md
@@ -681,81 +538,78 @@ Repo-scoped Factory skills were added for discovery by future coding agents:
 .factory/skills/daw-vst3/SKILL.md
 ```
 
-Those skills explicitly separate semantic project mutations, desktop runtime operations, and VST-specific trust/acceptance behavior.
+The skills keep project mutations, desktop runtime commands, and VST trust/testing rules separate.
 
-`AGENTS.md` was updated so agents are directed to the public control boundaries rather than the old Workers AI/agent-route assumptions. Local Factory settings, captures, threat models, and credentials remain ignored; only intentional repo skill manifests are unignored.
+`AGENTS.md` points coding agents to these public APIs instead of the old Workers AI and application-specific agent-route assumptions. Local Factory settings, captures, threat models, credentials, and other machine state remain ignored.
 
-## 22. Documentation and historical cleanup
+## Repository cleanup
 
-The README was rewritten to describe the repository as a browser + cloud + Electron/native DAW rather than a browser-only product.
+The README was updated for the browser, cloud, Electron, and native architecture.
 
-The model-independent-control implementation tracker is now marked completed/historical and points to current operating docs.
+The model-independent-control implementation tracker is marked completed and historical. It points readers to the current docs and acceptance report.
 
-Temporary branch-local advisor plans 001–010 were removed after the work they described was implemented and certified.
+Temporary advisor plans 001 through 010 were deleted after their work was implemented and certified.
 
-The stale checked-in `security-findings.json` that identified itself as an August 17 working-tree scan was removed so it cannot be mistaken for exact-head certification evidence. The meaningful VST native-code trust boundary is now documented in the current native VST3 reference.
+The checked-in `security-findings.json` was also removed. It described an older August 17 working-tree scan and could be mistaken for exact-head certification evidence.
 
-Old AI/agent route assumptions were removed from current guidance. The supported automation story after this merge is the explicit model-independent control platform, not hidden application-specific agent mutations.
+## Compatibility kept on purpose
 
-## 23. Compatibility that was deliberately preserved
+The merge kept:
 
-This was a large architecture change, but compatibility was intentionally additive.
+- V1 and V2 control contracts
+- V1 and V2 capability and snapshot projections
+- versioned REST routes
+- CLI commands
+- MCP compatibility tools
+- desktop V1 and V2 framing where applicable
+- `registration-v1.json`
+- durable local control, history, and recovery records that still need migration compatibility
 
-Preserved compatibility surfaces include:
+A newer in-repo API is not enough reason to delete one of these. Removal needs evidence from deployed or installed consumers.
 
-- V1 and V2 control contracts;
-- V1/V2 snapshot/capability projections;
-- retained REST routes;
-- CLI commands;
-- MCP compatibility tools;
-- desktop V1/V2 framing where applicable;
-- `registration-v1.json` discovery;
-- durable local control/history/recovery markers where migration evidence required them.
+## Known limits
 
-A large change is not permission to delete an older surface without deployed/external consumer evidence.
+The merge does not provide:
 
-## 24. Current limitations and intentionally deferred scope
+- VST3 in browser or cloud targets
+- public arbitrary VST insertion, removal, editor control, or worker control
+- a malicious-plugin sandbox
+- cloud JSONL process transport
+- a public arbitrary-operation RPC
+- external extension package loading
+- arbitrary DSP/package loading
+- portable or cloud opaque VST state transport
+- packaged extension activation, deactivation, or reload controls
+- Native Phase A export for projects that contain automation
 
-The merge does not claim these are solved:
+The current product flow also requires stopped transport before automation re-enable succeeds.
 
-- native VST3 loading in browser or cloud targets;
-- public arbitrary VST insertion/removal/editor/process control;
-- malicious-plugin sandboxing;
-- cloud JSONL process transport;
-- public arbitrary operation RPC;
-- external extension package loading;
-- arbitrary DSP/package loading;
-- portable/cloud opaque VST state transport;
-- a packaged extension activation/deactivation/reload product surface;
-- Native Phase A export for projects containing automation.
+The exact overlapping same-URL Electron event sequence cannot be forced reliably through CDP. The executable lifecycle tests are the authority for that case.
 
-Observed current product behavior also requires transport to be stopped before the automation-reenable flow succeeds.
+## What contributors should do now
 
-The packaged exact-overlap same-URL Electron event sequence cannot be deterministically forced/proven via CDP, so the executable lifecycle state-machine tests are the authority for that specific ambiguous-event case.
+When adding an agent, extension, CLI command, MCP tool, REST adapter, or other integration:
 
-## 25. What integrators and contributors should do differently now
+- start with `control.capabilities` and `control.snapshot`
+- use V2 reads for new integrations
+- use the existing V1 write envelopes
+- build persisted references from the latest snapshot
+- preview every write
+- request approval only when preview requires it
+- reuse an idempotency key only for the identical request
+- rebuild after `revision-conflict`
+- keep transport, diagnostics, import/export, and VST reads out of project actions
+- use `external-plugin.parameters.set` only when local capabilities advertise it
+- use the SDK or desktop protocol client instead of reading registration or socket internals
+- keep the VST trust, preflight, state, and size checks in place
+- do not mutate Convex, IndexedDB, plugin state artifacts, or raw native frames when a public API exists
 
-If you are adding an agent, extension, CLI command, MCP tool, REST adapter, or external integration after this merge:
+## Certification trail
 
-- do not create a new mutation language;
-- start with `control.capabilities` and `control.snapshot`;
-- prefer canonical V2 reads for new consumers;
-- use the existing V1 mutation envelopes;
-- construct persisted references from the latest snapshot;
-- preview before commit;
-- request approval only when preview requires it;
-- reuse idempotency keys only for the identical request;
-- rebuild after revision conflict;
-- keep runtime transport/import/export/VST reads separate from semantic project actions;
-- use `external-plugin.parameters.set` only when local capabilities advertise it;
-- use the SDK/desktop protocol client instead of reading registration/socket internals;
-- preserve native trust/preflight/state bounds;
-- never directly mutate Convex, IndexedDB, plugin state artifacts, or raw native frames when a public boundary exists.
+Runtime certification stopped at `37e400e42bcde874926d45e952a91ceb5080c94d`. The following two PR commits changed only docs, Factory skill manifests, ignore and tracker cleanup, acceptance reporting, and stale review artifacts.
 
-## 26. Certification trail
+The final reviewed PR head was `3cff4bf5af63a8eb8fd6823babd0c119d1bb3d67`. Cloudflare built and deployed that exact commit before merge.
 
-The runtime-certified ancestor was `37e400e42bcde874926d45e952a91ceb5080c94d`. Two following commits changed only documentation, shared Factory skill manifests, ignore/tracker hygiene, acceptance reporting, and stale review artifacts. The final reviewed PR head was `3cff4bf5af63a8eb8fd6823babd0c119d1bb3d67`.
+PR #47 merged as `b4bf014d5d9e95e82cff64df8c78a44ae46ae138`.
 
-Cloudflare successfully built/deployed the exact final PR head before merge. PR #47 was then merged into `master` with merge commit `b4bf014d5d9e95e82cff64df8c78a44ae46ae138`.
-
-For the detailed runtime matrix, individual bugs discovered during packaged testing, and temporary evidence locations, use the [packaged runtime acceptance report](../../acceptance-reports/control-platform-runtime-2026-08-20.md). For historical checkpoint-by-checkpoint implementation context, use the [completed tracker](../../implementation-trackers/model-independent-control-platform.md).
+For the full runtime matrix, packaged bugs, and evidence paths, read the [acceptance report](../../acceptance-reports/control-platform-runtime-2026-08-20.md). For checkpoint-by-checkpoint implementation history, read the [completed tracker](../../implementation-trackers/model-independent-control-platform.md).

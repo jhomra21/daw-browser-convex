@@ -11,6 +11,7 @@ import { DashboardTimelineView } from "./timeline-view";
 import { DashboardKeyboardView } from "./keyboard-view";
 import { DashboardExportView } from "./export-view";
 import { DashboardAudioView } from "./audio-view";
+import { DashboardPluginsView } from "./plugins-view";
 
 const items: readonly { view: DashboardView; label: string }[] = [
   { view: "general", label: "General" },
@@ -33,6 +34,7 @@ type DashboardProps = {
 
 export function Dashboard(props: DashboardProps) {
   const selectedView = () => props.view;
+  const desktopPluginCatalog = () => window.dawDesktop?.pluginCatalog;
   const canClose = () => props.canClose !== false;
   const close = () => {
     if (canClose()) props.setView(null);
@@ -62,6 +64,14 @@ export function Dashboard(props: DashboardProps) {
                     />
                   )}
                 </For>
+                <Show when={desktopPluginCatalog()}>
+                  <DashboardSidebarItem
+                    view="plugins"
+                    label="Plug-ins"
+                    active={selectedView() === "plugins"}
+                    onSelect={props.setView}
+                  />
+                </Show>
               </nav>
               <DashboardSidebarItem
                 view="account"
@@ -98,6 +108,9 @@ export function Dashboard(props: DashboardProps) {
                 </Match>
                 <Match when={selectedView() === "export"}>
                   <DashboardExportView model={props.model} />
+                </Match>
+                <Match when={selectedView() === "plugins" && desktopPluginCatalog()}>
+                  <DashboardPluginsView />
                 </Match>
               </Switch>
             </section>

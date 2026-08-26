@@ -1,4 +1,4 @@
-import type { ArpParams, SynthParamsInput } from '@daw-browser/shared'
+import type { ArpParams, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
 import type { MixerChannel } from './channels'
 import type { Track, TrackSend } from '@daw-browser/timeline-core/types'
 import type { AudioEffectRuntimeInstance } from '../effects/runtime-instance'
@@ -7,6 +7,7 @@ export type MixerTrackFx = {
   instances: AudioEffectRuntimeInstance[]
   arp?: ArpParams
   synth?: SynthParamsInput
+  instrument?: TrackInstrumentParams
 }
 
 export type ResolvedMixerSend = TrackSend

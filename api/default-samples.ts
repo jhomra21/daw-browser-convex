@@ -1,39 +1,30 @@
 import { defaultSampleUrl, toDefaultSampleAssetKey } from '@daw-browser/shared'
+import { z } from 'zod'
 
 const DEFAULT_SAMPLE_LIST_TIMEOUT_MS = 4_000
 const DEFAULT_SAMPLE_PREFIX = 'default/'
 const MAX_FALLBACK_SAMPLES = 1_000
 
-type DefaultSample = {
-  key: string
-  assetKey: string
-  sourceKind: 'url'
-  name: string
-  url: string | undefined
-  duration?: number
-  source?: {
-    durationSec: number
-    sampleRate: number
-    channelCount: number
-  }
-  sizeBytes?: number
-}
+const defaultSampleSchema = z.object({
+  key: z.string(),
+  assetKey: z.string(),
+  sourceKind: z.literal('url'),
+  name: z.string(),
+  url: z.string().optional(),
+  duration: z.number().optional(),
+  source: z.object({
+    durationSec: z.number(),
+    sampleRate: z.number(),
+    channelCount: z.number(),
+  }).optional(),
+  sizeBytes: z.number().optional(),
+})
+
+type DefaultSample = z.infer<typeof defaultSampleSchema>
 
 let cachedDefaultSamples: DefaultSample[] = []
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object'
-
-const readString = (record: Record<string, unknown>, key: string) =>
-  typeof record[key] === 'string' ? record[key] : undefined
-
-const isDefaultSample = (value: unknown): value is DefaultSample => {
-  if (!isRecord(value)) return false
-  return readString(value, 'key') !== undefined
-    && readString(value, 'assetKey') !== undefined
-    && value.sourceKind === 'url'
-    && readString(value, 'name') !== undefined
-}
+const defaultSampleResponseSchema = z.object({ samples: z.array(z.unknown()) })
 
 const withTimeout = async <T>(task: Promise<T>, timeoutMs: number): Promise<T | null> => {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -91,9 +82,12 @@ const fetchFallbackDefaultSamples = async (env: Env, requestUrl: string) => {
   if (!baseUrl) return null
   const response = await withTimeout(fetch(`${baseUrl}/api/default-samples`), DEFAULT_SAMPLE_LIST_TIMEOUT_MS)
   if (!response?.ok) return null
-  const data: unknown = await response.json().catch(() => null)
-  if (!isRecord(data) || !Array.isArray(data.samples)) return null
-  return data.samples.filter(isDefaultSample).slice(0, MAX_FALLBACK_SAMPLES)
+  const data = defaultSampleResponseSchema.safeParse(await response.json().catch(() => null))
+  if (!data.success) return null
+  return data.data.samples.flatMap((sample) => {
+    const parsed = defaultSampleSchema.safeParse(sample)
+    return parsed.success ? [parsed.data] : []
+  }).slice(0, MAX_FALLBACK_SAMPLES)
 }
 
 const fallbackOrCache = async (env: Env, requestUrl: string) => {

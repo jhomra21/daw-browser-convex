@@ -5,11 +5,14 @@ import type { ApiContext } from './app-types'
 import type { Session } from './auth'
 import { createMaintenanceWorkerConvexClient, createWorkerConvexClient, type ApiConvexClient } from './convex-auth'
 
+type R2DeleteBucket = Pick<R2Bucket, 'list' | 'delete'>
+
 type R2DeleteQueueRow = {
   _id: Id<'r2DeleteQueue'>
   projectId: string
   r2Key: string
   kind: R2DeleteKind
+  claimToken?: string
 }
 
 type R2DeleteDrainSummary = {
@@ -26,7 +29,7 @@ const toDrainSummary = (result: ProjectR2DeleteDrainResult): R2DeleteDrainSummar
   deleted: result.deleted,
 })
 
-const deleteR2Prefix = async (bucket: R2Bucket, prefix: string) => {
+const deleteR2Prefix = async (bucket: R2DeleteBucket, prefix: string) => {
   let cursor: string | undefined
   do {
     const page = await bucket.list({ prefix, cursor, limit: 1000 })
@@ -36,26 +39,39 @@ const deleteR2Prefix = async (bucket: R2Bucket, prefix: string) => {
   } while (cursor)
 }
 
-export const deleteR2Keys = async (bucket: R2Bucket, keys: string[]) => {
+export const deleteR2Keys = async (bucket: R2DeleteBucket, keys: string[]) => {
   if (keys.length === 0) return
   await bucket.delete(keys)
 }
 
-const markFailed = async (convex: ApiConvexClient, row: R2DeleteQueueRow, error: unknown) => {
+const markFailed = async (convex: Pick<ApiConvexClient, 'mutation'>, row: R2DeleteQueueRow, error: Error) => {
+  if (!row.claimToken) return
   await convex.mutation(convexApi.r2Deletes.markFailed, {
     projectId: row.projectId,
     id: row._id,
+    claimToken: row.claimToken,
     error: error instanceof Error ? error.message : 'R2 delete failed',
   })
 }
 
-const drainR2DeleteRows = async (input: {
-  convex: ApiConvexClient
-  bucket: R2Bucket
+export const drainR2DeleteRows = async (input: {
+  convex: Pick<ApiConvexClient, 'mutation'>
+  bucket: R2DeleteBucket
   rows: R2DeleteQueueRow[]
 }) => {
+  const rowsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
+  for (const row of input.rows) {
+    const ids = rowsByProject.get(row.projectId) ?? []
+    ids.push(row._id)
+    rowsByProject.set(row.projectId, ids)
+  }
+  const claimed = (await Promise.all(Array.from(rowsByProject, ([projectId, ids]) => (
+    input.convex.mutation(convexApi.r2Deletes.claimRows, { projectId, ids, now: Date.now() })
+  )))).flat()
+  if (claimed.length === 0) return { processed: 0, deleted: 0, deletedKeys: [] }
   const deletedIdsByProject = new Map<string, Id<'r2DeleteQueue'>[]>()
   const deletedKeys: string[] = []
+  const claimedById = new Map(claimed.map((row) => [String(row._id), row]))
   const recordDeleted = (row: R2DeleteQueueRow) => {
     let ids = deletedIdsByProject.get(row.projectId)
     if (!ids) {
@@ -67,45 +83,82 @@ const drainR2DeleteRows = async (input: {
   }
   const objectRows: R2DeleteQueueRow[] = []
   const prefixRows: R2DeleteQueueRow[] = []
-  for (const row of input.rows) {
+  for (const row of claimed) {
     if (row.kind === 'project-prefix') prefixRows.push(row)
     else objectRows.push(row)
   }
-  const deletedPrefixes: string[] = []
+  const deletedPrefixKeys = new Set<string>()
+  const failedPrefixKeys = new Set<string>()
   for (let index = 0; index < prefixRows.length; index += 2) {
     await Promise.all(prefixRows.slice(index, index + 2).map(async (row) => {
       try {
         await deleteR2Prefix(input.bucket, row.r2Key)
-        deletedPrefixes.push(row.r2Key)
+        deletedPrefixKeys.add(row.r2Key)
         recordDeleted(row)
       } catch (error) {
-        await markFailed(input.convex, row, error)
+        await markFailed(input.convex, row, error instanceof Error ? error : new Error('R2 delete failed'))
+        failedPrefixKeys.add(row.r2Key)
       }
     }))
   }
   const remainingObjectRows: R2DeleteQueueRow[] = []
+  const failedCoveredObjectRows: R2DeleteQueueRow[] = []
+  const matchingPrefixKeyByObjectId = new Map<string, string | undefined>()
   for (const row of objectRows) {
-    if (deletedPrefixes.some((prefix) => row.r2Key.startsWith(prefix))) recordDeleted(row)
-    else remainingObjectRows.push(row)
+    let matchingPrefixKey: string | undefined
+    for (const prefix of prefixRows) {
+      if (row.r2Key.startsWith(prefix.r2Key)) {
+        matchingPrefixKey = prefix.r2Key
+        break
+      }
+    }
+    matchingPrefixKeyByObjectId.set(String(row._id), matchingPrefixKey)
   }
+  for (const row of objectRows) {
+    const matchingPrefixKey = matchingPrefixKeyByObjectId.get(String(row._id))
+    if (matchingPrefixKey && deletedPrefixKeys.has(matchingPrefixKey)) {
+      recordDeleted(row)
+      continue
+    }
+    if (matchingPrefixKey && failedPrefixKeys.has(matchingPrefixKey)) {
+      failedCoveredObjectRows.push(row)
+      continue
+    }
+    remainingObjectRows.push(row)
+  }
+  await Promise.all(failedCoveredObjectRows.map((row) => markFailed(
+    input.convex,
+    row,
+    new Error('R2 prefix delete failed'),
+  )))
   if (remainingObjectRows.length > 0) {
     try {
       await deleteR2Keys(input.bucket, remainingObjectRows.map((row) => row.r2Key))
       for (const row of remainingObjectRows) recordDeleted(row)
     } catch (error) {
-      await Promise.all(remainingObjectRows.map((row) => markFailed(input.convex, row, error)))
+      await Promise.all(remainingObjectRows.map((row) => markFailed(
+        input.convex,
+        row,
+        error instanceof Error ? error : new Error('R2 delete failed'),
+      )))
     }
   }
   await Promise.all(Array.from(deletedIdsByProject).map(([projectId, ids]) => (
-    input.convex.mutation(convexApi.r2Deletes.markDeleted, { projectId, ids })
+    input.convex.mutation(convexApi.r2Deletes.markDeleted, {
+      projectId,
+      claims: ids.flatMap((id) => {
+        const row = claimedById.get(String(id))
+        return row?.claimToken ? [{ id, claimToken: row.claimToken }] : []
+      }),
+    })
   )))
-  return { processed: input.rows.length, deleted: deletedKeys.length, deletedKeys }
+  return { processed: claimed.length, deleted: deletedKeys.length, deletedKeys }
 }
 
 export const drainR2DeleteQueue = async (input: {
   c: ApiContext
   user: Session['user']
-  bucket: R2Bucket
+  bucket: R2DeleteBucket
   projectId: string
   limit?: number
 }): Promise<ProjectR2DeleteDrainResult> => {
@@ -120,10 +173,14 @@ export const drainR2DeleteQueue = async (input: {
 
 export const drainDueR2DeleteQueue = async (input: {
   c: ApiContext
-  bucket: R2Bucket
+  bucket: R2DeleteBucket
   limit?: number
 }): Promise<R2DeleteDrainSummary> => {
   const convex = await createMaintenanceWorkerConvexClient(input.c)
+  await convex.mutation(convexApi.assets.reconcileStalePending, {
+    before: Date.now() - 60 * 60 * 1000,
+    limit: 100,
+  })
   const rows = await convex.query(convexApi.r2Deletes.listDueAny, {
     now: Date.now(),
     limit: input.limit ?? 25,
@@ -135,15 +192,22 @@ export const drainDueR2DeleteQueue = async (input: {
 export const drainProjectPrefixDelete = async (input: {
   c: ApiContext
   user: Session['user']
-  bucket: R2Bucket
+  bucket: R2DeleteBucket
   projectId: string
 }): Promise<R2DeleteDrainSummary> => {
   const convex = await createWorkerConvexClient(input.c, input.user)
-  const row = await convex.query(convexApi.r2Deletes.findDueProjectPrefix, {
+  const prefixRows = await convex.query(convexApi.r2Deletes.listDueProjectPrefixes, {
     projectId: input.projectId,
     now: Date.now(),
+    limit: 100,
   })
-  if (!row) return { processed: 0, deleted: 0 }
-  const result = await drainR2DeleteRows({ convex, bucket: input.bucket, rows: [row] })
+  if (prefixRows.length === 0) return { processed: 0, deleted: 0 }
+  const objectRows = await convex.query(convexApi.r2Deletes.listDue, {
+    projectId: input.projectId,
+    now: Date.now(),
+    limit: 100,
+  })
+  const rows = [...new Map([...prefixRows, ...objectRows].map((row) => [row._id, row])).values()]
+  const result = await drainR2DeleteRows({ convex, bucket: input.bucket, rows })
   return toDrainSummary(result)
 }

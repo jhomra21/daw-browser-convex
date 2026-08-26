@@ -350,7 +350,7 @@ function EarlyReflectionsPanel(props: {
   class?: string
   onSpinToggle: () => void
   onReflectChange: (value: number) => void
-  onShapeChange: (value: number) => void
+  onReflectionAmountChange: (value: number) => void
   onModAmountChange: (value: number) => void
   onModRateChange: (value: number) => void
 }) {
@@ -375,14 +375,14 @@ function EarlyReflectionsPanel(props: {
         <Knob
           class="px-1 py-1"
           label="Shape"
-          valueLabel={formatUnitPercent(props.params.reflectionShape)}
-          value={props.params.reflectionShape}
-          resetValue={DEFAULT_REVERB_PARAMS.reflectionShape}
+          valueLabel={formatUnitPercent(props.params["reflectionShape"])}
+          value={props.params["reflectionShape"]}
+          resetValue={DEFAULT_REVERB_PARAMS["reflectionShape"]}
           min={REVERB_UNIT_PARAM_MIN}
           max={REVERB_UNIT_PARAM_MAX}
           step={0.01}
           disabled={props.disabled}
-          onValueChange={props.onShapeChange}
+          onValueChange={props.onReflectionAmountChange}
         />
         <Knob
           class="px-1 py-1"
@@ -441,9 +441,9 @@ export default function Reverb(props: ReverbProps) {
     const reflections = normalizeUnitParam(value)
     if (reflections !== props.params.reflections) props.onChange({ reflections })
   }
-  const updateReflectionShape = (value: number) => {
-    const reflectionShape = normalizeUnitParam(value)
-    if (reflectionShape !== props.params.reflectionShape) props.onChange({ reflectionShape })
+  const updateReflectionAmount = (value: number) => {
+    const reflectionAmount = normalizeUnitParam(value)
+    if (reflectionAmount !== props.params["reflectionShape"]) props.onChange({ ["reflectionShape"]: reflectionAmount })
   }
   const updateReflectionModAmount = (value: number) => {
     const reflectionModAmountMs = normalizeReflectionModAmount(value)
@@ -582,7 +582,7 @@ export default function Reverb(props: ReverbProps) {
           disabled={!props.params.enabled}
           onSpinToggle={toggleReflectionSpin}
           onReflectChange={updateReflections}
-          onShapeChange={updateReflectionShape}
+          onReflectionAmountChange={updateReflectionAmount}
           onModAmountChange={updateReflectionModAmount}
           onModRateChange={updateReflectionModRate}
         />

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  assertProjectManifestPublishIntegrity,
   normalizeProjectManifest,
   parseProjectManifest,
   PROJECT_MANIFEST_SCHEMA_VERSION,
@@ -19,11 +20,12 @@ const manifestV1: ProjectManifest = {
   assets: [],
   projectState: [],
   syncState: [],
+  externalPluginArtifacts: [],
 }
 
 describe('project format boundaries', () => {
   test('reports the current manifest schema version', () => {
-    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([PROJECT_MANIFEST_SCHEMA_VERSION])
+    expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, 2, 3, PROJECT_MANIFEST_SCHEMA_VERSION])
   })
 
   test('reads the current manifest schema without migration', () => {
@@ -32,20 +34,101 @@ describe('project format boundaries', () => {
     expect(parseProjectManifest(JSON.stringify(manifest))).toEqual(manifest)
   })
 
+  test('migrates legacy manifests idempotently', () => {
+    const legacy = { ...manifestV1, schemaVersion: 1 }
+    const migrated = normalizeProjectManifest(legacy)
+    expect(migrated.schemaVersion).toBe(PROJECT_MANIFEST_SCHEMA_VERSION)
+    expect(migrated.externalPluginArtifacts).toEqual([])
+    expect(normalizeProjectManifest(migrated)).toEqual(migrated)
+  })
+
   test('rejects unsupported writer versions', () => {
-    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 1 })).toThrow(
-      'Unsupported project manifest schema version 1.',
-    )
-    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 3 })).toThrow(
-      'Unsupported project manifest schema version 3.',
+    expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 5 })).toThrow(
+      'Unsupported project manifest schema version 5.',
     )
     expect(() => normalizeProjectManifest({ ...manifestV1, schemaVersion: 0 })).toThrow(
       'Unsupported project manifest schema version 0.',
     )
   })
 
-  test('preserves current effect entity values without migration', () => {
+  test('preserves external plugin artifact metadata without state payloads', () => {
+    const manifest: ProjectManifest = {
+      ...manifestV1,
+      schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
+      externalPluginArtifacts: [{
+        id: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
+        sha256: 'a'.repeat(64),
+        byteLength: 12,
+        kind: 'plugin-state',
+        ownerId: 'user-1',
+        acl: 'owner',
+        bucket: 'local',
+        location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
+      }],
+    }
+    expect(normalizeProjectManifest(manifest).externalPluginArtifacts).toEqual(manifest.externalPluginArtifacts)
+  })
+
+  test('rejects invalid external plugin artifact metadata', () => {
+    const artifact = {
+      id: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
+      sha256: 'a'.repeat(64),
+      byteLength: 12,
+      kind: 'plugin-state',
+      ownerId: 'user-1',
+      acl: 'owner',
+      bucket: 'local',
+      location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
+    }
     const manifest = {
+      ...manifestV1,
+      schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
+      externalPluginArtifacts: [artifact],
+    }
+    expect(() => normalizeProjectManifest({
+      ...manifest,
+      externalPluginArtifacts: [{ ...artifact, id: 'not-a-uuid' }],
+    })).toThrow('artifact id')
+    expect(() => normalizeProjectManifest({
+      ...manifest,
+      externalPluginArtifacts: [{ ...artifact, sha256: 'A'.repeat(64) }],
+    })).toThrow('artifact hash')
+    expect(() => normalizeProjectManifest({
+      ...manifest,
+      externalPluginArtifacts: [{ ...artifact, byteLength: 0 }],
+    })).toThrow('byte length')
+    expect(() => normalizeProjectManifest({
+      ...manifest,
+      externalPluginArtifacts: [{ ...artifact, ownerId: '' }],
+    })).toThrow('ownerId')
+    expect(() => normalizeProjectManifest({
+      ...manifest,
+      externalPluginArtifacts: [{ ...artifact, location: 'x'.repeat(1025) }],
+    })).toThrow('artifact metadata')
+  })
+
+  test('rejects plugin artifact R2 locations from generic backup publishing', () => {
+    const manifest: ProjectManifest = {
+      ...manifestV1,
+      schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
+      externalPluginArtifacts: [{
+        id: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
+        sha256: 'a'.repeat(64),
+        byteLength: 12,
+        kind: 'plugin-state',
+        ownerId: 'user-1',
+        acl: 'owner',
+        bucket: 'r2-plugin-artifacts',
+        location: 'projects/project-1/plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
+      }],
+    }
+    expect(() => assertProjectManifestPublishIntegrity(manifest)).toThrow(
+      'external plugin artifacts cannot be published',
+    )
+  })
+
+  test('preserves current effect entity values without migration', () => {
+    const manifest: ProjectManifest = {
       ...manifestV1,
       schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
       entityCount: 3,

@@ -1,5 +1,7 @@
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { openLocalProjectDb, type LocalProjectAssetRow } from '~/lib/local-project-db'
+import { openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { z } from 'zod'
 
 type LocalAssetFolderRow = {
   id: string
@@ -8,28 +10,24 @@ type LocalAssetFolderRow = {
   updatedAt: number
 }
 
-const FOLDER_KEY_PREFIX = 'asset-folder:'
+export const LOCAL_ASSET_FOLDER_KEY_PREFIX = 'asset-folder:'
 
 const now = () => Date.now()
-const folderKey = (folderId: string) => `${FOLDER_KEY_PREFIX}${folderId}`
+export const localAssetFolderKey = (folderId: string) => `${LOCAL_ASSET_FOLDER_KEY_PREFIX}${folderId}`
 const createFolderId = () => `asset-folder:${crypto.randomUUID()}`
-
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
 
 const normalizeFolderName = (name: string) => name.trim() || 'Folder'
 
-const readFolderRow = (value: unknown): LocalAssetFolderRow | undefined => {
-  if (!isRecord(value)) return undefined
-  if (typeof value.id !== 'string' || typeof value.name !== 'string') return undefined
-  if (typeof value.createdAt !== 'number' || typeof value.updatedAt !== 'number') return undefined
-  return {
-    id: value.id,
-    name: value.name,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
-  }
+const localAssetFolderRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+
+export const parseLocalAssetFolderRow = (storedValue: LocalProjectStoredValue): LocalAssetFolderRow | undefined => {
+  const parsed = localAssetFolderRowSchema.safeParse(storedValue)
+  return parsed.success ? parsed.data : undefined
 }
 
 const sortFoldersByName = (folders: LocalAssetFolderRow[]) => (
@@ -41,8 +39,8 @@ export const listLocalAssetFolders = async (projectId: string): Promise<LocalAss
   const rows = await db.getAll('projectState')
   const folders: LocalAssetFolderRow[] = []
   for (const row of rows) {
-    if (!row.key.startsWith(FOLDER_KEY_PREFIX)) continue
-    const folder = readFolderRow(row.value)
+    if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) continue
+    const folder = parseLocalAssetFolderRow(row.value)
     if (folder) folders.push(folder)
   }
   return sortFoldersByName(folders)
@@ -61,7 +59,7 @@ export const createLocalAssetFolder = async (
   }
   const db = await openLocalProjectDb(projectId)
   await db.put('projectState', {
-    key: folderKey(row.id),
+    key: localAssetFolderKey(row.id),
     value: row,
     updatedAt: timestamp,
   })
@@ -75,8 +73,8 @@ export const renameLocalAssetFolder = async (
   name: string,
 ): Promise<LocalAssetFolderRow | undefined> => {
   const db = await openLocalProjectDb(projectId)
-  const stateRow = await db.get('projectState', folderKey(folderId))
-  const folder = readFolderRow(stateRow?.value)
+  const stateRow = await db.get('projectState', localAssetFolderKey(folderId))
+  const folder = stateRow === undefined ? undefined : parseLocalAssetFolderRow(stateRow.value)
   if (!folder) return undefined
   const timestamp = now()
   const next = {
@@ -85,7 +83,7 @@ export const renameLocalAssetFolder = async (
     updatedAt: timestamp,
   }
   await db.put('projectState', {
-    key: folderKey(folderId),
+    key: localAssetFolderKey(folderId),
     value: next,
     updatedAt: timestamp,
   })
@@ -97,12 +95,14 @@ export const deleteEmptyLocalAssetFolder = async (
   projectId: string,
   folderId: string,
 ): Promise<boolean> => {
-  const db = await openLocalProjectDb(projectId)
-  const assets = await db.getAll('assets')
-  if (assets.some((asset) => asset.folderId === folderId)) return false
-  await db.delete('projectState', folderKey(folderId))
-  notifyLocalProjectChanged(projectId)
-  return true
+  return withLocalProjectAssetLock(projectId, async () => {
+    const db = await openLocalProjectDb(projectId)
+    const assets = await db.getAll('assets')
+    if (assets.some((asset) => asset.folderId === folderId)) return false
+    await db.delete('projectState', localAssetFolderKey(folderId))
+    notifyLocalProjectChanged(projectId)
+    return true
+  })
 }
 
 export const moveLocalAssetToFolder = async (
@@ -110,20 +110,23 @@ export const moveLocalAssetToFolder = async (
   assetId: string,
   folderId: string | undefined,
 ): Promise<LocalProjectAssetRow | undefined> => {
-  const db = await openLocalProjectDb(projectId)
-  const asset = await db.get('assets', assetId)
-  if (!asset) return undefined
-  if (folderId) {
-    const folder = readFolderRow((await db.get('projectState', folderKey(folderId)))?.value)
-    if (!folder) return undefined
-  }
-  const timestamp = now()
-  const next: LocalProjectAssetRow = {
-    ...asset,
-    folderId,
-    updatedAt: timestamp,
-  }
-  await db.put('assets', next)
-  notifyLocalProjectChanged(projectId)
-  return next
+  return withLocalProjectAssetLock(projectId, async () => {
+    const db = await openLocalProjectDb(projectId)
+    const asset = await db.get('assets', assetId)
+    if (!asset) return undefined
+    if (folderId) {
+      const folderRow = await db.get('projectState', localAssetFolderKey(folderId))
+      const folder = folderRow === undefined ? undefined : parseLocalAssetFolderRow(folderRow.value)
+      if (!folder) return undefined
+    }
+    const timestamp = now()
+    const next: LocalProjectAssetRow = {
+      ...asset,
+      folderId,
+      updatedAt: timestamp,
+    }
+    await db.put('assets', next)
+    notifyLocalProjectChanged(projectId)
+    return next
+  })
 }

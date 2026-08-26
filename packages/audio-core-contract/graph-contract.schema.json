@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daw-browser.dev/contracts/audio-core/graph/v1",
+  "title": "DAW Browser Portable Audio Graph Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "revision", "contractHash", "nodes", "edges", "masterNodeId", "assets"],
+  "properties": {
+    "version": { "const": 1 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "contractHash": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "inputLayout", "outputLayout", "processorOrder", "latencyFrames"],
+        "properties": {
+          "kind": { "enum": ["source", "instrument", "mixer", "return", "group", "master"] },
+          "inputLayout": { "enum": ["mono", "stereo"] },
+          "outputLayout": { "enum": ["mono", "stereo"] },
+          "latencyFrames": { "type": "integer", "minimum": 0 },
+          "instrument": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "kind", "voiceCapacity", "outputLayout", "parameterTargets"],
+            "properties": {
+              "version": { "const": 1 },
+              "kind": { "const": "synth" },
+              "voiceCapacity": { "type": "integer", "minimum": 1, "maximum": 32 },
+              "outputLayout": { "const": "stereo" },
+              "parameterTargets": { "type": "array", "maxItems": 24 }
+            }
+          },
+          "processorOrder": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "required": ["id", "kind", "kindId", "instanceId", "stateVersion", "state", "parameterTargets", "latencyFrames", "tailFrames", "bypassed"],
+              "properties": {
+                "tailKind": { "enum": ["finite", "unbounded"] },
+                "parameterTargets": {
+                  "type": "array",
+                  "maxItems": 24
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "id", "fromNodeId", "toNodeId", "gain", "kind", "tap", "sidechain", "pdcDelayFrames"],
+        "properties": {
+          "version": { "const": 1 },
+          "id": { "type": "string", "minLength": 1 },
+          "fromNodeId": { "type": "string", "minLength": 1 },
+          "toNodeId": { "type": "string", "minLength": 1 },
+          "targetProcessorId": { "type": "string", "minLength": 1 },
+          "gain": { "type": "number" },
+          "kind": { "enum": ["output", "send"] },
+          "tap": { "enum": ["pre-fx", "pre-fader", "post-fader"] },
+          "sidechain": { "type": "boolean" },
+          "pdcDelayFrames": { "type": "integer", "minimum": 0 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "sidechain": { "const": true } } },
+            "then": { "required": ["targetProcessorId"] }
+          },
+          {
+            "if": { "properties": { "sidechain": { "const": false } } },
+            "then": { "not": { "required": ["targetProcessorId"] } }
+          }
+        ]
+      }
+    },
+    "masterNodeId": { "type": "string" },
+    "assets": { "type": "array" }
+  }
+}

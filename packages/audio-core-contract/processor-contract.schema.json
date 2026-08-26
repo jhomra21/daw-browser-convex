@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daw-browser.dev/contracts/audio-core/processor/v1",
+  "title": "DAW Browser Audio Core Processor Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "processors"],
+  "properties": {
+    "version": { "const": 1 },
+    "processors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["utility", "autofilter", "saturator", "eq", "chorus", "flanger", "phaser", "tremolo", "autopan", "ensemble", "gate", "compressor", "limiter", "lofi", "delay", "reverb", "spectral"],
+      "properties": {
+        "utility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 1 },
+            "schemaVersion": { "const": 1 },
+            "stateBytes": { "const": 40 },
+            "tombstone": { "const": false },
+            "state": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "gainDb", "polarity", "inputMode", "pan", "balance", "width", "matrix", "swap", "dcBlock"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "gainDb": { "type": "number", "default": 0, "minimum": -60, "maximum": 24, "portableParameter": true },
+                "polarity": { "enum": ["normal", "invert"] },
+                "inputMode": { "enum": ["stereo", "mono-sum"] },
+                "pan": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
+                "balance": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
+                "width": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true },
+                "matrix": { "enum": ["stereo", "mid-side-encode", "mid-side-decode"] },
+                "swap": { "type": "boolean" },
+                "dcBlock": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "autofilter": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 16 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "mode", "quality", "frequencyHz", "resonance", "driveDb", "mix", "envelope", "lfo"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "mode": { "enum": ["lowpass", "highpass", "bandpass", "notch", "peak"] },
+                "quality": { "const": "2x" },
+                "frequencyHz": { "type": "number", "default": 1000, "minimum": 20, "maximum": 20000, "portableParameter": true },
+                "resonance": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
+                "driveDb": { "type": "number", "default": 0, "minimum": 0, "maximum": 24, "portableParameter": true },
+                "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true },
+                "envelope": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["amountOctaves", "attackMs", "releaseMs"],
+                  "properties": {
+                    "amountOctaves": { "type": "number", "default": 0, "minimum": -6, "maximum": 6, "portableParameter": true },
+                    "attackMs": { "type": "number", "default": 10, "minimum": 0.5, "maximum": 500, "portableParameter": true },
+                    "releaseMs": { "type": "number", "default": 100, "minimum": 5, "maximum": 2000, "portableParameter": true }
+                  }
+                },
+                "lfo": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["waveform", "rateHz", "depthOctaves", "phaseOffset", "stereoPhase"],
+                  "properties": {
+                    "waveform": { "enum": ["sine", "triangle"] },
+                    "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20, "portableParameter": true },
+                    "depthOctaves": { "type": "number", "default": 0, "minimum": 0, "maximum": 6, "portableParameter": true },
+                    "phaseOffset": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+                    "stereoPhase": { "type": "number", "default": 0, "minimum": -0.5, "maximum": 0.5, "portableParameter": true }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "saturator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 2 },
+            "schemaVersion": { "const": 1 },
+            "stateBytes": { "const": 32 },
+            "tombstone": { "const": false },
+            "state": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "driveDb", "curve", "color", "colorFrequencyHz", "colorAmount", "outputDb", "dryWet"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "driveDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 36, "portableParameter": true},
+                "curve": { "enum": ["soft", "medium", "hard", "clip"] },
+                "color": { "type": "boolean" },
+                "colorFrequencyHz": { "type": "number", "default": 1200, "minimum": 100, "maximum": 10000, "portableParameter": true},
+                "colorAmount": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true},
+                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "eq": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 3 },
+            "schemaVersion": { "const": 1 },
+            "stateBytes": { "const": 200 },
+            "tombstone": { "const": false },
+            "state": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "channelMode", "bands"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "channelMode": { "enum": ["stereo", "mono"] },
+                "bands": {
+                  "type": "array",
+                  "minItems": 8,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["enabled", "type", "frequency", "gainDb", "q"],
+                    "properties": {
+                      "enabled": { "type": "boolean" },
+                      "type": { "enum": ["lowpass", "highpass", "bandpass", "lowshelf", "highshelf", "peaking", "notch", "allpass"] },
+                      "frequency": { "type": "number", "minimum": 20, "maximum": 20000 },
+                      "gainDb": { "type": "number", "minimum": -24, "maximum": 24 },
+                      "q": { "type": "number", "minimum": 0.2, "maximum": 18 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "chorus": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 4 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "delayMs": { "type": "number", "default": 12, "minimum": 5, "maximum": 30, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 4, "minimum": 0, "maximum": 10, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.8, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0, "minimum": 0, "maximum": 0.5, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.25, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.35, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "flanger": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 5 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "delayMs": { "type": "number", "default": 1.5, "minimum": 0.1, "maximum": 10, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 1, "minimum": 0, "maximum": 5, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.2, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0.35, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "phaser": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 6 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 32 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "stages", "centerHz", "depthOctaves", "rateHz", "feedback", "stereoPhase", "mix"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "stages": { "enum": [4, 6, 8, 12] },
+                "centerHz": { "type": "number", "default": 1000, "minimum": 100, "maximum": 8000, "portableParameter": true},
+                "depthOctaves": { "type": "number", "default": 3, "minimum": 0, "maximum": 5, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "feedback": { "type": "number", "default": 0.3, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "tremolo": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 7 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
+                "rateHz": { "type": "number", "default": 4, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "depth": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "autopan": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 8 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
+                "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20, "portableParameter": true},
+                "depth": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "ensemble": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 9 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "voices", "delayMs", "depthMs", "rateHz", "spread", "mix"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "voices": { "const": 3 },
+                "delayMs": { "type": "number", "default": 18, "minimum": 10, "maximum": 30, "portableParameter": true},
+                "depthMs": { "type": "number", "default": 6, "minimum": 1, "maximum": 12, "portableParameter": true},
+                "rateHz": { "type": "number", "default": 0.6, "minimum": 0.05, "maximum": 5, "portableParameter": true},
+                "spread": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+              }
+            }
+          }
+        },
+        "gate": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 10 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "mode", "thresholdDb", "ratio", "attackMs", "holdMs", "releaseMs", "hysteresisDb", "rangeDb", "lookaheadMs", "detector", "link", "sidechain"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "mode": { "enum": ["gate", "expander"] },
+                "thresholdDb": { "type": "number", "default": -40, "minimum": -80, "maximum": 0, "portableParameter": true},
+                "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 20, "portableParameter": true},
+                "attackMs": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 100, "portableParameter": true},
+                "holdMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 500, "portableParameter": true},
+                "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 2000, "portableParameter": true},
+                "hysteresisDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
+                "rangeDb": { "type": "number", "default": -80, "minimum": -80, "maximum": 0, "portableParameter": true},
+                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "detector": { "enum": ["peak", "rms"] }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "frequencyHz", "q"], "properties": {
+                  "enabled": { "type": "boolean" }, "frequencyHz": { "type": "number", "default": 80, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
+                }}
+              }
+            }
+          }
+        },
+        "compressor": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 11 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 72 }, "tombstone": { "const": false },
+            "state": {
+              "type": "object", "additionalProperties": false,
+              "required": ["enabled", "thresholdDb", "ratio", "attackMs", "releaseMs", "autoRelease", "makeupDb", "outputDb", "dryWet", "kneeDb", "lookaheadMs", "detectorMode", "dynamicsMode", "envelopeCurve", "sidechain"],
+              "properties": {
+                "enabled": { "type": "boolean" }, "thresholdDb": { "type": "number", "default": -24, "minimum": -60, "maximum": 0, "portableParameter": true}, "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 100, "portableParameter": true},
+                "attackMs": { "type": "number", "default": 10, "minimum": 0.1, "maximum": 100, "portableParameter": true}, "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 1000, "portableParameter": true},
+                "autoRelease": { "type": "boolean" }, "makeupDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true}, "outputDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true},
+                "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "kneeDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
+                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 10, "portableParameter": true}, "detectorMode": { "enum": ["peak", "rms"] }, "dynamicsMode": { "enum": ["compress", "expand"] }, "envelopeCurve": { "enum": ["log", "linear"] },
+                "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "filterType", "frequencyHz", "q"], "properties": {
+                  "enabled": { "type": "boolean" }, "filterType": { "enum": ["lowpass", "highpass", "bandpass"] }, "frequencyHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
+                }}
+              }
+            }
+          }
+        },
+        "limiter": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 12 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "ceilingDbtp", "releaseMs", "lookaheadMs", "link", "detectorOversampling"], "properties": {
+              "enabled": { "type": "boolean" }, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0, "portableParameter": true, "portableParameterId": "ceiling"}, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true, "portableParameterId": "release"}, "lookaheadMs": { "type": "number", "default": 5, "minimum": 1, "maximum": 5, "portableParameter": true}, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "detectorOversampling": { "const": 4 }
+            }}
+          }
+        },
+        "lofi": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 17 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 36 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "bitDepth", "sampleRateRatio", "jitter", "noiseDb", "quantization", "dither", "mix", "seed"], "properties": {
+              "enabled": { "type": "boolean" },
+              "bitDepth": { "type": "number", "default": 12, "minimum": 2, "maximum": 24, "portableParameter": true},
+              "sampleRateRatio": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 1, "portableParameter": true },
+              "jitter": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "noiseDb": { "type": "number", "default": -80, "minimum": -120, "maximum": -24, "portableParameter": true },
+              "quantization": { "enum": ["round", "floor", "truncate"] },
+              "dither": { "enum": ["off", "rectangular", "triangular"] },
+              "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "seed": { "type": "number", "minimum": 1, "maximum": 4294967295 }
+            }}
+          }
+        },
+        "delay": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 13 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 32 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "delayMs", "feedback", "dryWet", "pingPong", "filterEnabled", "lowCutHz", "highCutHz"], "properties": {
+              "enabled": { "type": "boolean" }, "delayMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 3000, "portableParameter": true, "portableParameterId": "timeMs" },
+              "feedback": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 0.95, "portableParameter": true },
+              "dryWet": { "type": "number", "default": 0.2, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "pingPong": { "type": "boolean" }, "filterEnabled": { "type": "boolean" },
+              "lowCutHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 2000, "portableParameter": true },
+              "highCutHz": { "type": "number", "default": 8000, "minimum": 1000, "maximum": 20000, "portableParameter": true }
+            }}
+          }
+        },
+        "reverb": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 14 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 72 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "wet", "decaySec", "preDelayMs", "reflections", "reflectionSpin", "reflectionModAmountMs", "reflectionModRateHz", "reflectionShape", "diffuse", "size", "diffusion", "density", "lowCutHz", "highCutHz", "diffusionLowCutHz", "diffusionHighCutHz", "stereoWidth"], "properties": {
+              "enabled": { "type": "boolean" }, "wet": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "decaySec": { "type": "number", "default": 2.2, "minimum": 0.05, "maximum": 12, "portableParameter": true},
+              "preDelayMs": { "type": "number", "default": 20, "minimum": 0, "maximum": 250, "portableParameter": true },
+              "reflections": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "reflectionSpin": { "type": "boolean" }, "reflectionModAmountMs": { "type": "number", "default": 17.5, "minimum": 0, "maximum": 25, "portableParameter": true},
+              "reflectionModRateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 5, "portableParameter": true},
+              "reflectionShape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "diffuse": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "size": { "type": "number", "default": 0.65, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "diffusion": { "type": "number", "default": 0.75, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "density": { "type": "number", "default": 0.8, "minimum": 0, "maximum": 1, "portableParameter": true},
+              "lowCutHz": { "type": "number", "default": 20, "minimum": 20, "maximum": 1200, "portableParameter": true },
+              "highCutHz": { "type": "number", "default": 20000, "minimum": 1200, "maximum": 20000, "portableParameter": true },
+              "diffusionLowCutHz": { "type": "number", "default": 20, "minimum": 20, "maximum": 1200, "portableParameter": true},
+              "diffusionHighCutHz": { "type": "number", "default": 20000, "minimum": 1200, "maximum": 20000, "portableParameter": true},
+              "stereoWidth": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true }
+            }}
+          }
+        },
+        "spectral": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
+          "properties": {
+            "id": { "const": 15 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "fftSize", "overlap", "mode", "freeze", "gateThresholdDb", "gateAttackMs", "gateReleaseMs", "morph", "binShift", "blur", "harmonicPercussiveBalance", "noiseReduction", "profileLearn", "mix"], "properties": {
+              "enabled": { "type": "boolean" },
+              "fftSize": { "enum": [512, 1024, 2048, 4096] },
+              "overlap": { "enum": [2, 4] },
+              "mode": { "enum": ["freeze", "gate", "morph", "shift-blur", "hpss", "noise-reduce"] },
+              "freeze": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "gateThresholdDb": { "type": "number", "default": -60, "minimum": -120, "maximum": 0, "portableParameter": true },
+              "gateAttackMs": { "type": "number", "default": 10, "minimum": 0.1, "maximum": 1000, "portableParameter": true },
+              "gateReleaseMs": { "type": "number", "default": 100, "minimum": 1, "maximum": 5000, "portableParameter": true },
+              "morph": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "binShift": { "type": "number", "default": 0, "minimum": -2048, "maximum": 2048, "portableParameter": true },
+              "blur": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "harmonicPercussiveBalance": { "type": "number", "default": 0, "minimum": -1, "maximum": 1, "portableParameter": true },
+              "noiseReduction": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "profileLearn": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true },
+              "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true }
+            }}
+          }
+        }
+      }
+    }
+  }
+}

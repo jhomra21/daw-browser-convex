@@ -1,0 +1,15 @@
+{
+  "decision": "rejected",
+  "scope": "Phase 9 M0 native realtime bridge",
+  "facts": [
+    "The browser AudioEngine remains the graph owner.",
+    "The existing SharedArrayBuffer ring is browser-only SPSC transport.",
+    "No browser-to-native realtime audio bridge integration point exists."
+  ],
+  "activationRequirements": [
+    "A concrete bounded-copy bridge integration point",
+    "Measured realtime latency and underrun results",
+    "Desktop custom-scheme COOP/COEP compatibility tests"
+  ],
+  "safeBehavior": "External processors remain dry-route degraded placeholders."
+}

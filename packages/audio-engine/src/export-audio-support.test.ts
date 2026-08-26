@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { Quality } from 'mediabunny'
 import { getExportAudioEncodingConfig } from './export-audio-support'
 
 describe('getExportAudioEncodingConfig', () => {
@@ -10,20 +11,20 @@ describe('getExportAudioEncodingConfig', () => {
     })).toEqual({
       sampleRate: 96000,
       numberOfChannels: 1,
-      bitrate: 320000,
+      quality: new Quality({ bitrate: 320000 }),
     })
   })
 
-  test('provides valid defaults for Opus and FLAC', () => {
-    expect(getExportAudioEncodingConfig('ogg-opus').bitrate).toBe(128000)
+  test('provides a Quality bitrate for Opus and no bitrate for FLAC', () => {
+    expect(getExportAudioEncodingConfig('ogg-opus').quality).toEqual(new Quality({ bitrate: 128000 }))
     expect(getExportAudioEncodingConfig('flac')).toEqual({
       sampleRate: 44100,
       numberOfChannels: 2,
-      bitrate: 1411200,
+      quality: undefined,
     })
   })
 
-  test('leaves PCM bitrate undefined', () => {
-    expect(getExportAudioEncodingConfig('wav').bitrate).toBeUndefined()
+  test('leaves PCM quality undefined', () => {
+    expect(getExportAudioEncodingConfig('wav').quality).toBeUndefined()
   })
 })

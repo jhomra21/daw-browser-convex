@@ -11,6 +11,8 @@ export type AudioRuntimeOptions = {
   latencyHint: AudioContextLatencyCategory
 }
 
+export const CANONICAL_DECODE_SAMPLE_RATE = 44_100
+
 export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
   let ctx: AudioContext
   try {
@@ -29,10 +31,20 @@ export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
   }
 }
 
-export async function decodeAudioData(runtime: AudioRuntime | null, arrayBuffer: ArrayBuffer) {
-  if (runtime) return runtime.ctx.decodeAudioData(arrayBuffer)
-  const offline = new OfflineAudioContext(2, 1, 44100)
+export async function decodeAudioData(
+  _runtime: AudioRuntime | null,
+  arrayBuffer: ArrayBuffer,
+  targetSampleRate = CANONICAL_DECODE_SAMPLE_RATE,
+) {
+  if (!Number.isFinite(targetSampleRate) || targetSampleRate <= 0) {
+    throw new Error(`Invalid decode sample rate: ${targetSampleRate}`)
+  }
+  const offline = new OfflineAudioContext(2, 1, targetSampleRate)
   return offline.decodeAudioData(arrayBuffer)
+}
+
+export async function decodeEncodedAudioData(arrayBuffer: ArrayBuffer, targetSampleRate?: number) {
+  return decodeAudioData(null, arrayBuffer, targetSampleRate)
 }
 
 export function getOutputLatencySec(runtime: AudioRuntime | null) {

@@ -3,15 +3,16 @@ import { createGranularPrng, createGranularSchedule, granularWindow, granularWin
 
 describe('granular core', () => {
   test('windows are finite, bounded, and have useful energy', () => {
-    for (const shape of ['hann', 'tukey', 'gaussian'] as const) {
+    const windowKinds: readonly ['hann', 'tukey', 'gaussian'] = ['hann', 'tukey', 'gaussian']
+    for (const windowKind of windowKinds) {
       for (let index = 0; index <= 100; index += 1) {
-        const value = granularWindow(shape, index / 100)
+        const value = granularWindow(windowKind, index / 100)
         expect(Number.isFinite(value)).toBe(true)
         expect(value).toBeGreaterThanOrEqual(0)
         expect(value).toBeLessThanOrEqual(1)
       }
-      expect(granularWindowEnergy(shape)).toBeGreaterThan(0.1)
-      expect(granularWindowEnergy(shape)).toBeLessThanOrEqual(1)
+      expect(granularWindowEnergy(windowKind)).toBeGreaterThan(0.1)
+      expect(granularWindowEnergy(windowKind)).toBeLessThanOrEqual(1)
     }
   })
 

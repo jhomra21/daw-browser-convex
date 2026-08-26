@@ -13,8 +13,23 @@ type ConvexAuthEnv = {
   BETTER_AUTH_URL?: string;
 }
 
+type ConvexAuthIssuanceContext = {
+  env: ConvexAuthEnv;
+  requestUrl: string;
+}
+
 type ConvexAuthUser = Pick<Session['user'], 'id' | 'email' | 'name'> & {
   image?: Session['user']['image']
+}
+
+type ConvexControlActorAttribution = {
+  issuer: string;
+  tokenIdentifier: string;
+}
+
+type ConvexAuthTokenOptions = {
+  worker?: boolean;
+  actor?: ConvexControlActorAttribution;
 }
 
 const maintenanceWorkerUser: ConvexAuthUser = {
@@ -23,22 +38,37 @@ const maintenanceWorkerUser: ConvexAuthUser = {
   name: 'DAW Worker',
 }
 
-const readEnv = (c: ApiContext): ConvexAuthEnv => c.env
+const issuanceContext = (c: ApiContext): ConvexAuthIssuanceContext => ({
+  env: c.env,
+  requestUrl: c.req.url,
+})
 
-const readIssuer = (c: ApiContext) => {
-  const env = readEnv(c)
+const readIssuer = (context: ConvexAuthIssuanceContext) => {
+  const { env } = context
   const baseUrl = env.CONVEX_AUTH_ISSUER ?? (env.BETTER_AUTH_URL ? `${env.BETTER_AUTH_URL}/api/convex-auth` : null)
-  return baseUrl ?? `${new URL(c.req.url).origin}/api/convex-auth`
+  return baseUrl ?? `${new URL(context.requestUrl).origin}/api/convex-auth`
 }
 
-const readPrivateJwk = (c: ApiContext) => {
-  const raw = readEnv(c).CONVEX_AUTH_PRIVATE_JWK
+const readPrivateJwk = (context: ConvexAuthIssuanceContext) => {
+  const raw = context.env.CONVEX_AUTH_PRIVATE_JWK
   if (!raw) throw new Error('Convex auth private key is not configured.')
   return JSON.parse(raw)
 }
 
+const validateActorClaim = (value: string, name: string) => {
+  if (value.length === 0 || value.length > 256) {
+    throw new Error(`${name} must be a string between 1 and 256 characters.`)
+  }
+  return value
+}
+
+const validateActorAttribution = (actor: ConvexControlActorAttribution) => ({
+  issuer: validateActorClaim(actor.issuer, 'Control actor issuer'),
+  tokenIdentifier: validateActorClaim(actor.tokenIdentifier, 'Control actor token identifier'),
+})
+
 const readJwks = async (c: ApiContext) => {
-  const privateJwk = readPrivateJwk(c)
+  const privateJwk = readPrivateJwk(issuanceContext(c))
   const publicJwk = {
     kty: privateJwk.kty,
     crv: privateJwk.crv,
@@ -48,21 +78,24 @@ const readJwks = async (c: ApiContext) => {
   return { keys: [{ ...publicJwk, kid: keyId, alg: algorithm, use: 'sig' }] }
 }
 
-const issueConvexAuthToken = async (
-  c: ApiContext,
+export const issueConvexAuthToken = async (
+  context: ConvexAuthIssuanceContext,
   user: ConvexAuthUser,
-  options?: { worker?: boolean },
+  options?: ConvexAuthTokenOptions,
 ) => {
+  const actor = options?.actor === undefined ? undefined : validateActorAttribution(options.actor)
   const now = Math.floor(Date.now() / 1000)
-  const privateKey = await importJWK(readPrivateJwk(c), algorithm)
+  const privateKey = await importJWK(readPrivateJwk(context), algorithm)
   return await new SignJWT({
     email: user.email,
     name: user.name,
     picture: user.image,
     dawWorker: options?.worker ? true : undefined,
+    dawControlActorIssuer: actor?.issuer,
+    dawControlActorTokenIdentifier: actor?.tokenIdentifier,
   })
     .setProtectedHeader({ alg: algorithm, kid: keyId, typ: 'JWT' })
-    .setIssuer(readIssuer(c))
+    .setIssuer(readIssuer(context))
     .setAudience(defaultAudience)
     .setSubject(user.id)
     .setIssuedAt(now)
@@ -73,11 +106,11 @@ const issueConvexAuthToken = async (
 const createConvexClientWithAuth = async (
   c: ApiContext,
   user: ConvexAuthUser,
-  options?: { worker?: boolean },
+  options?: ConvexAuthTokenOptions,
 ) => {
   const { ConvexHttpClient } = await import('convex/browser')
   const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
-  convex.setAuth(await issueConvexAuthToken(c, user, options))
+  convex.setAuth(await issueConvexAuthToken(issuanceContext(c), user, options))
   return convex
 }
 
@@ -89,6 +122,22 @@ export const createAuthenticatedConvexClient = async (c: ApiContext, user: Sessi
 
 export const createWorkerConvexClient = async (c: ApiContext, user: Session['user']) => (
   createConvexClientWithAuth(c, user, { worker: true })
+)
+
+export const createControlConvexClient = async (
+  c: ApiContext,
+  actor: ConvexControlActorAttribution & { userId: string },
+) => (
+  createConvexClientWithAuth(c, {
+    id: actor.userId,
+    email: '',
+    name: '',
+  }, {
+    actor: {
+      issuer: actor.issuer,
+      tokenIdentifier: actor.tokenIdentifier,
+    },
+  })
 )
 
 export const createMaintenanceWorkerConvexClient = async (c: ApiContext) => (
@@ -109,7 +158,7 @@ export function registerConvexAuthRoutes(app: App) {
     try {
       const user = c.get('user')
       if (!user) return c.json({ token: null }, 401)
-      const token = await issueConvexAuthToken(c, user)
+      const token = await issueConvexAuthToken(issuanceContext(c), user)
       return c.json({ token })
     } catch (error) {
       console.error('Convex token error', error)

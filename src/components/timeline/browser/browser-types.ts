@@ -3,7 +3,7 @@ import type { BrowserDragSession } from "./browser-drag-types";
 
 export type TimelineBrowserTab = "assets" | "effects" | "midi-instruments";
 
-export type BrowserItemSource = "project" | "default" | "builtin";
+export type BrowserItemSource = "project" | "default" | "builtin" | "external-catalog";
 
 export type BrowserItemCategory =
   | "sample"
@@ -11,7 +11,8 @@ export type BrowserItemCategory =
   | "audio-effect-chain"
   | "midi-effect"
   | "midi-instrument"
-  | "instrument-preset";
+  | "instrument-preset"
+  | "external-plugin";
 
 export type BrowserItem = {
   id: string;

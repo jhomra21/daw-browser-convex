@@ -1,6 +1,8 @@
+import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import type { DrumRackPadSample } from './drum-rack-params'
 
 export const SAMPLER_STATE_VERSION = 1
+export const MAX_SAMPLED_INSTRUMENT_VOICES = 32
 
 export type SamplerPlaybackMode = 'one-shot' | 'forward-loop' | 'crossfade-loop'
 export type SamplerFilterMode = 'lowpass' | 'highpass' | 'bandpass' | 'notch'
@@ -61,13 +63,13 @@ export type SamplerParams = {
 }
 
 export type SamplerParamsInput = Partial<Omit<SamplerParams, 'version' | 'zones'>> & {
-  version?: unknown
-  zones?: readonly unknown[]
+  version?: JsonValue
+  zones?: readonly JsonValue[]
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const finite = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
-const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+const finite = (value: JsonValue | undefined, fallback: number) => isJsonNumber(value) && Number.isFinite(value) ? value : fallback
+const record = (value: JsonValue): value is JsonObject => isJsonObject(value)
 
 export function createDefaultSamplerParams(): SamplerParams {
   return {
@@ -86,8 +88,8 @@ export function createDefaultSamplerParams(): SamplerParams {
   }
 }
 
-const normalizeEnvelope = (value: unknown, fallback: SamplerEnvelope): SamplerEnvelope => {
-  if (!record(value)) return fallback
+const normalizeEnvelope = (value: SamplerEnvelope | undefined, fallback: SamplerEnvelope): SamplerEnvelope => {
+  if (value === undefined) return fallback
   return {
     attackSec: clamp(finite(value.attackSec, fallback.attackSec), 0, 60),
     decaySec: clamp(finite(value.decaySec, fallback.decaySec), 0, 60),
@@ -97,10 +99,10 @@ const normalizeEnvelope = (value: unknown, fallback: SamplerEnvelope): SamplerEn
   }
 }
 
-const normalizeZone = (value: unknown, index: number): SamplerZone | undefined => {
-  if (!record(value) || !record(value.sample) || typeof value.sample.assetKey !== 'string' || typeof value.sample.url !== 'string') return undefined
+const normalizeZone = (value: JsonValue, index: number): SamplerZone | undefined => {
+  if (!record(value) || !record(value.sample) || !isJsonString(value.sample.assetKey) || !isJsonString(value.sample.url)) return undefined
   const source = record(value.sample.source) ? value.sample.source : undefined
-  if (!source || typeof source.durationSec !== 'number' || typeof source.sampleRate !== 'number' || typeof source.channelCount !== 'number') return undefined
+  if (!source || !isJsonNumber(source.durationSec) || !isJsonNumber(source.sampleRate) || !isJsonNumber(source.channelCount)) return undefined
   const sourceKind = value.sample.sourceKind
   if (sourceKind !== 'upload' && sourceKind !== 'url' && sourceKind !== 'recording') return undefined
   const startSec = clamp(finite(value.startSec, 0), 0, source.durationSec)
@@ -110,11 +112,11 @@ const normalizeZone = (value: unknown, index: number): SamplerZone | undefined =
   const loopEndSec = clamp(finite(value.loopEndSec, endSec), loopStartSec, endSec)
   const maxCrossfade = Math.max(0, (loopEndSec - loopStartSec) / 2)
   return {
-    id: typeof value.id === 'string' && value.id ? value.id : `zone-${index}`,
+    id: isJsonString(value.id) && value.id ? value.id : `zone-${index}`,
     sample: {
       assetKey: value.sample.assetKey,
       url: value.sample.url,
-      name: typeof value.sample.name === 'string' ? value.sample.name : undefined,
+      name: isJsonString(value.sample.name) ? value.sample.name : undefined,
       sourceKind,
       source: { durationSec: source.durationSec, sampleRate: source.sampleRate, channelCount: source.channelCount },
     },
@@ -145,7 +147,6 @@ export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams
     return normalized && normalized.keyLow <= normalized.keyHigh && normalized.velocityLow <= normalized.velocityHigh ? [normalized] : []
   })
   const filterMode = input.filterMode === 'highpass' || input.filterMode === 'bandpass' || input.filterMode === 'notch' ? input.filterMode : 'lowpass'
-  const lfo: Record<string, unknown> = record(input.lfo) ? input.lfo : {}
   return {
     version: SAMPLER_STATE_VERSION,
     zones,
@@ -153,17 +154,17 @@ export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams
     filterEnvelope: normalizeEnvelope(input.filterEnvelope, defaults.filterEnvelope),
     filterMode,
     filterFrequencyHz: clamp(finite(input.filterFrequencyHz, defaults.filterFrequencyHz), 20, 20_000),
-    filterQ: clamp(finite(input.filterQ, defaults.filterQ), 0.0001, 30),
+    filterQ: clamp(finite(input.filterQ, defaults.filterQ), 0.05, 30),
     lfo: {
-      enabled: typeof lfo.enabled === 'boolean' ? lfo.enabled : defaults.lfo.enabled,
-      frequencyHz: clamp(finite(lfo.frequencyHz, defaults.lfo.frequencyHz), 0.01, 100),
-      pitchCents: clamp(finite(lfo.pitchCents, defaults.lfo.pitchCents), -2400, 2400),
-      filterHz: clamp(finite(lfo.filterHz, defaults.lfo.filterHz), -20_000, 20_000),
-      amp: clamp(finite(lfo.amp, defaults.lfo.amp), 0, 1),
-      pan: clamp(finite(lfo.pan, defaults.lfo.pan), 0, 1),
+      enabled: isJsonBoolean(input.lfo?.enabled) ? input.lfo.enabled : defaults.lfo.enabled,
+      frequencyHz: clamp(finite(input.lfo?.frequencyHz, defaults.lfo.frequencyHz), 0.01, 100),
+      pitchCents: clamp(finite(input.lfo?.pitchCents, defaults.lfo.pitchCents), -2400, 2400),
+      filterHz: clamp(finite(input.lfo?.filterHz, defaults.lfo.filterHz), -20_000, 20_000),
+      amp: clamp(finite(input.lfo?.amp, defaults.lfo.amp), 0, 1),
+      pan: clamp(finite(input.lfo?.pan, defaults.lfo.pan), 0, 1),
     },
-    polyphony: Math.round(clamp(finite(input.polyphony, defaults.polyphony), 1, 128)),
-    retrigger: typeof input.retrigger === 'boolean' ? input.retrigger : defaults.retrigger,
+    polyphony: Math.round(clamp(finite(input.polyphony, defaults.polyphony), 1, MAX_SAMPLED_INSTRUMENT_VOICES)),
+    retrigger: isJsonBoolean(input.retrigger) ? input.retrigger : defaults.retrigger,
     cachePolicy: input.cachePolicy === 'lazy' ? 'lazy' : 'preload',
     maxDecodedBytes: Math.round(clamp(finite(input.maxDecodedBytes, defaults.maxDecodedBytes), 1024 * 1024, 2 * 1024 * 1024 * 1024)),
   }

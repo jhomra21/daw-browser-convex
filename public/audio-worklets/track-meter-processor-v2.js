@@ -1,6 +1,8 @@
 const REPORT_FRAMES = 2048
 const TRUE_PEAK_PHASES = 4
 const TRUE_PEAK_TAPS = 24
+const isTrackMeterMessage = (data) => data !== null && Object.prototype.toString.call(data) === '[object Object]'
+const isTrackMeterBoolean = (value) => value === true || value === false
 const sinc = (value) => value === 0 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value)
 const TRUE_PEAK_COEFFICIENTS = Array.from({ length: TRUE_PEAK_PHASES }, (_, phase) => {
   const coefficients = new Float64Array(TRUE_PEAK_TAPS)
@@ -28,13 +30,13 @@ class TrackMeterProcessorV2 extends AudioWorkletProcessor {
     this.reset()
     this.port.onmessage = (event) => {
       const data = event.data
-      if (!data || typeof data !== 'object') return
+      if (!isTrackMeterMessage(data)) return
       if (data.type === 'reset') {
         this.reset()
         if (this.active) this.emitZero()
         return
       }
-      if (typeof data.active !== 'boolean') return
+      if (!isTrackMeterBoolean(data.active)) return
       this.active = data.active
       this.truePeak = data.truePeak === true
       this.reset()

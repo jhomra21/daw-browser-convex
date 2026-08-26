@@ -6,6 +6,8 @@ type MixerTimingPlan = {
   graphLatencyFrames: number
 }
 
+export type ExternalNodeLatencyFrames = ReadonlyMap<string, number>
+
 type MixerEdgeKind = 'output' | 'send'
 type MixerSendTap = 'pre-fx' | 'pre-fader' | 'post-fader'
 
@@ -31,8 +33,22 @@ export const resolveMixerTiming = (
   graph: ResolvedMixerGraph,
   sampleRate: number,
   bpm = 120,
+  externalLatencyFrames: ExternalNodeLatencyFrames = new Map(),
 ): MixerTimingPlan => {
   const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))
+  const getExternalLatency = (channelId: string) => externalLatencyFrames.get(channelId) ?? 0
+  const getNodeLatency = (channel: ResolvedMixerGraph['channels'][number]) => (
+    getChannelLatency(channel, sampleRate, bpm) + getExternalLatency(channel.channel.id)
+  )
+  const getTapLatency = (
+    source: ResolvedMixerGraph['channels'][number],
+    sourceOutputLatency: number,
+    tap: MixerSendTap,
+  ) => {
+    if (tap === 'pre-fx') return sourceOutputLatency - getNodeLatency(source)
+    if (tap === 'pre-fader') return sourceOutputLatency
+    return sourceOutputLatency
+  }
   const incoming = new Map<string, Array<{ sourceId: string; kind: MixerEdgeKind; tap?: MixerSendTap }>>()
   for (const entry of graph.channels) {
     const edges = [
@@ -63,12 +79,12 @@ export const resolveMixerTiming = (
     if (!entry) throw new Error(`Missing mixer channel ${channelId}`)
     const upstreamLatency = Math.max(0, ...(incoming.get(channelId) ?? []).map((edge) => {
       const sourceOutputLatency = visit(edge.sourceId)
-      if (edge.kind !== 'send' || edge.tap !== 'pre-fx') return sourceOutputLatency
+      if (edge.kind !== 'send') return sourceOutputLatency
       const source = channelById.get(edge.sourceId)
       if (!source) throw new Error(`Missing mixer channel ${edge.sourceId}`)
-      return sourceOutputLatency - getChannelLatency(source, sampleRate, bpm)
+      return getTapLatency(source, sourceOutputLatency, edge.tap ?? 'post-fader')
     }))
-    const latency = upstreamLatency + getChannelLatency(entry, sampleRate, bpm)
+    const latency = upstreamLatency + getNodeLatency(entry)
     pathLatency.set(channelId, latency)
     visiting.delete(channelId)
     return latency
@@ -80,9 +96,9 @@ export const resolveMixerTiming = (
   for (const [targetId, edges] of incoming) {
     const edgeLatency = (edge: (typeof edges)[number]) => {
       const channelLatency = pathLatency.get(edge.sourceId) ?? 0
-      return edge.kind === 'send' && edge.tap === 'pre-fx'
-        ? channelLatency - getChannelLatency(channelById.get(edge.sourceId)!, sampleRate, bpm)
-        : channelLatency
+      if (edge.kind !== 'send') return channelLatency
+      const source = channelById.get(edge.sourceId)!
+      return getTapLatency(source, channelLatency, edge.tap ?? 'post-fader')
     }
     const convergenceLatency = Math.max(0, ...edges.map(edgeLatency))
     for (const edge of edges) {

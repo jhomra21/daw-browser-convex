@@ -15,9 +15,31 @@ import type {
   SidechainRouteHistorySnapshot,
 } from './types'
 
+export function buildControlRangeDeleteHistoryEntry(input: {
+  projectId: string
+  tracks: Track[]
+  trackIds: Track['id'][]
+  startSec: number
+  endSec: number
+  recoveryId: string
+}): Extract<HistoryEntry, { type: 'control-range-delete' }> {
+  const tracksById = new Map(input.tracks.map((track) => [track.id, track]))
+  return {
+    type: 'control-range-delete',
+    projectId: input.projectId,
+    data: {
+      trackRefs: input.trackIds.map((trackId) => getTrackHistoryRef(tracksById.get(trackId))),
+      startSec: input.startSec,
+      endSec: input.endSec,
+      recoveryId: input.recoveryId,
+    },
+  }
+}
+
 export function buildTrackCreateHistoryEntry(input: {
   projectId: string
   trackId: Track['id']
+  name?: string
   index: number
   kind?: 'audio' | 'instrument'
   channelRole?: Track['channelRole']
@@ -30,6 +52,7 @@ export function buildTrackCreateHistoryEntry(input: {
     data: {
       trackRef: input.trackId,
       currentTrackId: input.trackId,
+      name: input.name,
       index: input.index,
       kind: input.kind,
       channelRole: input.channelRole,
@@ -54,6 +77,7 @@ export function buildTrackClipCreateHistoryEntry(input: {
       track: {
         trackRef,
         currentTrackId: input.track.id,
+        name: input.track.name,
         index: input.tracks.findIndex((entry) => entry.id === input.track.id),
         kind: input.track.kind,
         channelRole: input.track.channelRole,
@@ -388,6 +412,8 @@ export function buildClipDeleteHistoryEntry(input: {
   projectId: string
   tracks: Track[]
   clipIds: Iterable<string>
+  recoveryIdsByClipId?: ReadonlyMap<string, string>
+  recoveryOperationId?: string
 }): Extract<HistoryEntry, { type: 'clip-delete' }> {
   const selectedIds = new Set(input.clipIds)
   return {
@@ -398,7 +424,12 @@ export function buildClipDeleteHistoryEntry(input: {
         .filter((clip) => selectedIds.has(clip.id))
         .map((clip) => ({
           trackRef: getTrackHistoryRef(track),
-          clip: buildClipHistorySnapshot(clip),
+          clip: {
+            ...buildClipHistorySnapshot(clip),
+            recoveryId: input.recoveryIdsByClipId?.get(clip.id) ? input.recoveryIdsByClipId.get(clip.id) : undefined,
+            recoveryOperationId: input.recoveryOperationId ? input.recoveryOperationId : undefined,
+            recoverySourceClipId: input.recoveryOperationId ? clip.id : undefined,
+          },
         }))),
     },
   }

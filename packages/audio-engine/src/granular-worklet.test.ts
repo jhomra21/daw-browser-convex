@@ -3,6 +3,16 @@ import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../../../public/audio-worklets/daw-granular-processor-v1.js', import.meta.url), 'utf8')
 
+type GranularProcessorOptions = {
+  seed?: number
+  maxGrains?: number
+}
+
+type GranularProcessor = {
+  port: { onmessage: ((event: { data: object }) => void) | null }
+  process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
+}
+
 describe('granular worklet source', () => {
   test('uses a bounded preallocated pool and sample-accurate parameters', () => {
     expect(source).toContain('const MAX_GRAINS = 128')
@@ -14,13 +24,10 @@ describe('granular worklet source', () => {
   })
 
   test('downmixes a centered mono grain without overwriting one side', () => {
-    const registered = new Map<string, new (options?: { processorOptions: Record<string, unknown> }) => {
-      port: { onmessage: ((event: { data: unknown }) => void) | null }
-      process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
-    }>()
+    const registered = new Map<string, new (options?: { processorOptions: GranularProcessorOptions }) => GranularProcessor>()
     class FakeAudioWorkletProcessor {
       port = {
-        onmessage: null as ((event: { data: unknown }) => void) | null,
+        onmessage: null,
         postMessage: () => undefined,
       }
     }
@@ -32,7 +39,7 @@ describe('granular worklet source', () => {
     )
     evaluate(
       FakeAudioWorkletProcessor,
-      (name: string, processor: new (options?: { processorOptions: Record<string, unknown> }) => never) => registered.set(name, processor),
+      (name: string, processor: new (options?: { processorOptions: GranularProcessorOptions }) => GranularProcessor) => registered.set(name, processor),
       48_000,
     )
     const Processor = registered.get('daw-granular-processor')

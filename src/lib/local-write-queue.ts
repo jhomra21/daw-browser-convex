@@ -27,9 +27,9 @@ const scheduleIdleFlush = (callback: () => void, delayMs: number): ScheduledIdle
     const handle = globalThis.setTimeout(callback, delayMs)
     return { cancel: () => globalThis.clearTimeout(handle) }
   }
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    const handle = window.requestIdleCallback(callback)
-    return { cancel: () => window.cancelIdleCallback(handle) }
+  if (globalThis.window !== undefined && 'requestIdleCallback' in globalThis.window) {
+    const handle = globalThis.window.requestIdleCallback(callback)
+    return { cancel: () => globalThis.window.cancelIdleCallback(handle) }
   }
   const handle = globalThis.setTimeout(callback, 0)
   return { cancel: () => globalThis.clearTimeout(handle) }

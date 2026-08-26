@@ -1,7 +1,9 @@
-import { getLocalAsset, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
+import { getLocalAsset, readLocalAssetBytes, writeLocalAssetFileUnlocked } from '~/lib/local-assets'
 import { assetCloudIdMappingKey, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { openLocalProjectDb } from '~/lib/local-project-db'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
+import { z } from 'zod'
 
 type CloudAssetReadResult =
   | { status: 'ready'; file: File; source: 'local' | 'cloud' }
@@ -22,8 +24,12 @@ const readCloudAssetReference = async (
     db.get('syncState', `cloud-source:asset:${assetId}`),
     db.get('syncState', assetCloudIdMappingKey(assetId)),
   ])
-  if (typeof urlRow?.value === 'string') return { kind: 'url', value: urlRow.value }
-  if (typeof sourceRow?.value === 'string') return { kind: 'key', value: sourceRow.value }
+  const parsedUrl = z.string().safeParse(urlRow?.value)
+  const url = parsedUrl.success ? parsedUrl.data : undefined
+  if (url) return { kind: 'url', value: url }
+  const parsedSource = z.string().safeParse(sourceRow?.value)
+  const source = parsedSource.success ? parsedSource.data : undefined
+  if (source) return { kind: 'key', value: source }
   if (isCloudIdMappingValue(mappingRow?.value)) return { kind: 'key', value: mappingRow.value.cloudId }
   return undefined
 }
@@ -77,12 +83,17 @@ export const readLocalOrCloudAssetFile = async (
 const cacheCloudAssetForOffline = async (
   projectId: string,
   assetId: string,
-): Promise<void> => {
+): Promise<boolean> => {
   const row = await getLocalAsset(projectId, assetId)
   if (!row) throw new Error('Asset metadata is missing.')
   const result = await readCloudAssetFile(projectId, assetId, row)
   if (result.status !== 'ready') throw new Error('Cloud asset could not be downloaded.')
-  await writeLocalAssetFile(projectId, row.storagePath, result.file)
+  return withLocalProjectAssetLock(projectId, async () => {
+    const current = await getLocalAsset(projectId, assetId)
+    if (!current || current.storagePath !== row.storagePath) return false
+    await writeLocalAssetFileUnlocked(projectId, current.storagePath, result.file)
+    return true
+  })
 }
 
 export const downloadCloudAssetsForOffline = async (
@@ -94,8 +105,7 @@ export const downloadCloudAssetsForOffline = async (
   await runWithConcurrency(rows, 3, async (asset) => {
     const before = await readLocalAssetBytes(projectId, asset.id)
     if (before.status === 'ready') return
-    await cacheCloudAssetForOffline(projectId, asset.id)
-    downloaded += 1
+    if (await cacheCloudAssetForOffline(projectId, asset.id)) downloaded += 1
   })
   return downloaded
 }

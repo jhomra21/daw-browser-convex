@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { createCueBus } from './cue-routing'
 
+type TestAudioNode = Record<never, never>
+
 const createNode = () => {
   const node = Object.create(null)
-  node.connections = [] as unknown[]
-  node.connect = (target: unknown) => node.connections.push(target)
+  node.connections = []
+  node.connect = (target: TestAudioNode) => node.connections.push(target)
   return node
 }
 

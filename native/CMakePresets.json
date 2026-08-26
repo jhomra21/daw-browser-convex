@@ -1,0 +1,60 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "audio-core-debug",
+      "displayName": "Audio Core Debug",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/audio-core-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DAW_BUILD_PLUGIN_HOST": "OFF"
+      }
+    },
+    {
+      "name": "audio-core-sanitized",
+      "inherits": "audio-core-debug",
+      "binaryDir": "${sourceDir}/build/audio-core-sanitized",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "audio-host-macos-debug",
+      "inherits": "audio-core-debug",
+      "binaryDir": "${sourceDir}/build/audio-host-macos-debug",
+      "cacheVariables": {
+        "DAW_BUILD_AUDIO_HOST_MACOS": "ON",
+        "DAW_BUILD_PLUGIN_HOST": "ON",
+        "VST3_SDK_PATH": "$env{VST3_SDK_PATH}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "audio-core-debug",
+      "configurePreset": "audio-core-debug"
+    },
+    {
+      "name": "audio-core-sanitized",
+      "configurePreset": "audio-core-sanitized"
+    },
+    {
+      "name": "audio-host-macos-debug",
+      "configurePreset": "audio-host-macos-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "audio-core-debug",
+      "configurePreset": "audio-core-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "audio-host-macos-debug",
+      "configurePreset": "audio-host-macos-debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

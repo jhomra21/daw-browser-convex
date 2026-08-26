@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 
 import { convexApi, useConvexQuery } from '~/lib/convex'
-import { assert, isLocalId } from '@daw-browser/shared'
+import { assert, assertDefined, isLocalId } from '@daw-browser/shared'
 import {
   buildOptimisticGrantScopeKey,
   isOptimisticGrantScopeCurrent,
@@ -247,19 +247,19 @@ export function useProjectedTimelineModel(
       assert(track.volume !== undefined, `Missing mixer channel volume for track ${String(track._id)}`)
       assert(track.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}`)
       serverVolumes.set(track._id, track.volume)
-      if (typeof track.muted === 'boolean') {
+      if (track.muted !== undefined) {
         serverMuted.set(track._id, track.muted)
       }
-      if (typeof track.soloed === 'boolean') {
+      if (track.soloed !== undefined) {
         serverSoloed.set(track._id, track.soloed)
       }
       serverRouting.set(track._id, {
         outputTargetId: track.outputTargetId,
         sends: track.sends.map((send) => {
-          assert(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
+          const targetId = assertDefined(send?.targetId, `Missing mixer send target for track ${String(track._id)}`)
           const amount = Number(send.amount)
           assert(Number.isFinite(amount), `Invalid mixer send amount for track ${String(track._id)}`)
-          return { targetId: send.targetId, amount, tap: send.tap }
+          return { targetId, amount, tap: send.tap }
         }),
       })
     }

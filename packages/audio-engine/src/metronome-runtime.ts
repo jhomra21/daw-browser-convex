@@ -25,7 +25,7 @@ export function createMetronomeRuntime(clock: TransportClock) {
   let enabled = false
   let gain: GainNode | null = null
   let buffer: AudioBuffer | null = null
-  let schedulerId: number | null = null
+  let schedulerId: ReturnType<typeof setInterval> | null = null
   let nextBeatTimelineSec: number | null = null
   let sources: AudioBufferSourceNode[] = []
   const lookaheadSec = 0.25
@@ -107,7 +107,7 @@ export function createMetronomeRuntime(clock: TransportClock) {
       } catch (err) {
         console.error('[AudioEngine] metronome scheduling error', err)
       }
-    }, intervalMs) as unknown as number
+    }, intervalMs)
   }
 
   return {

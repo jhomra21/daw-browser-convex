@@ -1,3 +1,6 @@
+import { RECORDER_BLOCK_FRAMES } from "../../../packages/audio-engine/src/recording/recording-protocol"
+import { z } from "zod"
+
 const RECORDING_DIRECTORY = "recording-sessions"
 const SESSION_METADATA_FILE = "session.json"
 const SESSION_CREATED_AT_FILE = "created-at"
@@ -44,7 +47,7 @@ type PlanarPcmBlock = {
 }
 
 export type RecordingStorageWritable = {
-  write: (data: Uint8Array | Float32Array) => Promise<void>
+  write: (data: Uint8Array<ArrayBuffer>) => Promise<void>
   close: () => Promise<void>
   abort: () => Promise<void>
 }
@@ -84,36 +87,46 @@ type CreateSessionInput = {
 
 type RecordingTempSession = {
   append: (channels: readonly Float32Array[]) => Promise<void>
+  appendPlanar: (buffer: ArrayBuffer, frameCount: number) => Promise<void>
   finalize: () => Promise<RecordingTempSessionDescriptor>
   abort: () => Promise<void>
 }
 
 const isSafeName = (value: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
 
-const classifyStorageFailure = (error: unknown): RecordingTempStorageFailure => {
-  if (error instanceof DOMException) {
-    if (error.name === "QuotaExceededError") return "quota-exceeded"
-    if (error.name === "NotAllowedError" || error.name === "SecurityError") return "permission-denied"
+const classifyStorageFailure = (cause: unknown): RecordingTempStorageFailure => {
+  if (cause instanceof DOMException) {
+    if (cause.name === "QuotaExceededError") return "quota-exceeded"
+    if (cause.name === "NotAllowedError" || cause.name === "SecurityError") return "permission-denied"
   }
   return "write-failed"
 }
 
-const storageFailure = (message: string, error: unknown): RecordingTempStorageError =>
-  new RecordingTempStorageError(classifyStorageFailure(error), message, { cause: error })
+const storageFailure = (message: string, cause: unknown): RecordingTempStorageError =>
+  new RecordingTempStorageError(classifyStorageFailure(cause), message, { cause })
 
-const encodeDescriptor = (descriptor: RecordingTempSessionDescriptor): Uint8Array =>
-  new TextEncoder().encode(JSON.stringify(descriptor))
+const encodeText = (value: string): Uint8Array<ArrayBuffer> => {
+  const encoded = new TextEncoder().encode(value)
+  const bytes = new Uint8Array(new ArrayBuffer(encoded.byteLength))
+  bytes.set(encoded)
+  return bytes
+}
 
-const encodeCreatedAt = (createdAtMs: number): Uint8Array =>
-  new TextEncoder().encode(String(createdAtMs))
+const encodeDescriptor = (descriptor: RecordingTempSessionDescriptor): Uint8Array<ArrayBuffer> =>
+  encodeText(JSON.stringify(descriptor))
+
+const encodeCreatedAt = (createdAtMs: number): Uint8Array<ArrayBuffer> =>
+  encodeText(String(createdAtMs))
 
 const parseCreatedAt = (value: string): number | null => {
   const createdAtMs = Number(value)
   return Number.isSafeInteger(createdAtMs) && createdAtMs >= 0 ? createdAtMs : null
 }
 
-const encodePlanarBlock = (channels: readonly Float32Array[], frameCount: number): Uint8Array => {
-  const bytes = new Uint8Array(BLOCK_HEADER_BYTES + channels.length * frameCount * Float32Array.BYTES_PER_ELEMENT)
+const encodePlanarBlock = (channels: readonly Float32Array[], frameCount: number): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(new ArrayBuffer(
+    BLOCK_HEADER_BYTES + channels.length * frameCount * Float32Array.BYTES_PER_ELEMENT,
+  ))
   const view = new DataView(bytes.buffer)
   view.setUint32(0, frameCount, true)
   let offset = BLOCK_HEADER_BYTES
@@ -157,34 +170,22 @@ export const decodePlanarPcmBlocks = (bytes: Uint8Array, channelCount: number): 
   return blocks
 }
 
+const recordingTempSessionDescriptorSchema = z.object({
+  version: z.literal(1),
+  sessionId: z.string(),
+  format: z.literal("planar-float32-blocks"),
+  sampleRate: z.number(),
+  channelCount: z.number(),
+  capturedFrames: z.number(),
+  byteLength: z.number(),
+  createdAtMs: z.number(),
+  finalizedAtMs: z.number().nullable(),
+})
+
 const parseDescriptor = (value: string): RecordingTempSessionDescriptor | null => {
   try {
-    const parsed: unknown = JSON.parse(value)
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
-    const descriptor = parsed
-    if (
-      !("version" in descriptor) || descriptor.version !== 1 ||
-      !("sessionId" in descriptor) || typeof descriptor.sessionId !== "string" ||
-      !("format" in descriptor) || descriptor.format !== "planar-float32-blocks" ||
-      !("sampleRate" in descriptor) || typeof descriptor.sampleRate !== "number" ||
-      !("channelCount" in descriptor) || typeof descriptor.channelCount !== "number" ||
-      !("capturedFrames" in descriptor) || typeof descriptor.capturedFrames !== "number" ||
-      !("byteLength" in descriptor) || typeof descriptor.byteLength !== "number" ||
-      !("createdAtMs" in descriptor) || typeof descriptor.createdAtMs !== "number" ||
-      !("finalizedAtMs" in descriptor) ||
-      (descriptor.finalizedAtMs !== null && typeof descriptor.finalizedAtMs !== "number")
-    ) return null
-    return {
-      version: 1,
-      sessionId: descriptor.sessionId,
-      format: "planar-float32-blocks",
-      sampleRate: descriptor.sampleRate,
-      channelCount: descriptor.channelCount,
-      capturedFrames: descriptor.capturedFrames,
-      byteLength: descriptor.byteLength,
-      createdAtMs: descriptor.createdAtMs,
-      finalizedAtMs: descriptor.finalizedAtMs
-    }
+    const descriptor = recordingTempSessionDescriptorSchema.safeParse(JSON.parse(value))
+    return descriptor.success ? descriptor.data : null
   } catch {
     return null
   }
@@ -206,11 +207,7 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDi
         }
         const writable = await createWritable.call(handle)
         return {
-          write: (data) => {
-            const bytes = new Uint8Array(data.byteLength)
-            bytes.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength))
-            return writable.write(bytes)
-          },
+          write: (data) => writable.write(data),
           close: () => writable.close(),
           abort: () => writable.abort()
         }
@@ -278,7 +275,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     }
     ownedSessionIds.add(input.sessionId)
 
-    const sessions = await sessionsDirectory().catch((error: unknown) => {
+    const sessions = await sessionsDirectory().catch((error) => {
       ownedSessionIds.delete(input.sessionId)
       throw storageFailure("Could not access recording session storage.", error)
     })
@@ -339,36 +336,74 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       }
     }
 
-    const append = (channels: readonly Float32Array[]): Promise<void> => {
+    const appendEncodedBlock = (
+      frameCount: number,
+      writeSamples: () => Promise<void>,
+    ): Promise<void> => {
       const operation = appendQueue.then(async () => {
         if (state !== "open") {
           throw new RecordingTempStorageError("write-failed", "Recording session is no longer writable.")
         }
-        const frameCount = channels[0]?.length ?? 0
-        if (
-          channels.length !== input.channelCount ||
-          frameCount === 0 ||
-          channels.some((channel) => channel.length !== frameCount)
-        ) {
-          throw new RecordingTempStorageError("invalid-block", "Recording block shape does not match the session.")
-        }
         const blockBytes = BLOCK_HEADER_BYTES + frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT
+        if (!Number.isInteger(frameCount) || frameCount <= 0) {
+          throw new RecordingTempStorageError("invalid-block", "Recording block frame count is invalid.")
+        }
         if (!Number.isSafeInteger(blockBytes) || byteLength + blockBytes > maxBytes) {
           throw new RecordingTempStorageError("capacity-exceeded", "Recording session exceeded its storage bound.")
         }
         try {
-          await writable.write(encodePlanarBlock(channels, frameCount))
+          const header = new Uint8Array(BLOCK_HEADER_BYTES)
+          new DataView(header.buffer).setUint32(0, frameCount, true)
+          await writable.write(header)
+          await writeSamples()
         } catch (error) {
           throw storageFailure("Could not write recording audio.", error)
         }
         capturedFrames += frameCount
         byteLength += blockBytes
-      }).catch(async (error: unknown) => {
+      }).catch(async (error) => {
         if (state === "open") await abortAndRemove()
         throw error
       })
       appendQueue = operation.catch(() => undefined)
       return operation
+    }
+
+    const append = (channels: readonly Float32Array[]): Promise<void> => {
+      const frameCount = channels[0]?.length ?? 0
+      if (
+        channels.length !== input.channelCount
+        || frameCount === 0
+        || channels.some((channel) => channel.length !== frameCount)
+      ) {
+        return Promise.reject(new RecordingTempStorageError("invalid-block", "Recording block shape does not match the session."))
+      }
+      return appendEncodedBlock(frameCount, async () => {
+        await writable.write(encodePlanarBlock(channels, frameCount).subarray(BLOCK_HEADER_BYTES))
+      })
+    }
+
+    const appendPlanar = (buffer: ArrayBuffer, frameCount: number): Promise<void> => {
+      const sampleBytes = frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT
+      const requiredBufferBytes = input.channelCount * RECORDER_BLOCK_FRAMES * Float32Array.BYTES_PER_ELEMENT
+      if (
+        !Number.isInteger(frameCount)
+        || frameCount <= 0
+        || frameCount > RECORDER_BLOCK_FRAMES
+        || !Number.isSafeInteger(sampleBytes)
+        || buffer.byteLength < requiredBufferBytes
+      ) {
+        return Promise.reject(new RecordingTempStorageError("invalid-block", "Recording planar block shape is invalid."))
+      }
+      return appendEncodedBlock(frameCount, async () => {
+        for (let channel = 0; channel < input.channelCount; channel += 1) {
+          await writable.write(new Uint8Array(
+            buffer,
+            channel * RECORDER_BLOCK_FRAMES * Float32Array.BYTES_PER_ELEMENT,
+            frameCount * Float32Array.BYTES_PER_ELEMENT,
+          ))
+        }
+      })
     }
 
     const finalize = async (): Promise<RecordingTempSessionDescriptor> => {
@@ -416,7 +451,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       await abortAndRemove()
     }
 
-    return { append, finalize, abort }
+    return { append, appendPlanar, finalize, abort }
   }
 
   const open = async (sessionId: string): Promise<RecordingTempSessionDescriptor | null> => {

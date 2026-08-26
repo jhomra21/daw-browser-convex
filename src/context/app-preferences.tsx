@@ -1,6 +1,6 @@
 import { batch, createContext, createEffect, createSignal, type ParentComponent, useContext } from "solid-js"
 import { useColorMode } from "@kobalte/core"
-import { assert } from "@daw-browser/shared"
+import { assertDefined } from "@daw-browser/shared"
 import {
   createPersistedAppPreferencesWithInitial,
   normalizeRecordingManualOffsetFrames,
@@ -38,10 +38,6 @@ type AppPreferencesContextValue = {
     commitThemeSelection: (selection: AppTheme | DawThemeId) => void
     cancelThemePreview: () => void
   }
-  agent: {
-    autoApply: () => boolean
-    toggleAutoApply: () => void
-  }
   sidebar: {
     open: () => boolean
     setOpen: (open: boolean) => void
@@ -67,12 +63,18 @@ type AppPreferencesContextValue = {
     setEchoCancellation: (enabled: boolean) => void
     setNoiseSuppression: (enabled: boolean) => void
     setAutoGainControl: (enabled: boolean) => void
+    setNativePlaybackEnabled: (enabled: boolean) => void
   }
   recording: {
     preferences: () => AppPreferences["recording"]
+    setPortableEnabled: (enabled: boolean) => void
     setInputConfiguration: (configuration: RecordingInputPreferences) => void
     setManualOffsetFrames: (frames: number) => void
     setCalibrations: (calibrations: RecordingCalibration[]) => void
+  }
+  midi: {
+    selectedInputIds: () => readonly string[]
+    setSelectedInputIds: (ids: string[]) => void
   }
 }
 
@@ -161,10 +163,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     })
   }
 
-  const toggleAgentAutoApply = () => {
-    setPreferences("agent", "autoApply", (autoApply) => !autoApply)
-  }
-
   const setSidebarOpen = (open: boolean) => {
     if (preferences.sidebar.open === open) return
     setPreferences("sidebar", "open", open)
@@ -218,10 +216,6 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           commitThemeSelection,
           cancelThemePreview
         },
-        agent: {
-          autoApply: () => preferences.agent.autoApply,
-          toggleAutoApply: toggleAgentAutoApply
-        },
         sidebar: {
           open: () => preferences.sidebar.open,
           setOpen: setSidebarOpen
@@ -246,16 +240,23 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
           setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),
           setNoiseSuppression: (enabled) => setPreferences("audio", "noiseSuppression", enabled),
-          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled)
+          setAutoGainControl: (enabled) => setPreferences("audio", "autoGainControl", enabled),
+          setNativePlaybackEnabled: (enabled) => setPreferences("audio", "nativePlaybackEnabled", enabled),
         },
         recording: {
           preferences: () => preferences.recording,
+          setPortableEnabled: (enabled) => setPreferences("recording", "portableEnabled", enabled),
           setInputConfiguration: (configuration) =>
             setPreferences("recording", (recording) => updateRecordingInputPreferences(recording, configuration)),
           setManualOffsetFrames: (frames) =>
             setPreferences("recording", "manualOffsetFrames", normalizeRecordingManualOffsetFrames(frames)),
           setCalibrations: (calibrations) =>
             setPreferences("recording", (recording) => updateRecordingCalibrations(recording, calibrations))
+        },
+        midi: {
+          selectedInputIds: () => preferences.midi.selectedInputIds,
+          setSelectedInputIds: (ids) =>
+            setPreferences("midi", "selectedInputIds", () => ids)
         }
       }}
     >
@@ -266,6 +267,5 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
 
 export const useAppPreferences = () => {
   const context = useContext(AppPreferencesContext)
-  assert(context, "useAppPreferences must be used within AppPreferencesProvider.")
-  return context
+  return assertDefined(context, "useAppPreferences must be used within AppPreferencesProvider.")
 }

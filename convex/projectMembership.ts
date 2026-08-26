@@ -1,18 +1,13 @@
 import type { MutationCtx } from "./_generated/server";
 import { isProjectOwnership } from "./projectAccess";
+import { requireProjectRow } from "./projectRows";
 
 type MembershipRemovalResult = {
   status: "removed" | "not-found";
 };
 
 async function readProjectOwnerUserId(ctx: MutationCtx, projectId: string) {
-  const project = await ctx.db
-    .query("projects")
-    .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
-    .order("asc")
-    .first();
-  if (!project) throw new Error("Project not found.");
-  return project.ownerUserId;
+  return (await requireProjectRow(ctx, projectId)).ownerUserId;
 }
 
 export async function removeProjectMemberAccessAndTransferEntities(

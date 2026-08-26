@@ -33,7 +33,7 @@ export function normalizeTrackChannelRole(value: string | undefined): RoutingTra
 }
 
 function normalizeTrackSendAmount(value: number | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  if (value === undefined || !Number.isFinite(value)) return 0
   return Math.max(0, Math.min(1, value))
 }
 

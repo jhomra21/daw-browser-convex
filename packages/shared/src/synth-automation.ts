@@ -38,7 +38,7 @@ export type SynthAutomationDescriptor = {
 
 const defaults = createDefaultSynthParams()
 
-export const SYNTH_AUTOMATION_DESCRIPTORS: Readonly<Record<SynthAutomationParameterId, SynthAutomationDescriptor>> = {
+export const SYNTH_AUTOMATION_DESCRIPTORS = {
   'output.gain': { defaultValue: defaults.gain, ...SYNTH_PARAMETER_LIMITS.gain, unit: 'ratio', rate: 'a-rate' },
   'output.pan': { defaultValue: defaults.pan, ...SYNTH_PARAMETER_LIMITS.pan, unit: 'ratio', rate: 'a-rate' },
   'osc1.level': { defaultValue: defaults.oscillators[0].level, ...SYNTH_PARAMETER_LIMITS.oscillatorLevel, unit: 'ratio', rate: 'a-rate' },
@@ -62,7 +62,7 @@ export const SYNTH_AUTOMATION_DESCRIPTORS: Readonly<Record<SynthAutomationParame
   'lfo.filterDepth': { defaultValue: defaults.lfo.filterOctaves, ...SYNTH_PARAMETER_LIMITS.lfoFilterOctaves, unit: 'octaves', rate: 'a-rate' },
   'lfo.ampDepth': { defaultValue: defaults.lfo.amp, ...SYNTH_PARAMETER_LIMITS.lfoAmp, unit: 'ratio', rate: 'a-rate' },
   'lfo.panDepth': { defaultValue: defaults.lfo.pan, ...SYNTH_PARAMETER_LIMITS.lfoPan, unit: 'ratio', rate: 'a-rate' },
-}
+} satisfies Readonly<Record<SynthAutomationParameterId, SynthAutomationDescriptor>>
 
 export type SynthAutomationKey = {
   kind: 'synth-instrument'

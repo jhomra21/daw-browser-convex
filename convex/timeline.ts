@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
+import { requireProjectRow } from "./projectRows";
 
 const readFullTimelineView = async (
   ctx: QueryCtx,
@@ -31,8 +32,28 @@ const readFullTimelineView = async (
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
   ]);
+  const project = await requireProjectRow(ctx, projectId);
 
-  return { tracks, clips, mixerSettings, automationEnvelopes, effects, sidechainRoutes };
+  return {
+    project: {
+      projectId: project.projectId,
+      name: project.name,
+      revision: project.revision,
+      tempoBpm: project.tempoBpm,
+      timeSignatureNumerator: project.timeSignatureNumerator,
+      timeSignatureDenominator: project.timeSignatureDenominator,
+      loopEnabled: project.loopEnabled,
+      loopStartSec: project.loopStartSec,
+      loopEndSec: project.loopEndSec,
+      updatedAt: project.updatedAt,
+    },
+    tracks,
+    clips,
+    mixerSettings,
+    automationEnvelopes,
+    effects,
+    sidechainRoutes,
+  };
 };
 
 export const fullView = query({

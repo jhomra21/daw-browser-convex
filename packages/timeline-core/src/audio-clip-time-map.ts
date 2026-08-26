@@ -32,7 +32,7 @@ export type MarkerWarpTimelineSegment = {
 }
 
 const resolveWarpBpm = (value: number | undefined, fallback: number) => (
-  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback
 )
 
 const resolveSourceBeatOffsetSec = (input: {
@@ -46,7 +46,7 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   const bufferOffsetRaw = Math.max(0, input.clip.bufferOffsetSec ?? 0)
   const clipStart = input.clip.startSec
   const clipEndRaw = input.clip.startSec + input.clip.duration
-  const clipEnd = typeof input.rangeEndSec === 'number' ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
+  const clipEnd = input.rangeEndSec !== undefined ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
   const audioStart = clipStart + leftPad
   const bufferDuration = Math.max(0, input.bufferDurationSec)
   const bufferOffset = Math.min(bufferDuration, bufferOffsetRaw)

@@ -1,0 +1,541 @@
+import { describe, expect, test } from "bun:test"
+import { parseDesktopReplyError } from "@daw-browser/desktop-protocol"
+import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
+
+type Reply = {
+  generation: number
+  response: PreloadHostResponse
+}
+
+const flushPromises = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+describe("desktop preload request queue", () => {
+  test("propagates the exact trusted actor subject", async () => {
+    const actorSubject = "local:123e4567-e89b-42d3-a456-426614174000"
+    let received: PreloadHostRequest | undefined
+    const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
+    queue.setRequestHandler(async (request) => {
+      received = request
+      return { id: request.id, result: {} }
+    })
+
+    queue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "control-1",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject,
+    }, actorSubject)
+    await flushPromises()
+
+    expect(received?.trustedActorSubject).toBe(actorSubject)
+  })
+
+  test("does not derive trusted control identity from the renderer request body", async () => {
+    let received: PreloadHostRequest | undefined
+    const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
+    queue.setRequestHandler(async (request) => {
+      received = request
+      return { id: request.id, result: {} }
+    })
+
+    queue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "control-override",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+    }, "local:223e4567-e89b-42d3-a456-426614174000")
+    await flushPromises()
+
+    expect(received?.trustedActorSubject).toBe("local:223e4567-e89b-42d3-a456-426614174000")
+  })
+
+  test("ignores dispatches from an older generation", () => {
+    const requests: string[] = []
+    const queue = createRequestQueue({ reply: () => undefined, queueLimit: 32 })
+
+    queue.dispatch(2, { version: "v1", type: "request", id: "new", operation: "transport.status", input: {} })
+    queue.dispatch(1, { version: "v1", type: "request", id: "stale", operation: "transport.status", input: {} })
+    queue.setRequestHandler(async (request) => {
+      requests.push(request.id)
+      return { id: request.id, result: {} }
+    })
+
+    expect(requests).toEqual(["new"])
+  })
+
+  test("a newer generation cancels queued work once before accepting new work", () => {
+    const replies: Reply[] = []
+    const requests: string[] = []
+    const queue = createRequestQueue({
+      reply: (generation, response) => replies.push({ generation, response }),
+      queueLimit: 32,
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "old", operation: "transport.play", input: {} })
+    queue.dispatch(2, { version: "v1", type: "request", id: "new", operation: "transport.status", input: {} })
+    queue.setRequestHandler(async (request) => {
+      requests.push(request.id)
+      return { id: request.id, result: {} }
+    })
+
+    expect(requests).toEqual(["new"])
+    expect(replies).toEqual([{
+      generation: 1,
+      response: { id: "old", error: { version: "v1", code: "cancelled", message: "The request was cancelled." } },
+    }])
+  })
+
+  test("a newer generation aborts active work once and suppresses its late resolution", async () => {
+    const replies: Reply[] = []
+    const oldRequest = Promise.withResolvers<PreloadHostResponse>()
+    const newRequest = Promise.withResolvers<PreloadHostResponse>()
+    let canceledId: string | undefined
+    const queue = createRequestQueue({
+      reply: (generation, response) => replies.push({ generation, response }),
+      queueLimit: 32,
+    })
+    queue.setRequestHandler((request) => {
+      return request.id === "old" ? oldRequest.promise : newRequest.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "old", operation: "transport.play", input: {} })
+    queue.dispatch(2, { version: "v1", type: "request", id: "new", operation: "transport.status", input: {} })
+    oldRequest.resolve({ id: "old", result: {} })
+    newRequest.resolve({ id: "new", result: {} })
+    await flushPromises()
+
+    expect(canceledId).toBe("old")
+    expect(replies).toEqual([
+      {
+        generation: 1,
+        response: { id: "old", error: { version: "v1", code: "cancelled", message: "The request was cancelled." } },
+      },
+      { generation: 2, response: { id: "new", result: {} } },
+    ])
+  })
+
+  test("reset only advances the generation", async () => {
+    const replies: Reply[] = []
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    let canceledId: string | undefined
+    const queue = createRequestQueue({
+      reply: (generation, response) => replies.push({ generation, response }),
+      queueLimit: 32,
+    })
+    queue.setRequestHandler((_request) => {
+      return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+
+    queue.dispatch(2, { version: "v1", type: "request", id: "active", operation: "transport.status", input: {} })
+    queue.reset(1)
+    queue.reset(2)
+    expect(canceledId).toBeUndefined()
+    expect(replies).toEqual([])
+
+    queue.reset(3)
+    queue.reset(3)
+    pending.resolve({ id: "active", result: {} })
+    await flushPromises()
+
+    expect(canceledId).toBe("active")
+    expect(replies).toEqual([{
+      generation: 2,
+      response: { id: "active", error: { version: "v1", code: "cancelled", message: "The request was cancelled." } },
+    }])
+  })
+
+  test("removing the handler cancels queued and active requests exactly once", () => {
+    const queuedReplies: PreloadHostResponse[] = []
+    const queuedQueue = createRequestQueue({
+      reply: (_generation, response) => queuedReplies.push(response),
+      queueLimit: 32,
+    })
+    queuedQueue.dispatch(1, { version: "v1", type: "request", id: "queued", operation: "transport.play", input: {} })
+    queuedQueue.setRequestHandler(undefined)
+    queuedQueue.setRequestHandler(undefined)
+
+    const activeReplies: PreloadHostResponse[] = []
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    let canceledId: string | undefined
+    const activeQueue = createRequestQueue({
+      reply: (_generation, response) => activeReplies.push(response),
+      queueLimit: 32,
+    })
+    activeQueue.setRequestHandler((_request) => {
+      return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+    activeQueue.dispatch(1, { version: "v1", type: "request", id: "active", operation: "transport.play", input: {} })
+    activeQueue.setRequestHandler(undefined)
+    activeQueue.setRequestHandler(undefined)
+
+    expect(canceledId).toBe("active")
+    expect(queuedReplies).toHaveLength(1)
+    expect(activeReplies).toHaveLength(1)
+    expect(queuedReplies[0]?.error?.code).toBe("cancelled")
+    expect(activeReplies[0]?.error?.code).toBe("cancelled")
+  })
+
+  test("explicit cancellation settles queued and active requests exactly once", () => {
+    const replies: PreloadHostResponse[] = []
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    queue.dispatch(1, { version: "v1", type: "request", id: "queued", operation: "transport.play", input: {} })
+    queue.cancel("queued")
+    queue.cancel("queued")
+
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    let canceledId: string | undefined
+    queue.setRequestHandler((_request) => {
+      return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+    queue.dispatch(1, { version: "v1", type: "request", id: "active", operation: "transport.play", input: {} })
+    queue.cancel("active")
+    queue.cancel("active")
+
+    expect(canceledId).toBe("active")
+    expect(replies).toHaveLength(2)
+    expect(replies.map((reply) => reply.id)).toEqual(["queued", "active"])
+    expect(replies.every((reply) => reply.error?.code === "cancelled")).toBe(true)
+  })
+
+  test("late resolution and rejection after abort emit no second reply", async () => {
+    const replies: PreloadHostResponse[] = []
+    const resolved = Promise.withResolvers<PreloadHostResponse>()
+    const rejected = Promise.withResolvers<PreloadHostResponse>()
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    queue.setRequestHandler((request) => request.id === "resolve" ? resolved.promise : rejected.promise)
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "resolve", operation: "transport.play", input: {} })
+    queue.dispatch(1, { version: "v1", type: "request", id: "reject", operation: "transport.play", input: {} })
+    queue.cancel("resolve")
+    queue.cancel("reject")
+    resolved.resolve({ id: "resolve", result: {} })
+    rejected.reject(new Error("late failure"))
+    await flushPromises()
+
+    expect(replies).toHaveLength(2)
+    expect(replies.every((reply) => reply.error?.code === "cancelled")).toBe(true)
+  })
+
+  test("allows main to dispatch the final same-id export from the preflight reply", async () => {
+    const replies: PreloadHostResponse[] = []
+    const requests: PreloadHostRequest[] = []
+    let dispatchFinal: (() => void) | undefined
+    const queue = createRequestQueue({
+      reply: (_generation, response) => {
+        replies.push(response)
+        dispatchFinal?.()
+      },
+      queueLimit: 32,
+    })
+    queue.setRequestHandler(async (request) => {
+      requests.push(request)
+      return { id: request.id, result: request.input }
+    })
+    dispatchFinal = () => {
+      dispatchFinal = undefined
+      queue.dispatch(1, {
+        version: "v1",
+        type: "request",
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: false },
+        deadlineMs: 10_000,
+      })
+    }
+
+    queue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "export-request",
+      operation: "host.export.run",
+      input: { preflightOnly: true },
+      deadlineMs: 10_000,
+    })
+    await flushPromises()
+
+    expect(requests).toEqual([
+      {
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: true },
+      },
+      {
+        id: "export-request",
+        operation: "host.export.run",
+        input: { preflightOnly: false },
+      },
+    ])
+    expect(replies).toEqual([
+      { id: "export-request", result: { preflightOnly: true } },
+      { id: "export-request", result: { preflightOnly: false } },
+    ])
+  })
+
+  test("forwards cancellation without exposing AbortSignal across the bridge", async () => {
+    const replies: PreloadHostResponse[] = []
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    let received: PreloadHostRequest | undefined
+    let canceledId: string | undefined
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    queue.setRequestHandler((request) => {
+      received = request
+      return pending.promise
+    }, (requestId) => {
+      canceledId = requestId
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "import", operation: "host.import.audio", input: { source: { kind: "picker" } } })
+    queue.cancel("import")
+    pending.resolve({ id: "import", result: {} })
+    await flushPromises()
+
+    expect(received).toEqual({
+      id: "import",
+      operation: "host.import.audio",
+      input: { source: { kind: "picker" } },
+    })
+    expect(canceledId).toBe("import")
+    expect(replies).toEqual([{
+      id: "import",
+      error: { version: "v1", code: "cancelled", message: "The request was cancelled." },
+    }])
+  })
+
+  test("expires queued requests before dispatching them", () => {
+    let now = 0
+    const replies: PreloadHostResponse[] = []
+    let calls = 0
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      now: () => now,
+      queueLimit: 32,
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "seek", operation: "transport.seek", input: { seconds: 12 }, deadlineMs: 10 })
+    now = 10
+    queue.setRequestHandler(async () => {
+      calls += 1
+      return { id: "seek", result: {} }
+    })
+
+    expect(calls).toBe(0)
+    expect(replies).toEqual([{
+      id: "seek",
+      error: { version: "v1", code: "deadline-exceeded", message: "The request deadline elapsed." },
+    }])
+  })
+
+  test("rejects requests beyond the queue limit without replacing queued work", () => {
+    const replies: PreloadHostResponse[] = []
+    const requests: string[] = []
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 1,
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "first", operation: "transport.status", input: {} })
+    queue.dispatch(1, { version: "v1", type: "request", id: "second", operation: "transport.status", input: {} })
+    queue.setRequestHandler(async (request) => {
+      requests.push(request.id)
+      return { id: request.id, result: {} }
+    })
+
+    expect(requests).toEqual(["first"])
+    expect(replies).toEqual([{
+      id: "second",
+      error: { version: "v1", code: "unavailable", message: "The timeline controller is not ready." },
+    }])
+  })
+
+  test("rejects duplicate queued and active request ids without overwriting originals", async () => {
+    const replies: PreloadHostResponse[] = []
+    const requests: PreloadHostRequest[] = []
+    const pending = Promise.withResolvers<PreloadHostResponse>()
+    const queue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+
+    queue.dispatch(1, { version: "v1", type: "request", id: "duplicate", operation: "transport.seek", input: { seconds: 1 } })
+    queue.dispatch(1, { version: "v1", type: "request", id: "duplicate", operation: "transport.seek", input: { seconds: 2 } })
+    queue.setRequestHandler((request) => {
+      requests.push(request)
+      return pending.promise
+    })
+    queue.dispatch(1, { version: "v1", type: "request", id: "duplicate", operation: "transport.seek", input: { seconds: 3 } })
+    pending.resolve({ id: "duplicate", result: {} })
+    await flushPromises()
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.input).toEqual({ seconds: 1 })
+    expect(replies).toEqual([
+      {
+        id: "duplicate",
+        error: { version: "v1", code: "invalid-request", message: "A request with this id is already pending." },
+      },
+      {
+        id: "duplicate",
+        error: { version: "v1", code: "invalid-request", message: "A request with this id is already pending." },
+      },
+      { id: "duplicate", result: {} },
+    ])
+  })
+
+  test("emits host transport errors for control queue failures", async () => {
+    const replies: PreloadHostResponse[] = []
+    let now = 0
+    const deadlineQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      now: () => now,
+      queueLimit: 32,
+    })
+    deadlineQueue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "deadline",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+      deadlineMs: 1,
+    })
+    now = 1
+    deadlineQueue.setRequestHandler(async (request) => ({ id: request.id, result: {} }))
+
+    const cancelQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    cancelQueue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "cancel",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+    })
+    cancelQueue.cancel("cancel")
+
+    const unavailableQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 0,
+    })
+    unavailableQueue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "unavailable",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+    })
+
+    const failedQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    failedQueue.setRequestHandler(async () => {
+      throw new Error("host failure")
+    })
+    failedQueue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "failed",
+      operation: "control.capabilities",
+      input: {},
+      actorSubject: "local:123e4567-e89b-42d3-a456-426614174000",
+    })
+    await flushPromises()
+
+    expect(replies).toHaveLength(4)
+    for (const reply of replies) {
+      const error = reply.error
+      if (!error) throw new Error("Expected a queue failure reply.")
+      expect(() => parseDesktopReplyError("control.capabilities", error)).not.toThrow()
+      expect(["deadline-exceeded", "cancelled", "unavailable", "internal"]).toContain(error.code)
+    }
+    expect(replies.map((reply) => reply.error?.message)).toEqual([
+      "The request deadline elapsed.",
+      "The request was cancelled.",
+      "The timeline controller is not ready.",
+      "The timeline operation failed.",
+    ])
+  })
+
+  test("retains host error codes for queue failures", async () => {
+    const replies: PreloadHostResponse[] = []
+    let now = 0
+    const deadlineQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      now: () => now,
+      queueLimit: 32,
+    })
+    deadlineQueue.dispatch(1, {
+      version: "v1",
+      type: "request",
+      id: "deadline",
+      operation: "transport.status",
+      input: {},
+      deadlineMs: 1,
+    })
+    now = 1
+    deadlineQueue.setRequestHandler(async (request) => ({ id: request.id, result: {} }))
+
+    const cancelQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    cancelQueue.dispatch(1, { version: "v1", type: "request", id: "cancel", operation: "transport.status", input: {} })
+    cancelQueue.cancel("cancel")
+
+    const unavailableQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 0,
+    })
+    unavailableQueue.dispatch(1, { version: "v1", type: "request", id: "unavailable", operation: "transport.status", input: {} })
+
+    const failedQueue = createRequestQueue({
+      reply: (_generation, response) => replies.push(response),
+      queueLimit: 32,
+    })
+    failedQueue.setRequestHandler(async () => {
+      throw new Error("host failure")
+    })
+    failedQueue.dispatch(1, { version: "v1", type: "request", id: "failed", operation: "transport.status", input: {} })
+    await flushPromises()
+
+    expect(replies.map((reply) => reply.error?.code)).toEqual([
+      "deadline-exceeded",
+      "cancelled",
+      "unavailable",
+      "internal",
+    ])
+    for (const reply of replies) {
+      const error = reply.error
+      if (!error) throw new Error("Expected a queue failure reply.")
+      expect(() => parseDesktopReplyError("transport.status", error)).not.toThrow()
+    }
+  })
+})

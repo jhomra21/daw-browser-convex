@@ -93,9 +93,10 @@ export function useTimelineIdentity(
       for (let index = 0; index < data.tracks.length; index++) {
         const trackId = data.tracks[index]._id
         const historyRef = trackHistoryRefsById().get(trackId) ?? trackId
-        if (current.has(historyRef)) continue
+        const name = data.tracks[index]?.name
+        if (!name || current.get(historyRef) === name) continue
         if (!next) next = new Map(current)
-        next.set(historyRef, `Track ${index + 1}`)
+        next.set(historyRef, name)
       }
       return next ?? current
     })

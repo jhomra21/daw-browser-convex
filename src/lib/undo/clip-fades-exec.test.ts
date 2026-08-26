@@ -172,7 +172,7 @@ test('timing history persists transformed fades atomically', async () => {
   expect(timingCommits).toEqual([entry.data.from])
 })
 
-test('undo recreates deleted faded clips in the local repository', async () => {
+test('undo recreates deleted legacy clips in the local repository without strict-write normalization', async () => {
   const projectId = 'project:history-recreated-faded-clip'
   const repository = createLocalTimelineRepository(projectId)
   await repository.createTrack({ id: 'track-1' })
@@ -187,6 +187,15 @@ test('undo recreates deleted faded clips in the local repository', async () => {
           startSec: 1,
           duration: 4,
           fades: to,
+          midi: {
+            wave: 'custom-legacy',
+            gain: 7,
+            notes: [
+              { beat: 0, length: 1, pitch: 60 },
+              { beat: 1, length: -1, pitch: 200 },
+              ...Array.from({ length: 501 }, (_, beat) => ({ beat: beat + 2, length: 1, pitch: 60 })),
+            ],
+          },
         },
       }],
     },
@@ -231,7 +240,9 @@ test('undo recreates deleted faded clips in the local repository', async () => {
     startSec: 1,
     duration: 4,
     fades: to,
+    midi: { wave: 'custom-legacy', gain: 7 },
   })
+  expect((await repository.loadSnapshot()).clips[0]?.midi?.notes).toHaveLength(503)
 })
 
 test('undo recreates faded clips inside deleted local tracks', async () => {

@@ -1,9 +1,87 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
+import { parseDurableSharedTimelineOperation, parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
 import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
 import { createDefaultSpectralParams } from './spectral-params'
+import type { JsonValue } from './json-value'
 
 describe('shared timeline operations', () => {
+  test('builds expanded MIDI clip creates while retaining note-only creates', () => {
+    const expanded = parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi: {
+          wave: 'sine',
+          inputChannel: 2,
+          notes: [{ id: 'note-1', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 2 }],
+          cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 2 }],
+          pitchBends: [{ id: 'bend-1', beat: 0, value: 0.25, channel: 2 }],
+          channelPressure: [{ id: 'pressure-1', beat: 0, value: 0.5, channel: 2 }],
+          polyPressure: [{ id: 'poly-1', beat: 0, pitch: 60, value: 0.5, channel: 2 }],
+          mappings: [{
+            id: 'mapping-1',
+            source: { kind: 'cc', controller: 1, channel: 2 },
+            target: { parameterId: 'gain', effectInstanceId: 'effect-1' },
+            outputMin: 0,
+            outputMax: 1,
+          }],
+        },
+      },
+    })
+    expect(expanded?.kind === 'clips.create' ? expanded.payload.midi : undefined).toMatchObject({
+      inputChannel: 2,
+      notes: [{ id: 'note-1', channel: 2 }],
+      cc: [{ id: 'cc-1', channel: 2 }],
+      pitchBends: [{ id: 'bend-1', channel: 2 }],
+      channelPressure: [{ id: 'pressure-1', channel: 2 }],
+      polyPressure: [{ id: 'poly-1', channel: 2 }],
+      mappings: [{ id: 'mapping-1' }],
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1', startSec: 0, duration: 1, clipKind: 'midi',
+        midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+      },
+    })?.kind).toBe('clips.create')
+  })
+
+  test('accepts historical durable MIDI creates without relaxing new writes', () => {
+    const legacy = {
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi: { wave: 'legacy-wave', gain: 4, notes: Array.from({ length: 501 }, (_, pitch) => ({ beat: pitch, length: 1, pitch: pitch % 128 })) },
+      },
+    }
+    expect(parseSharedTimelineOperation(legacy)).toBeNull()
+    expect(parseDurableSharedTimelineOperation(legacy)?.kind).toBe('clips.create')
+  })
+  test('accepts historical durable MIDI create-many entries without relaxing new writes', () => {
+    const legacy = {
+      kind: 'clips.createMany',
+      payload: {
+        items: [{
+          trackId: 'track-1',
+          startSec: 0,
+          duration: 1,
+          clipKind: 'midi',
+          midi: { wave: 'custom-legacy', gain: 7, notes: [] },
+        }],
+      },
+    }
+    expect(parseSharedTimelineOperation(legacy)).toBeNull()
+    expect(parseDurableSharedTimelineOperation(legacy)).toMatchObject({
+      kind: 'clips.createMany',
+      payload: { items: [{ midi: { wave: 'custom-legacy', gain: 7 } }] },
+    })
+  })
   test('parses fade operations and reports their clip target', () => {
     const operation = parseSharedTimelineOperation({
       kind: 'clips.setFades',
@@ -60,6 +138,91 @@ describe('shared timeline operations', () => {
       fadeInCurvePosition: 0.25,
       fadeOutCurvePosition: 0.75,
     })
+  })
+
+  test('parses strict durable MIDI and device-removal operations', () => {
+    const midi = parseSharedTimelineOperation({
+      kind: 'clips.setMidi',
+      payload: {
+        clipId: 'clip-1',
+        operationId: 'midi-1',
+        midi: {
+          wave: 'sine',
+          notes: [{ beat: 2, length: 1, pitch: 72 }, { beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
+        },
+      },
+    })
+    expect(midi).toEqual({
+      kind: 'clips.setMidi',
+      payload: {
+        clipId: 'clip-1',
+        operationId: 'midi-1',
+        midi: {
+          wave: 'sine',
+          notes: [
+            { id: 'midi:note:[["beat",0],["channel",1],["length",1],["pitch",60],["velocity",0.5]]:0', beat: 0, length: 1, pitch: 60, velocity: 0.5, channel: 1 },
+            { id: 'midi:note:[["beat",2],["channel",1],["length",1],["pitch",72]]:0', beat: 2, length: 1, pitch: 72, channel: 1 },
+          ],
+          cc: [],
+          pitchBends: [],
+          channelPressure: [],
+          polyPressure: [],
+          mappings: [],
+        },
+      },
+    })
+    if (!midi) throw new Error('Expected MIDI operation to parse')
+    expect(readSharedTimelineOperationTargets(midi).clipIds).toEqual(new Set(['clip-1']))
+    expect(parseSharedTimelineOperation({
+      kind: 'clips.setMidi',
+      payload: { clipId: 'clip-1', operationId: 'midi-1', midi: { wave: 'sine', notes: [] }, unexpected: true },
+    })).toBeNull()
+
+    const removeInstrument = parseSharedTimelineOperation({
+      kind: 'instruments.removeTrackInstrument',
+      payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
+    })
+    const removeArpeggiator = parseSharedTimelineOperation({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: 'arp-remove-1' },
+    })
+    expect(removeInstrument).toEqual({
+      kind: 'instruments.removeTrackInstrument',
+      payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
+    })
+    expect(removeArpeggiator).toEqual({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: 'arp-remove-1' },
+    })
+    expect(parseSharedTimelineOperation({
+      kind: 'effects.removeArpeggiator',
+      payload: { trackId: 'track-1', operationId: '', extra: true },
+    })).toBeNull()
+  })
+
+  test('rejects supplied MIDI create payloads that exceed write limits', () => {
+    const create = (midi: JsonValue) => parseSharedTimelineOperation({
+      kind: 'clips.create',
+      payload: {
+        trackId: 'track-1',
+        startSec: 0,
+        duration: 1,
+        clipKind: 'midi',
+        midi,
+      },
+    })
+    expect(create({
+      wave: 'sine',
+      notes: Array.from({ length: 501 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+    })).toBeNull()
+    expect(create({
+      wave: 'sine',
+      notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
+      cc: [{ beat: 0, controller: 1, value: 0 }],
+    })).toBeNull()
+    expect(create({ wave: 'custom-legacy', gain: 7, notes: [] })).toBeNull()
+    expect(create({ wave: '', gain: 7, notes: [] })).toBeNull()
+    expect(create({ wave: 'sine', gain: 7, notes: [] })).toBeNull()
   })
 
   test('roundtrips synth parameters only with a durable instance identity', () => {
@@ -290,13 +453,13 @@ describe('shared timeline operations', () => {
     })
   })
 
-  test('preserves color and collapsed state on track create operations', () => {
+  test('preserves name, color, and collapsed state on track create operations', () => {
     expect(parseSharedTimelineOperation({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
+      payload: { name: 'Named group', index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })).toEqual({
       kind: 'tracks.create',
-      payload: { index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
+      payload: { name: 'Named group', index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })
     const expanded = parseSharedTimelineOperation({
       kind: 'tracks.create',
@@ -351,7 +514,7 @@ describe('shared timeline operations', () => {
 
   test('rejects malformed effect metadata when restoring a dissolved group', () => {
     const payload: Extract<SharedTimelineOperation, { kind: 'tracks.restoreUngroup' }>['payload'] = {
-      group: { index: 1, volume: 0.8, sends: [] },
+      group: { name: 'Restored group', index: 1, volume: 0.8, sends: [] },
       children: [{ trackId: 'track-1', outputToGroup: true }],
       effects: [{
         type: 'arpeggiator',

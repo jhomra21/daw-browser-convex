@@ -1,4 +1,5 @@
 import type { TimelineTrackRow } from "./types";
+import { normalizeTrackColor } from "@daw-browser/shared";
 
 type BuildTimelineTrackRowInput = {
   id: string;
@@ -31,7 +32,7 @@ export const buildTimelineTrackRow = (input: BuildTimelineTrackRowInput): Timeli
   groupId: input.groupId,
   collapsed:
     input.collapsed ?? (input.channelRole === "return" ? true : undefined),
-  color: input.color,
+  color: normalizeTrackColor(input.color),
   outputTargetId: input.outputTargetId,
   sends: input.sends ?? [],
   createdAt: input.timestamp,

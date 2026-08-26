@@ -1,17 +1,16 @@
 import type { ReverbParamsLite } from '@daw-browser/shared'
-import { applyReverbNodeChainParams, createReverbNodeChain, disconnectReverbChain, type CreateReverbImpulseResponse, type ReverbNodeChain } from './chain'
-import { getAppliedReverbSignature, getReverbTopologySignature } from './reverb-signature'
+import { applyReverbNodeChainParams, createReverbNodeChain, disconnectReverbChain, type ReverbNodeChain } from './chain'
+import { serializeReverbParams } from '@daw-browser/shared'
 
 export type ReverbChainState = {
   chain: () => ReverbNodeChain | null
   set: (
     ctx: BaseAudioContext,
     params: ReverbParamsLite,
-    createImpulseResponse: CreateReverbImpulseResponse,
-  ) => {
+  ) => Promise<{
     changed: boolean
     requiresRoutingRebuild: boolean
-  }
+  }>
   close: () => void
 }
 
@@ -22,9 +21,9 @@ export function createReverbChainState(): ReverbChainState {
 
   return {
     chain: () => reverb,
-    set: (ctx, params, createImpulseResponse) => {
-      const nextSignature = getAppliedReverbSignature(params)
-      const topology = getReverbTopologySignature(params)
+    set: async (ctx, params) => {
+      const nextSignature = serializeReverbParams(params)
+      const topology = params.enabled ? 'enabled' : 'disabled'
       const previousTopology = topologySignature
       if (signature === nextSignature) {
         return {
@@ -47,8 +46,8 @@ export function createReverbChainState(): ReverbChainState {
         }
       }
 
-      if (!reverb) reverb = createReverbNodeChain(ctx, params, createImpulseResponse)
-      else applyReverbNodeChainParams(reverb, params, createImpulseResponse)
+      if (!reverb) reverb = await createReverbNodeChain(ctx, params)
+      else applyReverbNodeChainParams(reverb, params)
       signature = nextSignature
       topologySignature = topology
       return {

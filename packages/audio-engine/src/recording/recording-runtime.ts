@@ -1,6 +1,11 @@
 import { loadWorkletModule } from '../worklet-loader'
 import { recorderWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
-import { readRecorderOutboundMessage, type RecorderReturnMessage } from './recording-protocol'
+import {
+  readRecorderOutboundMessage,
+  type RecorderBlockMessage,
+  type RecorderOutboundMessage,
+  type RecorderReturnMessage,
+} from './recording-protocol'
 import { observeResource, type ResourceObserver } from '../runtime-diagnostics'
 
 export type RecordingMonitorMode = 'off' | 'auto' | 'on'
@@ -65,9 +70,34 @@ export type RecordingCaptureTransport = {
   terminate: () => void
 }
 
+type RecordingWorkletMessage =
+  | {
+    type: 'configure'
+    generation: number
+    sessionId: string
+    channelCount: number
+    inputChannels: readonly number[]
+    gain: number
+    polarity: 1 | -1
+    epoch: RecordingEpoch
+    punchStartFrame: number
+    punchEndFrame: number | null
+  }
+  | {
+    type: 'initialize-sab'
+    generation: number
+    sessionId: string
+    state: SharedArrayBuffer
+    frameCounts: SharedArrayBuffer
+    samples: SharedArrayBuffer
+  }
+  | RecorderBlockMessage
+  | { type: 'finalize'; generation: number; sessionId: string; stopContextFrame?: number }
+  | RecorderReturnMessage
+
 export type RecordingMessageEndpoint = {
-  postMessage: (message: unknown, transfer?: readonly ArrayBuffer[]) => void
-  setMessageHandler: (handler: (message: unknown) => void) => void
+  postMessage: (message: RecordingWorkletMessage, transfer?: readonly ArrayBuffer[]) => void
+  setMessageHandler: (handler: (message: RecorderOutboundMessage | null) => void) => void
 }
 
 export type StartRecordingCaptureOptions = {
@@ -274,7 +304,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     captureTrack.addEventListener('mute', onMute)
     captureTrack.addEventListener('unmute', onUnmute)
     captureContext.addEventListener('statechange', onContextStateChange)
-    let transportMessageHandler: ((message: unknown) => void) | null = null
+    let transportMessageHandler: ((message: RecorderOutboundMessage | null) => void) | null = null
     establishedSession.transport = input.createTransport?.({
       generation: currentGeneration,
       sessionId: input.sessionId,
@@ -298,7 +328,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     captureWorklet.port.onmessage = (event) => {
       const message = readRecorderOutboundMessage(event.data)
       if (!message) {
-        transportMessageHandler?.(event.data)
+        transportMessageHandler?.(null)
         return
       }
       if (message.generation !== currentGeneration || message.sessionId !== input.sessionId) return
@@ -335,7 +365,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
           contextFrame: frameAtCurrentTime(captureContext),
         })
         if (transportMessageHandler) {
-          transportMessageHandler(event.data)
+          transportMessageHandler(message)
         } else {
           const returned: RecorderReturnMessage = {
             type: 'return',
@@ -349,12 +379,12 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
         return
       }
       if (message.type === 'failure') {
-        transportMessageHandler?.(event.data)
+        transportMessageHandler?.(message)
         fail(establishedSession, message.reason)
         return
       }
       if (transportMessageHandler) {
-        transportMessageHandler(event.data)
+        transportMessageHandler(message)
         return
       }
       const stopContextFrame = establishedSession.stopContextFrame ?? frameAtCurrentTime(captureContext)
@@ -450,7 +480,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
         sessionId: session.sessionId,
         stopContextFrame,
         capturedFrames: descriptor.capturedFrames,
-      }, true)).catch((error: unknown) => fail(
+      }, true)).catch((error) => fail(
         session,
         error instanceof Error ? error.message : 'recording-transport-failed',
         true,

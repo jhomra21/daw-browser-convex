@@ -1,29 +1,14 @@
-import { Link, useNavigate } from "@tanstack/solid-router";
 import { isLocalId } from "@daw-browser/shared";
 import { type Component, Show, createMemo } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator } from "~/components/ui/menubar";
-import { authClient } from "~/lib/auth-client";
-import { queryClient } from "~/lib/query-client";
-import { useSessionQuery } from "~/lib/session";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "../transport-types";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) => {
   const toolbar = () => props.toolbar;
-  const navigate = useNavigate();
-  const session = useSessionQuery();
-  const user = createMemo(() => session.data?.user);
   const canExportArchive = () => isLocalId("project", toolbar().projectMenu.currentProjectId);
-
-  const handleSignOut = async () => {
-    try {
-      await authClient.signOut();
-    } finally {
-      queryClient.setQueryData(["session"], null);
-      navigate({ to: "/Login" });
-    }
-  };
+  const signedIn = createMemo(() => Boolean(toolbar().projectMenu.currentUserId));
 
   return (
     <MenubarMenu value="file">
@@ -81,9 +66,9 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
         </MenubarItem>
         <MenubarSeparator />
         <Show
-          when={user()?.email}
+          when={signedIn()}
           fallback={
-            <MenubarItem as={Link} to="/Login" class={nativeMenuItemClass}>
+            <MenubarItem class={nativeMenuItemClass} onSelect={toolbar().projectMenu.onSignIn}>
               Sign In
             </MenubarItem>
           }
@@ -94,7 +79,7 @@ export const FileMenu: Component<{ toolbar: TransportControlsProps }> = (props) 
           >
             Account
           </MenubarItem>
-          <MenubarItem class={nativeMenuItemClass} onSelect={handleSignOut}>
+          <MenubarItem class={nativeMenuItemClass} onSelect={() => void toolbar().projectMenu.onLogout()}>
             Logout
           </MenubarItem>
         </Show>

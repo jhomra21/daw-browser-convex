@@ -20,6 +20,7 @@ describe('durable shared ungroup history', () => {
     const result = readSharedUngroupResult({
       status: 'applied',
       group: {
+        name: 'Committed group name',
         historyRef: 'group-ref',
         index: 0,
         volume: 0.8,
@@ -64,7 +65,7 @@ describe('durable shared ungroup history', () => {
     }])
     expect(entry.data.effects?.audioEffects?.[0]?.index).toBe(2)
     expect(entry.data.automation?.[0]).toMatchObject({ id: 'envelope', enabled: true, updatedAt: 2 })
-    expect(entry.data.groupTrack).toMatchObject({ volume: 0.8, soloed: true })
+    expect(entry.data.groupTrack).toMatchObject({ name: 'Committed group name', volume: 0.8, soloed: true })
   })
 
   test('rejects a replay rejection instead of creating history', () => {

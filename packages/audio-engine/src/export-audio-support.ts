@@ -2,6 +2,7 @@ import {
   FlacOutputFormat,
   Mp3OutputFormat,
   OggOutputFormat,
+  Quality,
   WavOutputFormat,
   canEncodeAudio,
   type AudioCodec,
@@ -24,10 +25,9 @@ export type ExportAudioSupportRequest = {
 type ExportAudioEncodingDescriptor = {
   codec: AudioCodec
   createOutputFormat: () => OutputFormat
-  requiredBitrate?: number
 }
 
-const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncodingDescriptor> = {
+const exportAudioEncodingDescriptors = {
   wav: {
     codec: 'pcm-s16',
     createOutputFormat: () => new WavOutputFormat(),
@@ -43,27 +43,36 @@ const exportAudioEncodingDescriptors: Record<ExportAudioFormat, ExportAudioEncod
   flac: {
     codec: 'flac',
     createOutputFormat: () => new FlacOutputFormat(),
-    requiredBitrate: 1411200,
   },
-}
+} satisfies Record<ExportAudioFormat, ExportAudioEncodingDescriptor>
 
 export const getExportAudioCodec = (format: ExportAudioFormat): AudioCodec => {
   return exportAudioEncodingDescriptors[format].codec
 }
 
 export const getExportAudioDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
-  return getExportAudioBitrate(format) ?? exportAudioEncodingDescriptors[format].requiredBitrate
+  return getExportAudioBitrate(format)
+}
+
+export const getExportAudioQuality = (
+  format: ExportAudioFormat,
+  bitrate = getExportAudioDefaultBitrate(format),
+): Quality | undefined => {
+  if (!isLossyExportAudioFormat(format) || bitrate === undefined) return
+  return new Quality({ bitrate })
 }
 
 export const getExportAudioEncodingConfig = (
   format: ExportAudioFormat,
   request: ExportAudioSupportRequest = {},
-) => ({
-  sampleRate: request.sampleRate ?? 44100,
-  numberOfChannels: request.numberOfChannels ?? 2,
-  bitrate: (isLossyExportAudioFormat(format) ? request.bitrateByFormat?.[format] : undefined)
-    ?? getExportAudioDefaultBitrate(format),
-})
+) => {
+  const bitrate = isLossyExportAudioFormat(format) ? request.bitrateByFormat?.[format] : undefined
+  return {
+    sampleRate: request.sampleRate ?? 44100,
+    numberOfChannels: request.numberOfChannels ?? 2,
+    quality: getExportAudioQuality(format, bitrate),
+  }
+}
 
 export const createExportAudioOutputFormat = (format: ExportAudioFormat): OutputFormat => {
   return exportAudioEncodingDescriptors[format].createOutputFormat()

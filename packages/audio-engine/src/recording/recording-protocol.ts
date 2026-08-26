@@ -43,7 +43,7 @@ type RecorderMeterMessage = {
   peak: number
 }
 
-type RecorderOutboundMessage =
+export type RecorderOutboundMessage =
   | RecorderBlockMessage
   | RecorderMeterMessage
   | RecorderCompleteMessage
@@ -106,19 +106,44 @@ export type WriterOutboundMessage =
   | { type: 'aborted'; generation: number; sessionId: string }
   | { type: 'failure'; generation: number; sessionId: string; reason: string }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+type RecorderMessageFields = {
+  type?: unknown
+  generation?: unknown
+  sessionId?: unknown
+  blockId?: unknown
+  sequence?: unknown
+  frameCount?: unknown
+  channelCount?: unknown
+  buffer?: unknown
+  rms?: unknown
+  peak?: unknown
+  capturedFrames?: unknown
+  droppedFrames?: unknown
+  droppedBlocks?: unknown
+  reason?: unknown
+  sampleRate?: unknown
+  state?: unknown
+  frameCounts?: unknown
+  samples?: unknown
+}
+
+const isRecord = <Value>(value: Value): value is Value & RecorderMessageFields =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const isGeneration = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
 
-const isSessionId = (value: unknown): value is string =>
-  typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
+const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
 
-const isPositiveInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+const isGeneration = <Value>(value: Value): value is Value & number =>
+  isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
-const readRecorderBlockMessage = (value: unknown): RecorderBlockMessage | null => {
+const isSessionId = <Value>(value: Value): value is Value & string =>
+  isString(value) && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
+
+const isPositiveInteger = <Value>(value: Value): value is Value & number =>
+  isNumber(value) && Number.isSafeInteger(value) && value > 0
+
+const readRecorderBlockMessage = <Value>(value: Value): RecorderBlockMessage | null => {
   if (
     !isRecord(value) ||
     value.type !== 'block' ||
@@ -145,7 +170,7 @@ const readRecorderBlockMessage = (value: unknown): RecorderBlockMessage | null =
   }
 }
 
-export const readRecorderOutboundMessage = (value: unknown): RecorderOutboundMessage | null => {
+export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutboundMessage | null => {
   const block = readRecorderBlockMessage(value)
   if (block) return block
   if (
@@ -153,10 +178,10 @@ export const readRecorderOutboundMessage = (value: unknown): RecorderOutboundMes
     value.type === 'meter' &&
     isGeneration(value.generation) &&
     isSessionId(value.sessionId) &&
-    typeof value.rms === 'number' &&
+    isNumber(value.rms) &&
     Number.isFinite(value.rms) &&
     value.rms >= 0 &&
-    typeof value.peak === 'number' &&
+    isNumber(value.peak) &&
     Number.isFinite(value.peak) &&
     value.peak >= 0
   ) {
@@ -186,7 +211,7 @@ export const readRecorderOutboundMessage = (value: unknown): RecorderOutboundMes
       droppedBlocks: value.droppedBlocks,
     }
   }
-  if (value.type === 'failure' && typeof value.reason === 'string' && value.reason.length > 0) {
+  if (value.type === 'failure' && isString(value.reason) && value.reason.length > 0) {
     return {
       type: 'failure',
       generation: value.generation,
@@ -200,7 +225,7 @@ export const readRecorderOutboundMessage = (value: unknown): RecorderOutboundMes
   return null
 }
 
-const readRecorderReturnMessage = (value: unknown): RecorderReturnMessage | null => {
+const readRecorderReturnMessage = <Value>(value: Value): RecorderReturnMessage | null => {
   if (
     !isRecord(value) ||
     value.type !== 'return' ||
@@ -218,7 +243,7 @@ const readRecorderReturnMessage = (value: unknown): RecorderReturnMessage | null
   }
 }
 
-export const readWriterInboundMessage = (value: unknown): WriterInboundMessage | null => {
+export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMessage | null => {
   const block = readRecorderBlockMessage(value)
   if (block) return block
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
@@ -275,7 +300,7 @@ export const readWriterInboundMessage = (value: unknown): WriterInboundMessage |
   return null
 }
 
-export const readWriterOutboundMessage = (value: unknown): WriterOutboundMessage | null => {
+export const readWriterOutboundMessage = <Value>(value: Value): WriterOutboundMessage | null => {
   const returned = readRecorderReturnMessage(value)
   if (returned) return returned
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
@@ -289,7 +314,7 @@ export const readWriterOutboundMessage = (value: unknown): WriterOutboundMessage
       capturedFrames: value.capturedFrames,
     }
   }
-  if (value.type === 'failure' && typeof value.reason === 'string') {
+  if (value.type === 'failure' && isString(value.reason)) {
     return {
       type: 'failure',
       generation: value.generation,

@@ -41,10 +41,12 @@ describe('createPersistedAutomationState', () => {
       })
 
       state.previewEnvelope(envelope)
+      expect(state.snapshotPatches()).toEqual([{ targetKey: envelope.targetKey, envelope }])
       await state.commitEnvelope(envelope)
 
       expect(applied.at(-1)).toEqual([envelope])
       expect(persisted).toEqual([envelope])
+      expect(state.snapshotPatches()).toEqual([])
       dispose()
     })
   })
@@ -92,6 +94,26 @@ describe('createPersistedAutomationState', () => {
         next: [],
         previous: [envelope],
         changed: [envelope.targetKey],
+      }])
+      dispose()
+    })
+  })
+
+  test('exports an explicit deletion patch without treating an empty projection as authoritative', async () => {
+    await createRoot(async (dispose) => {
+      const state = createPersistedAutomationState({
+        targetKey: () => envelope.targetKey,
+        envelopes: () => [envelope],
+        applyToEngine: () => {},
+        persistEnvelope: () => {},
+        deleteEnvelope: () => {},
+      })
+
+      expect(state.snapshotPatches()).toEqual([])
+      state.previewEnvelope(undefined)
+      expect(state.snapshotPatches()).toEqual([{
+        targetKey: envelope.targetKey,
+        envelope: undefined,
       }])
       dispose()
     })

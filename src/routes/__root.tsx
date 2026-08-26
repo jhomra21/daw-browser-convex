@@ -5,13 +5,12 @@ const TanStackRouterDevtools = import.meta.env.DEV
   ? lazy(() => import('@tanstack/solid-router-devtools').then((mod) => ({ default: mod.TanStackRouterDevtools })))
   : null
 
-const isChunkLoadError = (error: unknown) => {
-  if (!(error instanceof Error)) return false
+const isChunkLoadError = (error: Error) => {
   return /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|ChunkLoadError/i.test(error.message)
 }
 
 const AppErrorFallback = (props: { error: unknown }) => {
-  const chunkLoadError = () => isChunkLoadError(props.error)
+  const chunkLoadError = () => props.error instanceof Error && isChunkLoadError(props.error)
 
   return (
     <div class="flex min-h-screen items-center justify-center bg-neutral-950 p-6 text-neutral-100">

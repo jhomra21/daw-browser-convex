@@ -4,6 +4,7 @@ import { clientXToSec } from '~/lib/timeline-utils'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
+import type { LivePlaybackCompileContext, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 
 type Options = {
   audioEngine: AudioEngine
@@ -13,15 +14,30 @@ type Options = {
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
   pixelsPerSecond: Accessor<number>
+  preflightPlayback?: () => Promise<boolean>
+  requiresNativeAudio?: boolean
+  nativePlayback?: {
+    enabled: Accessor<boolean>
+    projectId?: Accessor<string>
+    projectGeneration?: Accessor<number>
+    compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
+    captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
+    reportFault?: (message: string) => void
+  }
+  portableBrowserPlayback?: {
+    projectGeneration?: Accessor<number>
+    compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
+    reportFault?: (message: string) => void
+  }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
-  })
+  }, nativePlayback ? { ...nativePlayback, requiresNativeAudio } : undefined, portableBrowserPlayback)
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false
@@ -67,6 +83,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
   }
 
   const requestPlay = async () => {
+    if (preflightPlayback && !await preflightPlayback()) return
     const initialTracks = tracks()
     const pendingBuffers: Promise<void>[] = []
     for (const track of initialTracks) {

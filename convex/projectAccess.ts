@@ -1,19 +1,21 @@
 import type { Doc } from "./_generated/dataModel";
 import { query, type DatabaseReader } from "./_generated/server";
+import type { UserIdentity } from "convex/server";
 import { v } from "convex/values";
 import { isProjectRole, type ProjectRole } from "@daw-browser/shared";
+import { z } from "zod";
+import { getProjectRow } from "./projectRows";
 
 type RoomSummary = {
   projectId: string;
   name: string;
 };
 
-type ProjectRecord = Doc<"projects">;
 type RoomOwnership = Doc<"ownerships">;
 type ProjectAccessCtx = { db: DatabaseReader };
 type AuthenticatedCtx = {
   auth: {
-    getUserIdentity: () => Promise<{ subject: string } | null>;
+    getUserIdentity: () => Promise<UserIdentity | null>;
   };
 };
 
@@ -21,53 +23,20 @@ export function isProjectOwnership(ownership: RoomOwnership) {
   return !ownership.trackId && !ownership.clipId;
 }
 
-const hasDeletionPending = (projects: ProjectRecord[]) => (
-  projects.some((project) => project.deletionPendingAt !== undefined)
-);
-
-async function listProjectsByUser(
-  ctx: ProjectAccessCtx,
-  projectId: string,
-  userId: string,
-) {
-  return await ctx.db
-    .query("projects")
-    .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
-    .collect();
-}
-
 export async function isProjectDeletionPending(
   ctx: ProjectAccessCtx,
   projectId: string,
 ) {
-  const projects = await ctx.db
-    .query("projects")
-    .withIndex("by_room", (q) => q.eq("projectId", projectId))
-    .collect();
-  return hasDeletionPending(projects);
-}
-
-function buildProjectNameByRoom(projects: ProjectRecord[]) {
-  const nameByProjectId = new Map<string, string>();
-  for (const project of projects) {
-    if (!nameByProjectId.has(project.projectId)) {
-      nameByProjectId.set(project.projectId, project.name);
-    }
-  }
-  return nameByProjectId;
+  const project = await getProjectRow(ctx, projectId);
+  return project?.deletionPendingAt !== undefined;
 }
 
 async function readAccessibleProjectNameByRoom(
   ctx: ProjectAccessCtx,
   projectId: string,
 ) {
-  const projects = await ctx.db
-    .query("projects")
-    .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
-    .order("asc")
-    .collect();
-  if (hasDeletionPending(projects)) return null;
-  const project = projects[0];
+  const project = await getProjectRow(ctx, projectId);
+  if (project?.deletionPendingAt !== undefined) return null;
   return project?.name.trim() ? project.name : "Untitled";
 }
 
@@ -86,13 +55,8 @@ export async function listAccessibleProjects(
       .collect(),
   ]);
 
-  const pendingProjectIds = new Set(
-    projects
-      .filter((project) => project.deletionPendingAt !== undefined)
-      .map((project) => project.projectId),
-  );
-  const activeProjects = projects.filter((project) => project.deletionPendingAt === undefined && !pendingProjectIds.has(project.projectId));
-  const nameByProjectId = buildProjectNameByRoom(activeProjects);
+  const activeProjects = projects.filter((project) => project.deletionPendingAt === undefined);
+  const nameByProjectId = new Map(activeProjects.map((project) => [project.projectId, project.name]));
   const projectIds = new Set<string>();
 
   for (const project of activeProjects) {
@@ -138,8 +102,9 @@ export async function getProjectRole(
   projectId: string,
   userId: string,
 ): Promise<ProjectRole | null> {
-  const projects = await listProjectsByUser(ctx, projectId, userId);
-  if (projects.length > 0) return hasDeletionPending(projects) ? null : "owner";
+  const project = await getProjectRow(ctx, projectId);
+  if (!project || project.deletionPendingAt !== undefined) return null;
+  if (project.ownerUserId === userId) return "owner";
   const ownerships = await ctx.db
     .query("ownerships")
     .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
@@ -147,7 +112,6 @@ export async function getProjectRole(
   if (ownerships.length === 0) return null;
   const projectOwnership = ownerships.find(isProjectOwnership);
   if (!projectOwnership) return null;
-  if (await isProjectDeletionPending(ctx, projectId)) return null;
   const role = projectOwnership.role;
   return isProjectRole(role) ? role : "editor";
 }
@@ -190,9 +154,29 @@ export async function requireProjectAccess(
 }
 
 export async function requireAuthenticatedUserId(ctx: AuthenticatedCtx) {
+  return (await requireAuthenticatedIdentity(ctx)).subject;
+}
+
+export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Authentication required.");
-  return identity.subject;
+  const parsedIdentity = z.object({
+    subject: z.string(),
+    issuer: z.string(),
+    tokenIdentifier: z.string(),
+    dawControlActorIssuer: z.string().optional(),
+    dawControlActorTokenIdentifier: z.string().optional(),
+    dawWorker: z.boolean().optional(),
+  }).safeParse(identity);
+  if (!parsedIdentity.success) throw new Error("Authentication claims are invalid.");
+  return {
+    subject: parsedIdentity.data.subject,
+    issuer: parsedIdentity.data.issuer,
+    tokenIdentifier: parsedIdentity.data.tokenIdentifier,
+    dawControlActorIssuer: parsedIdentity.data.dawControlActorIssuer,
+    dawControlActorTokenIdentifier: parsedIdentity.data.dawControlActorTokenIdentifier,
+    dawWorker: parsedIdentity.data.dawWorker === true ? true : undefined,
+  };
 }
 
 export async function hasProjectAdminCapability(

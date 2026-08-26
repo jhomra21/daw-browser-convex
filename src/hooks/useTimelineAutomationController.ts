@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
@@ -13,10 +14,12 @@ import {
   isLocalId,
   normalizeTrackInstrumentParams,
   type AutomationTargetDeviceInstance,
+  type AutomationExternalParameter,
   type AutomationParameterSelection,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import { createPersistedAutomationState } from "~/components/timeline/create-persisted-automation-state";
+import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
@@ -24,6 +27,7 @@ import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
 import type { HistoryEntry } from "~/lib/undo/types";
 import { useProjectPersistedState } from "~/hooks/useProjectPersistedState";
 import { listLocalEffects } from "~/lib/local-effects";
+import { listLocalExternalProcessors } from "~/lib/external-plugins";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 
 type RemoteAutomationRow = {
@@ -39,6 +43,32 @@ type RemoteAutomationRow = {
   updatedAt: number;
 };
 
+type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+type JsonObject = { readonly [key: string]: JsonValue };
+
+const isJsonObject = (cause: unknown): cause is JsonObject => (
+  typeof cause === "object"
+  && cause !== null
+  && !Array.isArray(cause)
+  && Object.values(cause).every(isJsonValue)
+);
+
+const isJsonValue = (cause: unknown): cause is JsonValue => (
+  cause === null
+  || typeof cause === "boolean"
+  || typeof cause === "number"
+  || typeof cause === "string"
+  || (Array.isArray(cause) && cause.every(isJsonValue))
+  || isJsonObject(cause)
+);
+
+const isBoolean = (cause: unknown): cause is boolean => typeof cause === "boolean";
+const isFiniteNumber = (cause: unknown): cause is number => typeof cause === "number" && Number.isFinite(cause);
+const isString = (cause: unknown): cause is string => typeof cause === "string";
+const isAutomationTargetKey = (cause: JsonValue): cause is string => (
+  typeof cause === "string" && cause.startsWith("automation:v2:")
+);
+
 type TimelineAutomationControllerOptions = {
   projectId: Accessor<string>;
   userId: Accessor<string>;
@@ -52,6 +82,10 @@ type TimelineAutomationControllerOptions = {
     params?: unknown;
   }> | undefined>;
   audioEngine: AudioEngine;
+  reenableProcessorAutomation?: (
+    instanceId: string,
+    parameterIds: readonly string[],
+  ) => Promise<LiveProcessorControlResult>;
   isPlaying: Accessor<boolean>;
   playheadSec: Accessor<number>;
   selectedTrackId: Accessor<Track["id"] | "">;
@@ -116,11 +150,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-visible-tracks`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, boolean> = {};
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "boolean") next[key] = value;
+          if (isBoolean(value)) next[key] = value;
         }
         return next;
       } catch {
@@ -139,10 +173,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const legacySelected: Record<string, string> = {};
       if (selectedRaw) {
         try {
-          const parsed = JSON.parse(selectedRaw);
-          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          const parsed: unknown = JSON.parse(selectedRaw);
+          if (isJsonObject(parsed)) {
             for (const [key, value] of Object.entries(parsed)) {
-              if (typeof value === "string") legacySelected[key] = value;
+              if (isString(value)) legacySelected[key] = value;
             }
           }
         } catch {}
@@ -150,8 +184,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const readLegacy = () => {
         if (!legacyRaw) return {};
         try {
-          const parsed = JSON.parse(legacyRaw);
-          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+          const parsed: unknown = JSON.parse(legacyRaw);
+          if (!isJsonObject(parsed)) return {};
           const next: Record<string, string[]> = {};
           for (const [key, value] of Object.entries(parsed)) {
             if (key === "master" || value !== true) continue;
@@ -166,12 +200,12 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       };
       if (!raw) return readLegacy();
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return readLegacy();
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return readLegacy();
         const next: Record<string, string[]> = {};
         for (const [key, value] of Object.entries(parsed)) {
           if (!Array.isArray(value)) continue;
-          const targetKeys = value.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("automation:v2:"));
+          const targetKeys = value.filter(isAutomationTargetKey);
           if (targetKeys.length > 0) next[key] = Array.from(new Set(targetKeys));
         }
         return next;
@@ -188,11 +222,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-lane-heights`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, number> = {};
         for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "number" && Number.isFinite(value)) next[key] = clampAutomationLaneHeight(value);
+          if (isFiniteNumber(value)) next[key] = clampAutomationLaneHeight(value);
         }
         return next;
       } catch {
@@ -208,15 +242,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const raw = localStorage.getItem(`timeline:${rid}:automation-parameters`);
       if (!raw) return {};
       try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!isJsonObject(parsed)) return {};
         const next: Record<string, AutomationParameterSelection> = {};
         for (const [key, value] of Object.entries(parsed)) {
           if (value === "volume") next[key] = { parameterId: "volume" };
-          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-            const parameterId = Reflect.get(value, "parameterId");
-            const effectInstanceId = Reflect.get(value, "effectInstanceId");
-            if (typeof parameterId === "string" && (effectInstanceId === undefined || typeof effectInstanceId === "string")) {
+          if (isJsonObject(value)) {
+            const parameterId = value.parameterId;
+            const effectInstanceId = value.effectInstanceId;
+            if (isString(parameterId) && (effectInstanceId === undefined || isString(effectInstanceId))) {
               next[key] = { parameterId, effectInstanceId };
             }
           }
@@ -251,6 +285,13 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     changedTargetKeys: ReadonlySet<string>,
   ) => {
     options.audioEngine.cancelAutomationSchedules(changedTargetKeys.size === 0 ? undefined : changedTargetKeys, previous);
+    const nextTargetKeys = new Set(next.map((envelope) => envelope.targetKey));
+    const removedTargetKeys = new Set(
+      [...changedTargetKeys].filter((targetKey) => !nextTargetKeys.has(targetKey)),
+    );
+    if (removedTargetKeys.size > 0) {
+      options.audioEngine.restoreAutomationTargets(removedTargetKeys, previous);
+    }
     const overrides = overriddenAutomationTargetKeys();
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
     if (options.isPlaying()) {
@@ -273,10 +314,29 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       return next;
     });
   };
-  const reEnableAutomation = () => {
+  const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
     if (current.size === 0) return;
     const reEnabledTargetKeys = new Set(current);
+    const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
+    const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
+    for (const envelope of envelopes) {
+      if (!envelope.target.effectInstanceId) continue;
+      const key = envelope.target.effectInstanceId;
+      const entry = byProcessor.get(key) ?? { instanceId: key, parameterIds: [] };
+      if (!entry.parameterIds.includes(envelope.parameterId)) entry.parameterIds.push(envelope.parameterId);
+      byProcessor.set(key, entry);
+    }
+    const reenableProcessorAutomation = options.reenableProcessorAutomation;
+    if (reenableProcessorAutomation) {
+      const results = await Promise.all(
+        [...byProcessor.values()].map((processor) => (
+          reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
+        )),
+      );
+      const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
+      if (playbackControlAttempted && results.some((result) => !result.accepted)) return;
+    }
     const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
     setOverriddenAutomationTargetKeys(next);
     options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
@@ -284,6 +344,17 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     if (options.isPlaying()) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: reEnabledTargetKeys });
     else options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
   };
+  onMount(() => {
+    const releasePointerAutomation = () => {
+      void reEnableAutomation();
+    };
+    window.addEventListener("pointerup", releasePointerAutomation);
+    window.addEventListener("pointercancel", releasePointerAutomation);
+    onCleanup(() => {
+      window.removeEventListener("pointerup", releasePointerAutomation);
+      window.removeEventListener("pointercancel", releasePointerAutomation);
+    });
+  });
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,
@@ -388,12 +459,33 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       setEffectInstancesByOwnerKey({});
       return;
     }
-    const collect = (rows: Array<{ targetId: string; kind: string; instanceId?: string; index?: number; params?: unknown }>) => {
+    const collect = (rows: Array<{
+      targetId: string
+      kind: string
+      instanceId?: string
+      index?: number
+      params?: unknown
+      external?: { name: string; parameters: readonly AutomationExternalParameter[] }
+    }>) => {
       const grouped = new Map<string, Array<AutomationTargetDeviceInstance & { index: number }>>();
       for (const row of rows) {
+        if (row.external) {
+          const entries = grouped.get(row.targetId) ?? [];
+          entries.push({
+            id: row.instanceId ?? "external",
+            kind: "external",
+            name: row.external.name,
+            parameters: row.external.parameters,
+            index: row.index ?? entries.length,
+          });
+          grouped.set(row.targetId, entries);
+          continue;
+        }
         const normalizedKind = row.kind.startsWith("master-") ? row.kind.slice("master-".length) : row.kind;
         if (normalizedKind === "instrument") {
-          const instrument = normalizeTrackInstrumentParams(row.params);
+          const instrument = isJsonValue(row.params)
+            ? normalizeTrackInstrumentParams(row.params)
+            : undefined;
           if (!instrument || (instrument.kind !== "sampler" && instrument.kind !== "granular" && instrument.kind !== "synth")) continue;
           const entries = grouped.get(row.targetId) ?? [];
           entries.push({ id: instrument.instanceId, kind: instrument.kind, index: row.index ?? entries.length });
@@ -409,32 +501,54 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       for (const [targetId, entries] of grouped) {
         next[targetId] = entries
           .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
-          .map(({ id, kind }) => ({ id, kind }));
+          .map((entry) => entry.kind === "external"
+            ? {
+              id: entry.id,
+              kind: "external" as const,
+              name: entry.name,
+              parameters: entry.parameters,
+            }
+            : { id: entry.id, kind: entry.kind });
       }
       setEffectInstancesByOwnerKey(next);
     };
     if (isLocalId("project", rid)) {
-      const reload = () => void listLocalEffects(rid).then((rows) => {
+      const reload = () => void Promise.all([listLocalEffects(rid), listLocalExternalProcessors(rid)]).then(([rows, processors]) => {
         if (options.projectId() !== rid) return;
-        collect(rows.map((row) => ({
-          targetId: row.targetId,
-          kind: row.effect,
-          instanceId: row.instanceId,
-          index: row.index,
-          params: row.params,
-        })));
+        collect([
+          ...rows.map((row) => ({
+            targetId: row.targetId,
+            kind: row.effect,
+            instanceId: row.instanceId,
+            index: row.index,
+            params: row.params,
+          })),
+          ...processors.map((processor) => ({
+            targetId: processor.targetId,
+            kind: "external",
+            instanceId: processor.instanceId,
+            index: processor.index,
+            external: {
+              name: processor.manifest.identity.name,
+              parameters: processor.manifest.parameters
+                .map(({ id, title, unit, readOnly, hidden }) => ({ id, title, unit, readOnly, hidden })),
+            },
+          })),
+        ]);
       });
       reload();
       const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
       onCleanup(unsubscribe);
     }
-    collect((options.remoteEffects() ?? []).map((row) => ({
-      targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
-      kind: row.type,
-      instanceId: row.instanceId,
-      index: row.index,
-      params: row.params,
-    })).filter((row) => row.targetId.length > 0));
+    if (!isLocalId("project", rid)) {
+      collect((options.remoteEffects() ?? []).map((row) => ({
+        targetId: row.targetType === "master" ? "master" : row.trackId ?? "",
+        kind: row.type,
+        instanceId: row.instanceId,
+        index: row.index,
+        params: row.params,
+      })).filter((row) => row.targetId.length > 0));
+    }
   });
   const automationEnvelopesByTargetKey = createMemo(() => (
     new Map(persistedAutomation.envelopes().map((envelope) => [envelope.targetKey, envelope]))
@@ -597,6 +711,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
   return {
     envelopes: persistedAutomation.envelopes,
+    snapshotExportPatches: (): ExportAutomationPatch[] => persistedAutomation.snapshotPatches(),
     envelopesByTargetKey: automationEnvelopesByTargetKey,
     evaluatedValuesByTargetKey,
     applyEnvelope: applyAutomationEnvelopeState,

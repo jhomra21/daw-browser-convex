@@ -14,6 +14,7 @@ import { loadHistory, saveHistory, type LocalMixPatch } from '~/lib/timeline-sto
 import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
 import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
+import { createProjectControlClient } from '~/lib/project-control-client'
 import {
   applyTrackMixStateInHistoryModel,
   applyTrackPatchInHistoryModel,
@@ -31,7 +32,11 @@ import {
 } from '~/lib/undo/history-model'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
-import { registerSharedOutboxHistoryHandler } from '~/lib/shared-outbox'
+import {
+  attachClipDeletionRecoveriesToHistory,
+  flushPendingSharedOutboxHistoryUpdates,
+  registerSharedOutboxHistoryHandler,
+} from '~/lib/shared-outbox'
 
 export type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
@@ -61,6 +66,7 @@ type HistoryScopeContext = {
   tracks: Track[]
   pendingRun: Promise<void>
   pendingLocalHistorySave: Promise<void>
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
   unregisterLocalHistoryFlusher?: () => void
   hydratedFromLocalDb?: boolean
   pendingLocalHistoryState?: PersistedHistory
@@ -86,7 +92,6 @@ const mergeLocalHistoryState = (
 export function useTimelineHistory(
   options: UseTimelineHistoryOptions,
 ): UseTimelineHistoryReturn {
-  const drumRackBufferSync = createDrumRackBufferSync()
   const scopeContexts = new Map<string, HistoryScopeContext>()
 
   const readCurrentScope = () => readOptimisticGrantScope({
@@ -145,6 +150,10 @@ export function useTimelineHistory(
       tracks: [],
       pendingRun: Promise.resolve(),
       pendingLocalHistorySave: Promise.resolve(),
+      drumRackBufferSync: createDrumRackBufferSync({
+        projectId: () => scope.projectId,
+        isCurrentProject: () => readCurrentScopeKey() === scopeKey,
+      }),
     }
     scopeContexts.set(scopeKey, context)
     if (localProject) {
@@ -194,19 +203,31 @@ export function useTimelineHistory(
     const scope = readCurrentScope()
     if (!scope || scope.projectId !== entry.projectId) return
     getScopeContext(scope).manager.push(entry, mergeKey, mergeWindowMs)
+    flushPendingSharedOutboxHistoryUpdates()
   }
 
-  const unregisterSharedOutboxHistory = registerSharedOutboxHistoryHandler((entry) => {
-    if (entry.projectId !== options.projectId()) return false
-    pushHistory(entry)
-    return true
+  const unregisterSharedOutboxHistory = registerSharedOutboxHistoryHandler((update) => {
+    if (update.kind === 'entry') {
+      if (update.entry.projectId !== options.projectId()) return false
+      pushHistory(update.entry)
+      return true
+    }
+    if (update.projectId !== options.projectId()) return false
+    const scope = readCurrentScope()
+    if (!scope || scope.projectId !== update.projectId || scope.userId !== update.userId) return false
+    return getScopeContext(scope).manager.mutate((history) => (
+      attachClipDeletionRecoveriesToHistory(
+        history,
+        update.operationId,
+        update.recoveryIdsBySourceClipId,
+      )
+    ))
   })
   onCleanup(unregisterSharedOutboxHistory)
 
   const runHistoryAction = (
     mode: 'undo' | 'redo',
     executor: typeof execUndo | typeof execRedo,
-    onSuccess: (manager: UndoManager, entry: HistoryEntry) => void,
   ) => {
     const scope = readCurrentScope()
     if (!scope) return
@@ -217,9 +238,38 @@ export function useTimelineHistory(
       if (mode === 'undo' && !manager.canUndo()) return
       if (mode === 'redo' && !manager.canRedo()) return
 
-      const snapshot = manager.snapshot()
-      const entry = mode === 'undo' ? manager.popUndo() : manager.popRedo()
+      const entry = mode === 'undo' ? manager.reserveUndo() : manager.reserveRedo()
       if (!entry) return
+      const initializeDeleteOperationId = (candidate: HistoryEntry): boolean => {
+        if (candidate.type === 'section-edit') {
+          return candidate.data.entries.reduce(
+            (changed, child) => initializeDeleteOperationId(child) || changed,
+            false,
+          )
+        }
+        if (candidate.type === 'control-range-delete') {
+          if (mode === 'undo' && !candidate.data.restoreOperationId) {
+            candidate.data.restoreOperationId = crypto.randomUUID()
+            return true
+          }
+          if (mode === 'redo' && !candidate.data.deleteOperationId) {
+            candidate.data.deleteOperationId = crypto.randomUUID()
+            return true
+          }
+          return false
+        }
+        if (isLocalId('project', scope.projectId)) return false
+        if (mode === 'undo' && candidate.type === 'clip-create' && !candidate.data.clip.deleteOperationId) {
+          candidate.data.clip.deleteOperationId = crypto.randomUUID()
+          return true
+        }
+        if (mode === 'redo' && candidate.type === 'clip-delete' && !candidate.data.deleteOperationId) {
+          candidate.data.deleteOperationId = crypto.randomUUID()
+          return true
+        }
+        return false
+      }
+      manager.mutate(() => initializeDeleteOperationId(entry))
 
       const sourceActions = options.getActions()
       const workingTracks = cloneHistoryTracks(context.tracks)
@@ -263,6 +313,14 @@ export function useTimelineHistory(
         rescheduleChangedClips: (clipIds) => {
           runVisibleAction(scopeKey, () => sourceActions.rescheduleChangedClips(clipIds))
         },
+        rescheduleTimeline: () => {
+          runVisibleAction(scopeKey, () => sourceActions.rescheduleTimeline?.())
+        },
+        refreshLocalTimeline: () => (
+          readCurrentScopeKey() === scopeKey
+            ? sourceActions.refreshLocalTimeline?.() ?? Promise.resolve()
+            : Promise.resolve()
+        ),
         cancelTrackVolumeWrite: (trackId) => {
           runVisibleAction(scopeKey, () => sourceActions.cancelTrackVolumeWrite(trackId))
         },
@@ -300,24 +358,34 @@ export function useTimelineHistory(
           getTracks: () => workingTracks,
           getHistoryEntries: () => {
             const currentSnapshot = manager.snapshot()
-            return [...currentSnapshot.undo, ...currentSnapshot.redo, entry]
+            return [...currentSnapshot.undo, ...currentSnapshot.redo]
           },
           projectId: scope.projectId,
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
           audioEngine: options.audioEngine,
+          isCurrentScope: () => readCurrentScopeKey() === scopeKey,
           replayInstanceEffectParams: options.replayInstanceEffectParams,
-          drumRackBufferSync,
+          drumRackBufferSync: context.drumRackBufferSync,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,
+          persistHistory: () => { manager.mutate(() => true) },
+          controlClient: createProjectControlClient({
+            projectId: scope.projectId,
+            userId: scope.userId,
+            convexClient: options.convexClient,
+            convexApi: options.convexApi,
+          }),
           actions,
         })
         context.tracks = workingTracks
-        onSuccess(manager, entry)
+        if (mode === 'undo') manager.completeUndo(entry)
+        else manager.completeRedo(entry)
       } catch (error) {
+        if (mode === 'undo') manager.restoreUndo(entry)
+        else manager.restoreRedo(entry)
         console.error(`[Timeline] ${mode} failed`, error)
-        manager.hydrate(snapshot)
       }
     }
 
@@ -329,15 +397,11 @@ export function useTimelineHistory(
   }
 
   const handleUndo = () => {
-    runHistoryAction('undo', execUndo, (manager, entry) => {
-      manager.pushRedo(entry)
-    })
+    runHistoryAction('undo', execUndo)
   }
 
   const handleRedo = () => {
-    runHistoryAction('redo', execRedo, (manager, entry) => {
-      manager.pushUndoEntry(entry)
-    })
+    runHistoryAction('redo', execRedo)
   }
 
   createEffect(() => {
@@ -348,7 +412,10 @@ export function useTimelineHistory(
   })
 
   onCleanup(() => {
-    for (const context of scopeContexts.values()) context.unregisterLocalHistoryFlusher?.()
+    for (const context of scopeContexts.values()) {
+      context.unregisterLocalHistoryFlusher?.()
+      context.drumRackBufferSync.dispose()
+    }
   })
 
   return {

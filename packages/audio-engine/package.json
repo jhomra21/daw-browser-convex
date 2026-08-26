@@ -9,6 +9,8 @@
     "./bpm-detection": "./src/bpm-detection.ts",
     "./browser-characterization": "./src/browser-characterization.ts",
     "./audio-scheduling": "./src/audio-scheduling.ts",
+    "./midi-expression-scheduling": "./src/midi-expression-scheduling.ts",
+    "./portable-frame-scheduling": "./src/portable-frame-scheduling.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
     "./export-fidelity": "./src/export-fidelity.ts",
     "./export-range": "./src/export-range.ts",
@@ -17,14 +19,33 @@
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./reliability-characterization": "./src/reliability-characterization.ts",
     "./spectral-core": "./src/spectral-core.ts",
-    "./recording-encode-wav": "./src/recording/encode-wav.ts"
+    "./recording-encode-wav": "./src/recording/encode-wav.ts",
+    "./recording-protocol": "./src/recording/recording-protocol.ts",
+    "./portable-wasm-protocol": "./src/portable-wasm-protocol.ts",
+    "./native-host-wire": "./src/native-host-wire.ts",
+    "./live-native-projection": "./src/live-native-projection.ts",
+    "./live-mixer-runtime": "./src/live-mixer-runtime.ts",
+    "./portable-clip-projector": "./src/portable-clip-projector.ts",
+    "./portable-export-snapshot": "./src/portable-export-snapshot.ts",
+    "./portable-session-compiler": "./src/portable-session-compiler.ts",
+    "./portable-stretch-preparation": "./src/portable-stretch-preparation.ts",
+    "./effects/timing": "./src/effects/timing.ts",
+    "./portable-export-worker": "./src/portable-export-worker.ts",
+    "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",
+    "./wasm-audio-worklet-backend": "./src/backends/wasm-audio-worklet-backend.ts",
+    "./mixer/graph-contract": "./src/mixer/graph-contract.ts",
+    "./mixer/resolve-graph-processor": "./src/mixer/resolve-graph-processor.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {
+    "@daw-browser/audio-core-contract": "workspace:*",
+    "@daw-browser/audio-core-wasm": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
+    "@daw-browser/plugin-host-protocol": "workspace:*",
     "@daw-browser/shared": "workspace:*",
     "@daw-browser/timeline-core": "workspace:*",
-    "mediabunny": "^1.35.1"
+    "mediabunny": "1.55.1"
   }
 }

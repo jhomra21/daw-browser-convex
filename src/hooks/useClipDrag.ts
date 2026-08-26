@@ -1,5 +1,5 @@
 import { onCleanup, type Accessor } from 'solid-js'
-import { assert } from '@daw-browser/shared'
+import { assertDefined } from '@daw-browser/shared'
 
 import type { convexApi, convexClient } from '~/lib/convex'
 import { commitDuplicatedClipDrag, commitMovedClipDrag } from '~/lib/clip-drag-commit'
@@ -36,6 +36,8 @@ type ClipDragHandlers = {
   isDragging: () => boolean
 }
 
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
 type ClipDragOptions = {
   placementTracks: Accessor<Track[]>
   trackLayout: Accessor<TimelineTrackLayoutRow[]>
@@ -50,6 +52,7 @@ type ClipDragOptions = {
   setPreviewClipsByTrack: (previews: Map<TrackId, Clip[]>) => void
   commitClipMoves: (moves: Array<{ clipId: string; trackId: Track['id']; startSec: number }>) => void
   canWriteClip: (clipId: string) => boolean
+  canEditClip?: (clipId: string) => boolean
   selection: TimelineSelectionController
   projectId: Accessor<string>
   userId: () => string
@@ -99,6 +102,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     setPreviewClipsByTrack,
     commitClipMoves,
     canWriteClip,
+    canEditClip,
     selection,
     projectId,
     userId,
@@ -157,8 +161,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const visible = layout.map((row) => {
       const track = trackById.get(row.trackId)
-      assert(track, `Timeline layout row references missing track ${row.trackId}`)
-      return track
+      return assertDefined(track, `Timeline layout row references missing track ${row.trackId}`)
     })
     let result = visible
     if (addedTrackDuringDrag) {
@@ -239,6 +242,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
   const onClipPointerDown = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     if (event.button !== 0) return
+    if (canEditClip && !canEditClip(clipId)) return
     event.preventDefault()
     event.stopPropagation()
     const currentTracks = visiblePlacementTracks()
@@ -520,7 +524,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           historyPush: options.historyPush,
           createManyCloudClips: async (items, operationId) => {
             const result = await publishSharedTimelineOperation(rid, buildSharedClipCreateManyOperation({ items }, operationId))
-            return Array.isArray(result) ? result.map((item) => typeof item === 'string' ? item : null) : []
+            return Array.isArray(result) ? result.map((item) => isString(item) ? item : null) : []
           },
           selection,
         })

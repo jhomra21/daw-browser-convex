@@ -1,3 +1,5 @@
+import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from './json-value'
+
 export const SPECTRAL_FFT_SIZES = [512, 1024, 2048, 4096] as const
 export const SPECTRAL_OVERLAPS = [2, 4] as const
 export const SPECTRAL_MODES = ['freeze', 'gate', 'morph', 'shift-blur', 'hpss', 'noise-reduce'] as const
@@ -52,18 +54,18 @@ export const createDefaultSpectralParams = (): SpectralParams => ({
   mix: 1,
 })
 
-const objectValue = (value: unknown): object =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {}
+const objectValue = (value: JsonValue | undefined): JsonObject =>
+  isJsonObject(value) ? value : {}
 
-const numberValue = (value: unknown, fallback: number, min: number, max: number) =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+const numberValue = (value: JsonValue | undefined, fallback: number, min: number, max: number) =>
+  isJsonNumber(value) && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
 
-const isSpectralFftSize = (value: unknown): value is SpectralFftSize =>
+const isSpectralFftSize = (value: JsonValue | undefined): value is SpectralFftSize =>
   value === 512 || value === 1024 || value === 2048 || value === 4096
 
-const isSpectralOverlap = (value: unknown): value is SpectralOverlap => value === 2 || value === 4
+const isSpectralOverlap = (value: JsonValue | undefined): value is SpectralOverlap => value === 2 || value === 4
 
-const isSpectralMode = (value: unknown): value is SpectralMode =>
+const isSpectralMode = (value: JsonValue | undefined): value is SpectralMode =>
   value === 'freeze'
   || value === 'gate'
   || value === 'morph'
@@ -71,28 +73,28 @@ const isSpectralMode = (value: unknown): value is SpectralMode =>
   || value === 'hpss'
   || value === 'noise-reduce'
 
-export const normalizeSpectralParamsEnvelope = (value: unknown): SpectralParamsEnvelope => {
+export const normalizeSpectralParamsEnvelope = (value: JsonValue): SpectralParamsEnvelope => {
   const envelope = objectValue(value)
-  const state = objectValue(Reflect.get(envelope, 'version') === 1 ? Reflect.get(envelope, 'state') : value)
+  const state = objectValue(envelope.version === 1 ? envelope.state : value)
   const defaults = createDefaultSpectralParams()
   return {
     version: 1,
     state: {
-      enabled: typeof Reflect.get(state, 'enabled') === 'boolean' ? Reflect.get(state, 'enabled') : defaults.enabled,
-      fftSize: isSpectralFftSize(Reflect.get(state, 'fftSize')) ? Reflect.get(state, 'fftSize') : defaults.fftSize,
-      overlap: isSpectralOverlap(Reflect.get(state, 'overlap')) ? Reflect.get(state, 'overlap') : defaults.overlap,
-      mode: isSpectralMode(Reflect.get(state, 'mode')) ? Reflect.get(state, 'mode') : defaults.mode,
-      freeze: numberValue(Reflect.get(state, 'freeze'), defaults.freeze, 0, 1),
-      gateThresholdDb: numberValue(Reflect.get(state, 'gateThresholdDb'), defaults.gateThresholdDb, -120, 0),
-      gateAttackMs: numberValue(Reflect.get(state, 'gateAttackMs'), defaults.gateAttackMs, 0.1, 1000),
-      gateReleaseMs: numberValue(Reflect.get(state, 'gateReleaseMs'), defaults.gateReleaseMs, 1, 5000),
-      morph: numberValue(Reflect.get(state, 'morph'), defaults.morph, 0, 1),
-      binShift: numberValue(Reflect.get(state, 'binShift'), defaults.binShift, -2048, 2048),
-      blur: numberValue(Reflect.get(state, 'blur'), defaults.blur, 0, 1),
-      harmonicPercussiveBalance: numberValue(Reflect.get(state, 'harmonicPercussiveBalance'), defaults.harmonicPercussiveBalance, -1, 1),
-      noiseReduction: numberValue(Reflect.get(state, 'noiseReduction'), defaults.noiseReduction, 0, 1),
-      profileLearn: numberValue(Reflect.get(state, 'profileLearn'), defaults.profileLearn, 0, 1),
-      mix: numberValue(Reflect.get(state, 'mix'), defaults.mix, 0, 1),
+      enabled: isJsonBoolean(state.enabled) ? state.enabled : defaults.enabled,
+      fftSize: isSpectralFftSize(state.fftSize) ? state.fftSize : defaults.fftSize,
+      overlap: isSpectralOverlap(state.overlap) ? state.overlap : defaults.overlap,
+      mode: isSpectralMode(state.mode) ? state.mode : defaults.mode,
+      freeze: numberValue(state.freeze, defaults.freeze, 0, 1),
+      gateThresholdDb: numberValue(state.gateThresholdDb, defaults.gateThresholdDb, -120, 0),
+      gateAttackMs: numberValue(state.gateAttackMs, defaults.gateAttackMs, 0.1, 1000),
+      gateReleaseMs: numberValue(state.gateReleaseMs, defaults.gateReleaseMs, 1, 5000),
+      morph: numberValue(state.morph, defaults.morph, 0, 1),
+      binShift: numberValue(state.binShift, defaults.binShift, -2048, 2048),
+      blur: numberValue(state.blur, defaults.blur, 0, 1),
+      harmonicPercussiveBalance: numberValue(state.harmonicPercussiveBalance, defaults.harmonicPercussiveBalance, -1, 1),
+      noiseReduction: numberValue(state.noiseReduction, defaults.noiseReduction, 0, 1),
+      profileLearn: numberValue(state.profileLearn, defaults.profileLearn, 0, 1),
+      mix: numberValue(state.mix, defaults.mix, 0, 1),
     },
   }
 }

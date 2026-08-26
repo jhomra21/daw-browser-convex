@@ -157,17 +157,20 @@ export function scheduleSamplerVoice(input: {
   outputPan.connect(outputGain)
   outputGain.connect(input.destination)
   if (input.timelineStartSec !== undefined && input.timelineToCtxTime) {
-    const directBindings: Partial<Record<SamplerAutomationParameterId, AudioParam>> = {
-      'output.gain': outputGain.gain,
-      'output.pan': outputPan.pan,
-      'filter.frequency': filter.frequency,
-      'filter.q': filter.Q,
-      'lfo.rate': oscillator?.frequency,
-      ...lfoDepthParams,
-    }
+    const directBindings = new Map<SamplerAutomationParameterId, AudioParam | undefined>([
+      ['output.gain', outputGain.gain],
+      ['output.pan', outputPan.pan],
+      ['filter.frequency', filter.frequency],
+      ['filter.q', filter.Q],
+      ['lfo.rate', oscillator?.frequency],
+      ['lfo.filterDepth', lfoDepthParams['lfo.filterDepth']],
+      ['lfo.ampDepth', lfoDepthParams['lfo.ampDepth']],
+      ['lfo.panDepth', lfoDepthParams['lfo.panDepth']],
+      ['lfo.pitchDepth', lfoDepthParams['lfo.pitchDepth']],
+    ])
     for (const envelope of input.automationEnvelopes ?? []) {
       const key = parseInstrumentAutomationKey(envelope.parameterId)
-      const param = key ? directBindings[key.parameterId] : undefined
+      const param = key ? directBindings.get(key.parameterId) : undefined
       if (!key || !param || !envelope.enabled) continue
       scheduleAutomationEnvelope(
         [{ param, valueToAudioValue: (value) => key.parameterId === 'lfo.ampDepth' ? value * plan.peakGain : value }],
@@ -220,18 +223,18 @@ export function createSamplerRuntime(options: Options) {
       }
     }
   }
-  const trigger = (trackId: string, note: number, velocity: number, when: number, durationSec: number, clipId?: string, timelineStartSec?: number) => {
+  const trigger = (trackId: string, note: number, velocity: number, when: number, durationSec: number, clipId?: string, timelineStartSec?: number, onEnded?: () => void): ((stopWhen: number) => void) | undefined => {
     const config = configs.get(trackId)
     const ctx = options.getAudioContext()
-    if (!config || !ctx) return false
+    if (!config || !ctx) return undefined
     const selected = selectSamplerZone(config.params.zones, note, Math.round(velocity * 127), config.roundRobin)
     config.roundRobin = selected.roundRobin
     const zone = selected.zone
     const buffer = zone ? config.buffers.get(zone.id) : undefined
-    if (!zone) return false
+    if (!zone) return undefined
     if (!buffer) {
       options.onNoteMiss({ trackId, zoneId: zone.id, assetKey: zone.sample.assetKey, url: zone.sample.url })
-      return false
+      return undefined
     }
     if (config.params.retrigger) terminateMatching(trackId, when, (voice) => voice.note === note)
     if (zone.chokeGroup > 0) terminateMatching(trackId, when, (voice) => voice.chokeGroup === zone.chokeGroup)
@@ -260,9 +263,16 @@ export function createSamplerRuntime(options: Options) {
     options.onAssetUse(zone.sample.assetKey, true)
     const voice: Voice = { ...scheduled, id: voiceId++, note, chokeGroup: zone.chokeGroup, assetKey: zone.sample.assetKey, clipId, removed: false }
     voices.set(trackId, [...(voices.get(trackId) ?? []), voice])
-    scheduled.source.onended = () => remove(trackId, voice)
+    scheduled.source.onended = () => {
+      remove(trackId, voice)
+      onEnded?.()
+    }
     if (clipId) options.sources.add(clipId, scheduled.source)
-    return true
+    return (stopWhen, force = false) => {
+      if (!force && zone.playbackMode === 'one-shot') return false
+      stop(trackId, voice, stopWhen)
+      return true
+    }
   }
   const disposeTrack = (trackId: string) => {
     for (const voice of Array.from(voices.get(trackId) ?? [])) stop(trackId, voice)
@@ -278,13 +288,23 @@ export function createSamplerRuntime(options: Options) {
       if (!clip.midi) return false
       const events = getScheduledMidiEvents({ clip, bpm: options.getBpm(), notes: clip.midi.notes, rangeStartSec: playheadSec, rangeEndSec: endLimitSec, arp: options.getArpeggiator(track.id) })
       let scheduled = false
-      for (const event of events) scheduled = trigger(track.id, event.pitch, event.velocity ?? 1, Math.max(nowCtx, options.timelineToCtxTime(event.startSec)), event.endSec - event.startSec, clip.id, event.startSec) || scheduled
+      for (const event of events) scheduled = Boolean(trigger(track.id, event.pitch, event.velocity ?? 1, Math.max(nowCtx, options.timelineToCtxTime(event.startSec)), event.endSec - event.startSec, clip.id, event.startSec)) || scheduled
       return scheduled
     },
     previewNote: (trackId: string, note: number, velocity: number) => {
       options.ensureAudio()
       const ctx = options.getAudioContext()
-      return ctx ? trigger(trackId, note, velocity, ctx.currentTime, 0.5) : false
+      return Boolean(ctx && trigger(trackId, note, velocity, ctx.currentTime, 0.5))
+    },
+    startLiveNote: (trackId: string, note: number, velocity: number, durationSec = 86_400, onEnded?: () => void) => {
+      options.ensureAudio()
+      const ctx = options.getAudioContext()
+      return ctx ? trigger(trackId, note, velocity, ctx.currentTime, durationSec, undefined, undefined, onEnded) : undefined
+    },
+    stopLiveNotes: (trackId: string, when: number) => {
+      for (const voice of Array.from(voices.get(trackId) ?? [])) {
+        if (voice.clipId === undefined) stop(trackId, voice, when)
+      }
     },
     stopClip: (clipId: string) => {
       for (const [trackId, active] of voices) {

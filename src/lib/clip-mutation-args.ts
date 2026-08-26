@@ -33,9 +33,13 @@ export function buildClipMoveManyMutationInput(input: {
 }
 
 export function buildClipRemoveManyMutationInput(input: {
+  projectId: string
   clipIds: string[]
+  operationId: string
 }): FunctionArgs<typeof convexApi.clips.removeMany> {
   return {
+    projectId: input.projectId,
     clipIds: input.clipIds.map(toCloudClipId),
+    operationId: input.operationId,
   }
 }

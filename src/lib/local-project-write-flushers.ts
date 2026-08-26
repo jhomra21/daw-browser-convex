@@ -1,4 +1,4 @@
-type PendingWriteKind = 'effects' | 'history' | 'project-state'
+export type PendingWriteKind = 'effects' | 'history' | 'midi' | 'project-state'
 
 const pendingFlushers = new Map<PendingWriteKind, Map<string, Set<() => Promise<void>>>>()
 
@@ -19,10 +19,16 @@ export const registerPendingLocalProjectWriteFlusher = (
   }
 }
 
-export const flushRegisteredLocalProjectWrites = async (projectId?: string): Promise<void> => {
-  await Promise.all(Array.from(pendingFlushers.values()).flatMap((byProject) => (
-    projectId
-      ? Array.from(byProject.get(projectId) ?? [], (flush) => flush())
-      : Array.from(byProject.values()).flatMap((projectFlushers) => Array.from(projectFlushers, (flush) => flush()))
+export const flushRegisteredLocalProjectWrites = async (
+  projectId?: string,
+  options?: { excludeKinds?: readonly PendingWriteKind[] },
+): Promise<void> => {
+  const excluded = new Set(options?.excludeKinds)
+  await Promise.all(Array.from(pendingFlushers.entries()).flatMap(([kind, byProject]) => (
+    excluded.has(kind)
+      ? []
+      : projectId
+        ? Array.from(byProject.get(projectId) ?? [], (flush) => flush())
+        : Array.from(byProject.values()).flatMap((projectFlushers) => Array.from(projectFlushers, (flush) => flush()))
   )))
 }

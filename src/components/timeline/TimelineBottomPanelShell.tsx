@@ -55,7 +55,7 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
       <button
         type="button"
         aria-label={props.resizeLabel}
-        class="absolute left-0 right-0 top-0 z-40 -translate-y-1/2 cursor-ns-resize"
+        class="group absolute left-0 right-0 top-0 z-40 -translate-y-1/2 cursor-ns-resize"
         style={{ height: `${BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX * 2}px` }}
         onDblClick={() => props.controls.onHeightCommit(BOTTOM_PANEL_DEFAULT_HEIGHT_PX)}
         onPointerDown={(event) => {
@@ -63,7 +63,7 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
           setDragStart({ y: event.clientY, height: props.controls.heightPx });
         }}
       >
-        <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-border" />
+        <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
       </button>
       <div style={{ height: `${props.controls.heightPx}px` }}>
         {props.children}

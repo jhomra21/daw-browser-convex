@@ -1,0 +1,34 @@
+{
+  "name": "@daw-browser/control-cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth": "./src/auth.ts",
+    "./credentials": "./src/credentials.ts",
+    "./server": "./src/server.ts"
+  },
+  "bin": {
+    "daw-control": "./dist/daw-control.js",
+    "daw-control-mcp": "./dist/daw-control-mcp.js"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outfile ./dist/daw-control.js --target bun && bun build ./src/mcp.ts --outfile ./dist/daw-control-mcp.js --target bun",
+    "prepack": "bun run build",
+    "check": "bun --bun tsc --noEmit"
+  },
+  "knip": {
+    "entry": [
+      "src/index.ts",
+      "src/mcp.ts"
+    ]
+  },
+  "dependencies": {
+    "@daw-browser/control": "workspace:*",
+    "@daw-browser/control-mcp": "workspace:*",
+    "@daw-browser/control-sdk": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
+}

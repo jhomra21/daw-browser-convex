@@ -5,36 +5,44 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
+    "build:portable-wasm": "sh native/audio-core/scripts/build-wasm.sh",
+    "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/control' --filter '@daw-browser/control-core' --filter '@daw-browser/control-sdk' --filter '@daw-browser/control-mcp' --filter '@daw-browser/control-cli' --filter '@daw-browser/desktop-protocol' --filter '@daw-browser/plugin-host-protocol' --filter '@daw-browser/external-plugins' --filter '@daw-browser/desktop' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
     "lint:fix": "oxlint --fix .",
     "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
     "test": "bun test",
+    "test:anti-slop": "set -- tools/oxlint/anti-slop/rules/*.rule-test.ts; test \"$#\" -eq 12 || { echo \"Expected 12 anti-slop suites, found $#\" >&2; exit 1; }; for file do node --experimental-strip-types \"$file\" || exit; done",
+    "test:control-compat": "bun test src/hooks/local-send-reload.integration.test.ts src/lib/desktop/attached-host-controller.test.ts src/lib/local-control/local-control-state.test.ts src/lib/local-control/local-control-service.test.ts",
+    "test:control-platform": "bun test src/lib/control-platform-conformance.test.ts packages/control/src/operations.test.ts packages/control-sdk/src/jsonl.test.ts packages/control-sdk/src/index.test.ts packages/control-sdk/src/desktop.test.ts packages/control-cli/src/index.test.ts packages/control-cli/src/process.test.ts packages/control-mcp/src/index.test.ts src/lib/extensions/extension-kernel.test.ts src/lib/extensions/project-actions.test.ts api/routes/control.test.ts api/control-contract-equivalence.test.ts packages/desktop-protocol/src/index.test.ts packages/desktop-protocol/src/client.test.ts packages/desktop-protocol/src/client-identity.test.ts apps/desktop/desktop-operations.test.ts",
     "serve": "vite preview",
     "knip": "knip"
   },
   "overrides": {
-    "undici": "7.24.8"
+    "undici": "7.24.8",
+    "@electron/fuses": "2.1.3"
   },
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.40.0",
+    "@oxlint/plugins": "1.78.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/router-plugin": "^1.164.0",
     "@tanstack/solid-router-devtools": "^1.163.3",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.5.0",
+    "convex-test": "0.0.46",
     "eslint": "9.39.5",
     "eslint-plugin-solid": "0.14.5",
     "fake-indexeddb": "^6.2.5",
     "knip": "^6.1.0",
-    "oxlint": "1.74.0",
+    "oxlint": "1.78.0",
     "solid-devtools": "^0.34.5",
     "tailwindcss": "^4.2.1",
     "typescript": "^6.0.2",
@@ -44,17 +52,24 @@
     "wrangler": "4.98.0"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.6.23",
     "@daw-browser/audio-engine": "workspace:*",
+    "@daw-browser/control": "workspace:*",
+    "@daw-browser/control-core": "workspace:*",
+    "@daw-browser/control-mcp": "workspace:*",
+    "@daw-browser/desktop-protocol": "workspace:*",
+    "@daw-browser/external-plugins": "workspace:*",
+    "@daw-browser/plugin-host-protocol": "workspace:*",
     "@daw-browser/shared": "workspace:*",
     "@daw-browser/timeline-core": "workspace:*",
     "@daw-browser/waveforms": "workspace:*",
     "@kobalte/core": "^0.13.11",
-    "@openrouter/ai-sdk-provider": "^1.5.4",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@noble/hashes": "^2.0.1",
     "@solid-primitives/storage": "^4.3.4",
     "@tanstack/solid-query": "^5.90.23",
     "@tanstack/solid-router": "^1.163.3",
-    "ai": "^5.0.142",
-    "better-auth": "^1.5.2",
+    "better-auth": "1.6.23",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.32.0",
@@ -63,9 +78,14 @@
     "jose": "^6.2.3",
     "kysely": "0.28.11",
     "kysely-d1": "^0.4.0",
+    "mediabunny": "1.55.1",
     "solid-js": "^1.9.11",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^4.3.6"
+  },
+  "patchedDependencies": {
+    "@electron-forge/core-utils@7.11.2": "patches/@electron-forge%2Fcore-utils@7.11.2.patch",
+    "@electron/osx-sign@1.3.3": "patches/@electron%2Fosx-sign@1.3.3.patch"
   }
 }

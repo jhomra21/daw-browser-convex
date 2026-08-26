@@ -4,11 +4,11 @@ import {
   normalizeTrackRouting as normalizeTrackRoutingCore,
 } from "@daw-browser/shared";
 
-type TrackLike = {
-  _id: string
+type TrackLike<TTrackId extends string> = {
+  _id: TTrackId
   channelRole?: string
   kind?: string
-  groupId?: string
+  groupId?: TTrackId
 }
 
 type SendLike<TTrackId extends string> = {
@@ -22,7 +22,7 @@ const sanitizeTrackRouting = <TTrackId extends string>(
     sends?: Array<SendLike<TTrackId>>
     outputTargetId?: TTrackId
   },
-  tracks: TrackLike[],
+  tracks: Array<TrackLike<TTrackId>>,
 ) => {
   return normalizeTrackRoutingCore({
     track: sourceTrack ? { id: sourceTrack._id, channelRole: sourceTrack.channelRole, groupId: sourceTrack.groupId } : null,

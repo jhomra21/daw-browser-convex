@@ -15,8 +15,10 @@ type IconProps = BaseIconProps & {
   name: IconName;
 } & JSX.SvgSVGAttributes<SVGSVGElement>;
 
-const normalizeSize = (size?: number | string) =>
-  typeof size === "number" ? `${size}px` : size ?? "1em";
+const normalizeSize = (size?: number | string) => {
+  if (size === undefined) return "1em";
+  return Number.isFinite(size) ? `${size}px` : String(size);
+};
 
 const GoogleIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>> = (props) => {
   const [local, rest] = splitProps(props, ["size", "class", "title", "ariaLabel"]);
@@ -467,7 +469,7 @@ const SidebarClosedIcon: Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGEl
   );
 };
 
-const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>> = {
+const registry = {
   google: GoogleIcon,
   solidjs: SolidJSIcon,
   convex: ConvexIcon,
@@ -484,7 +486,7 @@ const registry: Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<
   house: HouseIcon,
   "sidebar-open": SidebarOpenIcon,
   "sidebar-closed": SidebarClosedIcon,
-};
+} satisfies Record<IconName, Component<BaseIconProps & JSX.SvgSVGAttributes<SVGSVGElement>>>;
 
 const Icon: Component<IconProps> = (allProps) => {
   const [props, rest] = splitProps(allProps, ["name", "size", "class", "title", "ariaLabel"]);

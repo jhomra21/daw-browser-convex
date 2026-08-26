@@ -4,6 +4,9 @@ import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess"
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 
 const SHARE_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+type RevokeAcceptedAccessResult = {
+  status: "revoked" | "not-found";
+};
 
 const roleRank = (role: "owner" | "editor" | "viewer" | undefined) => (
   role === "owner" ? 3 : role === "viewer" ? 1 : 2
@@ -116,10 +119,10 @@ export const revokeAcceptedAccess = mutation({
 
     const removal = await removeProjectMemberAccessAndTransferEntities(ctx, projectId, targetUserId);
     if (removal.status === "not-found") {
-      const result: { status: "not-found" } = { status: "not-found" };
+      const result = { status: "not-found" } satisfies RevokeAcceptedAccessResult;
       return result;
     }
-    const result: { status: "revoked" } = { status: "revoked" };
+    const result = { status: "revoked" } satisfies RevokeAcceptedAccessResult;
     return result;
   },
 });

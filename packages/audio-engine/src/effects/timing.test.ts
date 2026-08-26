@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { createDefaultGateParams, createDefaultUtilityParams } from '@daw-browser/shared'
-import { getEffectTiming } from './timing'
+import {
+  createDefaultDelayParams,
+  createDefaultGateParams,
+  createDefaultReverbParams,
+  createDefaultUtilityParams,
+} from '@daw-browser/shared'
+import { getEffectChainTimingWithExternal, getEffectTiming } from './timing'
 
 describe('utility and gate timing', () => {
   test('keeps utility at zero latency and gate at fixed two millisecond latency', () => {
@@ -13,4 +18,43 @@ describe('utility and gate timing', () => {
       44_100,
     ).latencyFrames).toBe(89)
   })
+})
+
+test('includes external reported latency in PDC timing without widening built-in runtime unions', () => {
+  expect(getEffectChainTimingWithExternal([], [{
+    latencyFrames: 256,
+    tailFrames: 512,
+  }], 48_000)).toEqual({
+    latencyFrames: 256,
+    tail: { kind: 'finite', frames: 512 },
+  })
+})
+
+test('bounds sync-resolved Delay timing and removes disabled or dry-only tails', () => {
+  const params = createDefaultDelayParams()
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, mode: 'sync', syncDivision: '1/1', feedback: 0 } },
+    48_000,
+    20,
+  ).tail).toEqual({ kind: 'finite', frames: 144_000 })
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, dryWet: 0 } },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 0 })
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, enabled: false } },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 0 })
+})
+
+test('removes disabled or dry-only Reverb tails while retaining wet decay timing', () => {
+  const params = createDefaultReverbParams()
+  expect(getEffectTiming(
+    { kind: 'reverb', params: { ...params, wet: 0 } },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 0 })
+  expect(getEffectTiming(
+    { kind: 'reverb', params },
+    48_000,
+  ).tail).toEqual({ kind: 'finite', frames: 106_561 })
 })

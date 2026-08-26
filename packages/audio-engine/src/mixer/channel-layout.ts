@@ -1,4 +1,4 @@
-import { assert } from '@daw-browser/shared'
+import { assert, assertDefined } from '@daw-browser/shared'
 import type { ChannelLayout, MixerTrackFx, ResolvedMixerGraph } from './types'
 
 export const getSourceChannelLayout = (channelCounts: readonly number[] | undefined): ChannelLayout | undefined => {
@@ -20,7 +20,9 @@ const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pi
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
   for (const instance of fx.instances) {
-    if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
+    if (instance.kind === 'eq' && instance.params.enabled && instance.params.channelMode === 'mono') {
+      layout = 'mono'
+    } else if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
       if (instance.params.state.enabled) layout = 'stereo'
     } else if ((instance.kind === 'delay' || instance.kind === 'reverb') && expandsLayout(instance.kind, instance.params)) {
       layout = 'stereo'
@@ -46,15 +48,15 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
     }
   }
 
-  const resolved = new Map<string, { input: ChannelLayout; output: ChannelLayout }>()
+  type ResolvedChannelLayout = { input: ChannelLayout; output: ChannelLayout }
+  const resolved = new Map<string, ResolvedChannelLayout>()
   const visiting = new Set<string>()
-  const visit = (channelId: string): { input: ChannelLayout; output: ChannelLayout } => {
+  const visit = (channelId: string): ResolvedChannelLayout => {
     const existing = resolved.get(channelId)
     if (existing) return existing
     assert(!visiting.has(channelId), `Cyclic mixer routing at ${channelId}`)
     visiting.add(channelId)
-    const entry = channelById.get(channelId)
-    assert(entry, `Missing mixer channel ${channelId}`)
+    const entry = assertDefined(channelById.get(channelId), `Missing mixer channel ${channelId}`)
     const upstream = (incoming.get(channelId) ?? []).map((sourceId) => visit(sourceId).output)
     const input = upstream.length > 0 ? mergeLayouts(upstream) : entry.sourceLayout ?? 'stereo'
     const output = propagateEffects(input, entry.fx ?? { instances: [] })

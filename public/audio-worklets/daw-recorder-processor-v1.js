@@ -6,6 +6,8 @@ const SAB_WRITE_INDEX = 1
 const SAB_NOTIFICATION = 2
 const SAB_DROPPED_FRAMES = 3
 const SAB_DROPPED_BLOCKS = 4
+const isRecorderMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]'
+const isRecorderSessionId = (sessionId) => Object(sessionId) !== sessionId && String(sessionId) === sessionId
 
 class DawRecorderProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -27,7 +29,7 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
   }
 
   handleMessage(message) {
-    if (!message || typeof message !== 'object') return this.fail('malformed-message')
+    if (!isRecorderMessage(message)) return this.fail('malformed-message')
     if (message.type === 'initialize-sab') {
       if (
         this.session ||
@@ -50,7 +52,7 @@ class DawRecorderProcessor extends AudioWorkletProcessor {
         this.session ||
         !Number.isSafeInteger(message.generation) ||
         message.generation < 0 ||
-        typeof message.sessionId !== 'string' ||
+        !isRecorderSessionId(message.sessionId) ||
         !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(message.sessionId) ||
         !Number.isInteger(message.channelCount) ||
         message.channelCount < 1 ||

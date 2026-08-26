@@ -1,3 +1,4 @@
+import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import {
   createDefaultSynthParams,
   normalizeSynthParams,
@@ -35,6 +36,7 @@ export type TrackInstrumentParams =
   | { kind: 'granular'; instanceId: string; params: GranularParams }
 
 export const createInstrumentInstanceId = () => `instrument:${crypto.randomUUID()}`
+export const createAudioEffectInstanceId = () => `audio-effect:${crypto.randomUUID()}`
 
 export const duplicateTrackInstrumentParams = (
   instrument: TrackInstrumentParams,
@@ -103,17 +105,17 @@ export const INSTRUMENT_CONTRACTS = {
   },
 } satisfies InstrumentContractByKind
 
-export function isInstrumentKind(value: unknown): value is InstrumentKind {
+export function isInstrumentKind(value: JsonValue): value is InstrumentKind {
   return value === 'synth' || value === 'drum-rack' || value === 'sampler' || value === 'granular'
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const isRecord = (value: JsonValue): value is JsonObject => (
+  isJsonObject(value)
 )
 
-export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentParams | undefined {
+export function normalizeTrackInstrumentParams(value: JsonValue): TrackInstrumentParams | undefined {
   if (!isRecord(value) || !isInstrumentKind(value.kind)) return undefined
-  const instanceId = typeof value.instanceId === 'string' && value.instanceId ? value.instanceId : undefined
+  const instanceId = isJsonString(value.instanceId) && value.instanceId ? value.instanceId : undefined
   if (!instanceId) return undefined
   if (value.kind === 'synth') {
     return { kind: value.kind, instanceId, params: normalizeSynthParams(value.params) }
@@ -129,4 +131,16 @@ export function normalizeTrackInstrumentParams(value: unknown): TrackInstrumentP
     instanceId,
     params: normalizeDrumRackParams(isRecord(value.params) ? value.params : {}),
   }
+}
+
+export const normalizePersistedInstrumentParams = (
+  kind: JsonValue,
+  instanceId: JsonValue,
+  params: JsonValue,
+): TrackInstrumentParams | undefined => {
+  if (kind === 'instrument') return normalizeTrackInstrumentParams(params)
+  if (kind === 'synth') {
+    return normalizeTrackInstrumentParams({ kind: 'synth', instanceId, params })
+  }
+  return undefined
 }

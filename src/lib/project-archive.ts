@@ -1,6 +1,7 @@
 import { createLocalProjectId, normalizeProjectManifest } from '@daw-browser/shared'
-import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFile } from '~/lib/local-assets'
-import { deleteLocalProject, importLocalProject } from '~/lib/local-project-db'
+import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFileUnlocked } from '~/lib/local-assets'
+import { deleteLocalProjectUnlocked, importLocalProjectUnlocked } from '~/lib/local-project-db'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import {
   buildProjectManifest,
   createRestoredProjectEntry,
@@ -132,19 +133,27 @@ export const importDawProjectArchive = async (file: File): Promise<string> => {
   })
   const localAssets = manifest.assets.map(({ cloudKey: _cloudKey, ...asset }) => asset)
   try {
-    await Promise.all(assetFiles.map(async ({ asset, bytes }) => {
-      const assetBytes = new ArrayBuffer(bytes.byteLength)
-      new Uint8Array(assetBytes).set(bytes)
-      await writeLocalAssetFile(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
-    }))
-    await importLocalProject(project, {
-      entities: manifest.entities,
-      assets: localAssets,
-      projectState: manifest.projectState,
-      syncState: [],
+    await withLocalProjectAssetLock(projectId, async () => {
+      const writes = await Promise.allSettled(assetFiles.map(async ({ asset, bytes }) => {
+        const assetBytes = new ArrayBuffer(bytes.byteLength)
+        new Uint8Array(assetBytes).set(bytes)
+        await writeLocalAssetFileUnlocked(projectId, asset.storagePath, new File([assetBytes], asset.name, { type: asset.mimeType }))
+      }))
+      const failure = writes.find((result) => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+      await importLocalProjectUnlocked(project, {
+        entities: manifest.entities,
+        assets: localAssets,
+        projectState: manifest.projectState,
+        syncState: [],
+        externalPluginArtifacts: manifest.externalPluginArtifacts.map((artifact) => ({
+          ...artifact,
+          updatedAt: Date.now(),
+        })),
+      })
     })
   } catch (error) {
-    await deleteLocalProject(projectId)
+    await withLocalProjectAssetLock(projectId, () => deleteLocalProjectUnlocked(projectId))
     throw error
   }
   return projectId

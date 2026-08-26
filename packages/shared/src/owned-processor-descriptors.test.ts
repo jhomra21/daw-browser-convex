@@ -25,7 +25,7 @@ describe('owned processor descriptors', () => {
       { version: 1, state: { sidechain: { frequencyHz: 2_000 } } },
       { version: 1, state: { sidechain: { enabled: true, filterType: 'highpass', frequencyHz: 100, q: 1 } } },
     )
-    expect(Reflect.get(merged.state, 'sidechain')).toEqual({
+    expect(Object.entries(merged.state).find(([key]) => key === 'sidechain')?.[1]).toEqual({
       enabled: true,
       filterType: 'highpass',
       frequencyHz: 2_000,

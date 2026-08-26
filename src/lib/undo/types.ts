@@ -41,6 +41,10 @@ export type ClipSnapshot = {
 
 export type HistoryClipSnapshot = ClipSnapshot & {
   clipRef: ClipRef
+  legacyHistory?: boolean
+  recoveryId?: string
+  recoveryOperationId?: string
+  recoverySourceClipId?: string
 }
 
 export type TrackRoutingSnapshot = {
@@ -191,6 +195,21 @@ export type HistoryEntry =
       data: { entries: HistoryEntry[] }
     }
   | {
+      type: 'control-range-delete'
+      projectId: string
+      data: {
+        trackRefs: TrackRef[]
+        startSec: number
+        endSec: number
+        recoveryId: string
+        restoreOperationId?: string
+        deleteOperationId?: string
+        restoreExpectedRevision?: number
+        deleteExpectedRevision?: number
+        deleteApprovalToken?: string
+      }
+    }
+  | {
       type: 'clip-create'
       projectId: string
       data: {
@@ -207,6 +226,7 @@ export type HistoryEntry =
           sourceKind?: AudioSourceKind
           midi?: any
           timing?: ClipOffsets
+          deleteOperationId?: string
         }
       }
     }
@@ -216,6 +236,8 @@ export type HistoryEntry =
       data: {
         items: Array<{ trackRef: TrackRef; clip: HistoryClipSnapshot }>
         recreatedClips?: Array<{ clipRef: ClipRef; clipId: string }>
+        legacyRecreate?: boolean
+        deleteOperationId?: string
       }
     }
   | {
@@ -259,13 +281,13 @@ export type HistoryEntry =
   | {
       type: 'track-create'
       projectId: string
-      data: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
+      data: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
     }
   | {
       type: 'track-clip-create'
       projectId: string
       data: {
-        track: { trackRef: TrackRef; currentTrackId?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
+        track: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
         clip: {
           trackRef: TrackRef
           clipRef: ClipRef

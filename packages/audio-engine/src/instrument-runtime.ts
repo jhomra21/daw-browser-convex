@@ -167,6 +167,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     setTrackArpeggiator: (trackId: string, params: ArpParams) => {
       arpeggiators.set(trackId, params)
     },
+    getTrackArpeggiator: (trackId: string) => arpeggiators.get(trackId),
     clearTrackArpeggiator: (trackId: string) => {
       arpeggiators.delete(trackId)
     },
@@ -177,15 +178,27 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       velocity?: number
       when: number
       durationSec: number
+      live?: boolean
     }) => activeKinds.get(input.trackId) === 'synth' ? synthRuntime.triggerNote(input) : undefined,
+    getSynthLiveVoiceGeneration: (trackId: string) => (
+      activeKinds.get(trackId) === 'synth' ? synthRuntime.getLiveVoiceGeneration(trackId) : undefined
+    ),
     previewSynthNote: (trackId: string, pitch: number, velocity?: number, durationSec?: number) => (
       activeKinds.get(trackId) === 'synth' ? synthRuntime.previewNote(trackId, pitch, velocity, durationSec) : undefined
     ),
     startSynthPreviewNote: (trackId: string, pitch: number, velocity?: number) => (
       activeKinds.get(trackId) === 'synth' ? synthRuntime.startPreviewNote(trackId, pitch, velocity) : undefined
     ),
-    releaseSynthPreviewNote: (trackId: string, noteInstanceId: number) => {
-      if (activeKinds.get(trackId) === 'synth') synthRuntime.releasePreviewNote(trackId, noteInstanceId)
+    releaseSynthPreviewNote: (
+      trackId: string,
+      noteInstanceId: number,
+      when?: number,
+      force = false,
+      generation?: number,
+    ) => {
+      if (activeKinds.get(trackId) === 'synth') {
+        synthRuntime.releasePreviewNote(trackId, noteInstanceId, when, force, generation)
+      }
     },
     resolveSynthAutomationBindings: (trackId: string, parameterId: string) => (
       synthRuntime.resolveAutomationBindings(trackId, parameterId)
@@ -229,6 +242,22 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     previewDrumRackPad: drumRackRuntime.previewPad,
     previewDrumRackNote: drumRackRuntime.previewNote,
     previewSamplerNote: samplerRuntime.previewNote,
+    startLiveDrumRackNote: drumRackRuntime.startLiveNote,
+    startLiveSamplerNote: samplerRuntime.startLiveNote,
+    startLiveGranularNote: (trackId: string, when: number, durationSec: number, liveId: string) => {
+      if (activeKinds.get(trackId) !== 'granular') return undefined
+      const runtime = granularRuntimes.get(trackId)
+      if (!runtime) return undefined
+      runtime.scheduleNote({
+        clipId: liveId,
+        when,
+        durationSec,
+        timelineStartSec: 0,
+        timelineToCtxTime: (timeSec) => timeSec,
+        automationEnvelopes: [],
+      })
+      return () => runtime.stopClip(liveId)
+    },
     setSamplerRuntimeListeners: (listeners: {
       onNoteMiss?: (miss: SamplerNoteMiss) => void
       onAssetUse?: (assetKey: string, active: boolean) => void
@@ -248,6 +277,11 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       samplerRuntime.stopAll()
       for (const runtime of granularRuntimes.values()) runtime.stop()
     },
+    stopLiveNotes: (trackId: string, when: number) => {
+      samplerRuntime.stopLiveNotes(trackId, when)
+      drumRackRuntime.stopLiveNotes(trackId, when)
+      granularRuntimes.get(trackId)?.stop()
+    },
     disposeTrack: (trackId: string) => {
       activeKinds.delete(trackId)
       arpeggiators.delete(trackId)
@@ -263,7 +297,6 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       drumRackRuntime.clear()
       samplerRuntime.clear()
       for (const trackId of Array.from(granularRuntimes.keys())) disposeGranular(trackId)
-      granularRevisions.clear()
     },
   }
 }

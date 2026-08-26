@@ -1,0 +1,474 @@
+const protocolVersion = 1
+
+const assert = (condition, message) => {
+  if (!condition) throw new Error(message)
+}
+
+const waitFor = (messages, predicate, label) => new Promise((resolve, reject) => {
+  const existing = messages.find(predicate)
+  if (existing) {
+    resolve(existing)
+    return
+  }
+  const timeout = setTimeout(() => {
+    reject(new Error(`Timed out waiting for ${label}.`))
+  }, 20_000)
+  const observer = () => {
+    const next = messages.find(predicate)
+    if (!next) return
+    clearTimeout(timeout)
+    window.removeEventListener('portable-wasm-status', observer)
+    resolve(next)
+  }
+  window.addEventListener('portable-wasm-status', observer)
+})
+
+const readChannelDiagnostics = (analyser) => {
+  const output = new Float32Array(analyser.fftSize)
+  analyser.getFloatTimeDomainData(output)
+  return {
+    finite: output.every(Number.isFinite),
+    maximumAbsolute: Math.max(...output.map(Math.abs)),
+  }
+}
+
+const sourceNode = (id, bus) => ({
+  id,
+  kind: 'source',
+  inputLayout: 'stereo',
+  outputLayout: 'stereo',
+  latencyFrames: 0,
+  processorOrder: [],
+  bus,
+})
+
+const utilityProcessor = {
+  id: 'utility-a',
+  kind: 'utility',
+  kindId: 1,
+  instanceId: 1,
+  stateVersion: 1,
+  state: (() => {
+    const state = new Uint8Array(40)
+    const view = new DataView(state.buffer)
+    view.setUint32(0, 1, true)
+    view.setFloat32(4, 0, true)
+    view.setUint32(12, 0, true)
+    view.setFloat32(24, 1, true)
+    return state
+  })(),
+  parameterTargets: [{ id: 'utility.gainDb', target: 1 }],
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+}
+
+const saturatorProcessor = {
+  id: 'saturator-a',
+  kind: 'saturator',
+  kindId: 2,
+  instanceId: 2,
+  stateVersion: 1,
+  state: (() => {
+    const state = new Uint8Array(32)
+    const view = new DataView(state.buffer)
+    view.setUint32(0, 1, true)
+    view.setFloat32(4, 18, true)
+    view.setUint32(8, 2, true)
+    view.setUint32(12, 1, true)
+    view.setFloat32(16, 2500, true)
+    view.setFloat32(20, 0.5, true)
+    view.setFloat32(24, -3, true)
+    view.setFloat32(28, 1, true)
+    return state
+  })(),
+  parameterTargets: [{ id: 'saturator.outputDb', target: 72 }],
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+}
+
+
+const graphSnapshot = {
+  version: 1,
+  revision: 1,
+  contractHash: 'electron-worklet-fixture',
+  masterNodeId: 'master',
+  assets: [],
+  nodes: [
+    sourceNode('source-a', 0),
+    {
+      id: 'master',
+      kind: 'master',
+      inputLayout: 'stereo',
+      outputLayout: 'stereo',
+      processorOrder: [],
+    },
+  ],
+  edges: [
+    {
+      version: 1,
+      id: 'source-a-to-master',
+      fromNodeId: 'source-a',
+      toNodeId: 'master',
+      gain: 1,
+      kind: 'output',
+      tap: 'post-fader',
+      sidechain: false,
+      pdcDelayFrames: 0,
+    },
+  ],
+}
+
+const synthGraphSnapshot = {
+  version: 1,
+  revision: 2,
+  contractHash: 'electron-worklet-fixture',
+  masterNodeId: 'master',
+  assets: [],
+  nodes: [
+    {
+      id: 'instrument-a',
+      kind: 'instrument',
+      inputLayout: 'stereo',
+      outputLayout: 'stereo',
+      processorOrder: [utilityProcessor, saturatorProcessor],
+      instrument: {
+        version: 1,
+        kind: 'synth',
+        voiceCapacity: 8,
+        outputLayout: 'stereo',
+        parameterTargets: [],
+        oscillators: [
+          { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 },
+          { enabled: false, waveform: 0, level: 0, octave: 0, semitone: 0, detuneCents: 0 },
+        ],
+        noiseEnabled: false,
+        noiseLevel: 0,
+        filterEnabled: false,
+        filterMode: 0,
+        filterCutoffHz: 4000,
+        filterResonance: 0.7,
+        filterKeyTracking: 0,
+        filterEnvelopeAmountOctaves: 0,
+        filterAttackMs: 0,
+        filterDecayMs: 0,
+        filterSustain: 1,
+        filterReleaseMs: 0,
+        ampAttackMs: 0,
+        ampDecayMs: 0,
+        ampSustain: 0.8,
+        ampReleaseMs: 500,
+        lfoEnabled: false,
+        lfoWaveform: 0,
+        lfoRateHz: 1,
+        lfoPitchCents: 0,
+        lfoFilterOctaves: 0,
+        lfoAmplitude: 0,
+        lfoPan: 0,
+        outputGain: 0.8,
+        outputPan: 0,
+      },
+    },
+    {
+      id: 'master',
+      kind: 'master',
+      inputLayout: 'stereo',
+      outputLayout: 'stereo',
+      processorOrder: [],
+    },
+  ],
+  edges: [
+    {
+      version: 1,
+      id: 'instrument-a-to-master',
+      fromNodeId: 'instrument-a',
+      toNodeId: 'master',
+      gain: 1,
+      kind: 'output',
+      tap: 'post-fader',
+      sidechain: false,
+      pdcDelayFrames: 0,
+    },
+  ],
+}
+
+window.runPortableWasmWorkletFixture = (async () => {
+  const requestedSampleRate = Number(new URL(window.location.href).searchParams.get('sampleRate') ?? 48_000)
+  assert(requestedSampleRate === 44_100 || requestedSampleRate === 48_000 || requestedSampleRate === 96_000, 'Unsupported fixture sample rate.')
+  const manifest = await (await fetch('./audio-core/daw-audio-core.manifest.json')).json()
+  const wasm = await (await fetch(manifest.wasmUrl)).arrayBuffer()
+  const wasmModule = await WebAssembly.compile(wasm)
+  const context = new AudioContext({ sampleRate: requestedSampleRate })
+  assert(context.sampleRate === requestedSampleRate, `Chromium substituted ${context.sampleRate} Hz for requested ${requestedSampleRate} Hz.`)
+  await context.audioWorklet.addModule('./audio-worklets/daw-portable-audio-core-processor-v2.js')
+  const node = new AudioWorkletNode(context, 'daw-portable-audio-core-processor-v2', {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    processorOptions: { wasmModule },
+  })
+  const messages = []
+  node.port.onmessage = (event) => {
+    messages.push(event.data)
+    window.dispatchEvent(new Event('portable-wasm-status'))
+  }
+  node.onprocessorerror = (event) => {
+    const details = {
+      type: event?.type,
+      message: event?.message,
+      filename: event?.filename,
+      lineno: event?.lineno,
+      colno: event?.colno,
+      error: event?.error ? {
+        name: event.error.name,
+        message: event.error.message,
+        stack: event.error.stack,
+      } : undefined,
+    }
+    console.error(`portable AudioWorklet processorerror ${JSON.stringify(details)}`)
+    throw new Error(`The AudioWorklet processor crashed: ${JSON.stringify(details)}`)
+  }
+  const splitter = context.createChannelSplitter(2)
+  const leftAnalyser = context.createAnalyser()
+  const rightAnalyser = context.createAnalyser()
+  leftAnalyser.fftSize = 128
+  rightAnalyser.fftSize = 128
+  node.connect(splitter)
+  splitter.connect(leftAnalyser, 0)
+  splitter.connect(rightAnalyser, 1)
+  leftAnalyser.connect(context.destination)
+  rightAnalyser.connect(context.destination)
+
+  await context.resume()
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'initialize',
+    abiVersion: 3,
+    contractHash: manifest.contractHash,
+    maxFramesPerBlock: 256,
+  })
+  const initialization = await waitFor(messages, (message) => message.type === 'ready' || message.type === 'fault', 'AudioWorklet initialization')
+  assert(initialization.type === 'ready', `The AudioWorklet initialization faulted with ${initialization.code}.`)
+  node.port.postMessage({ version: protocolVersion, type: 'prepare-graph', requestId: 1, snapshot: graphSnapshot })
+  const prepared = await waitFor(messages, (message) => message.type === 'graph-prepared' && message.requestId === 1, 'graph preparation')
+  assert(prepared.result === 'prepared', `The portable graph was rejected: ${JSON.stringify(prepared)}`)
+  node.port.postMessage({ version: protocolVersion, type: 'publish-graph', requestId: 2, revision: 1 })
+  const published = await waitFor(messages, (message) => message.type === 'graph-published' && message.requestId === 2, 'graph publication')
+  assert(published.result === 'published', 'The portable graph was not published.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'register-asset',
+    requestId: 3,
+    generation: 1,
+      asset: { version: 1, assetId: 'clip-a', frameCount: requestedSampleRate, sampleRateHz: requestedSampleRate, channelCount: 2 },
+    planes: [new Float32Array(requestedSampleRate).fill(0.25), new Float32Array(requestedSampleRate).fill(-0.125)],
+  })
+  const registered = await waitFor(messages, (message) => message.type === 'asset-registered' && message.requestId === 3, 'asset registration')
+  assert(registered.result === 'registered', 'The portable clip asset was rejected.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 4,
+    epoch: 1,
+    running: false,
+    frame: 0,
+  })
+  const stopped = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 4, 'transport stop')
+  assert(stopped.result === 'applied', 'The portable transport did not stop.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'schedule-sources',
+    requestId: 5,
+    revision: 1,
+    epoch: 1,
+    events: [{
+      version: 1,
+      epoch: 1,
+      sequence: 1,
+      sourceNodeId: 'source-a',
+      assetId: 'clip-a',
+      startFrame: 0,
+      stopFrame: requestedSampleRate * 10,
+      sourceOffsetFrame: 0,
+      sourceFrameCount: requestedSampleRate,
+      gain: 1,
+      fadeInStartFrame: 0,
+      fadeInEndFrame: 0,
+      fadeOutStartFrame: requestedSampleRate * 8,
+      fadeOutEndFrame: requestedSampleRate * 9,
+    }],
+  })
+  const scheduled = await waitFor(messages, (message) => message.type === 'sources-scheduled' && message.requestId === 5, 'clip scheduling')
+  assert(scheduled.result === 'scheduled', 'The portable clip was rejected.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 6,
+    epoch: 1,
+    running: true,
+    frame: 0,
+  })
+  const started = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 6, 'transport start')
+  assert(started.result === 'applied', 'The portable transport did not start.')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  node.port.postMessage({ version: protocolVersion, type: 'diagnostics' })
+  const health = await waitFor(messages, (message) => message.type === 'health', 'AudioWorklet diagnostics')
+  const fault = messages.find((message) => message.type === 'fault')
+  assert(!fault, `The worklet reported a fault: ${fault && fault.code}.`)
+  const leftOutput = readChannelDiagnostics(leftAnalyser)
+  const rightOutput = readChannelDiagnostics(rightAnalyser)
+  assert(health.framesProcessed >= leftAnalyser.fftSize, 'The worklet did not process the rendered frames.')
+  assert(leftOutput.finite && rightOutput.finite, 'The worklet emitted non-finite audio.')
+  assert(Math.abs(leftOutput.maximumAbsolute - 0.25) < 0.0001, 'The portable left clip channel did not produce the expected output.')
+  assert(Math.abs(rightOutput.maximumAbsolute - 0.125) < 0.0001, 'The portable right clip channel did not produce the expected output.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 13,
+    epoch: 1,
+    running: false,
+    frame: 2_048,
+  })
+  const clipPaused = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 13, 'clip pause')
+  assert(clipPaused.result === 'applied', 'The portable clip did not pause.')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const pausedLeft = readChannelDiagnostics(leftAnalyser)
+  const pausedRight = readChannelDiagnostics(rightAnalyser)
+  assert(
+    pausedLeft.maximumAbsolute < 0.0001 && pausedRight.maximumAbsolute < 0.0001,
+    `The portable clip did not become silent while paused: left=${pausedLeft.maximumAbsolute}, right=${pausedRight.maximumAbsolute}.`,
+  )
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'transport',
+    requestId: 14,
+    epoch: 1,
+    running: true,
+    frame: 2_048,
+  })
+  const clipResumed = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 14, 'clip resume')
+  assert(clipResumed.result === 'applied', 'The portable clip did not resume in its existing epoch.')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const resumedLeft = readChannelDiagnostics(leftAnalyser)
+  const resumedRight = readChannelDiagnostics(rightAnalyser)
+  assert(resumedLeft.maximumAbsolute > 0.1 && resumedRight.maximumAbsolute > 0.05, 'The portable clip did not produce output after resume.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 15, epoch: 2, running: false, frame: 0 })
+  const newerEpoch = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 15, 'newer transport epoch')
+  assert(newerEpoch.result === 'applied', 'The newer transport epoch was rejected.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 16, epoch: 1, running: true, frame: 0 })
+  const staleEpoch = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 16, 'stale transport epoch')
+  assert(staleEpoch.result === 'rejected', 'The stale transport epoch was accepted.')
+
+  node.port.postMessage({ version: protocolVersion, type: 'prepare-graph', requestId: 7, snapshot: synthGraphSnapshot })
+  const synthPrepared = await waitFor(messages, (message) => message.type === 'graph-prepared' && message.requestId === 7, 'synth graph preparation')
+  assert(synthPrepared.result === 'prepared', 'The portable synth graph was rejected.')
+  node.port.postMessage({ version: protocolVersion, type: 'publish-graph', requestId: 8, revision: 2 })
+  const synthPublished = await waitFor(messages, (message) => message.type === 'graph-published' && message.requestId === 8, 'synth graph publication')
+  assert(synthPublished.result === 'published', 'The portable synth graph was not published.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 9, epoch: 2, running: false, frame: 0 })
+  const synthStopped = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 9, 'synth transport stop')
+  assert(synthStopped.result === 'applied', 'The portable synth transport did not stop.')
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'install-schedule',
+    requestId: 10,
+    schedule: {
+      revision: 2,
+      transportEpoch: 2,
+      sampleRateHz: requestedSampleRate,
+      bpm: 120,
+      timeOrigin: { timelineSec: 0, frame: 0 },
+      events: [
+        { frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'instrument-a' }, noteId: 1, pitch: 60, velocity: 0.8 },
+        { frame: Math.round(requestedSampleRate * 0.15), sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'instrument-a' }, noteId: 1, pitch: 60 },
+      ],
+    },
+  })
+  const synthInstalled = await waitFor(messages, (message) => message.type === 'schedule-installed' && message.requestId === 10, 'synth schedule installation')
+  assert(synthInstalled.result === 'installed', 'The portable synth schedule was rejected.')
+  node.port.postMessage({ version: protocolVersion, type: 'transport', requestId: 11, epoch: 2, running: true, frame: 0 })
+  const synthStarted = await waitFor(messages, (message) => message.type === 'transport-applied' && message.requestId === 11, 'synth transport start')
+  assert(synthStarted.result === 'applied', 'The portable synth transport did not start.')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const liveBefore = readChannelDiagnostics(leftAnalyser)
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'processor-events',
+    requestId: 12,
+    revision: 2,
+    epoch: 2,
+    sequence: 1,
+    events: [{
+      processorInstanceId: 1,
+      parameterTarget: 1,
+      frameOffset: 0,
+      value: -12,
+    }],
+  })
+  const utilityApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 12, 'Utility live processor update')
+  assert(utilityApplied.result === 'applied', `The portable Utility live processor update was not applied: ${utilityApplied.result}.`)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const liveAfterUtility = readChannelDiagnostics(leftAnalyser)
+  assert(liveBefore.maximumAbsolute > 0.1, `The portable live-control signal was not active before the update: ${liveBefore.maximumAbsolute}.`)
+  assert(liveAfterUtility.maximumAbsolute > 0.01 && liveAfterUtility.maximumAbsolute < liveBefore.maximumAbsolute * 0.95, `The portable Utility live processor update did not change the ongoing signal: before=${liveBefore.maximumAbsolute}, after=${liveAfterUtility.maximumAbsolute}.`)
+  node.port.postMessage({
+    version: protocolVersion,
+    type: 'processor-events',
+    requestId: 17,
+    revision: 2,
+    epoch: 2,
+    sequence: 2,
+    events: [{
+      processorInstanceId: 2,
+      parameterTarget: 72,
+      frameOffset: 0,
+      value: -18,
+    }],
+  })
+  const saturatorApplied = await waitFor(messages, (message) => message.type === 'processor-events-applied' && message.requestId === 17, 'Saturator live processor update')
+  assert(saturatorApplied.result === 'applied', `The portable Saturator live processor update was not applied: ${saturatorApplied.result}.`)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const liveAfter = readChannelDiagnostics(leftAnalyser)
+  assert(liveAfter.maximumAbsolute > 0.01 && liveAfter.maximumAbsolute < liveAfterUtility.maximumAbsolute * 0.5, `The portable Saturator live processor update did not change the ongoing signal: before=${liveAfterUtility.maximumAbsolute}, after=${liveAfter.maximumAbsolute}.`)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  const synthTail = readChannelDiagnostics(leftAnalyser)
+  assert(synthTail.maximumAbsolute > 0.0001, 'The portable synth release tail was not rendered after note-off.')
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  const synthSilence = readChannelDiagnostics(leftAnalyser)
+  assert(synthSilence.maximumAbsolute < 0.0001, 'The portable synth release tail did not become silent.')
+
+  node.port.postMessage({ version: protocolVersion, type: 'dispose' })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const disposedLeft = readChannelDiagnostics(leftAnalyser)
+  const disposedRight = readChannelDiagnostics(rightAnalyser)
+  assert(disposedLeft.maximumAbsolute < 0.0001 && disposedRight.maximumAbsolute < 0.0001, 'The disposed worklet did not become silent while still connected.')
+  node.disconnect()
+  splitter.disconnect()
+  leftAnalyser.disconnect()
+  rightAnalyser.disconnect()
+  await context.close()
+  return {
+    framesProcessed: health.framesProcessed,
+    requestedSampleRate,
+    actualSampleRate: context.sampleRate,
+    channels: {
+      left: {
+        finite: leftOutput.finite,
+        maximumAbsolute: leftOutput.maximumAbsolute,
+        maximumAbsoluteAfterDispose: disposedLeft.maximumAbsolute,
+      },
+      right: {
+        finite: rightOutput.finite,
+        maximumAbsolute: rightOutput.maximumAbsolute,
+        maximumAbsoluteAfterDispose: disposedRight.maximumAbsolute,
+      },
+    },
+    maximumAbsoluteLiveBefore: liveBefore.maximumAbsolute,
+    maximumAbsoluteLiveAfterUtility: liveAfterUtility.maximumAbsolute,
+    maximumAbsoluteLiveAfter: liveAfter.maximumAbsolute,
+    maximumAbsoluteSynthTailSample: synthTail.maximumAbsolute,
+    memoryBytes: health.memoryBytes,
+    graphPrepare: health.graphPrepare,
+  }
+})()

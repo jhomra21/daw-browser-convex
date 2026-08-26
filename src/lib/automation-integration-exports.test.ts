@@ -31,7 +31,7 @@ describe('automation integration exports', () => {
   })
 
   test('keeps local automation persistence API available', () => {
-    expect(typeof loadLocalAutomationEnvelopes).toBe('function')
-    expect(typeof replaceLocalAutomationEnvelopes).toBe('function')
+    expect(loadLocalAutomationEnvelopes).toBeFunction()
+    expect(replaceLocalAutomationEnvelopes).toBeFunction()
   })
 })

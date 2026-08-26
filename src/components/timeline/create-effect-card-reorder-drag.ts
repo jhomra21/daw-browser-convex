@@ -1,16 +1,20 @@
-import type { AudioEffectInstance } from "@daw-browser/shared";
 import { onCleanup } from "solid-js";
+import {
+  isDeviceHeaderTarget,
+  isDeviceInteractiveTarget,
+  REORDER_ACTIVATION_THRESHOLD_PX,
+} from "~/components/timeline/device-interaction";
 
 type EffectCardReorderDragOptions = {
-  effect: AudioEffectInstance;
-  orderedEffects: () => AudioEffectInstance[];
+  key: string;
+  orderedKeys: () => readonly string[];
   canWrite: () => boolean;
-  onReorder: (effect: AudioEffectInstance, targetIndex: number) => void;
+  onReorder: (key: string, targetIndex: number) => void;
   onPreviewChange: (preview: EffectCardReorderPreview | undefined) => void;
 };
 
 export type EffectCardReorderPreview = {
-  effect: AudioEffectInstance;
+  key: string;
   indicatorX: number;
   top: number;
   height: number;
@@ -23,9 +27,7 @@ export type EffectCardReorderPreview = {
 };
 
 const shouldStartReorderDrag = (event: PointerEvent) => {
-  if (!(event.target instanceof Element)) return false;
-  if (!event.target.closest('[data-effect-shell-header="true"]')) return false;
-  return !event.target.closest('button,input,select,textarea,[role="slider"],[contenteditable="true"]');
+  return isDeviceHeaderTarget(event.target) && !isDeviceInteractiveTarget(event.target);
 };
 
 export function createEffectCardReorderDrag(options: EffectCardReorderDragOptions) {
@@ -57,7 +59,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     if (!chainRect || !ghostOffset || !ghostSize) return;
     const targetIndex = targetIndexForPoint(position.x);
     options.onPreviewChange({
-      effect: options.effect,
+      key: options.key,
       indicatorX: indicatorXForTargetIndex(targetIndex),
       top: chainRect.top,
       height: chainRect.height,
@@ -100,8 +102,8 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
       chainRect = parentRect ? { top: parentRect.top, height: parentRect.height } : undefined;
       for (const element of sourceElement.parentElement?.children ?? []) {
         if (!(element instanceof HTMLElement)) continue;
-        const effectId = element.dataset.effectId;
-        if (!effectId || effectId === options.effect.id) continue;
+        const reorderKey = element.dataset.reorderKey;
+        if (!reorderKey || reorderKey === options.key) continue;
         const rect = element.getBoundingClientRect();
         cardRects.push({ left: rect.left, right: rect.right, centerX: rect.left + rect.width / 2 });
       }
@@ -114,7 +116,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     if (event.pointerId !== pointerId || !pointerStart) return
     const position = { x: event.clientX, y: event.clientY }
     if (!dragActivated) {
-      if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < 4) return
+      if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < REORDER_ACTIVATION_THRESHOLD_PX) return
       activateDrag(position)
       return
     }
@@ -124,14 +126,14 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
   const finishPointer = (event: PointerEvent, cancelled: boolean) => {
     if (event.pointerId !== pointerId) return
     const position = { x: event.clientX, y: event.clientY }
-    const order = options.orderedEffects()
-    const currentIndex = order.findIndex((entry) => entry.id === options.effect.id)
+    const order = options.orderedKeys()
+    const currentIndex = order.indexOf(options.key)
     const targetIndex = targetIndexForPoint(position.x)
     const canReorder = !cancelled && dragActivated && cardRects.length > 0
     removePointerListeners()
     clearPreview()
     if (currentIndex < 0 || !canReorder || targetIndex === currentIndex) return
-    options.onReorder(options.effect, targetIndex)
+    options.onReorder(options.key, targetIndex)
   }
 
   const handlePointerUp = (event: PointerEvent) => finishPointer(event, false)

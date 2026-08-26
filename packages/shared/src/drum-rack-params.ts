@@ -2,6 +2,7 @@ import {
   normalizeAudioSourceMetadataPatch,
   type AudioSourceKind,
 } from './audio-source-rules'
+import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonValue } from './json-value'
 
 export type DrumRackPadSample = {
   assetKey: string
@@ -34,23 +35,9 @@ export type DrumRackParams = {
   selectedPadId?: string
 }
 
-export type DrumRackPadSampleInput = Partial<Omit<DrumRackPadSample, 'sourceKind' | 'source'>> & {
-  sourceKind?: unknown
-  source?: {
-    durationSec?: unknown
-    sampleRate?: unknown
-    channelCount?: unknown
-  }
-}
-
-export type DrumRackPadParamsInput = Partial<Omit<DrumRackPadParams, 'sample'>> & {
-  sample?: DrumRackPadSampleInput
-}
-
-export type DrumRackParamsInput = {
-  pads?: DrumRackPadParamsInput[]
-  selectedPadId?: unknown
-}
+export type DrumRackPadSampleInput = JsonValue
+export type DrumRackPadParamsInput = JsonValue
+export type DrumRackParamsInput = JsonValue
 
 export type DrumRackSampleAssignment = DrumRackPadSample
 
@@ -63,22 +50,24 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function readFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+function readFiniteNumber(value: JsonValue | undefined): number | undefined {
+  return isJsonNumber(value) && Number.isFinite(value) ? value : undefined
 }
 
-function normalizePadSample(input: DrumRackPadSampleInput | undefined): DrumRackPadSample | undefined {
+function normalizePadSample(input: JsonValue | undefined): DrumRackPadSample | undefined {
+  const value = isJsonObject(input) ? input : undefined
+  const source = value && isJsonObject(value.source) ? value.source : undefined
   const metadata = normalizeAudioSourceMetadataPatch({
-    assetKey: input?.assetKey,
-    sourceKind: typeof input?.sourceKind === 'string' ? input.sourceKind : undefined,
-    durationSec: readFiniteNumber(input?.source?.durationSec),
-    sampleRate: readFiniteNumber(input?.source?.sampleRate),
-    channelCount: readFiniteNumber(input?.source?.channelCount),
+    assetKey: value && isJsonString(value.assetKey) ? value.assetKey : undefined,
+    sourceKind: value && isJsonString(value.sourceKind) ? value.sourceKind : undefined,
+    durationSec: readFiniteNumber(source?.durationSec),
+    sampleRate: readFiniteNumber(source?.sampleRate),
+    channelCount: readFiniteNumber(source?.channelCount),
   })
+  const url = value && isJsonString(value.url) ? value.url : undefined
   if (
     metadata.assetKey === undefined
-    || typeof input?.url !== 'string'
-    || !input.url
+    || url === undefined
     || metadata.sourceKind === undefined
     || metadata.durationSec === undefined
     || metadata.sampleRate === undefined
@@ -87,10 +76,11 @@ function normalizePadSample(input: DrumRackPadSampleInput | undefined): DrumRack
     return undefined
   }
 
+  const name = value && isJsonString(value.name) && value.name ? value.name : undefined
   return {
     assetKey: metadata.assetKey,
-    url: input.url,
-    name: typeof input.name === 'string' && input.name ? input.name : undefined,
+    url,
+    name,
     sourceKind: metadata.sourceKind,
     source: {
       durationSec: metadata.durationSec,
@@ -166,9 +156,10 @@ export function assignSampleToDrumRackPad(
 
 export function normalizeDrumRackParams(input: DrumRackParamsInput): DrumRackParams {
   const defaults = createDefaultDrumRackParams()
-  const inputPads = input.pads ?? []
+  const inputValue = isJsonObject(input) ? input : {}
+  const inputPads = Array.isArray(inputValue.pads) ? inputValue.pads : []
   const pads = defaults.pads.map((defaultPad, index) => {
-    const inputPad = inputPads[index]
+    const inputPad = isJsonObject(inputPads[index]) ? inputPads[index] : undefined
     const sample = normalizePadSample(inputPad?.sample)
     const startSec = Math.max(0, readFiniteNumber(inputPad?.startSec) ?? defaultPad.startSec)
     const rawEndSec = readFiniteNumber(inputPad?.endSec)
@@ -176,19 +167,19 @@ export function normalizeDrumRackParams(input: DrumRackParamsInput): DrumRackPar
 
     return {
       ...defaultPad,
-      name: typeof inputPad?.name === 'string' && inputPad.name ? inputPad.name : undefined,
+      name: isJsonString(inputPad?.name) && inputPad.name ? inputPad.name : undefined,
       sample,
       gain: clamp(readFiniteNumber(inputPad?.gain) ?? defaultPad.gain, 0, 2),
       pan: clamp(readFiniteNumber(inputPad?.pan) ?? defaultPad.pan, -1, 1),
       transpose: Math.round(clamp(readFiniteNumber(inputPad?.transpose) ?? defaultPad.transpose, -48, 48)),
       startSec,
       endSec,
-      mute: typeof inputPad?.mute === 'boolean' ? inputPad.mute : defaultPad.mute,
+      mute: isJsonBoolean(inputPad?.mute) ? inputPad.mute : defaultPad.mute,
       chokeGroup: Math.round(clamp(readFiniteNumber(inputPad?.chokeGroup) ?? defaultPad.chokeGroup, 0, 16)),
     }
   })
-  const selectedPadId = typeof input.selectedPadId === 'string' && pads.some((pad) => pad.id === input.selectedPadId)
-    ? input.selectedPadId
+  const selectedPadId = isJsonString(inputValue.selectedPadId) && pads.some((pad) => pad.id === inputValue.selectedPadId)
+    ? inputValue.selectedPadId
     : pads[0]?.id
 
   return { pads, selectedPadId }

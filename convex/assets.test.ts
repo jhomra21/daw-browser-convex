@@ -1,0 +1,341 @@
+import { expect, test } from "bun:test";
+import { convexTest } from "convex-test";
+import { api } from "./_generated/api";
+import schema from "./schema";
+import { enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
+
+const projectId = "project-assets";
+const owner = "asset-owner";
+const digest = "a".repeat(64);
+const audioMetadata = { durationSec: 1, sampleRate: 44_100, channelCount: 2 };
+const controlIdentity = {
+  subject: owner,
+  dawControlActorIssuer: "https://control.example",
+  dawControlActorTokenIdentifier: "token-assets",
+};
+
+const modules = {
+  "./_generated/api.ts": () => import("./_generated/api"),
+  "./assets.ts": () => import("./assets"),
+  "./projects.ts": () => import("./projects"),
+  "./projectAccess.ts": () => import("./projectAccess"),
+  "./projectRows.ts": () => import("./projectRows"),
+  "./sampleRows.ts": () => import("./sampleRows"),
+  "./r2Deletes.ts": () => import("./r2Deletes"),
+};
+
+const setup = async () => {
+  const t = convexTest(schema, modules);
+  await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
+  return t;
+};
+
+const begin = (t: Awaited<ReturnType<typeof setup>>, idempotencyKey = "asset-key-1") => (
+  t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId, idempotencyKey, contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
+  })
+);
+
+test("asset receipts replay deterministically and finalize exactly once", async () => {
+  const t = await setup();
+  const first = await begin(t);
+  const replay = await begin(t);
+  expect(replay).toEqual(first);
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: "b".repeat(64), name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
+  })).rejects.toThrow("Idempotency key");
+  const finalized = await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  });
+  expect(finalized.idempotencyReplay).toBe(false);
+  expect(finalized.asset).toMatchObject({
+    durationSec: 1,
+    sampleRate: 44_100,
+    channelCount: 2,
+  });
+  expect((await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  })).idempotencyReplay).toBe(true);
+  expect((await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique()))?.revision).toBe(1);
+});
+
+test("receipt replay rejects trusted metadata drift", async () => {
+  const t = await setup();
+  await begin(t);
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "asset-key-1",
+    contentSha256: digest,
+    name: "Kick.wav",
+    mimeType: "audio/wav",
+    sizeBytes: 12,
+    durationSec: 2,
+    sampleRate: 44_100,
+    channelCount: 2,
+  })).rejects.toThrow("Idempotency key");
+});
+
+test("legacy upload receipts fail closed until restarted", async () => {
+  const t = await setup();
+  await t.run(async (ctx) => {
+    await ctx.db.insert("assetUploadReceipts", {
+      projectId,
+      actorUserId: owner,
+      idempotencyKey: "legacy-key",
+      contentSha256: digest,
+      assetKey: "legacy-asset",
+      r2Key: "asset-namespaces/legacy/samples/legacy",
+      semanticDigest: "legacy",
+      status: "pending",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      name: "Legacy.wav",
+      createdAt: 1,
+      updatedAt: 1,
+      attempts: 0,
+    });
+  });
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "legacy-key",
+    contentSha256: digest,
+    name: "Legacy.wav",
+    mimeType: "audio/wav",
+    sizeBytes: 12,
+    ...audioMetadata,
+  })).rejects.toThrow("legacy upload receipt");
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "legacy-key", contentSha256: digest,
+  })).rejects.toThrow("Legacy upload receipt metadata");
+});
+
+test("stale legacy receipts backfill metadata from completed samples", async () => {
+  const t = await setup();
+  await t.run(async (ctx) => {
+    await ctx.db.insert("assetUploadReceipts", {
+      projectId,
+      actorUserId: owner,
+      idempotencyKey: "legacy-reconcile",
+      contentSha256: digest,
+      assetKey: "legacy-reconcile-asset",
+      r2Key: "asset-namespaces/legacy/samples/reconcile",
+      semanticDigest: "legacy",
+      status: "pending",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      name: "Legacy.wav",
+      createdAt: 1,
+      updatedAt: 1,
+      attempts: 0,
+    });
+    await ctx.db.insert("samples", {
+      projectId,
+      assetKey: "legacy-reconcile-asset",
+      sourceKind: "upload",
+      name: "Legacy.wav",
+      mimeType: "audio/wav",
+      sizeBytes: 12,
+      contentSha256: digest,
+      r2Key: "asset-namespaces/legacy/samples/reconcile",
+      duration: 2,
+      sampleRate: 48_000,
+      channelCount: 1,
+      ownerUserId: owner,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+  });
+  await t.withIdentity({ subject: "worker", dawWorker: true, tokenIdentifier: "worker-assets" })
+    .mutation(api.assets.reconcileStalePending, { before: Date.now(), limit: 10 });
+  expect(await t.run(async (ctx) => await ctx.db.query("assetUploadReceipts").first())).toMatchObject({
+    status: "completed",
+    durationSec: 2,
+    sampleRate: 48_000,
+    channelCount: 1,
+  });
+});
+
+test("folders have material revisions and cannot delete nonempty contents", async () => {
+  const t = await setup();
+  const folder = await t.withIdentity(controlIdentity).mutation(api.assets.createFolder, { projectId, name: "Drums" });
+  expect((await t.withIdentity(controlIdentity).mutation(api.assets.renameFolder, {
+    projectId, folderId: folder.folder.id, name: "Drums",
+  })).applied).toBe(false);
+  await begin(t);
+  const uploaded = await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  });
+  await t.withIdentity(controlIdentity).mutation(api.assets.moveAssetToFolder, {
+    projectId, assetKey: uploaded.asset.id, folderId: folder.folder.id,
+  });
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.deleteFolder, {
+    projectId, folderId: folder.folder.id,
+  })).rejects.toThrow("empty");
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.deleteAsset, {
+    projectId, assetKey: uploaded.asset.id,
+  })).resolves.toEqual({ deleted: true });
+});
+
+test("failed receipts retry only with the same full request metadata", async () => {
+  const t = await setup();
+  await begin(t);
+  expect((await t.withIdentity(controlIdentity).mutation(api.assets.failUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  })).queued).toBe(true);
+  expect((await begin(t)).status).toBe("pending");
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Other.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
+  })).rejects.toThrow("Idempotency key");
+});
+
+test("retry keeps a fetched old-key deletion from deleting the new object", async () => {
+  const t = await setup();
+  const begun = await begin(t);
+  const bucket = new Map([[begun.r2Key, "old content"]]);
+  await t.withIdentity(controlIdentity).mutation(api.assets.failUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  });
+  const fetchedDeleteRow = await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue")
+    .withIndex("by_key", (query) => query.eq("r2Key", begun.r2Key)).first());
+  if (!fetchedDeleteRow) throw new Error("Expected old upload cleanup row.");
+  const retried = await begin(t);
+  expect(retried.assetKey).toBe(begun.assetKey);
+  expect(retried.r2Key).not.toBe(begun.r2Key);
+  bucket.set(retried.r2Key, "new content");
+  expect(await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue")
+    .withIndex("by_key", (query) => query.eq("r2Key", begun.r2Key)).first())).not.toBeNull();
+  await t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  });
+  bucket.delete(fetchedDeleteRow.r2Key);
+  const sample = await t.run(async (ctx) => await ctx.db.query("samples")
+    .withIndex("by_room_assetKey", (query) => query.eq("projectId", projectId).eq("assetKey", begun.assetKey)).unique());
+  expect(sample?.r2Key).toBe(retried.r2Key);
+  expect(bucket.get(sample?.r2Key ?? "")).toBe("new content");
+});
+
+test("finalization preserves the asset cap under concurrent pending receipts", async () => {
+  const t = await setup();
+  await t.run(async (ctx) => {
+    for (let index = 0; index < 999; index += 1) {
+      await ctx.db.insert("samples", {
+        projectId,
+        assetKey: `existing-${index}`,
+        sourceKind: "upload",
+        ownerUserId: owner,
+        name: "Existing.wav",
+        mimeType: "audio/wav",
+        sizeBytes: 1,
+        contentSha256: digest,
+        r2Key: `asset-namespaces/test/existing-${index}`,
+        createdAt: index,
+        updatedAt: index,
+      });
+    }
+  });
+  await begin(t, "asset-key-1");
+  await begin(t, "asset-key-2");
+  const results = await Promise.allSettled([
+    t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+      projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+    }),
+    t.withIdentity(controlIdentity).mutation(api.assets.finalizeUpload, {
+      projectId, idempotencyKey: "asset-key-2", contentSha256: digest,
+    }),
+  ]);
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect((await t.withIdentity(controlIdentity).query(api.assets.listByProject, { projectId, limit: 1_000 }))).toHaveLength(1_000);
+  expect((await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique()))?.revision).toBe(1);
+});
+
+test("failed uploads protect their folders until retried", async () => {
+  const t = await setup();
+  const folder = await t.withIdentity(controlIdentity).mutation(api.assets.createFolder, { projectId, name: "Drums" });
+  await t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
+    folderId: folder.folder.id,
+  });
+  await t.withIdentity(controlIdentity).mutation(api.assets.failUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest,
+  });
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.deleteFolder, {
+    projectId, folderId: folder.folder.id,
+  })).rejects.toThrow("retryable");
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId, idempotencyKey: "asset-key-1", contentSha256: digest, name: "Kick.wav", mimeType: "audio/wav", sizeBytes: 12, ...audioMetadata,
+    folderId: folder.folder.id,
+  })).resolves.toMatchObject({ status: "pending" });
+});
+
+test("R2 deletion rows claim atomically, complete, and reactivate from tombstones", async () => {
+  const t = await setup();
+  const project = await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  if (!project) throw new Error("Project missing.");
+  const r2Key = `asset-namespaces/${project.storageNamespace}/samples/recovery-queue-test`;
+  await t.run(async (ctx) => {
+    await enqueueR2DeleteRows(ctx, {
+      projectId,
+      storageNamespace: project.storageNamespace,
+      keys: [r2Key],
+      kind: "sample",
+    });
+  });
+  const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+  const due = await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now: Date.now(), limit: 10 });
+  expect(due).toHaveLength(1);
+  const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: due.map((row) => row._id), now: Date.now(),
+  });
+  expect(claimed).toHaveLength(1);
+  expect((await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: due.map((row) => row._id), now: Date.now(),
+  }))).toEqual([]);
+  await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
+    projectId,
+    claims: claimed.flatMap((row) => row.claimToken ? [{ id: row._id, claimToken: row.claimToken }] : []),
+  });
+  expect(await t.run(async (ctx) => await hasR2DeleteRow(ctx, { projectId, r2Key }))).toBe(false);
+  await t.run(async (ctx) => {
+    await enqueueR2DeleteRows(ctx, {
+      projectId,
+      storageNamespace: project.storageNamespace,
+      keys: [r2Key],
+      kind: "sample",
+    });
+  });
+  expect(await t.run(async (ctx) => await hasR2DeleteRow(ctx, { projectId, r2Key }))).toBe(true);
+});
+
+test("expired R2 claims are re-leased and reject stale completion", async () => {
+  const t = await setup();
+  const project = await t.run(async (ctx) => await ctx.db.query("projects")
+    .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique());
+  if (!project) throw new Error("Project missing.");
+  const r2Key = `asset-namespaces/${project.storageNamespace}/samples/stale-claim`;
+  await t.run(async (ctx) => await enqueueR2DeleteRows(ctx, {
+    projectId, storageNamespace: project.storageNamespace, keys: [r2Key], kind: "sample",
+  }));
+  const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
+  const now = Date.now();
+  const first = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId,
+    ids: (await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now, limit: 1 })).map((row) => row._id),
+    now,
+  });
+  const original = first[0];
+  if (!original?.claimToken) throw new Error("Expected initial claim.");
+  const reclaimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
+    projectId, ids: [original._id], now: now + 5 * 60 * 1000,
+  });
+  const current = reclaimed[0];
+  if (!current?.claimToken) throw new Error("Expected reclaimed claim.");
+  await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
+    projectId, claims: [{ id: original._id, claimToken: original.claimToken }],
+  });
+  const row = await t.run(async (ctx) => await ctx.db.get(original._id));
+  expect(row?.status).toBe("claimed");
+  expect(row?.claimToken).toBe(current.claimToken);
+});

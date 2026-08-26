@@ -1,22 +1,19 @@
-import { isLocalId } from '@daw-browser/shared'
+import { isJsonObject, isLocalId, type JsonValue } from '@daw-browser/shared'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import type { UpdateTrackInput } from '~/lib/timeline-repository/types'
 import type { TrackRouting } from '@daw-browser/timeline-core/types'
+import { z } from 'zod'
 
 type TrackWriteContext = {
   projectId: string
   userId: string
-  writeLocalTrack: (input: UpdateTrackInput) => Promise<unknown>
+  writeLocalTrack: (input: UpdateTrackInput) => Promise<void>
 }
 
 type TrackMixWriteResult = { status?: 'access-denied' | 'applied' | 'noop' | 'not-found' }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const readTrackMixWriteResult = (value: unknown): TrackMixWriteResult => {
-  if (!isRecord(value)) return { status: 'applied' }
+const readTrackMixWriteResult = (value: JsonValue): TrackMixWriteResult => {
+  if (!isJsonObject(value)) return { status: 'applied' }
   const status = value.status
   if (status === 'access-denied' || status === 'applied' || status === 'noop' || status === 'not-found') {
     return { status }
@@ -27,7 +24,7 @@ const readTrackMixWriteResult = (value: unknown): TrackMixWriteResult => {
 export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
   const updateLocalOrCloudTrack = async (
     localInput: UpdateTrackInput,
-    writeCloud: (userId: string) => Promise<unknown>,
+    writeCloud: (userId: string) => Promise<JsonValue>,
   ) => {
     if (isLocalId('project', context.projectId)) {
       return await context.writeLocalTrack(localInput)
@@ -43,7 +40,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
         outputTargetId: routing.outputTargetId ?? null,
         sends: routing.sends ?? [],
       },
-      async (userId) => await publishDurableSharedTimelineOperation({
+      async (userId) => z.json().parse(await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: {
@@ -57,16 +54,16 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
           },
         },
         queuedResult: { status: 'applied' },
-      }),
+      })),
     ),
     setVolume: async (trackId: string, volume: number) => await updateLocalOrCloudTrack(
       { trackId, volume },
-      async (userId) => await publishDurableSharedTimelineOperation({
+      async (userId) => z.json().parse(await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: { kind: 'tracks.setVolume', payload: { trackId, volume } },
         queuedResult: { status: 'applied' },
-      }),
+      })),
     ),
     setMix: async (trackId: string, patch: { muted?: boolean; soloed?: boolean }): Promise<TrackMixWriteResult | undefined> => {
       if (patch.muted === undefined && patch.soloed === undefined) return undefined
@@ -76,7 +73,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
       }
       if (!context.userId) return undefined
       const userId = context.userId
-      const result = await publishDurableSharedTimelineOperation({
+      const result = z.json().parse(await publishDurableSharedTimelineOperation({
         projectId: context.projectId,
         userId,
         operation: {
@@ -88,7 +85,7 @@ export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
           },
         },
         queuedResult: { status: 'applied' },
-      })
+      }))
       return readTrackMixWriteResult(result)
     },
   }

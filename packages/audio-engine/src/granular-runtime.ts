@@ -9,6 +9,16 @@ export type GranularInstalledBuffer = {
   buffer: AudioBuffer
 }
 
+export type GranularWorkletControlMessage =
+  | { type: 'install'; version: 1; generation: number; assetKey: string; sampleRate: number; channels: readonly Float32Array[] }
+  | { type: 'release'; version: 1; generation: number }
+  | { type: 'reset-seed'; version: 1; seed: number }
+  | { type: 'freeze'; version: 1; freeze: boolean }
+
+export type GranularWorkletStatusMessage =
+  | { type: 'installed'; version: 1; generation: number }
+  | { type: 'error'; version: 1; generation: number; code?: string }
+
 type GranularRuntimeOptions = {
   context: BaseAudioContext | { currentTime: number }
   destination?: AudioNode
@@ -21,13 +31,13 @@ type GranularRuntimeOptions = {
 type GranularWorkletNode = {
   parameters: ReadonlyMap<string, AudioParam>
   port: {
-    onmessage: ((event: MessageEvent) => void) | null
-    postMessage(message: unknown, transfer: Transferable[]): void
-    postMessage(message: unknown, options?: StructuredSerializeOptions): void
+    onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null
+    postMessage(message: GranularWorkletControlMessage, transfer: Transferable[]): void
+    postMessage(message: GranularWorkletControlMessage, options?: StructuredSerializeOptions): void
     close: () => void
   }
-  onprocessorerror: ((event: ErrorEvent) => unknown) | null
-  connect: (destination: AudioNode) => unknown
+  onprocessorerror: ((event: ErrorEvent) => void) | null
+  connect: (destination: AudioNode) => void
   disconnect: () => void
 }
 
@@ -57,7 +67,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
         processorOptions: {
           seed: params.seed,
           maxGrains: params.maxGrains,
-          windowShape: params.windowShape,
+          'windowShape': params['windowShape'],
         },
       },
     )
@@ -109,16 +119,14 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
 
   node.port.onmessage = (event) => {
     const data = event.data
-    if (typeof data !== 'object' || data === null || !('generation' in data) || typeof data.generation !== 'number') return
     const request = pending.get(data.generation)
     if (!request) return
-    if (!('type' in data)) return
     if (data.type === 'installed') {
       pending.delete(data.generation)
       request.resolve()
     } else if (data.type === 'error') {
       pending.delete(data.generation)
-      const code = 'code' in data && typeof data.code === 'string' ? data.code : 'install-error'
+      const code = data.code ?? 'install-error'
       request.reject(new Error(`Granular sample installation failed: ${code}`))
       options.onFault?.(code)
     }
@@ -190,6 +198,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       const gate = node.parameters.get('gate')
       if (!gate) return
       scheduledGateEnd = 0
+      scheduledNotes.clear()
       gate.cancelScheduledValues(options.context.currentTime)
       gate.setValueAtTime(0, options.context.currentTime)
     },

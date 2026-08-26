@@ -1,3 +1,5 @@
+import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from './json-value'
+
 export const SYNTH_STATE_VERSION = 2
 export const SYNTH_PARAMETER_LIMITS = {
   envelopeSeconds: { min: 0, max: 60 },
@@ -78,7 +80,7 @@ export type SynthParams = {
   retrigger: boolean
 }
 
-export type SynthParamsInput = unknown
+export type SynthParamsInput = JsonValue
 
 export type SynthParamsUpdate = {
   oscillators?: readonly [
@@ -103,33 +105,29 @@ type LegacySynthParams = {
   releaseMs?: number
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const finiteNumber = (value: unknown) => (
-  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const finiteNumber = (value: JsonValue | undefined) => (
+  isJsonNumber(value) && Number.isFinite(value) ? value : undefined
 )
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const integer = (value: unknown, fallback: number, min: number, max: number) => {
+const integer = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
   const number = finiteNumber(value)
   return number === undefined ? fallback : clamp(Math.round(number), min, max)
 }
-const number = (value: unknown, fallback: number, min: number, max: number) => {
+const number = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
   const input = finiteNumber(value)
   return input === undefined ? fallback : clamp(input, min, max)
 }
 
-const isFiniteNumber = (value: unknown): value is number => (
-  typeof value === 'number' && Number.isFinite(value)
+const isFiniteNumber = (value: JsonValue | undefined): value is number => (
+  isJsonNumber(value) && Number.isFinite(value)
 )
 
-export const isSynthWave = (value: unknown): value is SynthWave => (
+export const isSynthWave = (value: JsonValue): value is SynthWave => (
   value === 'sine' || value === 'square' || value === 'sawtooth' || value === 'triangle'
 )
 
-export const isSynthFilterMode = (value: unknown): value is SynthFilterMode => (
+export const isSynthFilterMode = (value: JsonValue): value is SynthFilterMode => (
   value === 'lowpass' || value === 'highpass' || value === 'bandpass' || value === 'notch'
 )
 
@@ -157,8 +155,8 @@ export const createDefaultSynthParams = (): SynthParams => ({
   retrigger: true,
 })
 
-const normalizeEnvelope = (input: unknown, defaults: SynthEnvelopeParams): SynthEnvelopeParams => {
-  const value = isRecord(input) ? input : {}
+const normalizeEnvelope = (input: JsonValue | undefined, defaults: SynthEnvelopeParams): SynthEnvelopeParams => {
+  const value = isJsonObject(input) ? input : {}
   return {
     attackSec: number(value.attackSec, defaults.attackSec, SYNTH_PARAMETER_LIMITS.envelopeSeconds.min, SYNTH_PARAMETER_LIMITS.envelopeSeconds.max),
     decaySec: number(value.decaySec, defaults.decaySec, SYNTH_PARAMETER_LIMITS.envelopeSeconds.min, SYNTH_PARAMETER_LIMITS.envelopeSeconds.max),
@@ -167,10 +165,10 @@ const normalizeEnvelope = (input: unknown, defaults: SynthEnvelopeParams): Synth
   }
 }
 
-const normalizeOscillator = (input: unknown, defaults: SynthOscillatorParams): SynthOscillatorParams => {
-  const value = isRecord(input) ? input : {}
+const normalizeOscillator = (input: JsonValue | undefined, defaults: SynthOscillatorParams): SynthOscillatorParams => {
+  const value = isJsonObject(input) ? input : {}
   return {
-    enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
+    enabled: isJsonBoolean(value.enabled) ? value.enabled : defaults.enabled,
     wave: isSynthWave(value.wave) ? value.wave : defaults.wave,
     octave: integer(value.octave, defaults.octave, SYNTH_PARAMETER_LIMITS.oscillatorOctave.min, SYNTH_PARAMETER_LIMITS.oscillatorOctave.max),
     semitone: integer(value.semitone, defaults.semitone, SYNTH_PARAMETER_LIMITS.oscillatorSemitone.min, SYNTH_PARAMETER_LIMITS.oscillatorSemitone.max),
@@ -179,12 +177,12 @@ const normalizeOscillator = (input: unknown, defaults: SynthOscillatorParams): S
   }
 }
 
-const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => {
+const normalizeV2SynthParams = (input: JsonObject): SynthParams => {
   const defaults = createDefaultSynthParams()
   const oscillators = Array.isArray(input.oscillators) ? input.oscillators : []
-  const filterInput = isRecord(input.filter) ? input.filter : {}
-  const lfoInput = isRecord(input.lfo) ? input.lfo : {}
-  const noiseInput = isRecord(input.noise) ? input.noise : {}
+  const filterInput = isJsonObject(input.filter) ? input.filter : {}
+  const lfoInput = isJsonObject(input.lfo) ? input.lfo : {}
+  const noiseInput = isJsonObject(input.noise) ? input.noise : {}
   return {
     version: SYNTH_STATE_VERSION,
     oscillators: [
@@ -193,7 +191,7 @@ const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => 
     ],
     ampEnvelope: normalizeEnvelope(input.ampEnvelope, defaults.ampEnvelope),
     filter: {
-      enabled: typeof filterInput.enabled === 'boolean' ? filterInput.enabled : defaults.filter.enabled,
+      enabled: isJsonBoolean(filterInput.enabled) ? filterInput.enabled : defaults.filter.enabled,
       mode: isSynthFilterMode(filterInput.mode) ? filterInput.mode : defaults.filter.mode,
       frequencyHz: number(filterInput.frequencyHz, defaults.filter.frequencyHz, SYNTH_PARAMETER_LIMITS.filterFrequencyHz.min, SYNTH_PARAMETER_LIMITS.filterFrequencyHz.max),
       q: number(filterInput.q, defaults.filter.q, SYNTH_PARAMETER_LIMITS.filterQ.min, SYNTH_PARAMETER_LIMITS.filterQ.max),
@@ -202,7 +200,7 @@ const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => 
       envelope: normalizeEnvelope(filterInput.envelope, defaults.filter.envelope),
     },
     lfo: {
-      enabled: typeof lfoInput.enabled === 'boolean' ? lfoInput.enabled : defaults.lfo.enabled,
+      enabled: isJsonBoolean(lfoInput.enabled) ? lfoInput.enabled : defaults.lfo.enabled,
       wave: isSynthWave(lfoInput.wave) ? lfoInput.wave : defaults.lfo.wave,
       frequencyHz: number(lfoInput.frequencyHz, defaults.lfo.frequencyHz, SYNTH_PARAMETER_LIMITS.lfoFrequencyHz.min, SYNTH_PARAMETER_LIMITS.lfoFrequencyHz.max),
       pitchCents: number(lfoInput.pitchCents, defaults.lfo.pitchCents, SYNTH_PARAMETER_LIMITS.lfoPitchCents.min, SYNTH_PARAMETER_LIMITS.lfoPitchCents.max),
@@ -211,31 +209,31 @@ const normalizeV2SynthParams = (input: Record<string, unknown>): SynthParams => 
       pan: number(lfoInput.pan, defaults.lfo.pan, SYNTH_PARAMETER_LIMITS.lfoPan.min, SYNTH_PARAMETER_LIMITS.lfoPan.max),
     },
     noise: {
-      enabled: typeof noiseInput.enabled === 'boolean' ? noiseInput.enabled : defaults.noise.enabled,
+      enabled: isJsonBoolean(noiseInput.enabled) ? noiseInput.enabled : defaults.noise.enabled,
       level: number(noiseInput.level, defaults.noise.level, SYNTH_PARAMETER_LIMITS.noiseLevel.min, SYNTH_PARAMETER_LIMITS.noiseLevel.max),
     },
     gain: number(input.gain, defaults.gain, SYNTH_PARAMETER_LIMITS.gain.min, SYNTH_PARAMETER_LIMITS.gain.max),
     pan: number(input.pan, defaults.pan, SYNTH_PARAMETER_LIMITS.pan.min, SYNTH_PARAMETER_LIMITS.pan.max),
     polyphony: integer(input.polyphony, defaults.polyphony, SYNTH_PARAMETER_LIMITS.polyphony.min, SYNTH_PARAMETER_LIMITS.polyphony.max),
-    retrigger: typeof input.retrigger === 'boolean' ? input.retrigger : defaults.retrigger,
+    retrigger: isJsonBoolean(input.retrigger) ? input.retrigger : defaults.retrigger,
   }
 }
 
-const isLegacySynthParams = (value: Record<string, unknown>) => (
+const isLegacySynthParams = (value: JsonObject) => (
   'wave1' in value || 'wave2' in value || 'attackMs' in value || 'releaseMs' in value
 )
 
-const isCompleteSynthEnvelope = (value: unknown): boolean => (
-  isRecord(value)
+const isCompleteSynthEnvelope = (value: JsonValue | undefined): boolean => (
+  isJsonObject(value)
   && isFiniteNumber(value.attackSec)
   && isFiniteNumber(value.decaySec)
   && isFiniteNumber(value.sustain)
   && isFiniteNumber(value.releaseSec)
 )
 
-const isCompleteSynthOscillator = (value: unknown): boolean => (
-  isRecord(value)
-  && (value.enabled === undefined || typeof value.enabled === 'boolean')
+const isCompleteSynthOscillator = (value: JsonValue | undefined): boolean => (
+  isJsonObject(value)
+  && (value.enabled === undefined || isJsonBoolean(value.enabled))
   && isSynthWave(value.wave)
   && isFiniteNumber(value.octave)
   && isFiniteNumber(value.semitone)
@@ -243,29 +241,29 @@ const isCompleteSynthOscillator = (value: unknown): boolean => (
   && isFiniteNumber(value.level)
 )
 
-const isCompleteSynthNoise = (value: unknown): boolean => (
-  isRecord(value)
-  && typeof value.enabled === 'boolean'
+const isCompleteSynthNoise = (value: JsonValue | undefined): boolean => (
+  isJsonObject(value)
+  && isJsonBoolean(value.enabled)
   && isFiniteNumber(value.level)
 )
 
-const isCompleteSynthParams = (value: Record<string, unknown>): boolean => (
+const isCompleteSynthParams = (value: JsonObject): boolean => (
   value.version === SYNTH_STATE_VERSION
   && Array.isArray(value.oscillators)
   && value.oscillators.length === 2
   && isCompleteSynthOscillator(value.oscillators[0])
   && isCompleteSynthOscillator(value.oscillators[1])
   && isCompleteSynthEnvelope(value.ampEnvelope)
-  && isRecord(value.filter)
-  && typeof value.filter.enabled === 'boolean'
+  && isJsonObject(value.filter)
+  && isJsonBoolean(value.filter.enabled)
   && isSynthFilterMode(value.filter.mode)
   && isFiniteNumber(value.filter.frequencyHz)
   && isFiniteNumber(value.filter.q)
   && isFiniteNumber(value.filter.keyTracking)
   && isFiniteNumber(value.filter.envelopeAmountOctaves)
   && isCompleteSynthEnvelope(value.filter.envelope)
-  && isRecord(value.lfo)
-  && typeof value.lfo.enabled === 'boolean'
+  && isJsonObject(value.lfo)
+  && isJsonBoolean(value.lfo.enabled)
   && isSynthWave(value.lfo.wave)
   && isFiniteNumber(value.lfo.frequencyHz)
   && isFiniteNumber(value.lfo.pitchCents)
@@ -276,10 +274,10 @@ const isCompleteSynthParams = (value: Record<string, unknown>): boolean => (
   && isFiniteNumber(value.gain)
   && isFiniteNumber(value.pan)
   && isFiniteNumber(value.polyphony)
-  && typeof value.retrigger === 'boolean'
+  && isJsonBoolean(value.retrigger)
 )
 
-const isCompleteLegacySynthParams = (value: Record<string, unknown>): boolean => (
+const isCompleteLegacySynthParams = (value: JsonObject): boolean => (
   isSynthWave(value.wave1)
   && isSynthWave(value.wave2)
   && (value.gain === undefined || isFiniteNumber(value.gain))
@@ -287,33 +285,33 @@ const isCompleteLegacySynthParams = (value: Record<string, unknown>): boolean =>
   && (value.releaseMs === undefined || isFiniteNumber(value.releaseMs))
 )
 
-export const parseStrictSynthParams = (input: unknown): SynthParams | undefined => (
-  isRecord(input) && (isCompleteSynthParams(input) || isCompleteLegacySynthParams(input))
+export const parseStrictSynthParams = (input: JsonValue): SynthParams | undefined => {
+  return isJsonObject(input) && (isCompleteSynthParams(input) || isCompleteLegacySynthParams(input))
     ? normalizeSynthParams(input)
     : undefined
-)
+}
 
 export const migrateLegacySynthParams = (legacy: LegacySynthParams): SynthParams => {
   const defaults = createDefaultSynthParams()
   return normalizeV2SynthParams({
     ...defaults,
     oscillators: [
-      { ...defaults.oscillators[0], wave: legacy.wave1, detuneCents: 0, level: 0.5 },
-      { ...defaults.oscillators[1], wave: legacy.wave2, detuneCents: 0, level: 0.5 },
+      { ...defaults.oscillators[0], wave: legacy.wave1 ?? defaults.oscillators[0].wave, detuneCents: 0, level: 0.5 },
+      { ...defaults.oscillators[1], wave: legacy.wave2 ?? defaults.oscillators[1].wave, detuneCents: 0, level: 0.5 },
     ],
-    gain: legacy.gain,
+    gain: legacy.gain ?? defaults.gain,
     ampEnvelope: {
       ...defaults.ampEnvelope,
-      attackSec: typeof legacy.attackMs === 'number' ? legacy.attackMs / 1000 : undefined,
+      attackSec: isJsonNumber(legacy.attackMs) ? legacy.attackMs / 1000 : defaults.ampEnvelope.attackSec,
       decaySec: 0,
       sustain: 1,
-      releaseSec: typeof legacy.releaseMs === 'number' ? legacy.releaseMs / 1000 : undefined,
+      releaseSec: isJsonNumber(legacy.releaseMs) ? legacy.releaseMs / 1000 : defaults.ampEnvelope.releaseSec,
     },
   })
 }
 
 export const normalizeSynthParams = (input: SynthParamsInput): SynthParams => {
-  if (!isRecord(input)) return createDefaultSynthParams()
+  if (!isJsonObject(input)) return createDefaultSynthParams()
   if (isLegacySynthParams(input)) {
     return migrateLegacySynthParams({
       wave1: isSynthWave(input.wave1) ? input.wave1 : undefined,

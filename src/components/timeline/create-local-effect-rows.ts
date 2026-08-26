@@ -4,8 +4,13 @@ import { isLocalId } from "@daw-browser/shared";
 
 type LocalEffectSelector = LocalEffectKind | ((targetId: string) => LocalEffectKind);
 
+const isLocalEffectResolver = (
+  effect: LocalEffectSelector,
+): effect is (targetId: string) => LocalEffectKind => typeof effect === "function";
+
 type LocalEffectRows<TParams> = {
   fetchRow: (projectId: string, targetId: string) => Promise<LocalEffectRow<TParams> | undefined>;
+  isLoaded: (targetId: string | undefined) => boolean;
   isLocalProject: Accessor<boolean>;
   persist: (projectId: string, targetId: string, params: TParams, instanceId?: string) => Promise<void>;
   remove: (projectId: string, targetId: string, instanceId?: string) => Promise<void>;
@@ -13,7 +18,7 @@ type LocalEffectRows<TParams> = {
 };
 
 const resolveEffect = (effect: LocalEffectSelector, targetId: string) => (
-  typeof effect === "function" ? effect(targetId) : effect
+  isLocalEffectResolver(effect) ? effect(targetId) : effect
 );
 
 const scopeKey = (projectId: string, targetId: string, effect: LocalEffectKind) => (
@@ -27,6 +32,7 @@ export function createLocalEffectRows<TParams>(input: {
   normalize?: (params: TParams) => TParams;
 }): LocalEffectRows<TParams> {
   const [rows, setRows] = createSignal<Record<string, LocalEffectRow<TParams> | undefined>>({});
+  const [loaded, setLoaded] = createSignal<Record<string, true | undefined>>({});
   const isLocalProject = createMemo(() => {
     const projectId = input.projectId();
     return Boolean(projectId && isLocalId("project", projectId));
@@ -46,9 +52,11 @@ export function createLocalEffectRows<TParams>(input: {
     void getLocalEffect<TParams>(projectId, targetId, effect).then((row) => {
       if (!untrack(isCurrentScope)) return;
       setRows((prev) => ({ ...prev, [key]: row }));
+      setLoaded((prev) => ({ ...prev, [key]: true }));
     }).catch(() => {
       if (!untrack(isCurrentScope)) return;
       setRows((prev) => ({ ...prev, [key]: undefined }));
+      setLoaded((prev) => ({ ...prev, [key]: true }));
     });
   });
 
@@ -71,6 +79,7 @@ export function createLocalEffectRows<TParams>(input: {
     const row = await getLocalEffect<TParams>(projectId, targetId, effect);
     if (input.projectId() !== projectId) return row;
     setRows((prev) => ({ ...prev, [key]: row }));
+    setLoaded((prev) => ({ ...prev, [key]: true }));
     return row;
   };
 
@@ -81,10 +90,16 @@ export function createLocalEffectRows<TParams>(input: {
     else await deleteLocalEffect(projectId, targetId, effect);
     if (input.projectId() !== projectId) return;
     setRows((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: undefined }));
+    setLoaded((prev) => ({ ...prev, [scopeKey(projectId, targetId, effect)]: true }));
   };
 
   return {
     fetchRow,
+    isLoaded: (targetId) => {
+      const projectId = input.projectId();
+      if (!projectId || !targetId || !isLocalId("project", projectId)) return false;
+      return loaded()[scopeKey(projectId, targetId, resolveEffect(input.effect, targetId))] === true;
+    },
     isLocalProject,
     persist,
     remove,

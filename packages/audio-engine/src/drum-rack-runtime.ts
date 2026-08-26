@@ -1,7 +1,7 @@
 import { getScheduledMidiEvents } from './audio-scheduling'
 import { disconnectAudioNodes } from './effects/chain'
 import { stopAndDisconnectSource, type SourceRegistry } from './source-registry'
-import { normalizeDrumRackParams, type ArpParams, type DrumRackPadParams, type DrumRackParams } from '@daw-browser/shared'
+import { MAX_SAMPLED_INSTRUMENT_VOICES, normalizeDrumRackParams, type ArpParams, type DrumRackPadParams, type DrumRackParams } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
@@ -17,6 +17,7 @@ type TrackDrumRackConfig = {
 }
 
 type ActiveHit = {
+  id: number
   clipId?: string
   source: AudioBufferSourceNode
   gain: GainNode
@@ -78,6 +79,7 @@ export function scheduleDrumRackHit(input: {
 export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
   const configs = new Map<string, TrackDrumRackConfig>()
   const activeHitsByTrack = new Map<string, Set<ActiveHit>>()
+  let nextHitId = 1
 
   const buildPadIndex = (params: DrumRackParams) => {
     const padIndexByNote = new Map<number, number>()
@@ -125,10 +127,18 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
     }
   }
 
-  const triggerPad = (trackId: string, pad: DrumRackPadParams, buffer: AudioBuffer, when: number, velocity: number, clipId?: string) => {
+  const triggerPad = (trackId: string, pad: DrumRackPadParams, buffer: AudioBuffer, when: number, velocity: number, clipId?: string, onEnded?: () => void): ((stopWhen: number) => void) | undefined => {
     const ctx = options.getAudioContext()
-    if (!ctx) return false
+    if (!ctx) return undefined
     chokeGroup(trackId, pad.chokeGroup, when)
+    const activeHits = activeHitsByTrack.get(trackId)
+    if (activeHits && activeHits.size >= MAX_SAMPLED_INSTRUMENT_VOICES) {
+      let oldest: ActiveHit | undefined
+      for (const candidate of activeHits) {
+        if (!oldest || candidate.id < oldest.id) oldest = candidate
+      }
+      if (oldest) stopHit(trackId, oldest, when)
+    }
     const scheduled = scheduleDrumRackHit({
       ctx,
       destination: options.ensureTrackInput(trackId),
@@ -137,17 +147,20 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       when,
       velocity,
     })
-    if (!scheduled) return false
-    const hit: ActiveHit = { ...scheduled, clipId, chokeGroup: pad.chokeGroup }
+    if (!scheduled) return undefined
+    const hit: ActiveHit = { ...scheduled, id: nextHitId++, clipId, chokeGroup: pad.chokeGroup }
     let hits = activeHitsByTrack.get(trackId)
     if (!hits) {
       hits = new Set()
       activeHitsByTrack.set(trackId, hits)
     }
     hits.add(hit)
-    scheduled.source.onended = () => removeActiveHit(trackId, hit)
+    scheduled.source.onended = () => {
+      removeActiveHit(trackId, hit)
+      onEnded?.()
+    }
     if (clipId) options.sources.add(clipId, scheduled.source)
-    return true
+    return (stopWhen) => stopHit(trackId, hit, stopWhen)
   }
 
   const disposeTrack = (trackId: string) => {
@@ -192,7 +205,7 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
         if (!pad) continue
         const buffer = config.buffers.get(pad.id)
         if (!buffer) continue
-        didSchedule = triggerPad(track.id, pad, buffer, Math.max(nowCtx, options.timelineToCtxTime(note.startSec)), note.velocity ?? 1, clip.id) || didSchedule
+        didSchedule = Boolean(triggerPad(track.id, pad, buffer, Math.max(nowCtx, options.timelineToCtxTime(note.startSec)), note.velocity ?? 1, clip.id)) || didSchedule
       }
       return didSchedule
     },
@@ -215,7 +228,22 @@ export function createDrumRackRuntime(options: DrumRackRuntimeOptions) {
       const pad = padIndex === undefined ? undefined : config.params.pads[padIndex]
       const buffer = pad ? config.buffers.get(pad.id) : undefined
       if (!pad || !buffer) return false
-      return triggerPad(trackId, pad, buffer, ctx.currentTime, velocity)
+      return Boolean(triggerPad(trackId, pad, buffer, ctx.currentTime, velocity))
+    },
+    startLiveNote: (trackId: string, pitch: number, velocity: number, onEnded?: () => void) => {
+      options.ensureAudio()
+      const config = configs.get(trackId)
+      const ctx = options.getAudioContext()
+      if (!config || !ctx) return undefined
+      const padIndex = config.padIndexByNote.get(pitch)
+      const pad = padIndex === undefined ? undefined : config.params.pads[padIndex]
+      const buffer = pad ? config.buffers.get(pad.id) : undefined
+      return pad && buffer ? triggerPad(trackId, pad, buffer, ctx.currentTime, velocity, undefined, onEnded) : undefined
+    },
+    stopLiveNotes: (trackId: string, when: number) => {
+      for (const hit of Array.from(activeHitsByTrack.get(trackId) ?? [])) {
+        if (hit.clipId === undefined) stopHit(trackId, hit, when)
+      }
     },
     stopAll: () => {
       for (const trackId of Array.from(activeHitsByTrack.keys())) {

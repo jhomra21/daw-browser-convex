@@ -1,7 +1,7 @@
 import type { Accessor } from 'solid-js'
 
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { assert, isLocalId, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
+import { assert, assertDefined, isLocalId, parseJsonValue, trackCreationCollapsed, trackCreationIndex } from '@daw-browser/shared'
 import { ensureRoomShareLink, getInviteShareUrl } from '~/lib/timeline-share'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
@@ -89,6 +89,24 @@ type UseTimelineActionsReturn = {
   resetClipColors: (trackId: Track['id']) => Promise<void>
 }
 
+type SharedOperationPayload = {
+  token?: unknown
+  completionOwner?: unknown
+  result?: unknown
+  trackUpdates?: unknown
+  clipUpdates?: unknown
+  trackId?: unknown
+  clipId?: unknown
+  from?: unknown
+  to?: unknown
+}
+
+const isSharedOperationPayload = (cause: unknown): cause is SharedOperationPayload => (
+  typeof cause === 'object' && cause !== null && !Array.isArray(cause)
+)
+
+const isString = (cause: unknown): cause is string => typeof cause === 'string'
+
 export const projectLocalTrackCreation = (
   tracks: readonly Track[],
   createdTrack: Track,
@@ -119,10 +137,6 @@ export const projectLocalTrackCreation = (
 export function useTimelineActions(
   options: UseTimelineActionsOptions,
 ): UseTimelineActionsReturn {
-  const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-  )
-
   async function createTimelineTrack(
     trackOptions: TimelineTrackCreateOptions = {},
     behavior: TimelineTrackCreateBehavior = {},
@@ -220,8 +234,10 @@ export function useTimelineActions(
       body: JSON.stringify({ projectId, role: 'viewer' }),
     })
     if (!response.ok) throw new Error('Failed to create share invite.')
-    const result = await response.json()
-    return typeof result?.token === 'string' ? getInviteShareUrl(projectId, result.token) : undefined
+    const result: unknown = await response.json()
+    return isSharedOperationPayload(result) && isString(result.token)
+      ? getInviteShareUrl(projectId, result.token)
+      : undefined
   }
 
   const persistTrackPatch = async (
@@ -276,7 +292,7 @@ export function useTimelineActions(
     await runWithConcurrency(updates, 8, async (update) => {
       if (localTimelineRepository) {
         const row = await localTimelineRepository.updateClip({ clipId: update.clipId, color: update.to })
-        assert(row, 'Failed to assign track color to clip')
+        assertDefined(row, 'Failed to assign track color to clip')
         return
       }
       const result = await publishSharedTimelineOperation(projectId, { kind: 'clips.setColor', payload: { clipId: update.clipId, color: update.to } })
@@ -290,9 +306,9 @@ export function useTimelineActions(
     }
     return updates.flatMap((update) => {
       const clip = clipById.get(update.clipId)
-      assert(clip, 'Planned clip color update references a missing clip')
-      options.creation.replaceLocalClip(update.trackId, { ...clip, color: update.to })
-      return [buildClipColorHistoryEntry({ projectId, clip, from: update.from, to: update.to })]
+      const resolvedClip = assertDefined(clip, 'Planned clip color update references a missing clip')
+      options.creation.replaceLocalClip(update.trackId, { ...resolvedClip, color: update.to })
+      return [buildClipColorHistoryEntry({ projectId, clip: resolvedClip, from: update.from, to: update.to })]
     })
   }
 
@@ -433,25 +449,36 @@ export function useTimelineActions(
           effects,
           automation,
         },
+        completionOwner: 'caller',
       })
-      const committed = readSharedUngroupResult(result)
-      assert(committed, 'Invalid shared ungroup result')
+      const completion = isSharedOperationPayload(result)
+        && result.completionOwner !== undefined
+        && result.result !== undefined
+        ? result
+        : undefined
+      if (completion?.completionOwner === 'background') return
+      const committedResult = completion?.result ?? result
+      const committedValue = parseJsonValue(committedResult)
+      const committed = committedValue === undefined
+        ? undefined
+        : readSharedUngroupResult(committedValue)
+      const resolvedCommitted = assertDefined(committed, 'Invalid shared ungroup result')
       const historyEntry = buildCommittedSharedUngroupHistoryEntry({
         projectId,
         tracks,
         groupTrack,
         effects,
         automation,
-        result: committed,
+        result: resolvedCommitted,
       })
       options.creation.pushHistory(historyEntry)
       for (const envelope of historyEntry.data.automation ?? []) {
         options.applyAutomationEnvelope(undefined, envelope.targetKey)
       }
-      for (const update of committed.children) {
+      for (const update of resolvedCommitted.children) {
         const track = trackById.get(update.trackId)
         if (!track) continue
-        applyTrackPatch(track, { groupId: committed.group.parentGroupId, outputTargetId: update.nextOutputTargetId })
+        applyTrackPatch(track, { groupId: resolvedCommitted.group.parentGroupId, outputTargetId: update.nextOutputTargetId })
       }
       options.creation.removeLocalTrack(groupId)
       return
@@ -547,21 +574,21 @@ export function useTimelineActions(
         },
       })
       assertAppliedSharedTimelineOperationResult(result)
-      assert(isRecord(result) && Array.isArray(result.trackUpdates) && Array.isArray(result.clipUpdates), 'Invalid shared color cascade result')
+      assert(isSharedOperationPayload(result) && Array.isArray(result.trackUpdates) && Array.isArray(result.clipUpdates), 'Invalid shared color cascade result')
       const committedTrackUpdates = result.trackUpdates.flatMap((update) => (
-        isRecord(update) && typeof update.trackId === 'string'
+        isSharedOperationPayload(update) && isString(update.trackId)
           ? [{
               trackId: update.trackId,
-              from: typeof update.from === 'string' ? update.from : undefined,
-              to: typeof update.to === 'string' ? update.to : undefined,
+              from: isString(update.from) ? update.from : undefined,
+              to: isString(update.to) ? update.to : undefined,
             }]
           : []
       ))
       const committedClipUpdates = result.clipUpdates.flatMap((update) => (
-        isRecord(update) && typeof update.clipId === 'string' && typeof update.to === 'string'
+        isSharedOperationPayload(update) && isString(update.clipId) && isString(update.to)
           ? [{
               clipId: update.clipId,
-              from: typeof update.from === 'string'
+              from: isString(update.from)
                 ? update.from
                 : trackIndex.clipEntryById.get(update.clipId)?.clip.color ?? update.to,
               to: update.to,
@@ -591,14 +618,18 @@ export function useTimelineActions(
     }
     for (const update of plan.trackUpdates) {
       const track = trackById.get(update.trackId)
-      assert(track, 'Planned track color update references a missing track')
-      applyTrackPatch(track, { color: update.to })
+      const resolvedTrack = assertDefined(track, 'Planned track color update references a missing track')
+      applyTrackPatch(resolvedTrack, { color: update.to })
     }
     for (const update of plan.clipUpdates) {
       const track = trackById.get(update.trackId)
       const clip = track?.clips.find((candidate) => candidate.id === update.clipId)
-      assert(track && clip, 'Planned clip color update references a missing clip')
-      options.creation.replaceLocalClip(track.id, { ...clip, color: update.to })
+      const resolvedTrack = assertDefined(track, 'Planned clip color update references a missing track')
+      const resolvedClip = assertDefined(
+        clip,
+        'Planned clip color update references a missing clip',
+      )
+      options.creation.replaceLocalClip(resolvedTrack.id, { ...resolvedClip, color: update.to })
     }
     options.creation.pushHistory(buildTrackColorCascadeHistoryEntry({
       projectId,

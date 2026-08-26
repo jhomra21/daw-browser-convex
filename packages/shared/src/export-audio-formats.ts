@@ -12,7 +12,7 @@ type ExportAudioFormatMetadata = {
 
 export const exportAudioFormats: readonly ExportAudioFormat[] = ['wav', 'mp3', 'ogg-opus', 'flac']
 
-const exportAudioFormatMetadata: Record<ExportAudioFormat, ExportAudioFormatMetadata> = {
+const exportAudioFormatMetadata = {
   wav: {
     id: 'wav',
     label: 'WAV',
@@ -41,7 +41,7 @@ const exportAudioFormatMetadata: Record<ExportAudioFormat, ExportAudioFormatMeta
     fileExtension: '.flac',
     mimeType: 'audio/flac',
   },
-}
+} satisfies Record<ExportAudioFormat, ExportAudioFormatMetadata>
 
 export const getExportAudioFormatMetadata = (format: ExportAudioFormat): ExportAudioFormatMetadata => {
   return exportAudioFormatMetadata[format]
@@ -50,7 +50,7 @@ export const getExportAudioFormatMetadata = (format: ExportAudioFormat): ExportA
 export function getExportAudioBitrate(format: LossyExportAudioFormat): number
 export function getExportAudioBitrate(format: ExportAudioFormat): number | undefined
 export function getExportAudioBitrate(format: ExportAudioFormat): number | undefined {
-  return exportAudioFormatMetadata[format].defaultBitrate
+  return isLossyExportAudioFormat(format) ? exportAudioFormatMetadata[format].defaultBitrate : undefined
 }
 
 export const isLossyExportAudioFormat = (format: ExportAudioFormat): format is LossyExportAudioFormat => (

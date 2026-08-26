@@ -151,7 +151,9 @@ const characterizeSampleRateConversion = async (
   const durationSec = 0.25
   const inputLength = Math.ceil(durationSec * sourceSampleRate)
   const expectedOutputLength = Math.ceil(inputLength * targetSampleRate / sourceSampleRate)
-  const startedAt = typeof performance === 'undefined' ? null : performance.now()
+  const startedAt = 'performance' in globalThis && globalThis.performance
+    ? globalThis.performance.now()
+    : null
   try {
     const toneFrequencies = [1_000, Math.min(sourceSampleRate, targetSampleRate) * 0.1, Math.min(sourceSampleRate, targetSampleRate) * 0.225]
     const amplitudes: number[] = []
@@ -250,7 +252,9 @@ const capture = async (run: () => Promise<BrowserCharacterizationCase>): Promise
   }
 }
 
-const envelope = <State>(state: State): { version: 1; state: State } => ({ version: 1, state })
+type CharacterizationEnvelope<State> = { version: 1; state: State }
+
+const envelope = <State>(state: State): CharacterizationEnvelope<State> => ({ version: 1, state })
 
 const staticParams = (kind: StaticWorkletKind) => {
   if (kind === 'utility') return envelope({ ...createDefaultUtilityParams(), enabled: false })
@@ -280,21 +284,40 @@ export const getStaticModuleDeclaredLatencyFrames = (
       ? 2048
       : 0
 
-export function isStaticModuleCharacterization(value: unknown): value is StaticModuleCharacterization {
-  if (typeof value !== 'object' || value === null) return false
-  if (!('kind' in value) || !('sampleRate' in value) || !('channels' in value)
-    || !('supported' in value) || !('declaredLatencyFrames' in value)
-    || !('registrationStatus' in value) || !('renderStatus' in value)
-    || !('finiteOutput' in value)) return false
-  const validStatus = (status: unknown) => status === 'pass' || status === 'fail' || status === 'unsupported'
-  return typeof value.kind === 'string'
-    && typeof value.sampleRate === 'number'
+type StaticModuleCharacterizationFields = {
+  kind?: unknown
+  sampleRate?: unknown
+  channels?: unknown
+  supported?: unknown
+  declaredLatencyFrames?: unknown
+  registrationStatus?: unknown
+  renderStatus?: unknown
+  finiteOutput?: unknown
+}
+
+const isStaticModuleCharacterizationFields = <Value>(
+  value: Value,
+): value is Value & StaticModuleCharacterizationFields => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isString = <Value>(value: Value): value is Value & string => typeof value === 'string'
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+const isBoolean = <Value>(value: Value): value is Value & boolean => typeof value === 'boolean'
+const isValidStatus = <Value>(status: Value): status is Value & BrowserCharacterizationCase['status'] => (
+  status === 'pass' || status === 'fail' || status === 'unsupported'
+)
+
+export function isStaticModuleCharacterization<Value>(value: Value): value is Value & StaticModuleCharacterization {
+  if (!isStaticModuleCharacterizationFields(value)) return false
+  return isString(value.kind)
+    && isNumber(value.sampleRate)
     && (value.channels === 1 || value.channels === 2)
-    && typeof value.supported === 'boolean'
-    && (typeof value.declaredLatencyFrames === 'number' || value.declaredLatencyFrames === null)
-    && validStatus(value.registrationStatus)
-    && validStatus(value.renderStatus)
-    && (typeof value.finiteOutput === 'boolean' || value.finiteOutput === null)
+    && isBoolean(value.supported)
+    && (isNumber(value.declaredLatencyFrames) || value.declaredLatencyFrames === null)
+    && isValidStatus(value.registrationStatus)
+    && isValidStatus(value.renderStatus)
+    && (isBoolean(value.finiteOutput) || value.finiteOutput === null)
 }
 
 const characterizeStaticModule = async (
@@ -342,7 +365,7 @@ const characterizeStaticModule = async (
     declaredLatencyFrames,
     registrationStatus: registered ? 'pass' : result.status,
     renderStatus: result.status,
-    finiteOutput: result.metrics && typeof result.metrics.containsNonFiniteSamples === 'boolean'
+    finiteOutput: result.metrics && isBoolean(result.metrics.containsNonFiniteSamples)
       ? !result.metrics.containsNonFiniteSamples
       : null,
     message: result.message,

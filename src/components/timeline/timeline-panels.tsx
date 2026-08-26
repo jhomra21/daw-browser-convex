@@ -1,7 +1,7 @@
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
-import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { isLocalId, type AutomationEnvelope } from '@daw-browser/shared'
+import type { AudioEngine, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import { isLocalId, type AutomationEnvelope, type TrackInstrumentParams } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
 import EffectsPanel from '~/components/timeline/EffectsPanel'
@@ -11,26 +11,26 @@ import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import type { ExternalProcessor } from '@daw-browser/external-plugins'
 import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
-import type { EffectsPanelAudioEffects } from '~/components/timeline/create-effects-panel-controller'
+import type { TimelinePlaybackRebuildIntent } from '~/hooks/useTimelinePlayback'
+import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
+import type { ExportQueue } from '~/lib/export/export-queue'
+import type { TimelineExportService } from '~/lib/export/timeline-export-service'
 
-const AgentChat = lazy(() => import('~/components/AgentChat'))
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
 export type TimelinePanelsProps = {
+  exportQueue: ExportQueue
+  exportService: TimelineExportService
   chat: {
     bottomOffsetPx: number
-    agentPanelOpen: boolean
     sharedChatOpen: boolean
     projectId?: string
     userId?: string
-    bpm: number
-    toggleAgentPanel: () => void
     toggleSharedChat: () => void
-    closeAgentPanel: () => void
     closeSharedChat: () => void
-    applyAgentMixOps: (ops: Array<{ type: 'setMute' | 'setSolo'; indices: number[]; value: boolean; exclusive?: boolean; issuedAt: number }>) => void
   }
   effectsPanel: {
     isOpen: boolean
@@ -47,6 +47,7 @@ export type TimelinePanelsProps = {
     projectId?: string
     userId?: string
     audioEngine: AudioEngine
+    spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
     onSelectClip: (trackId: Track['id'], clipId: string, startSec: number) => void
@@ -54,10 +55,26 @@ export type TimelinePanelsProps = {
     onClose: () => void
     onOpen: () => void
     onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
+    onStructuralPlaybackChange?: (targetId: Track['id'], next: TrackInstrumentParams) => void
+    usesLegacyAudioEngine?: () => boolean
+    projectGeneration?: () => number
+    onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void
+    onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>
+    onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
     onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
     onLocalSaveFailed?: (message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
+    onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
+    autoOpenExternalProcessorId?: string
+    onExternalProcessorAutoOpenHandled?: (instanceId: string) => void
+    onExternalProcessorUpdated?: (
+      processor: ExternalProcessor,
+      previous: ExternalProcessor,
+      intent?: TimelinePlaybackRebuildIntent,
+    ) => void
+    captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent
+    onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void
     automationEnvelopes?: AutomationEnvelope[]
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
@@ -97,58 +114,27 @@ export type TimelinePanelsProps = {
 
 const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
   const floatingButtonOffset = () => props.chat.bottomOffsetPx > 0 ? `${props.chat.bottomOffsetPx}px` : '16px'
-  const canUseAgentChat = () => !props.chat.projectId || !isLocalId('project', props.chat.projectId)
   const canUseSharedChat = () => Boolean(props.chat.projectId && !isLocalId('project', props.chat.projectId))
 
   createEffect(() => {
-    if (!canUseAgentChat() && props.chat.agentPanelOpen) {
-      props.chat.closeAgentPanel()
-    }
     if (!canUseSharedChat() && props.chat.sharedChatOpen) {
       props.chat.closeSharedChat()
     }
   })
 
   return (
-    <ExportProvider>
-      <Show when={canUseAgentChat()}>
-        <Button
-          variant="outline"
-          size="sm"
-          class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
-          style={{ bottom: floatingButtonOffset() }}
-          aria-label="Toggle AI Chat"
-          onClick={props.chat.toggleAgentPanel}
-        >
-          AI Chat
-        </Button>
-      </Show>
-
+    <ExportProvider queue={props.exportQueue} service={props.exportService}>
       <Show when={canUseSharedChat()}>
         <Button
           variant="outline"
           size="sm"
-          class="fixed left-24 z-40 bg-muted text-foreground hover:bg-secondary"
+          class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
           style={{ bottom: floatingButtonOffset() }}
           aria-label="Toggle Room Chat"
           onClick={props.chat.toggleSharedChat}
         >
           Room Chat
         </Button>
-      </Show>
-
-      <Show when={canUseAgentChat() && props.chat.agentPanelOpen}>
-        <Suspense fallback={null}>
-          <AgentChat
-            isOpen={props.chat.agentPanelOpen}
-            onClose={props.chat.closeAgentPanel}
-            projectId={props.chat.projectId}
-            userId={props.chat.userId}
-            bpm={props.chat.bpm}
-            bottomOffsetPx={props.chat.bottomOffsetPx}
-            onApplyMixOps={props.chat.applyAgentMixOps}
-          />
-        </Suspense>
       </Show>
 
       <Show when={canUseSharedChat() && props.chat.sharedChatOpen}>
@@ -174,6 +160,7 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onClose={props.effectsPanel.onClose}
         onOpen={props.effectsPanel.onOpen}
         audioEngine={props.effectsPanel.audioEngine}
+        spectrumProvider={props.effectsPanel.spectrumProvider}
         projectId={props.effectsPanel.projectId}
         userId={props.effectsPanel.userId}
         canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
@@ -182,10 +169,22 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
         onSelectClip={props.effectsPanel.onSelectClip}
         insertLocalClip={props.effectsPanel.insertLocalClip}
         onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
+        onStructuralPlaybackChange={props.effectsPanel.onStructuralPlaybackChange}
+        usesLegacyAudioEngine={props.effectsPanel.usesLegacyAudioEngine}
+        projectGeneration={props.effectsPanel.projectGeneration}
+        onEffectParamsPreview={props.effectsPanel.onEffectParamsPreview}
+        onEffectParamsFlush={props.effectsPanel.onEffectParamsFlush}
+        onPreviewNote={props.effectsPanel.onPreviewNote}
         onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
         onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
+        onExportSnapshotChange={props.effectsPanel.onExportSnapshotChange}
         onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
+        autoOpenExternalProcessorId={props.effectsPanel.autoOpenExternalProcessorId}
+        onExternalProcessorAutoOpenHandled={props.effectsPanel.onExternalProcessorAutoOpenHandled}
+        onExternalProcessorUpdated={props.effectsPanel.onExternalProcessorUpdated}
+        captureStructuralPlaybackIntent={props.effectsPanel.captureStructuralPlaybackIntent}
+        onMixedReorderCommitted={props.effectsPanel.onMixedReorderCommitted}
         automationEnvelopes={props.effectsPanel.automationEnvelopes}
         evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}
         onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}

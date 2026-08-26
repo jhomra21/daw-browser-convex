@@ -1,14 +1,10 @@
 import { createSignal, type Accessor } from 'solid-js'
 
 import {
-  loadBpm,
   loadGridSettings,
-  loadLoopSettings,
   loadMixSyncFlag,
   loadTimelineScale,
-  saveBpm,
   saveGridSettings,
-  saveLoopSettings,
   saveMixSyncFlag,
   saveTimelineScale,
 } from '~/lib/timeline-storage'
@@ -22,6 +18,21 @@ import { useProjectPersistedState } from './useProjectPersistedState'
 type UseTimelinePreferencesOptions = {
   projectId: Accessor<string>
   onLocalSaveFailed?: (message: string) => void
+  cloudTimelineSettings?: Accessor<{
+    tempoBpm: number
+    loopEnabled: boolean
+    loopStartSec: number
+    loopEndSec: number
+  } | undefined>
+  onCloudTimelineSettingsChange?: (
+    projectId: string,
+    settings: Partial<{
+      tempoBpm: number
+      loopEnabled: boolean
+      loopStartSec: number
+      loopEndSec: number
+    }>,
+  ) => void
 }
 
 type UseTimelinePreferencesReturn = {
@@ -56,8 +67,8 @@ export function useTimelinePreferences(
   const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
     if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
   }
-  const onLocalSaveError = (error: unknown) => {
-    options.onLocalSaveFailed?.(error instanceof Error ? error.message : 'Local project settings could not be saved.')
+  const onLocalSaveError = (cause: unknown) => {
+    options.onLocalSaveFailed?.(cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
   }
 
   const syncMixState = useProjectPersistedState<boolean>({
@@ -75,11 +86,9 @@ export function useTimelinePreferences(
   const bpmState = useProjectPersistedState<number>({
     projectId: options.projectId,
     createInitial: () => 120,
-    load: (projectId) => isLocalId('project', projectId) ? 120 : loadBpm(projectId),
+    load: () => 120,
     loadAsync: (projectId) => loadLocalState<number>(projectId, 'bpm'),
-    save: (projectId, value) => {
-      if (!isLocalId('project', projectId)) saveBpm(projectId, value)
-    },
+    save: () => undefined,
     saveAsync: (projectId, value) => saveLocalState(projectId, 'bpm', value),
     onSaveAsyncError: onLocalSaveError,
   })
@@ -99,11 +108,9 @@ export function useTimelinePreferences(
   const loopState = useProjectPersistedState<{ enabled: boolean; startSec: number; endSec: number }>({
     projectId: options.projectId,
     createInitial: () => ({ enabled: false, startSec: 0, endSec: 8 }),
-    load: (projectId) => isLocalId('project', projectId) ? { enabled: false, startSec: 0, endSec: 8 } : loadLoopSettings(projectId),
+    load: () => ({ enabled: false, startSec: 0, endSec: 8 }),
     loadAsync: (projectId) => loadLocalState<{ enabled: boolean; startSec: number; endSec: number }>(projectId, 'loop'),
-    save: (projectId, value) => {
-      if (!isLocalId('project', projectId)) saveLoopSettings(projectId, value)
-    },
+    save: () => undefined,
     saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
     onSaveAsyncError: onLocalSaveError,
   })
@@ -124,14 +131,34 @@ export function useTimelinePreferences(
 
   const syncMix = syncMixState.value
   const setSyncMix = syncMixState.setValue
-  const bpm = bpmState.value
-  const setBpm = bpmState.setValue
+  const cloudTimelineSettings = () => options.cloudTimelineSettings?.()
+  const isLocalProject = () => isLocalId('project', options.projectId())
+  const bpm = () => isLocalProject()
+    ? bpmState.value()
+    : cloudTimelineSettings()?.tempoBpm ?? 120
+  const setBpm = (value: number) => {
+    if (isLocalProject()) {
+      bpmState.setValue(value)
+      return
+    }
+    const projectId = options.projectId()
+    if (projectId) options.onCloudTimelineSettingsChange?.(projectId, { tempoBpm: value })
+  }
   const gridEnabled = () => gridState.value().enabled
   const gridDenominator = () => gridState.value().denominator
-  const loopEnabled = () => loopState.value().enabled
-  const loopStartSec = () => loopState.value().startSec
-  const loopEndSec = () => loopState.value().endSec
+  const loopEnabled = () => isLocalProject()
+    ? loopState.value().enabled
+    : cloudTimelineSettings()?.loopEnabled ?? false
+  const loopStartSec = () => isLocalProject()
+    ? loopState.value().startSec
+    : cloudTimelineSettings()?.loopStartSec ?? 0
+  const loopEndSec = () => isLocalProject()
+    ? loopState.value().endSec
+    : cloudTimelineSettings()?.loopEndSec ?? 8
   const pixelsPerSecond = () => clampPixelsPerSecond(scaleState.value())
+  const isBooleanUpdater = (
+    value: boolean | ((current: boolean) => boolean),
+  ): value is (current: boolean) => boolean => typeof value === 'function'
 
   const clampBpm = (value: number) => {
     if (!Number.isFinite(value)) return bpm()
@@ -147,7 +174,7 @@ export function useTimelinePreferences(
   const setGridEnabled = (value: boolean | ((current: boolean) => boolean)) => {
     gridState.setValue((current) => ({
       ...current,
-      enabled: typeof value === 'function' ? value(current.enabled) : value,
+      enabled: isBooleanUpdater(value) ? value(current.enabled) : value,
     }))
   }
 
@@ -156,15 +183,30 @@ export function useTimelinePreferences(
   }
 
   const setLoopEnabled = (value: boolean | ((current: boolean) => boolean)) => {
+    if (!isLocalProject()) {
+      const current = loopEnabled()
+      const enabled = isBooleanUpdater(value) ? value(current) : value
+      const projectId = options.projectId()
+      if (projectId) options.onCloudTimelineSettingsChange?.(projectId, { loopEnabled: enabled })
+      return
+    }
     loopState.setValue((current) => ({
       ...current,
-      enabled: typeof value === 'function' ? value(current.enabled) : value,
+      enabled: isBooleanUpdater(value) ? value(current.enabled) : value,
     }))
   }
 
   const setLoopRegion = (start: number, end: number) => {
     const nextStart = Math.max(0, Math.min(start, end - 0.05))
     const nextEnd = Math.max(nextStart + 0.05, end)
+    if (!isLocalProject()) {
+      const projectId = options.projectId()
+      if (projectId) options.onCloudTimelineSettingsChange?.(projectId, {
+        loopStartSec: nextStart,
+        loopEndSec: nextEnd,
+      })
+      return
+    }
     loopState.setValue((current) => ({
       ...current,
       startSec: nextStart,

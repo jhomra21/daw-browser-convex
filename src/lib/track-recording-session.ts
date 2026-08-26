@@ -1,8 +1,9 @@
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assert } from '@daw-browser/shared'
+import { assertDefined, type JsonValue } from '@daw-browser/shared'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { supportsPlanarFloat32WavEncoding } from '@daw-browser/audio-engine/recording-encode-wav'
+import { z } from 'zod'
 
 const RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
@@ -14,9 +15,21 @@ const RECORDING_MIME_TYPES = [
 
 const RECORDING_LOCK_KEEPALIVE_MS = 30_000
 
-const isLockResult = (value: unknown): value is { ok?: boolean; reason?: string } => (
-  typeof value === 'object' && value !== null
-)
+const lockResultSchema = z.object({
+  ok: z.boolean().optional(),
+  reason: z.string().optional(),
+})
+
+const readLockResult = (value: JsonValue) => {
+  const result = lockResultSchema.safeParse(value)
+  return result.success ? result.data : undefined
+}
+
+type StopPromise = {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (cause?: unknown) => void
+}
 
 export type RecordingContext = {
   projectId: string
@@ -26,12 +39,14 @@ export type RecordingContext = {
   tracks: Track[]
   createdTrack: Track | null
   startSec: number
-  stream: MediaStream
+  stream: MediaStream | null
   recorder: MediaRecorder | null
   chunks: BlobPart[]
   mimeType: string
   lockedByUserId: string
   engineCaptureActive: boolean
+  portableCaptureActive: boolean
+  nativeCaptureActive: boolean
   engineCaptureSessionId: string
   savedAudioSource: 'worklet-pcm-f32' | 'media-recorder-compressed'
   sampleRate: number
@@ -39,53 +54,51 @@ export type RecordingContext = {
   onDataAvailable: (event: BlobEvent) => void
   onStop: () => void
   stopPromise: Promise<void>
-  rejectStopPromise: (error?: unknown) => void
+  rejectStopPromise: (cause?: unknown) => void
 }
 
-export function createStopPromise(): {
-  promise: Promise<void>
-  resolve: () => void
-  reject: (error?: unknown) => void
-} {
+export function createStopPromise(): StopPromise {
   let settled = false
   let resolvePromise: (() => void) | undefined
-  let rejectPromise: ((error?: unknown) => void) | undefined
+  let rejectPromise: ((cause?: unknown) => void) | undefined
   const promise = new Promise<void>((resolve, reject) => {
     resolvePromise = () => {
       if (settled) return
       settled = true
       resolve()
     }
-    rejectPromise = (error?: unknown) => {
+    rejectPromise = (cause?: unknown) => {
       if (settled) return
       settled = true
-      reject(error)
+      reject(cause)
     }
   })
-  assert(resolvePromise, 'Stop promise resolver was not initialized')
-  assert(rejectPromise, 'Stop promise rejecter was not initialized')
+  const resolve = assertDefined(resolvePromise, 'Stop promise resolver was not initialized')
+  const reject = assertDefined(rejectPromise, 'Stop promise rejecter was not initialized')
   return {
     promise,
-    resolve: resolvePromise,
-    reject: rejectPromise,
+    resolve,
+    reject,
   }
 }
 
-export function getRecordingSupport(): {
+type RecordingSupport = {
   supported: boolean
   mimeType: string
-} {
-  if (typeof window === 'undefined') {
+}
+
+export function getRecordingSupport(): RecordingSupport {
+  if (!('window' in globalThis)) {
     return { supported: false, mimeType: '' }
   }
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+  if (!('navigator' in globalThis) || !globalThis.navigator.mediaDevices?.getUserMedia) {
     return { supported: false, mimeType: '' }
   }
   const mediaRecorderCtor = window.MediaRecorder
-  if (typeof mediaRecorderCtor !== 'function') {
+  if (!mediaRecorderCtor) {
     return { supported: false, mimeType: '' }
   }
-  const isTypeSupported = typeof mediaRecorderCtor.isTypeSupported === 'function'
+  const isTypeSupported = 'isTypeSupported' in mediaRecorderCtor
     ? mediaRecorderCtor.isTypeSupported.bind(mediaRecorderCtor)
     : null
   for (const mime of RECORDING_MIME_TYPES) {
@@ -97,11 +110,12 @@ export function getRecordingSupport(): {
 }
 
 export function getProductionRecordingSupport(): boolean {
-  return typeof window !== 'undefined'
-    && typeof AudioWorkletNode === 'function'
-    && typeof Worker === 'function'
-    && typeof navigator !== 'undefined'
-    && typeof navigator.storage?.getDirectory === 'function'
+  return 'window' in globalThis
+    && 'AudioWorkletNode' in globalThis
+    && 'Worker' in globalThis
+    && 'navigator' in globalThis
+    && globalThis.navigator.storage !== undefined
+    && 'getDirectory' in globalThis.navigator.storage
     && supportsPlanarFloat32WavEncoding()
 }
 
@@ -123,9 +137,10 @@ export async function acquireTrackRecordingLock(options: {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
     })
-    if (!isLockResult(res) || !res.ok) {
+    const result = readLockResult(res)
+    if (!result?.ok) {
       options.clearTrackLock(options.trackId)
-      return { ok: false, reason: isLockResult(res) ? res.reason : undefined }
+      return { ok: false, reason: result?.reason }
     }
     options.setTrackLock(options.trackId, options.locker)
     return { ok: true }
@@ -148,11 +163,12 @@ export async function releaseTrackRecordingLock(options: {
     return
   }
   try {
-    const result = await publishSharedTimelineOperation(options.projectId, {
+    const response = await publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.unlock',
       payload: { trackId: options.trackId },
     })
-    if (!isLockResult(result) || !result.ok) {
+    const result = readLockResult(response)
+    if (!result?.ok) {
       options.clearTrackLock(options.trackId)
       return
     }
@@ -173,12 +189,16 @@ export function startRecordingLockHeartbeat(options: {
   projectId: string
   trackId: Track['id']
   locker: string
-  onError?: (error: unknown) => void
+  onError?: (cause: unknown) => void
+  onLost?: (reason?: string) => void
 }): number {
   return window.setInterval(() => {
     void publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
+    }).then((response) => {
+      const result = readLockResult(response)
+      if (result && !result.ok) options.onLost?.(result.reason)
     }).catch((error) => {
       options.onError?.(error)
     })
@@ -207,7 +227,7 @@ export async function cleanupRecordingSession(options: {
   try {
     if (ctx.recorder && ctx.recorder.state !== 'inactive') ctx.recorder.stop()
   } catch {}
-  try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
+  try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)
   options.setIsRecording(false)
@@ -226,7 +246,7 @@ export function haltRecordingPreview(options: {
   if (!options.activeCtx) return
   const ctx = options.activeCtx
   try {
-    try { ctx.stream.getTracks().forEach((track) => track.stop()) } catch {}
+    try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
   } catch {}
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)

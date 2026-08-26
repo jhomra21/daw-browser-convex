@@ -8,6 +8,7 @@ import {
   type ReverbParamsLite,
   type SaturatorParamsLite,
 } from '@daw-browser/shared'
+import { resolveDelayTimeSec } from './dsp'
 import type { AudioEffectRuntimeInstance } from './runtime-instance'
 
 type EffectTiming = {
@@ -30,19 +31,6 @@ const finite = (frames: number): EffectTiming['tail'] => ({
   kind: 'finite',
   frames: Math.max(0, Math.ceil(frames)),
 })
-
-const delayTimeSeconds = (params: DelayParamsLite, bpm: number) => {
-  const normalized = normalizeDelayParams(params)
-  if (normalized.mode === 'time') return normalized.timeMs / 1000
-  const beatsByDivision = {
-    '1/16': 0.25,
-    '1/8': 0.5,
-    '1/4': 1,
-    '1/2': 2,
-    '1/1': 4,
-  }
-  return beatsByDivision[normalized.syncDivision] * 60 / Math.max(1, bpm)
-}
 
 export const getEffectTiming = (
   input: EffectTimingInput,
@@ -78,15 +66,16 @@ export const getEffectTiming = (
     const normalized = normalizeDelayParams(input.params)
     if (!normalized.enabled || normalized.dryWet === 0) return { latencyFrames: 0, tail: finite(0) }
     if (normalized.feedback >= 1) return { latencyFrames: 0, tail: { kind: 'unbounded' } }
-    const delayFrames = delayTimeSeconds(normalized, bpm) * rate
+    const delayFrames = resolveDelayTimeSec(normalized, bpm) * rate
     const repeats = Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(Math.max(normalized.feedback, 1e-6))))
     return { latencyFrames: 0, tail: finite(delayFrames * repeats) }
   }
   if (input.kind === 'reverb') {
     const normalized = normalizeReverbParams(input.params)
+    if (!normalized.enabled || normalized.wet === 0) return { latencyFrames: 0, tail: finite(0) }
     return {
       latencyFrames: 0,
-      tail: finite(normalized.enabled ? (normalized.preDelayMs / 1000 + normalized.decaySec) * rate : 0),
+      tail: finite((normalized.preDelayMs / 1000 + normalized.decaySec) * rate),
     }
   }
   if (input.kind === 'chorus' || input.kind === 'flanger') {
@@ -127,4 +116,33 @@ export const getEffectChainTiming = (
     tailFrames += timing.tail.frames
   }
   return { latencyFrames, tail: finite(tailFrames) }
+}
+
+type ExternalEffectTimingInput = {
+  latencyFrames: number
+  tailFrames: number | null
+}
+
+export const getEffectChainTimingWithExternal = (
+  instances: readonly AudioEffectRuntimeInstance[],
+  external: readonly ExternalEffectTimingInput[],
+  sampleRate: number,
+  bpm = 120,
+): EffectTiming => {
+  const timing = getEffectChainTiming(instances, sampleRate, bpm)
+  let latencyFrames = timing.latencyFrames
+  let tailFrames = timing.tail.kind === 'finite' ? timing.tail.frames : 0
+  let hasUnboundedTail = timing.tail.kind === 'unbounded'
+  for (const processor of external) {
+    latencyFrames += Math.max(0, Math.ceil(processor.latencyFrames))
+    if (processor.tailFrames === null) {
+      hasUnboundedTail = true
+      continue
+    }
+    tailFrames += Math.max(0, Math.ceil(processor.tailFrames))
+  }
+  return {
+    latencyFrames,
+    tail: hasUnboundedTail ? { kind: 'unbounded' } : finite(tailFrames),
+  }
 }

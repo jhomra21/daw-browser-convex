@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { createDefaultGranularParams } from '@daw-browser/shared'
-import { createGranularRuntime } from './granular-runtime'
+import {
+  createGranularRuntime,
+  type GranularWorkletControlMessage,
+  type GranularWorkletStatusMessage,
+} from './granular-runtime'
 
 class FakeAudioBuffer {
   readonly length: number
@@ -46,7 +50,7 @@ describe('granular runtime transfer contract', () => {
       ['stereoSpread', parameter('stereoSpread')],
       ['gate', parameter('gate')],
     ])
-    const messages: unknown[] = []
+    const messages: GranularWorkletControlMessage[] = []
     const node = {
       parameters,
       connect: () => {},
@@ -54,7 +58,7 @@ describe('granular runtime transfer contract', () => {
       onprocessorerror: null,
       port: {
         onmessage: null,
-        postMessage: (message: unknown) => messages.push(message),
+        postMessage: (message: GranularWorkletControlMessage) => messages.push(message),
         close: () => {},
       },
     }
@@ -88,9 +92,9 @@ describe('granular runtime transfer contract', () => {
 
   test('acks transfers, deduplicates identity, freezes, releases, faults, and closes idempotently', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
-    const messages: unknown[] = []
+    const messages: GranularWorkletControlMessage[] = []
     const transfers: Transferable[][] = []
-    let onmessage: ((event: MessageEvent) => void) | null = null
+    let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     let disconnected = 0
     let released = 0
     const node = {
@@ -101,7 +105,7 @@ describe('granular runtime transfer contract', () => {
       port: {
         get onmessage() { return onmessage },
         set onmessage(value) { onmessage = value },
-        postMessage: (message: unknown, options?: StructuredSerializeOptions | Transferable[]) => {
+        postMessage: (message: GranularWorkletControlMessage, options?: StructuredSerializeOptions | Transferable[]) => {
           messages.push(message)
           if (Array.isArray(options)) transfers.push(options)
         },
@@ -137,9 +141,49 @@ describe('granular runtime transfer contract', () => {
     expect(released).toBe(1)
   })
 
+  test('force-stops only the matching live gate while preserving other live and clip intervals', async () => {
+    const scheduled: Array<[number, number]> = []
+    const gate: AudioParam = {
+      automationRate: 'a-rate',
+      defaultValue: 0,
+      maxValue: 1,
+      minValue: 0,
+      value: 0,
+      cancelAndHoldAtTime: () => gate,
+      cancelScheduledValues: () => gate,
+      exponentialRampToValueAtTime: () => gate,
+      linearRampToValueAtTime: () => gate,
+      setTargetAtTime: () => gate,
+      setValueAtTime: (value, time) => {
+        scheduled.push([value, time])
+        return gate
+      },
+      setValueCurveAtTime: () => gate,
+    }
+    const runtime = await createGranularRuntime({
+      context: { currentTime: 2 },
+      params: createDefaultGranularParams(),
+      createNode: () => ({
+        parameters: new Map([['gate', gate]]),
+        connect: () => {},
+        disconnect: () => {},
+        onprocessorerror: null,
+        port: { onmessage: null, postMessage: () => {}, close: () => {} },
+      }),
+    })
+
+    runtime.scheduleNote({ clipId: 'live:one', when: 4, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.scheduleNote({ clipId: 'live:two', when: 5.5, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.scheduleNote({ clipId: 'transport', when: 7, durationSec: 1, timelineStartSec: 0, timelineToCtxTime: (time) => time, automationEnvelopes: [] })
+    runtime.stopClip('live:one')
+
+    expect(scheduled.slice(-5)).toEqual([[0, 2], [1, 5.5], [0, 6.5], [1, 7], [0, 8]])
+    runtime.close()
+  })
+
   test('rejects oversize, install errors, stale acknowledgements, and pending work on close', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: FakeAudioBuffer })
-    let onmessage: ((event: MessageEvent) => void) | null = null
+    let onmessage: ((event: MessageEvent<GranularWorkletStatusMessage>) => void) | null = null
     const faults: string[] = []
     const node = {
       parameters: new Map(),

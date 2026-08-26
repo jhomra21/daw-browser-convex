@@ -1,5 +1,6 @@
 import { api as convexApi } from '../convex/_generated/api'
 import { readSharedTimelineOperationTargets, type SharedTimelineOperation } from '@daw-browser/shared'
+import { z } from 'zod'
 import type { createAuthenticatedConvexClient } from './convex-auth'
 
 type AuthenticatedConvexClient = Awaited<ReturnType<typeof createAuthenticatedConvexClient>>
@@ -22,6 +23,7 @@ export const buildTrackCreateMutationArgs = (
   payload: Extract<SharedTimelineOperation, { kind: 'tracks.create' }>['payload'],
 ) => ({
   projectId,
+  name: payload.name,
   index: payload.index,
   kind: payload.kind,
   channelRole: payload.channelRole,
@@ -37,11 +39,81 @@ export const buildClipFadesMutationArgs = (
   fades: payload.fades,
 })
 
+export const buildClipMidiMutationArgs = (
+  projectId: string,
+  payload: Extract<SharedTimelineOperation, { kind: 'clips.setMidi' }>['payload'],
+) => ({
+  projectId,
+  clipId: payload.clipId,
+  midi: payload.midi,
+  operationId: payload.operationId,
+})
+
 export class TimelineOperationTargetError extends Error {
-  constructor(message: string) {
+  readonly status: 400 | 403
+
+  constructor(message: string, status: 400 | 403 = 400) {
     super(message)
     this.name = 'TimelineOperationTargetError'
+    this.status = status
   }
+}
+
+const bulkClipDeleteErrorSchema = z.object({
+  message: z.string().optional(),
+  code: z.string().optional(),
+  cause: z.unknown().optional(),
+})
+
+const bulkClipDeleteErrorDetails = (error: Error) => {
+  const details: Array<{ message?: string; code?: string }> = []
+  const visited = new Set<object>()
+  let currentCause: object = error
+  while (true) {
+    const parsed = bulkClipDeleteErrorSchema.safeParse(currentCause)
+    if (!parsed.success) break
+    const current = parsed.data
+    if (visited.has(current)) break
+    visited.add(current)
+    details.push(current)
+    const nextCause = z.object({}).passthrough().safeParse(current.cause)
+    if (!nextCause.success) break
+    currentCause = nextCause.data
+  }
+  return details
+}
+
+export const classifyBulkClipDeleteError = (error: Error): TimelineOperationTargetError | undefined => {
+  const details = bulkClipDeleteErrorDetails(error)
+  const message = details.map((detail) => detail.message).find((value): value is string => value !== undefined)
+  const protectedCode = details.some((detail) => (
+    detail.code === 'forbidden'
+    || detail.code === 'access-denied'
+    || detail.code === 'track-locked'
+  ))
+  const protectedMessage = details
+    .map((detail) => detail.message)
+    .find((value): value is string => value !== undefined && (
+      value.includes('Actor cannot delete one or more clips.')
+      || value.includes('Actor cannot delete clips on a locked track.')
+    ))
+  if (protectedCode || protectedMessage) {
+    return new TimelineOperationTargetError(
+      protectedMessage ?? message ?? 'Actor cannot delete one or more clips.',
+      403,
+    )
+  }
+  if (!message) return undefined
+  if (
+    message.includes('Clip deletion requires at least one clip.')
+    || message.includes('Clip deletion cannot contain duplicate clip IDs.')
+    || message.includes('Invalid clip deletion ID:')
+    || message.includes('Clip deletion target was not found:')
+    || message.includes('Clip deletion targets must belong to the requested project.')
+    || message.includes('Clip deletion target changed during deletion.')
+    || message.includes('Clip deletion recovery limit exceeded.')
+  ) return new TimelineOperationTargetError(message)
+  return undefined
 }
 
 const verifyTimelineOperationTargets = async (
@@ -74,8 +146,10 @@ const verifyTimelineOperationTargets = async (
 export const executeTimelineOperation = async (
   context: TimelineOperationContext,
   operation: SharedTimelineOperation,
-): Promise<unknown> => {
-  await verifyTimelineOperationTargets(context, operation)
+) => {
+  if (operation.kind !== 'clips.removeMany') {
+    await verifyTimelineOperationTargets(context, operation)
+  }
 
   switch (operation.kind) {
     case 'tracks.create':
@@ -105,9 +179,20 @@ export const executeTimelineOperation = async (
         operationId: operation.payload.operationId,
       })
     case 'clips.removeMany':
-      return await context.convex.mutation(convexApi.clips.serverRemoveMany, {
-        clipIds: operation.payload.clipIds,
-      })
+      try {
+        return await context.convex.mutation(convexApi.clips.serverRemoveMany, {
+          projectId: context.projectId,
+          clipIds: operation.payload.clipIds,
+          operationId: operation.payload.operationId,
+        })
+      } catch (error) {
+        const caughtError = z.instanceof(Error).safeParse(error)
+        const classified = caughtError.success
+          ? classifyBulkClipDeleteError(caughtError.data)
+          : undefined
+        if (classified) throw classified
+        throw error
+      }
     case 'clips.moveMany':
       return await context.convex.mutation(convexApi.clips.serverMoveMany, {
         moves: operation.payload.moves.map((move) => ({
@@ -137,6 +222,15 @@ export const executeTimelineOperation = async (
       )
     case 'clips.setColor':
       return await context.convex.mutation(convexApi.clips.serverSetColor, operation.payload)
+    case 'clips.setMidi':
+      return await context.convex.mutation(convexApi.clips.serverSetMidi, {
+        ...buildClipMidiMutationArgs(context.projectId, operation.payload),
+      })
+    case 'clips.setMidiAndTiming':
+      return await context.convex.mutation(convexApi.clips.serverSetMidiAndTiming, {
+        projectId: context.projectId,
+        ...operation.payload,
+      })
     case 'tracks.setRouting':
       await context.convex.mutation(convexApi.tracks.serverSetRouting, {
         trackId: operation.payload.trackId,
@@ -289,11 +383,23 @@ export const executeTimelineOperation = async (
         trackId: operation.payload.trackId,
         instrument: operation.payload.instrument,
       })
+    case 'instruments.removeTrackInstrument':
+      return await context.convex.mutation(convexApi.effects.serverRemoveTrackInstrument, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        operationId: operation.payload.operationId,
+      })
     case 'effects.setArpeggiatorParams':
       return await context.convex.mutation(convexApi.effects.serverSetArpeggiatorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
         params: operation.payload.params,
+      })
+    case 'effects.removeArpeggiator':
+      return await context.convex.mutation(convexApi.effects.serverRemoveArpeggiator, {
+        projectId: context.projectId,
+        trackId: operation.payload.trackId,
+        operationId: operation.payload.operationId,
       })
     case 'effects.setMasterEqParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterEqParams, {

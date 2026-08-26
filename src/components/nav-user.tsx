@@ -13,7 +13,7 @@ import { useDashboardRouteParam } from "~/hooks/useDashboardRouteParam"
 export const NavUser: Component = () => {
   const navigate = useNavigate()
   const session = useSessionQuery()
-  const user = createMemo(() => session.data?.user as any)
+  const user = createMemo(() => session.data?.user)
   const { setDashboardParam } = useDashboardRouteParam()
 
   const getInitials = (name: string) => {
@@ -48,10 +48,10 @@ export const NavUser: Component = () => {
           <Button variant="ghost" size="icon" aria-label="User menu" class="hover:bg-muted">
             <Avatar class="h-8 w-8 shrink-0 border border-border">
               <Show when={user()?.image}>
-                <AvatarImage src={(user()?.image as string) || ''} alt={(user()?.name as string) || ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
+                <AvatarImage src={user()?.image ?? ''} alt={user()?.name ?? ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
               </Show>
               <AvatarFallback class="bg-transparent text-xs">
-                {getInitials((user()?.name as string) || (user()?.email as string) || "")}
+                {getInitials(user()?.name ?? user()?.email ?? "")}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -61,9 +61,9 @@ export const NavUser: Component = () => {
             <div class="flex items-center gap-2 px-2 py-2 text-left text-sm">
               <Avatar class="h-8 w-8">
                 <Show when={user()?.image}>
-                  <AvatarImage src={(user()?.image as string) || ''} alt={(user()?.name as string) || ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
+                  <AvatarImage src={user()?.image ?? ''} alt={user()?.name ?? ''} crossorigin="anonymous" referrerpolicy="no-referrer" />
                 </Show>
-                <AvatarFallback class="text-xs">{getInitials((user()?.name as string) || (user()?.email as string) || "")}</AvatarFallback>
+                <AvatarFallback class="text-xs">{getInitials(user()?.name ?? user()?.email ?? "")}</AvatarFallback>
               </Avatar>
               <div class="grid flex-1 text-left text-sm leading-tight min-w-0">
                 <span class="truncate font-semibold text-muted-foreground">{user()?.name || user()?.email}</span>

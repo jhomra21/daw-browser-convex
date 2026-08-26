@@ -1,7 +1,7 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
     "types": ["./worker-configuration.d.ts"],
     "skipLibCheck": true,
     "noEmit": true
@@ -13,6 +13,7 @@
     "../src/types/**/*.ts"
   ],
   "exclude": [
-    "../packages/**/*.test.ts"
+    "../packages/**/*.test.ts",
+    "**/*.test.ts"
   ]
 }

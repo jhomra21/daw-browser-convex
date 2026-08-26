@@ -1,4 +1,4 @@
-import type { ExportAudioFormat } from '@daw-browser/shared'
+import { isJsonObject, isJsonString, type ExportAudioFormat, type JsonValue } from '@daw-browser/shared'
 
 type SaveCloudExportInput = {
   projectId: string
@@ -14,11 +14,11 @@ type CloudExportUpload = {
   url: string
 }
 
-const readCloudExportUpload = (value: unknown): CloudExportUpload => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+const readCloudExportUpload = (value: JsonValue): CloudExportUpload => {
+  if (!isJsonObject(value)) {
     throw new Error('Invalid upload response')
   }
-  const url = 'url' in value && typeof value.url === 'string' ? value.url : ''
+  const url = isJsonString(value.url) ? value.url : ''
   if (!url) throw new Error('Invalid upload response')
   return { url }
 }

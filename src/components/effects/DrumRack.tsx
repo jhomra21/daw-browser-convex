@@ -21,7 +21,9 @@ import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from 
 type DrumRackProps = {
   params: DrumRackParams;
   targetId: string;
+  projectId?: string;
   audioEngine: AudioEngine;
+  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   canWrite: boolean;
   onAssignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
   onReset: () => void;
@@ -72,7 +74,6 @@ const pruneBufferState = (state: DrumRackBufferState, targetId: string, params: 
   return nextBuffers.size === state.buffers.size ? state : { targetId, buffers: nextBuffers, sampleKeys: nextKeys };
 };
 
-const loader = createSampleBufferLoader();
 const CHOKE_GROUPS = Array.from({ length: 16 }, (_, index) => index + 1);
 const SAMPLE_WAVEFORM_BINS = 360;
 
@@ -202,6 +203,7 @@ const SampleWaveform: Component<{
 };
 
 const DrumRack: Component<DrumRackProps> = (props) => {
+  const loader = createSampleBufferLoader({ projectId: () => props.projectId });
   const [selectedPadId, setSelectedPadId] = createSignal(untrack(() => props.params.selectedPadId ?? props.params.pads[0]?.id));
   const [loadingPadId, setLoadingPadId] = createSignal<string>();
   const [bufferState, setBufferState] = createSignal<DrumRackBufferState>(untrack(() => createEmptyBufferState(props.targetId)));
@@ -230,7 +232,11 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     if (!sample) return undefined;
     setLoadingPadId(pad.id);
     const audioEngine = props.audioEngine;
-    const buffer = await loader.load(sample.url, (data) => audioEngine.decodeAudioData(data));
+    const buffer = await loader.load(
+      sample.url,
+      (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
+      { targetSampleRate: sample.source.sampleRate },
+    );
     if (untrack(loadingPadId) === pad.id) setLoadingPadId(undefined);
     if (untrack(() => props.targetId) !== targetId) return undefined;
     return buffer ?? undefined;
@@ -267,7 +273,11 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     if (!pad.sample || pad.mute) return;
     const didSync = await syncPadBuffer(pad);
     if (!didSync) return;
-    props.audioEngine.previewDrumRackPad(props.targetId, pad.id, 1);
+    if (props.onPreviewNote) {
+      props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
+    } else {
+      props.audioEngine.previewDrumRackPad(props.targetId, pad.id, 1);
+    }
   };
 
   const assignSample = async (pad: DrumRackPadParams, sample: SampleDragData) => {
@@ -275,7 +285,11 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     const assignment = sampleToAssignment(sample);
     props.onAssignSampleToPad(pad.id, assignment);
     const audioEngine = props.audioEngine;
-    const buffer = await loader.load(assignment.url, (data) => audioEngine.decodeAudioData(data));
+    const buffer = await loader.load(
+      assignment.url,
+      (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
+      { targetSampleRate: assignment.source.sampleRate },
+    );
     if (!buffer || untrack(() => props.targetId) !== targetId) return;
     const key = drumRackSampleKey(assignment);
     if (currentPadSampleKey(pad.id) !== key) return;

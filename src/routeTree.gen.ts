@@ -13,6 +13,7 @@ import { Route as DspCharacterizationRouteImport } from './routes/dsp-characteri
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as LoginRouteImport } from './routes/Login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OauthConsentRouteImport } from './routes/oauth/consent'
 
 const DspCharacterizationRoute = DspCharacterizationRouteImport.update({
   id: '/dsp-characterization',
@@ -34,18 +35,25 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthConsentRoute = OauthConsentRouteImport.update({
+  id: '/oauth/consent',
+  path: '/oauth/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
   '/dsp-characterization': typeof DspCharacterizationRoute
+  '/oauth/consent': typeof OauthConsentRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
   '/dsp-characterization': typeof DspCharacterizationRoute
+  '/oauth/consent': typeof OauthConsentRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,25 @@ export interface FileRoutesById {
   '/Login': typeof LoginRoute
   '/about': typeof AboutRoute
   '/dsp-characterization': typeof DspCharacterizationRoute
+  '/oauth/consent': typeof OauthConsentRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/Login' | '/about' | '/dsp-characterization'
+  fullPaths:
+    | '/'
+    | '/Login'
+    | '/about'
+    | '/dsp-characterization'
+    | '/oauth/consent'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/Login' | '/about' | '/dsp-characterization'
-  id: '__root__' | '/' | '/Login' | '/about' | '/dsp-characterization'
+  to: '/' | '/Login' | '/about' | '/dsp-characterization' | '/oauth/consent'
+  id:
+    | '__root__'
+    | '/'
+    | '/Login'
+    | '/about'
+    | '/dsp-characterization'
+    | '/oauth/consent'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +87,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   AboutRoute: typeof AboutRoute
   DspCharacterizationRoute: typeof DspCharacterizationRoute
+  OauthConsentRoute: typeof OauthConsentRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -99,6 +120,13 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/consent': {
+      id: '/oauth/consent'
+      path: '/oauth/consent'
+      fullPath: '/oauth/consent'
+      preLoaderRoute: typeof OauthConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +135,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   AboutRoute: AboutRoute,
   DspCharacterizationRoute: DspCharacterizationRoute,
+  OauthConsentRoute: OauthConsentRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

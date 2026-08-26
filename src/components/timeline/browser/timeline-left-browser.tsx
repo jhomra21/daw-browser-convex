@@ -3,11 +3,11 @@ import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection,
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
 
-const tabPlaceholder: Record<TimelineBrowserTab, string> = {
+const tabPlaceholder = {
   assets: "",
   effects: "No effects match this search.",
   "midi-instruments": "No MIDI instruments match this search.",
-};
+} satisfies Record<TimelineBrowserTab, string>;
 
 const rootRowId = (sectionId: string) => `section:${sectionId}`;
 
@@ -231,6 +231,8 @@ const BrowserItemRow: Component<{
       type="button"
       draggable={props.draggable}
       disabled={props.item.disabled}
+      title={props.item.subtitle}
+      aria-description={props.item.subtitle}
       class="group flex h-6 w-full items-center px-5 text-left text-xs hover:bg-app-surface disabled:cursor-not-allowed disabled:opacity-50"
       onClick={() => props.onClick()}
       onDragStart={(event) => props.onDragStart?.(event)}
@@ -314,6 +316,7 @@ const assetItemContextItems = (
 };
 
 const deviceContextActionLabel = (activeTab: TimelineBrowserTab, item: BrowserItem) => {
+  if (item.source === "external-catalog") return "Insert VST3 effect";
   if (item.category === "audio-effect-chain") return "Add chain";
   if (item.category === "instrument-preset") return "Add preset";
   return activeTab === "effects" ? "Add effect" : "Add instrument";
@@ -461,9 +464,11 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
       <button
         type="button"
         aria-label="Resize browser"
-        class="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent hover:bg-sky-500/20"
+        class="group absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent"
         onPointerDown={(event) => props.browser.onResizePointerDown(event)}
-      />
+      >
+        <span class="pointer-events-none absolute right-1/2 top-0 h-full w-1 translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
+      </button>
     </aside>
   );
 };

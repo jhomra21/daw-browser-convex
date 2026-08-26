@@ -41,12 +41,14 @@ export type AutomationParameterDescriptor = {
   label: string
   group: string
   device: string
-  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | AudioEffectKind | 'spectral'
+  owner: 'mixer' | 'sampler' | 'granular' | 'synth' | 'external' | AudioEffectKind | 'spectral'
   targetKinds: AutomationTargetKind[]
   min: number
   max: number
   defaultValue: number
   scale: 'linear' | 'log'
+  interpolation?: 'linear' | 'hold'
+  valueKind?: 'continuous' | 'integer'
   unit?: 'db' | 'hz' | 'percent' | 'seconds' | 'milliseconds' | 'semitones' | 'cents' | 'octaves'
 }
 
@@ -72,14 +74,50 @@ export type AutomationInstrumentInstance = {
   kind: 'sampler' | 'granular' | 'synth'
 }
 
-export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance
+export type AutomationExternalParameter = {
+  id: number
+  title: string
+  unit: string
+  readOnly: boolean
+  hidden: boolean
+}
+
+export type AutomationExternalInstance = {
+  id: string
+  kind: 'external'
+  name: string
+  parameters: readonly AutomationExternalParameter[]
+}
+
+export type AutomationTargetDeviceInstance = AutomationEffectInstance | AutomationInstrumentInstance | AutomationExternalInstance
 
 export type AutomationTargetParameterOption = AutomationParameterOption & AutomationParameterSelection
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
+export const normalizeAutomationValue = (
+  value: number,
+  descriptor: AutomationParameterDescriptor,
+) => {
+  const clamped = clamp(value, descriptor.min, descriptor.max)
+  return descriptor.valueKind === 'integer' ? Math.round(clamped) : clamped
+}
+
+export const externalAutomationParameterId = (instanceId: string, parameterId: number) => (
+  `vst3:${instanceId}:${parameterId}`
+)
+
+export const parseExternalAutomationParameterId = (parameterId: string) => {
+  const match = /^vst3:([^:]+):([0-9]+)$/.exec(parameterId)
+  if (!match || !match[1] || !match[2]) return null
+  const id = Number(match[2])
+  return Number.isSafeInteger(id) && id >= 0 && id <= 0xffff_ffff
+    ? { instanceId: match[1], parameterId: id }
+    : null
+}
+
 const staticDescriptors: AutomationParameterDescriptor[] = [
-  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 1.5, defaultValue: 1, scale: 'linear', unit: 'percent' },
+  { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 2, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
 const effectDescriptors: AutomationParameterDescriptor[] = [
@@ -110,7 +148,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'limiter.ceiling', label: 'Limiter Ceiling', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: -12, max: 0, defaultValue: -1, scale: 'linear', unit: 'db' },
   { id: 'limiter.release', label: 'Limiter Release', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 20, max: 1000, defaultValue: 100, scale: 'linear' },
   { id: 'limiter.link', label: 'Limiter Link', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear' },
-  { id: 'lofi.bitDepth', label: 'LoFi Bit Depth', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 2, max: 24, defaultValue: 12, scale: 'linear' },
+  { id: 'lofi.bitDepth', label: 'LoFi Bit Depth', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 2, max: 24, defaultValue: 12, scale: 'linear', interpolation: 'hold', valueKind: 'integer' },
   { id: 'lofi.sampleRateRatio', label: 'LoFi Sample Rate', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 0.01, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
   { id: 'lofi.jitter', label: 'LoFi Jitter', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear', unit: 'percent' },
   { id: 'lofi.noiseDb', label: 'LoFi Noise', group: 'Audio Effects', device: 'LoFi', owner: 'lofi', targetKinds: ['track', 'master'], min: -120, max: -24, defaultValue: -80, scale: 'linear', unit: 'db' },
@@ -171,7 +209,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'spectral.mix', label: 'Spectral Mix', group: 'Audio Effects', device: 'Spectral', owner: 'spectral', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]
 
-const descriptorsByEffectKind: Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]> = {
+const descriptorsByEffectKind = {
   utility: effectDescriptors.filter((descriptor) => descriptor.owner === 'utility'),
   eq: [],
   autofilter: effectDescriptors.filter((descriptor) => descriptor.owner === 'autofilter'),
@@ -189,7 +227,7 @@ const descriptorsByEffectKind: Record<AudioEffectKind | 'spectral', AutomationPa
   autopan: effectDescriptors.filter((descriptor) => descriptor.owner === 'autopan'),
   ensemble: effectDescriptors.filter((descriptor) => descriptor.owner === 'ensemble'),
   spectral: effectDescriptors.filter((descriptor) => descriptor.owner === 'spectral'),
-}
+} satisfies Record<AudioEffectKind | 'spectral', AutomationParameterDescriptor[]>
 
 export const getAutomationParameterOptions = (): AutomationParameterOption[] => [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer' },
@@ -248,6 +286,21 @@ export const getAutomationParameterOptionsForTarget = (
           group: 'Instrument',
           device: 'Synth',
         }))
+      }
+      if (effect.kind === 'external') {
+        return effect.parameters
+          .filter((parameter) => !parameter.hidden)
+          .map((parameter) => {
+            const parameterId = externalAutomationParameterId(effect.id, parameter.id)
+            return {
+              id: parameterId,
+              parameterId,
+              label: parameter.title,
+              group: 'VST3',
+              device: effect.name,
+              effectInstanceId: effect.id,
+            }
+          })
       }
       const ordinal = (kindCounts.get(effect.kind) ?? 0) + 1
       kindCounts.set(effect.kind, ordinal)
@@ -336,6 +389,21 @@ export const getAutomationParameterDescriptor = (
     }
   }
   const eq = parseEqBandParameterId(parameterId)
+  const external = parseExternalAutomationParameterId(parameterId)
+  if (!eq && external) {
+    return {
+      id: parameterId,
+      label: `VST3 Parameter ${external.parameterId}`,
+      group: 'VST3',
+      device: 'VST3',
+      owner: 'external',
+      targetKinds: ['track', 'master'],
+      min: 0,
+      max: 1,
+      defaultValue: 0,
+      scale: 'linear',
+    }
+  }
   if (!eq) return undefined
   if (eq.property === 'frequencyHz') {
     return { id: parameterId, label: 'EQ Frequency', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 20, max: 20000, defaultValue: 1000, scale: 'log', unit: 'hz' }
@@ -343,7 +411,7 @@ export const getAutomationParameterDescriptor = (
   if (eq.property === 'gainDb') {
     return { id: parameterId, label: 'EQ Gain', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' }
   }
-  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.1, max: 18, defaultValue: 1, scale: 'linear' }
+  return { id: parameterId, label: 'EQ Q', group: 'Audio Effects', device: 'EQ Eight', owner: 'eq', targetKinds: ['track', 'master'], min: 0.2, max: 18, defaultValue: 1, scale: 'linear' }
 }
 
 export const isAutomationParameterSupportedForTarget = (
@@ -401,8 +469,10 @@ export const normalizeAutomationPoints = (
     byTime.set(timeSec, {
       id: point.id,
       timeSec,
-      value: clamp(point.value, descriptor.min, descriptor.max),
-      interpolation: isAutomationInterpolation(point.interpolation) ? point.interpolation : 'linear',
+      value: normalizeAutomationValue(point.value, descriptor),
+      interpolation: descriptor.interpolation === 'hold'
+        ? 'hold'
+        : isAutomationInterpolation(point.interpolation) ? point.interpolation : 'linear',
     })
   }
   return [...byTime.values()].sort((a, b) => a.timeSec - b.timeSec || a.id.localeCompare(b.id))
@@ -440,6 +510,7 @@ export const valueAtAutomationTime = (
   const previous = points[nextIndex - 1]
   const next = points[nextIndex]
   if (!previous || !next) return fallbackValue
+  if (timeSec === next.timeSec) return next.value
   if (previous.interpolation === 'hold') return previous.value
   const span = next.timeSec - previous.timeSec
   if (span <= 0) return next.value
@@ -456,9 +527,10 @@ export const evaluatedAutomationValuesByTargetKey = (
   for (const envelope of envelopes) {
     if (!envelope.enabled || overriddenTargetKeys.has(envelope.targetKey)) continue
     const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
+    const points = descriptor ? normalizeAutomationPoints([...envelope.points], descriptor) : envelope.points
     values.set(
       envelope.targetKey,
-      valueAtAutomationTime(envelope.points, timeSec, descriptor?.defaultValue ?? 0),
+      valueAtAutomationTime(points, timeSec, descriptor?.defaultValue ?? 0),
     )
   }
   return values

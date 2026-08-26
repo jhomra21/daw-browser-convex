@@ -1,11 +1,11 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import { assert, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp } from '@daw-browser/shared'
+import { assert, assertDefined, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp, sanitizeLegacyMidiClipForCreate } from '@daw-browser/shared'
 import type { ClipCreateSnapshot, SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
-import { enqueueSharedAudioClipCreateOnFailure, enqueueSharedTimelineOperationOnFailure, SharedOutboxQueuedError } from '~/lib/shared-outbox'
+import { enqueueSharedAudioClipCreateOnFailure, enqueueSharedTimelineOperationOnFailure, isPermanentSharedOperationError, SharedOutboxQueuedError } from '~/lib/shared-outbox'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { TrackId } from '@daw-browser/timeline-core/types'
@@ -39,7 +39,7 @@ type UploadedAudioClipInput = {
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<string | null>
+  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<{ assetKey: string; url: string } | null>
   audioBufferCache: ClipBufferWriter
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -80,6 +80,14 @@ export type BatchClipCreateItem = {
   clip: ClipCreateSnapshot
   buffer?: AudioBuffer | null
 }
+
+const sanitizeNewClipCreateItem = (item: BatchClipCreateItem): BatchClipCreateItem => ({
+  ...item,
+  clip: {
+    ...item.clip,
+    midi: item.clip.midi ? sanitizeLegacyMidiClipForCreate(item.clip.midi) : undefined,
+  },
+})
 
 type BatchClipCreateResult = {
   trackId: TrackId
@@ -155,7 +163,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     operationId,
   })
 
-  const sampleUrl = await uploadClipSampleUrl({
+  const upload = await uploadClipSampleUrl({
     projectId: input.projectId,
     assetKey: input.sourceAssetKey,
     file: input.file,
@@ -163,6 +171,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     uploadToR2: input.uploadToR2,
   }).catch(async (error) => {
     removePendingClip()
+    if (isPermanentSharedOperationError(error)) throw error
     await enqueueSharedAudioClipCreateOnFailure({
       projectId: input.projectId,
       userId: input.userId,
@@ -172,36 +181,38 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
       clipPayload: queuedClipPayload,
       error,
     })
-    throw new SharedOutboxQueuedError('clips.createUploadedAudio')
+    throw new SharedOutboxQueuedError('clips.createUploadedAudio', operationId)
   })
-  clip.sampleUrl = sampleUrl
+  clip.sampleUrl = upload.url
+  clip.sourceAssetKey = upload.assetKey
 
   let clipId: string
   const payload = {
     ...queuedClipPayload,
-    sampleUrl,
+    sampleUrl: upload.url,
+    assetKey: upload.assetKey,
   }
   try {
     const createdClipId = await input.createServerClip(payload)
-    assert(createdClipId, 'Failed to create clip')
-    clipId = createdClipId
+    clipId = assertDefined(createdClipId, 'Failed to create clip')
   } catch (error) {
     removePendingClip()
+    if (isPermanentSharedOperationError(error)) throw error
     await enqueueSharedTimelineOperationOnFailure({
       projectId: input.projectId,
       userId: input.userId,
       operation: { kind: 'clips.create', payload },
       error,
     })
-    throw new SharedOutboxQueuedError('clips.create')
+    throw new SharedOutboxQueuedError('clips.create', operationId)
   }
   input.grantClipWrite?.(clipId, input.grantScope)
   removePendingClip()
 
   if (input.canProject?.() === false) {
     void primeClipSourceAsset({
-      sourceAssetKey: input.sourceAssetKey,
-      sampleUrl,
+      sourceAssetKey: upload.assetKey,
+      sampleUrl: upload.url,
       buffer: input.decoded,
     })
     return { clipId, clip }
@@ -218,7 +229,7 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   input.onClipCreated?.(localClip)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
-    sampleUrl,
+    sampleUrl: upload.url,
     buffer: input.decoded,
   })
 
@@ -290,7 +301,7 @@ export async function createLocalAudioClip(input: LocalAudioClipInput): Promise<
   return { clipId: row.id, clip }
 }
 
-export async function createManyClips(input: {
+async function createManyClips(input: {
   projectId: string
   items: readonly BatchClipCreateItem[]
   createMany: (items: ReturnType<typeof buildClipCreatePayload>[], operationId: string) => Promise<Array<string | null>>
@@ -303,7 +314,8 @@ export async function createManyClips(input: {
   }
 
   const operationId = crypto.randomUUID()
-  const payloadItems = input.items.map((item) => buildClipCreatePayload({
+  const items = input.items.map(sanitizeNewClipCreateItem)
+  const payloadItems = items.map((item) => buildClipCreatePayload({
     projectId: input.projectId,
     trackId: item.trackId,
     clip: item.clip,
@@ -313,14 +325,14 @@ export async function createManyClips(input: {
 
   const created: BatchClipCreateResult[] = []
   const bufferEntries: Array<readonly [string, AudioBuffer]> = []
-  for (let index = 0; index < input.items.length; index++) {
-    const item = input.items[index]
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
     const clipId = clipIds[index]
-    assert(clipId, 'Failed to create clips')
-    if (item.buffer) bufferEntries.push([clipId, item.buffer])
+    const resolvedClipId = assertDefined(clipId, 'Failed to create clips')
+    if (item.buffer) bufferEntries.push([resolvedClipId, item.buffer])
     created.push({
       trackId: item.trackId,
-      clipId,
+      clipId: resolvedClipId,
       clip: item.clip,
     })
   }
@@ -361,6 +373,7 @@ export async function createProjectedLocalClips(input: {
   canProject?: () => boolean
 }) {
   const repository = createLocalTimelineRepository(input.projectId)
+  const items = input.items.map(sanitizeNewClipCreateItem)
   const created: BatchClipCreateResult[] = []
   const bufferEntries: Array<readonly [string, AudioBuffer]> = []
   const cleanupCreatedClips = async (clipIds: string[]) => {
@@ -369,7 +382,7 @@ export async function createProjectedLocalClips(input: {
     input.removeLocalClips(clipIds)
   }
   try {
-    for (const item of input.items) {
+    for (const item of items) {
       if (input.canProject && !input.canProject()) {
         await cleanupCreatedClips(created.map((entry) => entry.clipId))
         return []
@@ -458,7 +471,7 @@ export function pushClipCreateHistory(input: {
   clipId: string
   clip: ClipCreateSnapshot
 }) {
-  if (!input.projectId || typeof input.historyPush !== 'function') return
+  if (!input.projectId || !input.historyPush) return
 
   input.historyPush(buildClipCreateHistoryEntry({
     projectId: input.projectId,

@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'bun:test'
+import 'fake-indexeddb/auto'
+import { isJsonString } from '@daw-browser/shared'
+import type { LocalProjectStoredValue } from './local-project-db'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import { buildClipCreateSnapshot, buildClipHistorySnapshot } from './clip-create'
+import { buildClipCreateSnapshot, buildClipHistorySnapshot, createUploadedAudioClip } from './clip-create'
 import { buildDuplicateClipCreateItems } from './clip-drag-session'
+import { openLocalProjectDb } from './local-project-db'
+import { SharedOutboxQueuedError } from './shared-outbox'
+import {
+  publishSharedTimelineOperation,
+  SharedTimelineOperationHttpError,
+  SharedTimelineOperationRejectedError,
+} from './shared-timeline-operations-api'
 
 const clip = (input: Partial<Clip> & Pick<Clip, 'id' | 'name' | 'startSec' | 'duration' | 'color'>): Clip => ({
   ...input,
@@ -54,4 +64,156 @@ describe('clip create snapshots', () => {
       },
     ])
   })
+})
+
+const source = {
+  durationSec: 1,
+  sampleRate: 44_100,
+  channelCount: 2,
+}
+
+const clipBufferWriter = {
+  storeBuffer: () => undefined,
+  storeBuffers: () => undefined,
+  removeBuffer: () => undefined,
+}
+
+const isStoredObject = (
+  value: LocalProjectStoredValue,
+): value is { readonly [key: string]: LocalProjectStoredValue } => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+test('returns the committed clip when cancellation follows the server commit', async () => {
+  const controller = new AbortController()
+  const insertedClipIds: string[] = []
+  let createCalls = 0
+
+  const result = await createUploadedAudioClip({
+    projectId: 'project-commit-abort',
+    userId: 'user-1',
+    trackId: 'track-1',
+    startSec: 0,
+    file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+    durationSec: 1,
+    source,
+    sourceAssetKey: 'asset-1',
+    sourceKind: 'upload',
+    createServerClip: async () => {
+      createCalls += 1
+      controller.abort()
+      return 'clip-1'
+    },
+    insertLocalClip: (_trackId, clip_) => insertedClipIds.push(clip_.id),
+    uploadToR2: async () => ({ assetKey: 'asset-1', url: 'https://example.test/clip.wav' }),
+    audioBufferCache: clipBufferWriter,
+  })
+
+  expect(controller.signal.aborted).toBe(true)
+  expect(createCalls).toBe(1)
+  expect(result.clipId).toBe('clip-1')
+  expect(insertedClipIds).toHaveLength(2)
+  expect(insertedClipIds[0]).toStartWith('pending:')
+  expect(insertedClipIds[1]).toBe('clip-1')
+})
+
+test('carries the persisted operation receipt when an uploaded clip is queued', async () => {
+  let error: unknown
+
+  try {
+    await createUploadedAudioClip({
+      projectId: 'project-queued-receipt',
+      userId: 'user-1',
+      trackId: 'track-1',
+      startSec: 0,
+      file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+      durationSec: 1,
+      source,
+      sourceAssetKey: 'asset-1',
+      sourceKind: 'upload',
+      createServerClip: async () => 'clip-1',
+      insertLocalClip: () => undefined,
+      uploadToR2: async () => {
+        throw new Error('offline')
+      },
+      audioBufferCache: clipBufferWriter,
+    })
+  } catch (caught) {
+    error = caught
+  }
+
+  expect(error).toBeInstanceOf(SharedOutboxQueuedError)
+  if (!(error instanceof SharedOutboxQueuedError)) throw error
+  expect(error.operationId).toMatch(/^[0-9a-f-]{36}$/)
+
+  const rows = await (await openLocalProjectDb('project-queued-receipt')).getAll('syncState')
+  const queued = rows.find((row) => row.key.startsWith('shared-outbox:'))
+  if (!queued || !isStoredObject(queued.value) || !isStoredObject(queued.value.payload) || !isStoredObject(queued.value.payload.clipPayload)) {
+    throw new Error('Queued clip receipt was not persisted.')
+  }
+  expect(queued.value.payload.clipPayload.operationId).toBe(error.operationId)
+})
+
+test('does not queue permanently rejected uploaded clip creates', async () => {
+  const projectId = 'project-permanent-create-rejection'
+  await expect(createUploadedAudioClip({
+    projectId,
+    userId: 'user-1',
+    trackId: 'track-1',
+    startSec: 0,
+    file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+    durationSec: 1,
+    source,
+    sourceAssetKey: 'asset-1',
+    sourceKind: 'upload',
+    createServerClip: async () => {
+      throw new SharedTimelineOperationHttpError(400, 'invalid clip')
+    },
+    insertLocalClip: () => undefined,
+    uploadToR2: async () => ({ assetKey: 'asset-1', url: 'https://example.test/clip.wav' }),
+    audioBufferCache: clipBufferWriter,
+  })).rejects.toBeInstanceOf(SharedTimelineOperationHttpError)
+  const rows = await (await openLocalProjectDb(projectId)).getAll('syncState')
+  expect(rows.some((row) => row.key.startsWith('shared-outbox:'))).toBe(false)
+})
+
+test('rolls back and does not queue uploaded clip creates with null server results', async () => {
+  const projectId = 'project-null-create-rejection'
+  const originalFetch = globalThis.fetch
+  const removedClipIds: string[][] = []
+  globalThis.fetch = Object.assign(
+    async () => new Response(JSON.stringify(null), { status: 200 }),
+    { preconnect: originalFetch.preconnect },
+  )
+
+  try {
+    await expect(createUploadedAudioClip({
+      projectId,
+      userId: 'user-1',
+      trackId: 'track-1',
+      startSec: 0,
+      file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+      durationSec: 1,
+      source,
+      sourceAssetKey: 'asset-1',
+      sourceKind: 'upload',
+      createServerClip: async (payload) => {
+        const result = await publishSharedTimelineOperation(projectId, {
+          kind: 'clips.create',
+          payload,
+        })
+        return isJsonString(result) ? result : null
+      },
+      insertLocalClip: () => undefined,
+      removeLocalClips: (clipIds) => removedClipIds.push([...clipIds]),
+      uploadToR2: async () => ({ assetKey: 'asset-1', url: 'https://example.test/clip.wav' }),
+      audioBufferCache: clipBufferWriter,
+    })).rejects.toBeInstanceOf(SharedTimelineOperationRejectedError)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  expect(removedClipIds).toHaveLength(1)
+  const rows = await (await openLocalProjectDb(projectId)).getAll('syncState')
+  expect(rows.some((row) => row.key.startsWith('shared-outbox:'))).toBe(false)
 })

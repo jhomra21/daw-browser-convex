@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createRecordingWriterHandler, type RecordingWriterStorage } from './recording-writer-core'
+import type { WriterOutboundMessage } from '../../../packages/audio-engine/src/recording/recording-protocol'
 import {
   createRecorderSabRingBuffers,
   createRecorderSabRingProducer,
@@ -21,7 +22,7 @@ describe('recording writer handler', () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers)
     const writes: number[][][] = []
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async (channels) => {
@@ -75,7 +76,7 @@ describe('recording writer handler', () => {
         abort: async () => undefined,
       }),
     }
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler(storage, (message) => {
       output.push(message)
       if (message.type === 'return') events.push(`return:${message.blockId}`)
@@ -94,8 +95,33 @@ describe('recording writer handler', () => {
     expect(output.at(-1)).toMatchObject({ type: 'finalized', capturedFrames: 4 })
   })
 
+  test('passes contiguous transferable PCM directly to storage', async () => {
+    const planarBlocks: ArrayBuffer[] = []
+    const output: WriterOutboundMessage[] = []
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        appendPlanar: async (buffer) => {
+          planarBlocks.push(buffer)
+        },
+        append: async () => {
+          throw new Error('channel slicing should not be used')
+        },
+        finalize: async () => ({ capturedFrames: 2 }),
+        abort: async () => undefined,
+      }),
+    }, (message) => output.push(message))
+    handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
+    await handler.testing.settled()
+    const input = block(0)
+    new Float32Array(input.buffer).set([1, 2])
+    handler.handle(input)
+    await handler.testing.settled()
+    expect(planarBlocks).toEqual([input.buffer])
+    expect(output.at(-1)).toMatchObject({ type: 'return', blockId: 0 })
+  })
+
   test('ignores stale sessions and rejects malformed messages', async () => {
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => undefined,
@@ -117,7 +143,7 @@ describe('recording writer handler', () => {
     const stalled = new Promise<void>((resolve) => {
       release = resolve
     })
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: () => stalled,
@@ -141,7 +167,7 @@ describe('recording writer handler', () => {
     const aborting = new Promise<void>((resolve) => {
       releaseAbort = resolve
     })
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -164,7 +190,7 @@ describe('recording writer handler', () => {
 
   test('aborts only after queued writes and surfaces worker storage failure', async () => {
     const events: string[] = []
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -184,7 +210,7 @@ describe('recording writer handler', () => {
     expect(events).toEqual(['write', 'abort'])
     expect(output.at(-1)).toMatchObject({ type: 'aborted' })
 
-    const failedOutput: unknown[] = []
+    const failedOutput: WriterOutboundMessage[] = []
     const failed = createRecordingWriterHandler({
       createSession: async () => {
         throw new Error('storage-unavailable')
@@ -198,7 +224,7 @@ describe('recording writer handler', () => {
   test('rejects channel layout changes without appending the block', async () => {
     let appends = 0
     let aborts = 0
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async () => {
@@ -229,7 +255,7 @@ describe('recording writer handler', () => {
       release = resolve
     })
     const events: string[] = []
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: async (channels) => {
@@ -257,9 +283,7 @@ describe('recording writer handler', () => {
     await handler.testing.settled()
     expect(events).toEqual(['append:1', 'abort'])
     expect(handler.testing.snapshot()).toMatchObject({ state: 'failed', queuedBlocks: 0 })
-    expect(output.filter((message) =>
-      typeof message === 'object' && message !== null && 'type' in message && message.type === 'failure'
-    )).toHaveLength(1)
+    expect(output.filter((message) => message.type === 'failure')).toHaveLength(1)
   })
 
   test('keeps createSession failure terminal when startup completion is already queued', async () => {
@@ -274,7 +298,7 @@ describe('recording writer handler', () => {
         },
       })
     })
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: () => pendingSession,
     }, (message) => output.push(message))
@@ -301,7 +325,7 @@ describe('recording writer handler', () => {
     })
     let finalizes = 0
     let aborts = 0
-    const output: unknown[] = []
+    const output: WriterOutboundMessage[] = []
     const handler = createRecordingWriterHandler({
       createSession: async () => ({
         append: () => pendingAppend,
@@ -328,10 +352,7 @@ describe('recording writer handler', () => {
     expect(aborts).toBe(1)
     expect(handler.testing.snapshot()).toEqual({ state: 'failed', queuedBlocks: 0 })
     expect(output.filter((message) =>
-      typeof message === 'object'
-      && message !== null
-      && 'type' in message
-      && (message.type === 'failure' || message.type === 'finalized' || message.type === 'aborted')
+      message.type === 'failure' || message.type === 'finalized' || message.type === 'aborted'
     )).toEqual([{
       type: 'failure',
       generation: 1,

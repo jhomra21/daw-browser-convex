@@ -1,8 +1,9 @@
 import type { SamplerZone } from './sampler-params'
+import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonValue } from './json-value'
 
 export const GRANULAR_STATE_VERSION = 1
 export const GRANULAR_MAX_GRAINS = 128
-export type GranularWindowShape = 'hann' | 'tukey' | 'gaussian'
+export type GranularWindowKind = 'hann' | 'tukey' | 'gaussian'
 
 export type GranularParams = {
   version: typeof GRANULAR_STATE_VERSION
@@ -13,7 +14,7 @@ export type GranularParams = {
   spray: number
   pitchSemitones: number
   reverseProbability: number
-  windowShape: GranularWindowShape
+  'windowShape': GranularWindowKind
   stereoSpread: number
   freeze: boolean
   seed: number
@@ -21,9 +22,9 @@ export type GranularParams = {
   maxDecodedBytes: number
 }
 
-export type GranularParamsInput = Partial<GranularParams> & { version?: unknown; zone?: unknown }
+export type GranularParamsInput = JsonValue
 
-const finite = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
+const finite = (value: JsonValue | undefined, fallback: number) => isJsonNumber(value) && Number.isFinite(value) ? value : fallback
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value))
 
 export function createDefaultGranularParams(): GranularParams {
@@ -35,7 +36,7 @@ export function createDefaultGranularParams(): GranularParams {
     spray: 0.1,
     pitchSemitones: 0,
     reverseProbability: 0,
-    windowShape: 'hann',
+    'windowShape': 'hann',
     stereoSpread: 0.5,
     freeze: false,
     seed: 1,
@@ -44,31 +45,31 @@ export function createDefaultGranularParams(): GranularParams {
   }
 }
 
-const isZone = (value: unknown): value is SamplerZone => {
-  if (typeof value !== 'object' || value === null || !('sample' in value)) return false
+const isZone = (value: JsonValue | undefined): value is SamplerZone => {
+  if (!isJsonObject(value) || !isJsonObject(value.sample)) return false
   const sample = value.sample
-  return typeof sample === 'object' && sample !== null
-    && 'assetKey' in sample && typeof sample.assetKey === 'string'
-    && 'url' in sample && typeof sample.url === 'string'
+  return isJsonString(sample.assetKey)
+    && isJsonString(sample.url)
 }
 
 export function normalizeGranularParams(input: GranularParamsInput): GranularParams {
   const defaults = createDefaultGranularParams()
+  const value = isJsonObject(input) ? input : {}
   return {
     version: GRANULAR_STATE_VERSION,
-    zone: isZone(input.zone) ? input.zone : undefined,
-    grainSizeMs: clamp(finite(input.grainSizeMs, defaults.grainSizeMs), 5, 1000),
-    densityHz: clamp(finite(input.densityHz, defaults.densityHz), 0.25, 200),
-    position: clamp(finite(input.position, defaults.position), 0, 1),
-    spray: clamp(finite(input.spray, defaults.spray), 0, 1),
-    pitchSemitones: clamp(finite(input.pitchSemitones, defaults.pitchSemitones), -48, 48),
-    reverseProbability: clamp(finite(input.reverseProbability, defaults.reverseProbability), 0, 1),
-    windowShape: input.windowShape === 'tukey' || input.windowShape === 'gaussian' ? input.windowShape : 'hann',
-    stereoSpread: clamp(finite(input.stereoSpread, defaults.stereoSpread), 0, 1),
-    freeze: input.freeze === true,
-    seed: Math.round(clamp(finite(input.seed, defaults.seed), 1, 0x7fffffff)),
-    maxGrains: Math.round(clamp(finite(input.maxGrains, defaults.maxGrains), 1, GRANULAR_MAX_GRAINS)),
-    maxDecodedBytes: Math.round(clamp(finite(input.maxDecodedBytes, defaults.maxDecodedBytes), 1024 * 1024, 256 * 1024 * 1024)),
+    zone: isZone(value.zone) ? value.zone : undefined,
+    grainSizeMs: clamp(finite(value.grainSizeMs, defaults.grainSizeMs), 5, 1000),
+    densityHz: clamp(finite(value.densityHz, defaults.densityHz), 0.25, 200),
+    position: clamp(finite(value.position, defaults.position), 0, 1),
+    spray: clamp(finite(value.spray, defaults.spray), 0, 1),
+    pitchSemitones: clamp(finite(value.pitchSemitones, defaults.pitchSemitones), -48, 48),
+    reverseProbability: clamp(finite(value.reverseProbability, defaults.reverseProbability), 0, 1),
+    'windowShape': value['windowShape'] === 'tukey' || value['windowShape'] === 'gaussian' ? value['windowShape'] : 'hann',
+    stereoSpread: clamp(finite(value.stereoSpread, defaults.stereoSpread), 0, 1),
+    freeze: isJsonBoolean(value.freeze) && value.freeze,
+    seed: Math.round(clamp(finite(value.seed, defaults.seed), 1, 0x7fffffff)),
+    maxGrains: Math.round(clamp(finite(value.maxGrains, defaults.maxGrains), 1, GRANULAR_MAX_GRAINS)),
+    maxDecodedBytes: Math.round(clamp(finite(value.maxDecodedBytes, defaults.maxDecodedBytes), 1024 * 1024, 256 * 1024 * 1024)),
   }
 }
 

@@ -18,7 +18,6 @@ export const compareAudioEffectOrderEntries = (
   (left.index === undefined && right.index !== undefined ? 1 : 0)
   || (left.index !== undefined && right.index === undefined ? -1 : 0)
   || getAudioEffectOrderSortIndex(left) - getAudioEffectOrderSortIndex(right)
-  || getAudioEffectOrderSortIndex(left) - getAudioEffectOrderSortIndex(right)
 )
 
 export const collectAudioEffectOrders = (entries: Iterable<AudioEffectOrderEntry>) => {

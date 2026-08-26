@@ -7,6 +7,24 @@ type UseTimelineProjectRouteOptions = {
   bootstrapIfEmpty: boolean
 }
 
+export const settlePopstateProjectTransition = async (input: {
+  currentProjectId: string
+  nextProjectId: string | null | undefined
+  settle: () => Promise<void>
+  resolve: () => void
+  restore: () => void
+}) => {
+  if (input.currentProjectId && input.nextProjectId !== input.currentProjectId) {
+    try {
+      await input.settle()
+    } catch {
+      input.restore()
+      return
+    }
+  }
+  input.resolve()
+}
+
 const updateRoomUrl = (projectId: string, mode: 'push' | 'replace') => {
   try {
     const url = new URL(window.location.href)
@@ -30,6 +48,14 @@ export const clearShareTokenFromUrl = () => {
 
 export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions) => {
   const [projectId, setProjectIdState] = createSignal<string>('')
+  const [mountedProjectGeneration, setMountedProjectGeneration] = createSignal(0)
+  let settleProjectTransition: (() => Promise<void>) | undefined
+  let historyTransition = 0
+  const setMountedProjectId = (nextProjectId: string) => {
+    if (projectId() !== nextProjectId) setMountedProjectGeneration((generation) => generation + 1)
+    setProjectIdState(nextProjectId)
+  }
+
   const [bootstrapProjectId, setBootstrapProjectId] = createSignal<string | null>(null)
   const [acceptingShareToken, setAcceptingShareToken] = createSignal<string | null>(null)
 
@@ -45,36 +71,55 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
     }
     batch(() => {
       setBootstrapProjectId(routeOptions?.bootstrap ?? null)
-      setProjectIdState(nextProjectId)
+      setMountedProjectId(nextProjectId)
     })
   }
 
-  const replaceRoom = (nextProjectId: string) => {
+  const settleBeforeRoomChange = async () => {
+    await settleProjectTransition?.()
+  }
+
+  const replaceRoom = async (nextProjectId: string) => {
+    await settleBeforeRoomChange()
     resolveRoom(nextProjectId, { history: 'replace' })
   }
 
-  const navigateToRoom = (nextProjectId: string) => {
+  const navigateToRoom = async (nextProjectId: string) => {
+    await settleBeforeRoomChange()
     resolveRoom(nextProjectId, { history: 'push' })
     if (isLocalId('project', nextProjectId)) options.onLocalProjectOpened(nextProjectId)
   }
 
-  const setProjectId = (nextProjectId: string) => {
+  const setProjectId = async (nextProjectId: string) => {
+    await settleBeforeRoomChange()
     setBootstrapProjectId(null)
-    setProjectIdState(nextProjectId)
+    setMountedProjectId(nextProjectId)
   }
 
   onMount(() => {
-    const syncLocationState = () => {
+    const syncLocationState = async (fromHistory = false) => {
       const nextProjectId = readLocationSearchParam('projectId')
       const nextShareToken = readLocationSearchParam('shareToken')
       setAcceptingShareToken(nextShareToken)
+      const transition = ++historyTransition
+      if (fromHistory) {
+        let resolved = false
+        await settlePopstateProjectTransition({
+          currentProjectId: projectId(),
+          nextProjectId,
+          settle: settleBeforeRoomChange,
+          resolve: () => { resolved = true },
+          restore: () => updateRoomUrl(projectId(), 'replace'),
+        })
+        if (!resolved || transition !== historyTransition) return
+      }
       if (nextProjectId) {
         resolveRoom(nextProjectId)
         return
       }
       batch(() => {
         setBootstrapProjectId(null)
-        setProjectIdState('')
+        setMountedProjectId('')
       })
       if (nextShareToken || !options.bootstrapIfEmpty) return
       const generatedProjectId = crypto.randomUUID()
@@ -84,8 +129,8 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
       })
     }
 
-    syncLocationState()
-    const syncRoomFromHistory = () => syncLocationState()
+    void syncLocationState()
+    const syncRoomFromHistory = () => { void syncLocationState(true) }
     window.addEventListener('popstate', syncRoomFromHistory)
     onCleanup(() => {
       window.removeEventListener('popstate', syncRoomFromHistory)
@@ -94,11 +139,16 @@ export const useTimelineProjectRoute = (options: UseTimelineProjectRouteOptions)
 
   return {
     projectId,
+    mountedProjectGeneration,
     bootstrapProjectId,
     acceptingShareToken,
     setAcceptingShareToken,
     setProjectId,
     clearBootstrapProjectId: () => setBootstrapProjectId(null),
+    setProjectTransitionSettlement: (settle: (() => Promise<void>) | undefined) => {
+      settleProjectTransition = settle
+    },
+    settleProjectTransition: settleBeforeRoomChange,
     replaceRoom,
     navigateToRoom,
   }

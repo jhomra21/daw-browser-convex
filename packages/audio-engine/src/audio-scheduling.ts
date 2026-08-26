@@ -5,6 +5,7 @@ import { normalizeClipFades, normalizedFadeGainAtClipTime, type ClipFades, type 
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 type MidiNote = {
+  id?: string
   beat: number
   length: number
   pitch: number
@@ -12,14 +13,32 @@ type MidiNote = {
 }
 
 type ScheduledMidiEvent = {
+  identity: string
   startSec: number
   endSec: number
   pitch: number
   velocity?: number
 }
 
+export const isPlayableLegacyMidiNote = (note: MidiNote): boolean => (
+  Number.isFinite(note.beat)
+  && Number.isFinite(note.length)
+  && note.length > 0
+  && Number.isInteger(note.pitch)
+  && note.pitch >= 0
+  && note.pitch <= 127
+  && (note.velocity === undefined || (Number.isFinite(note.velocity) && note.velocity >= 0 && note.velocity <= 1))
+)
+
 const arpeggiatedNotesCache = new WeakMap<MidiNote[], Map<string, MidiNote[]>>()
 const MAX_ARPEGGIATOR_CACHE_ENTRIES = 4
+
+export const getPlayableMidiNotes = (notes: MidiNote[]): MidiNote[] => {
+  for (let index = 0; index < notes.length; index += 1) {
+    if (!isPlayableLegacyMidiNote(notes[index])) return notes.filter(isPlayableLegacyMidiNote)
+  }
+  return notes
+}
 
 function getArpeggiatorCacheKey(params: ArpParams, clipDurationBeats: number) {
   return [
@@ -64,17 +83,19 @@ export function getScheduledMidiEvents(input: {
   const secondsPerBeat = 60 / Math.max(1, input.bpm || 120)
   const clipStart = input.clip.startSec
   const clipEndRaw = input.clip.startSec + input.clip.duration
-  const clipEnd = typeof input.rangeEndSec === 'number' ? Math.min(clipEndRaw, input.rangeEndSec) : clipEndRaw
+  const clipEnd = input.rangeEndSec === undefined ? clipEndRaw : Math.min(clipEndRaw, input.rangeEndSec)
   const clipDurationBeats = input.clip.duration / secondsPerBeat
   const midiOffsetBeats = Math.max(0, input.clip.midiOffsetBeats ?? 0)
 
-  let notesToSchedule = input.notes
+  let notesToSchedule = getPlayableMidiNotes(input.notes)
   if (input.arp?.enabled) {
-    notesToSchedule = getArpeggiatedNotes(notesToSchedule, input.arp, clipDurationBeats)
+    notesToSchedule = getPlayableMidiNotes(
+      getArpeggiatedNotes(notesToSchedule, input.arp, clipDurationBeats),
+    )
   }
 
   const events: ScheduledMidiEvent[] = []
-  for (const note of notesToSchedule) {
+  for (const [index, note] of notesToSchedule.entries()) {
     const noteBeatRaw = note.beat || 0
     const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeatRaw)
     const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
@@ -88,6 +109,7 @@ export function getScheduledMidiEvents(input: {
     if (endSec <= startSec) continue
 
     events.push({
+      identity: note.id ?? `${note.beat}:${note.length}:${note.pitch}:${note.velocity ?? 1}:${index}`,
       startSec,
       endSec,
       pitch: note.pitch,

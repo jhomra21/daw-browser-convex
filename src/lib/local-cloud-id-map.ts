@@ -1,5 +1,6 @@
 import { openLocalProjectDb } from '~/lib/local-project-db'
-import type { LocalProjectSyncStateRow } from '~/lib/local-project-db'
+import type { LocalProjectStoredValue, LocalProjectSyncStateRow } from '~/lib/local-project-db'
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from '@daw-browser/shared'
 
 export type CloudMappedEntityKind = 'track' | 'clip' | 'asset'
 
@@ -15,7 +16,7 @@ const keyFor = (kind: CloudMappedEntityKind, localId: string) => `cloud-id:${kin
 const indexKeyFor = (kind: CloudMappedEntityKind, cloudId: string) => `local-id:${kind}:${cloudId}`
 const now = () => Date.now()
 
-const isCloudMappedEntityKind = (value: unknown): value is CloudMappedEntityKind => (
+const isCloudMappedEntityKind = (value: JsonValue | undefined): value is CloudMappedEntityKind => (
   value === 'track' || value === 'clip' || value === 'asset'
 )
 
@@ -75,18 +76,15 @@ export const assetCloudIdMappingRows = (
   updatedAt = now(),
 ) => cloudIdMappingRows('asset', mappings, updatedAt)
 
-const isMapping = (value: unknown): value is CloudIdMapping => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+const isMapping = (value: LocalProjectStoredValue | undefined): value is CloudIdMapping => {
+  const parsed = parseJsonValue(value)
+  if (!isJsonObject(parsed)) return false
   return (
-    'kind' in value
-    && 'localId' in value
-    && 'cloudId' in value
-    && 'historyRef' in value
-    && isCloudMappedEntityKind(value.kind)
-    && typeof value.localId === 'string'
-    && typeof value.cloudId === 'string'
-    && typeof value.historyRef === 'string'
-    && (!('updatedAt' in value) || typeof value.updatedAt === 'number')
+    isCloudMappedEntityKind(parsed.kind)
+    && isJsonString(parsed.localId)
+    && isJsonString(parsed.cloudId)
+    && isJsonString(parsed.historyRef)
+    && (parsed.updatedAt === undefined || isJsonNumber(parsed.updatedAt))
   )
 }
 
@@ -158,5 +156,6 @@ export const getLocalIdForCloudId = async (
 ): Promise<string | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', indexKeyFor(kind, cloudId))
-  return typeof row?.value === 'string' ? row.value : undefined
+  const value = parseJsonValue(row?.value)
+  return isJsonString(value) ? value : undefined
 }

@@ -43,51 +43,86 @@ const clamp = (value: number, minimum: number, maximum: number) => Math.min(maxi
 const linearFromDb = (value: number) => 10 ** (value / 20)
 const dbFromLinear = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
-export const normalizeWavEncodingSettings = (value: unknown): WavEncodingSettings => {
-  if (!value || typeof value !== 'object') return { codec: 'pcm-s16', dither: 'none' }
-  const codec = Reflect.get(value, 'codec')
-  const dither = Reflect.get(value, 'dither')
+type WavEncodingInput = {
+  codec?: unknown
+  dither?: unknown
+}
+
+type ExportNormalizationInput = {
+  mode?: unknown
+  targetDbfs?: unknown
+  targetLufs?: unknown
+  truePeakCeilingDbtp?: unknown
+  limiting?: unknown
+}
+
+type ExportTailPolicyInput = {
+  mode?: unknown
+  durationSec?: unknown
+  thresholdDbfs?: unknown
+  holdSec?: unknown
+  maximumSec?: unknown
+}
+
+const isWavEncodingInput = <Value>(value: Value): value is Value & WavEncodingInput => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isExportNormalizationInput = <Value>(value: Value): value is Value & ExportNormalizationInput => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isExportTailPolicyInput = <Value>(value: Value): value is Value & ExportTailPolicyInput => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+const isNumber = <Value>(value: Value): value is Value & number => typeof value === 'number'
+
+export const normalizeWavEncodingSettings = <Value>(value: Value): WavEncodingSettings => {
+  if (!isWavEncodingInput(value)) return { codec: 'pcm-s16', dither: 'none' }
+  const codec = value.codec
+  const dither = value.dither
   if (codec === 'pcm-f32') return { codec, dither: 'none' }
   if (codec === 'pcm-s24') return { codec, dither: dither === 'tpdf' ? 'tpdf' : 'none' }
   return { codec: 'pcm-s16', dither: dither === 'tpdf' ? 'tpdf' : 'none' }
 }
 
-export const normalizeExportNormalization = (value: unknown): ExportNormalization => {
-  if (!value || typeof value !== 'object') return { mode: 'none' }
-  const mode = Reflect.get(value, 'mode')
+export const normalizeExportNormalization = <Value>(value: Value): ExportNormalization => {
+  if (!isExportNormalizationInput(value)) return { mode: 'none' }
+  const mode = value.mode
   if (mode === 'sample-peak') {
-    const target = Reflect.get(value, 'targetDbfs')
-    return { mode, targetDbfs: clamp(typeof target === 'number' ? target : 0, -120, 0) }
+    const target = value.targetDbfs
+    return { mode, targetDbfs: clamp(isNumber(target) ? target : 0, -120, 0) }
   }
   if (mode === 'loudness') {
-    const target = Reflect.get(value, 'targetLufs')
-    const ceiling = Reflect.get(value, 'truePeakCeilingDbtp')
+    const target = value.targetLufs
+    const ceiling = value.truePeakCeilingDbtp
     return {
       mode,
-      targetLufs: clamp(typeof target === 'number' ? target : -14, -36, -5),
-      truePeakCeilingDbtp: clamp(typeof ceiling === 'number' ? ceiling : -1, -12, 0),
-      limiting: Reflect.get(value, 'limiting') === 'true-peak' ? 'true-peak' : 'off',
+      targetLufs: clamp(isNumber(target) ? target : -14, -36, -5),
+      truePeakCeilingDbtp: clamp(isNumber(ceiling) ? ceiling : -1, -12, 0),
+      limiting: value.limiting === 'true-peak' ? 'true-peak' : 'off',
     }
   }
   return { mode: 'none' }
 }
 
-export const normalizeExportTailPolicy = (value: unknown): ExportTailPolicy => {
-  if (!value || typeof value !== 'object') return { mode: 'none' }
-  const mode = Reflect.get(value, 'mode')
+export const normalizeExportTailPolicy = <Value>(value: Value): ExportTailPolicy => {
+  if (!isExportTailPolicyInput(value)) return { mode: 'none' }
+  const mode = value.mode
   if (mode === 'fixed') {
-    const duration = Reflect.get(value, 'durationSec')
-    return { mode, durationSec: clamp(typeof duration === 'number' ? duration : 0, 0, 60) }
+    const duration = value.durationSec
+    return { mode, durationSec: clamp(isNumber(duration) ? duration : 0, 0, 60) }
   }
   if (mode === 'automatic') {
-    const threshold = Reflect.get(value, 'thresholdDbfs')
-    const hold = Reflect.get(value, 'holdSec')
-    const maximum = Reflect.get(value, 'maximumSec')
+    const threshold = value.thresholdDbfs
+    const hold = value.holdSec
+    const maximum = value.maximumSec
     return {
       mode,
-      thresholdDbfs: clamp(typeof threshold === 'number' ? threshold : -60, -120, -20),
-      holdSec: clamp(typeof hold === 'number' ? hold : 1, 0.1, 10),
-      maximumSec: clamp(typeof maximum === 'number' ? maximum : 10, 0.1, 120),
+      thresholdDbfs: clamp(isNumber(threshold) ? threshold : -60, -120, -20),
+      holdSec: clamp(isNumber(hold) ? hold : 1, 0.1, 10),
+      maximumSec: clamp(isNumber(maximum) ? maximum : 10, 0.1, 120),
     }
   }
   return { mode: 'none' }

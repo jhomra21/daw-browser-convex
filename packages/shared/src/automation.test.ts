@@ -2,9 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { synthAutomationKey } from './synth-automation'
-import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
+import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
+  test('keeps EQ Q automation within the shared processor contract bounds', () => {
+    expect(getAutomationParameterDescriptor('eq.band-1.q')?.min).toBe(0.2)
+  })
+
   test('builds stable target keys', () => {
     expect(automationTargetKey({ kind: 'master' }, 'volume')).toBe('automation:v2:["master",null,null,"volume"]')
     expect(automationTargetKey({ kind: 'track', trackId: 'track-1' }, 'volume')).toBe('automation:v2:["track","track-1",null,"volume"]')
@@ -69,6 +73,22 @@ describe('automation helpers', () => {
     ])
   })
 
+  test('keeps LoFi bit depth automation integral and hold-only', () => {
+    const descriptor = getAutomationParameterDescriptor('lofi.bitDepth')
+    expect(descriptor?.interpolation).toBe('hold')
+    expect(descriptor?.valueKind).toBe('integer')
+    expect(descriptor).toBeDefined()
+    if (!descriptor) return
+
+    expect(normalizeAutomationPoints([
+      { id: 'a', timeSec: 0, value: 7.4, interpolation: 'linear' },
+      { id: 'b', timeSec: 1, value: 13.6, interpolation: 'linear' },
+    ], descriptor)).toEqual([
+      { id: 'a', timeSec: 0, value: 7, interpolation: 'hold' },
+      { id: 'b', timeSec: 1, value: 14, interpolation: 'hold' },
+    ])
+  })
+
   test('interpolates linear and hold values', () => {
     expect(valueAtAutomationTime([
       { id: 'a', timeSec: 0, value: 0, interpolation: 'linear' },
@@ -79,6 +99,10 @@ describe('automation helpers', () => {
       { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
       { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
     ], 5, 1)).toBe(0)
+    expect(valueAtAutomationTime([
+      { id: 'a', timeSec: 0, value: 0, interpolation: 'hold' },
+      { id: 'b', timeSec: 10, value: 10, interpolation: 'linear' },
+    ], 10, 1)).toBe(10)
   })
 
   test('evaluates enabled envelopes without mutating or sorting points', () => {
@@ -113,6 +137,25 @@ describe('automation helpers', () => {
     const overridden = evaluatedAutomationValuesByTargetKey(envelopes, 5, new Set([envelopes[0].targetKey]))
     expect(overridden.size).toBe(1)
     expect(overridden.has(envelopes[0].targetKey)).toBe(false)
+  })
+
+  test('normalizes legacy hold-only values before evaluation', () => {
+    const target = { kind: 'track' as const, trackId: 'track-lofi', effectInstanceId: 'lofi:one' }
+    const targetKey = automationTargetKey(target, 'lofi.bitDepth')
+    const values = evaluatedAutomationValuesByTargetKey([{
+      id: 'lofi-envelope',
+      projectId: 'project-1',
+      target,
+      targetKey,
+      parameterId: 'lofi.bitDepth',
+      enabled: true,
+      points: [
+        { id: 'a', timeSec: 0, value: 7.4, interpolation: 'linear' },
+        { id: 'b', timeSec: 10, value: 13.6, interpolation: 'linear' },
+      ],
+      updatedAt: 1,
+    }], 5)
+    expect(values.get(targetKey)).toBe(7)
   })
 
   test('isolates effect instances by stable target key', () => {
@@ -153,7 +196,7 @@ describe('automation helpers', () => {
 
     expect(automationValueToRatio(descriptor, descriptor.min)).toBe(0)
     expect(automationValueToRatio(descriptor, descriptor.max)).toBe(1)
-    expect(automationRatioToValue(descriptor, 0.5)).toBe(0.75)
+    expect(automationRatioToValue(descriptor, 0.5)).toBe(1)
   })
 
   test('maps log automation values to ratios and back', () => {
@@ -210,6 +253,38 @@ describe('automation helpers', () => {
     expect(options.some((option) => option.parameterId === 'instrument:track-1:sampler:one:filter.frequency')).toBe(true)
     expect(options.some((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')).toBe(true)
     expect(options.find((option) => option.parameterId === 'instrument:track-1:granular:one:grainSize')?.effectInstanceId).toBeUndefined()
+  })
+
+  test('publishes normalized VST3 parameters with stable instance identities', () => {
+    const parameterId = externalAutomationParameterId('vst-instance', 42)
+    const options = getAutomationParameterOptionsForTarget([{
+      id: 'vst-instance',
+      kind: 'external',
+      name: 'Example VST',
+      parameters: [{ id: 42, title: 'Mix', unit: '%', readOnly: false, hidden: false }],
+    }], 'track-1')
+    expect(options).toContainEqual({
+      id: parameterId,
+      parameterId,
+      label: 'Mix',
+      group: 'VST3',
+      device: 'Example VST',
+      effectInstanceId: 'vst-instance',
+    })
+    expect(getAutomationParameterDescriptor(parameterId)).toMatchObject({
+      owner: 'external',
+      min: 0,
+      max: 1,
+      targetKinds: ['track', 'master'],
+    })
+  })
+
+  test('round trips unsigned VST3 automation IDs and rejects overflow', () => {
+    for (const parameterId of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
+      const encoded = externalAutomationParameterId('vst-instance', parameterId)
+      expect(parseExternalAutomationParameterId(encoded)).toEqual({ instanceId: 'vst-instance', parameterId })
+    }
+    expect(parseExternalAutomationParameterId('vst3:vst-instance:4294967296')).toBeNull()
   })
 
   test('exposes only effect parameters with supported automation bindings and UI controls', () => {

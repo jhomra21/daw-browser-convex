@@ -2,7 +2,7 @@ import type { FunctionReturnType } from 'convex/server'
 
 import type { ClipMediaCache } from '~/lib/clip-buffer-cache'
 import type { convexApi } from '~/lib/convex'
-import { audioWarpEqual, isLocalId, isLocalProjectAssetKey, normalizeAudioWarp, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, isLocalId, isLocalProjectAssetKey, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeTrackChannelRole, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { resolveTrackMixView } from '~/lib/timeline-mix-authority'
 import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
@@ -25,6 +25,7 @@ type TimelineTrackLike<TTrackId extends string = Track['id']> = Omit<Track, 'id'
 
 export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
   _id: TTrackId
+  name?: string
   index: number
   kind?: string
   groupId?: TTrackId
@@ -108,7 +109,6 @@ type ServerTimelineIndex<TTrackId extends string = Track['id']> = {
   trackLocksById: Map<TTrackId, string | null>
 }
 
-const MIDI_WAVES = ['sine', 'square', 'sawtooth', 'triangle'] as const
 
 const nearlyEqual = (left: number | undefined, right: number | undefined) => {
   if (left === undefined || right === undefined) return left === right
@@ -147,17 +147,11 @@ const normalizeSourceKind = (value: string | undefined): Clip['sourceKind'] => {
 }
 
 const normalizeMidi = (value: FullTimelineView['clips'][number]['midi']): Clip['midi'] => {
-  const wave = MIDI_WAVES.find((entry) => entry === value?.wave)
-  if (!value || !wave) return undefined
-  return {
-    wave,
-    gain: value.gain,
-    notes: value.notes.map((note) => ({
-      beat: note.beat,
-      length: note.length,
-      pitch: note.pitch,
-      velocity: note.velocity,
-    })),
+  if (!value) return undefined
+  try {
+    return normalizeLegacyMidiClip(value)
+  } catch {
+    return undefined
   }
 }
 
@@ -189,9 +183,9 @@ const resolveTrackName = (input: {
   fallbackIndex: number
   namesByHistoryRef: Map<string, string>
 }) => {
+  if (input.explicitName) return input.explicitName
   const rememberedName = input.namesByHistoryRef.get(input.historyRef)
   if (rememberedName) return rememberedName
-  if (input.explicitName) return input.explicitName
   return `Track ${input.fallbackIndex}`
 }
 
@@ -289,7 +283,7 @@ export function buildServerTimelineIndex<TTrackId extends string>(data: Timeline
     const trackId = track._id
     trackIds.add(trackId)
     trackRowsById.set(trackId, track)
-    trackLocksById.set(trackId, typeof track.lockedBy === 'string' ? track.lockedBy : null)
+    trackLocksById.set(trackId, track.lockedBy ?? null)
   }
 
   for (const clip of data.clips) {
@@ -385,20 +379,20 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
       historyRef,
       name: resolveTrackName({
         historyRef,
-        explicitName: localTrackRow?.name,
+        explicitName: trackRow.name ?? localTrackRow?.name,
         fallbackIndex: index + 1,
         namesByHistoryRef: options.client.tracks.namesByHistoryRef,
       }),
       volume: serverVolume ?? localTrackRow?.volume ?? 0.8,
       clips: [],
-      muted: typeof trackRow.muted === 'boolean' ? trackRow.muted : false,
-      soloed: typeof trackRow.soloed === 'boolean' ? trackRow.soloed : false,
-      lockedBy: typeof trackRow.lockedBy === 'string' ? trackRow.lockedBy : null,
+      muted: trackRow.muted ?? false,
+      soloed: trackRow.soloed ?? false,
+      lockedBy: trackRow.lockedBy ?? null,
       kind: normalizeTrackKind(trackRow.kind) ?? 'audio',
       channelRole: normalizeTrackChannelRole(trackRow.channelRole),
       groupId: pendingTrackValue ? pendingTrackValue.groupId : localTrackRow?.groupId ?? trackRow.groupId,
-      collapsed: pendingTrackValue ? pendingTrackValue.collapsed : typeof trackRow.collapsed === 'boolean' ? trackRow.collapsed : localTrackRow?.collapsed,
-      color: pendingTrackValue ? pendingTrackValue.color : typeof trackRow.color === 'string' ? trackRow.color : localTrackRow?.color,
+      collapsed: pendingTrackValue ? pendingTrackValue.collapsed : trackRow.collapsed ?? localTrackRow?.collapsed,
+      color: pendingTrackValue ? pendingTrackValue.color : trackRow.color ?? localTrackRow?.color,
       sends: pendingTrackValue?.sends ?? localTrackRow?.sends ?? trackRow.sends ?? [],
       outputTargetId: pendingTrackValue ? pendingTrackValue.outputTargetId : localTrackRow?.outputTargetId ?? trackRow.outputTargetId,
     })

@@ -1,0 +1,18 @@
+{
+  "name": "@daw-browser/control",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./recovery-limits": "./src/recovery-limits.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/shared": "workspace:*",
+    "@noble/hashes": "^2.0.1",
+    "zod": "^4.3.6"
+  }
+}

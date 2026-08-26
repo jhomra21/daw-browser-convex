@@ -1,3 +1,5 @@
+import { isJsonNumber, isJsonObject, isJsonString, type JsonValue } from './json-value'
+
 export type AudioWarpMode = 'repitch' | 'stretch'
 
 export type AudioWarpMarker = {
@@ -20,12 +22,8 @@ const MIN_SOURCE_BEAT_OFFSET = -16
 const MAX_SOURCE_BEAT_OFFSET = 16
 const SOURCE_BEAT_OFFSET_PRECISION = 1_000
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
-
-const normalizeWarpBpm = (value: unknown) => (
-  typeof value === 'number' && Number.isFinite(value)
+const normalizeWarpBpm = (value: JsonValue | undefined) => (
+  isJsonNumber(value) && Number.isFinite(value)
     ? Math.round(Math.min(MAX_WARP_BPM, Math.max(MIN_WARP_BPM, value)) * 100) / 100
     : undefined
 )
@@ -36,22 +34,22 @@ export const normalizeSourceBeatOffsetValue = (value: number) => (
   ) / SOURCE_BEAT_OFFSET_PRECISION
 )
 
-const normalizeSourceBeatOffset = (value: unknown) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+const normalizeSourceBeatOffset = (value: JsonValue | undefined) => {
+  if (!isJsonNumber(value) || !Number.isFinite(value)) return undefined
   const normalized = normalizeSourceBeatOffsetValue(value)
   return Object.is(normalized, -0) || normalized === 0 ? undefined : normalized
 }
 
-const normalizeMarkerBeat = (value: unknown) => (
-  typeof value === 'number' && Number.isFinite(value)
+const normalizeMarkerBeat = (value: JsonValue | undefined) => (
+  isJsonNumber(value) && Number.isFinite(value)
     ? Math.round(value * SOURCE_BEAT_OFFSET_PRECISION) / SOURCE_BEAT_OFFSET_PRECISION
     : undefined
 )
 
-export function normalizeAudioWarpMarkers(value: unknown): AudioWarpMarker[] | undefined {
+export function normalizeAudioWarpMarkers(value: JsonValue): AudioWarpMarker[] | undefined {
   if (!Array.isArray(value)) return undefined
   const ordered = value.flatMap((entry) => {
-    if (!isRecord(entry) || typeof entry.id !== 'string' || entry.id.length === 0) return []
+    if (!isJsonObject(entry) || !isJsonString(entry.id) || entry.id.length === 0) return []
     const sourceBeat = normalizeMarkerBeat(entry.sourceBeat)
     const timelineBeat = normalizeMarkerBeat(entry.timelineBeat)
     return sourceBeat === undefined || timelineBeat === undefined ? [] : [{ id: entry.id, sourceBeat, timelineBeat }]
@@ -130,13 +128,13 @@ export function createDefaultAudioWarp(projectBpm: number): AudioWarpPayload {
   }
 }
 
-export function normalizeAudioWarp(value: unknown): AudioWarpPayload | undefined {
-  if (!isRecord(value)) return undefined
+export function normalizeAudioWarp(value: JsonValue | undefined): AudioWarpPayload | undefined {
+  if (!isJsonObject(value)) return undefined
   return {
     enabled: 'enabled' in value ? Boolean(value.enabled) : false,
     sourceBpm: normalizeWarpBpm(value.sourceBpm),
     sourceBeatOffset: normalizeSourceBeatOffset(value.sourceBeatOffset),
-    markers: normalizeAudioWarpMarkers(value.markers),
+    markers: value.markers === undefined ? undefined : normalizeAudioWarpMarkers(value.markers),
     mode: value.mode === 'stretch' ? 'stretch' : 'repitch',
   }
 }

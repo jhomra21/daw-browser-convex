@@ -3,14 +3,15 @@ import { RouterProvider, createRouter } from '@tanstack/solid-router'
 import { QueryClientProvider } from '@tanstack/solid-query'
 import { ColorModeProvider, type ColorModeStorageManager } from '@kobalte/core'
 import { registerSW } from 'virtual:pwa-register'
-import { assert } from '@daw-browser/shared'
+import { assertDefined } from '@daw-browser/shared'
 import { routeTree } from './routeTree.gen'
 import './index.css'
 import { queryClient } from '~/lib/query-client'
 import { AppPreferencesProvider } from '~/context/app-preferences'
+import { MidiAccessProvider } from '~/context/midi-access'
 import { loadInitialAppPreferences } from '~/lib/preferences/app-preferences'
 
-if (import.meta.env.PROD) {
+if (import.meta.env.PROD && !import.meta.env.VITE_DESKTOP) {
   registerSW({ immediate: true })
 }
 
@@ -28,7 +29,7 @@ declare module '@tanstack/solid-router' {
 }
 
 const rootElement = document.getElementById('root')
-assert(rootElement, 'Root element with id "root" not found in index.html')
+const resolvedRootElement = assertDefined(rootElement, 'Root element with id "root" not found in index.html')
 const initialAppPreferences = loadInitialAppPreferences()
 const initialColorMode = initialAppPreferences.appearance.theme
 const appPreferencesColorModeManager: ColorModeStorageManager = {
@@ -41,8 +42,10 @@ render(() => (
   <QueryClientProvider client={queryClient}>
     <ColorModeProvider initialColorMode={initialColorMode} storageManager={appPreferencesColorModeManager}>
       <AppPreferencesProvider initialPreferences={initialAppPreferences}>
-        <RouterProvider router={router} />
+        <MidiAccessProvider>
+          <RouterProvider router={router} />
+        </MidiAccessProvider>
       </AppPreferencesProvider>
     </ColorModeProvider>
   </QueryClientProvider>
-), rootElement)
+), resolvedRootElement)

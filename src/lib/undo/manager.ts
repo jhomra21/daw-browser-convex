@@ -1,6 +1,42 @@
 import type { HistoryEntry, MergeKey, PersistedHistory } from './types'
 
+import { isJsonObject, type JsonValue } from '@daw-browser/shared'
+import { serializeJsonValue } from '~/lib/json'
+
 export type UndoManager = ReturnType<typeof createUndoManager>
+
+const sameHistoryEntry = (left: JsonValue, right: JsonValue): boolean => {
+  if (Object.is(left, right)) return true
+  if (!isJsonObject(left) || !isJsonObject(right)) return false
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameHistoryEntry(value, right[index]))
+  }
+  const leftEntries = Object.entries(left)
+  const rightEntries = new Map(Object.entries(right))
+  return leftEntries.length === rightEntries.size
+    && leftEntries.every(([key, value]) => {
+      const rightValue = rightEntries.get(key)
+      return rightValue !== undefined && sameHistoryEntry(value, rightValue)
+    })
+}
+
+const occurrenceFromEnd = (entries: HistoryEntry[], entry: HistoryEntry, index: number) => (
+  entries.slice(index + 1).filter((candidate) => (
+    sameHistoryEntry(serializeJsonValue(candidate), serializeJsonValue(entry))
+  )).length
+)
+
+const occurrenceIndexFromEnd = (entries: HistoryEntry[], entry: HistoryEntry, occurrence: number) => {
+  let remaining = occurrence
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (!sameHistoryEntry(serializeJsonValue(entries[index]), serializeJsonValue(entry))) continue
+    if (remaining === 0) return index
+    remaining -= 1
+  }
+  return undefined
+}
 
 function mergeEntry(prev: HistoryEntry, entry: HistoryEntry): HistoryEntry {
   if (prev.type === 'clip-timing' && entry.type === 'clip-timing') {
@@ -74,8 +110,25 @@ export function createUndoManager(options: { max?: number; onChange?: (state: Pe
   const max = options.max ?? 50
   let undo: HistoryEntry[] = []
   let redo: HistoryEntry[] = []
+  let reservedUndo: { entry: HistoryEntry; index: number; occurrence: number; generation: number } | undefined
+  let redoGeneration = 0
+  let undoGeneration = 0
+  let reservedRedo: { entry: HistoryEntry; index: number; occurrence: number; undoIndex: number; generation: number } | undefined
   let lastMerged: { key: MergeKey; ts: number } | null = null
-  const notify = () => options.onChange?.({ undo: [...undo], redo: [...redo] })
+  const withReservation = (
+    entries: HistoryEntry[],
+    reservation: { entry: HistoryEntry; index: number } | undefined,
+  ) => {
+    if (!reservation) return [...entries]
+    const result = [...entries]
+    result.splice(Math.min(reservation.index, result.length), 0, reservation.entry)
+    return result
+  }
+  const snapshot = (): PersistedHistory => ({
+    undo: withReservation(undo, reservedUndo),
+    redo: withReservation(redo, reservedRedo),
+  })
+  const notify = () => options.onChange?.(snapshot())
 
   const push = (entry: HistoryEntry, mergeKey?: MergeKey, mergeWindowMs = 500) => {
     if (mergeKey && undo.length > 0) {
@@ -94,41 +147,131 @@ export function createUndoManager(options: { max?: number; onChange?: (state: Pe
     }
     if (undo.length > max) undo.shift()
     redo = []
+    redoGeneration += 1
+    undoGeneration += 1
     notify()
   }
 
   const canUndo = () => undo.length > 0
   const canRedo = () => redo.length > 0
-  const pushUndoEntry = (entry: HistoryEntry) => {
-    undo.push(entry)
+  const reserveUndo = () => {
+    if (reservedUndo || undo.length === 0) return undefined
+    const index = undo.length - 1
+    const [entry] = undo.splice(index, 1)
+    if (!entry) return undefined
+    reservedUndo = { entry, index, occurrence: occurrenceFromEnd(undo, entry, index), generation: undoGeneration }
+    lastMerged = null
+    notify()
+    return entry
+  }
+  const reserveRedo = () => {
+    if (reservedRedo || redo.length === 0) return undefined
+    const index = redo.length - 1
+    const [entry] = redo.splice(index, 1)
+    if (!entry) return undefined
+    reservedRedo = {
+      entry,
+      index,
+      occurrence: occurrenceFromEnd(redo, entry, index),
+      undoIndex: undo.length,
+      generation: redoGeneration,
+    }
+    lastMerged = null
+    notify()
+    return entry
+  }
+  const completeUndo = (entry: HistoryEntry) => {
+    if (!reservedUndo || reservedUndo.entry !== entry) return false
+    const reservation = reservedUndo
+    reservedUndo = undefined
+    if (reservation.generation === undoGeneration) {
+      redo.push(entry)
+      if (redo.length > max) redo.shift()
+    }
+    lastMerged = null
+    notify()
+    return true
+  }
+  const completeRedo = (entry: HistoryEntry) => {
+    if (!reservedRedo || reservedRedo.entry !== entry) return false
+    const index = Math.min(reservedRedo.undoIndex, undo.length)
+    reservedRedo = undefined
+    undo.splice(index, 0, entry)
     if (undo.length > max) undo.shift()
     lastMerged = null
     notify()
+    return true
   }
-  const popUndo = () => {
-    const e = undo.pop()
-    if (e) notify()
-    return e
+  const restoreUndo = (entry: HistoryEntry) => {
+    if (!reservedUndo || reservedUndo.entry !== entry) return false
+    undo.splice(Math.min(reservedUndo.index, undo.length), 0, entry)
+    reservedUndo = undefined
+    lastMerged = null
+    notify()
+    return true
   }
-  const pushRedo = (e: HistoryEntry) => {
-    redo.push(e)
-    if (redo.length > max) redo.shift()
+  const restoreRedo = (entry: HistoryEntry) => {
+    if (!reservedRedo || reservedRedo.entry !== entry) return false
+    if (reservedRedo.generation === redoGeneration) {
+      redo.splice(Math.min(reservedRedo.index, redo.length), 0, entry)
+    }
+    reservedRedo = undefined
+    lastMerged = null
+    notify()
+    return true
+  }
+  const mutate = (mutator: (state: PersistedHistory) => boolean) => {
+    if (!mutator(snapshot())) return false
+    notify()
+    return true
+  }
+  const clear = () => {
+    undo = []
+    redo = []
+    redoGeneration += 1
+    undoGeneration += 1
+    reservedUndo = undefined
+    reservedRedo = undefined
+    lastMerged = null
     notify()
   }
-  const popRedo = () => {
-    const e = redo.pop()
-    if (e) notify()
-    return e
-  }
-  const clear = () => { undo = []; redo = []; lastMerged = null; notify() }
-  const snapshot = (): PersistedHistory => ({ undo: [...undo], redo: [...redo] })
   const hydrate = (state?: PersistedHistory) => {
     if (!state) return
-    undo = Array.isArray(state.undo) ? state.undo as HistoryEntry[] : []
-    redo = Array.isArray(state.redo) ? state.redo as HistoryEntry[] : []
+    undo = state.undo
+    redo = state.redo
+    if (reservedUndo) {
+      const reserved = reservedUndo
+      const index = occurrenceIndexFromEnd(undo, reserved.entry, reserved.occurrence)
+      if (index !== undefined) {
+        undo.splice(index, 1)
+        reservedUndo = { ...reserved, index }
+      }
+    }
+    if (reservedRedo) {
+      const reserved = reservedRedo
+      const index = occurrenceIndexFromEnd(redo, reserved.entry, reserved.occurrence)
+      if (index !== undefined) {
+        redo.splice(index, 1)
+        reservedRedo = { ...reserved, index }
+      }
+    }
     lastMerged = null
     notify()
   }
 
-  return { push, pushUndoEntry, canUndo, canRedo, popUndo, pushRedo, popRedo, clear, snapshot, hydrate }
+  return {
+    push,
+    canUndo,
+    canRedo,
+    reserveUndo,
+    reserveRedo,
+    completeUndo,
+    completeRedo,
+    restoreUndo,
+    restoreRedo,
+    mutate,
+    clear,
+    snapshot,
+    hydrate,
+  }
 }

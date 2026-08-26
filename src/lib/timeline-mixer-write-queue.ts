@@ -1,11 +1,11 @@
 export type ScheduledTrackWrite = {
   timer: number
-  write: () => Promise<unknown>
+  write: () => Promise<void>
   afterWrite?: () => void
 }
 
 export const createTimelineMixerWriteQueue = <TTrackId extends string>(
-  onWriteFailure: (error: unknown) => void,
+  onWriteFailure: (error: Error) => void,
 ) => {
   const runningWrites = new Set<Promise<void>>()
 
@@ -44,7 +44,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>(
   const scheduleTrackWrite = (
     timers: Map<TTrackId, ScheduledTrackWrite>,
     trackId: TTrackId,
-    write: () => Promise<unknown>,
+    write: () => Promise<void>,
     afterWrite?: () => void,
   ) => {
     const previous = timers.get(trackId)

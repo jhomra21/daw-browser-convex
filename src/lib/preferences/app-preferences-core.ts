@@ -1,12 +1,20 @@
 import type { ConfigColorMode } from "@kobalte/core"
 import { parseHexColor } from "~/lib/color"
+import { normalizeMidiSelectedInputIds } from "~/lib/midi/midi-input"
 import type { RecordingCalibration, RecordingInputPreferences } from "~/lib/recording/recording-preferences"
 import { DEFAULT_DAW_THEME_ID, parseThemeId, type DawThemeId } from "~/lib/theme/theme-registry"
+import {
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
+} from "@daw-browser/shared"
 
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 3
+export const APP_PREFERENCES_VERSION = 8
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -25,8 +33,10 @@ export type AudioPreferences = {
   echoCancellation: boolean
   noiseSuppression: boolean
   autoGainControl: boolean
+  nativePlaybackEnabled: boolean
 }
 export type RecordingPreferences = RecordingInputPreferences & {
+  portableEnabled: boolean
   manualOffsetFrames: number
   calibrations: RecordingCalibration[]
 }
@@ -37,9 +47,6 @@ export type AppPreferences = {
     theme: AppTheme
     themeId: DawThemeId
   }
-  agent: {
-    autoApply: boolean
-  }
   sidebar: {
     open: boolean
   }
@@ -49,6 +56,9 @@ export type AppPreferences = {
   }
   audio: AudioPreferences
   recording: RecordingPreferences
+  midi: {
+    selectedInputIds: string[]
+  }
 }
 
 
@@ -57,9 +67,6 @@ export const defaultAppPreferences: AppPreferences = {
   appearance: {
     theme: "system",
     themeId: DEFAULT_DAW_THEME_ID
-  },
-  agent: {
-    autoApply: false
   },
   sidebar: {
     open: true
@@ -75,9 +82,11 @@ export const defaultAppPreferences: AppPreferences = {
     latencyMode: "interactive",
     echoCancellation: false,
     noiseSuppression: false,
-    autoGainControl: false
+    autoGainControl: false,
+    nativePlaybackEnabled: true
   },
   recording: {
+    portableEnabled: false,
     layout: "mono",
     inputChannel: 0,
     monitor: "off",
@@ -85,68 +94,68 @@ export const defaultAppPreferences: AppPreferences = {
     invertPolarity: false,
     manualOffsetFrames: 0,
     calibrations: []
+  },
+  midi: {
+    selectedInputIds: []
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const isAppTheme = (value: unknown): value is AppTheme =>
+const isAppTheme = (value: JsonValue): value is AppTheme =>
   value === "system" || value === "light" || value === "dark"
 
-export const parseAppTheme = (value: unknown): AppTheme =>
+export const parseAppTheme = (value: JsonValue): AppTheme =>
   isAppTheme(value) ? value : defaultAppPreferences.appearance.theme
 
-const parseBoolean = (value: unknown, fallback: boolean): boolean =>
-  typeof value === "boolean" ? value : fallback
-const parseDeviceId = (value: unknown): string => typeof value === "string" ? value : ""
-const parseFiniteInteger = (value: unknown, minimum: number, maximum: number, fallback: number): number =>
-  typeof value === "number" && Number.isFinite(value)
+const parseBoolean = (value: JsonValue, fallback: boolean): boolean =>
+  isJsonBoolean(value) ? value : fallback
+const parseDeviceId = (value: JsonValue): string => isJsonString(value) ? value : ""
+const parseFiniteInteger = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
+  isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
     : fallback
-const parseFiniteNumber = (value: unknown, minimum: number, maximum: number, fallback: number): number =>
-  typeof value === "number" && Number.isFinite(value)
+const parseFiniteNumber = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
+  isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, value))
     : fallback
-export const parseAudioSampleRate = (value: unknown): AudioSampleRatePreference =>
+export const parseAudioSampleRate = (value: JsonValue): AudioSampleRatePreference =>
   value === 44100 || value === 48000 || value === 96000 ? value : "default"
-export const parseAudioLatencyMode = (value: unknown): AudioLatencyMode =>
+export const parseAudioLatencyMode = (value: JsonValue): AudioLatencyMode =>
   value === "balanced" || value === "playback" ? value : "interactive"
 
-const isTimelineDefaultColorToken = (value: unknown): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
+const isTimelineDefaultColorToken = (value: JsonValue): value is typeof TIMELINE_DEFAULT_TRACK_COLOR | typeof TIMELINE_DEFAULT_GROUP_COLOR =>
   value === TIMELINE_DEFAULT_TRACK_COLOR || value === TIMELINE_DEFAULT_GROUP_COLOR
 
 export const timelineDefaultCreateColor = (color: string): string | undefined =>
   isTimelineDefaultColorToken(color) ? undefined : color
 
-const normalizeTimelineDefaultColor = (value: unknown, fallback: string, legacyBranchDefault: string): string => {
+const normalizeTimelineDefaultColor = (value: JsonValue, fallback: string, legacyBranchDefault: string): string => {
   if (isTimelineDefaultColorToken(value)) return value
-  const color = parseHexColor(value, fallback)
+  const color = parseHexColor(isJsonString(value) ? value : undefined, fallback)
   const normalized = color.toLowerCase()
   return normalized === legacyBranchDefault || normalized === LEGACY_DARK_TIMELINE_SURFACE_COLOR ? fallback : color
 }
 
-export const normalizeRecordingCalibration = (value: unknown): RecordingCalibration | null => {
-  if (!isRecord(value)) return null
+export const normalizeRecordingCalibration = (value: JsonValue): RecordingCalibration | null => {
+  if (!isJsonObject(value)) return null
   const unstableDeviceIds = new Set(["default", "communications"])
   if (
-    typeof value.inputDeviceId !== "string" || value.inputDeviceId.length === 0 ||
-    typeof value.outputDeviceId !== "string" || value.outputDeviceId.length === 0 ||
-    typeof value.platformIdentity !== "string" || value.platformIdentity.length === 0 ||
+    !isJsonString(value.inputDeviceId) || value.inputDeviceId.length === 0 ||
+    !isJsonString(value.outputDeviceId) || value.outputDeviceId.length === 0 ||
+    !isJsonString(value.platformIdentity) || value.platformIdentity.length === 0 ||
     value.platformIdentity === "unknown" ||
     unstableDeviceIds.has(value.inputDeviceId) || unstableDeviceIds.has(value.outputDeviceId)
   ) return null
 
   if (
-    typeof value.sampleRate !== "number" || !Number.isInteger(value.sampleRate) ||
+    !isJsonNumber(value.sampleRate) || !Number.isInteger(value.sampleRate) ||
     value.sampleRate < 8000 || value.sampleRate > 384000 ||
-    typeof value.measuredRoundTripFrames !== "number" || !Number.isInteger(value.measuredRoundTripFrames) ||
+    !isJsonNumber(value.measuredRoundTripFrames) || !Number.isInteger(value.measuredRoundTripFrames) ||
     value.measuredRoundTripFrames < 0 || value.measuredRoundTripFrames > 1_920_000 ||
-    typeof value.recordingOffsetFrames !== "number" || !Number.isInteger(value.recordingOffsetFrames) ||
+    !isJsonNumber(value.recordingOffsetFrames) || !Number.isInteger(value.recordingOffsetFrames) ||
     value.recordingOffsetFrames < -1_920_000 || value.recordingOffsetFrames > 1_920_000 ||
-    typeof value.confidence !== "number" || !Number.isFinite(value.confidence) ||
+    !isJsonNumber(value.confidence) || !Number.isFinite(value.confidence) ||
     value.confidence < 0 || value.confidence > 1 ||
-    typeof value.createdAtMs !== "number" || !Number.isSafeInteger(value.createdAtMs) || value.createdAtMs < 0
+    !isJsonNumber(value.createdAtMs) || !Number.isSafeInteger(value.createdAtMs) || value.createdAtMs < 0
   ) return null
 
   return {
@@ -161,7 +170,7 @@ export const normalizeRecordingCalibration = (value: unknown): RecordingCalibrat
   }
 }
 
-export const normalizeRecordingCalibrations = (value: unknown): RecordingCalibration[] => {
+export const normalizeRecordingCalibrations = (value: JsonValue): RecordingCalibration[] => {
   if (!Array.isArray(value)) return []
   return value
     .map(normalizeRecordingCalibration)
@@ -199,25 +208,22 @@ export const updateRecordingCalibrations = (
   calibrations: normalizeRecordingCalibrations(calibrations)
 })
 
-export const normalizeAppPreferences = (value: unknown): AppPreferences => {
-  if (!isRecord(value)) return defaultAppPreferences
-  if (value.version !== 1 && value.version !== 2 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
+export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
+  if (!isJsonObject(value)) return defaultAppPreferences
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== APP_PREFERENCES_VERSION) return defaultAppPreferences
 
-  const appearance = isRecord(value.appearance) ? value.appearance : {}
-  const agent = isRecord(value.agent) ? value.agent : {}
-  const sidebar = isRecord(value.sidebar) ? value.sidebar : {}
-  const timeline = isRecord(value.timeline) ? value.timeline : {}
-  const audio = value.version !== 1 && isRecord(value.audio) ? value.audio : {}
-  const recording = value.version === APP_PREFERENCES_VERSION && isRecord(value.recording) ? value.recording : {}
+  const appearance = isJsonObject(value.appearance) ? value.appearance : {}
+  const sidebar = isJsonObject(value.sidebar) ? value.sidebar : {}
+  const timeline = isJsonObject(value.timeline) ? value.timeline : {}
+  const audio = value.version !== 1 && isJsonObject(value.audio) ? value.audio : {}
+  const recording = (value.version === 3 || value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.recording) ? value.recording : {}
+  const midi = (value.version === 4 || value.version === 5 || value.version === 6 || value.version === APP_PREFERENCES_VERSION) && isJsonObject(value.midi) ? value.midi : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
     appearance: {
       theme: parseAppTheme(appearance.theme),
       themeId: parseThemeId(appearance.themeId)
-    },
-    agent: {
-      autoApply: parseBoolean(agent.autoApply, defaultAppPreferences.agent.autoApply)
     },
     sidebar: {
       open: parseBoolean(sidebar.open, defaultAppPreferences.sidebar.open)
@@ -241,20 +247,31 @@ export const normalizeAppPreferences = (value: unknown): AppPreferences => {
       latencyMode: parseAudioLatencyMode(audio.latencyMode),
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),
       noiseSuppression: parseBoolean(audio.noiseSuppression, defaultAppPreferences.audio.noiseSuppression),
-      autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl)
+      autoGainControl: parseBoolean(audio.autoGainControl, defaultAppPreferences.audio.autoGainControl),
+      nativePlaybackEnabled: (value.version === 5 || value.version === 6 || value.version === 7 || value.version === APP_PREFERENCES_VERSION)
+        ? parseBoolean(audio.nativePlaybackEnabled, value.version === APP_PREFERENCES_VERSION
+          ? defaultAppPreferences.audio.nativePlaybackEnabled
+          : false)
+        : defaultAppPreferences.audio.nativePlaybackEnabled,
     },
     recording: {
+      portableEnabled: value.version === APP_PREFERENCES_VERSION
+        ? parseBoolean(recording.portableEnabled, defaultAppPreferences.recording.portableEnabled)
+        : defaultAppPreferences.recording.portableEnabled,
       layout: recording.layout === "stereo" ? "stereo" : "mono",
       inputChannel: parseFiniteInteger(recording.inputChannel, 0, 31, defaultAppPreferences.recording.inputChannel),
       monitor: recording.monitor === "auto" || recording.monitor === "on" ? recording.monitor : "off",
       gainDb: parseFiniteNumber(recording.gainDb, -60, 24, defaultAppPreferences.recording.gainDb),
       invertPolarity: parseBoolean(recording.invertPolarity, defaultAppPreferences.recording.invertPolarity),
       manualOffsetFrames: normalizeRecordingManualOffsetFrames(
-        typeof recording.manualOffsetFrames === "number"
+        isJsonNumber(recording.manualOffsetFrames)
           ? recording.manualOffsetFrames
           : defaultAppPreferences.recording.manualOffsetFrames,
       ),
       calibrations: normalizeRecordingCalibrations(recording.calibrations)
+    },
+    midi: {
+      selectedInputIds: normalizeMidiSelectedInputIds(midi.selectedInputIds)
     }
   }
 }

@@ -7,7 +7,7 @@ import {
   type ExportTailPolicy,
   type WavEncodingSettings,
 } from '@daw-browser/audio-engine/export-fidelity'
-import type { LossyExportAudioFormat } from '@daw-browser/shared'
+import { isExportAudioFormat, isJsonBoolean, isJsonNumber, isJsonObject, type JsonValue, type LossyExportAudioFormat } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
 
@@ -43,26 +43,38 @@ const defaultExportSettings: PersistedExportSettings = {
   },
 }
 
-const normalizePersistedExportSettings = (value: unknown): PersistedExportSettings => {
-  if (!value || typeof value !== 'object') return defaultExportSettings
-  const render = Reflect.get(value, 'render')
-  const encoding = Reflect.get(value, 'encoding')
-  const legacyNormalize = render && typeof render === 'object' && Reflect.get(render, 'normalize') === true
-  const sampleRate = render && typeof render === 'object' ? Reflect.get(render, 'sampleRate') : undefined
-  const numberOfChannels = render && typeof render === 'object' ? Reflect.get(render, 'numberOfChannels') : undefined
-  const bitrateByFormat = encoding && typeof encoding === 'object' ? Reflect.get(encoding, 'bitrateByFormat') : undefined
+const normalizePersistedExportSettings = (value: JsonValue): PersistedExportSettings => {
+  if (!isJsonObject(value)) return defaultExportSettings
+  const render = isJsonObject(value.render) ? value.render : undefined
+  const encoding = isJsonObject(value.encoding) ? value.encoding : undefined
+  const legacyNormalize = render !== undefined && isJsonBoolean(render.normalize) && render.normalize
+  const sampleRate = render?.sampleRate
+  const numberOfChannels = render?.numberOfChannels
+  const bitrateByFormat: Partial<Record<LossyExportAudioFormat, number>> = {}
+  if (isJsonObject(encoding?.bitrateByFormat)) {
+    for (const [format, bitrate] of Object.entries(encoding.bitrateByFormat)) {
+      if (
+        isExportAudioFormat(format)
+        && (format === 'mp3' || format === 'ogg-opus')
+        && isJsonNumber(bitrate)
+        && Number.isFinite(bitrate)
+      ) {
+        bitrateByFormat[format] = bitrate
+      }
+    }
+  }
   return {
     render: {
       sampleRate: sampleRate === 48000 || sampleRate === 96000 ? sampleRate : 44100,
       numberOfChannels: numberOfChannels === 1 ? 1 : 2,
       normalization: legacyNormalize
         ? { mode: 'sample-peak', targetDbfs: 0 }
-        : normalizeExportNormalization(render && typeof render === 'object' ? Reflect.get(render, 'normalization') : undefined),
-      tail: normalizeExportTailPolicy(render && typeof render === 'object' ? Reflect.get(render, 'tail') : undefined),
+        : normalizeExportNormalization(render?.normalization),
+      tail: normalizeExportTailPolicy(render?.tail),
     },
     encoding: {
-      bitrateByFormat: bitrateByFormat && typeof bitrateByFormat === 'object' ? bitrateByFormat : {},
-      wav: normalizeWavEncodingSettings(encoding && typeof encoding === 'object' ? Reflect.get(encoding, 'wav') : undefined),
+      bitrateByFormat,
+      wav: normalizeWavEncodingSettings(encoding?.wav),
     },
   }
 }
@@ -70,9 +82,9 @@ const normalizePersistedExportSettings = (value: unknown): PersistedExportSettin
 const EXPORT_SETTINGS_STORAGE_KEY = 'daw:export-settings:v2'
 
 export const loadPersistedExportSettings = (): PersistedExportSettings => {
-  if (typeof localStorage === 'undefined') return defaultExportSettings
+  if (!globalThis.localStorage) return defaultExportSettings
   try {
-    const raw = localStorage.getItem(EXPORT_SETTINGS_STORAGE_KEY)
+    const raw = globalThis.localStorage.getItem(EXPORT_SETTINGS_STORAGE_KEY)
     return raw ? normalizePersistedExportSettings(JSON.parse(raw)) : defaultExportSettings
   } catch {
     return defaultExportSettings
@@ -80,8 +92,8 @@ export const loadPersistedExportSettings = (): PersistedExportSettings => {
 }
 
 export const savePersistedExportSettings = (settings: PersistedExportSettings): void => {
-  if (typeof localStorage === 'undefined') return
-  localStorage.setItem(EXPORT_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+  if (!globalThis.localStorage) return
+  globalThis.localStorage.setItem(EXPORT_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
 }
 
 export const createCustomExportRange = (startSec: number, lengthSec: number): ExportRange => {

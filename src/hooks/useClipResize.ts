@@ -27,6 +27,7 @@ type ClipResizeOptions = {
   setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; fades?: ClipFades; midiOffsetBeats?: number } | null) => void
   commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; fades?: ClipFades; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
+  canEditClip?: (clipId: string) => boolean
   selection: TimelineSelectionController
   convexClient: typeof convexClient
   convexApi: typeof convexApi
@@ -52,6 +53,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     setDraftClipTiming,
     commitClipTiming,
     canWriteClip,
+    canEditClip,
     selection,
     convexClient,
     convexApi,
@@ -96,6 +98,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     const track = tracks().find(t => t.id === trackId)
     const clip = track?.clips.find(c => c.id === clipId)
     if (!track || !clip) return
+    if (canEditClip && !canEditClip(clipId)) return
     if (!canWriteClip(clipId)) return
 
     clipResizing = true
@@ -209,14 +212,12 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
           leftPadSec: timing.leftPadSec,
           bufferOffsetSec: timing.bufferOffsetSec,
           audioWarp: timing.audioWarp,
-          ...(resizeOrigFades ? {
-            fades: transformClipFadesForDuration(
+          fades: resizeOrigFades ? transformClipFadesForDuration(
               resizeOrigFades,
               resizeOrigDuration,
               newDuration,
               Math.max(0, newStart - resizeOrigStart),
-            ),
-          } : {}),
+            ) : undefined,
         })
       }
     } else {
@@ -258,9 +259,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
 
       setDraftClipTiming(clip.id, {
         duration: newDuration,
-        ...(resizeOrigFades ? {
-          fades: transformClipFadesForDuration(resizeOrigFades, resizeOrigDuration, newDuration),
-        } : {}),
+        fades: resizeOrigFades ? transformClipFadesForDuration(resizeOrigFades, resizeOrigDuration, newDuration) : undefined,
       })
     }
   }

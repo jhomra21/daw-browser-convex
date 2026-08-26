@@ -1,4 +1,7 @@
 dist
+.vite
+apps/desktop/out
+apps/desktop/.native
 .wrangler
 .output
 .vercel
@@ -6,6 +9,7 @@ dist
 .vinxi
 app.config.timestamp_*.js
 *.tsbuildinfo
+/main.js
 
 # Environment
 .env*
@@ -14,6 +18,9 @@ app.config.timestamp_*.js
 
 # dependencies
 /node_modules
+/native/build
+/native/audio-core/build
+/public/audio-core
 
 # IDEs and editors
 /.idea
@@ -32,3 +39,8 @@ Thumbs.db
 .wrangler
 
 .factory/*
+!.factory/skills/
+.factory/skills/*
+!.factory/skills/*/
+.factory/skills/*/*
+!.factory/skills/*/SKILL.md

@@ -7,32 +7,31 @@ const BASE_C4 = 60
 const DEFAULT_VELOCITY = 0.9
 const VELOCITY_STEP = 0.1
 
-const whiteKeySemitones: Record<string, number> = {
-  KeyA: 0,
-  KeyS: 2,
-  KeyD: 4,
-  KeyF: 5,
-  KeyG: 7,
-  KeyH: 9,
-  KeyJ: 11,
-  KeyK: 12,
-  KeyL: 14,
-  Semicolon: 16,
-}
+const whiteKeySemitones = new Map<string, number>([
+  ['KeyA', 0],
+  ['KeyS', 2],
+  ['KeyD', 4],
+  ['KeyF', 5],
+  ['KeyG', 7],
+  ['KeyH', 9],
+  ['KeyJ', 11],
+  ['KeyK', 12],
+  ['KeyL', 14],
+  ['Semicolon', 16],
+])
 
-const blackKeySemitones: Record<string, number> = {
-  KeyW: 1,
-  KeyE: 3,
-  KeyT: 6,
-  KeyY: 8,
-  KeyU: 10,
-  KeyO: 13,
-  KeyP: 15,
-}
+const blackKeySemitones = new Map<string, number>([
+  ['KeyW', 1],
+  ['KeyE', 3],
+  ['KeyT', 6],
+  ['KeyY', 8],
+  ['KeyU', 10],
+  ['KeyO', 13],
+  ['KeyP', 15],
+])
 
 type UseMidiKeyboardInputOptions = {
   projectId: () => string | undefined
-  targetId: () => string | null | undefined
   enabled: () => boolean
   canPlay: () => boolean
   onStartLiveNote?: (pitch: number, velocity?: number) => void
@@ -40,9 +39,9 @@ type UseMidiKeyboardInputOptions = {
 }
 
 export const midiKeyboardCodeToSemitone = (code: string): number | undefined => {
-  const white = whiteKeySemitones[code]
+  const white = whiteKeySemitones.get(code)
   if (white !== undefined) return white
-  return blackKeySemitones[code]
+  return blackKeySemitones.get(code)
 }
 
 export const clampMidiKeyboardOctave = (value: number) => Math.max(-4, Math.min(4, value))
@@ -155,12 +154,6 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
     { defer: true },
   ))
 
-  createEffect(on(
-    () => options.targetId(),
-    () => stopPressedNotes(),
-    { defer: true },
-  ))
-
   createEffect(() => {
     if (!canUseLocalStorage()) return
     try {
@@ -176,7 +169,7 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   })
 
   createEffect(() => {
-    if (!options.enabled() || !options.canPlay()) {
+    if (!options.enabled()) {
       stopPressedNotes()
     }
   })
@@ -184,13 +177,17 @@ export function useMidiKeyboardInput(options: UseMidiKeyboardInputOptions) {
   createEffect(() => {
     if (!options.enabled()) return
     const listenerOptions: AddEventListenerOptions = { capture: true }
+    const handleVisibilityChange = () => {
+      if (document.hidden) stopPressedNotes()
+    }
+    // Window blur also fires when focus moves to the native editor window.
     window.addEventListener('keydown', handleKeyDown, listenerOptions)
     window.addEventListener('keyup', handleKeyUp, listenerOptions)
-    window.addEventListener('blur', stopPressedNotes)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     onCleanup(() => {
       window.removeEventListener('keydown', handleKeyDown, listenerOptions)
       window.removeEventListener('keyup', handleKeyUp, listenerOptions)
-      window.removeEventListener('blur', stopPressedNotes)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       stopPressedNotes()
     })
   })

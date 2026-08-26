@@ -10,7 +10,7 @@ type UseRoomPersistedStateOptions<TValue> = {
   loadAsync?: (projectId: string) => Promise<TValue | undefined>
   save: (projectId: string, value: TValue) => void
   saveAsync?: (projectId: string, value: TValue) => Promise<void>
-  onSaveAsyncError?: (error: unknown) => void
+  onSaveAsyncError?: (error: Error) => void
 }
 
 type UseRoomPersistedStateReturn<TValue> = {
@@ -95,7 +95,7 @@ export function useProjectPersistedState<TValue>(
     ensureProjectFlusher(projectId)
     const save = options.saveAsync(projectId, value)
     void save.catch((error) => {
-      options.onSaveAsyncError?.(error)
+      options.onSaveAsyncError?.(error instanceof Error ? error : new Error('Project state save failed.'))
     })
     trackAsyncSave(projectId, save)
   }

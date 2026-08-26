@@ -1,0 +1,19 @@
+{
+  "name": "@daw-browser/audio-core-contract",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generated": "./src/generated/processor-contract-metadata.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit",
+    "generate": "bun scripts/generate-contract.ts",
+    "check:generated": "bun scripts/generate-contract.ts --check",
+    "native:build": "sh ../../native/audio-core/scripts/build-native.sh",
+    "native:test": "sh ../../native/audio-core/scripts/test-native.sh",
+    "test": "bun test",
+    "wasm:build": "sh ../../native/audio-core/scripts/build-wasm.sh"
+  }
+}

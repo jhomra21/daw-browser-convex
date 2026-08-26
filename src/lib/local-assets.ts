@@ -9,11 +9,15 @@ import {
 } from '~/lib/local-project-db'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 
 type LocalAssetMetadata = {
+  sourceKind?: 'upload' | 'url' | 'recording'
   durationSec?: number
   sampleRate?: number
+  channelCount?: number
   contentHash?: string
   originalFileName?: string
   originalLastModified?: number
@@ -37,15 +41,14 @@ export class LocalAssetWriteError extends Error {
   }
 }
 
-type LocalAssetBytesResult =
+export type LocalAssetBytesResult =
   | { status: 'ready'; file: File }
   | { status: 'missing' }
   | { status: 'permission-denied' }
 
 const ASSETS_DIRECTORY_NAME = 'assets'
 const MAX_ASSET_EXTENSION_LENGTH = 16
-
-const isPermissionError = (error: unknown) => (
+const isPermissionError = (error: Error) => (
   error instanceof DOMException
   && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
 )
@@ -103,6 +106,12 @@ const writeFile = async (
   }
 }
 
+const sha256File = async (file: File): Promise<string> => {
+  const hash = sha256.create()
+  for await (const chunk of file.stream()) hash.update(chunk)
+  return hash.digest().reduce((hex, byte) => `${hex}${byte.toString(16).padStart(2, '0')}`, '')
+}
+
 const removeFileIfPresent = async (
   root: FileSystemDirectoryHandle,
   path: string,
@@ -116,7 +125,43 @@ const removeFileIfPresent = async (
   }
 }
 
-export const writeLocalAssetFile = async (
+type LocalAssetRemovalResult =
+  | { status: 'deleted' | 'already-missing' }
+  | { status: 'permission-unavailable' | 'retryable-failure' }
+
+/** Removes a retained asset without prompting or publishing a project change. */
+export const removeLocalAssetFileUnlocked = async (
+  projectId: string,
+  storagePath: string,
+): Promise<LocalAssetRemovalResult> => {
+  const directoryHandle = await getProjectDirectoryHandle(projectId)
+  if (directoryHandle) {
+    const permission = await queryFileSystemHandlePermission(directoryHandle, 'readwrite')
+    if (permission !== 'granted') return { status: 'permission-unavailable' }
+  }
+  try {
+    const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
+    const assets = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+    await assets.removeEntry(storagePath)
+    return { status: 'deleted' }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') {
+      return { status: 'already-missing' }
+    }
+    if (isPermissionError(error instanceof Error ? error : new Error())) return { status: 'permission-unavailable' }
+    return { status: 'retryable-failure' }
+  }
+}
+
+export const removeLocalAssetFile = (
+  projectId: string,
+  storagePath: string,
+): Promise<LocalAssetRemovalResult> => (
+  withLocalProjectAssetLock(projectId, () => removeLocalAssetFileUnlocked(projectId, storagePath))
+)
+
+/** Caller must hold the project asset lock. */
+export const writeLocalAssetFileUnlocked = async (
   projectId: string,
   path: string,
   file: File,
@@ -128,7 +173,15 @@ export const writeLocalAssetFile = async (
   await writeFile(root, path, file)
 }
 
-export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
+export const writeLocalAssetFile = async (
+  projectId: string,
+  path: string,
+  file: File,
+): Promise<void> => {
+  await withLocalProjectAssetLock(projectId, () => writeLocalAssetFileUnlocked(projectId, path, file))
+}
+
+const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
   const root = await getWritableProjectRoot(input.projectId)
   if (!root) {
     throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
@@ -137,7 +190,7 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
   const timestamp = now()
   const id = createLocalAssetId()
   const storagePath = getAssetFileName(id, input.file.name)
-  await writeFile(root, storagePath, input.file)
+  const contentHash = await sha256File(input.file)
 
   const row: LocalProjectAssetRow = {
     id,
@@ -147,15 +200,18 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
     storagePath,
     originalFileName: input.metadata?.originalFileName ?? input.file.name,
     originalLastModified: input.metadata?.originalLastModified ?? input.file.lastModified,
-    contentHash: input.metadata?.contentHash,
+    contentHash,
+    sourceKind: input.metadata?.sourceKind ?? 'upload',
     durationSec: input.metadata?.durationSec,
     sampleRate: input.metadata?.sampleRate,
+    channelCount: input.metadata?.channelCount,
     createdAt: timestamp,
     updatedAt: timestamp,
   }
 
-  const db = await openLocalProjectDb(input.projectId)
   try {
+    await writeFile(root, storagePath, input.file)
+    const db = await openLocalProjectDb(input.projectId)
     await db.put('assets', row)
   } catch (error) {
     await removeFileIfPresent(root, storagePath).catch(() => null)
@@ -164,6 +220,10 @@ export const createLocalAsset = async (input: CreateLocalAssetInput): Promise<Lo
   notifyLocalProjectChanged(input.projectId)
   return row
 }
+
+export const createLocalAsset = (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => (
+  withLocalProjectAssetLock(input.projectId, () => createLocalAssetUnlocked(input))
+)
 
 export const getLocalAsset = async (
   projectId: string,
@@ -183,28 +243,30 @@ export const setLocalProjectAssetDirectory = async (
   projectId: string,
   nextRoot: FileSystemDirectoryHandle,
 ): Promise<void> => {
-  const rows = await listLocalAssets(projectId)
-  await requireWritableDirectory(nextRoot)
-  const previousRoot = await getWritableProjectRoot(projectId)
-  if (rows.length === 0) {
-    await saveProjectDirectoryHandle(projectId, nextRoot)
-    return
-  }
-  if (!previousRoot) {
-    throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
-  }
+  await withLocalProjectAssetLock(projectId, async () => {
+    const rows = await listLocalAssets(projectId)
+    await requireWritableDirectory(nextRoot)
+    const previousRoot = await getWritableProjectRoot(projectId)
+    if (rows.length === 0) {
+      await saveProjectDirectoryHandle(projectId, nextRoot)
+      return
+    }
+    if (!previousRoot) {
+      throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
+    }
 
-  try {
-    const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
-    await Promise.all(rows.map(async (row) => {
-      const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
-      await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
-    }))
-  } catch (error) {
-    if (error instanceof LocalAssetWriteError) throw error
-    throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
-  }
-  await saveProjectDirectoryHandle(projectId, nextRoot)
+    try {
+      const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+      await Promise.all(rows.map(async (row) => {
+        const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
+        await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
+      }))
+    } catch (error) {
+      if (error instanceof LocalAssetWriteError) throw error
+      throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
+    }
+    await saveProjectDirectoryHandle(projectId, nextRoot)
+  })
 }
 
 export const readLocalAssetBytes = async (
@@ -228,12 +290,12 @@ export const readLocalAssetBytes = async (
     const fileHandle = await assetsDir.getFileHandle(row.storagePath)
     return { status: 'ready', file: await fileHandle.getFile() }
   } catch (error) {
-    if (isPermissionError(error)) return { status: 'permission-denied' }
+    if (isPermissionError(error instanceof Error ? error : new Error())) return { status: 'permission-denied' }
     return { status: 'missing' }
   }
 }
 
-export const deleteLocalAsset = async (
+const deleteLocalAssetUnlocked = async (
   projectId: string,
   assetId: string,
 ): Promise<void> => {
@@ -259,3 +321,8 @@ export const deleteLocalAsset = async (
   }
   notifyLocalProjectChanged(projectId)
 }
+
+export const deleteLocalAsset = (
+  projectId: string,
+  assetId: string,
+): Promise<void> => withLocalProjectAssetLock(projectId, () => deleteLocalAssetUnlocked(projectId, assetId))

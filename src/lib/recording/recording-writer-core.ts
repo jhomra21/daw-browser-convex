@@ -1,4 +1,5 @@
 import {
+  RECORDER_BLOCK_FRAMES,
   RECORDER_MAX_QUEUED_BLOCKS,
   readWriterInboundMessage,
   type RecorderBlockMessage,
@@ -11,6 +12,7 @@ import {
 
 type WriterSession = {
   append: (channels: readonly Float32Array[]) => Promise<void>
+  appendPlanar?: (buffer: ArrayBuffer, frameCount: number) => Promise<void>
   finalize: () => Promise<{ capturedFrames: number }>
   abort: () => Promise<void>
 }
@@ -66,12 +68,16 @@ export const createRecordingWriterHandler = (
     if (message.sequence !== expectedSequence) throw new Error('recording-block-out-of-order')
     if (message.channelCount !== canonicalChannelCount) throw new Error('recording-channel-layout-mismatch')
     expectedSequence += 1
-    const planar = new Float32Array(message.buffer)
-    const channels: Float32Array[] = []
-    for (let channel = 0; channel < message.channelCount; channel += 1) {
-      channels.push(planar.subarray(channel * 2048, channel * 2048 + message.frameCount))
+    if (session.appendPlanar) {
+      await session.appendPlanar(message.buffer, message.frameCount)
+    } else {
+      const planar = new Float32Array(message.buffer)
+      const channels: Float32Array[] = []
+      for (let channel = 0; channel < message.channelCount; channel += 1) {
+        channels.push(planar.subarray(channel * RECORDER_BLOCK_FRAMES, channel * RECORDER_BLOCK_FRAMES + message.frameCount))
+      }
+      await session.append(channels)
     }
-    await session.append(channels)
     if (hasFailed()) return
     output({
       type: 'return',
@@ -95,7 +101,7 @@ export const createRecordingWriterHandler = (
   }
 
   const scheduleSabDrain = () => {
-    operations = operations.then(drainSab).catch((error: unknown) => {
+    operations = operations.then(drainSab).catch((error) => {
       transitionToFailure(error instanceof Error ? error.message : 'write-failed')
     })
   }
@@ -109,7 +115,7 @@ export const createRecordingWriterHandler = (
     }
   }
 
-  const handle = (value: unknown) => {
+  const handle = <Message,>(value: Message) => {
     const message = readWriterInboundMessage(value)
     if (!message) {
       transitionToFailure('malformed-message')
@@ -142,10 +148,10 @@ export const createRecordingWriterHandler = (
         if (hasFailed()) return
         state = 'open'
         output({ type: 'ready', generation, sessionId })
-        if (sabConsumer && typeof Atomics.waitAsync === 'function') {
+        if (sabConsumer && 'waitAsync' in Atomics) {
           void waitForSabData()
         }
-      }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'start-failed'))
+      }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'start-failed'))
       return
     }
     if (message.generation !== generation || message.sessionId !== sessionId) return
@@ -201,7 +207,7 @@ export const createRecordingWriterHandler = (
         ) throw new Error('Recording SAB captured frame count mismatch.')
         state = 'closed'
         output({ type: 'finalized', generation, sessionId, capturedFrames: descriptor.capturedFrames })
-      }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
+      }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
       return
     }
     if (state === 'closed' || state === 'failed') return
@@ -212,7 +218,7 @@ export const createRecordingWriterHandler = (
       if (hasFailed()) return
       state = 'closed'
       output({ type: 'aborted', generation, sessionId })
-    }).catch((error: unknown) => transitionToFailure(error instanceof Error ? error.message : 'abort-failed'))
+    }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'abort-failed'))
   }
 
   return {

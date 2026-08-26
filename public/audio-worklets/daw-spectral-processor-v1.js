@@ -70,25 +70,23 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       this.reconfigure(message.fftSize, message.overlap)
       return
     }
+    if (message.type === 'reset') {
+      this.reset()
+      return
+    }
     if (message.type === 'configure' && message.state) {
-      this.enabled = message.state.enabled !== false
+      const enabled = message.state.enabled !== false
+      const enabledChanged = enabled !== this.enabled
+      this.enabled = enabled
       this.mode = message.state.mode
+      if (enabledChanged) this.reset()
     }
   }
 
-  reconfigure(fftSize, overlap) {
-    if (fftSize !== 512 && fftSize !== 1024 && fftSize !== 2048 && fftSize !== 4096) fftSize = 2048
-    if (overlap !== 2 && overlap !== 4) overlap = 4
-    if (this.fftSize === fftSize && this.overlap === overlap && this.window[1] !== 0) return
-    this.fftSize = fftSize
-    this.overlap = overlap
-    this.hopSize = fftSize / overlap
-    this.latency = fftSize
+  reset() {
     this.writeIndex = 0
     this.samplesUntilFrame = this.fftSize
-    for (let index = 0; index < fftSize; index += 1) {
-      this.window[index] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * index / fftSize))
-    }
+    this.bypass = this.enabled ? 0 : 1
     for (let channel = 0; channel < 2; channel += 1) {
       this.inputRing[channel].fill(0)
       this.sideRing[channel].fill(0)
@@ -100,6 +98,20 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       this.freezeCaptured[channel] = false
       this.hpssIndex[channel] = 0
     }
+  }
+
+  reconfigure(fftSize, overlap) {
+    if (fftSize !== 512 && fftSize !== 1024 && fftSize !== 2048 && fftSize !== 4096) fftSize = 2048
+    if (overlap !== 2 && overlap !== 4) overlap = 4
+    if (this.fftSize === fftSize && this.overlap === overlap && this.window[1] !== 0) return
+    this.fftSize = fftSize
+    this.overlap = overlap
+    this.hopSize = fftSize / overlap
+    this.latency = fftSize
+    for (let index = 0; index < fftSize; index += 1) {
+      this.window[index] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * index / fftSize))
+    }
+    this.reset()
   }
 
   fft(real, imaginary, inverse) {
@@ -296,10 +308,12 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       for (let channel = 0; channel < 2; channel += 1) {
         const sourceChannel = input[channel] || input[0]
         const sideChannel = sidechain[channel] || sidechain[0]
-        const sample = sourceChannel ? sourceChannel[frame] : 0
+        const sampleValue = sourceChannel ? sourceChannel[frame] : 0
+        const sample = Number.isFinite(sampleValue) ? sampleValue : 0
         const inputIndex = this.writeIndex & inputMask
         this.inputRing[channel][inputIndex] = sample
-        this.sideRing[channel][inputIndex] = sideChannel ? sideChannel[frame] : 0
+        const sideValue = sideChannel ? sideChannel[frame] : 0
+        this.sideRing[channel][inputIndex] = Number.isFinite(sideValue) ? sideValue : 0
         const dryTarget = (this.writeIndex + this.latency) & outputMask
         this.dryRing[channel][dryTarget] = sample
         const wet = this.outputRing[channel][this.writeIndex]

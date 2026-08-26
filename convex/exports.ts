@@ -3,6 +3,7 @@ import { v } from "convex/values"
 import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess"
 import { isValidR2DeleteKey } from "@daw-browser/shared"
 import { enqueueR2DeleteRows } from "./r2Deletes"
+import { requireProjectRow } from "./projectRows"
 
 export const listByRoom = query({
   args: { projectId: v.string() },
@@ -32,7 +33,8 @@ export const create = mutation({
   handler: async (ctx, { projectId, name, url, r2Key, format, duration, sampleRate, sizeBytes }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
-    if (!isValidR2DeleteKey(projectId, "export", r2Key)) {
+    const project = await requireProjectRow(ctx, projectId)
+    if (!isValidR2DeleteKey(projectId, project.storageNamespace, "export", r2Key)) {
       throw new Error("Invalid export key.")
     }
     return await ctx.db.insert("exports", {
@@ -59,7 +61,10 @@ export const remove = mutation({
     const row = await ctx.db.get(normalizedExportId)
     if (!row) return
     await requireProjectRole(ctx, row.projectId, userId, ["owner", "editor"])
-    await enqueueR2DeleteRows(ctx, { projectId: row.projectId, keys: [row.r2Key], kind: "export" })
+    const project = await requireProjectRow(ctx, row.projectId)
+    await enqueueR2DeleteRows(ctx, {
+      projectId: row.projectId, storageNamespace: project.storageNamespace, keys: [row.r2Key], kind: "export",
+    })
     await ctx.db.delete(normalizedExportId)
     return { projectId: row.projectId }
   },

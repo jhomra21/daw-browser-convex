@@ -1,6 +1,6 @@
 import { createEffect, onCleanup, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import type { ClipBufferWriter } from "~/lib/clip-buffer-cache";
+import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";
 import type { LocalProjectMode } from "~/lib/local-project-db";
 import { flushSharedOutbox } from "~/lib/shared-outbox";
@@ -29,12 +29,15 @@ type SelectionActions = {
 
 type Input = {
   projectId: Accessor<string>;
+  mountedProjectGeneration: Accessor<number>;
   remoteTimelineAvailable: Accessor<boolean>;
   localProjectMode: Accessor<LocalProjectMode | undefined>;
   userId: Accessor<string | undefined>;
   renderTracks: Accessor<Track[]>;
   audioEngine: AudioEngine;
   audioBufferCache: ClipBufferWriter;
+  preloadClipBuffer: EnsureClipBuffer;
+  getClipBuffer: (clipId: string) => AudioBuffer | undefined;
   localProject: LocalProjectActions;
   projection: ProjectionActions;
   selection: SelectionActions;
@@ -43,19 +46,22 @@ type Input = {
 export const useTimelinePersistenceController = (input: Input) => {
   const mediaRecovery = useMissingMediaRecovery({
     projectId: input.projectId,
+    mountedProjectGeneration: input.mountedProjectGeneration,
     remoteTimelineAvailable: input.remoteTimelineAvailable,
     localTimelineReloadVersion: input.localProject.localTimelineReloadVersion,
     userId: input.userId,
     renderTracks: input.renderTracks,
     audioEngine: input.audioEngine,
     audioBufferCache: input.audioBufferCache,
+    preloadClipBuffer: input.preloadClipBuffer,
+    getClipBuffer: input.getClipBuffer,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
-      const removedIds = await createTimelineClipWriteAdapter({
+      const deletion = await createTimelineClipWriteAdapter({
         projectId,
         userId: input.userId(),
       }).deleteClips([clipId]);
-      return removedIds.has(clipId);
+      return deletion.removedIds.has(clipId);
     },
     projection: input.projection,
     selection: input.selection,
@@ -80,5 +86,13 @@ export const useTimelinePersistenceController = (input: Input) => {
     onCleanup(() => window.removeEventListener("online", flush));
   });
 
-  return { mediaRecovery };
+  return {
+    mediaRecovery,
+    reconcileMountedLocalTimeline: (guard: {
+      projectId: string;
+      mountedProjectGeneration: number;
+      signal: AbortSignal;
+    }) => mediaRecovery.reloadLocalTimeline(guard),
+    ensureMountedLocalMedia: mediaRecovery.ensureMountedLocalMedia,
+  };
 };

@@ -1,6 +1,7 @@
 import { ConvexClient } from "convex/browser";
 import { useQuery, useQueryClient } from "@tanstack/solid-query";
 import { createEffect, onCleanup, untrack } from "solid-js";
+import { z } from "zod";
 
 import { api } from "../../convex/_generated/api";
 import type {
@@ -8,18 +9,26 @@ import type {
   FunctionArgs,
 } from "convex/server";
 
-const convex = new ConvexClient(import.meta.env.VITE_CONVEX_URL as string);
+const convexUrl = z.string().min(1).parse(import.meta.env.VITE_CONVEX_URL);
+const convex = new ConvexClient(convexUrl);
 let convexAuthConfigured = false;
+const convexAccessTokenSchema = z.object({ token: z.string() });
 
 const fetchConvexAccessToken = async () => {
-  const response = await fetch('/api/convex-auth/token', { credentials: 'include' });
-  if (response.status === 401) return null;
-  if (!response.ok) throw new Error('Failed to fetch Convex auth token');
-  const body: unknown = await response.json();
-  if (!body || typeof body !== 'object' || !('token' in body) || typeof body.token !== 'string') {
-    return null;
+  let response: Response;
+  try {
+    response = await fetch('/api/convex-auth/token', { credentials: 'include' });
+  } catch {
+    if (import.meta.env.VITE_DESKTOP) return null;
+    throw new Error('Failed to fetch Convex auth token');
   }
-  return body.token;
+  if (response.status === 401) return null;
+  if (!response.ok) {
+    if (import.meta.env.VITE_DESKTOP) return null;
+    throw new Error('Failed to fetch Convex auth token');
+  }
+  const body = convexAccessTokenSchema.safeParse(await response.json());
+  return body.success ? body.data.token : null;
 };
 
 const configureConvexAuth = () => {
@@ -28,13 +37,26 @@ const configureConvexAuth = () => {
   convex.setAuth(fetchConvexAccessToken);
 };
 
-if (typeof window !== 'undefined') {
+type BrowserWindow = Window & {
+  readonly document: Document
+  readonly addEventListener: Window['addEventListener']
+}
+
+const hasBrowserWindowCapabilities = (
+  value: Window | undefined,
+): value is BrowserWindow => (
+  value !== undefined
+  && 'addEventListener' in value
+  && 'document' in value
+)
+
+if (hasBrowserWindowCapabilities(globalThis.window)) {
   configureConvexAuth();
 }
 
 // Type-safe Convex query hook using TanStack Query with real-time subscriptions
 export function useConvexQuery<
-  Query extends FunctionReference<"query", "public", any, any>,
+  Query extends FunctionReference<"query">,
 >(
   query: Query,
   args: () => FunctionArgs<Query> | null | undefined,
@@ -49,7 +71,7 @@ export function useConvexQuery<
       if (currentArgs === null || currentArgs === undefined) {
         throw new Error('Query args are null or undefined');
       }
-      return await convex.query(query as any, currentArgs as any);
+      return await convex.query(query, currentArgs);
     },
     enabled: () => {
       const currentArgs = args();
@@ -71,9 +93,9 @@ export function useConvexQuery<
 
     try {
       unsubscribe = convex.onUpdate(
-        query as any,
-        currentArgs as any,
-        (newData: any) => {
+        query,
+        currentArgs,
+        (newData) => {
           // Update TanStack Query cache with new data from Convex
           // Wrap in untrack to avoid Solid tracking these writes and re-running this effect
           untrack(() => {

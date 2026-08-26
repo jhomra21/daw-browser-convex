@@ -10,8 +10,8 @@ type PersistedAutomationStateOptions = {
   targetKey: Accessor<string | undefined>
   envelopes: Accessor<AutomationEnvelope[]>
   applyToEngine: (envelopes: AutomationEnvelope[], previousEnvelopes: AutomationEnvelope[], changedTargetKeys: ReadonlySet<string>) => void
-  persistEnvelope: (envelope: AutomationEnvelope, context: PersistedAutomationContext) => void | Promise<unknown>
-  deleteEnvelope: (targetKey: string, context: PersistedAutomationContext) => void | Promise<unknown>
+  persistEnvelope: (envelope: AutomationEnvelope, context: PersistedAutomationContext) => void | Promise<void>
+  deleteEnvelope: (targetKey: string, context: PersistedAutomationContext) => void | Promise<void>
   createPersistContext?: () => PersistedAutomationContext
   onEnvelopeCommitted?: (previous: AutomationEnvelope | undefined, next: AutomationEnvelope | undefined, context: PersistedAutomationContext) => void
 }
@@ -144,6 +144,7 @@ export function createPersistedAutomationState(options: PersistedAutomationState
     commitEnvelope,
     cancelPreview,
     envelopes,
+    snapshotPatches: () => Object.entries(draftByTargetKey()).map(([targetKey, envelope]) => ({ targetKey, envelope })),
     previewEnvelope,
     syncRemote,
   }

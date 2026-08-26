@@ -2,7 +2,17 @@ import { readLocalAssetBytes } from '~/lib/local-assets'
 import { assetCloudIdMappingRows, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY, createRestoredProjectEntry, isProjectManifestSyncStateKey } from '~/lib/project-manifest'
-import { normalizeProjectManifest, type ProjectManifest } from '@daw-browser/shared'
+import {
+  assertProjectManifestPublishIntegrity,
+  normalizeProjectManifest,
+  isJsonBoolean,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
+  type ProjectManifest,
+} from '@daw-browser/shared'
+import { z } from 'zod'
 
 type BackupResult = {
   ok: boolean
@@ -26,10 +36,7 @@ type CloudBackupSnapshot = {
 }
 
 const CLOUD_ASSET_DELETE_PREFIX = 'cloud-delete:asset:'
-
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-)
+const finiteNumberSchema = z.number().finite()
 
 const cloudAssetDeleteKeyRange = () => IDBKeyRange.bound(CLOUD_ASSET_DELETE_PREFIX, `${CLOUD_ASSET_DELETE_PREFIX}\uffff`)
 
@@ -39,32 +46,33 @@ const readPendingDeletedCloudAssetRows = async (projectId: string) => {
 }
 
 const readPendingDeletedCloudAssetKey = (row: LocalProjectSyncStateRow): string | null => {
-  if (typeof row.value === 'string') return row.value
+  const cloudKey = z.string().safeParse(row.value)
+  if (cloudKey.success) return cloudKey.data
   return isCloudIdMappingValue(row.value) ? row.value.cloudId : null
 }
 
-const readNumber = (value: unknown): number | undefined => (
-  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const readNumber = (value: JsonValue): number | undefined => (
+  isJsonNumber(value) && Number.isFinite(value) ? value : undefined
 )
 
-const readStringRecord = (value: unknown): Record<string, string> | undefined => {
-  if (!isRecord(value)) return undefined
+const readStringRecord = (value: JsonValue): Record<string, string> | undefined => {
+  if (!isJsonObject(value)) return undefined
   const result: Record<string, string> = {}
   for (const [key, entry] of Object.entries(value)) {
-    if (!key || typeof entry !== 'string' || !entry) return undefined
+    if (!key || !isJsonString(entry) || !entry) return undefined
     result[key] = entry
   }
   return result
 }
 
-const readStringArray = (value: unknown): string[] | undefined => {
+const readStringArray = (value: JsonValue): string[] | undefined => {
   if (!Array.isArray(value)) return undefined
-  const result = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+  const result = value.filter((entry): entry is string => isJsonString(entry) && entry.length > 0)
   return result.length === value.length ? result : undefined
 }
 
-const readBackupConflict = (value: unknown): BackupResult['conflict'] | undefined => {
-  if (!isRecord(value)) return undefined
+const readBackupConflict = (value: JsonValue): BackupResult['conflict'] | undefined => {
+  if (!isJsonObject(value)) return undefined
   const localUpdatedAt = readNumber(value.localUpdatedAt)
   const cloudUpdatedAt = readNumber(value.cloudUpdatedAt)
   const localEntityCount = readNumber(value.localEntityCount)
@@ -91,24 +99,24 @@ const readBackupConflict = (value: unknown): BackupResult['conflict'] | undefine
   }
 }
 
-const readBackupResult = (value: unknown): BackupResult | null => {
-  if (!isRecord(value) || typeof value.ok !== 'boolean') return null
+const readBackupResult = (value: JsonValue): BackupResult | null => {
+  if (!isJsonObject(value) || !isJsonBoolean(value.ok)) return null
   const result: BackupResult = { ok: value.ok }
-  if (typeof value.manifestVersion === 'string') result.manifestVersion = value.manifestVersion
+  if (isJsonString(value.manifestVersion)) result.manifestVersion = value.manifestVersion
   const uploadedAssetKeys = readStringRecord(value.uploadedAssetKeys)
   if (uploadedAssetKeys) result.uploadedAssetKeys = uploadedAssetKeys
   const deletedAssetKeys = readStringArray(value.deletedAssetKeys)
   if (deletedAssetKeys) result.deletedAssetKeys = deletedAssetKeys
   const conflict = readBackupConflict(value.conflict)
   if (conflict) result.conflict = conflict
-  if (typeof value.error === 'string') result.error = value.error
+  if (isJsonString(value.error)) result.error = value.error
   if (value.ok && value.uploadedAssetKeys !== undefined && !uploadedAssetKeys) return null
   if (!value.ok && value.conflict !== undefined && !conflict) return null
   return result
 }
 
-const readCloudBackupSnapshot = (value: unknown): CloudBackupSnapshot | null => {
-  if (!isRecord(value) || typeof value.manifestVersion !== 'string') return null
+const readCloudBackupSnapshot = (value: JsonValue): CloudBackupSnapshot | null => {
+  if (!isJsonObject(value) || !isJsonString(value.manifestVersion)) return null
   try {
     return {
       manifest: normalizeProjectManifest(value.manifest),
@@ -126,13 +134,15 @@ const LAST_BACKED_UP_MANIFEST_VERSION_KEY = CLOUD_BACKUP_LAST_MANIFEST_VERSION_K
 const readLastBackedUpProjectUpdatedAt = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY)
-  return typeof row?.value === 'number' ? row.value : undefined
+  const parsed = finiteNumberSchema.safeParse(row?.value)
+  return parsed.success ? parsed.data : undefined
 }
 
 const readLastBackedUpManifestVersion = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', LAST_BACKED_UP_MANIFEST_VERSION_KEY)
-  return typeof row?.value === 'string' ? row.value : undefined
+  const parsed = z.string().safeParse(row?.value)
+  return parsed.success ? parsed.data : undefined
 }
 
 const readPendingDeletedCloudAssetKeys = async (projectId: string): Promise<string[]> => {
@@ -236,6 +246,11 @@ const restoreSyncRows = (
   ...backupBookkeepingRows(manifest, manifestVersion),
 ])
 
+const restoredExternalPluginArtifacts = (manifest: ProjectManifest) => {
+  const updatedAt = Date.now()
+  return manifest.externalPluginArtifacts.map((artifact) => ({ ...artifact, updatedAt }))
+}
+
 const fetchCloudBackupSnapshot = async (projectId: string): Promise<CloudBackupSnapshot> => {
   const response = await fetch(`/api/cloud-backups/${encodeURIComponent(projectId)}`)
   const snapshot = readCloudBackupSnapshot(await response.json().catch(() => null))
@@ -260,6 +275,7 @@ export const restoreCloudBackupToLocalProject = async (
     assets,
     projectState: manifest.projectState,
     syncState: restoreSyncRows(manifest, manifestVersion, { linkAssetsForBackup: true }),
+    externalPluginArtifacts: restoredExternalPluginArtifacts(manifest),
   })
   return projectId
 }
@@ -282,6 +298,7 @@ export const duplicateCloudBackupAsLocalProject = async (
     assets,
     projectState: duplicatedManifest.projectState,
     syncState: cloudAssetSourceRows(manifest),
+    externalPluginArtifacts: restoredExternalPluginArtifacts(duplicatedManifest),
   })
   return localProjectId
 }
@@ -306,6 +323,7 @@ export const runProjectBackup = async (
 ): Promise<BackupResult> => {
   try {
     const manifest = await buildProjectManifest(projectId, 'backup')
+    assertProjectManifestPublishIntegrity(manifest)
     const baseManifestVersion = await readLastBackedUpManifestVersion(projectId)
     const pendingDeletedCloudKeys = await readPendingDeletedCloudAssetKeys(projectId)
     if (

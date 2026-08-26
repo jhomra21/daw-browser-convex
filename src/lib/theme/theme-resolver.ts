@@ -5,7 +5,7 @@ export type ResolvedThemeTokens = Record<DawThemeTokenName, string>
 
 const withAlpha = (color: string, alpha: string) => `${color}${alpha}`
 
-const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark"): ResolvedThemeTokens => {
+const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark") => {
   const palette = variant.palette
   const dark = mode === "dark"
   const neutral = palette.neutral
@@ -14,7 +14,7 @@ const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark"):
   const accent = palette.accent ?? palette.primary
   const interactive = palette.interactive ?? palette.primary
 
-  const tokens: ResolvedThemeTokens = {
+  const tokens = {
     background: neutral,
     foreground: ink,
     card: dark ? "#181824" : "#ffffff",
@@ -73,7 +73,7 @@ const resolveVariantTokens = (variant: DawThemeVariant, mode: "light" | "dark"):
     "sidebar-accent-foreground": ink,
     "sidebar-border": dark ? "#313244" : "#d9e0ee",
     "sidebar-ring": primary
-  }
+  } satisfies ResolvedThemeTokens
 
   if (!variant.overrides) return tokens
 
@@ -95,7 +95,7 @@ export const themeTokensToCss = (tokens: ResolvedThemeTokens): string =>
     .map((name) => `  --${name}: ${tokens[name]};`)
     .join("\n")
 
-const ensureThemeStyleElement = (): HTMLStyleElement => {
+const ensureThemeStyleElement = (document: Document): HTMLStyleElement => {
   const existing = document.getElementById("daw-theme")
   if (existing instanceof HTMLStyleElement) return existing
   const element = document.createElement("style")
@@ -111,9 +111,10 @@ type ApplyDawThemeResult = {
 
 export const applyDawTheme = (themeId: DawThemeId, mode: "light" | "dark"): ApplyDawThemeResult => {
   const tokens = resolveDawThemeById(themeId, mode)
-  if (typeof document === "undefined") return { changed: false, tokens }
+  const document = globalThis.document
+  if (!document) return { changed: false, tokens }
   const css = `:root {\n${themeTokensToCss(tokens)}\n}`
-  const element = ensureThemeStyleElement()
+  const element = ensureThemeStyleElement(document)
   const changed = element.textContent !== css || document.documentElement.dataset.dawTheme !== themeId
   if (!changed) return { changed, tokens }
   element.textContent = css

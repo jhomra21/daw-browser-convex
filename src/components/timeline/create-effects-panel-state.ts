@@ -7,7 +7,7 @@ import {
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
-import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { createSamplerBufferSync, GranularLoadStatus, SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot, isLocalId,
   createDefaultArpeggiatorParams,
@@ -60,8 +60,11 @@ type EffectsPanelContext = {
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
   onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams) => void;
+  projectGeneration?: Accessor<number>;
   onLocalSaveFailed?: (message: string) => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
 };
 
 type EffectsPanelInstrumentDevice = {
@@ -112,6 +115,14 @@ type EffectsPanelInstrumentDevice = {
     update: (updates: Partial<GranularParams>) => void;
   };
   activeInstrument: Accessor<TrackInstrumentParams | undefined>;
+  snapshotInstrumentBuffers: (
+    targetId: string,
+    instrument: TrackInstrumentParams,
+  ) => {
+    samplerBuffers?: ReadonlyMap<string, AudioBuffer>;
+    drumRackBuffers?: ReadonlyMap<string, AudioBuffer>;
+    granularBuffer?: { assetKey: string; buffer: AudioBuffer };
+  } | undefined;
   readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined) => void;
@@ -143,11 +154,10 @@ export function createEffectsPanelInstrumentDevice(
     const projectId = context.projectId();
     return Boolean(projectId && isLocalId("project", projectId));
   };
-  const drumRackBufferSync = createDrumRackBufferSync();
+  const drumRackBufferSync = context.drumRackBufferSync;
   const samplerBufferSync = context.samplerBufferSync;
   const [samplerStatusVersion, setSamplerStatusVersion] = createSignal(0);
   onCleanup(samplerBufferSync.subscribe(() => setSamplerStatusVersion((version) => version + 1)));
-  onCleanup(drumRackBufferSync.dispose);
   const localArp = createLocalEffectRows<ArpeggiatorParams>({
     projectId: context.projectId,
     targetId: getTrackTargetId,
@@ -222,29 +232,6 @@ export function createEffectsPanelInstrumentDevice(
     }, projectId);
   }
 
-  const synthDefaultsByTarget = new Map<string, SynthParams>();
-  const synthInstanceIdsByTarget = new Map<string, string>();
-  const ensureSynthInstanceId = (targetId: string) => {
-    const current = synthInstanceIdsByTarget.get(targetId);
-    if (current) return current;
-    const next = createInstrumentInstanceId();
-    synthInstanceIdsByTarget.set(targetId, next);
-    return next;
-  };
-  const ensureSynthDefaults = (targetId: string) => {
-    const current = synthDefaultsByTarget.get(targetId);
-    if (current) return current;
-    const next = createDefaultSynthParams();
-    synthDefaultsByTarget.set(targetId, next);
-    return next;
-  };
-
-  const readSynthDefaults = (targetId: string) => {
-    return getTrackByTargetId(targetId)?.kind === "instrument"
-      ? ensureSynthDefaults(targetId)
-      : undefined;
-  };
-
   const remoteEffectForTarget = (targetId: string | undefined, effectType: "instrument" | "synth" | "arpeggiator") => {
     if (!targetId || isLocalProject()) return undefined;
     const rows = context.roomEffects?.();
@@ -268,12 +255,20 @@ export function createEffectsPanelInstrumentDevice(
     clearFromEngine: (targetId) => {
       context.audioEngine().clearTrackArpeggiator(targetId);
     },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
+    createPersistContext: () => ({
+      projectId: context.projectId(),
+      userId: context.userId(),
+      projectGeneration: context.projectGeneration?.(),
+    }),
+    isRemote: () => !isLocalProject(),
+    persistParams: async (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      return persistArpeggiator(track.id, params, persistContext);
+      await persistArpeggiator(track.id, params, persistContext);
     },
+    isMissingRowLoaded: () => isLocalProject()
+      ? localArp.isLoaded(getTrackTargetId())
+      : context.roomEffects?.() !== undefined,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
     onPersistError: (error) => {
       if (!isLocalProject()) return;
@@ -291,14 +286,8 @@ export function createEffectsPanelInstrumentDevice(
     scopeId: context.projectId,
     row: () => isLocalProject() ? localInstrument.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "instrument"),
     readQueryParams: (row) => row ? readInstrumentParamsFromEffectRow(row) : undefined,
-    readVisibleParams: (targetId) => {
-      const params = readSynthDefaults(targetId);
-      return params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId: ensureSynthInstanceId(targetId), params }) : undefined;
-    },
-    createInitialParams: (targetId) => {
-      const params = readSynthDefaults(targetId);
-      return params ? normalizeTrackInstrumentParams({ kind: "synth", instanceId: ensureSynthInstanceId(targetId), params }) : undefined;
-    },
+    readVisibleParams: () => undefined,
+    createInitialParams: () => undefined,
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
       if (params.kind === "synth") {
@@ -307,30 +296,47 @@ export function createEffectsPanelInstrumentDevice(
       }
       if (params.kind === "drum-rack") {
         samplerBufferSync.clearTrack(targetId);
-        drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params);
-        return;
+        return drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
       }
       if (params.kind === "granular") {
         drumRackBufferSync.clearTrack(targetId);
-        samplerBufferSync.syncGranularTrack(context.audioEngine(), targetId, params.params, params.instanceId);
-        return;
+        return samplerBufferSync.syncGranularTrack(context.audioEngine(), targetId, params.params, params.instanceId);
       }
       drumRackBufferSync.clearTrack(targetId);
-      samplerBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+      return samplerBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
     },
     clearFromEngine: (targetId) => {
       drumRackBufferSync.clearTrack(targetId);
       samplerBufferSync.clearTrack(targetId);
       context.audioEngine().clearTrackInstrument(targetId);
     },
-    createPersistContext: () => ({ projectId: context.projectId(), userId: context.userId() }),
-    persistParams: (targetId, params, persistContext) => {
+    createPersistContext: () => ({
+      projectId: context.projectId(),
+      userId: context.userId(),
+      projectGeneration: context.projectGeneration?.(),
+    }),
+    persistParams: async (targetId, params, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      return persistInstrument(track.id, params, persistContext);
+      await persistInstrument(track.id, params, persistContext);
     },
+    isMissingRowLoaded: () => isLocalProject()
+      ? localInstrument.isLoaded(getTrackTargetId())
+      : context.roomEffects?.() !== undefined,
     debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
     remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
+    onApplyCompleted: (targetId, previous, next, applyContext) => {
+      if (!applyContext || applyContext.projectId !== context.projectId()
+        || (applyContext.projectGeneration !== undefined
+          && applyContext.projectGeneration !== context.projectGeneration?.())) return;
+      context.onStructuralPlaybackChange?.(targetId, next);
+    },
+    onEngineStateChanged: (targetId, previous, next, _source, applyContext) => {
+      if (!applyContext || applyContext.projectId !== context.projectId()
+        || (applyContext.projectGeneration !== undefined
+          && applyContext.projectGeneration !== context.projectGeneration?.())) return;
+      context.onStructuralPlaybackChange?.(targetId, next);
+    },
     onPersistError: (error) => {
       if (!isLocalProject()) return;
       context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
@@ -413,14 +419,11 @@ export function createEffectsPanelInstrumentDevice(
     if (!track || track.kind !== "instrument") return false;
     const current = instrumentState.readForTarget(targetId);
     if (current?.kind === kind) return true;
-    instrumentState.updateForTarget(targetId, (prev) => {
-      if (prev.kind === kind) return prev;
-      const instanceId = createInstrumentInstanceId();
-      if (kind === "synth") return { kind, instanceId, params: ensureSynthDefaults(targetId) };
-      if (kind === "drum-rack") return { kind, instanceId, params: INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams() };
-      if (kind === "sampler") return { kind, instanceId, params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() };
-      return { kind, instanceId, params: INSTRUMENT_CONTRACTS.granular.createDefaultParams() };
-    });
+    const instanceId = createInstrumentInstanceId();
+    if (kind === "synth") instrumentState.setForTarget(targetId, { kind, instanceId, params: createDefaultSynthParams() });
+    else if (kind === "drum-rack") instrumentState.setForTarget(targetId, { kind, instanceId, params: INSTRUMENT_CONTRACTS["drum-rack"].createDefaultParams() });
+    else if (kind === "sampler") instrumentState.setForTarget(targetId, { kind, instanceId, params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() });
+    else instrumentState.setForTarget(targetId, { kind, instanceId, params: INSTRUMENT_CONTRACTS.granular.createDefaultParams() });
     return true;
   }
 
@@ -474,7 +477,9 @@ export function createEffectsPanelInstrumentDevice(
         }),
       );
       const result = await publishDurableSharedTimelineOperation({ projectId, userId: grantScope.userId, operation });
-      const clipId = typeof result === "string" ? result : null;
+      const clipId = result !== null && result !== undefined && result === String(result)
+        ? String(result)
+        : null;
       if (!clipId) return false;
 
       context.grantClipWrite?.(clipId, grantScope);
@@ -507,14 +512,14 @@ export function createEffectsPanelInstrumentDevice(
   function setArpeggiatorForTarget(targetId: Track["id"], params: ArpeggiatorParams): boolean {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
-    arpState.updateForTarget(targetId, () => params);
+    arpState.setForTarget(targetId, params);
     return true;
   }
 
   function setInstrumentForTarget(targetId: Track["id"], instrument: TrackInstrumentParams): boolean {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
-    instrumentState.updateForTarget(targetId, () => instrument);
+    instrumentState.setForTarget(targetId, instrument);
     return true;
   }
 
@@ -585,7 +590,7 @@ export function createEffectsPanelInstrumentDevice(
       reset: () => {
         const targetId = getTrackTargetId();
         if (!targetId) return;
-        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: ensureSynthDefaults(targetId) }));
+        instrumentState.updateForTarget(targetId, (previous) => ({ kind: "synth", instanceId: previous.kind === "synth" ? previous.instanceId : createInstrumentInstanceId(), params: createDefaultSynthParams() }));
       },
     },
     drumRack: {
@@ -672,6 +677,21 @@ export function createEffectsPanelInstrumentDevice(
       },
     },
     activeInstrument: instrumentState.params,
+    snapshotInstrumentBuffers: (targetId: string, instrument: TrackInstrumentParams) => {
+      if (instrument.kind === "sampler") {
+        const buffers = samplerBufferSync.snapshotSamplerBuffers(targetId, instrument);
+        return buffers ? { samplerBuffers: buffers } : undefined;
+      }
+      if (instrument.kind === "drum-rack") {
+        const buffers = drumRackBufferSync.snapshotBuffers(targetId, instrument);
+        return buffers ? { drumRackBuffers: buffers } : undefined;
+      }
+      if (instrument.kind === "granular") {
+        const buffer = samplerBufferSync.snapshotGranularBuffer(targetId, instrument);
+        return buffer ? { granularBuffer: buffer } : undefined;
+      }
+      return undefined;
+    },
     readDraftInstrumentForTarget: instrumentState.readDraftForTarget,
     readInstrumentForTarget: instrumentState.readForTarget,
     syncRemoteInstrumentForTarget: instrumentState.syncRemoteForTarget,

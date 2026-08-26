@@ -21,7 +21,7 @@ class DawGranularProcessor extends AudioWorkletProcessor {
     const config = options.processorOptions || {}
     this.seed = (config.seed || 1) >>> 0
     this.maxGrains = Math.max(1, Math.min(MAX_GRAINS, config.maxGrains || 64))
-    this.windowShape = config.windowShape || 'hann'
+    this.windowType = config['windowShape'] || 'hann'
     this.channels = [EMPTY, EMPTY]
     this.sampleRateSource = sampleRate
     this.nextGrainFrame = 0
@@ -77,12 +77,12 @@ class DawGranularProcessor extends AudioWorkletProcessor {
   }
 
   window(phase) {
-    if (this.windowShape === 'tukey') {
+    if (this.windowType === 'tukey') {
       if (phase < 0.25) return 0.5 * (1 - Math.cos(4 * Math.PI * phase))
       if (phase > 0.75) return 0.5 * (1 - Math.cos(4 * Math.PI * (1 - phase)))
       return 1
     }
-    if (this.windowShape === 'gaussian') {
+    if (this.windowType === 'gaussian') {
       const x = (phase - 0.5) / 0.18
       return Math.exp(-0.5 * x * x)
     }

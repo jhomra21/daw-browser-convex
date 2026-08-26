@@ -112,7 +112,7 @@ const pushMoveHistory = (
 ) => {
   if (successfulMoves.length === 0) return;
   input.onCommitMoves?.(successfulMoves.map((move) => move.clipId));
-  if (typeof input.historyPush !== "function") return;
+  if (!input.historyPush) return;
   if (input.addedTrackId && successfulMoves.some((move) => move.trackId === input.addedTrackId)) {
     pushTrackCreateHistory(
       input.historyPush,

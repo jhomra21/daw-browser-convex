@@ -71,7 +71,7 @@ type AudioEffectMetadata = {
   description: string;
 };
 
-const AUDIO_EFFECT_METADATA: Record<AudioEffectKind, AudioEffectMetadata> = {
+const AUDIO_EFFECT_METADATA = {
   utility: { label: "Utility", description: "Gain, pan, width, and utility routing" },
   eq: { label: "EQ", description: "Eight-band parametric equalizer" },
   autofilter: { label: "Auto Filter", description: "Envelope and LFO filter modulation" },
@@ -89,14 +89,14 @@ const AUDIO_EFFECT_METADATA: Record<AudioEffectKind, AudioEffectMetadata> = {
   delay: { label: "Delay", description: "Synchronized or free-time echo" },
   reverb: { label: "Reverb", description: "Algorithmic room and space reverb" },
   spectral: { label: "Spectral", description: "FFT spectral processing and freeze" },
-};
+} satisfies Record<AudioEffectKind, AudioEffectMetadata>;
 
-const INSTRUMENT_METADATA: Record<InstrumentKind, AudioEffectMetadata> = {
+const INSTRUMENT_METADATA = {
   synth: { label: "Synth", description: "Polyphonic subtractive synthesizer" },
   "drum-rack": { label: "Drum Rack", description: "MIDI drum rack with sample pads" },
   sampler: { label: "Sampler", description: "Key-zone sample instrument" },
   granular: { label: "Granular", description: "Granular sample instrument" },
-};
+} satisfies Record<InstrumentKind, AudioEffectMetadata>;
 
 const catalogCapabilities = (): DeviceCatalogCapabilities => ({
   addable: true,

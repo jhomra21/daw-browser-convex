@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
 import { createRoot, createSignal, untrack } from 'solid-js'
 
@@ -13,6 +13,12 @@ import {
   getReturnSendTargets,
   resolveSendTargetId,
 } from '~/components/timeline/track-send-targets'
+import {
+  installHermeticWindow,
+  resetHermeticBrowserEnvironment,
+} from '~/lib/test/hermetic-browser-environment'
+
+afterEach(resetHermeticBrowserEnvironment)
 
 const projectId = 'project:local-send-reload'
 const sourceTrackId = 'track:source'
@@ -62,13 +68,7 @@ describe('local send reload path', () => {
     expect(getReturnSendTargets(tracks)).toEqual([])
     expect(resolveSendTargetId(thirdTrackId, thirdTrackId, getReturnSendTargets(tracks))).toBe('')
 
-    const previousWindow = globalThis.window
-    Reflect.set(globalThis, 'window', {
-      addEventListener: () => undefined,
-      clearTimeout,
-      setTimeout,
-    })
-
+    const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
     try {
       const repository = createLocalTimelineRepository(noReturnProjectId)
       await Promise.all(tracks.map((track, index) => repository.createTrack({
@@ -113,18 +113,38 @@ describe('local send reload path', () => {
         })
       }))
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
+      restoreWindow()
     }
   })
 
-  test('persists a send to a return created after controller setup, reloads it, and clears it', async () => {
-    const previousWindow = globalThis.window
-    Reflect.set(globalThis, 'window', {
-      addEventListener: () => undefined,
-      clearTimeout,
-      setTimeout,
-    })
+  test('resolves local pending volume overlays', async () => {
+    const overlayProjectId = 'project:local-volume-overlay'
+    const repository = createLocalTimelineRepository(overlayProjectId)
+    await repository.createTrack({ id: sourceTrackId, index: 0 })
+    await repository.createTrack({ id: returnTrackId, index: 1, channelRole: 'return' })
+    const snapshot = await repository.loadSnapshot()
+    const pendingVolumes = new Map<Track['id'], number>([
+      [sourceTrackId, 0.35],
+      [returnTrackId, 0.55],
+    ])
 
+    const client = emptyClientState({})
+    client.mix.pendingSharedTrackVolumes = pendingVolumes
+    const resolvedTracks = resolveTimelineTracks({
+      projectId: overlayProjectId,
+      server: { localSnapshot: snapshot },
+      client,
+      buffers: {
+        getBuffer: () => undefined,
+        getMediaStatus: () => undefined,
+      },
+    })
+    expect(resolvedTracks.find((track) => track.id === sourceTrackId)?.volume).toBe(0.35)
+    expect(resolvedTracks.find((track) => track.id === returnTrackId)?.volume).toBe(0.55)
+  })
+
+  test('persists a send to a return created after controller setup, reloads it, and clears it', async () => {
+    const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
     try {
       const repository = createLocalTimelineRepository(projectId)
       await repository.createTrack({ id: sourceTrackId, index: 0 })
@@ -218,18 +238,12 @@ describe('local send reload path', () => {
         })
       }))
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
+      restoreWindow()
     }
   })
 
   test('retains a durable return send instead of restoring a stale local mix overlay', async () => {
-    const previousWindow = globalThis.window
-    Reflect.set(globalThis, 'window', {
-      addEventListener: () => undefined,
-      clearTimeout,
-      setTimeout,
-    })
-
+    const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
     try {
       const repository = createLocalTimelineRepository('project:local-send-stale-local-mix')
       await repository.createTrack({ id: sourceTrackId, index: 0 })
@@ -285,7 +299,7 @@ describe('local send reload path', () => {
         })
       }))
     } finally {
-      Reflect.set(globalThis, 'window', previousWindow)
+      restoreWindow()
     }
   })
 

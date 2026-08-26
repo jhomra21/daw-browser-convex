@@ -171,9 +171,10 @@ type Props = {
     card: TimelineMidiBounds;
     userId: string;
     projectId: string;
+    canWrite: boolean;
     close: () => void;
     changeBounds: (bounds: TimelineMidiBounds) => void;
-    auditionNote: (note: number, velocity?: number) => void;
+    auditionNote: (trackId: string, note: number, velocity?: number, durSec?: number) => void;
     keyboard: {
       isActive: (pitch: number) => boolean;
     };
@@ -183,6 +184,7 @@ type Props = {
     currentUserId: string;
     master: MasterSidebarModel;
     subscribeTrackLevels: AudioEngine["subscribeTrackStereoLevels"];
+    subscribeMasterLevels: AudioEngine["subscribeMasterStereoLevels"];
     canWriteTrackRouting: (trackId: Track["id"]) => boolean;
     onTrackClick: (trackId: Track["id"]) => void;
     onTrackSendsChange: (trackId: Track["id"], sends: TrackSend[]) => void;
@@ -476,6 +478,7 @@ export default function TimelineWorkspace(props: Props) {
                   }}
                   recording={props.recording}
                   midi={props.midi}
+                  effectInstancesByOwnerKey={props.automation.lanes.effectInstancesByOwnerKey}
                 />
               </div>
               <div
@@ -631,6 +634,7 @@ export default function TimelineWorkspace(props: Props) {
                 recordArmTrackId: props.recording.recordArmTrackId,
                 currentUserId: props.sidebar.currentUserId,
                 subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
+                subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
                 onTrackClick: props.sidebar.onTrackClick,
                 canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
                 onTrackSendsChange: props.sidebar.onTrackSendsChange,

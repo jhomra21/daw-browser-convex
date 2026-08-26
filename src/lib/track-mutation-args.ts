@@ -6,6 +6,7 @@ import type { TrackId } from '@daw-browser/timeline-core/types'
 
 export function buildTrackCreateMutationInput(input: {
   projectId: string
+  name?: string
   index?: number
   kind?: 'audio' | 'instrument'
   channelRole?: 'track' | 'group' | 'return'
@@ -13,6 +14,7 @@ export function buildTrackCreateMutationInput(input: {
 }): FunctionArgs<typeof convexApi.tracks.create> {
   return {
     projectId: input.projectId,
+    name: input.name,
     index: input.index,
     kind: input.kind,
     channelRole: input.channelRole,

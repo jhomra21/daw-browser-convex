@@ -11,6 +11,7 @@ import {
   normalizeTremoloParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from './effects-params'
+import { isJsonObject, parseJsonValue, type JsonObject, type JsonValue, type JsonValueInput } from './json-value'
 import { normalizeSpectralParamsEnvelope } from './spectral-params'
 
 export const OWNED_PROCESSOR_KINDS = [
@@ -46,7 +47,7 @@ export const OWNED_PROCESSOR_PARAMETER_IDS = {
 } as const satisfies Record<OwnedProcessorKind, readonly string[]>
 
 const descriptor = (
-  normalizeParams: (value: unknown) => { version: 1; state: object },
+  normalizeParams: (value: JsonValue) => { version: 1; state: object },
   nestedStateKeys: readonly string[] = [],
 ) => ({
   normalizeParams,
@@ -70,28 +71,32 @@ export const OWNED_PROCESSOR_DESCRIPTORS = {
   spectral: descriptor(normalizeSpectralParamsEnvelope),
 } satisfies Record<OwnedProcessorKind, ReturnType<typeof descriptor>>
 
-export const isOwnedProcessorKind = (value: unknown): value is OwnedProcessorKind =>
+export const isOwnedProcessorKind = (value: JsonValueInput): value is OwnedProcessorKind =>
   OWNED_PROCESSOR_KINDS.some((kind) => value === kind)
 
-export const normalizeOwnedProcessorParams = (kind: OwnedProcessorKind, value: unknown) =>
-  OWNED_PROCESSOR_DESCRIPTORS[kind].normalizeParams(value)
+export const normalizeOwnedProcessorParams = (kind: OwnedProcessorKind, value: JsonValueInput) =>
+  OWNED_PROCESSOR_DESCRIPTORS[kind].normalizeParams(parseJsonValue(value) ?? null)
 
 export const mergeOwnedProcessorParams = (
   kind: OwnedProcessorKind,
-  params: unknown,
-  existing?: unknown,
+  params: JsonValueInput,
+  existing?: JsonValueInput,
 ) => {
   const descriptor = OWNED_PROCESSOR_DESCRIPTORS[kind]
-  const current = descriptor.normalizeParams(existing)
-  const update = typeof params === 'object' && params !== null && 'state' in params && typeof params.state === 'object' && params.state !== null
-    ? params.state
+  const currentEnvelope = parseJsonValue(descriptor.normalizeParams(parseJsonValue(existing) ?? null))
+  const currentState = isJsonObject(currentEnvelope) && isJsonObject(currentEnvelope.state)
+    ? currentEnvelope.state
     : {}
-  const state: Record<string, unknown> = { ...current.state, ...update }
+  const parsedParams = parseJsonValue(params)
+  const update = isJsonObject(parsedParams) && isJsonObject(parsedParams.state)
+    ? parsedParams.state
+    : {}
+  let state: JsonObject = { ...currentState, ...update }
   for (const key of descriptor.nestedStateKeys) {
-    const currentValue = Reflect.get(current.state, key)
-    const updateValue = Reflect.get(update, key)
-    if (typeof currentValue === 'object' && currentValue !== null && typeof updateValue === 'object' && updateValue !== null) {
-      state[key] = { ...currentValue, ...updateValue }
+    const currentValue = currentState[key]
+    const updateValue = update[key]
+    if (isJsonObject(currentValue) && isJsonObject(updateValue)) {
+      state = { ...state, [key]: { ...currentValue, ...updateValue } }
     }
   }
   return descriptor.normalizeParams({ version: 1, state })

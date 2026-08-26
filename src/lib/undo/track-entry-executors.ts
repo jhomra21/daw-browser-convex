@@ -1,6 +1,6 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
-import { assert, assertDefined, collectTrackDescendantIds } from '@daw-browser/shared'
+import { assertDefined, collectTrackDescendantIds } from '@daw-browser/shared'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 
@@ -79,6 +79,7 @@ export async function applyTrackClipCreateEntry(
   if (!trackId) {
     const createdTrackResult = await createHistoryTrack(deps, {
       trackRef: entry.data.track.trackRef,
+      name: entry.data.track.name,
       index: entry.data.track.index,
       kind: entry.data.track.kind,
       channelRole: entry.data.track.channelRole,
@@ -87,21 +88,24 @@ export async function applyTrackClipCreateEntry(
     trackIndex = createdTrackResult.index
     createdTrack = true
   }
-  assert(trackId, 'Failed to recreate track')
+  trackId = assertDefined(trackId, 'Failed to recreate track')
   entry.data.track.currentTrackId = trackId
   deps.grantTrackWrite(trackId, grantScope)
   deps.actions.insertLocalTrack(createLocalTrack({
     id: trackId,
     historyRef: entry.data.track.trackRef,
     index: trackIndex,
+    name: entry.data.track.name,
     kind: entry.data.track.kind ?? 'audio',
     channelRole: entry.data.track.channelRole ?? 'track',
   }), trackIndex)
 
   try {
     const clipSnapshot = entry.data.clip
-    const clipId = entry.data.clip.currentId || await createHistoryClip(deps, trackId, clipSnapshot)
-    assert(clipId, 'Failed to recreate clip')
+    const clipId = assertDefined(
+      entry.data.clip.currentId || await createHistoryClip(deps, trackId, clipSnapshot),
+      'Failed to recreate clip',
+    )
     entry.data.clip.currentId = clipId
     deps.grantClipWrite(clipId, grantScope)
     if (clipSnapshot.sampleUrl) {
@@ -174,7 +178,7 @@ export async function applyTrackDeleteEntry(
     trackIndex = createdTrackResult.index
     createdTrack = true
   }
-  assert(newTrackId, 'Failed to recreate deleted track')
+  newTrackId = assertDefined(newTrackId, 'Failed to recreate deleted track')
   entry.data.recreatedTrackId = newTrackId
   deps.grantTrackWrite(newTrackId, grantScope)
   syncHistoryTrackCreateEntryId(deps.getHistoryEntries(), entry.data.track.trackRef, newTrackId)
@@ -226,15 +230,17 @@ export async function applyTrackDeleteEntry(
     for (const clip of entry.data.clips) {
       const clipRef = requireResolved(clip.clipRef, 'Missing clip reference for track-delete history entry')
       const clipSnapshot = clip
-      const newId = recreatedClipIdsByRef.get(clipRef) || await createHistoryClip(deps, newTrackId, clipSnapshot)
-      assert(newId, 'Failed to recreate deleted track clip')
-      recreatedClipIdsByRef.set(clipRef, newId)
-      deps.grantClipWrite(newId, grantScope)
+      const resolvedNewId = assertDefined(
+        recreatedClipIdsByRef.get(clipRef) || await createHistoryClip(deps, newTrackId, clipSnapshot),
+        'Failed to recreate deleted track clip',
+      )
+      recreatedClipIdsByRef.set(clipRef, resolvedNewId)
+      deps.grantClipWrite(resolvedNewId, grantScope)
       if (clipSnapshot.sampleUrl) {
-        await deps.ensureClipBuffer?.(newId, clipSnapshot.sampleUrl)
+        await deps.ensureClipBuffer?.(resolvedNewId, clipSnapshot.sampleUrl)
       }
-      deps.actions.insertLocalClip(newTrackId, buildLocalClip({ id: newId, clip: clipSnapshot }))
-      restoredClipIds.push(newId)
+      deps.actions.insertLocalClip(newTrackId, buildLocalClip({ id: resolvedNewId, clip: clipSnapshot }))
+      restoredClipIds.push(resolvedNewId)
     }
     if (restoredClipIds.length > 0) {
       deps.actions.rescheduleChangedClips(restoredClipIds)

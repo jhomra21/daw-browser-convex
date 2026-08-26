@@ -1,5 +1,5 @@
 import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
-import { buildClipCreatePayload, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
+import { buildClipCreatePayload, isJsonString, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
 import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
 import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
@@ -22,7 +22,7 @@ type UploadToR2 = (
   assetKey: string,
   file: File,
   durationSec?: number,
-) => Promise<string | null>
+) => Promise<{ assetKey: string; url: string } | null>
 
 type ConvexClientType = typeof convexClient
 type ConvexApiType = typeof convexApi
@@ -83,10 +83,12 @@ type UploadedFileClipInput = {
   track: Track
   startSec: number
   autoCreatedTrack?: Track
+  signal?: AbortSignal
 }
 
 type AudioImportResult =
-  | { status: 'created' }
+  | { status: 'created'; assetId: string; clipId: string }
+  | { status: 'queued'; assetId: string; operationId: string }
   | { status: 'skipped' }
   | { status: 'local-save-failed'; message: string }
   | { status: 'failed'; message: string }
@@ -105,7 +107,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     if (!projectId || !userId) return null
     const operation = buildSharedClipCreateOperation(buildClipCreatePayload({ projectId, trackId, clip }))
     const result = await publishDurableSharedTimelineOperation({ projectId, userId, operation, throwQueued: true })
-    return typeof result === 'string' ? result : null
+    return isJsonString(result) ? result : null
   }
 
   const trackRefFor = (trackId: TrackId) =>
@@ -210,10 +212,11 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
     if (isLocalId('project', projectId)) {
       let asset: Awaited<ReturnType<typeof createLocalAsset>>
       try {
+        input.signal?.throwIfAborted()
         asset = await createLocalAsset({
           projectId,
           file: input.file,
-          metadata: sourceMetadata,
+          metadata: { ...sourceMetadata, sourceKind: 'upload' },
         })
       } catch (error) {
         const message = error instanceof LocalAssetWriteError
@@ -224,8 +227,10 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         return { status: 'local-save-failed', message: guidance }
       }
+      let created: Awaited<ReturnType<typeof createLocalAudioClip>>
       try {
-        const created = await createLocalAudioClip({
+        input.signal?.throwIfAborted()
+        created = await createLocalAudioClip({
           projectId,
           trackId: input.track.id,
           trackRef: trackRefFor(input.track.id),
@@ -252,15 +257,17 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         throw error
       }
-      return { status: 'created' }
+      return { status: 'created', assetId: asset.id, clipId: created.clipId }
     }
 
     const userId = context.project.userId()
     if (!userId) return { status: 'skipped' }
     const sourceAssetKey = createAudioAssetKey()
 
+    let created: Awaited<ReturnType<typeof createUploadedAudioClip>>
     try {
-      const created = await createUploadedAudioClip({
+      input.signal?.throwIfAborted()
+      created = await createUploadedAudioClip({
         projectId,
         userId,
         trackId: input.track.id,
@@ -276,7 +283,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
             kind: 'clips.create',
             payload,
           })
-          return typeof result === 'string' ? result : null
+          return isJsonString(result) ? result : null
         },
         insertLocalClip: context.clips.insertLocalClip,
         removeLocalClips: context.clips.removeLocalClips,
@@ -295,14 +302,19 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
       }
     } catch (error) {
-      if (!isSharedOutboxQueuedError(error)) {
-        await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+      if (isSharedOutboxQueuedError(error)) {
+        if (error.operationId) {
+          return {
+            status: 'queued',
+            assetId: sourceAssetKey,
+            operationId: error.operationId,
+          }
+        }
       }
-      return { status: 'failed', message: isSharedOutboxQueuedError(error)
-        ? 'Audio import was queued and will retry when sync resumes.'
-        : 'Audio could not be uploaded. Please retry the import.' }
+      await context.rollback.removeCloudTrack(input.autoCreatedTrack)
+      return { status: 'failed', message: 'Audio could not be uploaded. Please retry the import.' }
     }
-    return { status: 'created' }
+    return { status: 'created', assetId: sourceAssetKey, clipId: created.clipId }
   }
 
   return {

@@ -1,19 +1,40 @@
 import { describe, expect, test } from "bun:test";
+import "fake-indexeddb/auto";
 import { createRoot, createSignal } from "solid-js";
 import { AudioEngine, type AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine";
 import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance } from "@daw-browser/shared";
+import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
+import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import {
   createAudioEffectInstanceIdentityCache,
   createEffectsPanelAudioDevice,
 } from "./create-effects-panel-audio-effects-state";
 
-type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<unknown>;
+type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<void>;
 
 class SpyAudioEngine extends AudioEngine {
   readonly trackFxCalls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = [];
+  readonly masterFxCalls: AudioEffectRuntimeInstance[][] = [];
+  deferMasterFx = false;
+  private resolveMasterFx?: () => void;
 
   override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
     this.trackFxCalls.push({ trackId, instances });
+  }
+
+  override async setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
+    this.masterFxCalls.push(instances);
+    if (this.deferMasterFx) {
+      await new Promise<void>((resolve) => {
+        this.resolveMasterFx = resolve;
+      });
+    }
+    await super.setMasterFxInstances(instances);
+  }
+
+  releaseMasterFx() {
+    this.resolveMasterFx?.();
+    this.resolveMasterFx = undefined;
   }
 }
 
@@ -21,27 +42,102 @@ const createDevice = (
   engine: SpyAudioEngine,
   options: {
     canWrite?: boolean;
+    projectId?: string;
+    projectGeneration?: number;
+    targetId?: string;
     persistAudioEffectOrder?: PersistOrder;
+    persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<void>;
+    sidechainRoutes?: ExternalSidechainRoute[];
+    onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
   } = {},
 ) => {
-  const [currentTargetId, setCurrentTargetId] = createSignal("track-1");
+  const [currentTargetId, setCurrentTargetId] = createSignal(options.targetId ?? "track-1");
+  const [projectId, setProjectId] = createSignal(options.projectId);
+  const [projectGeneration, setProjectGeneration] = createSignal(options.projectGeneration ?? 0);
   const [canWriteCurrentTargetEffects, setCanWriteCurrentTargetEffects] = createSignal(options.canWrite ?? true);
+  const [sidechainRoutes, setSidechainRoutes] = createSignal(options.sidechainRoutes ?? []);
   const device = createEffectsPanelAudioDevice(
     {
       audioEngine: () => engine,
-      projectId: () => undefined,
-      userId: () => undefined,
+      projectId,
+      userId: () => projectId() ? "user-1" : undefined,
       roomEffects: () => [],
+      sidechainRoutes,
       canWriteCurrentTargetEffects,
+      projectGeneration,
       persistAudioEffectOrder: options.persistAudioEffectOrder,
+      persistSidechainRoute: options.persistSidechainRoute,
+      onEffectParamsCommitted: options.onEffectParamsCommitted,
     },
     currentTargetId,
     () => undefined,
   );
-  return { device, setCanWriteCurrentTargetEffects, setCurrentTargetId };
+  return {
+    device,
+    setCanWriteCurrentTargetEffects,
+    setCurrentTargetId,
+    setProjectGeneration,
+    setProjectId,
+    setSidechainRoutes,
+  };
 };
 
 describe("effects panel instance engine synchronization", () => {
+  test("commits a real reverb edit with the persisted row instance ID", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const commits: EffectParamsCommitPayload[] = [];
+      const { device } = createDevice(engine, {
+        onEffectParamsCommitted: (payload) => commits.push(payload),
+      });
+      await device.addByKindToTarget("track-1", "reverb");
+      const inserted = engine.trackFxCalls.at(-1)?.instances[0];
+      if (!inserted || inserted.kind !== "reverb") throw new Error("Expected an inserted reverb instance.");
+
+      device.reverb.changeInstance(inserted.id, (params) => ({ ...params, wet: 0.35 }));
+      await device.flushPending();
+      await Promise.resolve();
+
+      expect(commits.at(-1)).toMatchObject({
+        targetId: "track-1",
+        effect: "reverb",
+        instanceId: inserted.id,
+        to: { wet: 0.35 },
+      });
+      dispose();
+    });
+  });
+
+  test("does not commit an async edit after the project generation changes", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const commits: EffectParamsCommitPayload[] = [];
+      const { device, setProjectGeneration, setProjectId } = createDevice(engine, {
+        projectId: "project:stale-effect-commit",
+        targetId: "master",
+        onEffectParamsCommitted: (payload) => commits.push(payload),
+      });
+      await device.addByKindToTarget("master", "delay");
+      const inserted = engine.masterFxCalls.at(-1)?.[0];
+      if (!inserted) throw new Error("Expected an inserted delay instance.");
+      await device.flushPending();
+      commits.length = 0;
+
+      engine.deferMasterFx = true;
+      device.delay.changeInstance(inserted.id, (params) => ({ ...params, feedback: 0.8 }));
+      const pending = device.flushPending();
+      await Promise.resolve();
+      setProjectId("project:other");
+      setProjectGeneration(1);
+      engine.releaseMasterFx();
+      await pending;
+      await Promise.resolve();
+      expect(engine.masterFxCalls.at(-1)?.[0]?.params).toMatchObject({ feedback: 0.8 });
+      expect(commits).toHaveLength(0);
+      dispose();
+    });
+  });
+
   test("applies an optimistic parameter edit to the engine before persistence", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
@@ -56,11 +152,8 @@ describe("effects panel instance engine synchronization", () => {
       await addPromise;
 
       expect(engine.trackFxCalls.length).toBeGreaterThan(before);
-      const hasUpdatedFeedback = (params: unknown) => (
-        typeof params === "object" &&
-        params !== null &&
-        "feedback" in params &&
-        params.feedback === 0.8
+      const hasUpdatedFeedback = (params: AudioEffectRuntimeInstance["params"]) => (
+        "feedback" in params && params.feedback === 0.8
       );
       const updated = engine.trackFxCalls
         .flatMap((call) => call.instances)
@@ -225,6 +318,120 @@ describe("effects panel instance engine synchronization", () => {
       expect(added).toBe(false);
       expect(device.orderedEffects()).toEqual([]);
       expect(engine.trackFxCalls.at(-1)?.instances).toEqual([]);
+      dispose();
+    });
+  });
+
+  test("projects draft edits, all-target insertions, reorders, and removals into export rows", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      const { device } = createDevice(engine, { projectId: `project:effects-export-projection-${crypto.randomUUID()}` });
+
+      const delayAdd = device.addByKindToTarget("track-1", "delay");
+      expect(device.snapshotExportRows(["track-1"])).toEqual([
+        expect.objectContaining({ targetId: "track-1", effect: "delay", index: 0 }),
+      ]);
+      await delayAdd;
+      await device.addByKindToTarget("track-1", "chorus");
+      await device.addByKindToTarget("master", "utility");
+
+      const delay = device.snapshotExportRows(["track-1"])
+        .find((row) => row.effect === "delay");
+      if (!delay?.instanceId) throw new Error("Expected a projected delay.");
+      device.delay.changeInstance(delay.instanceId, (params) => ({ ...params, feedback: 0.8 }));
+      expect(device.snapshotExportRows(["track-1"])
+        .find((row) => row.effect === "delay")?.params).toMatchObject({ feedback: 0.8 });
+
+      device.reorder({ id: delay.instanceId, kind: "delay" }, 1);
+      expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["chorus", "delay"]);
+      expect(device.snapshotExportRows(["master", "track-1"]).map((row) => row.targetId)).toEqual([
+        "master",
+        "track-1",
+        "track-1",
+      ]);
+
+      const removal = device.removeByInstanceFromTarget("track-1", { id: delay.instanceId, kind: "delay" });
+      expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["chorus"]);
+      await removal;
+
+      const removeMaster = device.removeAllFromTarget("master");
+      expect(device.snapshotExportRows(["master"])).toEqual([]);
+      await removeMaster;
+      dispose();
+    });
+  });
+
+  test("restores projected removal order when persistence fails", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      let rejectReorder = false;
+      const { device } = createDevice(engine, {
+        projectId: "project:effects-export-removal-rollback",
+        persistAudioEffectOrder: () => rejectReorder
+          ? Promise.reject(new Error("reorder failed"))
+          : Promise.resolve(),
+      });
+      await device.addByKindToTarget("track-1", "delay");
+      await device.addByKindToTarget("track-1", "chorus");
+      const delay = device.snapshotExportRows(["track-1"])
+        .find((row) => row.effect === "delay");
+      if (!delay?.instanceId) throw new Error("Expected a projected delay.");
+
+      rejectReorder = true;
+      const removal = device.removeByInstanceFromTarget("track-1", { id: delay.instanceId, kind: "delay" });
+      expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["chorus"]);
+      await expect(removal).rejects.toThrow("reorder failed");
+      expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["delay", "chorus"]);
+      dispose();
+    });
+  });
+
+  test("projects pending sidechain changes, flushes them, and rolls back failures", async () => {
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      let resolvePersist: (() => void) | undefined;
+      let rejectNext = false;
+      const { device, setSidechainRoutes } = createDevice(engine, {
+        projectId: "project:sidechain-export",
+        sidechainRoutes: [{
+          sourceTrackId: "track-source-a",
+          targetTrackId: "track-1",
+          effectInstanceId: "gate-1",
+        }],
+        persistSidechainRoute: async () => {
+          if (rejectNext) throw new Error("sidechain persistence failed");
+          await new Promise<void>((resolve) => {
+            resolvePersist = resolve;
+          });
+        },
+      });
+
+      const pending = device.gate.setSidechainSource("gate-1", "track-source-b");
+      expect(device.snapshotSidechainRoutes()).toEqual([{
+        sourceTrackId: "track-source-b",
+        targetTrackId: "track-1",
+        effectInstanceId: "gate-1",
+      }]);
+      let flushed = false;
+      const flush = device.flushPending().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      expect(flushed).toBeFalse();
+      resolvePersist?.();
+      await Promise.all([pending, flush]);
+      setSidechainRoutes([{
+        sourceTrackId: "track-source-b",
+        targetTrackId: "track-1",
+        effectInstanceId: "gate-1",
+      }]);
+      expect(device.snapshotSidechainRoutes()[0]?.sourceTrackId).toBe("track-source-b");
+
+      rejectNext = true;
+      const failed = device.gate.setSidechainSource("gate-1", "track-source-c");
+      expect(device.snapshotSidechainRoutes()[0]?.sourceTrackId).toBe("track-source-c");
+      await expect(failed).rejects.toThrow("sidechain persistence failed");
+      expect(device.snapshotSidechainRoutes()[0]?.sourceTrackId).toBe("track-source-b");
       dispose();
     });
   });

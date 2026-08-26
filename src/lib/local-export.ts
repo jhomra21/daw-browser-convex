@@ -1,4 +1,3 @@
-import type { EncodeAudioBufferTarget } from '@daw-browser/audio-engine/export-mixdown'
 import { queryFileSystemHandlePermission, requestFileSystemHandlePermission } from '~/lib/local-project-db'
 
 type BlobDownloadInput = {
@@ -19,11 +18,9 @@ export type LocalExportWritable = {
   writable: FileSystemWritableFileStream
 }
 
-type LocalExportTarget = Extract<EncodeAudioBufferTarget, { mode: 'stream' }>
-
 export const chooseLocalExportFile = async (input: LocalExportWritableInput): Promise<FileSystemFileHandle | undefined> => {
-  if (typeof window === 'undefined' || !window.showSaveFilePicker) return
-  return await window.showSaveFilePicker({
+  if (!globalThis.window?.showSaveFilePicker) return
+  return await globalThis.window.showSaveFilePicker({
     suggestedName: input.suggestedName,
     types: input.types,
   })
@@ -43,10 +40,10 @@ const requestWritableExportDirectory = async (handle: FileSystemDirectoryHandle)
 }
 
 export const chooseLocalExportDirectory = async (): Promise<FileSystemDirectoryHandle> => {
-  if (typeof window === 'undefined' || !window.showDirectoryPicker) {
+  if (!globalThis.window?.showDirectoryPicker) {
     throw new Error('Folder selection is not supported in this browser.')
   }
-  const directory = await window.showDirectoryPicker()
+  const directory = await globalThis.window.showDirectoryPicker()
   await requestWritableExportDirectory(directory)
   return directory
 }
@@ -58,13 +55,6 @@ export const createLocalExportDirectoryWritable = async (
   const fileHandle = await directory.getFileHandle(fileName, { create: true })
   return createLocalExportWritable(fileHandle)
 }
-
-export const createLocalExportTarget = (localExport: LocalExportWritable): LocalExportTarget => ({
-  mode: 'stream',
-  writable: localExport.writable,
-  close: () => localExport.writable.close(),
-  abort: (reason) => localExport.writable.abort(reason),
-})
 
 export const downloadBlob = (input: BlobDownloadInput): void => {
   const url = URL.createObjectURL(input.blob)
@@ -80,8 +70,8 @@ export const downloadBlob = (input: BlobDownloadInput): void => {
 }
 
 export const saveBlobLocally = async (input: SaveBlobInput): Promise<void> => {
-  if (typeof window !== 'undefined' && window.showSaveFilePicker) {
-    const handle = await window.showSaveFilePicker({
+  if (globalThis.window?.showSaveFilePicker) {
+    const handle = await globalThis.window.showSaveFilePicker({
       suggestedName: input.suggestedName,
       types: input.types,
     })

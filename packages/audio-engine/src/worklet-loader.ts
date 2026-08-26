@@ -28,7 +28,7 @@ export function loadWorkletModule(context: WorkletContext, moduleUrl: string): P
   const next = context.audioWorklet.addModule(moduleUrl).then(() => {
     registration.loaded.add(moduleUrl)
     registration.pending.delete(moduleUrl)
-  }, (error: unknown) => {
+  }, (error) => {
     registration.pending.delete(moduleUrl)
     throw error
   })

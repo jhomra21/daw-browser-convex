@@ -220,20 +220,19 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const padBottom = WAVEFORM_PAD_Y;
     const innerH = Math.max(1, cssH - padTop - padBottom);
 
-    const midi: any = (props.clip as any).midi;
+    const midi = props.clip.midi;
     if (midi && Array.isArray(midi.notes) && midi.notes.length > 0) {
       const spb = 60 / Math.max(1, props.bpm || 120);
       const midiOffsetBeats = Math.max(
         0,
-        (props.clip as any).midiOffsetBeats ?? 0,
+        props.clip.midiOffsetBeats ?? 0,
       );
       const color = props.isSelected
         ? clipSelected
         : contentColor;
       let minP = Infinity;
       let maxP = -Infinity;
-      for (const note of midi.notes as Array<{ pitch: number }>) {
-        if (typeof note.pitch !== "number") continue;
+      for (const note of midi.notes) {
         if (note.pitch < minP) minP = note.pitch;
         if (note.pitch > maxP) maxP = note.pitch;
       }
@@ -245,11 +244,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       const barH = Math.max(2, Math.floor(innerH / Math.min(12, range)));
 
       ctx.fillStyle = color;
-      for (const note of midi.notes as Array<{
-        beat: number;
-        length: number;
-        pitch: number;
-      }>) {
+      for (const note of midi.notes) {
         const noteBeat = note.beat || 0;
         const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeat);
         const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats);
@@ -374,11 +369,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.clip.audioWarp;
     void props.clip.color;
     void props.isSelected;
-    const midi: any = (props.clip as any).midi;
+    const midi = props.clip.midi;
     const midiSignature = Array.isArray(midi?.notes)
       ? midi.notes
           .map(
-            (note: any) =>
+            (note) =>
               `${note.pitch ?? ""}/${note.beat ?? ""}/${note.length ?? ""}`,
           )
           .join("|")

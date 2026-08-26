@@ -1,0 +1,692 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { createServer, type Socket } from "node:net"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import {
+  desktopFrameSchemaV1,
+  desktopFrameSchema,
+  desktopProtocolVersion,
+  desktopProtocolVersionV2,
+  maxDesktopReplyBytes,
+  maxDesktopReplyFrameBytes,
+  type DesktopFrameV1,
+  type DesktopFrame,
+  type DesktopOperationV1,
+} from "@daw-browser/desktop-protocol"
+import { localControlCapabilitiesV2, type ControlErrorV1 } from "@daw-browser/control"
+import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
+import { createDesktopHostClient, DesktopControlError } from "./client"
+
+const originalActorPath = process.env.DAW_CONTROL_ACTOR_PATH
+const originalAuthPath = process.env.DAW_CONTROL_AUTH_PATH
+const originalHome = process.env.HOME
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME
+const directories: string[] = []
+const servers: ReturnType<typeof createServer>[] = []
+const sockets = new Set<Socket>()
+type RawDesktopFrame = Parameters<typeof desktopFrameSchema.parse>[0]
+
+const hostStatus = {
+  project: { id: "project-1", kind: "local" },
+  ready: true,
+  transport: "stopped",
+  capabilities: { playback: true, diagnostics: true },
+}
+
+const temporaryDirectory = async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-host-client-"))
+  directories.push(directory)
+  return directory
+}
+
+const writeRawFrame = (socket: Socket, value: RawDesktopFrame) => {
+  const payload = Buffer.from(JSON.stringify(value))
+  const frame = Buffer.alloc(payload.byteLength + 4)
+  frame.writeUInt32BE(payload.byteLength)
+  payload.copy(frame, 4)
+  socket.write(frame)
+}
+
+const writePaddedRawFrame = (socket: Socket, value: RawDesktopFrame, payloadByteLength: number) => {
+  const json = Buffer.from(JSON.stringify(value))
+  const payload = Buffer.alloc(payloadByteLength, 0x20)
+  json.copy(payload)
+  const frame = Buffer.alloc(payload.byteLength + 4)
+  frame.writeUInt32BE(payload.byteLength)
+  payload.copy(frame, 4)
+  socket.write(frame)
+}
+
+const writeFrame = (socket: Socket, value: RawDesktopFrame) => {
+  socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse(value)))
+}
+
+const acknowledge = (socket: Socket, capabilities: DesktopOperationV1[]) => {
+  writeFrame(socket, {
+    version: desktopProtocolVersion,
+    type: "helloAck",
+    sessionId: "session-identifier",
+    capabilities,
+  })
+}
+const acknowledgeV2 = (socket: Socket, capabilities: DesktopOperationV1[]) => {
+  socket.write(encodeDesktopFrame(desktopFrameSchema.parse({
+    version: desktopProtocolVersionV2,
+    type: "helloAck",
+    selectedVersion: desktopProtocolVersionV2,
+    sessionId: "session-identifier",
+    capabilities,
+  })))
+}
+
+const waitForClose = (socket: Socket) => (
+  socket.destroyed
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => socket.once("close", () => resolve()))
+)
+
+type HostFixture = {
+  paths: {
+    platform: "linux"
+    homeDirectory: string
+    userDataDirectory: string
+    actorPath: string
+  }
+}
+
+const createHostFixture = async (
+  onFrame: (socket: Socket, frame: DesktopFrameV1) => void,
+): Promise<HostFixture> => {
+  const userDataDirectory = await temporaryDirectory()
+  const hostDirectory = path.join(userDataDirectory, "host")
+  await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+  await chmod(hostDirectory, 0o700)
+  const socketPath = path.join(await realpath(hostDirectory), "host.sock")
+  const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.once("close", () => sockets.delete(socket))
+    const decoder = createDesktopFrameDecoder((frame: DesktopFrame) => {
+      if (frame.version !== "v1") {
+        socket.destroy()
+        return
+      }
+      onFrame(socket, frame)
+    })
+    socket.on("data", decoder)
+  })
+  servers.push(server)
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
+  const registration = path.join(hostDirectory, "registration-v1.json")
+  await writeFile(registration, JSON.stringify({
+    version: "v1",
+    instanceId: "a".repeat(32),
+    pid: process.pid,
+    createdAt: Date.now(),
+    address: socketPath,
+    secret: "b".repeat(64),
+  }), { mode: 0o600 })
+  await chmod(registration, 0o600)
+  return {
+    paths: {
+      platform: "linux",
+      homeDirectory: userDataDirectory,
+      userDataDirectory,
+      actorPath: path.join(userDataDirectory, "identity", "host-actor-v1.json"),
+    },
+  }
+}
+
+const createV2HostFixture = async (
+  onFrame: (socket: Socket, frame: DesktopFrame) => void,
+): Promise<HostFixture> => {
+  const userDataDirectory = await temporaryDirectory()
+  const hostDirectory = path.join(userDataDirectory, "host")
+  await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
+  await chmod(hostDirectory, 0o700)
+  const socketPath = path.join(await realpath(hostDirectory), "host.sock")
+  const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.once("close", () => sockets.delete(socket))
+    const decoder = createDesktopFrameDecoder((frame) => onFrame(socket, frame))
+    socket.on("data", decoder)
+  })
+  servers.push(server)
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
+  const registration = path.join(hostDirectory, "registration-v1.json")
+  await writeFile(registration, JSON.stringify({
+    version: "v1",
+    instanceId: "a".repeat(32),
+    pid: process.pid,
+    createdAt: Date.now(),
+    address: socketPath,
+    secret: "b".repeat(64),
+  }), { mode: 0o600 })
+  await chmod(registration, 0o600)
+  return {
+    paths: {
+      platform: "linux",
+      homeDirectory: userDataDirectory,
+      userDataDirectory,
+      actorPath: path.join(userDataDirectory, "identity", "host-actor-v1.json"),
+    },
+  }
+}
+
+const replyChunks = (
+  operation: DesktopOperationV1,
+  id: string,
+  reply: RawDesktopFrame,
+) => {
+  const bytes = Buffer.from(JSON.stringify(reply))
+  const split = Math.ceil(bytes.byteLength / 2)
+  const parts = [bytes.subarray(0, split), bytes.subarray(split)]
+  const sha256 = createHash("sha256").update(bytes).digest("hex")
+  return parts.map((part, index) => ({
+    version: desktopProtocolVersion,
+    type: "replyChunk",
+    id,
+    operation,
+    index,
+    total: parts.length,
+    byteLength: bytes.byteLength,
+    sha256,
+    payload: part.toString("base64"),
+  }))
+}
+
+beforeEach(async () => {
+  const directory = await temporaryDirectory()
+  process.env.DAW_CONTROL_AUTH_PATH = path.join(directory, "credentials", "control-auth.json")
+})
+
+afterEach(async () => {
+  for (const socket of sockets) socket.destroy()
+  sockets.clear()
+  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => {
+    if (!server.listening) {
+      resolve()
+      return
+    }
+    server.close(() => resolve())
+  })))
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+  if (originalActorPath === undefined) delete process.env.DAW_CONTROL_ACTOR_PATH
+  else process.env.DAW_CONTROL_ACTOR_PATH = originalActorPath
+  if (originalAuthPath === undefined) delete process.env.DAW_CONTROL_AUTH_PATH
+  else process.env.DAW_CONTROL_AUTH_PATH = originalAuthPath
+  if (originalHome === undefined) delete process.env.HOME
+  else process.env.HOME = originalHome
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome
+})
+
+describe("desktop host client", () => {
+  test("canonicalizes socket address parents through a user data directory alias", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+    })
+    const aliasParent = await temporaryDirectory()
+    const aliasedUserDataDirectory = path.join(aliasParent, "user-data")
+    await symlink(fixture.paths.userDataDirectory, aliasedUserDataDirectory, "dir")
+    const aliasedPaths = {
+      ...fixture.paths,
+      userDataDirectory: aliasedUserDataDirectory,
+    }
+    const registration = path.join(fixture.paths.userDataDirectory, "host", "registration-v1.json")
+    const writeRegistration = async (address: string) => {
+      await writeFile(registration, JSON.stringify({
+        version: "v1",
+        instanceId: "a".repeat(32),
+        pid: process.pid,
+        createdAt: Date.now(),
+        address,
+        secret: "b".repeat(64),
+      }), { mode: 0o600 })
+    }
+
+    await writeRegistration(path.join(aliasedUserDataDirectory, "host", "host.sock"))
+    const lexicalAddressClient = await createDesktopHostClient({ paths: aliasedPaths })
+    lexicalAddressClient.close()
+
+    await writeRegistration(path.join(await realpath(fixture.paths.userDataDirectory), "host", "host.sock"))
+    const canonicalAddressClient = await createDesktopHostClient({ paths: aliasedPaths })
+    canonicalAddressClient.close()
+
+    await writeRegistration(path.join(aliasParent, "outside.sock"))
+    await expect(createDesktopHostClient({ paths: aliasedPaths })).rejects.toThrow("Desktop host address is invalid.")
+  })
+
+  test("rejects and closes an accepted but silent host before the handshake deadline", async () => {
+    const fixture = await createHostFixture(() => undefined)
+    await expect(createDesktopHostClient({
+      paths: fixture.paths,
+      handshakeDeadlineMs: 20,
+    })).rejects.toThrow("Desktop host handshake deadline exceeded.")
+  })
+
+  test("persists the hello actor ID beside credentials and reuses it on reconnect", async () => {
+    const actorIds: string[] = []
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type !== "hello") return
+      actorIds.push(frame.actorId)
+      acknowledge(socket, ["host.status"])
+    })
+
+    const first = await createDesktopHostClient({ paths: fixture.paths })
+    first.close()
+    const second = await createDesktopHostClient({ paths: fixture.paths })
+    second.close()
+
+    expect(actorIds).toHaveLength(2)
+    expect(actorIds[0]).toBe(actorIds[1])
+    expect(JSON.parse(await readFile(
+      fixture.paths.actorPath,
+      "utf8",
+    ))).toEqual({ version: "v1", actorId: actorIds[0] })
+  })
+
+  test("uses the explicitly configured actor identity", async () => {
+    const actorId = "9d8ab7cb-6203-4a25-84d5-b7a58436b7f4"
+    const received = Promise.withResolvers<string>()
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type !== "hello") return
+      received.resolve(frame.actorId)
+      acknowledge(socket, [])
+    })
+    const actorPath = fixture.paths.actorPath
+    await mkdir(path.dirname(actorPath), { recursive: true, mode: 0o700 })
+    await chmod(path.dirname(actorPath), 0o700)
+    await writeFile(actorPath, JSON.stringify({ version: "v1", actorId }), { mode: 0o600 })
+    await chmod(actorPath, 0o600)
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(await received.promise).toBe(actorId)
+    client.close()
+  })
+
+  test("uses an explicit actor path without requiring default environment paths", async () => {
+    delete process.env.HOME
+    delete process.env.XDG_CONFIG_HOME
+    delete process.env.DAW_CONTROL_AUTH_PATH
+    delete process.env.DAW_CONTROL_ACTOR_PATH
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, [])
+    })
+    const actorPath = path.join(fixture.paths.userDataDirectory, "explicit-actor", "host-actor-v1.json")
+
+    const client = await createDesktopHostClient({
+      userDataDirectory: fixture.paths.userDataDirectory,
+      actorPath,
+    })
+
+    expect(JSON.parse(await readFile(actorPath, "utf8"))).toMatchObject({ version: "v1" })
+    client.close()
+  })
+
+  test("round trips a regular host status reply", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type === "request") {
+        writeFrame(socket, {
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          result: hostStatus,
+        })
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(await client.request("host.status", {})).toEqual(hostStatus)
+    client.close()
+  })
+
+  test("negotiates V2 and accepts an unchunked V2 capabilities reply", async () => {
+    const fixture = await createV2HostFixture((socket, frame) => {
+      if (frame.type === "hello") {
+        expect(frame.version).toBe("v2")
+        if (frame.version === "v2") expect(frame.supportedVersions).toEqual(["v1", "v2"])
+        acknowledgeV2(socket, ["control.capabilities"])
+      }
+      if (frame.type === "request") {
+        expect(frame.version).toBe("v2")
+        socket.write(encodeDesktopFrame(desktopFrameSchema.parse({
+          version: "v2",
+          type: "reply",
+          id: frame.id,
+          result: localControlCapabilitiesV2,
+        })))
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(client.protocolVersion).toBe("v2")
+    expect(await client.requestV2("control.capabilities", {})).toEqual(localControlCapabilitiesV2)
+    client.close()
+  })
+
+  test("falls back to V1 and rejects an explicit V2 read without sending a request", async () => {
+    let requestCount = 0
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["control.capabilities"])
+      if (frame.type === "request") requestCount += 1
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(client.protocolVersion).toBe("v1")
+    await expect(client.requestV2("control.capabilities", {})).rejects.toMatchObject({
+      name: "DesktopHostError",
+      data: { version: "v1", code: "unsupported-version" },
+    })
+    expect(requestCount).toBe(0)
+    client.close()
+  })
+
+  test("rejects mixed V1 replies after a V2 handshake", async () => {
+    const fixture = await createV2HostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledgeV2(socket, ["host.status"])
+      if (frame.type === "request") {
+        socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          result: hostStatus,
+        })))
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {})).rejects.toThrow("mixed protocol frame")
+  })
+
+  test("rejects a normal reply whose wire JSON exceeds the reply frame limit", async () => {
+    const connectionClosed = Promise.withResolvers<void>()
+    const fixture = await createHostFixture((socket, frame) => {
+      socket.once("close", () => connectionClosed.resolve())
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type !== "request") return
+      writePaddedRawFrame(socket, {
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result: hostStatus,
+      }, maxDesktopReplyFrameBytes + 1)
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {})).rejects.toThrow("frame size limit")
+    await connectionClosed.promise
+  })
+
+  test("returns non-control host errors as ordinary errors", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type === "request") {
+        writeFrame(socket, {
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          error: { version: "v1", code: "unavailable", message: "Host unavailable." },
+        })
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    const error = await client.request("host.status", {}).catch((failure) => failure)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(DesktopControlError)
+    expect(error).toHaveProperty("message", "Host unavailable.")
+    client.close()
+  })
+
+  test("preserves all valid control error fields in DesktopControlError", async () => {
+    const errors = [
+      { version: "v1", code: "forbidden", message: "Denied." },
+      {
+        version: "v1",
+        code: "validation",
+        message: "Invalid action.",
+        actionIndex: 3,
+        details: { name: "Required." },
+      },
+    ] satisfies ControlErrorV1[]
+    let nextError = 0
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["control.capabilities"])
+      if (frame.type === "request") {
+        writeFrame(socket, {
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          error: errors[nextError],
+        })
+        nextError += 1
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    for (const expected of errors) {
+      const error = await client.request("control.capabilities", {}).catch((failure) => failure)
+      expect(error).toBeInstanceOf(DesktopControlError)
+      if (!(error instanceof DesktopControlError)) throw new Error("Expected DesktopControlError.")
+      expect(error.data).toEqual(expected)
+    }
+    client.close()
+  })
+
+  test("reassembles a valid chunked host result", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type !== "request") return
+      const chunks = replyChunks("host.status", frame.id, {
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result: hostStatus,
+      })
+      for (const chunk of chunks) writeFrame(socket, chunk)
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(await client.request("host.status", {})).toEqual(hostStatus)
+    client.close()
+  })
+
+  test("rejects a normal reply after a partial chunk and closes the connection", async () => {
+    const connectionClosed = Promise.withResolvers<void>()
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type !== "request") return
+      const chunks = replyChunks("host.status", frame.id, {
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result: hostStatus,
+      })
+      void waitForClose(socket).then(connectionClosed.resolve)
+      writeFrame(socket, chunks[0])
+      writeFrame(socket, { version: "v1", type: "reply", id: frame.id, result: hostStatus })
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {})).rejects.toThrow("Mixed desktop reply framing.")
+    await connectionClosed.promise
+  })
+
+  test("rejects a duplicate terminal reply and closes the connection", async () => {
+    const connectionClosed = Promise.withResolvers<void>()
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type !== "request") return
+      void waitForClose(socket).then(connectionClosed.resolve)
+      const reply = { version: "v1", type: "reply", id: frame.id, result: hostStatus }
+      writeFrame(socket, reply)
+      writeFrame(socket, reply)
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    expect(await client.request("host.status", {})).toEqual(hostStatus)
+    await connectionClosed.promise
+    await expect(client.request("host.status", {})).rejects.toThrow("Desktop host connection closed.")
+  })
+
+  for (const scenario of [
+    {
+      name: "empty payload",
+      mutate: (chunks: ReturnType<typeof replyChunks>) => ({ ...chunks[0], payload: "" }),
+    },
+    {
+      name: "out-of-order index",
+      mutate: (chunks: ReturnType<typeof replyChunks>) => chunks[1],
+    },
+    {
+      name: "oversized aggregate",
+      mutate: (chunks: ReturnType<typeof replyChunks>) => ({
+        ...chunks[0],
+        total: 1,
+        byteLength: maxDesktopReplyBytes + 1,
+      }),
+    },
+    {
+      name: "invalid hash",
+      mutate: (chunks: ReturnType<typeof replyChunks>) => ({
+        ...chunks[0],
+        total: 1,
+        byteLength: Buffer.from(chunks[0]?.payload ?? "", "base64").byteLength,
+        sha256: "0".repeat(64),
+      }),
+    },
+  ]) {
+    test(`rejects and closes for a ${scenario.name} reply chunk`, async () => {
+      const connectionClosed = Promise.withResolvers<void>()
+      const fixture = await createHostFixture((socket, frame) => {
+        if (frame.type === "hello") acknowledge(socket, ["host.status"])
+        if (frame.type !== "request") return
+        const chunks = replyChunks("host.status", frame.id, {
+          version: "v1",
+          type: "reply",
+          id: frame.id,
+          result: hostStatus,
+        })
+        void waitForClose(socket).then(connectionClosed.resolve)
+        writeRawFrame(socket, scenario.mutate(chunks))
+      })
+      const client = await createDesktopHostClient({ paths: fixture.paths })
+      await expect(client.request("host.status", {})).rejects.toBeInstanceOf(Error)
+      await connectionClosed.promise
+    })
+  }
+
+  test("rejects duplicate hello acknowledgements even with empty capabilities", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type !== "hello") return
+      const acknowledgement = desktopFrameSchemaV1.parse({
+        version: "v1",
+        type: "helloAck",
+        sessionId: "session-identifier",
+        capabilities: [],
+      })
+      socket.write(Buffer.concat([
+        Buffer.from(encodeDesktopFrame(acknowledgement)),
+        Buffer.from(encodeDesktopFrame(acknowledgement)),
+      ]))
+    })
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toThrow("Desktop host connection closed.")
+  })
+
+  test("rejects a non-acknowledgement frame before hello completes", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type !== "hello") return
+      writeFrame(socket, { version: "v1", type: "lifecycle", event: "closing" })
+    })
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toThrow(
+      "Desktop host sent a frame before the handshake acknowledgement.",
+    )
+  })
+
+  test("rejects a malformed hello acknowledgement", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type !== "hello") return
+      writeRawFrame(socket, {
+        version: "v1",
+        type: "helloAck",
+        sessionId: "",
+        capabilities: ["host.status"],
+      })
+    })
+    await expect(createDesktopHostClient({ paths: fixture.paths })).rejects.toBeInstanceOf(Error)
+  })
+
+  for (const scenario of [
+    {
+      name: "host result",
+      operation: "host.status",
+      value: { version: "v1", type: "reply", result: { ready: true } },
+    },
+    {
+      name: "host error",
+      operation: "host.status",
+      value: {
+        version: "v1",
+        type: "reply",
+        error: { version: "v1", code: "validation", message: "Wrong error domain." },
+      },
+    },
+  ] satisfies Array<{
+    name: string
+    operation: DesktopOperationV1
+    value: { version: string; type: string; result?: unknown; error?: unknown }
+  }>) {
+    test(`rejects and closes for a malformed operation-specific ${scenario.name}`, async () => {
+      const connectionClosed = Promise.withResolvers<void>()
+      const fixture = await createHostFixture((socket, frame) => {
+        if (frame.type === "hello") acknowledge(socket, [scenario.operation])
+        if (frame.type !== "request") return
+        void waitForClose(socket).then(connectionClosed.resolve)
+        writeFrame(socket, { ...scenario.value, id: frame.id })
+      })
+      const client = await createDesktopHostClient({ paths: fixture.paths })
+      await expect(client.request(scenario.operation, {})).rejects.toBeInstanceOf(Error)
+      await connectionClosed.promise
+    })
+  }
+
+  test("sends one cancel on request timeout and closes for a late reply", async () => {
+    const cancelReceived = Promise.withResolvers<void>()
+    const connectionClosed = Promise.withResolvers<void>()
+    let requestId = ""
+    let cancelCount = 0
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type === "request") {
+        requestId = frame.id
+        void waitForClose(socket).then(connectionClosed.resolve)
+      }
+      if (frame.type === "cancel") {
+        cancelCount += 1
+        cancelReceived.resolve()
+        writeFrame(socket, { version: "v1", type: "reply", id: requestId, result: hostStatus })
+      }
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {}, 20)).rejects.toThrow(
+      "Desktop host request deadline exceeded.",
+    )
+    await cancelReceived.promise
+    await connectionClosed.promise
+    expect(cancelCount).toBe(1)
+  })
+
+  test("rejects a pending request when the socket closes", async () => {
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type === "request") socket.end()
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    await expect(client.request("host.status", {})).rejects.toThrow("Desktop host connection closed.")
+  })
+
+  test("rejects a pending request when the client closes", async () => {
+    const requestReceived = Promise.withResolvers<void>()
+    const fixture = await createHostFixture((socket, frame) => {
+      if (frame.type === "hello") acknowledge(socket, ["host.status"])
+      if (frame.type === "request") requestReceived.resolve()
+    })
+    const client = await createDesktopHostClient({ paths: fixture.paths })
+    const request = client.request("host.status", {})
+    await requestReceived.promise
+    client.close()
+    await expect(request).rejects.toThrow("Desktop host connection closed.")
+  })
+})

@@ -2,9 +2,16 @@ import { describe, expect, test } from 'bun:test'
 import { createDefaultLoFiParams } from '@daw-browser/shared'
 import { loFiWorklet } from '../worklet-manifest'
 
+type LoFiConfigureMessage = {
+  type: 'configure'
+  version: 1
+  revision: number
+  state: ReturnType<typeof createDefaultLoFiParams>
+}
+
 type Port = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  postMessage: (message: unknown) => void
+  onmessage: ((event: { data: LoFiConfigureMessage }) => void) | null
+  postMessage: (message: LoFiConfigureMessage) => void
   close: () => void
 }
 
@@ -40,6 +47,27 @@ const loadProcessor = async () => {
 }
 
 describe('LoFi static worklet', () => {
+  const parameters = () => ({
+    'lofi.bitDepth': Float32Array.of(8),
+    'lofi.sampleRateRatio': Float32Array.of(0.5),
+    'lofi.jitter': Float32Array.of(0.35),
+    'lofi.noiseDb': Float32Array.of(-60),
+    'lofi.mix': Float32Array.of(1),
+  })
+
+  const input = Float32Array.from({ length: 128 }, (_, frame) => Math.sin(frame * 0.17) * 0.7)
+
+  const configure = (processor: Processor) => {
+    processor.port.onmessage?.({
+      data: {
+        type: 'configure',
+        version: 1,
+        revision: 1,
+        state: { ...createDefaultLoFiParams(), seed: 123, enabled: true },
+      },
+    })
+  }
+
   test('uses the same bypass transition for every channel', async () => {
     const processor = await loadProcessor()
     processor.port.onmessage?.({
@@ -65,5 +93,20 @@ describe('LoFi static worklet', () => {
     )
     expect(output[0]).toEqual(output[1])
     expect(output[0][0]).not.toBe(output[0][127])
+  })
+
+  test('is invariant to render block partitioning and keeps stereo RNG streams independent', async () => {
+    const wholeProcessor = await loadProcessor()
+    const partitionedProcessor = await loadProcessor()
+    configure(wholeProcessor)
+    configure(partitionedProcessor)
+    const whole = [new Float32Array(128), new Float32Array(128)]
+    wholeProcessor.process([[input, input]], [whole], parameters())
+    const partitioned = [new Float32Array(128), new Float32Array(128)]
+    partitionedProcessor.process([[input.slice(0, 37), input.slice(0, 37)]], [[partitioned[0].subarray(0, 37), partitioned[1].subarray(0, 37)]], parameters())
+    partitionedProcessor.process([[input.slice(37), input.slice(37)]], [[partitioned[0].subarray(37), partitioned[1].subarray(37)]], parameters())
+    expect(partitioned[0]).toEqual(whole[0])
+    expect(partitioned[1]).toEqual(whole[1])
+    expect(whole[0]).not.toEqual(whole[1])
   })
 })

@@ -1,6 +1,7 @@
-This is a browser/chrome based DAW (Digital Audio Workstation), like Ableton but all in browser. Local first with a cloud/shared project model using convex to power sharing and realtime collaboration. Mediabunny for exporting, reading/writing/decoding/encoding files. Web Audio API for audio engine and dsp processing.
+This is a DAW (Digital Audio Workstation), like Ableton but with a portable core to enable some browser usage, except for VST and other native features. Local first with a cloud/shared project model using convex to power sharing and realtime collaboration. Mediabunny for exporting, reading/writing/decoding/encoding files. Web Audio API for audio engine and dsp processing.
 Web Audio API Docs:
 https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API#web_audio_api_target_audience
+Always follow Ableton UX/UI patterns
 
 ## Philosophy
 Do not make baseless or empty assumptions. Never say if this works like 'x' or 'y'. Always read source code or up to date docs.
@@ -80,10 +81,38 @@ Solid rules: `AGENTS-solid.md`
 
 ### Backend (Hono + Cloudflare Workers)
 - API routes in `api/index.ts` using Hono framework
-- Use Cloudflare Workers AI binding for LLM functionality
-- Handle both streaming and non-streaming responses
 - Proper error handling with JSON responses
 - Type Cloudflare bindings appropriately
+
+### Control and automation boundaries
+- Treat [`docs/control-platform.md`](docs/control-platform.md) and
+  [`docs/agent-control.md`](docs/agent-control.md) as the current control and
+  automation references; the canonical project catalog is the authority.
+- Public project control is limited to discovery, capabilities, snapshots,
+  preview, approval, keyed commit, history, and recoveries. Do not add
+  convenience mutation tools or raw store access.
+- Discover capabilities before constructing actions. Capabilities and
+  snapshots are canonical V2; mutation, history, and recovery envelopes remain
+  V1 compatibility contracts.
+- Use preview, then request approval when preview requires it, then commit with
+  a stable idempotency key, and re-observe with a fresh snapshot.
+- On a revision conflict, discard the stale plan, fetch a fresh canonical
+  snapshot, rebuild the action references and request, preview again, and only
+  then commit. Do not retry a stale request unchanged.
+- `project.current` is desktop-only. Cloud project discovery uses
+  `project.list`; desktop host/runtime IDs are a separate runtime boundary.
+- Runtime operations are not project semantic actions. Keep host status,
+  transport, diagnostics, import/export, and VST discovery/parameter reads in
+  the desktop protocol catalog.
+- Capability discovery is local-only for local project capabilities; never
+  infer local-only actions from cloud capabilities or from a desktop runtime
+  ID.
+- Native VST3 worker isolation is a crash/availability boundary, not a
+  malicious-code sandbox. Preserve the trust, scanner, fingerprint, state, and
+  packaged-artifact gates documented in [`docs/native-vst3.md`](docs/native-vst3.md).
+- For operation schemas, action inventory, references, recovery expiry,
+  transports, and VST boundaries, use the linked skills in `.factory/skills/`
+  and the detailed docs rather than duplicating contracts in guidance.
 
 ### Styling
 - Use TailwindCSS v4 with Vite plugin

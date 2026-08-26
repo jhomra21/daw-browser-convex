@@ -1,11 +1,17 @@
-import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectEntityRow } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, normalizeAudioWarp, normalizeTrackRouting } from '@daw-browser/shared'
+import {
+  createLocalProjectEntityRow,
+  openLocalProjectDb,
+  type LocalProjectEntityRow,
+  type LocalProjectStoredValue,
+} from '~/lib/local-project-db'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
 import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,
+  RestoreHistoryClipInput,
   CreateTrackInput,
   UpdateTrackInput,
   UpdateClipInput,
@@ -24,6 +30,12 @@ import type {
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
+import { externalPluginEntityKind } from '@daw-browser/external-plugins'
+import {
+  applyLocalExternalProcessorDeletionPlanToStores,
+  planLocalExternalProcessorDeletion,
+} from '~/lib/external-plugins'
+import { z } from 'zod'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -33,63 +45,93 @@ const SIDECHAIN_KIND = 'sidechain-route'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
 const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
+const projectMutationTails = new Map<string, Promise<void>>()
 let lifecycleFlushAttached = false
 
 const now = () => Date.now()
 
-const isString = (value: unknown): value is string => typeof value === 'string'
-const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
-const isObject = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValue }
+
+const abortLocalTimelineTransaction = (tx: { abort: () => void; done: Promise<unknown> }) => {
+  try {
+    tx.abort()
+  } catch {}
+  void tx.done.catch(() => undefined)
+}
+
+const isLocalProjectStoredObject = (
+  value: LocalProjectStoredValue,
+): value is LocalProjectStoredObject => (
+  typeof value === 'object'
+  && value !== null
+  && !Array.isArray(value)
+  && !(value instanceof Date)
+  && !(value instanceof RegExp)
+  && !(value instanceof Blob)
+  && !(value instanceof ArrayBuffer)
+  && !ArrayBuffer.isView(value)
+  && !(value instanceof Map)
+  && !(value instanceof Set)
 )
 
-const isTrackRow = (value: unknown): value is TimelineTrackRow => {
-  if (!isObject(value)) return false
-  return isString(value.id)
-    && isString(value.historyRef)
-    && isString(value.name)
-    && isNumber(value.index)
-    && isNumber(value.volume)
-    && isBoolean(value.muted)
-    && isBoolean(value.soloed)
+const isStoredString = (value: LocalProjectStoredValue): value is string => typeof value === 'string'
+const isStoredNumber = (value: LocalProjectStoredValue): value is number => typeof value === 'number'
+const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => typeof value === 'boolean'
+
+const isTrackRow = (value: LocalProjectStoredValue): value is TimelineTrackRow => {
+  if (!isLocalProjectStoredObject(value)) return false
+  return isStoredString(value.id)
+    && isStoredString(value.historyRef)
+    && isStoredString(value.name)
+    && isStoredNumber(value.index)
+    && Number.isFinite(value.index)
+    && isStoredNumber(value.volume)
+    && Number.isFinite(value.volume)
+    && isStoredBoolean(value.muted)
+    && isStoredBoolean(value.soloed)
     && (value.kind === 'audio' || value.kind === 'instrument')
     && (value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
     && Array.isArray(value.sends)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt)
+    && isStoredNumber(value.createdAt)
+    && Number.isFinite(value.createdAt)
+    && isStoredNumber(value.updatedAt)
+    && Number.isFinite(value.updatedAt)
 }
 
-const isClipRow = (value: unknown): value is TimelineClipRow => {
-  if (!isObject(value)) return false
-  return isString(value.id)
-    && isString(value.trackId)
-    && isString(value.historyRef)
-    && isString(value.name)
-    && isNumber(value.startSec)
-    && isNumber(value.duration)
-    && isString(value.color)
-    && isNumber(value.createdAt)
-    && isNumber(value.updatedAt)
+const isClipRow = (value: LocalProjectStoredValue): value is TimelineClipRow => {
+  if (!isLocalProjectStoredObject(value)) return false
+  return isStoredString(value.id)
+    && isStoredString(value.trackId)
+    && isStoredString(value.historyRef)
+    && isStoredString(value.name)
+    && isStoredNumber(value.startSec)
+    && Number.isFinite(value.startSec)
+    && isStoredNumber(value.duration)
+    && Number.isFinite(value.duration)
+    && isStoredString(value.color)
+    && isStoredNumber(value.createdAt)
+    && Number.isFinite(value.createdAt)
+    && isStoredNumber(value.updatedAt)
+    && Number.isFinite(value.updatedAt)
 }
 
-const isAutomationEnvelopeForTrack = (value: unknown, trackId: TimelineTrackId) => (
-  isObject(value)
-  && isObject(value.target)
-  && value.target.kind === 'track'
-  && value.target.trackId === trackId
-)
+const isAutomationEnvelopeForTrack = (value: LocalProjectStoredValue, trackId: TimelineTrackId) => {
+  return isLocalProjectStoredObject(value)
+    && isLocalProjectStoredObject(value.target)
+    && value.target.kind === 'track'
+    && value.target.trackId === trackId
+}
 
-const isEffectForTrack = (value: unknown, trackId: TimelineTrackId) => (
-  isObject(value) && value.targetId === trackId
-)
+const isEffectForTrack = (value: LocalProjectStoredValue, trackId: TimelineTrackId) => {
+  return isLocalProjectStoredObject(value) && value.targetId === trackId
+}
 
-const isSidechainRoute = (value: unknown): value is ExternalSidechainRoute => (
-  isObject(value)
-  && isString(value.sourceTrackId)
-  && isString(value.targetTrackId)
-  && isString(value.effectInstanceId)
-)
+const isSidechainRoute = (value: LocalProjectStoredValue): value is ExternalSidechainRoute => {
+  return isLocalProjectStoredObject(value)
+    && isStoredString(value.sourceTrackId)
+    && isStoredString(value.targetTrackId)
+    && isStoredString(value.effectInstanceId)
+}
 
 const requireUngroupable = (
   group: TimelineTrackRow,
@@ -118,7 +160,19 @@ const requireUngroupable = (
 const toEntityRow = createLocalProjectEntityRow
 
 const trackValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isTrackRow(row.value) ? [row.value] : [])
-const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => isClipRow(row.value) ? [row.value] : [])
+const normalizeClipRow = (value: LocalProjectStoredValue): TimelineClipRow | null => {
+  if (!isClipRow(value)) return null
+  try {
+    return { ...value, midi: value.midi === undefined ? undefined : normalizeLegacyMidiClip(value.midi) }
+  } catch {
+    return null
+  }
+}
+
+const clipValues = (rows: LocalProjectEntityRow[]) => rows.flatMap((row) => {
+  const clip = normalizeClipRow(row.value)
+  return clip ? [clip] : []
+})
 
 const sendsEqual = (
   left: TimelineTrackRow['sends'],
@@ -162,7 +216,7 @@ const clipPersistenceFieldsEqual = (left: TimelineClipRow, right: TimelineClipRo
   && left.gain === right.gain
   && clipFadesEqual(left.fades, right.fades, left.duration)
   && left.color === right.color
-  && left.midi === right.midi
+  && midiClipEquals(left.midi, right.midi)
   && left.midiOffsetBeats === right.midiOffsetBeats
 )
 
@@ -331,7 +385,8 @@ const readEntityRowsByKind = async (projectId: string, kind: string): Promise<Lo
 }
 
 const attachLifecycleFlush = () => {
-  if (lifecycleFlushAttached || typeof window === 'undefined') return
+  const browserWindow = globalThis.window
+  if (lifecycleFlushAttached || !browserWindow) return
   lifecycleFlushAttached = true
   const flush = () => {
     void Promise.all([
@@ -339,11 +394,11 @@ const attachLifecycleFlush = () => {
       flushRegisteredLocalProjectWrites(),
     ])
   }
-  window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flush()
+  browserWindow.addEventListener('visibilitychange', () => {
+    if (browserWindow.document.visibilityState === 'hidden') flush()
   })
-  window.addEventListener('pagehide', flush)
-  window.addEventListener('beforeunload', flush)
+  browserWindow.addEventListener('pagehide', flush)
+  browserWindow.addEventListener('beforeunload', flush)
 }
 
 export const registerPendingLocalTimelineFlusher = (projectId: string, flush: () => Promise<void>): (() => void) => {
@@ -376,8 +431,15 @@ const flushScheduledLocalTimelineWrites = async (projectId?: string) => {
   await flushEntityWriteQueues(projectId)
 }
 
-const trackRepositoryWrite = <T>(projectId: string, write: Promise<T>): Promise<T> => {
-  const tracked = write.finally(() => {
+const trackRepositoryWrite = <T>(projectId: string, write: () => Promise<T>): Promise<T> => {
+  const previous = projectMutationTails.get(projectId) ?? Promise.resolve()
+  const operation = previous.catch(() => undefined).then(write)
+  const tail = operation.then(() => undefined, () => undefined)
+  projectMutationTails.set(projectId, tail)
+  void tail.finally(() => {
+    if (projectMutationTails.get(projectId) === tail) projectMutationTails.delete(projectId)
+  })
+  const tracked = operation.finally(() => {
     const writes = pendingRepositoryWritesByProject.get(projectId)
     writes?.delete(tracked)
     if (writes?.size === 0) pendingRepositoryWritesByProject.delete(projectId)
@@ -452,7 +514,10 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     return track
   }
 
-  const createClip = async (input: CreateClipInput): Promise<TimelineClipRow> => {
+  const createClipRow = async (
+    input: CreateClipInput,
+    normalizeMidi: (midi: NonNullable<CreateClipInput['midi']>) => NonNullable<CreateClipInput['midi']>,
+  ): Promise<TimelineClipRow> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const trackRow = await db.get('entities', [TRACK_KIND, input.trackId])
@@ -481,7 +546,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       gain: input.gain,
       fades: input.fades ? normalizeClipFades(input.fades, input.duration) : undefined,
       sampleUrl: input.sampleUrl,
-      midi: input.midi,
+      midi: input.midi === undefined ? undefined : normalizeMidi(input.midi),
       midiOffsetBeats: input.midiOffsetBeats,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -490,6 +555,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     markChanged()
     return clip
   }
+
+  const createClip = async (input: CreateClipInput) => (
+    await createClipRow(input, normalizeMidiClip)
+  )
+
+  const restoreHistoryClip = async (input: RestoreHistoryClipInput) => (
+    await createClipRow(input, normalizeLegacyMidiClip)
+  )
 
   const updateTrack = async (input: UpdateTrackInput): Promise<TimelineTrackRow | null> => {
     const [row, trackRows] = await Promise.all([
@@ -535,60 +608,75 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const deleteTrack = async (trackId: TimelineTrackId): Promise<void> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
-      tx.store.index('by-kind').getAll(TRACK_KIND),
-      tx.store.index('by-kind').getAll(CLIP_KIND),
-      tx.store.index('by-kind').getAll(EFFECT_KIND),
-      tx.store.index('by-kind').getAll(AUTOMATION_KIND),
-      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
-    ])
-    const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
-    const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
-    const timestamp = now()
-    const remainingTracks = trackValues(trackRows).filter((row) => row.id !== trackId)
-    await Promise.all([
-      tx.store.delete([TRACK_KIND, trackId]),
-      ...clipRows
-        .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...effectRows
-        .filter((row) => isEffectForTrack(row.value, trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...automationRows
-        .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...sidechainRows
-        .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === trackId || row.value.targetTrackId === trackId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...remainingTracks.map((row) => {
-        const routing = normalizeTrackRouting({
-          track: row,
-          sends: row.sends,
-          outputTargetId: row.outputTargetId,
-          tracks: remainingTracks,
-        })
-        const track: TimelineTrackRow = {
-          ...row,
-          index: deletedIndex !== null && row.index > deletedIndex ? row.index - 1 : row.index,
-          groupId: row.groupId === trackId ? undefined : row.groupId,
-          sends: routing.sends,
-          outputTargetId: routing.outputTargetId,
-          updatedAt: timestamp,
-        }
-        if (
-          track.index === row.index
-          && track.groupId === row.groupId
-          && track.outputTargetId === row.outputTargetId
-          && sendsEqual(track.sends, row.sends)
-        ) {
-          return Promise.resolve()
-        }
-        return tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))
-      }),
-    ])
-    await tx.done
-    markChanged()
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const entities = tx.objectStore('entities')
+    try {
+      const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
+        entities.index('by-kind').getAll(TRACK_KIND),
+        entities.index('by-kind').getAll(CLIP_KIND),
+        entities.index('by-kind').getAll(EFFECT_KIND),
+        entities.index('by-kind').getAll(externalPluginEntityKind),
+        entities.index('by-kind').getAll(AUTOMATION_KIND),
+        entities.index('by-kind').getAll(SIDECHAIN_KIND),
+      ])
+      const trackRow = trackRows.find((row) => row.id === trackId && isTrackRow(row.value))
+      const deletedIndex = trackRow && isTrackRow(trackRow.value) ? trackRow.value.index : null
+      const timestamp = now()
+      const remainingTracks = trackValues(trackRows).filter((row) => row.id !== trackId)
+      await Promise.all([
+        entities.delete([TRACK_KIND, trackId]),
+        ...clipRows
+          .filter((row) => isClipRow(row.value) && row.value.trackId === trackId)
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...effectRows
+          .filter((row) => isEffectForTrack(row.value, trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...automationRows
+          .filter((row) => isAutomationEnvelopeForTrack(row.value, trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...sidechainRows
+          .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === trackId || row.value.targetTrackId === trackId))
+          .map((row) => entities.delete([row.kind, row.id])),
+        ...remainingTracks.map((row) => {
+          const routing = normalizeTrackRouting({
+            track: row,
+            sends: row.sends,
+            outputTargetId: row.outputTargetId,
+            tracks: remainingTracks,
+          })
+          const track: TimelineTrackRow = {
+            ...row,
+            index: deletedIndex !== null && row.index > deletedIndex ? row.index - 1 : row.index,
+            groupId: row.groupId === trackId ? undefined : row.groupId,
+            sends: routing.sends,
+            outputTargetId: routing.outputTargetId,
+            updatedAt: timestamp,
+          }
+          if (
+            track.index === row.index
+            && track.groupId === row.groupId
+            && track.outputTargetId === row.outputTargetId
+            && sendsEqual(track.sends, row.sends)
+          ) {
+            return Promise.resolve()
+          }
+          return entities.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))
+        }),
+      ])
+      const deletionPlan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: externalPluginRows.filter((row) => isEffectForTrack(row.value, trackId)),
+        retainedMixedEffectRows: [...effectRows, ...externalPluginRows],
+      })
+      applyLocalExternalProcessorDeletionPlanToStores(deletionPlan, {
+        entities,
+        externalPluginArtifacts: tx.objectStore('externalPluginArtifacts'),
+      })
+      await tx.done
+      markChanged()
+    } catch (error) {
+      abortLocalTimelineTransaction(tx)
+      throw error
+    }
   }
 
   const deleteClip = async (clipId: string): Promise<void> => {
@@ -614,13 +702,14 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
     const updates = rows.flatMap((row, index) => {
-      if (!row || !isClipRow(row.value)) {
+      const current = row ? normalizeClipRow(row.value) : null
+      if (!current) {
         throw new Error('Failed to move local clip because a clip was not found.')
       }
       const move = moves[index]
-      if (row.value.trackId === move.trackId && row.value.startSec === move.startSec) return []
+      if (current.trackId === move.trackId && current.startSec === move.startSec) return []
       return [{
-        ...row.value,
+        ...current,
         trackId: move.trackId,
         startSec: move.startSec,
         updatedAt: timestamp,
@@ -640,39 +729,40 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
           .then(trackValues)
         : Promise.resolve([]),
     ])
-    if (!row || !isClipRow(row.value)) return null
+    const current = row ? normalizeClipRow(row.value) : null
+    if (!current) return null
     if (input.trackId) requireTrackIds([input.trackId], tracks)
     const timestamp = now()
     const clip: TimelineClipRow = {
-      ...row.value,
-      name: input.name ?? row.value.name,
-      trackId: input.trackId ?? row.value.trackId,
-      startSec: input.startSec ?? row.value.startSec,
-      duration: input.duration ?? row.value.duration,
-      sourceAssetId: input.sourceAssetId ?? row.value.sourceAssetId,
-      sourceAssetKey: input.sourceAssetKey ?? row.value.sourceAssetKey,
-      sourceKind: input.sourceKind ?? row.value.sourceKind,
-      sourceDurationSec: input.sourceDurationSec ?? row.value.sourceDurationSec,
-      sourceSampleRate: input.sourceSampleRate ?? row.value.sourceSampleRate,
-      sourceChannelCount: input.sourceChannelCount ?? row.value.sourceChannelCount,
-      sampleUrl: patchOptionalString(row.value.sampleUrl, input.sampleUrl),
-      leftPadSec: input.leftPadSec ?? row.value.leftPadSec,
-      bufferOffsetSec: input.bufferOffsetSec ?? row.value.bufferOffsetSec,
-      audioWarp: input.audioWarp === undefined ? row.value.audioWarp : normalizeAudioWarp(input.audioWarp),
-      gain: input.gain ?? row.value.gain,
+      ...current,
+      name: input.name ?? current.name,
+      trackId: input.trackId ?? current.trackId,
+      startSec: input.startSec ?? current.startSec,
+      duration: input.duration ?? current.duration,
+      sourceAssetId: input.sourceAssetId ?? current.sourceAssetId,
+      sourceAssetKey: input.sourceAssetKey ?? current.sourceAssetKey,
+      sourceKind: input.sourceKind ?? current.sourceKind,
+      sourceDurationSec: input.sourceDurationSec ?? current.sourceDurationSec,
+      sourceSampleRate: input.sourceSampleRate ?? current.sourceSampleRate,
+      sourceChannelCount: input.sourceChannelCount ?? current.sourceChannelCount,
+      sampleUrl: patchOptionalString(current.sampleUrl, input.sampleUrl),
+      leftPadSec: input.leftPadSec ?? current.leftPadSec,
+      bufferOffsetSec: input.bufferOffsetSec ?? current.bufferOffsetSec,
+      audioWarp: input.audioWarp === undefined ? current.audioWarp : normalizeAudioWarp(input.audioWarp),
+      gain: input.gain ?? current.gain,
       fades: input.fades
-        ? normalizeClipFades(input.fades, input.duration ?? row.value.duration)
+        ? normalizeClipFades(input.fades, input.duration ?? current.duration)
         : input.duration === undefined
-          ? row.value.fades
-          : row.value.fades
-            ? transformClipFadesForDuration(row.value.fades, row.value.duration, input.duration)
+          ? current.fades
+          : current.fades
+            ? transformClipFadesForDuration(current.fades, current.duration, input.duration)
             : undefined,
-      color: input.color ?? row.value.color,
-      midi: input.midi ?? row.value.midi,
-      midiOffsetBeats: input.midiOffsetBeats ?? row.value.midiOffsetBeats,
+      color: input.color ?? current.color,
+      midi: input.midi === undefined ? current.midi : normalizeMidiClip(input.midi),
+      midiOffsetBeats: input.midiOffsetBeats ?? current.midiOffsetBeats,
       updatedAt: timestamp,
     }
-    if (clipPersistenceFieldsEqual(row.value, clip)) return row.value
+    if (clipPersistenceFieldsEqual(current, clip)) return current
     markChanged()
     entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
     await entityQueue.flush()
@@ -737,19 +827,21 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const ungroupTrack = async (groupId: TimelineTrackId): Promise<void> => {
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
-    const tx = db.transaction('entities', 'readwrite')
-    const [trackRows, clipRows, effectRows, automationRows, sidechainRows] = await Promise.all([
-      tx.store.index('by-kind').getAll(TRACK_KIND),
-      tx.store.index('by-kind').getAll(CLIP_KIND),
-      tx.store.index('by-kind').getAll(EFFECT_KIND),
-      tx.store.index('by-kind').getAll(AUTOMATION_KIND),
-      tx.store.index('by-kind').getAll(SIDECHAIN_KIND),
-    ])
+    const tx = db.transaction(['entities', 'externalPluginArtifacts'], 'readwrite')
+    const entities = tx.objectStore('entities')
+    try {
+      const [trackRows, clipRows, effectRows, externalPluginRows, automationRows, sidechainRows] = await Promise.all([
+        entities.index('by-kind').getAll(TRACK_KIND),
+        entities.index('by-kind').getAll(CLIP_KIND),
+        entities.index('by-kind').getAll(EFFECT_KIND),
+        entities.index('by-kind').getAll(externalPluginEntityKind),
+        entities.index('by-kind').getAll(AUTOMATION_KIND),
+        entities.index('by-kind').getAll(SIDECHAIN_KIND),
+      ])
     const tracks = trackValues(trackRows)
     const group = tracks.find((track) => track.id === groupId)
     if (!group || group.channelRole !== 'group') {
-      await tx.done
-      throw new Error('Failed to ungroup local timeline because the group track was not found.')
+        throw new Error('Failed to ungroup local timeline because the group track was not found.')
     }
     requireUngroupable(group, tracks, clipValues(clipRows))
     const timestamp = now()
@@ -766,20 +858,32 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
         : [{ ...track, index, groupId: nextGroupId, outputTargetId, updatedAt: timestamp }]
     })
     await Promise.all([
-      tx.store.delete([TRACK_KIND, groupId]),
+      entities.delete([TRACK_KIND, groupId]),
       ...effectRows
         .filter((row) => isEffectForTrack(row.value, groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
+        .map((row) => entities.delete([row.kind, row.id])),
       ...automationRows
         .filter((row) => isAutomationEnvelopeForTrack(row.value, groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
+        .map((row) => entities.delete([row.kind, row.id])),
       ...sidechainRows
         .filter((row) => isSidechainRoute(row.value) && (row.value.sourceTrackId === groupId || row.value.targetTrackId === groupId))
-        .map((row) => tx.store.delete([row.kind, row.id])),
-      ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
+        .map((row) => entities.delete([row.kind, row.id])),
+      ...changedTracks.map((track) => entities.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
     ])
-    await tx.done
-    markChanged()
+      const deletionPlan = planLocalExternalProcessorDeletion({
+        selectedExternalRows: externalPluginRows.filter((row) => isEffectForTrack(row.value, groupId)),
+        retainedMixedEffectRows: [...effectRows, ...externalPluginRows],
+      })
+      applyLocalExternalProcessorDeletionPlanToStores(deletionPlan, {
+        entities,
+        externalPluginArtifacts: tx.objectStore('externalPluginArtifacts'),
+      })
+      await tx.done
+      markChanged()
+    } catch (error) {
+      abortLocalTimelineTransaction(tx)
+      throw error
+    }
   }
 
   const restoreUngroup = async (input: RestoreUngroupInput): Promise<void> => {
@@ -828,7 +932,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
             && effect.instanceId === route.effectInstanceId
           ))
         : effectRows.filter((row) => (
-            isObject(row.value)
+            isLocalProjectStoredObject(row.value)
             && row.value.targetId === route.targetTrackId
             && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
             && row.value.instanceId === route.effectInstanceId
@@ -840,6 +944,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     const timestamp = now()
     const persistedGroup = { ...restoredGroup, createdAt: timestamp, updatedAt: timestamp }
+    const persistedEffects = input.effects.map((effect) => {
+      const params = z.json().safeParse(effect.params)
+      if (!params.success) {
+        throw new Error('Failed to restore local group because an effect has invalid parameters.')
+      }
+      return { ...effect, params: params.data }
+    })
     const existingTrackById = new Map(tracks.map((track) => [track.id, track]))
     const changedTracks = restoredUngroupTracks(input, tracks, restoredGroup)
       .flatMap((track) => {
@@ -855,7 +966,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await Promise.all([
       tx.store.put(toEntityRow(TRACK_KIND, persistedGroup.id, persistedGroup, timestamp)),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_KIND, track.id, track, timestamp))),
-      ...input.effects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
+      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_KIND, effect.id, effect, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_KIND, envelope.targetKey, envelope, timestamp))),
       ...sidechainRoutes.map((route) => tx.store.put(toEntityRow(
         SIDECHAIN_KIND,
@@ -921,7 +1032,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const tracks = trackValues(trackRows)
     requireTrackIds([route.sourceTrackId, route.targetTrackId], tracks)
     const matchingEffects = effectRows.filter((row) => (
-      isObject(row.value)
+      isLocalProjectStoredObject(row.value)
       && row.value.targetId === route.targetTrackId
       && (row.value.effect === 'compressor' || row.value.effect === 'gate' || row.value.effect === 'spectral')
       && row.value.instanceId === route.effectInstanceId
@@ -939,26 +1050,27 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await flushScheduledLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
     const row = await db.get('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
-    if (!isSidechainRoute(row?.value) || row.value.targetTrackId !== targetTrackId) return
+    if (!row || !isSidechainRoute(row.value) || row.value.targetTrackId !== targetTrackId) return
     await db.delete('entities', [SIDECHAIN_KIND, localSidechainRouteRowId(targetTrackId, effectInstanceId)])
     markChanged()
   }
 
   return {
     loadSnapshot,
-    createTrack: (input) => trackRepositoryWrite(projectId, createTrack(input)),
-    updateTrack: (input) => trackRepositoryWrite(projectId, updateTrack(input)),
-    createClip: (input) => trackRepositoryWrite(projectId, createClip(input)),
-    updateClip: (input) => trackRepositoryWrite(projectId, updateClip(input)),
-    moveClips: (moves) => trackRepositoryWrite(projectId, moveClips(moves)),
-    reorderAndGroup: (updates) => trackRepositoryWrite(projectId, reorderAndGroup(updates)),
-    ungroupTrack: (groupId) => trackRepositoryWrite(projectId, ungroupTrack(groupId)),
-    restoreUngroup: (input) => trackRepositoryWrite(projectId, restoreUngroup(input)),
-    applyColorBatch: (updates) => trackRepositoryWrite(projectId, applyColorBatch(updates)),
-    deleteTrack: (trackId) => trackRepositoryWrite(projectId, deleteTrack(trackId)),
-    deleteClip: (clipId) => trackRepositoryWrite(projectId, deleteClip(clipId)),
-    deleteClips: (clipIds) => trackRepositoryWrite(projectId, deleteClips(clipIds)),
-    setSidechainRoute: (route) => trackRepositoryWrite(projectId, setSidechainRoute(route)),
-    removeSidechainRoute: (targetTrackId, effectInstanceId) => trackRepositoryWrite(projectId, removeSidechainRoute(targetTrackId, effectInstanceId)),
+    createTrack: (input) => trackRepositoryWrite(projectId, () => createTrack(input)),
+    updateTrack: (input) => trackRepositoryWrite(projectId, () => updateTrack(input)),
+    createClip: (input) => trackRepositoryWrite(projectId, () => createClip(input)),
+    restoreHistoryClip: (input) => trackRepositoryWrite(projectId, () => restoreHistoryClip(input)),
+    updateClip: (input) => trackRepositoryWrite(projectId, () => updateClip(input)),
+    moveClips: (moves) => trackRepositoryWrite(projectId, () => moveClips(moves)),
+    reorderAndGroup: (updates) => trackRepositoryWrite(projectId, () => reorderAndGroup(updates)),
+    ungroupTrack: (groupId) => trackRepositoryWrite(projectId, () => ungroupTrack(groupId)),
+    restoreUngroup: (input) => trackRepositoryWrite(projectId, () => restoreUngroup(input)),
+    applyColorBatch: (updates) => trackRepositoryWrite(projectId, () => applyColorBatch(updates)),
+    deleteTrack: (trackId) => trackRepositoryWrite(projectId, () => deleteTrack(trackId)),
+    deleteClip: (clipId) => trackRepositoryWrite(projectId, () => deleteClip(clipId)),
+    deleteClips: (clipIds) => trackRepositoryWrite(projectId, () => deleteClips(clipIds)),
+    setSidechainRoute: (route) => trackRepositoryWrite(projectId, () => setSidechainRoute(route)),
+    removeSidechainRoute: (targetTrackId, effectInstanceId) => trackRepositoryWrite(projectId, () => removeSidechainRoute(targetTrackId, effectInstanceId)),
   }
 }

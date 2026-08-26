@@ -1,11 +1,7 @@
+import { expect, test } from 'bun:test'
 import { parseSharedTimelineOperation } from '@daw-browser/shared'
 
-import { buildClipFadesMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs } from './timeline-operation-executor'
-
-declare function test(name: string, run: () => void): void
-declare function expect(value: unknown): {
-  toEqual(expected: unknown): void
-}
+import { buildClipFadesMutationArgs, buildClipMidiMutationArgs, buildRestoreChainMutationArgs, buildTrackCreateMutationArgs, classifyBulkClipDeleteError } from './timeline-operation-executor'
 
 test('forwards a parsed restore-chain payload without transport-only fields', () => {
   const operation = parseSharedTimelineOperation({
@@ -46,10 +42,11 @@ test('forwards a parsed restore-chain payload without transport-only fields', ()
   })
 })
 
-test('forwards collapsed state when creating a track', () => {
+test('forwards name and collapsed state when creating a track', () => {
   const operation = parseSharedTimelineOperation({
     kind: 'tracks.create',
     payload: {
+      name: 'Named return',
       index: 2,
       kind: 'audio',
       channelRole: 'return',
@@ -64,6 +61,7 @@ test('forwards collapsed state when creating a track', () => {
 
   expect(buildTrackCreateMutationArgs('project-1', operation.payload)).toEqual({
     projectId: 'project-1',
+    name: 'Named return',
     index: 2,
     kind: 'audio',
     channelRole: 'return',
@@ -105,4 +103,42 @@ test('forwards a parsed fade operation to the clips.setFades mutation', () => {
   }
 
   expect(buildClipFadesMutationArgs(operation.payload)).toEqual(expected)
+})
+
+test('forwards a parsed durable MIDI operation to the server mutation', () => {
+  const operation = parseSharedTimelineOperation({
+    kind: 'clips.setMidi',
+    payload: {
+      clipId: 'clip-1',
+      operationId: 'midi-1',
+      midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
+    },
+  })
+  if (!operation || operation.kind !== 'clips.setMidi') throw new Error('Expected MIDI operation to parse')
+  expect(buildClipMidiMutationArgs('project-1', operation.payload)).toEqual({
+    projectId: 'project-1',
+    clipId: 'clip-1',
+    operationId: 'midi-1',
+    midi: {
+      wave: 'sine',
+      notes: [{ id: 'midi:note:[["beat",0],["channel",1],["length",1],["pitch",60]]:0', beat: 0, length: 1, pitch: 60, channel: 1 }],
+      cc: [],
+      pitchBends: [],
+      channelPressure: [],
+      polyPressure: [],
+      mappings: [],
+    },
+  })
+})
+
+test('classifies wrapped lock and access errors as terminal forbidden responses', () => {
+  const wrapped = new Error('Convex request failed')
+  wrapped.cause = {
+    code: 'track-locked',
+    message: 'Request failed: Actor cannot delete clips on a locked track.',
+  }
+  expect(classifyBulkClipDeleteError(wrapped)).toMatchObject({ status: 403 })
+  expect(classifyBulkClipDeleteError(new Error('[CONVEX] Actor cannot delete one or more clips.'))).toMatchObject({
+    status: 403,
+  })
 })

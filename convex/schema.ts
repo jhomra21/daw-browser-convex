@@ -3,13 +3,13 @@ import { v } from "convex/values";
 import { audioWarpValidator } from "./audioWarpValidator";
 import { clipFadesValidator } from "./clipFadesValidator";
 import { projectManifestValidator } from "./projectManifestValidator";
+import { midiValidator } from "./midiValidator";
 
-// Minimal shared model for collaboration
-// - We intentionally DO NOT store track names or any audio URLs here
-// - All scoping is via a simple projectId string (avoids needing a timelines table)
+// Shared collaboration model scoped by a stable projectId.
 export default defineSchema({
   tracks: defineTable({
     projectId: v.string(),
+    name: v.string(),
     index: v.number(),
     kind: v.optional(v.string()), // 'audio' | 'instrument'
     historyRef: v.optional(v.string()),
@@ -49,6 +49,7 @@ export default defineSchema({
   clips: defineTable({
     projectId: v.string(),
     trackId: v.id("tracks"),
+    historyRef: v.optional(v.string()),
     startSec: v.number(),
     duration: v.number(),
     sourceAssetKey: v.optional(v.string()),
@@ -64,16 +65,7 @@ export default defineSchema({
     color: v.optional(v.string()),
     name: v.optional(v.string()),
     sampleUrl: v.optional(v.string()),
-    midi: v.optional(v.object({
-      wave: v.string(),
-      gain: v.optional(v.number()),
-      notes: v.array(v.object({
-        beat: v.number(),
-        length: v.number(),
-        pitch: v.number(),
-        velocity: v.optional(v.number()),
-      })),
-    })),
+    midi: v.optional(midiValidator),
     midiOffsetBeats: v.optional(v.number()),
   })
     .index("by_room", ["projectId"])
@@ -83,14 +75,18 @@ export default defineSchema({
     projectId: v.string(),
     assetKey: v.string(),
     sourceKind: v.string(),
-    url: v.string(),
-    name: v.optional(v.string()),
-    duration: v.number(),
-    sampleRate: v.number(),
-    channelCount: v.number(),
+    name: v.string(),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    contentSha256: v.string(),
+    r2Key: v.string(),
+    duration: v.optional(v.number()),
+    sampleRate: v.optional(v.number()),
+    channelCount: v.optional(v.number()),
     ownerUserId: v.string(),
     folderId: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.number(),
   })
     .index("by_room", ["projectId"])
     .index("by_room_assetKey", ["projectId", "assetKey"])
@@ -104,11 +100,47 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"]),
 
+  assetUploadReceipts: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    idempotencyKey: v.string(),
+    contentSha256: v.string(),
+    assetKey: v.string(),
+    r2Key: v.string(),
+    semanticDigest: v.string(),
+    status: v.union(v.literal("pending"), v.literal("completed"), v.literal("failed")),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    durationSec: v.optional(v.number()),
+    sampleRate: v.optional(v.number()),
+    channelCount: v.optional(v.number()),
+    name: v.string(),
+    folderId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    attempts: v.number(),
+  })
+    .index("by_project_actor_idempotency", ["projectId", "actorUserId", "idempotencyKey"])
+    .index("by_project_status_updatedAt", ["projectId", "status", "updatedAt"])
+    .index("by_status_updatedAt", ["status", "updatedAt"])
+    .index("by_asset", ["projectId", "assetKey"])
+    .index("by_project_folder_status", ["projectId", "folderId", "status"]),
+
   projects: defineTable({
     projectId: v.string(),
+    storageNamespace: v.string(),
     ownerUserId: v.string(),
     name: v.string(),
     createdAt: v.number(),
+    updatedAt: v.number(),
+    revision: v.number(),
+    tempoBpm: v.number(),
+    timeSignatureNumerator: v.number(),
+    timeSignatureDenominator: v.number(),
+    loopEnabled: v.boolean(),
+    loopStartSec: v.number(),
+    loopEndSec: v.number(),
     deletionPendingAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerUserId"])
@@ -162,14 +194,21 @@ export default defineSchema({
     kind: v.union(v.literal("backup-asset"), v.literal("sample"), v.literal("export"), v.literal("project-prefix")),
     attempts: v.number(),
     nextAttemptAt: v.number(),
+    status: v.union(v.literal("pending"), v.literal("claimed"), v.literal("deleted")),
+    claimedAt: v.optional(v.number()),
+    claimToken: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_key", ["r2Key"])
-    .index("by_due", ["nextAttemptAt"])
+    .index("by_status_due", ["status", "nextAttemptAt"])
+    .index("by_status_claimedAt", ["status", "claimedAt"])
     .index("by_room", ["projectId"])
-    .index("by_room_due", ["projectId", "nextAttemptAt"]),
+    .index("by_room_status_due", ["projectId", "status", "nextAttemptAt"])
+    .index("by_room_kind_status_due", ["projectId", "kind", "status", "nextAttemptAt"])
+    .index("by_room_kind_claimedAt", ["projectId", "kind", "status", "claimedAt"]),
 
   sharedOperationResults: defineTable({
     projectId: v.string(),
@@ -179,6 +218,105 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_room_user_operation", ["projectId", "userId", "operationId"]),
+
+  clipDeletionRecoveries: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    sourceClipId: v.string(),
+    deleteOperationId: v.string(),
+    payload: v.any(),
+    payloadDigest: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    restoredClipId: v.optional(v.string()),
+  })
+    .index("by_project_actor_source", ["projectId", "actorUserId", "sourceClipId"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
+  clipDeletionRecoveryReceipts: defineTable({
+    projectId: v.string(),
+    actorUserId: v.string(),
+    recoveryId: v.string(),
+    restoredClipId: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_recovery", ["recoveryId"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
+  controlCommits: defineTable({
+    projectId: v.string(),
+    apiVersion: v.literal("v1"),
+    actorSubject: v.string(),
+    actorIssuer: v.optional(v.string()),
+    actorTokenIdentifier: v.optional(v.string()),
+    actorRole: v.union(v.literal("owner"), v.literal("editor"), v.literal("viewer")),
+    idempotencyKey: v.string(),
+    requestDigest: v.string(),
+    semanticRequest: v.string(),
+    priorRevision: v.number(),
+    finalRevision: v.number(),
+    applied: v.boolean(),
+    result: v.any(),
+    createdAt: v.number(),
+    status: v.literal("completed"),
+  })
+    .index("by_project_actor_idempotency", ["projectId", "actorSubject", "idempotencyKey"])
+    .index("by_project_createdAt", ["projectId", "createdAt"]),
+
+  controlApprovals: defineTable({
+    projectId: v.string(),
+    actorSubject: v.string(),
+    requestDigest: v.string(),
+    baseRevision: v.number(),
+    actionIndexes: v.array(v.number()),
+    tokenHash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_project_actor_createdAt", ["projectId", "actorSubject", "createdAt"])
+    .index("by_project", ["projectId"])
+    .index("by_project_createdAt", ["projectId", "createdAt"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"]),
+
+  controlRecoveries: defineTable({
+    projectId: v.string(),
+    actorSubject: v.string(),
+    sourceCommitId: v.optional(v.id("controlCommits")),
+    sourceActionIndex: v.number(),
+    kind: v.union(
+      v.literal("clip.delete"),
+      v.literal("effect.remove"),
+      v.literal("instrument.remove"),
+      v.literal("arpeggiator.remove"),
+      v.literal("automation.delete"),
+      v.literal("sidechain.remove"),
+      v.literal("asset.delete"),
+      v.literal("track.delete"),
+      v.literal("track.ungroup"),
+      v.literal("timeline.range.delete"),
+    ),
+    payload: v.string(),
+    payloadHash: v.string(),
+    impact: v.object({
+      tracks: v.optional(v.number()),
+      clips: v.number(),
+      processors: v.number(),
+      automation: v.number(),
+      sidechains: v.number(),
+      assets: v.number(),
+    }),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+  })
+    .index("by_project_createdAt", ["projectId", "createdAt"])
+    .index("by_project_actor_createdAt", ["projectId", "actorSubject", "createdAt"])
+    .index("by_project_expiresAt", ["projectId", "expiresAt"]),
 
   effects: defineTable({
     projectId: v.string(),
@@ -225,19 +363,6 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_project_track", ["projectId", "trackId"])
     .index("by_project_target_key", ["projectId", "targetKey"]),
-
-  chatHistories: defineTable({
-    projectId: v.string(),
-    ownerUserId: v.string(),
-    messages: v.array(
-      v.object({
-        role: v.string(),
-        content: v.string(),
-      })
-    ),
-    updatedAt: v.number(),
-  })
-    .index("by_room_owner", ["projectId", "ownerUserId"]),
 
   projectMessages: defineTable({
     projectId: v.string(),

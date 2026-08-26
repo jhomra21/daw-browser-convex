@@ -23,5 +23,5 @@ export const streamProjectR2Object = async (
   const object = await input.bucket.get(input.key)
   if (!object) return c.json({ error: 'Not found' }, 404)
 
-  return createR2ObjectResponse(object, input.key, input.cacheControl)
+  return createR2ObjectResponse(object, input.cacheControl)
 }

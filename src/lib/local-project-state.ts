@@ -1,5 +1,6 @@
 import { openLocalProjectDb } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
+import { z } from 'zod'
 
 const now = () => Date.now()
 
@@ -9,6 +10,7 @@ export const loadLocalProjectState = async <TValue>(
 ): Promise<TValue | undefined> => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('projectState', key)
+  // SAFETY: callers provide the owner type for this key's persisted JSON value.
   return row?.value as TValue | undefined
 }
 
@@ -20,7 +22,7 @@ export const saveLocalProjectState = async <TValue>(
   const db = await openLocalProjectDb(projectId)
   await db.put('projectState', {
     key,
-    value,
+    value: z.json().parse(value),
     updatedAt: now(),
   })
   notifyLocalProjectChanged(projectId)

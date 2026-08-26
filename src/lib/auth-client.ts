@@ -1,13 +1,17 @@
-import { createAuthClient } from "better-auth/solid";
+import { createAuthClient } from 'better-auth/solid'
+import { resolveAuthBaseUrl } from '~/lib/auth-base-url'
+import { rendererApiRuntime } from '~/lib/renderer-api-url'
 
-// Configure the base URL of your auth server (Cloudflare Worker).
-// In dev, set VITE_AUTH_BASE_URL to your worker URL, e.g. http://localhost:8787
-const baseURL = (import.meta as any).env?.VITE_AUTH_BASE_URL || window.location.origin;
+const resolvedBaseURL = resolveAuthBaseUrl(
+  import.meta.env.VITE_AUTH_BASE_URL || import.meta.env.VITE_API_BASE_URL,
+  rendererApiRuntime(),
+)
+const baseURL = resolvedBaseURL ?? 'https://unavailable.invalid/api/auth'
 
 export const authClient = createAuthClient({
   baseURL,
   fetchOptions: {
     // Ensure cookies are sent across origins (dev server <-> worker)
-    credentials: "include",
+    credentials: 'include',
   },
-});
+})

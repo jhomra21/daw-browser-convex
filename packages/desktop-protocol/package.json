@@ -1,0 +1,22 @@
+{
+  "name": "@daw-browser/desktop-protocol",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./application-menu": "./src/application-menu.ts",
+    "./socket": "./src/socket.ts",
+    "./reply-chunks": "./src/reply-chunks.ts",
+    "./client": "./src/client.ts",
+    "./native-audio-host": "./src/native-audio-host.ts"
+  },
+  "scripts": {
+    "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/control": "workspace:*",
+    "@daw-browser/plugin-host-protocol": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

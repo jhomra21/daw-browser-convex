@@ -16,6 +16,9 @@ type KnobProps = {
   unit?: string
   disabled?: boolean
   onValueChange: (value: number) => void
+  onInteractionStart?: (value: number) => void
+  onInteractionEnd?: (value: number) => void
+  onInteractionCancel?: (value: number) => void
   logarithmic?: boolean
   zeroAwareLogarithmic?: boolean
   bipolar?: boolean
@@ -108,6 +111,9 @@ export default function Knob(props: KnobProps) {
     step,
     disabled: () => props.disabled ?? false,
     onValueChange: (value) => props.onValueChange(value),
+    onInteractionStart: (value) => props.onInteractionStart?.(value),
+    onInteractionEnd: (value) => props.onInteractionEnd?.(value),
+    onInteractionCancel: (value) => props.onInteractionCancel?.(value),
     valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => {
       const deltaY = startPosition.y - currentPosition.y
       return knobValueFromDrag(

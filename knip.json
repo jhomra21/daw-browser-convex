@@ -1,5 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/desktop": {
+      "entry": [
+        "main.ts",
+        "preload.ts"
+      ]
+    }
+  },
   "ignoreFiles": [
     "public/audio-worklets/*.js",
     "src/components/nav-user.tsx",
@@ -8,7 +16,20 @@
     "src/components/ui/separator.tsx",
     "src/components/ui/sheet.tsx",
     "src/components/ui/sidebar.tsx",
-    "src/components/ui/skeleton.tsx"
+    "src/components/ui/skeleton.tsx",
+    "apps/desktop/forge.config.ts",
+    "apps/desktop/no-pwa.ts",
+    "apps/desktop/vite.main.config.ts",
+    "apps/desktop/vite.preload.config.ts",
+    "apps/desktop/vite.renderer.config.ts"
+  ],
+  "ignoreDependencies": [
+    "@electron-forge/maker-dmg",
+    "@electron-forge/maker-squirrel",
+    "@electron-forge/maker-zip",
+    "@electron-forge/plugin-fuses",
+    "@electron-forge/plugin-vite",
+    "@electron/fuses"
   ],
   "ignoreIssues": {
     "src/lib/local-cloud-id-map.ts": [
@@ -30,6 +51,9 @@
       "exports",
       "types"
     ],
+    "src/lib/external-plugins.ts": [
+      "exports"
+    ],
     "src/lib/session.ts": [
       "exports"
     ],
@@ -42,11 +66,22 @@
     "packages/audio-engine/src/audio-stretch-cache.ts": [
       "exports"
     ],
+    "packages/control-cli/src/mcp.ts": [
+      "files"
+    ],
     "packages/audio-engine/src/clip-scheduler.ts": [
       "exports"
     ],
     "src/lib/timeline-repository/types.ts": [
       "types"
+    ],
+    "api/control-oauth.ts": [
+      "exports",
+      "types"
+    ],
+    "apps/desktop/plugin-catalog.ts": [
+      "files",
+      "exports"
     ],
     "src/components/ui/**/*.tsx": [
       "exports",

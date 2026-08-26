@@ -10,9 +10,10 @@ import {
 import { createStore, produce } from "solid-js/store";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
-  assert,
+  assertDefined,
   automationEnvelopeValueRange,
   automationTargetKey,
+  normalizeMixerVolume,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
 import {
@@ -50,6 +51,7 @@ import {
   getReturnSendTargets,
   resolveSendTargetId,
 } from "./track-send-targets";
+import { trackNumberById } from "~/lib/track-sidebar-mixer";
 import TrackSidebarRow from "./TrackSidebarRow";
 
 export type TrackSidebarProps = {
@@ -98,6 +100,7 @@ export type TrackSidebarProps = {
     subscribeTrackLevels: (
       listener: (levels: ReadonlyMap<string, TrackStereoLevels>) => void,
     ) => () => void;
+    subscribeMasterLevels: (listener: (levels: TrackStereoLevels) => void) => () => void;
     onVolumePreview: (
       trackId: Track["id"],
       volume: number,
@@ -116,9 +119,7 @@ const displayMeterLevel = (value: number | undefined) => {
   const clamped = clampUnit(value ?? 0);
   return clamped > METER_SILENCE_FLOOR ? clamped : 0;
 };
-const clampVolume = (volume: number) => clampUnit(volume);
-const quantizeVolume = (volume: number) =>
-  Math.round(clampVolume(volume) * 100) / 100;
+const quantizeVolume = normalizeMixerVolume;
 const isBulkCollapseModifier = (event: MouseEvent | PointerEvent) =>
   event.metaKey || event.altKey;
 const TrackSidebar: Component<TrackSidebarProps> = (props) => {
@@ -128,6 +129,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   const [meters, setMeters] = createStore<Record<string, TrackStereoLevels>>(
     {},
   );
+  const [masterLevels, setMasterLevels] = createSignal<TrackStereoLevels>({
+    left: 0,
+    right: 0,
+  });
   const [selectedOutputTargets, setSelectedOutputTargets] = createSignal<
     Map<Track["id"], string>
   >(new Map());
@@ -169,6 +174,16 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
   });
 
   createEffect(() => {
+    const unsubscribe = sidebar().subscribeMasterLevels((levels) => {
+      setMasterLevels({
+        left: clampUnit(levels.left),
+        right: clampUnit(levels.right),
+      });
+    });
+    onCleanup(unsubscribe);
+  });
+
+  createEffect(() => {
     const trackIds = new Set<string>(
       sidebar().allTracks.map((track) => track.id),
     );
@@ -199,6 +214,9 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     ...sidebar().trackLayout.scrollingRows,
     ...sidebar().trackLayout.returnRows,
   ]);
+  const trackNumbersById = createMemo(() =>
+    trackNumberById(sidebar().allTracks),
+  );
   const depthByTrackId = createMemo(
     () => new Map(allTrackLayout().map((row) => [row.trackId, row.depth])),
   );
@@ -300,7 +318,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
         existing.volumeEnvelope = envelope;
         existing.volumeRange = automationEnvelopeValueRange(envelope, {
           min: 0,
-          max: 1,
+          max: 2,
         });
       }
       mutable.set(envelope.target.trackId, existing);
@@ -310,14 +328,12 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     }
     return byTrackId;
   });
-  const masterAutomationMeta = createMemo<{
+  type MasterAutomationMeta = {
     automatedTargetKeys: Set<string>;
     selectedEnvelope: AutomationEnvelope | undefined;
-  }>(() => {
-    const meta: {
-      automatedTargetKeys: Set<string>;
-      selectedEnvelope: AutomationEnvelope | undefined;
-    } = {
+  };
+  const masterAutomationMeta = createMemo<MasterAutomationMeta>(() => {
+    const meta: MasterAutomationMeta = {
       automatedTargetKeys: new Set<string>(),
       selectedEnvelope: undefined,
     };
@@ -456,9 +472,8 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const localY = clientYToTimelineTrackY(clientY, scrollElement);
     const row = trackLayoutRowAtY(sidebar().trackLayout.scrollingRows, localY);
     if (!row) return undefined;
-    const track = sidebar().trackById.get(row.trackId);
-    assert(
-      track,
+    const track = assertDefined(
+      sidebar().trackById.get(row.trackId),
       `Timeline layout row references missing track ${row.trackId}`,
     );
     return {
@@ -611,22 +626,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     ]);
   };
 
-  const [activeVolumeDrag, setActiveVolumeDrag] = createSignal<{
-    pointerId: number;
-    trackId: Track["id"];
-    startValue: number;
-    value: number;
-  } | null>(null);
-
-  const volumeFromPointer = (input: HTMLInputElement, clientX: number) => {
-    const rect = input.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    return quantizeVolume((clientX - rect.left) / width);
-  };
-
   const displayVolume = (track: Track) => {
-    const active = activeVolumeDrag();
-    if (active?.trackId === track.id) return active.value;
     return (
       props.automation
         .evaluatedValuesByTargetKey()
@@ -642,11 +642,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   const previewTrackVolume = (track: Track, volume: number) => {
     const nextVolume = quantizeVolume(volume);
-    setActiveVolumeDrag((active) => {
-      if (!active || active.trackId !== track.id || active.value === nextVolume)
-        return active;
-      return { ...active, value: nextVolume };
-    });
     sidebar().onVolumePreview(track.id, nextVolume, !!track.muted);
   };
 
@@ -689,23 +684,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   onCleanup(() => cleanupAutomationResize?.());
 
-  const updateVolumeFromPointer = (
-    track: Track,
-    input: HTMLInputElement,
-    clientX: number,
-  ) => {
-    previewTrackVolume(track, volumeFromPointer(input, clientX));
-  };
-
-  const releaseVolumePointerCapture = (
-    input: HTMLInputElement,
-    pointerId: number,
-  ) => {
-    if (input.hasPointerCapture(pointerId)) {
-      input.releasePointerCapture(pointerId);
-    }
-  };
-
   return (
     <div
       class="sticky right-0 z-40 relative flex shrink-0 flex-col overflow-x-clip border-l border-border bg-timeline-surface p-0"
@@ -715,10 +693,10 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
       }}
     >
       <div
-        class="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
+        class="group absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
         onPointerDown={(event) => sidebar().onSidebarPointerDown(event)}
       >
-        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-muted" />
+        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
       </div>
 
       <div class="sticky top-0 z-40 bg-timeline-surface">
@@ -774,6 +752,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 appPreferences,
                 depthByTrackId,
                 layoutByTrackId,
+                trackNumbersById,
                 ancestorGroupColorBandsByTrackId,
                 defaultGroupColor,
                 resolveGroupColor,
@@ -800,10 +779,6 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 trackVolumeAutomationTargetKey,
                 previewTrackVolume,
                 commitTrackVolume,
-                activeVolumeDrag,
-                setActiveVolumeDrag,
-                updateVolumeFromPointer,
-                releaseVolumePointerCapture,
                 startAutomationResize,
                 handleOutputTargetChange,
                 handleSendTargetChange,
@@ -864,6 +839,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
                 </div>
                 <MasterSidebarRow
                   master={sidebar().master}
+                  levels={masterLevels()}
                   automation={{
                     visible: props.automation.lanes.masterVisible,
                     heightPx: props.automation.lanes.masterHeight,

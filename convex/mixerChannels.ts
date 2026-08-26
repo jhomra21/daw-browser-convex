@@ -1,6 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
-import { assert } from "@daw-browser/shared";
+import { assert, assertDefined } from "@daw-browser/shared";
 
 export type MixerSend = {
   targetId: Id<"tracks">;
@@ -17,6 +17,10 @@ export type MergedTrackDoc = Doc<"tracks"> & {
   channelRole: string;
   outputTargetId?: Id<"tracks">;
   sends: MixerSend[];
+};
+
+export type MergedTrackDocWithMixerChannel = MergedTrackDoc & {
+  mixerChannelId: Id<"mixerChannels">;
 };
 
 type MixerChannelState = {
@@ -132,23 +136,39 @@ function removeRoutingReferencesToTracksFromFields(
 function mergeTrackWithMixerState(
   track: Doc<"tracks">,
   channel: Doc<"mixerChannels"> | null | undefined,
+  now: number,
+  includeMixerChannelId: false,
+): MergedTrackDoc;
+function mergeTrackWithMixerState(
+  track: Doc<"tracks">,
+  channel: Doc<"mixerChannels"> | null | undefined,
+  now: number,
+  includeMixerChannelId: true,
+): MergedTrackDocWithMixerChannel;
+function mergeTrackWithMixerState(
+  track: Doc<"tracks">,
+  channel: Doc<"mixerChannels"> | null | undefined,
   now = Date.now(),
-): MergedTrackDoc {
-  assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
-  assert(channel.channelRole !== undefined, `Missing mixer channel role for track ${String(track._id)}.`);
-  assert(channel.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}.`);
-  const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt, now);
-  return {
+  includeMixerChannelId = false,
+): MergedTrackDoc | MergedTrackDocWithMixerChannel {
+  const definedChannel = assertDefined(channel, `Missing mixer channel for track ${String(track._id)}.`);
+  assert(definedChannel.channelRole !== undefined, `Missing mixer channel role for track ${String(track._id)}.`);
+  assert(definedChannel.sends !== undefined, `Missing mixer channel sends for track ${String(track._id)}.`);
+  const lockState = normalizeMixerLockState(definedChannel.lockedBy, definedChannel.lockedAt, now);
+  const merged = {
     ...track,
-    volume: channel.volume,
-    muted: channel.muted,
-    soloed: channel.soloed,
+    volume: definedChannel.volume,
+    muted: definedChannel.muted,
+    soloed: definedChannel.soloed,
     lockedBy: lockState.lockedBy,
     lockedAt: lockState.lockedAt,
-    channelRole: channel.channelRole,
-    outputTargetId: channel.outputTargetId,
-    sends: channel.sends,
+    channelRole: definedChannel.channelRole,
+    outputTargetId: definedChannel.outputTargetId,
+    sends: definedChannel.sends,
   };
+  return includeMixerChannelId
+    ? { ...merged, mixerChannelId: definedChannel._id }
+    : merged;
 }
 
 export async function listMixerChannelsForTrack(ctx: MixerReadCtx, trackId: Id<"tracks">) {
@@ -195,12 +215,23 @@ export async function removeTracksRoutingReferences(
 export async function ensureMixerChannelForTrack(ctx: MixerReadCtx, track: Doc<"tracks">) {
   const rows = await listMixerChannelsForTrack(ctx, track._id);
   assert(rows.length === 1, `Expected exactly one mixer channel for track ${String(track._id)}.`);
-  const channel = rows[0];
-  assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
-  return channel;
+  return assertDefined(rows[0], `Missing mixer channel for track ${String(track._id)}.`);
 }
 
-export async function listProjectTracksWithMixerChannels(ctx: MixerReadCtx, projectId: string): Promise<MergedTrackDoc[]> {
+export async function listProjectTracksWithMixerChannels(
+  ctx: MixerReadCtx,
+  projectId: string,
+): Promise<MergedTrackDoc[]>;
+export async function listProjectTracksWithMixerChannels(
+  ctx: MixerReadCtx,
+  projectId: string,
+  includeMixerChannelIds: true,
+): Promise<MergedTrackDocWithMixerChannel[]>;
+export async function listProjectTracksWithMixerChannels(
+  ctx: MixerReadCtx,
+  projectId: string,
+  includeMixerChannelIds = false,
+): Promise<MergedTrackDoc[] | MergedTrackDocWithMixerChannel[]> {
   const [tracks, channels] = await Promise.all([
     ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
     ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect(),
@@ -214,9 +245,13 @@ export async function listProjectTracksWithMixerChannels(ctx: MixerReadCtx, proj
   const now = Date.now();
   return tracks
     .map((track) => {
-      const channel = channelByTrackId.get(String(track._id));
-      assert(channel, `Missing mixer channel for track ${String(track._id)}.`);
-      return mergeTrackWithMixerState(track, channel, now);
+      const channel = assertDefined(
+        channelByTrackId.get(String(track._id)),
+        `Missing mixer channel for track ${String(track._id)}.`,
+      );
+      return includeMixerChannelIds
+        ? mergeTrackWithMixerState(track, channel, now, true)
+        : mergeTrackWithMixerState(track, channel, now, false);
     })
     .sort((a: MergedTrackDoc, b: MergedTrackDoc) => (a.index ?? 0) - (b.index ?? 0));
 }
@@ -225,5 +260,5 @@ export async function getMergedTrack(ctx: MixerReadCtx, trackId: Id<"tracks">): 
   const track = await ctx.db.get(trackId);
   if (!track) return null;
   const channel = await ensureMixerChannelForTrack(ctx, track);
-  return mergeTrackWithMixerState(track, channel);
+  return mergeTrackWithMixerState(track, channel, Date.now(), false);
 }

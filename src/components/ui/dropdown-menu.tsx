@@ -21,10 +21,13 @@ type DropdownMenuContentProps<T extends ValidComponent = "div"> =
     class?: string | undefined
   }
 
-const DropdownMenuContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuContentProps<T>>
-) => {
-  const [, rest] = splitProps(props as DropdownMenuContentProps, ["class"])
+function DropdownMenuContent<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuContentProps<T>>,
+): JSX.Element
+function DropdownMenuContent(
+  props: PolymorphicProps<ValidComponent, DropdownMenuContentProps<ValidComponent>>,
+): JSX.Element {
+  const [, rest] = splitProps(props, ["class"])
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -44,10 +47,13 @@ type DropdownMenuItemProps<T extends ValidComponent = "div"> =
     inset?: boolean
   }
 
-const DropdownMenuItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuItemProps<T>>
-) => {
-  const [local, rest] = splitProps(props as DropdownMenuItemProps, ["class", "inset"])
+function DropdownMenuItem<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuItemProps<T>>,
+): JSX.Element
+function DropdownMenuItem(
+  props: PolymorphicProps<ValidComponent, DropdownMenuItemProps<ValidComponent>>,
+): JSX.Element {
+  const [local, rest] = splitProps(props, ["class", "inset"])
   return (
     <DropdownMenuPrimitive.Item
       class={cn(
@@ -85,10 +91,13 @@ type DropdownMenuSeparatorProps<T extends ValidComponent = "hr"> =
     class?: string | undefined
   }
 
-const DropdownMenuSeparator = <T extends ValidComponent = "hr">(
-  props: PolymorphicProps<T, DropdownMenuSeparatorProps<T>>
-) => {
-  const [, rest] = splitProps(props as DropdownMenuSeparatorProps, ["class"])
+function DropdownMenuSeparator<T extends ValidComponent = "hr">(
+  props: PolymorphicProps<T, DropdownMenuSeparatorProps<T>>,
+): JSX.Element
+function DropdownMenuSeparator(
+  props: PolymorphicProps<ValidComponent, DropdownMenuSeparatorProps<ValidComponent>>,
+): JSX.Element {
+  const [, rest] = splitProps(props, ["class"])
   return (
     <DropdownMenuPrimitive.Separator
       class={cn("-mx-1 my-1 h-px bg-muted", props.class)}
@@ -104,10 +113,13 @@ type DropdownMenuSubTriggerProps<T extends ValidComponent = "div"> =
     inset?: boolean
   }
 
-const DropdownMenuSubTrigger = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuSubTriggerProps<T>>
-) => {
-  const [local, rest] = splitProps(props as DropdownMenuSubTriggerProps, ["class", "children", "inset"])
+function DropdownMenuSubTrigger<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuSubTriggerProps<T>>,
+): JSX.Element
+function DropdownMenuSubTrigger(
+  props: PolymorphicProps<ValidComponent, DropdownMenuSubTriggerProps<ValidComponent>>,
+): JSX.Element {
+  const [local, rest] = splitProps(props, ["class", "children", "inset"])
   return (
     <DropdownMenuPrimitive.SubTrigger
       class={cn(
@@ -137,10 +149,13 @@ type DropdownMenuSubContentProps<T extends ValidComponent = "div"> =
     class?: string | undefined
   }
 
-const DropdownMenuSubContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuSubContentProps<T>>
-) => {
-  const [, rest] = splitProps(props as DropdownMenuSubContentProps, ["class"])
+function DropdownMenuSubContent<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuSubContentProps<T>>,
+): JSX.Element
+function DropdownMenuSubContent(
+  props: PolymorphicProps<ValidComponent, DropdownMenuSubContentProps<ValidComponent>>,
+): JSX.Element {
+  const [, rest] = splitProps(props, ["class"])
   return (
     <DropdownMenuPrimitive.SubContent
       class={cn(
@@ -158,10 +173,13 @@ type DropdownMenuCheckboxItemProps<T extends ValidComponent = "div"> =
     children?: JSX.Element
   }
 
-const DropdownMenuCheckboxItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuCheckboxItemProps<T>>
-) => {
-  const [, rest] = splitProps(props as DropdownMenuCheckboxItemProps, ["class", "children"])
+function DropdownMenuCheckboxItem<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuCheckboxItemProps<T>>,
+): JSX.Element
+function DropdownMenuCheckboxItem(
+  props: PolymorphicProps<ValidComponent, DropdownMenuCheckboxItemProps<ValidComponent>>,
+): JSX.Element {
+  const [, rest] = splitProps(props, ["class", "children"])
   return (
     <DropdownMenuPrimitive.CheckboxItem
       class={cn(
@@ -195,10 +213,13 @@ type DropdownMenuGroupLabelProps<T extends ValidComponent = "span"> =
     inset?: boolean
   }
 
-const DropdownMenuGroupLabel = <T extends ValidComponent = "span">(
-  props: PolymorphicProps<T, DropdownMenuGroupLabelProps<T>>
-) => {
-  const [local, rest] = splitProps(props as DropdownMenuGroupLabelProps, ["class", "inset"])
+function DropdownMenuGroupLabel<T extends ValidComponent = "span">(
+  props: PolymorphicProps<T, DropdownMenuGroupLabelProps<T>>,
+): JSX.Element
+function DropdownMenuGroupLabel(
+  props: PolymorphicProps<ValidComponent, DropdownMenuGroupLabelProps<ValidComponent>>,
+): JSX.Element {
+  const [local, rest] = splitProps(props, ["class", "inset"])
   return (
     <DropdownMenuPrimitive.GroupLabel
       class={cn("px-2 py-1.5 text-sm font-semibold", local.inset && "pl-8", local.class)}
@@ -213,10 +234,13 @@ type DropdownMenuRadioItemProps<T extends ValidComponent = "div"> =
     children?: JSX.Element
   }
 
-const DropdownMenuRadioItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuRadioItemProps<T>>
-) => {
-  const [, rest] = splitProps(props as DropdownMenuRadioItemProps, ["class", "children"])
+function DropdownMenuRadioItem<T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuRadioItemProps<T>>,
+): JSX.Element
+function DropdownMenuRadioItem(
+  props: PolymorphicProps<ValidComponent, DropdownMenuRadioItemProps<ValidComponent>>,
+): JSX.Element {
+  const [, rest] = splitProps(props, ["class", "children"])
   return (
     <DropdownMenuPrimitive.RadioItem
       class={cn(

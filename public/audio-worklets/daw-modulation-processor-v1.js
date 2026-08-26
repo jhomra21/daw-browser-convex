@@ -9,6 +9,12 @@ const PARAMETER_PROPERTIES = {
   autopan: ['rateHz', 'depth', 'shape', 'phase'],
   ensemble: ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix'],
 }
+const isModulationMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+const isModulationConfigureMessage = (message, revision) => isModulationMessage(message)
+  && message.type === 'configure'
+  && Number.isInteger(message.revision)
+  && message.revision > revision
+  && Object.prototype.toString.call(message.state) === '[object Object]'
 
 class DawModulationProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -47,7 +53,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
   }
 
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!isModulationMessage(message)) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') {
       this.phase = 0
@@ -58,7 +64,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
       this.allpassYL.fill(0); this.allpassYR.fill(0)
       return
     }
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
+    if (!isModulationConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     if (message.processorKind !== undefined && message.processorKind !== this.processorKind) return this.fault('immutable-processor-kind')
     this.revision = message.revision
     this.state = message.state
@@ -75,9 +81,9 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     return Math.sin(TWO_PI * wrapped)
   }
 
-  shapedUnipolar(phase) {
+  unipolarWave(phase) {
     const unipolar = 0.5 + 0.5 * this.lfo(phase)
-    return unipolar ** (2 ** (4 * ((this.state.shape || 0) - 0.5)))
+    return unipolar ** (2 ** (4 * ((this.state['shape'] || 0) - 0.5)))
   }
 
   readDelay(buffer, delayFrames) {
@@ -173,10 +179,10 @@ class DawModulationProcessor extends AudioWorkletProcessor {
           processedL = l * (1 - this.state.mix) + wetL * this.state.mix
           processedR = r * (1 - this.state.mix) + wetR * this.state.mix
         } else if (kind === 'tremolo') {
-          processedL = l * (1 - this.state.depth + this.state.depth * this.shapedUnipolar(phaseL))
-          processedR = r * (1 - this.state.depth + this.state.depth * this.shapedUnipolar(phaseL))
+          processedL = l * (1 - this.state.depth + this.state.depth * this.unipolarWave(phaseL))
+          processedR = r * (1 - this.state.depth + this.state.depth * this.unipolarWave(phaseL))
         } else if (kind === 'autopan') {
-          const position = this.state.depth * (2 * this.shapedUnipolar(phaseL) - 1)
+          const position = this.state.depth * (2 * this.unipolarWave(phaseL) - 1)
           processedL = l * Math.cos((position + 1) * Math.PI * 0.25) * Math.SQRT2
           processedR = r * Math.sin((position + 1) * Math.PI * 0.25) * Math.SQRT2
         }

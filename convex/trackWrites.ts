@@ -1,4 +1,5 @@
 import type { Doc, Id } from "./_generated/dataModel";
+import type { DatabaseReader } from "./_generated/server";
 import { canWriteProject, getProjectRole } from "./projectAccess";
 
 type TrackWriteAccess = {
@@ -7,7 +8,11 @@ type TrackWriteAccess = {
   projectWriter: boolean;
 };
 
-async function readTrackWriteAccess(ctx: any, trackId: Id<"tracks">) {
+type TrackWriteContext = {
+  db: DatabaseReader;
+};
+
+async function readTrackWriteAccess(ctx: TrackWriteContext, trackId: Id<"tracks">) {
   const track = await ctx.db.get(trackId);
   if (!track) {
     return {
@@ -22,8 +27,8 @@ async function readTrackWriteAccess(ctx: any, trackId: Id<"tracks">) {
     .collect();
 
   return {
-    owner: (owners[0] as Doc<"ownerships"> | undefined) ?? null,
-    track: track as Doc<"tracks">,
+    owner: owners[0] ?? null,
+    track,
   };
 }
 

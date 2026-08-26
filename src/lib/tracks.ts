@@ -5,7 +5,7 @@ import {
 } from '~/lib/shared-timeline-operations-api'
 import { buildTrackCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
-import { trackCreationCollapsed } from '@daw-browser/shared'
+import { isJsonString, trackCreationCollapsed } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type CreateLocalTrackOptions = {
@@ -47,11 +47,12 @@ type CreateOptimisticTrackOptions = {
 type HistoryPush = (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
 
 export function createLocalTrack(options: CreateLocalTrackOptions): Track {
+  const volume = options.volume ?? 0.8
   const track: Track = {
     id: options.id,
     historyRef: options.historyRef ?? options.id,
     name: options.name ?? `Track ${options.index + 1}`,
-    volume: typeof options.volume === 'number' && Number.isFinite(options.volume) ? options.volume : 0.8,
+    volume: Number.isFinite(volume) ? volume : 0.8,
     clips: options.clips ?? [],
     muted: options.muted ?? false,
     soloed: options.soloed ?? false,
@@ -105,7 +106,7 @@ export async function createOptimisticTrack(options: CreateOptimisticTrackOption
     color: options.color,
   })
   const result = await publishSharedTimelineOperation(options.projectId, operation)
-  const trackId = typeof result === 'string' ? result : null
+  const trackId = isJsonString(result) ? result : null
   if (!trackId) return null
 
   options.grantWrite?.(trackId, options.grantScope)
@@ -125,14 +126,15 @@ export function pushTrackCreateHistory(
   historyPush: HistoryPush | undefined,
   projectId: string | undefined,
   tracks: Track[],
-  track: Pick<Track, 'id' | 'kind' | 'channelRole' | 'collapsed' | 'color'> | null | undefined,
+  track: Pick<Track, 'id' | 'name' | 'kind' | 'channelRole' | 'collapsed' | 'color'> | null | undefined,
 ) {
-  if (!track || !projectId || typeof historyPush !== 'function') return
+  if (!track || !projectId || !historyPush) return
   const index = tracks.findIndex((entry) => entry.id === track.id)
 
   historyPush(buildTrackCreateHistoryEntry({
     projectId,
     trackId: track.id,
+    name: track.name,
     index,
     kind: track.kind,
     channelRole: track.channelRole,

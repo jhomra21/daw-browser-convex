@@ -1,13 +1,14 @@
+import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 export type ProjectManifestEntityRow = {
   kind: string;
   id: string;
-  value: unknown;
+  value: JsonValue;
   updatedAt: number;
 };
 
 export type ProjectManifestStateRow = {
   key: string;
-  value: unknown;
+  value: JsonValue;
   updatedAt: number;
 };
 
@@ -21,12 +22,25 @@ export type ProjectManifestAsset = {
   originalFileName?: string;
   originalLastModified?: number;
   contentHash?: string;
+  sourceKind?: "upload" | "url" | "recording";
   durationSec?: number;
   sampleRate?: number;
+  channelCount?: number;
   folderId?: string;
   createdAt: number;
   updatedAt: number;
   cloudKey?: string;
+};
+
+export type ProjectManifestPluginArtifact = {
+  id: string;
+  sha256: string;
+  byteLength: number;
+  kind: "plugin-state" | "plugin-freeze";
+  ownerId: string;
+  acl: "owner" | "project-members";
+  bucket: "local" | "r2-plugin-artifacts";
+  location: string;
 };
 
 export type ProjectManifest = {
@@ -41,39 +55,90 @@ export type ProjectManifest = {
   assets: ProjectManifestAsset[];
   projectState: ProjectManifestStateRow[];
   syncState: ProjectManifestStateRow[];
+  externalPluginArtifacts: ProjectManifestPluginArtifact[];
 };
 
-export const PROJECT_MANIFEST_SCHEMA_VERSION = 2;
+export const PROJECT_MANIFEST_SCHEMA_VERSION = 4;
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
+  1,
+  2,
+  3,
   PROJECT_MANIFEST_SCHEMA_VERSION,
 ];
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const isRecord = (value: JsonValue): value is JsonObject =>
+  isJsonObject(value);
 
-const readNumber = (value: unknown, field: string) => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+const readNumber = (value: JsonValue, field: string) => {
+  if (!isJsonNumber(value) || !Number.isFinite(value)) {
     throw new Error(`Project manifest has invalid ${field}.`);
   }
   return value;
 };
 
-const readString = (value: unknown, field: string) => {
-  if (typeof value !== "string" || value.trim() === "") {
+const readString = (value: JsonValue, field: string) => {
+  if (!isJsonString(value) || value.trim() === "") {
     throw new Error(`Project manifest has invalid ${field}.`);
   }
   return value;
 };
 
-const readArray = (value: unknown, field: string) => {
+const readArray = (value: JsonValue, field: string) => {
   if (!Array.isArray(value)) throw new Error(`Project manifest has invalid ${field}.`);
   return value;
 };
 
-const readOptionalString = (value: unknown) => typeof value === "string" && value ? value : undefined;
-const readOptionalNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+const readOptionalString = (value: JsonValue) => isJsonString(value) && value ? value : undefined;
+const readOptionalNumber = (value: JsonValue) => isJsonNumber(value) && Number.isFinite(value) ? value : undefined;
+const readOptionalSourceKind = (value: JsonValue): ProjectManifestAsset["sourceKind"] => (
+  value === "upload" || value === "url" || value === "recording" ? value : undefined
+);
+const readPluginArtifact = (value: JsonValue): ProjectManifestPluginArtifact => {
+  if (!isRecord(value)) throw new Error("Project manifest has invalid external plugin artifact.");
+  const id = readString(value.id, "externalPluginArtifact.id");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("Project manifest has invalid external plugin artifact id.");
+  }
+  const sha256 = readString(value.sha256, "externalPluginArtifact.sha256");
+  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error("Project manifest has invalid external plugin artifact hash.");
+  const kind = value.kind;
+  if (kind !== "plugin-state" && kind !== "plugin-freeze") {
+    throw new Error("Project manifest has invalid external plugin artifact kind.");
+  }
+  const acl = value.acl;
+  if (acl !== "owner" && acl !== "project-members") {
+    throw new Error("Project manifest has invalid external plugin artifact ACL.");
+  }
+  const bucket = value.bucket;
+  if (bucket !== "local" && bucket !== "r2-plugin-artifacts") {
+    throw new Error("Project manifest has invalid external plugin artifact bucket.");
+  }
+  const byteLength = readNumber(value.byteLength, "externalPluginArtifact.byteLength");
+  if (!Number.isInteger(byteLength) || byteLength <= 0 || byteLength > 512 * 1024 * 1024) {
+    throw new Error("Project manifest has invalid external plugin artifact byte length.");
+  }
+  const ownerId = readString(value.ownerId, "externalPluginArtifact.ownerId");
+  const location = readString(value.location, "externalPluginArtifact.location");
+  if (ownerId.length > 256 || location.length > 1024) {
+    throw new Error("Project manifest has invalid external plugin artifact metadata.");
+  }
+  return {
+    id,
+    sha256,
+    byteLength,
+    kind,
+    ownerId,
+    acl,
+    bucket,
+    location,
+  };
+};
 
-const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
+export const normalizeProjectManifestPluginArtifact = (
+  value: JsonValue,
+): ProjectManifestPluginArtifact => readPluginArtifact(value);
+
+const readEntityRow = (value: JsonValue): ProjectManifestEntityRow => {
   if (!isRecord(value)) throw new Error("Project manifest has invalid entity.");
   return {
     kind: readString(value.kind, "entity.kind"),
@@ -83,7 +148,7 @@ const readEntityRow = (value: unknown): ProjectManifestEntityRow => {
   };
 };
 
-const readProjectStateRow = (value: unknown): ProjectManifestStateRow => {
+const readProjectStateRow = (value: JsonValue): ProjectManifestStateRow => {
   if (!isRecord(value)) throw new Error("Project manifest has invalid project state row.");
   return {
     key: readString(value.key, "projectState.key"),
@@ -92,7 +157,7 @@ const readProjectStateRow = (value: unknown): ProjectManifestStateRow => {
   };
 };
 
-const readSyncStateRow = (value: unknown): ProjectManifestStateRow => {
+const readSyncStateRow = (value: JsonValue): ProjectManifestStateRow => {
   if (!isRecord(value)) throw new Error("Project manifest has invalid sync state row.");
   return {
     key: readString(value.key, "syncState.key"),
@@ -129,10 +194,14 @@ export const assertProjectManifestBaseIntegrity = (manifest: ProjectManifest) =>
   assertUnique(manifest.assets, (row) => row.storagePath, "asset storage path");
   assertUnique(manifest.projectState, (row) => row.key, "project state key");
   assertUnique(manifest.syncState, (row) => row.key, "sync state key");
+  assertUnique(manifest.externalPluginArtifacts, (artifact) => artifact.id, "external plugin artifact id");
 };
 
 export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest) => {
   assertProjectManifestBaseIntegrity(manifest);
+  if (manifest.externalPluginArtifacts.some((artifact) => artifact.bucket === "r2-plugin-artifacts")) {
+    throw new Error("Project manifest external plugin artifacts cannot be published to the configured backup bucket.");
+  }
   const hasInvalidCloudKey = manifest.assets.some((asset) => (
     asset.missing
       ? asset.cloudKey !== undefined
@@ -143,9 +212,9 @@ export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest)
   }
 };
 
-const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
+const readProjectManifest = (raw: JsonObject): ProjectManifest => {
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
-  if (schemaVersion !== PROJECT_MANIFEST_SCHEMA_VERSION) {
+  if (!SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS.includes(schemaVersion)) {
     throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
   }
   if (raw.mode !== "backup" && raw.mode !== "shared") {
@@ -161,12 +230,14 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
       mimeType: readString(asset.mimeType, "asset.mimeType"),
       sizeBytes: readNumber(asset.sizeBytes, "asset.sizeBytes"),
       storagePath: readString(asset.storagePath, "asset.storagePath"),
-      missing: typeof asset.missing === "boolean" ? asset.missing : undefined,
+      missing: isJsonBoolean(asset.missing) ? asset.missing : undefined,
       originalFileName: readOptionalString(asset.originalFileName),
       originalLastModified: readOptionalNumber(asset.originalLastModified),
       contentHash: readOptionalString(asset.contentHash),
+      sourceKind: readOptionalSourceKind(asset.sourceKind),
       durationSec: readOptionalNumber(asset.durationSec),
       sampleRate: readOptionalNumber(asset.sampleRate),
+      channelCount: readOptionalNumber(asset.channelCount),
       folderId: readOptionalString(asset.folderId),
       createdAt: readNumber(asset.createdAt, "asset.createdAt"),
       updatedAt: readNumber(asset.updatedAt, "asset.updatedAt"),
@@ -174,7 +245,7 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
     };
   });
   const manifest = {
-    schemaVersion,
+    schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId: readString(raw.projectId, "projectId"),
     name: readString(raw.name, "name"),
     mode,
@@ -185,12 +256,15 @@ const readProjectManifest = (raw: Record<string, unknown>): ProjectManifest => {
     assets,
     projectState: readArray(raw.projectState, "projectState").map(readProjectStateRow),
     syncState: readArray(raw.syncState, "syncState").map(readSyncStateRow),
+    externalPluginArtifacts: schemaVersion >= 3
+      ? readArray(raw.externalPluginArtifacts, "externalPluginArtifacts").map(readPluginArtifact)
+      : [],
   };
   assertProjectManifestBaseIntegrity(manifest);
   return manifest;
 };
 
-export const normalizeProjectManifest = (raw: unknown): ProjectManifest => {
+export const normalizeProjectManifest = (raw: JsonValue): ProjectManifest => {
   if (!isRecord(raw)) throw new Error("Project manifest must be an object.");
   return readProjectManifest(raw);
 };

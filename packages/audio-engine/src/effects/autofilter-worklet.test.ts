@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { autoFilterWorklet } from '../worklet-manifest'
 
 type Port = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  messages: unknown[]
-  postMessage: (message: unknown) => void
+  onmessage: ((event: { data: WorkletMessage }) => void) | null
+  messages: PortMessage[]
+  postMessage: (message: PortMessage) => void
   close: () => void
 }
 type Processor = {
@@ -12,6 +12,20 @@ type Processor = {
   process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
 }
 type ProcessorConstructor = new () => Processor
+type WorkletMessage = {
+  type: 'configure' | 'fault' | 'reset'
+  version?: number
+  revision?: number
+  code?: string
+  state?: {
+    enabled: boolean
+    mode: string
+    quality: string
+    envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
+    lfo: { waveform: string; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
+  }
+}
+type PortMessage = WorkletMessage
 
 const loadProcessor = async (sampleRate: number) => {
   const source = await Bun.file(new URL(`../../../../public/${autoFilterWorklet.modulePath}`, import.meta.url)).text()
@@ -20,7 +34,7 @@ const loadProcessor = async (sampleRate: number) => {
     port: Port = {
       onmessage: null,
       messages: [],
-      postMessage: (message) => this.port.messages.push(message),
+      postMessage: (message: PortMessage) => this.port.messages.push(message),
       close: () => {},
     }
   }

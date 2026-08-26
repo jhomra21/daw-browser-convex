@@ -14,16 +14,15 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
   const [open, setOpen] = createSignal(true);
   const [mode, setMode] = createSignal<TimelineBottomPanelMode>("effects");
   const [heightPx, setHeightPx] = createSignal(BOTTOM_PANEL_DEFAULT_HEIGHT_PX);
-  const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
   const [sharedChatOpen, setSharedChatOpen] = createSignal(false);
 
   const bottomPanelOffsetPx = () => getBottomPanelMountedFootprintPx({ open: open(), heightPx: heightPx() });
   const chatBottomOffsetPx = () => bottomPanelOffsetPx() > 0 ? bottomPanelOffsetPx() + BOTTOM_PANEL_GAP_PX : 0;
   const preferenceScopeId = () => options.projectId() ?? "default";
-  const viewportHeightPx = () => typeof window === "undefined" ? heightPx() : window.innerHeight;
+  const viewportHeightPx = () => globalThis.window?.innerHeight ?? heightPx();
 
   createEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!globalThis.window) return;
     setHeightPx(loadBottomPanelHeight(preferenceScopeId(), window.innerHeight));
   });
 
@@ -45,11 +44,8 @@ export const useTimelineBottomPanelState = (options: TimelineBottomPanelStateOpt
     previewHeightPx,
     commitHeightPx,
     chatBottomOffsetPx,
-    agentPanelOpen,
     sharedChatOpen,
-    toggleAgentPanel: () => setAgentPanelOpen((value) => !value),
     toggleSharedChat: () => setSharedChatOpen((value) => !value),
-    closeAgentPanel: () => setAgentPanelOpen(false),
     closeSharedChat: () => setSharedChatOpen(false),
   };
 };

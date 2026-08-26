@@ -5,6 +5,12 @@ const PARAMS = [
   ['utility.balance', 0, -1, 1],
   ['utility.width', 1, 0, 2],
 ]
+const isUtilityMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+const isUtilityConfigureMessage = (message, revision) => isUtilityMessage(message)
+  && message.type === 'configure'
+  && Number.isInteger(message.revision)
+  && message.revision > revision
+  && Object.prototype.toString.call(message.state) === '[object Object]'
 
 class DawUtilityProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -26,14 +32,14 @@ class DawUtilityProcessor extends AudioWorkletProcessor {
   }
 
   onMessage(message) {
-    if (!message || typeof message !== 'object' || message.version !== 1) return this.fault('malformed-message')
+    if (!isUtilityMessage(message)) return this.fault('malformed-message')
     if (message.type === 'dispose') return this.port.close()
     if (message.type === 'reset') {
       this.x1L = this.x1R = this.y1L = this.y1R = 0
       this.bypass = this.state.enabled ? 0 : 1
       return
     }
-    if (message.type !== 'configure' || !Number.isInteger(message.revision) || message.revision <= this.revision || !message.state || typeof message.state !== 'object') return this.fault('malformed-or-stale-configure')
+    if (!isUtilityConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
     this.port.postMessage({ type: 'configured', version: 1, revision: this.revision })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
-import { createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
@@ -8,9 +8,11 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from './export-fidelity'
 
 const originalOfflineAudioContext = globalThis.OfflineAudioContext
+const originalAudioBuffer = globalThis.AudioBuffer
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: originalOfflineAudioContext })
+  Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: originalAudioBuffer })
 })
 
 const channel = (
@@ -199,8 +201,8 @@ describe('runtime-only cue routing', () => {
   })
 })
 
-describe('offline default synth scheduling', () => {
-  test('renders fresh instrument tracks with default synth params and skips explicit non-synth instruments', async () => {
+describe('offline instrument scheduling', () => {
+  test('does not fabricate a synth for instrument tracks without a persisted device', async () => {
     type Event = { kind: 'set' | 'ramp' | 'cancel'; value?: number; time: number }
     type Param = {
       value: number
@@ -211,6 +213,26 @@ describe('offline default synth scheduling', () => {
       setTargetAtTime: (value: number, time: number, timeConstant: number) => void
       cancelScheduledValues: (time: number) => void
       cancelAndHoldAtTime: (time: number) => void
+    }
+    type TestBiquadFilter = {
+      type: BiquadFilterType
+      frequency: Param
+      detune: Param
+      Q: Param
+      connect: () => void
+      disconnect: () => void
+    }
+    type TestOscillator = {
+      type: OscillatorType
+      frequency: Param
+      detune: Param
+      starts: number[]
+      stops: number[]
+      connect: () => void
+      disconnect: () => void
+      start: (when: number) => void
+      stop: (when: number) => void
+      onended: (() => void) | undefined
     }
     const param = (): Param => {
       const events: Event[] = []
@@ -247,21 +269,29 @@ describe('offline default synth scheduling', () => {
       }
 
       createBiquadFilter() {
-        return { type: 'lowpass' as BiquadFilterType, frequency: param(), detune: param(), Q: param(), connect: () => {}, disconnect: () => {} }
+        const filter: TestBiquadFilter = {
+          type: 'lowpass',
+          frequency: param(),
+          detune: param(),
+          Q: param(),
+          connect: () => {},
+          disconnect: () => {},
+        }
+        return filter
       }
 
       createOscillator() {
-        const oscillator = {
-          type: 'sine' as OscillatorType,
+        const oscillator: TestOscillator = {
+          type: 'sine',
           frequency: param(),
           detune: param(),
-          starts: [] as number[],
-          stops: [] as number[],
+          starts: [],
+          stops: [],
           connect: () => {},
           disconnect: () => {},
           start: (when: number) => { oscillator.starts.push(when) },
           stop: (when: number) => { oscillator.stops.push(when) },
-          onended: undefined as (() => void) | undefined,
+          onended: undefined,
         }
         this.oscillators.push(oscillator)
         return oscillator
@@ -351,11 +381,8 @@ describe('offline default synth scheduling', () => {
       },
     })
 
-    expect(contexts[0]?.oscillators).toHaveLength(3)
-    expect(contexts[0]?.oscillators.every((oscillator) => oscillator.starts.includes(0))).toBe(true)
-    expect(contexts[0]?.bufferSources).toHaveLength(1)
-    expect(contexts[0]?.bufferSources[0]?.starts).toEqual([0])
-    expect(contexts[0]?.bufferSources[0]?.loop).toBe(true)
+    expect(contexts[0]?.oscillators).toHaveLength(0)
+    expect(contexts[0]?.bufferSources).toHaveLength(0)
     expect(contexts[1]?.oscillators).toHaveLength(0)
   })
 })
@@ -456,6 +483,42 @@ describe('final master channel conversion', () => {
     stereo.getChannelData(1).set([-1, 0.5, -0.25])
     const mono = downmixStereoBufferToMono(stereo, createBuffer)
     expect(Array.from(mono.getChannelData(0))).toEqual([0, 0, 0])
+  })
+})
+
+describe('portable mixdown output adapter', () => {
+  class TestAudioBuffer {
+    readonly duration: number
+    private readonly channels: Float32Array<ArrayBuffer>[]
+
+    constructor(options: { numberOfChannels: number; length: number; sampleRate: number }) {
+      this.numberOfChannels = options.numberOfChannels
+      this.length = options.length
+      this.sampleRate = options.sampleRate
+      this.duration = options.length / options.sampleRate
+      this.channels = Array.from({ length: options.numberOfChannels }, () => new Float32Array(options.length))
+    }
+
+    readonly numberOfChannels: number
+    readonly length: number
+    readonly sampleRate: number
+
+    getChannelData(channel: number) {
+      const data = this.channels[channel]
+      if (!data) throw new Error('Missing channel')
+      return data
+    }
+  }
+
+  test('assembles ordered Worker PCM chunks into the normal AudioBuffer result', () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const output = createPortableOutputBuffer(new Map([
+      [0, { frameCount: 2, planes: [new Float32Array([0.25, -0.5]), new Float32Array([0.5, -0.25])] }],
+      [1, { frameCount: 2, planes: [new Float32Array([0.75, 1]), new Float32Array([-0.75, -1])] }],
+    ]), 4, 48_000, 2)
+
+    expect(Array.from(output.getChannelData(0))).toEqual([0.25, -0.5, 0.75, 1])
+    expect(Array.from(output.getChannelData(1))).toEqual([0.5, -0.25, -0.75, -1])
   })
 })
 

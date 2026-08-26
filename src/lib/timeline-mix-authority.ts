@@ -21,14 +21,14 @@ type ResolvedTrackMixView = {
 
 const firstNumber = (values: Array<number | undefined>) => {
   for (const value of values) {
-    if (typeof value === 'number') return value
+    if (value !== undefined) return value
   }
   return undefined
 }
 
 const firstBoolean = (values: Array<boolean | undefined>, fallback = false) => {
   for (const value of values) {
-    if (typeof value === 'boolean') return value
+    if (value !== undefined) return value
   }
   return fallback
 }

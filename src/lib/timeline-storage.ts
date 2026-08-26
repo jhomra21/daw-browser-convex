@@ -2,6 +2,7 @@ import { normalizePersistedHistory, serializePersistedHistory } from '~/lib/undo
 import type { PersistedHistory } from '~/lib/undo/types'
 import type { TrackId, TrackSend } from '@daw-browser/timeline-core/types'
 import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
+import { isJsonBoolean, isJsonNumber, isJsonObject } from '@daw-browser/shared'
 
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
@@ -25,7 +26,7 @@ type HistoryStorageScope = {
 }
 
 export const canUseLocalStorage = () => {
-  if (typeof window === 'undefined') return false
+  if (globalThis.window === undefined) return false
   try {
     const storage = window.localStorage
     return Boolean(storage)
@@ -96,16 +97,22 @@ export const saveMixSyncFlag = (rid: string | undefined, value: boolean) => {
   } catch {}
 }
 
-export const loadGridSettings = (rid?: string): { enabled: boolean; denominator: number } => {
+type GridSettings = {
+  enabled: boolean
+  denominator: number
+}
+
+export const loadGridSettings = (rid?: string): GridSettings => {
   if (!rid) return { enabled: true, denominator: 4 }
   if (!canUseLocalStorage()) return { enabled: true, denominator: 4 }
   try {
     const raw = localStorage.getItem(`${GRID_KEY_PREFIX}${rid}`)
     if (!raw) return { enabled: true, denominator: 4 }
     const parsed = JSON.parse(raw)
+    if (!isJsonObject(parsed)) return { enabled: true, denominator: 4 }
     return {
-      enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
-      denominator: typeof parsed.denominator === 'number' ? parsed.denominator : 4,
+      enabled: isJsonBoolean(parsed.enabled) ? parsed.enabled : true,
+      denominator: isJsonNumber(parsed.denominator) ? parsed.denominator : 4,
     }
   } catch {
     return { enabled: true, denominator: 4 }
@@ -224,7 +231,7 @@ const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}$
 const readStoredHistory = (storageKey: string) => {
   const raw = localStorage.getItem(toHistoryLocalStorageKey(storageKey))
   if (!raw) return null
-  return JSON.parse(raw) as unknown
+  return JSON.parse(raw)
 }
 
 export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {

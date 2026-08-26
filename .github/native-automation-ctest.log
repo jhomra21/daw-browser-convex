@@ -1,22 +1,22 @@
 Test project /Users/runner/work/daw-browser-convex/daw-browser-convex/native/build/audio-host-macos-debug
     Start 1: daw-audio-core-test
-1/6 Test #1: daw-audio-core-test ...........................   Passed    6.42 sec
+1/6 Test #1: daw-audio-core-test ...........................   Passed    5.01 sec
     Start 2: daw-plugin-host-worker-test
-2/6 Test #2: daw-plugin-host-worker-test ...................   Passed    0.26 sec
+2/6 Test #2: daw-plugin-host-worker-test ...................   Passed    0.23 sec
     Start 3: daw-audio-host-macos-test
-3/6 Test #3: daw-audio-host-macos-test .....................Subprocess aborted***Exception:   1.95 sec
-Assertion failed: (host.ProcessPlanar(input, output, 4)), function TestScheduledProcessorSetUsesAbsoluteFrame, file audio_host_test.cpp, line 1129.
+3/6 Test #3: daw-audio-host-macos-test .....................Subprocess aborted***Exception:   0.54 sec
+Assertion failed: (applied.get()), function TestProcessorStatePatchTimeoutCancelsAndReusesSlot, file audio_host_test.cpp, line 862.
 
     Start 4: daw-audio-host-macos-graph-integration-test
-4/6 Test #4: daw-audio-host-macos-graph-integration-test ...   Passed    0.12 sec
+4/6 Test #4: daw-audio-host-macos-graph-integration-test ...   Passed    0.08 sec
     Start 5: daw-audio-host-macos-transaction-test
-5/6 Test #5: daw-audio-host-macos-transaction-test .........   Passed    0.06 sec
+5/6 Test #5: daw-audio-host-macos-transaction-test .........   Passed    0.05 sec
     Start 6: daw-realtime-callback-static-guard
-6/6 Test #6: daw-realtime-callback-static-guard ............   Passed    0.12 sec
+6/6 Test #6: daw-realtime-callback-static-guard ............   Passed    0.18 sec
 
 83% tests passed, 1 tests failed out of 6
 
-Total Test time (real) =   8.94 sec
+Total Test time (real) =   6.10 sec
 
 The following tests FAILED:
 	  3 - daw-audio-host-macos-test (Subprocess aborted)

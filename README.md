@@ -1,6 +1,6 @@
 # DAW Browser Convex
 
-**Last Updated: 2026-08-25**
+**Last Updated: 2026-08-26**
 
 DAW Browser Convex is a local-first digital audio workstation with a portable
 browser core and an Electron desktop runtime for native audio and VST3
@@ -13,6 +13,7 @@ browser, cloud, desktop, and native responsibilities explicit.
 
 ## Start here
 
+- **[What changed in the model-independent control platform merge](docs/changes/2026-08-26-model-independent-control-platform.md)**
 - [Control platform architecture](docs/control-platform.md)
 - [Agent and automation contract](docs/agent-control.md)
 - [Native VST3 architecture](docs/native-vst3.md)

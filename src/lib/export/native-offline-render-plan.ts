@@ -11,6 +11,7 @@ import {
   serializeNativeScheduleWindow,
   type NativeHostPcmAsset,
   type NativeOfflineRenderPlan,
+  type NativeVstAutomationSegment,
 } from '@daw-browser/audio-engine/native-host-wire'
 import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -73,6 +74,51 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
     }
   })
   return { sessionAssets, assets }
+}
+
+const nativeOfflineBlockFrames = (
+  totalFrames: number,
+  attachments: NativeExternalAttachmentPlan | undefined,
+) => Math.min(
+  4_096,
+  totalFrames,
+  ...((attachments?.attachments ?? [])
+    .filter((attachment) => !attachment.bypassed)
+    .map((attachment) => attachment.workerTransport.maximumFrames)),
+)
+
+const assertNativeVstEventCapacity = (input: Readonly<{
+  attachments: NativeExternalAttachmentPlan | undefined
+  instrumentEvents: readonly Readonly<{ nodeId: string; frameOffset: number }>[]
+  automationSegments: readonly NativeVstAutomationSegment[]
+  blockFrames: number
+  totalFrames: number
+}>) => {
+  if (!input.attachments || input.automationSegments.length === 0) return
+  for (const attachment of input.attachments.attachments) {
+    if (attachment.bypassed) continue
+    const automationSegments = input.automationSegments.filter((segment) => (
+      segment.instanceId === attachment.instanceId
+    ))
+    if (automationSegments.length === 0) continue
+    const midiEvents = input.instrumentEvents.filter((event) => event.nodeId === attachment.graphNodeId)
+    for (let startFrame = 0; startFrame < input.totalFrames; startFrame += input.blockFrames) {
+      const endFrame = Math.min(input.totalFrames, startFrame + input.blockFrames)
+      const midiCount = midiEvents.filter((event) => (
+        event.frameOffset >= startFrame && event.frameOffset < endFrame
+      )).length
+      const automationCount = automationSegments.reduce((count, segment) => {
+        const overlaps = segment.startFrame < endFrame && segment.endFrame > startFrame
+        if (!overlaps) return count
+        return count + 1 + (segment.interpolation === 'linear' && segment.endFrame < endFrame ? 1 : 0)
+      }, 0)
+      if (midiCount + automationCount > attachment.workerTransport.maximumEventsPerBlock) {
+        throw new Error(
+          `Native VST3 export exceeds the callback event capacity for "${attachment.instanceId}" at frame ${startFrame}.`,
+        )
+      }
+    }
+  }
 }
 
 export const compileNativeOfflineRenderPlan = (input: {
@@ -164,6 +210,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     throw new Error('Native Phase A export exceeds the offline asset capacity.')
   }
   const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz)
+  const blockFrames = nativeOfflineBlockFrames(totalFrames, externalAttachments)
   const noteEvents = schedule.events.filter((event): event is Extract<typeof event, { type: 'note-on' | 'note-off' }> => (
     event.type === 'note-on' || event.type === 'note-off'
   ))
@@ -179,6 +226,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   }))
   const sampleSourceEvents = snapshot.events.filter((event) => event.startFrame < totalFrames)
   const scheduleWindows: Array<Uint8Array> = []
+  const automationSegments: NativeVstAutomationSegment[] = []
   const sortedInstrumentEvents = [...instrumentEvents].sort((left, right) => (
     left.frameOffset - right.frameOffset || left.sequence - right.sequence
   ))
@@ -225,6 +273,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       }
       windowEnd = windowStart + Math.max(1, Math.floor((windowEnd - windowStart) / 2))
     }
+    automationSegments.push(...windowAutomation)
     scheduleWindows.push(serializeNativeScheduleWindow({
       revision: 1,
       epoch: 1,
@@ -241,6 +290,13 @@ export const compileNativeOfflineRenderPlan = (input: {
     sourceOffset = nextSourceOffset
     windowStart = windowEnd
   }
+  assertNativeVstEventCapacity({
+    attachments: externalAttachments,
+    instrumentEvents,
+    automationSegments,
+    blockFrames,
+    totalFrames,
+  })
   const scheduleBytes = scheduleWindows[0]
   if (!scheduleBytes) throw new Error('Native Phase A export did not produce a schedule.')
   const instrumentStates = snapshot.graph.nodes.flatMap((node) => (
@@ -253,7 +309,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     sampleRateHz: input.sampleRateHz,
     channelCount: input.channelCount,
     totalFrames,
-    blockFrames: Math.min(4_096, totalFrames),
+    blockFrames,
     graph: serializeNativeGraph(snapshot.graph),
     externalAttachments: externalAttachments ? externalAttachments : undefined,
     capturedVstStates: input.capturedVstStates ? input.capturedVstStates : undefined,

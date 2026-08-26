@@ -1,6 +1,7 @@
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import type { PortableFrameScheduleEvent } from "@daw-browser/audio-engine/portable-frame-scheduling"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import type { NativeProcessorAutomationEvent } from "./native-processor-schedule-window"
 
 type PortableParameterEvent = Extract<
@@ -12,6 +13,7 @@ const resolveNativeParameterTarget = (
   graph: AudioCoreGraphSnapshot,
   event: PortableParameterEvent,
 ) => {
+  if (parseExternalAutomationParameterId(event.target.parameterId)) return undefined
   const nodeId = event.target.scope === "master" ? graph.masterNodeId : event.target.trackId
   const node = graph.nodes.find((candidate) => candidate.id === nodeId)
   if (!node) throw new Error(`Native automation target node "${nodeId}" is unavailable.`)

@@ -1,7 +1,7 @@
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
-import type { NativeProcessorAutomationEvent } from "@daw-browser/audio-engine/native-host-wire"
 import type { PortableFrameScheduleEvent } from "@daw-browser/audio-engine/portable-frame-scheduling"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import type { NativeProcessorAutomationEvent } from "./native-processor-schedule-window"
 
 type PortableParameterEvent = Extract<
   PortableFrameScheduleEvent,
@@ -28,10 +28,7 @@ const resolveNativeParameterTarget = (
         `Native automation parameter "${event.target.parameterId}" is unavailable on "${event.target.effectInstanceId}".`,
       )
     }
-    return {
-      processorInstanceId: resolved.processor.instanceId,
-      parameterTarget,
-    }
+    return { processorInstanceId: resolved.processor.instanceId, parameterTarget }
   }
 
   const mixer = node.mixer
@@ -41,18 +38,9 @@ const resolveNativeParameterTarget = (
   if (!mixer || parameterTarget === undefined) {
     throw new Error(`Native mixer automation parameter "${event.target.parameterId}" is unavailable on "${node.id}".`)
   }
-  return {
-    processorInstanceId: mixer.instanceId,
-    parameterTarget,
-  }
+  return { processorInstanceId: mixer.instanceId, parameterTarget }
 }
 
-/**
- * Keep portable scheduling as the timing authority. This adapter only resolves
- * portable string identities into the numeric processor targets used by the
- * native audio-core ABI. External VST automation stays on its existing worker
- * schedule path.
- */
 export const nativeProcessorAutomationEventsForSchedule = (
   graph: AudioCoreGraphSnapshot,
   events: readonly PortableFrameScheduleEvent[],
@@ -75,12 +63,7 @@ export const nativeProcessorAutomationEventsForSchedule = (
       })
       continue
     }
-    projected.push({
-      ...target,
-      kind: "set",
-      frame: event.frame,
-      value: event.value,
-    })
+    projected.push({ ...target, kind: "set", frame: event.frame, value: event.value })
   }
   return projected.toSorted((left, right) => (
     left.frame - right.frame

@@ -101,6 +101,11 @@ const assertNativeVstEventCapacity = (input: Readonly<{
       segment.instanceId === attachment.instanceId
     ))
     if (automationSegments.length === 0) continue
+    if (automationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments) {
+      throw new Error(
+        `Native VST3 export exceeds the retained automation segment capacity for "${attachment.instanceId}".`,
+      )
+    }
     const midiEvents = input.instrumentEvents.filter((event) => event.nodeId === attachment.graphNodeId)
     for (let startFrame = 0; startFrame < input.totalFrames; startFrame += input.blockFrames) {
       const endFrame = Math.min(input.totalFrames, startFrame + input.blockFrames)

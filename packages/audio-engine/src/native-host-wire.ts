@@ -582,8 +582,13 @@ export type NativeScheduleWindow = {
   instrumentEvents?: readonly NativeInstrumentEvent[]
   sampleSourceEvents?: readonly NativeSourceEvent[]
   vstAutomationSegments?: readonly NativeVstAutomationSegment[]
+  processorAutomationEvents?: readonly NativeProcessorAutomationEvent[]
   assets?: readonly NativeSessionAsset[]
 }
+
+export type NativeProcessorAutomationEvent =
+  | { kind: "set"; processorInstanceId: number; parameterTarget: number; frame: number; value: number }
+  | { kind: "linear"; processorInstanceId: number; parameterTarget: number; frame: number; endFrame: number; startValue: number; endValue: number }
 
 export type NativeVstAutomationSegment = {
   instanceId: string
@@ -616,79 +621,51 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   const instrumentEvents = window.instrumentEvents ?? []
   const sampleSourceEvents = window.sampleSourceEvents ?? []
   const vstAutomationSegments = window.vstAutomationSegments ?? []
+  const processorAutomationEvents = window.processorAutomationEvents ?? []
   const encodedInstanceIds = vstAutomationSegments.map((segment) => nativeTextEncoder.encode(segment.instanceId))
   const windowId = window.windowId ?? 1
   const chunkIndex = window.chunkIndex ?? 0
   const chunkCount = window.chunkCount ?? 1
-  const endsSchedule = window.endsSchedule ?? (chunkIndex === chunkCount - 1)
+  const endsSchedule = window.endsSchedule ?? true
   if (
     !Number.isSafeInteger(window.revision) || window.revision <= 0 || window.revision > 0xffff_ffff
     || !Number.isSafeInteger(window.epoch) || window.epoch <= 0 || window.epoch > 0xffff_ffff
+    || !Number.isSafeInteger(windowId) || windowId <= 0
     || !Number.isSafeInteger(window.startFrame) || window.startFrame < 0
     || !Number.isSafeInteger(window.endFrame) || window.endFrame <= window.startFrame
-    || !Number.isSafeInteger(windowId) || windowId <= 0
     || !Number.isSafeInteger(chunkIndex) || chunkIndex < 0
     || !Number.isSafeInteger(chunkCount) || chunkCount <= 0
-    || chunkCount > nativeAudioHostMaximumScheduleChunks
-    || chunkIndex >= chunkCount
-    || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length
-      > nativeAudioHostMaximumScheduleRecords
-    || instrumentEvents.length > nativeAudioHostMaximumInstrumentEvents
-    || sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents
-    || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments
+    || chunkCount > nativeAudioHostMaximumScheduleChunks || chunkIndex >= chunkCount
+    || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length + processorAutomationEvents.length > nativeAudioHostMaximumScheduleRecords
+    || instrumentEvents.length > nativeAudioHostMaximumInstrumentEvents || sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents
+    || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments || processorAutomationEvents.length > nativeAudioHostMaximumScheduleAutomationSegments
     || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame)
     || sampleSourceEvents.some((event) => event.startFrame < window.startFrame || event.startFrame >= window.endFrame)
-    || vstAutomationSegments.some((segment, index) => (
-      !Number.isInteger(segment.parameterId) || segment.parameterId < 0 || segment.parameterId > 0xffff_ffff
-      || !Number.isSafeInteger(segment.startFrame) || segment.startFrame < window.startFrame
-      || !Number.isSafeInteger(segment.endFrame) || segment.endFrame <= segment.startFrame
-      || segment.endFrame > window.endFrame
-      || !Number.isFinite(segment.startValue) || segment.startValue < 0 || segment.startValue > 1
-      || !Number.isFinite(segment.endValue) || segment.endValue < 0 || segment.endValue > 1
-      || (segment.interpolation !== "linear" && segment.interpolation !== "hold")
-      || encodedInstanceIds[index]?.byteLength === 0
-      || (encodedInstanceIds[index]?.byteLength ?? 0) > nativeAudioHostMaximumScheduleInstanceIdBytes
-    ))
+    || encodedInstanceIds.some((bytes) => bytes.byteLength === 0 || bytes.byteLength > nativeAudioHostMaximumScheduleInstanceIdBytes)
+    || vstAutomationSegments.some((segment) => !Number.isInteger(segment.parameterId) || segment.parameterId < 0 || segment.parameterId > 0xffff_ffff || !Number.isSafeInteger(segment.startFrame) || segment.startFrame < window.startFrame || !Number.isSafeInteger(segment.endFrame) || segment.endFrame <= segment.startFrame || segment.endFrame > window.endFrame || !Number.isFinite(segment.startValue) || segment.startValue < 0 || segment.startValue > 1 || !Number.isFinite(segment.endValue) || segment.endValue < 0 || segment.endValue > 1)
+    || processorAutomationEvents.some((event) => !Number.isSafeInteger(event.processorInstanceId) || event.processorInstanceId <= 0 || !Number.isInteger(event.parameterTarget) || event.parameterTarget <= 0 || event.parameterTarget > 0xffff_ffff || !Number.isSafeInteger(event.frame) || event.frame < window.startFrame || event.frame >= window.endFrame || (event.kind === "linear" ? !Number.isSafeInteger(event.endFrame) || event.endFrame <= event.frame || event.endFrame > window.endFrame || !Number.isFinite(event.startValue) || !Number.isFinite(event.endValue) : !Number.isFinite(event.value)))
   ) throw new Error("Native schedule window is invalid.")
   const instrumentBytes = serializeNativeInstrumentEvents(window.epoch, instrumentEvents)
   const sourceBytes = serializeNativeSourceEvents(sampleSourceEvents, window.assets ?? [])
   const automationBytes = encodedInstanceIds.reduce((total, instanceBytes) => total + 44 + instanceBytes.byteLength, 0)
-  const output = new Uint8Array(56 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes)
+  const output = new Uint8Array(60 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes + processorAutomationEvents.length * 40)
   const view = new DataView(output.buffer)
-  view.setUint32(0, window.revision, true)
-  view.setUint32(4, window.epoch, true)
-  view.setBigUint64(8, BigInt(windowId), true)
-  view.setBigUint64(16, BigInt(window.startFrame), true)
-  view.setBigUint64(24, BigInt(window.endFrame), true)
-  view.setUint32(32, chunkIndex, true)
-  view.setUint32(36, chunkCount, true)
-  view.setUint32(40, endsSchedule ? 1 : 0, true)
-  view.setUint32(44, instrumentEvents.length, true)
-  view.setUint32(48, sampleSourceEvents.length, true)
-  view.setUint32(52, vstAutomationSegments.length, true)
-  let offset = 56
-  output.set(instrumentBytes.subarray(4), offset)
-  offset += instrumentBytes.byteLength - 4
-  output.set(sourceBytes.subarray(4), offset)
-  offset += sourceBytes.byteLength - 4
-  for (const [index, segment] of vstAutomationSegments.entries()) {
-    const encodedInstance = encodedInstanceIds[index]
-    view.setUint32(offset, encodedInstance.byteLength, true)
-    offset += 4
-    output.set(encodedInstance, offset)
-    offset += encodedInstance.byteLength
-    view.setUint32(offset, segment.parameterId, true)
-    offset += 4
-    view.setBigUint64(offset, BigInt(segment.startFrame), true)
-    offset += 8
-    view.setBigUint64(offset, BigInt(segment.endFrame), true)
-    offset += 8
-    view.setFloat64(offset, segment.startValue, true)
-    offset += 8
-    view.setFloat64(offset, segment.endValue, true)
-    offset += 8
-    view.setUint32(offset, segment.interpolation === "linear" ? 1 : 0, true)
-    offset += 4
+  view.setUint32(0, window.revision, true); view.setUint32(4, window.epoch, true); view.setBigUint64(8, BigInt(windowId), true); view.setBigUint64(16, BigInt(window.startFrame), true); view.setBigUint64(24, BigInt(window.endFrame), true)
+  view.setUint32(32, chunkIndex, true); view.setUint32(36, chunkCount, true); view.setUint32(40, endsSchedule ? 1 : 0, true); view.setUint32(44, instrumentEvents.length, true); view.setUint32(48, sampleSourceEvents.length, true); view.setUint32(52, vstAutomationSegments.length, true); view.setUint32(56, processorAutomationEvents.length, true)
+  let offset = 60
+  output.set(instrumentBytes.subarray(4), offset); offset += instrumentBytes.byteLength - 4
+  output.set(sourceBytes.subarray(4), offset); offset += sourceBytes.byteLength - 4
+  for (let index = 0; index < vstAutomationSegments.length; index += 1) {
+    const segment = vstAutomationSegments[index]!; const instanceBytes = encodedInstanceIds[index]!
+    view.setUint32(offset, instanceBytes.byteLength, true); offset += 4; output.set(instanceBytes, offset); offset += instanceBytes.byteLength
+    view.setUint32(offset, segment.parameterId, true); offset += 4; view.setBigUint64(offset, BigInt(segment.startFrame), true); offset += 8; view.setBigUint64(offset, BigInt(segment.endFrame), true); offset += 8
+    view.setFloat64(offset, segment.startValue, true); offset += 8; view.setFloat64(offset, segment.endValue, true); offset += 8; view.setUint32(offset, segment.interpolation === "linear" ? 1 : 0, true); offset += 4
+  }
+  for (const event of processorAutomationEvents) {
+    view.setBigUint64(offset, BigInt(event.processorInstanceId), true); view.setUint32(offset + 8, event.parameterTarget, true); view.setUint32(offset + 12, event.kind === "linear" ? 1 : 0, true); view.setBigUint64(offset + 16, BigInt(event.frame), true)
+    if (event.kind === "linear") { view.setBigUint64(offset + 24, BigInt(event.endFrame), true); view.setFloat32(offset + 32, event.startValue, true); view.setFloat32(offset + 36, event.endValue, true) }
+    else { view.setBigUint64(offset + 24, BigInt(event.frame), true); view.setFloat32(offset + 32, event.value, true); view.setFloat32(offset + 36, event.value, true) }
+    offset += 40
   }
   return output
 }

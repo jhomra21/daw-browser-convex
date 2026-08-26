@@ -2,7 +2,7 @@ import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import type { PortableFrameScheduleEvent } from "@daw-browser/audio-engine/portable-frame-scheduling"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { parseExternalAutomationParameterId } from "@daw-browser/shared"
-import type { NativeProcessorAutomationEvent } from "./native-processor-schedule-window"
+import type { NativeProcessorAutomationEvent } from "@daw-browser/audio-engine/native-host-wire"
 
 type PortableParameterEvent = Extract<
   PortableFrameScheduleEvent,

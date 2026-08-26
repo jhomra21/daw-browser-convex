@@ -309,10 +309,11 @@ test("serializes bounded native schedule ownership events", () => {
     }],
   })
   const view = new DataView(bytes.buffer)
-  expect(bytes.byteLength).toBe(104)
+  expect(bytes.byteLength).toBe(108)
   expect(view.getUint32(0, true)).toBe(4)
   expect(view.getUint32(40, true)).toBe(1)
-  expect(view.getUint32(56 + 32, true)).toBe(104)
+  expect(view.getUint32(56, true)).toBe(0)
+  expect(view.getUint32(60 + 32, true)).toBe(104)
   expect(() => serializeNativeScheduleWindow({
     revision: 4, epoch: 2, startFrame: 100, endFrame: 200, windowId: 9,
     instrumentEvents: [{ nodeId: "track", noteId: 1, sequence: 1, frameOffset: 200, type: "live-note-off", channel: 0, note: 60, value: 0 }],

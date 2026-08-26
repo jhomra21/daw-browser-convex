@@ -1,0 +1,61 @@
+name: Native automation parity native gate
+
+on:
+  push:
+    branches:
+      - fix/native-automation-parity
+    paths:
+      - .github/scripts/native-automation-parity-native.py
+      - .github/workflows/native-automation-parity-native.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/native-automation-parity
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Apply native Phase A patch
+        run: python3 .github/scripts/native-automation-parity-native.py
+      - name: Install JS dependencies for native static guard
+        run: bun install --frozen-lockfile
+      - name: Checkout VST3 SDK 3.8.x
+        run: |
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+          test -f "$RUNNER_TEMP/vst3sdk/pluginterfaces/vst/ivstcomponent.h"
+      - name: Configure native audio host
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: cmake --preset audio-host-macos-debug
+      - name: Build native audio host
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: cmake --build --preset audio-host-macos-debug --parallel 3
+      - name: Run native CTest suite
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: ctest --preset audio-host-macos-debug
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit checked native Phase A patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp
+          if git diff --cached --quiet; then
+            echo "No native patch changes to commit."
+            exit 0
+          fi
+          git commit -m "fix: consume scheduled processor automation natively"
+          git push origin HEAD:fix/native-automation-parity

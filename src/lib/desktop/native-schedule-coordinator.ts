@@ -11,6 +11,7 @@ import type {
   NativeVstAutomationSegment,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { compilePortableFrameScheduleWindow } from "~/lib/portable-frame-schedule"
+import { nativeProcessorAutomationEventsForSchedule } from "~/lib/desktop/native-processor-automation"
 import { projectPortableClipEvents } from "@daw-browser/audio-engine/portable-clip-projector"
 import type { PortablePreparedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-preparation"
 import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
@@ -248,6 +249,7 @@ type ScheduleWindowCandidate = {
   instrumentEventKeys: string[]
   sampleSourceEvents: NativeSourceEvent[]
   vstAutomationSegments: NativeVstAutomationSegment[]
+  processorAutomationEvents: import("@daw-browser/audio-engine/native-host-wire").NativeProcessorAutomationEvent[]
   noteChanges: Array<[string, boolean]>
   sourceChanges: Array<[string, number]>
   sequenceCount: number
@@ -381,6 +383,7 @@ export const createNativeScheduleCoordinator = (input: {
     (input.preparedStretchAssets ?? []).map((asset) => [asset.clipId, asset]),
   )
   const audioTracks = input.snapshot.tracks.filter((track) => track.kind !== "instrument")
+  let scheduleGraph = input.graph
 
   const failWaiters = (error: Error) => {
     for (const waiter of transitionWaiters) waiter.reject(error)
@@ -420,6 +423,7 @@ export const createNativeScheduleCoordinator = (input: {
     const sourceChanges = new Map<string, number>()
     const sampleSourceEvents: NativeSourceEvent[] = []
     const vstAutomationSegments: NativeVstAutomationSegment[] = []
+    const processorAutomationEvents: import("@daw-browser/audio-engine/native-host-wire").NativeProcessorAutomationEvent[] = []
     const noteIsActive = (key: string) => noteChanges.has(key)
       ? noteChanges.get(key) === true
       : ledgers.activeNoteIds.has(key)
@@ -472,13 +476,14 @@ export const createNativeScheduleCoordinator = (input: {
         rangeEndFrame: slice.nativeEndFrame,
         rangeEndSec: arrangementEndSec,
         tracks: input.snapshot.tracks,
-        automationEnvelopes: [],
+        automationEnvelopes: input.snapshot.mixer.automationEnvelopes,
         arpeggiators,
         stableNoteIds: true,
         eventRangeStartSec: arrangementStartSec,
         noteScheduleStartSec: 0,
         clipSpanningNoteOn: true,
       })
+      if (scheduleGraph) processorAutomationEvents.push(...nativeProcessorAutomationEventsForSchedule(scheduleGraph, schedule.events))
       const scheduledEvents = schedule.events
         .filter((event) => event.type === "note-on" || event.type === "note-off")
         .toSorted((left, right) => (
@@ -581,6 +586,7 @@ export const createNativeScheduleCoordinator = (input: {
       instrumentEventKeys,
       sampleSourceEvents,
       vstAutomationSegments,
+      processorAutomationEvents,
       noteChanges: [...noteChanges],
       sourceChanges: [...sourceChanges],
       sequenceCount: instrumentEvents.length + sampleSourceEvents.length,
@@ -621,7 +627,7 @@ export const createNativeScheduleCoordinator = (input: {
         const processorCount = window.vstAutomationSegments.reduce((count, segment) => (
           count + (segment.startFrame < end && segment.endFrame > start ? 1 : 0)
             + (segment.interpolation === "linear" && segment.endFrame < end ? 1 : 0)
-        ), 0)
+        ), 0) + window.processorAutomationEvents.reduce((count, event) => count + (event.kind === "linear" ? event.frame < end && event.endFrame > start ? 1 : 0 : event.frame >= start && event.frame < end ? 1 : 0), 0)
         if (processorCount > nativeProcessorEventCapacity) {
           throw capacityError(`callback at frame ${start} contains ${processorCount} processor events; the native limit is 256.`)
         }
@@ -674,6 +680,7 @@ export const createNativeScheduleCoordinator = (input: {
   }
 
   const preflight = (graph: AudioCoreGraphSnapshot) => {
+    scheduleGraph = graph
     validateCallbackCapacity(graph)
   }
 
@@ -687,6 +694,7 @@ export const createNativeScheduleCoordinator = (input: {
       Math.ceil(window.instrumentEvents.length / nativeInstrumentEventBatchSize),
       Math.ceil(window.sampleSourceEvents.length / nativeInstrumentEventBatchSize),
       Math.ceil(window.vstAutomationSegments.length / nativeInstrumentEventBatchSize),
+      Math.ceil(window.processorAutomationEvents.length / nativeInstrumentEventBatchSize),
       1,
     )
     if (chunkCount > nativeScheduleChunkCount) {
@@ -706,6 +714,10 @@ export const createNativeScheduleCoordinator = (input: {
         chunk * nativeInstrumentEventBatchSize,
         (chunk + 1) * nativeInstrumentEventBatchSize,
       )
+      const processorAutomationEvents = window.processorAutomationEvents.slice(
+        chunk * nativeInstrumentEventBatchSize,
+        (chunk + 1) * nativeInstrumentEventBatchSize,
+      )
       const payload = serializeNativeScheduleWindow({
         revision: input.snapshot.revision,
         epoch: input.epoch,
@@ -718,6 +730,7 @@ export const createNativeScheduleCoordinator = (input: {
         instrumentEvents,
         sampleSourceEvents,
         vstAutomationSegments,
+        processorAutomationEvents,
         assets: input.assets,
       })
       let lastError: Error | undefined
@@ -767,6 +780,7 @@ export const createNativeScheduleCoordinator = (input: {
           Math.ceil(candidate.instrumentEvents.length / nativeInstrumentEventBatchSize),
           Math.ceil(candidate.sampleSourceEvents.length / nativeInstrumentEventBatchSize),
           Math.ceil(candidate.vstAutomationSegments.length / nativeInstrumentEventBatchSize),
+          Math.ceil(candidate.processorAutomationEvents.length / nativeInstrumentEventBatchSize),
           1,
         )
         if (
@@ -774,6 +788,7 @@ export const createNativeScheduleCoordinator = (input: {
           && candidate.instrumentEvents.length <= nativeInstrumentEventBatchSize * nativeScheduleChunkCount
           && candidate.sampleSourceEvents.length <= nativeInstrumentEventBatchSize * nativeScheduleChunkCount
           && candidate.vstAutomationSegments.length <= nativeInstrumentEventBatchSize * nativeScheduleChunkCount
+          && candidate.processorAutomationEvents.length <= nativeInstrumentEventBatchSize * nativeScheduleChunkCount
         ) break
         const shorter = nextWindowStartFrame + Math.max(
           1,

@@ -1,0 +1,48 @@
+name: Native automation parity bootstrap
+
+on:
+  push:
+    branches:
+      - fix/native-automation-parity
+    paths:
+      - .github/scripts/native-automation-parity.py
+      - .github/scripts/native-automation-parity-fix.py
+      - .github/workflows/native-automation-parity-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/native-automation-parity
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Apply parity patch
+        run: |
+          python3 .github/scripts/native-automation-parity.py
+          python3 .github/scripts/native-automation-parity-fix.py
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Focused tests
+        run: bun test packages/audio-engine/src/native-host-wire.test.ts src/lib/desktop/native-processor-automation.test.ts src/lib/desktop/native-schedule-coordinator.test.ts src/lib/export/native-offline-render-plan.test.ts src/lib/desktop/native-playback-controller.test.ts
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit checked patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit."
+            exit 0
+          fi
+          git commit -m "fix: wire native processor automation"
+          git push origin HEAD:fix/native-automation-parity

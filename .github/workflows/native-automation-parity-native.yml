@@ -1,0 +1,111 @@
+name: Native automation parity native gate
+
+on:
+  push:
+    branches:
+      - fix/native-automation-parity
+    paths:
+      - .github/scripts/native-automation-parity-native.py
+      - .github/scripts/native-automation-parity-native-fix.py
+      - .github/scripts/native-automation-parity-native-lifecycle-fix.py
+      - .github/workflows/native-automation-parity-native.yml
+
+permissions:
+  contents: write
+
+# Exact-head certification trigger after the offline ramp slicing follow-up.
+jobs:
+  patch-build-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/native-automation-parity
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Apply native Phase A patch
+        run: |
+          python3 .github/scripts/native-automation-parity-native.py
+          python3 .github/scripts/native-automation-parity-native-fix.py
+          python3 .github/scripts/native-automation-parity-native-lifecycle-fix.py
+      - name: Apply CI-only Xcode 16 floating parser compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('native/plugin-host/src/worker-main.cpp')
+          text = path.read_text()
+          anchor = '''template <typename Number>\nbool Parse(const std::string_view text, Number& result) {\n  const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);\n  return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();\n}\n'''
+          replacement = anchor + '''\nbool Parse(const std::string_view text, double& result) {\n  std::string owned(text);\n  char* end = nullptr;\n  errno = 0;\n  result = std::strtod(owned.c_str(), &end);\n  return errno == 0 && end == owned.c_str() + owned.size();\n}\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('worker-main Parse anchor changed')
+          path.write_text(text.replace(anchor, replacement, 1))
+          PY
+      - name: Install JS dependencies for native static guard
+        run: bun install --frozen-lockfile
+      - name: Checkout VST3 SDK 3.8.x
+        run: |
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+          test -f "$RUNNER_TEMP/vst3sdk/pluginterfaces/vst/ivstcomponent.h"
+      - name: Configure native audio host
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: >-
+          cmake --preset audio-host-macos-debug
+          -DCMAKE_CXX_FLAGS=-Wno-unknown-warning-option
+          -DCMAKE_OBJCXX_FLAGS=-Wno-unknown-warning-option
+      - name: Build native audio host
+        id: native_build
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: |
+          set +e
+          cmake --build --preset audio-host-macos-debug --parallel 3 --verbose 2>&1 | tee "$GITHUB_WORKSPACE/.github/native-automation-build.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Commit compiler diagnostics on failure
+        if: failure() && steps.native_build.outcome == 'failure'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp native/plugin-host/src/worker-main.cpp
+          git add -f .github/native-automation-build.log
+          git commit -m "ci: capture native automation build failure"
+          git push origin HEAD:fix/native-automation-parity
+      - name: Run native CTest suite
+        id: native_ctest
+        working-directory: native
+        env:
+          VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
+        run: |
+          set +e
+          ctest --preset audio-host-macos-debug --output-on-failure 2>&1 | tee "$GITHUB_WORKSPACE/.github/native-automation-ctest.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Commit CTest diagnostics on failure
+        if: failure() && steps.native_ctest.outcome == 'failure'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp native/plugin-host/src/worker-main.cpp
+          git add -f .github/native-automation-ctest.log
+          git commit -m "ci: capture native automation ctest failure"
+          git push origin HEAD:fix/native-automation-parity
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit checked native Phase A patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/plugin-host/src/worker-main.cpp
+          git add native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp
+          if git diff --cached --quiet; then
+            echo "No native patch changes to commit."
+            exit 0
+          fi
+          git commit -m "fix: consume scheduled processor automation natively"
+          git push origin HEAD:fix/native-automation-parity

@@ -216,7 +216,7 @@ const instrumentEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatM
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const count = view.getUint32(44, true)
   return Array.from({ length: count }, (_, index) => {
-    const offset = 56 + index * 48
+    const offset = 60 + index * 48
     return {
       noteId: view.getBigUint64(offset + 8, true),
       frame: view.getUint32(offset + 28, true),
@@ -594,8 +594,8 @@ test("moves a note-off at a window boundary into the following window", async ()
   if (!second) return
   const view = new DataView(second.buffer)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(56 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).toBe(2)
+  expect(view.getUint32(60 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).toBe(2)
   const events = instrumentEventsFrom(fixture.payloads)
   expect(events.filter((event) => event.type === 1)).toHaveLength(1)
   expect(events.filter((event) => event.type === 2)).toHaveLength(1)
@@ -644,8 +644,8 @@ test("extends the final schedule window so the final note-off is accepted", asyn
   expect(view.getUint32(24, true)).toBe(96_001)
   expect(view.getUint32(40, true)).toBe(1)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(56 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).toBe(2)
+  expect(view.getUint32(60 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).toBe(2)
 })
 
 test("projects repeated loop iterations onto monotonic native frames", async () => {
@@ -803,9 +803,9 @@ test("publishes a spanning note-on and later note-off in one logical window", as
   if (!payload) return
   const view = new DataView(payload.buffer)
   expect(view.getUint32(44, true)).toBe(2)
-  expect(view.getUint32(56 + 28, true)).toBe(48_000)
-  expect(view.getUint32(56 + 48 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).not.toBe(view.getUint32(56 + 48 + 32, true))
+  expect(view.getUint32(60 + 28, true)).toBe(48_000)
+  expect(view.getUint32(60 + 48 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).not.toBe(view.getUint32(56 + 48 + 32, true))
 })
 
 test("projects non-empty VST automation segments across start, seek, and end boundaries", () => {

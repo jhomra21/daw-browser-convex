@@ -13,6 +13,7 @@ import {
   type NativeOfflineRenderPlan,
 } from '@daw-browser/audio-engine/native-host-wire'
 import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
+import { nativeProcessorAutomationEventsForSchedule } from '~/lib/desktop/native-processor-automation'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
@@ -94,9 +95,6 @@ export const compileNativeOfflineRenderPlan = (input: {
   }
   const unsupported: string[] = []
   if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
-  if (input.automationEnvelopes.some((envelope) => envelope.enabled)) {
-    unsupported.push('Native Phase A export does not support automation.')
-  }
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (clip.audioWarp?.enabled === true) unsupported.push(`${clip.id}: Native Phase A export does not support warp.`)
@@ -133,7 +131,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     timeOrigin: { timelineSec: sourceBounds.startSec, frame: 0 },
     rangeEndSec: sourceBounds.endSec,
     tracks: input.tracks,
-    automationEnvelopes: [],
+    automationEnvelopes: input.automationEnvelopes,
     arpeggiators: new Map(Object.keys(input.fx.trackFx ?? {}).map((trackId) => {
       const arp = input.fx.trackFx?.[trackId]?.arp
       return [trackId, arp?.enabled ? arp : undefined]
@@ -142,8 +140,8 @@ export const compileNativeOfflineRenderPlan = (input: {
     eventRangeStartSec: sourceBounds.startSec,
     noteScheduleStartSec: sourceBounds.startSec,
   })
-  if (schedule.events.some((event) => event.type !== 'note-on' && event.type !== 'note-off')) {
-    throw new Error('Native Phase A export does not support MIDI expression.')
+  if (schedule.events.some((event) => event.type === 'parameter-restore' && event.target.parameterId !== 'mixer.gain')) {
+    throw new Error('Native Phase A export contains unsupported transient MIDI expression.')
   }
   const { sessionAssets, assets } = nativeAssets(snapshot)
   if (
@@ -154,6 +152,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     throw new Error('Native Phase A export exceeds the offline asset capacity.')
   }
   const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz)
+  const processorAutomationEvents = nativeProcessorAutomationEventsForSchedule(snapshot.graph, schedule.events)
   const noteEvents = schedule.events.filter((event): event is Extract<typeof event, { type: 'note-on' | 'note-off' }> => (
     event.type === 'note-on' || event.type === 'note-off'
   ))
@@ -184,6 +183,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       epoch: 1,
       startFrame: 0,
       endFrame: totalFrames,
+      processorAutomationEvents,
       assets: sessionAssets,
     }))
   } else {
@@ -252,6 +252,7 @@ export const compileNativeOfflineRenderPlan = (input: {
         endsSchedule: instrumentOffset === sortedInstrumentEvents.length && sourceOffset === sortedSourceEvents.length,
         instrumentEvents: sortedInstrumentEvents.slice(windowInstrumentStart, instrumentOffset),
         sampleSourceEvents: sortedSourceEvents.slice(windowSourceStart, sourceOffset),
+        processorAutomationEvents: processorAutomationEvents.filter((event) => event.frame >= windowStart && event.frame < Math.min(totalFrames, endFrame)),
         assets: sessionAssets,
       }))
       windowStart = Math.min(totalFrames, endFrame)

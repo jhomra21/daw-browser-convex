@@ -24,6 +24,18 @@ jobs:
           bun-version: 1.3.14
       - name: Apply native Phase A patch
         run: python3 .github/scripts/native-automation-parity-native.py
+      - name: Apply CI-only Xcode 16 floating parser compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('native/plugin-host/src/worker-main.cpp')
+          text = path.read_text()
+          anchor = '''template <typename Number>\nbool Parse(const std::string_view text, Number& result) {\n  const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);\n  return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();\n}\n'''
+          replacement = anchor + '''\nbool Parse(const std::string_view text, double& result) {\n  std::string owned(text);\n  char* end = nullptr;\n  errno = 0;\n  result = std::strtod(owned.c_str(), &end);\n  return errno == 0 && end == owned.c_str() + owned.size();\n}\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('worker-main Parse anchor changed')
+          path.write_text(text.replace(anchor, replacement, 1))
+          PY
       - name: Install JS dependencies for native static guard
         run: bun install --frozen-lockfile
       - name: Checkout VST3 SDK 3.8.x
@@ -54,7 +66,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp
+          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp native/plugin-host/src/worker-main.cpp
           git add .github/native-automation-build.log
           git commit -m "ci: capture native automation build failure"
           git push origin HEAD:fix/native-automation-parity
@@ -69,6 +81,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/plugin-host/src/worker-main.cpp
           git add native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp
           if git diff --cached --quiet; then
             echo "No native patch changes to commit."

@@ -49,4 +49,8 @@ wire_test = "packages/audio-engine/src/native-host-wire.test.ts"
 replace(wire_test, "  expect(bytes.byteLength).toBe(104)\n", "  expect(bytes.byteLength).toBe(108)\n")
 replace(wire_test, "  expect(view.getUint32(56 + 32, true)).toBe(104)\n", "  expect(view.getUint32(56, true)).toBe(0)\n  expect(view.getUint32(60 + 32, true)).toBe(104)\n")
 
+coordinator_test = "src/lib/desktop/native-schedule-coordinator.test.ts"
+replace(coordinator_test, "    const offset = 56 + index * 48\n", "    const offset = 60 + index * 48\n")
+replace(coordinator_test, "view.getUint32(56 + 28, true)", "view.getUint32(60 + 28, true)", count=3)
+
 print("native automation parity first-run fixes applied")

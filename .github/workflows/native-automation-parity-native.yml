@@ -37,10 +37,24 @@ jobs:
           VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
         run: cmake --preset audio-host-macos-debug
       - name: Build native audio host
+        id: native_build
         working-directory: native
         env:
           VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
-        run: cmake --build --preset audio-host-macos-debug --parallel 3
+        run: |
+          set +e
+          cmake --build --preset audio-host-macos-debug --parallel 3 --verbose 2>&1 | tee "$GITHUB_WORKSPACE/.github/native-automation-build.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Commit compiler diagnostics on failure
+        if: failure() && steps.native_build.outcome == 'failure'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp
+          git add .github/native-automation-build.log
+          git commit -m "ci: capture native automation build failure"
+          git push origin HEAD:fix/native-automation-parity
       - name: Run native CTest suite
         working-directory: native
         env:

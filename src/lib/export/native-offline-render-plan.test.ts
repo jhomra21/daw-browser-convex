@@ -207,6 +207,7 @@ test('rebases VST automation to frame zero for a custom export range', () => {
     externalAttachments: plan,
   })
 
+  expect(exportPlan.blockFrames).toBe(512)
   expect(automationSegmentsFromSchedule(exportPlan.schedule).map((segment) => ({
     startFrame: segment.startFrame,
     endFrame: segment.endFrame,
@@ -215,6 +216,34 @@ test('rebases VST automation to frame zero for a custom export range', () => {
     { startFrame: 0, endFrame: 24_000, interpolation: 'hold' },
     { startFrame: 24_000, endFrame: 48_000, interpolation: 'linear' },
   ])
+})
+
+test('rejects VST automation that exceeds the worker callback event capacity', () => {
+  const plan = attachmentPlan()
+  const constrainedPlan: NativeExternalAttachmentPlan = {
+    ...plan,
+    attachments: plan.attachments.map((attachment) => ({
+      ...attachment,
+      workerTransport: { ...attachment.workerTransport, maximumEventsPerBlock: 1 },
+    })),
+  }
+  const parameterId = externalAutomationParameterId(constrainedPlan.attachments[0]!.instanceId, 7)
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [track],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [automationEnvelope(parameterId, [
+      { id: 'start', timeSec: 0, value: 0.25, interpolation: 'linear' },
+      { id: 'middle', timeSec: 0.0005, value: 0.5, interpolation: 'hold' },
+      { id: 'end', timeSec: 0.001, value: 0.75, interpolation: 'hold' },
+    ])],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    externalAttachments: constrainedPlan,
+  })).toThrow('Native VST3 export exceeds the callback event capacity')
 })
 
 test('still rejects enabled automation that is not a VST parameter envelope', () => {

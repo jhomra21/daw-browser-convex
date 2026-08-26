@@ -22,8 +22,15 @@ import {
   nativeAudioHostMaximumAssetChannels,
   nativeAudioHostMaximumAssetFrames,
   nativeAudioHostMaximumInstalledAssets,
+  nativeAudioHostMaximumInstrumentEvents,
+  nativeAudioHostMaximumScheduleAutomationSegments,
   nativeAudioHostMaximumScheduleRecords,
+  nativeAudioHostMaximumSourceEvents,
 } from '@daw-browser/desktop-protocol/native-audio-host'
+import {
+  isExternalVstAutomationEnvelope,
+  projectNativeVstAutomationSegments,
+} from '~/lib/native-vst-automation'
 
 export const nativeExternalLatencyFrames = (
   attachments: NativeExternalAttachmentPlan | undefined,
@@ -92,10 +99,16 @@ export const compileNativeOfflineRenderPlan = (input: {
     startSec: sourceBounds.startSec,
     endSec: sourceBounds.endSec + input.tailFrames / input.sampleRateHz,
   }
+  const externalAttachments = input.externalAttachments
+    ? nativeExternalAttachmentPlanSchema.parse(input.externalAttachments)
+    : undefined
   const unsupported: string[] = []
   if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
-  if (input.automationEnvelopes.some((envelope) => envelope.enabled)) {
-    unsupported.push('Native Phase A export does not support automation.')
+  const unsupportedAutomation = input.automationEnvelopes.filter((envelope) => (
+    envelope.enabled && !isExternalVstAutomationEnvelope(envelope, externalAttachments)
+  ))
+  if (unsupportedAutomation.length > 0) {
+    unsupported.push('Native Phase A export supports VST3 parameter automation only.')
   }
   for (const track of input.tracks) {
     for (const clip of track.clips) {
@@ -106,9 +119,6 @@ export const compileNativeOfflineRenderPlan = (input: {
     }
   }
   if (unsupported.length > 0) throw new Error(unsupported.join(' '))
-  const externalAttachments = input.externalAttachments
-    ? nativeExternalAttachmentPlanSchema.parse(input.externalAttachments)
-    : undefined
   const externalLatencyFrames = nativeExternalLatencyFrames(externalAttachments)
   const snapshot = compilePortableExportSnapshot({
     tracks: input.tracks,
@@ -175,87 +185,61 @@ export const compileNativeOfflineRenderPlan = (input: {
   const sortedSourceEvents = [...sampleSourceEvents].sort((left, right) => (
     left.startFrame - right.startFrame || left.sequence - right.sequence
   ))
+  const automationForWindow = (startFrame: number, endFrame: number) => (
+    projectNativeVstAutomationSegments({
+      automationEnvelopes: input.automationEnvelopes,
+      externalAttachments,
+      sampleRateHz: input.sampleRateHz,
+      timelineOriginSec: sourceBounds.startSec,
+      startFrame,
+      endFrame,
+    })
+  )
   let windowStart = 0
   let instrumentOffset = 0
   let sourceOffset = 0
-  if (sortedInstrumentEvents.length === 0 && sortedSourceEvents.length === 0) {
+  while (windowStart < totalFrames) {
+    let windowEnd = totalFrames
+    let nextInstrumentOffset = instrumentOffset
+    let nextSourceOffset = sourceOffset
+    let windowAutomation = automationForWindow(windowStart, windowEnd)
+    for (;;) {
+      nextInstrumentOffset = instrumentOffset
+      while (sortedInstrumentEvents[nextInstrumentOffset]?.frameOffset < windowEnd) {
+        nextInstrumentOffset += 1
+      }
+      nextSourceOffset = sourceOffset
+      while (sortedSourceEvents[nextSourceOffset]?.startFrame < windowEnd) {
+        nextSourceOffset += 1
+      }
+      const instrumentCount = nextInstrumentOffset - instrumentOffset
+      const sourceCount = nextSourceOffset - sourceOffset
+      windowAutomation = automationForWindow(windowStart, windowEnd)
+      const fits = instrumentCount <= nativeAudioHostMaximumInstrumentEvents
+        && sourceCount <= nativeAudioHostMaximumSourceEvents
+        && windowAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
+        && instrumentCount + sourceCount + windowAutomation.length <= nativeAudioHostMaximumScheduleRecords
+      if (fits) break
+      if (windowEnd <= windowStart + 1) {
+        throw new Error('Native Phase A export contains too many scheduled events at one frame.')
+      }
+      windowEnd = windowStart + Math.max(1, Math.floor((windowEnd - windowStart) / 2))
+    }
     scheduleWindows.push(serializeNativeScheduleWindow({
       revision: 1,
       epoch: 1,
-      startFrame: 0,
-      endFrame: totalFrames,
+      windowId: scheduleWindows.length + 1,
+      startFrame: windowStart,
+      endFrame: windowEnd,
+      endsSchedule: windowEnd >= totalFrames,
+      instrumentEvents: sortedInstrumentEvents.slice(instrumentOffset, nextInstrumentOffset),
+      sampleSourceEvents: sortedSourceEvents.slice(sourceOffset, nextSourceOffset),
+      vstAutomationSegments: windowAutomation,
       assets: sessionAssets,
     }))
-  } else {
-    while (windowStart < totalFrames) {
-      if (sortedInstrumentEvents[instrumentOffset] === undefined
-        && sortedSourceEvents[sourceOffset] === undefined) {
-        scheduleWindows.push(serializeNativeScheduleWindow({
-          revision: 1,
-          epoch: 1,
-          startFrame: windowStart,
-          endFrame: totalFrames,
-          assets: sessionAssets,
-        }))
-        break
-      }
-      const windowInstrumentStart = instrumentOffset
-      const windowSourceStart = sourceOffset
-      let lastFrame = windowStart
-      while (instrumentOffset < sortedInstrumentEvents.length
-        || sourceOffset < sortedSourceEvents.length) {
-        const nextInstrument = sortedInstrumentEvents[instrumentOffset]
-        const nextSource = sortedSourceEvents[sourceOffset]
-        const nextFrame = Math.min(
-          nextInstrument?.frameOffset ?? Number.POSITIVE_INFINITY,
-          nextSource?.startFrame ?? Number.POSITIVE_INFINITY,
-        )
-        if (!Number.isFinite(nextFrame) || nextFrame < windowStart) break
-        let instrumentAtFrame = 0
-        while (sortedInstrumentEvents[instrumentOffset + instrumentAtFrame]?.frameOffset === nextFrame) {
-          instrumentAtFrame += 1
-        }
-        let sourceAtFrame = 0
-        while (sortedSourceEvents[sourceOffset + sourceAtFrame]?.startFrame === nextFrame) {
-          sourceAtFrame += 1
-        }
-        const instrumentCount = instrumentOffset - windowInstrumentStart + instrumentAtFrame
-        const sourceCount = sourceOffset - windowSourceStart + sourceAtFrame
-        if (
-          instrumentCount > 256
-          || sourceCount > 256
-          || instrumentCount + sourceCount > nativeAudioHostMaximumScheduleRecords
-        ) break
-        instrumentOffset += instrumentAtFrame
-        sourceOffset += sourceAtFrame
-        lastFrame = nextFrame
-        if (
-          instrumentOffset - windowInstrumentStart >= 256
-          || sourceOffset - windowSourceStart >= 256
-          || instrumentOffset - windowInstrumentStart + sourceOffset - windowSourceStart >= nativeAudioHostMaximumScheduleRecords
-        ) break
-      }
-      if (instrumentOffset === windowInstrumentStart && sourceOffset === windowSourceStart) {
-        throw new Error('Native Phase A export contains too many events at one frame.')
-      }
-      const nextFrame = Math.min(
-        sortedInstrumentEvents[instrumentOffset]?.frameOffset ?? totalFrames,
-        sortedSourceEvents[sourceOffset]?.startFrame ?? totalFrames,
-      )
-      const endFrame = Math.max(windowStart + 1, nextFrame > lastFrame ? nextFrame : lastFrame + 1)
-      scheduleWindows.push(serializeNativeScheduleWindow({
-        revision: 1,
-        epoch: 1,
-        windowId: scheduleWindows.length + 1,
-        startFrame: windowStart,
-        endFrame: Math.min(totalFrames, endFrame),
-        endsSchedule: instrumentOffset === sortedInstrumentEvents.length && sourceOffset === sortedSourceEvents.length,
-        instrumentEvents: sortedInstrumentEvents.slice(windowInstrumentStart, instrumentOffset),
-        sampleSourceEvents: sortedSourceEvents.slice(windowSourceStart, sourceOffset),
-        assets: sessionAssets,
-      }))
-      windowStart = Math.min(totalFrames, endFrame)
-    }
+    instrumentOffset = nextInstrumentOffset
+    sourceOffset = nextSourceOffset
+    windowStart = windowEnd
   }
   const scheduleBytes = scheduleWindows[0]
   if (!scheduleBytes) throw new Error('Native Phase A export did not produce a schedule.')

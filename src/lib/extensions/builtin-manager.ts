@@ -1,75 +1,53 @@
 import {
-  createExtensionKernel,
+  createExtensionManager,
+  type ExtensionManager,
+} from './extension-manager'
+import {
   type AppExtensionDefinition,
   type ExtensionDiagnostic,
   type ExtensionKernel,
   type ExtensionKernelSnapshot,
-} from "./extension-kernel";
+} from './extension-kernel'
 
 type BuiltinManager = Readonly<{
-  enable: (extensionId: string) => Promise<void>;
-  disable: (extensionId: string) => Promise<void>;
-  reload: (extensionId: string) => Promise<void>;
+  enable: (extensionId: string) => Promise<void>
+  disable: (extensionId: string) => Promise<void>
+  reload: (extensionId: string) => Promise<void>
   snapshot: () => Readonly<{
-    kernel: ExtensionKernelSnapshot;
-    enabled: readonly string[];
-    diagnostics: readonly ExtensionDiagnostic[];
-  }>;
-  kernel: ExtensionKernel;
-  dispose: () => Promise<void>;
-}>;
+    kernel: ExtensionKernelSnapshot
+    enabled: readonly string[]
+    diagnostics: readonly ExtensionDiagnostic[]
+  }>
+  kernel: ExtensionKernel
+  dispose: () => Promise<void>
+}>
 
-const freezeSnapshot = (
-  kernel: ExtensionKernelSnapshot,
-  enabled: readonly string[],
-): ReturnType<BuiltinManager["snapshot"]> => Object.freeze({
-  kernel,
-  enabled: Object.freeze([...enabled]),
-  diagnostics: kernel.diagnostics,
-});
+const builtinSnapshot = (
+  manager: ExtensionManager,
+): ReturnType<BuiltinManager['snapshot']> => {
+  const snapshot = manager.snapshot()
+  return Object.freeze({
+    kernel: snapshot.kernel,
+    enabled: Object.freeze(snapshot.registrations
+      .filter((registration) => registration.enabled)
+      .map((registration) => registration.id)),
+    diagnostics: snapshot.diagnostics,
+  })
+}
 
 export const createBuiltinExtensionManager = (
   definitions: readonly AppExtensionDefinition[],
-  kernel: ExtensionKernel = createExtensionKernel(),
+  kernel?: ExtensionKernel,
 ): BuiltinManager => {
-  const byId = new Map(definitions.map((definition) => [definition.id, definition]));
-  const enabled = new Set<string>();
-
-  const definitionFor = (extensionId: string) => {
-    const definition = byId.get(extensionId);
-    if (!definition) throw new Error(`Unknown built-in extension ${extensionId}.`);
-    return definition;
-  };
-
-  const enable = async (extensionId: string) => {
-    if (enabled.has(extensionId)) return;
-    await kernel.activate(definitionFor(extensionId));
-    enabled.add(extensionId);
-  };
-
-  const disable = async (extensionId: string) => {
-    if (!enabled.has(extensionId)) return;
-    await kernel.deactivate(extensionId);
-    enabled.delete(extensionId);
-  };
-
-  const reload = async (extensionId: string) => {
-    if (!enabled.has(extensionId)) {
-      await enable(extensionId);
-      return;
-    }
-    await kernel.reload(definitionFor(extensionId));
-  };
+  const manager = createExtensionManager(kernel)
+  for (const definition of definitions) manager.register(definition, 'builtin')
 
   return Object.freeze({
-    enable,
-    disable,
-    reload,
-    snapshot: () => freezeSnapshot(kernel.snapshot(), [...enabled].sort()),
-    kernel,
-    dispose: async () => {
-      await kernel.dispose();
-      enabled.clear();
-    },
-  });
-};
+    enable: manager.enable,
+    disable: manager.disable,
+    reload: manager.reload,
+    snapshot: () => builtinSnapshot(manager),
+    kernel: manager.kernel,
+    dispose: manager.dispose,
+  })
+}

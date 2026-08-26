@@ -7,6 +7,7 @@ on:
     paths:
       - .github/scripts/native-automation-parity-native.py
       - .github/scripts/native-automation-parity-native-fix.py
+      - .github/scripts/native-automation-parity-native-lifecycle-fix.py
       - .github/workflows/native-automation-parity-native.yml
 
 permissions:
@@ -28,6 +29,7 @@ jobs:
         run: |
           python3 .github/scripts/native-automation-parity-native.py
           python3 .github/scripts/native-automation-parity-native-fix.py
+          python3 .github/scripts/native-automation-parity-native-lifecycle-fix.py
       - name: Apply CI-only Xcode 16 floating parser compatibility
         run: |
           python3 - <<'PY'

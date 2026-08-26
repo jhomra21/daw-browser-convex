@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
 
+# Exact-head certification trigger after the offline ramp slicing follow-up.
 jobs:
   patch-build-test:
     runs-on: macos-15

@@ -12,9 +12,13 @@ const resolveNativeParameterTarget = (
   graph: AudioCoreGraphSnapshot,
   event: PortableParameterEvent,
 ) => {
-  const nodeId = event.target.scope === "master" ? graph.masterNodeId : event.target.trackId
-  const node = nodeId ? graph.nodes.find((candidate) => candidate.id === nodeId) : undefined
-  if (!node) throw new Error(`Native automation target node "${nodeId ?? "unknown"}" is unavailable.`)
+  const node = event.target.scope === "master"
+    ? graph.nodes.find((candidate) => candidate.kind === "master")
+    : graph.nodes.find((candidate) => candidate.id === event.target.trackId)
+  if (!node) {
+    const identity = event.target.scope === "master" ? "master" : event.target.trackId
+    throw new Error(`Native automation target node "${identity}" is unavailable.`)
+  }
 
   if (event.target.effectInstanceId) {
     const resolved = resolveGraphProcessor(graph, event.target.effectInstanceId, node.id)

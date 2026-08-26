@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import type { PortableFrameScheduleEvent } from "@daw-browser/audio-engine/portable-frame-scheduling"
-import { nativeProcessorAutomationEventsForSchedule } from "./native-processor-automation"
+import {
+  nativeProcessorAutomationEventsForSchedule,
+  sliceNativeProcessorAutomationEvents,
+} from "./native-processor-automation"
 
 const graph = {
   version: 1,
@@ -109,6 +112,32 @@ test("projects mixer and built-in automation to existing numeric graph targets",
       endValue: 0.25,
     },
   ])
+})
+
+test("slices linear processor automation at native window boundaries", () => {
+  const projected = nativeProcessorAutomationEventsForSchedule(graph, events)
+  expect(sliceNativeProcessorAutomationEvents(projected, 10, 14)).toEqual([
+    {
+      kind: "linear",
+      processorInstanceId: 102,
+      parameterTarget: 26,
+      frame: 10,
+      endFrame: 14,
+      startValue: 0.8125,
+      endValue: 0.4375,
+    },
+  ])
+})
+
+test("keeps set events only in their end-exclusive window", () => {
+  const projected = nativeProcessorAutomationEventsForSchedule(graph, events)
+  expect(sliceNativeProcessorAutomationEvents(projected, 4, 6)).toEqual([
+    { kind: "set", processorInstanceId: 101, parameterTarget: 26, frame: 4, value: 0.5 },
+  ])
+})
+
+test("fails closed when processor automation window bounds are invalid", () => {
+  expect(() => sliceNativeProcessorAutomationEvents([], 4, 4)).toThrow("window bounds")
 })
 
 test("fails closed when a graph target is unknown", () => {

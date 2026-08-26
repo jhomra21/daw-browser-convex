@@ -1,0 +1,23 @@
+Test project /Users/runner/work/daw-browser-convex/daw-browser-convex/native/build/audio-host-macos-debug
+    Start 1: daw-audio-core-test
+1/6 Test #1: daw-audio-core-test ...........................   Passed    4.45 sec
+    Start 2: daw-plugin-host-worker-test
+2/6 Test #2: daw-plugin-host-worker-test ...................   Passed    0.18 sec
+    Start 3: daw-audio-host-macos-test
+3/6 Test #3: daw-audio-host-macos-test .....................Subprocess aborted***Exception:   1.74 sec
+Assertion failed: (host.SetTransport(1, true, 0)), function TestScheduledProcessorSetUsesAbsoluteFrame, file audio_host_test.cpp, line 1117.
+
+    Start 4: daw-audio-host-macos-graph-integration-test
+4/6 Test #4: daw-audio-host-macos-graph-integration-test ...   Passed    0.06 sec
+    Start 5: daw-audio-host-macos-transaction-test
+5/6 Test #5: daw-audio-host-macos-transaction-test .........   Passed    0.05 sec
+    Start 6: daw-realtime-callback-static-guard
+6/6 Test #6: daw-realtime-callback-static-guard ............   Passed    0.14 sec
+
+83% tests passed, 1 tests failed out of 6
+
+Total Test time (real) =   6.63 sec
+
+The following tests FAILED:
+	  3 - daw-audio-host-macos-test (Subprocess aborted)
+Errors while running CTest

@@ -67,7 +67,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp native/plugin-host/src/worker-main.cpp
-          git add .github/native-automation-build.log
+          git add -f .github/native-automation-build.log
           git commit -m "ci: capture native automation build failure"
           git push origin HEAD:fix/native-automation-parity
       - name: Run native CTest suite

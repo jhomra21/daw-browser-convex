@@ -133,6 +133,19 @@ test('uses the kernel replacement path and restores the prior provider on disabl
   await manager.dispose()
 })
 
+test('reports kernel activation as the source of truth for enablement', async () => {
+  const manager = createExtensionManager()
+  const definition = commandDefinition('1.0.0', 'one')
+  manager.register(definition)
+
+  await manager.kernel.activate(definition)
+  expect(manager.snapshot().registrations[0]?.enabled).toBeTrue()
+
+  await manager.kernel.deactivate(definition.id)
+  expect(manager.snapshot().registrations[0]?.enabled).toBeFalse()
+  await manager.dispose()
+})
+
 test('rejects duplicate registrations and becomes inert after disposal', async () => {
   const manager = createExtensionManager()
   manager.register(commandDefinition('1.0.0', 'one'))

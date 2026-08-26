@@ -3,6 +3,7 @@ import {
   type AppExtensionDefinition,
   type Cleanup,
   type ExtensionDiagnostic,
+  type ExtensionId,
   type ExtensionKernel,
   type ExtensionKernelSnapshot,
 } from './extension-kernel'
@@ -10,7 +11,7 @@ import {
 export type AppExtensionSource = 'builtin' | 'project' | 'package'
 
 export type ExtensionManagerRegistration = Readonly<{
-  id: string
+  id: ExtensionId
   version: string
   source: AppExtensionSource
   enabled: boolean
@@ -25,10 +26,10 @@ export type ExtensionManagerSnapshot = Readonly<{
 export type ExtensionManager = Readonly<{
   register: (definition: AppExtensionDefinition, source?: AppExtensionSource) => Cleanup
   update: (definition: AppExtensionDefinition, source?: AppExtensionSource) => Promise<Cleanup>
-  unregister: (extensionId: string) => Promise<void>
-  enable: (extensionId: string) => Promise<void>
-  disable: (extensionId: string) => Promise<void>
-  reload: (extensionId: string) => Promise<void>
+  unregister: (extensionId: ExtensionId) => Promise<void>
+  enable: (extensionId: ExtensionId) => Promise<void>
+  disable: (extensionId: ExtensionId) => Promise<void>
+  reload: (extensionId: ExtensionId) => Promise<void>
   snapshot: () => ExtensionManagerSnapshot
   kernel: ExtensionKernel
   dispose: () => Promise<void>
@@ -63,8 +64,7 @@ const activateDefinition = async (
 export const createExtensionManager = (
   kernel: ExtensionKernel = createExtensionKernel(),
 ): ExtensionManager => {
-  const registrations = new Map<string, RegisteredExtension>()
-  const enabled = new Set<string>()
+  const registrations = new Map<ExtensionId, RegisteredExtension>()
   let registrationGeneration = 0
   let disposed = false
 
@@ -72,25 +72,25 @@ export const createExtensionManager = (
     if (disposed) throw new Error('Extension manager is disposed.')
   }
 
-  const registrationFor = (extensionId: string) => {
+  const registrationFor = (extensionId: ExtensionId) => {
     const registration = registrations.get(extensionId)
     if (!registration) throw new Error(`Unknown extension ${extensionId}.`)
     return registration
   }
 
-  const unregisterGeneration = async (extensionId: string, generation: number) => {
+  const isEnabled = (extensionId: ExtensionId): boolean =>
+    kernel.snapshot().extensions.some((extension) => extension.id === extensionId)
+
+  const unregisterGeneration = async (extensionId: ExtensionId, generation: number) => {
     const registration = registrations.get(extensionId)
     if (registration?.generation !== generation) return
-    if (enabled.has(extensionId)) {
-      await kernel.deactivate(extensionId)
-      enabled.delete(extensionId)
-    }
+    if (isEnabled(extensionId)) await kernel.deactivate(extensionId)
     if (registrations.get(extensionId)?.generation === generation) {
       registrations.delete(extensionId)
     }
   }
 
-  const cleanupFor = (extensionId: string, generation: number): Cleanup => async () => {
+  const cleanupFor = (extensionId: ExtensionId, generation: number): Cleanup => async () => {
     if (disposed) return
     await unregisterGeneration(extensionId, generation)
   }
@@ -108,23 +108,21 @@ export const createExtensionManager = (
     return cleanupFor(definition.id, generation)
   }
 
-  const enable = async (extensionId: string) => {
+  const enable = async (extensionId: ExtensionId) => {
     ensureAvailable()
-    if (enabled.has(extensionId)) return
+    if (isEnabled(extensionId)) return
     const registration = registrationFor(extensionId)
     await activateDefinition(kernel, registration.definition)
     if (registrations.get(extensionId)?.generation !== registration.generation) {
       await kernel.deactivate(extensionId)
       throw new Error(`Extension ${extensionId} registration changed during activation.`)
     }
-    enabled.add(extensionId)
   }
 
-  const disable = async (extensionId: string) => {
+  const disable = async (extensionId: ExtensionId) => {
     ensureAvailable()
-    if (!enabled.has(extensionId)) return
+    if (!isEnabled(extensionId)) return
     await kernel.deactivate(extensionId)
-    enabled.delete(extensionId)
   }
 
   const update = async (
@@ -134,9 +132,7 @@ export const createExtensionManager = (
     ensureAvailable()
     const current = registrationFor(definition.id)
     const nextSource = source ?? current.source
-    if (enabled.has(definition.id)) {
-      await kernel.reload(definition)
-    }
+    if (isEnabled(definition.id)) await kernel.reload(definition)
     const generation = ++registrationGeneration
     registrations.set(definition.id, Object.freeze({
       definition,
@@ -146,17 +142,17 @@ export const createExtensionManager = (
     return cleanupFor(definition.id, generation)
   }
 
-  const unregister = async (extensionId: string) => {
+  const unregister = async (extensionId: ExtensionId) => {
     ensureAvailable()
     const registration = registrations.get(extensionId)
     if (!registration) return
     await unregisterGeneration(extensionId, registration.generation)
   }
 
-  const reload = async (extensionId: string) => {
+  const reload = async (extensionId: ExtensionId) => {
     ensureAvailable()
     const registration = registrationFor(extensionId)
-    if (!enabled.has(extensionId)) {
+    if (!isEnabled(extensionId)) {
       await enable(extensionId)
       return
     }
@@ -165,12 +161,13 @@ export const createExtensionManager = (
 
   const snapshot = (): ExtensionManagerSnapshot => {
     const kernelSnapshot = kernel.snapshot()
+    const activeIds = new Set(kernelSnapshot.extensions.map((extension) => extension.id))
     const current = [...registrations.values()]
       .map((registration) => Object.freeze({
         id: registration.definition.id,
         version: registration.definition.version,
         source: registration.source,
-        enabled: enabled.has(registration.definition.id),
+        enabled: activeIds.has(registration.definition.id),
       }))
       .sort((left, right) => left.id.localeCompare(right.id))
     return freezeSnapshot(kernelSnapshot, current)
@@ -189,7 +186,6 @@ export const createExtensionManager = (
       if (disposed) return
       disposed = true
       await kernel.dispose()
-      enabled.clear()
       registrations.clear()
     },
   })

@@ -35,7 +35,10 @@ jobs:
         working-directory: native
         env:
           VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
-        run: cmake --preset audio-host-macos-debug
+        run: >-
+          cmake --preset audio-host-macos-debug
+          -DCMAKE_CXX_FLAGS=-Wno-unknown-warning-option
+          -DCMAKE_OBJCXX_FLAGS=-Wno-unknown-warning-option
       - name: Build native audio host
         id: native_build
         working-directory: native

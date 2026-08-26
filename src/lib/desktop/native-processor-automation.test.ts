@@ -7,6 +7,8 @@ const graph = {
   version: 1,
   revision: 1,
   contractHash: "test",
+  masterNodeId: "master",
+  assets: [],
   edges: [],
   nodes: [
     {

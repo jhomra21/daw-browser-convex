@@ -71,10 +71,24 @@ jobs:
           git commit -m "ci: capture native automation build failure"
           git push origin HEAD:fix/native-automation-parity
       - name: Run native CTest suite
+        id: native_ctest
         working-directory: native
         env:
           VST3_SDK_PATH: ${{ runner.temp }}/vst3sdk
-        run: ctest --preset audio-host-macos-debug
+        run: |
+          set +e
+          ctest --preset audio-host-macos-debug --output-on-failure 2>&1 | tee "$GITHUB_WORKSPACE/.github/native-automation-ctest.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Commit CTest diagnostics on failure
+        if: failure() && steps.native_ctest.outcome == 'failure'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git restore native/audio-host-macos/src/audio-host.cpp native/audio-host-macos/tests/audio_host_test.cpp native/plugin-host/src/worker-main.cpp
+          git add -f .github/native-automation-ctest.log
+          git commit -m "ci: capture native automation ctest failure"
+          git push origin HEAD:fix/native-automation-parity
       - name: Diff hygiene
         run: git diff --check
       - name: Commit checked native Phase A patch

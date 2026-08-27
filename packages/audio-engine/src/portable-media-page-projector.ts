@@ -1,9 +1,9 @@
 import { normalizeClipGain } from '@daw-browser/shared'
-import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreSampleSourceEventDto } from '../../audio-core-contract/src/index'
+import { audioCoreContractVersion, type AudioAssetRef } from '../../audio-core-contract/src/index'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import { stableSourceIdentity } from './portable-clip-projector'
+import { stableSourceIdentity, type PortableProjectedSourceEvent } from './portable-clip-projector'
 
 export type PortableMediaPage = {
   sourceAssetId: string
@@ -26,7 +26,7 @@ export type PortableMediaPageProjectInput = {
 export type PortableMediaPageProjection =
   | {
     supported: true
-    events: readonly AudioCoreSampleSourceEventDto[]
+    events: readonly PortableProjectedSourceEvent[]
     handledClipIds: ReadonlySet<string>
   }
   | {
@@ -65,7 +65,7 @@ const projectClipPages = (input: {
   epoch: number
   firstSequence: number
   includeStableIdentity: boolean
-}): { events?: AudioCoreSampleSourceEventDto[]; reason?: string } => {
+}): { events?: PortableProjectedSourceEvent[]; reason?: string } => {
   const metadata = clipSourceMetadata(input.clip)
   if (!metadata) return { reason: pageReason(input.clip, 'persisted source metadata is required for paged playback.') }
   if (input.clip.audioWarp?.enabled === true) {
@@ -98,7 +98,7 @@ const projectClipPages = (input: {
   if (!(sourceEndPosition > sourceStartPosition)) return { events: [] }
 
   const fades = normalizeClipFades(input.clip.fades, input.clip.duration)
-  const events: AudioCoreSampleSourceEventDto[] = []
+  const events: PortableProjectedSourceEvent[] = []
   let coveredThrough = sourceStartPosition
   for (const page of orderedPages) {
     const pageStart = page.sourceStartFrame
@@ -170,7 +170,7 @@ export const projectPortableMediaPageEvents = (
 ): PortableMediaPageProjection => {
   const handledClipIds = new Set<string>()
   const reasons: string[] = []
-  const events: AudioCoreSampleSourceEventDto[] = []
+  const events: PortableProjectedSourceEvent[] = []
   if (!finitePositiveInteger(input.sampleRateHz)) {
     return { supported: false, reasons: ['The portable sample rate is invalid.'], handledClipIds }
   }

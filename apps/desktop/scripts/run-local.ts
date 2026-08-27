@@ -9,7 +9,7 @@ import {
   type NativeReleaseArtifactPaths,
 } from "../release.config"
 
-export type LocalPackageCommand = "package" | "make"
+export type LocalPackageCommand = "start" | "package" | "make"
 
 export type LocalPackagePreparation = {
   command: LocalPackageCommand
@@ -68,7 +68,7 @@ const diagnostic = arguments_.includes("--dry-run") || arguments_.includes("--di
 const forgeArguments = arguments_.filter((argument) => argument !== "--dry-run" && argument !== "--diagnostic")
 
 const isLocalPackageCommand = (value: string | undefined): value is LocalPackageCommand =>
-  value === "package" || value === "make"
+  value === "start" || value === "package" || value === "make"
 
 const fail = (message: string): never => {
   throw new Error(message)
@@ -80,7 +80,7 @@ const main = async (): Promise<void> => {
   }
   const command = isLocalPackageCommand(commandArgument)
     ? commandArgument
-    : fail("Usage: bun scripts/run-local.ts <package|make> [--dry-run|--diagnostic] [Forge arguments...]")
+    : fail("Usage: bun scripts/run-local.ts <start|package|make> [--dry-run|--diagnostic] [Forge arguments...]")
 
   const desktopRoot = path.resolve(import.meta.dirname, "..")
   const projectRoot = path.resolve(desktopRoot, "../..")

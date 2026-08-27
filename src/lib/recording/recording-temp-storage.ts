@@ -225,7 +225,7 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDi
       yield { name, kind: handle.kind }
     }
   },
-  remove: (name, recursive) => directory.removeEntry(name, recursive)
+  remove: (name, recursive) => directory.removeEntry(name, { recursive })
 })
 
 export const createRecordingTempStorage = (options: CreateRecordingTempStorageOptions = {}) => {

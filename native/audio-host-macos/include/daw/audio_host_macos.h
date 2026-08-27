@@ -16,12 +16,12 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 16;
-constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
+constexpr std::uint32_t kControlProtocolVersion = 17;
+constexpr std::size_t kMaximumControlPayloadBytes = 16 * 1024 * 1024;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
 constexpr std::uint32_t kMaximumAssetChannels = 64;
-constexpr std::uint32_t kMaximumAssetFrames = 262'144;
+constexpr std::uint32_t kMaximumAssetFrames = 1'048'576;
 constexpr std::size_t kMaximumInstalledAssets = 64;
 constexpr std::size_t kMaximumMeterEntries = 64;
 constexpr std::size_t kMaximumSpectrumBins = 1024;

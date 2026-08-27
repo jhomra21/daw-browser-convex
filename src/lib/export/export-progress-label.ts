@@ -8,7 +8,17 @@ type ExportProgressJob = {
   progress?: ExportProgress
 }
 
-export const formatExportProgressLabel = (job: ExportProgressJob): string => {
+type ExportProgressLabelOptions = {
+  choosingSaveLocation?: boolean
+}
+
+export const formatExportProgressLabel = (
+  job: ExportProgressJob,
+  options: ExportProgressLabelOptions = {},
+): string => {
+  if (options.choosingSaveLocation) {
+    return `${job.name}: Choosing save location…`
+  }
   const progress = job.progress
   const formatLabel = progress?.currentFormat ? ` ${getExportAudioFormatMetadata(progress.currentFormat).label}` : ''
   const formatCount = progress?.totalFormats && progress.totalFormats > 1

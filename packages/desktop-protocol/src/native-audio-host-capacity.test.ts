@@ -14,19 +14,19 @@ const nativeHeader = readFileSync(
   'utf8',
 )
 
-test('keeps the widened PCM asset envelope versioned and stereo-safe', () => {
+test('keeps the widened PCM asset envelope bounded and stereo-safe', () => {
   const maximumStereoBytes = nativeAudioHostMaximumAssetFrames
     * 2
     * Float32Array.BYTES_PER_ELEMENT
     + nativeAudioHostAssetInstallHeaderBytes
 
-  expect(nativeAudioHostProtocolVersion).toBe(17)
+  expect(nativeAudioHostProtocolVersion).toBe(16)
   expect(nativeAudioHostMaximumAssetFrames).toBe(1_048_576)
   expect(maximumStereoBytes).toBeLessThanOrEqual(nativeAudioHostMaximumPayloadBytes)
 })
 
 test('keeps TypeScript and native host wire bounds aligned', () => {
-  expect(nativeHeader).toContain('kControlProtocolVersion = 17;')
+  expect(nativeHeader).toContain('kControlProtocolVersion = 16;')
   expect(nativeHeader).toContain('kMaximumControlPayloadBytes = 16 * 1024 * 1024;')
   expect(nativeHeader).toContain("kMaximumAssetFrames = 1'048'576;")
 })

@@ -6,7 +6,6 @@ const SESSION_METADATA_FILE = "session.json"
 const SESSION_CREATED_AT_FILE = "created-at"
 const PCM_FILE = "capture.pcm"
 const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
-const DEFAULT_MAX_BYTES = 4 * 1024 * 1024 * 1024
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
 type RecordingTempStorageFailure =
@@ -93,6 +92,12 @@ type RecordingTempSession = {
 }
 
 const isSafeName = (value: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
+
+export const recordingStorageLimitExceeded = (
+  byteLength: number,
+  appendBytes: number,
+  maxBytes?: number,
+): boolean => maxBytes !== undefined && byteLength + appendBytes > maxBytes
 
 const classifyStorageFailure = (cause: unknown): RecordingTempStorageFailure => {
   if (cause instanceof DOMException) {
@@ -220,12 +225,12 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDi
       yield { name, kind: handle.kind }
     }
   },
-  remove: (name, recursive) => directory.removeEntry(name, { recursive })
+  remove: (name, recursive) => directory.removeEntry(name, recursive)
 })
 
 export const createRecordingTempStorage = (options: CreateRecordingTempStorageOptions = {}) => {
   const filesystem = options.filesystem ?? browserFilesystem
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
+  const maxBytes = options.maxBytes
   const now = options.now ?? Date.now
   const ownedSessionIds = new Set<string>()
 
@@ -345,11 +350,15 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
           throw new RecordingTempStorageError("write-failed", "Recording session is no longer writable.")
         }
         const blockBytes = BLOCK_HEADER_BYTES + frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT
+        const nextByteLength = byteLength + blockBytes
         if (!Number.isInteger(frameCount) || frameCount <= 0) {
           throw new RecordingTempStorageError("invalid-block", "Recording block frame count is invalid.")
         }
-        if (!Number.isSafeInteger(blockBytes) || byteLength + blockBytes > maxBytes) {
-          throw new RecordingTempStorageError("capacity-exceeded", "Recording session exceeded its storage bound.")
+        if (!Number.isSafeInteger(blockBytes) || !Number.isSafeInteger(nextByteLength)) {
+          throw new RecordingTempStorageError("write-failed", "Recording byte accounting exceeded the supported filesystem number range.")
+        }
+        if (recordingStorageLimitExceeded(byteLength, blockBytes, maxBytes)) {
+          throw new RecordingTempStorageError("capacity-exceeded", "Recording session exceeded its configured test storage bound.")
         }
         try {
           const header = new Uint8Array(BLOCK_HEADER_BYTES)
@@ -360,7 +369,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
           throw storageFailure("Could not write recording audio.", error)
         }
         capturedFrames += frameCount
-        byteLength += blockBytes
+        byteLength = nextByteLength
       }).catch(async (error) => {
         if (state === "open") await abortAndRemove()
         throw error

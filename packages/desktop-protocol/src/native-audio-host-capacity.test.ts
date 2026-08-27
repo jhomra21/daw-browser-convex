@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test } from 'bun:test'
 
 import {
@@ -8,6 +9,11 @@ import {
   nativeOfflineRenderPlanSchema,
 } from './native-audio-host'
 
+const nativeHeader = readFileSync(
+  new URL('../../../native/audio-host-macos/include/daw/audio_host_macos.h', import.meta.url),
+  'utf8',
+)
+
 test('keeps the widened PCM asset envelope versioned and stereo-safe', () => {
   const maximumStereoBytes = nativeAudioHostMaximumAssetFrames
     * 2
@@ -17,6 +23,12 @@ test('keeps the widened PCM asset envelope versioned and stereo-safe', () => {
   expect(nativeAudioHostProtocolVersion).toBe(17)
   expect(nativeAudioHostMaximumAssetFrames).toBe(1_048_576)
   expect(maximumStereoBytes).toBeLessThanOrEqual(nativeAudioHostMaximumPayloadBytes)
+})
+
+test('keeps TypeScript and native host wire bounds aligned', () => {
+  expect(nativeHeader).toContain('kControlProtocolVersion = 17;')
+  expect(nativeHeader).toContain('kMaximumControlPayloadBytes = 16 * 1024 * 1024;')
+  expect(nativeHeader).toContain("kMaximumAssetFrames = 1'048'576;")
 })
 
 test('accepts a practical twenty-second stereo PCM asset', () => {

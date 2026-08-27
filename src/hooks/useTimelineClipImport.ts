@@ -11,6 +11,7 @@ import { clientXToSec, clientYToTimelineTrackY, calcNonOverlapStart, quantizeSec
 import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
+import { readAudioFileMetadata } from '~/lib/media/audio-file-metadata'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -81,7 +82,6 @@ type TargetAudioTrack = {
 
 export function useTimelineClipImport(options: TimelineClipImportOptions): TimelineClipImportHandlers {
   const {
-    audioEngine,
     tracks,
     trackLayout,
     removeLocalTrack,
@@ -226,18 +226,18 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     signal?: AbortSignal,
   ): Promise<ImportFileOutcome> => {
     signal?.throwIfAborted()
-    const decoded = await audioEngine.decodeAudioData(await file.arrayBuffer())
+    const source = await readAudioFileMetadata(file)
     signal?.throwIfAborted()
     const target = await ensureTargetAudioTrack(trackId)
     if (!target) return { fileName: file.name, status: 'skipped' }
     const startSec = resolveClipStartSec(
       target.track,
       desiredStart ?? playheadSec(),
-      decoded.duration,
+      source.durationSec,
     )
     const result = await audioImportTransaction.createUploadedFileClip({
       file,
-      decoded,
+      source,
       track: target.track,
       startSec,
       autoCreatedTrack: autoCreatedTrack ?? (target.autoCreated ? target.track : undefined),

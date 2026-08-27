@@ -6,6 +6,8 @@ import {
 } from "./scripts/run-release"
 import {
   createLocalPackageEnvironment,
+  createLocalPackagePreparation,
+  type LocalPackageCommand,
 } from "./scripts/run-local"
 import {
   defaultNotaryProfile,
@@ -14,7 +16,8 @@ import {
 
 const packageJson = await readFile(new URL("./package.json", import.meta.url), "utf8")
 
-test("uses the local helper for package and the release helper for make", () => {
+test("uses the local helper for start and package and the release helper for make", () => {
+  expect(packageJson).toContain('"start": "bun scripts/run-local.ts start"')
   expect(packageJson).toContain('"package": "bun scripts/run-local.ts package"')
   expect(packageJson).toContain('"make": "bun scripts/run-release.ts make"')
   expect(packageJson).toContain('"release:mac:package": "bun scripts/run-release.ts package"')
@@ -49,6 +52,31 @@ test("prepares the dry-run release environment with native artifact paths", () =
     APPLE_API_KEY: "not-forwarded-by-diagnostic",
     APPLE_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID)",
     APPLE_NOTARY_KEYCHAIN_PROFILE: defaultNotaryProfile,
+    DAW_ENABLE_VST3_HOSTING: "1",
+    DAW_VST3_SCANNER_PATH: artifactPaths.scannerPath,
+    DAW_VST3_WORKER_PATH: artifactPaths.workerPath,
+    DAW_AUDIO_HOST_PATH: artifactPaths.audioHostPath,
+    DAW_NATIVE_ARTIFACT_MANIFEST_PATH: manifestPath,
+  })
+})
+
+test("prepares local desktop start with native artifact paths", () => {
+  const command: LocalPackageCommand = "start"
+  const artifactPaths: NativeReleaseArtifactPaths = {
+    scannerPath: "/project/native/vst3-scanner",
+    workerPath: "/project/native/vst3-worker",
+    audioHostPath: "/project/native/audio-host",
+  }
+  const manifestPath = "/project/apps/desktop/.native/daw-native-artifacts-v1.json"
+  const preparation = createLocalPackagePreparation(
+    command,
+    { PATH: "/usr/bin" },
+    artifactPaths,
+    manifestPath,
+  )
+
+  expect(preparation.command).toBe("start")
+  expect(preparation.environment).toMatchObject({
     DAW_ENABLE_VST3_HOSTING: "1",
     DAW_VST3_SCANNER_PATH: artifactPaths.scannerPath,
     DAW_VST3_WORKER_PATH: artifactPaths.workerPath,

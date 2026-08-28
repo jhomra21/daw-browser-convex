@@ -112,13 +112,13 @@ const normalizeContribution = <TValue>(
   }
   const title = normalizeText(contribution.title, 'title')
   const slot = normalizeText(contribution.slot, 'slot', 128)
-  const replacement = contribution.replacement === undefined
+  const replacement: WorkspaceReplacementPolicy | undefined = contribution.replacement === undefined
     ? undefined
     : Object.freeze({
-        allowed: true as const,
+        allowed: true,
         contract: normalizeText(contribution.replacement.contract, 'replacement-contract', MAX_CONTRACT_LENGTH),
       })
-  const replaces = contribution.replaces === undefined
+  const replaces: WorkspaceReplacementIntent | undefined = contribution.replaces === undefined
     ? undefined
     : Object.freeze({
         contract: normalizeText(contribution.replaces.contract, 'replacement-intent', MAX_CONTRACT_LENGTH),
@@ -130,8 +130,8 @@ const normalizeContribution = <TValue>(
     title,
     slot,
     order,
-    ...(replacement === undefined ? {} : { replacement }),
-    ...(replaces === undefined ? {} : { replaces }),
+    replacement,
+    replaces,
     value: contribution.value,
   })
 }

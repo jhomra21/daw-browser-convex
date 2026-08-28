@@ -12,7 +12,14 @@ export {
   builtinViewToggleBrowserShortcut,
   createBuiltinViewToggleBrowser,
 } from './builtins/view-toggle-browser'
+export {
+  builtinBrowserWorkspaceContract,
+  builtinBrowserWorkspaceContributionId,
+  builtinBrowserWorkspaceExtensionId,
+  createBuiltinBrowserWorkspace,
+} from './builtins/workspace-browser'
 export { createTimelineExtensionHost } from './timeline-extension-host'
+export type { TimelineExtensionWorkspace } from './timeline-extension-host'
 export { createBuiltinExtensionManager } from './builtin-manager'
 export { createProjectActionFacade } from './project-actions'
 export type { ProjectActionFacade, ProjectActionGrant } from './project-actions'

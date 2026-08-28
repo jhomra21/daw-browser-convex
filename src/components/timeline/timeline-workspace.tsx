@@ -9,6 +9,7 @@ import {
   type Component,
   type JSX,
 } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import ArrangementOverview from "~/components/timeline/ArrangementOverview";
@@ -387,7 +388,10 @@ export default function TimelineWorkspace(props: Props) {
             class="min-h-0 shrink-0"
             style={{ height: `calc(100% - ${props.bottomPanelOffsetPx}px)` }}
           >
-            {browserContribution().value({ leftBrowser: props.leftBrowser })}
+            <Dynamic
+              component={browserContribution().value}
+              leftBrowser={props.leftBrowser}
+            />
           </div>
         )}
       </Show>

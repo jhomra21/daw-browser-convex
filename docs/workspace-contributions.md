@@ -39,14 +39,23 @@ This mirrors the extension kernel's command replacement behavior: the public sur
 
 ## Lifecycle use
 
-`register()` returns an idempotent cleanup function, so extension activation can bind a workspace contribution to the existing lifecycle boundary:
+`register()` returns an idempotent cleanup function. `contributeWorkspace()` registers against the current extension ID and adds that cleanup to the existing extension activation context.
 
 ```ts
-const cleanup = workspace.register(context.extensionId, contribution)
-context.addCleanup(cleanup)
+contributeWorkspace(context, workspace, contribution)
 ```
 
 No separate cleanup authority is required.
+
+## Timeline host
+
+`createTimelineExtensionHost()` owns a workspace registry alongside its command and shortcut host.
+
+When the host receives a Browser workspace value, it activates `builtin.workspace.browser` through the same built-in extension manager used by the Browser command. That built-in owns the stable `workspace.browser` panel contribution and opts into replacement through `workspace.panel.browser/v1`.
+
+Host activation is fail-closed. If the Browser workspace activates and a later built-in activation fails, the host disables the workspace built-in before returning its fallback activation result. Disposal removes both command and workspace contributions through the normal extension lifecycle.
+
+The host remains renderer-independent: the Browser contribution value is generic. The Solid renderer adapter can therefore supply a component or factory without moving Solid into the extension kernel.
 
 ## What this does not do
 
@@ -58,7 +67,7 @@ External extension loading should be layered on top of the existing extension li
 
 The next useful host adapters are:
 
-- current timeline/browser workspace surfaces registered as built-ins;
-- a renderer adapter that resolves active contributions into Solid-owned rendering;
-- declarative external manifests that request only named contribution and project-action capabilities;
-- additional typed contribution planes for model/tool providers where the DAW needs replaceable non-UI behavior.
+- resolve `workspace.browser` from the timeline host into Solid-owned rendering while preserving the current Browser UI as the fallback;
+- register the remaining stable workspace surfaces as built-ins only when they have a real replacement use case;
+- define declarative external manifests that request only named contribution and project-action capabilities;
+- add typed contribution planes for model/tool providers where the DAW needs replaceable non-UI behavior.

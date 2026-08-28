@@ -11,8 +11,20 @@ import {
   type BrowserToggleExtensionViews,
 } from "./builtins/view-toggle-browser";
 import { createBuiltinExtensionManager } from "./builtin-manager";
+import {
+  builtinBrowserWorkspaceExtensionId,
+  createBuiltinBrowserWorkspace,
+} from "./builtins/workspace-browser";
+import {
+  createWorkspaceContributionRegistry,
+  type WorkspaceContributionRegistry,
+} from "./workspace-contributions";
 
-type TimelineExtensionHost = Readonly<{
+export type TimelineExtensionWorkspace<TValue> = Readonly<{
+  browser: TValue;
+}>;
+
+type TimelineExtensionHost<TWorkspaceValue> = Readonly<{
   shortcuts: Readonly<{
     execute: (
       chord: ShortcutChord,
@@ -29,7 +41,8 @@ type TimelineExtensionHost = Readonly<{
     }>[]
     execute: (commandId: string) => Promise<boolean>
     subscribe: (listener: () => void) => () => void
-  }>
+  }>;
+  workspace: WorkspaceContributionRegistry<TWorkspaceValue>;
   activation: Promise<boolean>;
   dispose: () => Promise<void>;
 }>;
@@ -52,23 +65,33 @@ const isToggleBrowserShortcut = (
   }
 };
 
-export const createTimelineExtensionHost = (
+export const createTimelineExtensionHost = <TWorkspaceValue = never>(
   views: BrowserToggleExtensionViews,
   kernel: ExtensionKernel = createExtensionKernel(),
-): TimelineExtensionHost => {
+  workspace?: TimelineExtensionWorkspace<TWorkspaceValue>,
+): TimelineExtensionHost<TWorkspaceValue> => {
   const definition = createBuiltinViewToggleBrowser(views);
-  const manager = createBuiltinExtensionManager([definition], kernel);
+  const workspaceRegistry = createWorkspaceContributionRegistry<TWorkspaceValue>();
+  const workspaceDefinition = workspace === undefined
+    ? undefined
+    : createBuiltinBrowserWorkspace(workspaceRegistry, workspace.browser);
+  const definitions = [definition];
+  if (workspaceDefinition !== undefined) definitions.unshift(workspaceDefinition);
+  const manager = createBuiltinExtensionManager(definitions, kernel);
   let state: "activating" | "active" | "failed" | "disposed" = "activating";
-  const activation = manager.enable(definition.id).then(
-    () => {
+  const activation = (async (): Promise<boolean> => {
+    try {
+      if (workspaceDefinition !== undefined) {
+        await manager.enable(builtinBrowserWorkspaceExtensionId);
+      }
+      await manager.enable(definition.id);
       if (state === "activating") state = "active";
       return true;
-    },
-    () => {
+    } catch {
       if (state === "activating") state = "failed";
       return false;
-    },
-  );
+    }
+  })();
 
   const execute = (
     chord: ShortcutChord,
@@ -114,6 +137,7 @@ export const createTimelineExtensionHost = (
       execute: executeMenuCommand,
       subscribe: (listener: () => void) => kernel.subscribe(() => listener()),
     }),
+    workspace: workspaceRegistry,
     activation,
     dispose,
   });

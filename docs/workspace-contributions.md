@@ -55,19 +55,34 @@ When the host receives a Browser workspace value, it activates `builtin.workspac
 
 Host activation is fail-closed. If the Browser workspace activates and a later built-in activation fails, the host disables the workspace built-in before returning its fallback activation result. Disposal removes both command and workspace contributions through the normal extension lifecycle.
 
-The host remains renderer-independent: the Browser contribution value is generic. The Solid renderer adapter can therefore supply a component or factory without moving Solid into the extension kernel.
+The host remains renderer-independent: the Browser contribution value is generic. The Solid renderer supplies `renderBuiltinTimelineBrowserWorkspace`, which preserves the existing `TimelineLeftBrowser` UI without moving Solid into the extension kernel.
+
+## Solid rendering adapter
+
+The timeline now passes the built-in Solid renderer into `createTimelineExtensionHost()` and passes that host's workspace registry into `TimelineWorkspace`.
+
+`TimelineWorkspace` does not render `TimelineLeftBrowser` directly. `createTimelineWorkspaceContributionAccess()` subscribes to the generic registry generation and resolves the active `workspace.browser` contribution. The active renderer receives the existing Browser model and owns the left-panel rendering.
+
+This makes replacement observable at the real render boundary:
+
+- enabling a valid replacement for `workspace.browser` swaps the rendered implementation;
+- removing that replacement restores the built-in Browser renderer;
+- disabling or removing the contribution removes the Browser surface instead of falling back to a hidden hardcoded implementation;
+- the built-in path preserves the current Browser UI and behavior.
+
+The Solid adapter remains outside `src/lib/extensions`, so renderer dependencies do not leak into the extension kernel.
 
 ## What this does not do
 
 This registry does not load packages, execute arbitrary extension code, grant project mutation authority, or expose renderer internals.
 
-External extension loading should be layered on top of the existing extension lifecycle and scoped project-action grants after its manifest and capability contracts are explicit. A package loader should consume these contribution APIs rather than invent a second extension system.
+External extension loading should be layered on top of the existing extension lifecycle and scoped project-action grants after its manifest and capability contracts are explicit. A package loader should consume these contribution APIs rather than inventing a second extension system.
 
 ## Next seams
 
-The next useful host adapters are:
+The next useful platform seams are:
 
-- resolve `workspace.browser` from the timeline host into Solid-owned rendering while preserving the current Browser UI as the fallback;
-- register the remaining stable workspace surfaces as built-ins only when they have a real replacement use case;
-- define declarative external manifests that request only named contribution and project-action capabilities;
-- add typed contribution planes for model/tool providers where the DAW needs replaceable non-UI behavior.
+- define a declarative external extension manifest and one loader that activates contributions through the existing extension lifecycle;
+- register additional stable workspace surfaces only when there is a concrete replacement/composition use case;
+- add typed contribution planes for model/tool providers where the DAW needs replaceable non-UI behavior, including the predictive next-action or “Tab model” provider;
+- keep those non-UI planes domain-specific rather than turning the workspace registry into a generic hook bag.

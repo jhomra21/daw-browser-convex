@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { Component } from "solid-js";
 import { TimelineLeftBrowser } from "./browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "./browser/browser-types";
 
@@ -6,9 +6,7 @@ export type TimelineWorkspaceRenderContext = Readonly<{
   leftBrowser: TimelineLeftBrowserModel;
 }>;
 
-export type TimelineWorkspaceRenderer = (
-  context: TimelineWorkspaceRenderContext,
-) => JSX.Element;
+export type TimelineWorkspaceRenderer = Component<TimelineWorkspaceRenderContext>;
 
 export const renderBuiltinTimelineBrowserWorkspace: TimelineWorkspaceRenderer = (
   context,

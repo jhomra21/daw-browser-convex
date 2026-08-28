@@ -26,6 +26,8 @@ export type {
   WorkspaceReplacementIntent,
   WorkspaceReplacementPolicy,
 } from './workspace-contributions'
+export { contributeWorkspace } from './workspace-extension-api'
+export type { WorkspaceExtensionContext } from './workspace-extension-api'
 export type {
   AppExtensionCommandDeclaration,
   AppExtensionDefinition,

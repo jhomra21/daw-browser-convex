@@ -16,6 +16,16 @@ export { createTimelineExtensionHost } from './timeline-extension-host'
 export { createBuiltinExtensionManager } from './builtin-manager'
 export { createProjectActionFacade } from './project-actions'
 export type { ProjectActionFacade, ProjectActionGrant } from './project-actions'
+export { createWorkspaceContributionRegistry } from './workspace-contributions'
+export type {
+  ActiveWorkspaceContribution,
+  WorkspaceContribution,
+  WorkspaceContributionKind,
+  WorkspaceContributionRegistry,
+  WorkspaceContributionSnapshot,
+  WorkspaceReplacementIntent,
+  WorkspaceReplacementPolicy,
+} from './workspace-contributions'
 export type {
   AppExtensionCommandDeclaration,
   AppExtensionDefinition,

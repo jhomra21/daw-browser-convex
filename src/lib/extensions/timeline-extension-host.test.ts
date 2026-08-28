@@ -55,6 +55,29 @@ test("registers the browser workspace surface through the same extension lifecyc
   expect(kernel.snapshot().extensions).toEqual([]);
 });
 
+test("rolls back the browser workspace when later host activation fails", async () => {
+  const baseKernel = createExtensionKernel();
+  let activations = 0;
+  const kernel = {
+    ...baseKernel,
+    activate: async (definition: Parameters<typeof baseKernel.activate>[0]) => {
+      activations += 1;
+      if (activations === 2) throw new Error("command activation failed");
+      await baseKernel.activate(definition);
+    },
+  };
+  const host = createTimelineExtensionHost(
+    { browser: { toggle: () => {} } },
+    kernel,
+    { browser: { render: "browser" } },
+  );
+
+  expect(await host.activation).toBeFalse();
+  expect(host.workspace.get("workspace.browser")).toBeUndefined();
+  expect(kernel.snapshot().extensions).toEqual([]);
+  await host.dispose();
+});
+
 test("rejects editable targets, shifted chords, and commands after disposal", async () => {
   let toggles = 0;
   const host = createTimelineExtensionHost({

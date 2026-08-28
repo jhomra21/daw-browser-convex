@@ -21,7 +21,6 @@ import {
 } from "~/components/timeline/MasterSidebarRow";
 import TrackSidebar from "~/components/timeline/TrackSidebar";
 import AutomationLane from "~/components/timeline/automation-lane";
-import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
 import type { TimelineMidiBounds } from "~/lib/timeline-midi-bounds";
@@ -43,6 +42,7 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import type { ClipFades } from "@daw-browser/timeline-core/clip-fades";
 import { automationTargetKey } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
+import type { WorkspaceContributionRegistry } from "~/lib/extensions";
 import TimelineContextMenu, {
   type TimelineContextMenuItem,
 } from "./context-menu/timeline-context-menu";
@@ -52,6 +52,8 @@ import {
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
+import { createTimelineWorkspaceContributionAccess } from "./timeline-workspace-contribution-access";
+import type { TimelineWorkspaceRenderer } from "./timeline-workspace-renderer";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -97,6 +99,7 @@ type Props = {
   timelineSurfaceRef: (el: HTMLDivElement) => void;
   bottomPanelOffsetPx: number;
   leftBrowser: TimelineLeftBrowserModel;
+  workspace: WorkspaceContributionRegistry<TimelineWorkspaceRenderer>;
   durationSec: number;
   pixelsPerSecond: number;
   viewport: {
@@ -227,6 +230,7 @@ type Props = {
 export default function TimelineWorkspace(props: Props) {
   let scrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
+  const workspace = createTimelineWorkspaceContributionAccess(props.workspace);
   const trackById = createMemo(() => props.trackLookup.trackById);
   const visibleTracks = createMemo(() =>
     [
@@ -377,12 +381,16 @@ export default function TimelineWorkspace(props: Props) {
   };
   return (
     <div class="flex-1 flex min-h-0" ref={props.containerRef}>
-      <div
-        class="min-h-0 shrink-0"
-        style={{ height: `calc(100% - ${props.bottomPanelOffsetPx}px)` }}
-      >
-        <TimelineLeftBrowser browser={props.leftBrowser} />
-      </div>
+      <Show when={workspace.browser()}>
+        {(browserContribution) => (
+          <div
+            class="min-h-0 shrink-0"
+            style={{ height: `calc(100% - ${props.bottomPanelOffsetPx}px)` }}
+          >
+            {browserContribution().value({ leftBrowser: props.leftBrowser })}
+          </div>
+        )}
+      </Show>
       <TimelineContextMenu items={fallbackMenuItems}>
         <div
           class="flex-1 relative overflow-auto"

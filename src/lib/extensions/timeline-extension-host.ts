@@ -88,6 +88,11 @@ export const createTimelineExtensionHost = <TWorkspaceValue = never>(
       if (state === "activating") state = "active";
       return true;
     } catch {
+      if (workspaceDefinition !== undefined) {
+        try {
+          await manager.disable(builtinBrowserWorkspaceExtensionId);
+        } catch {}
+      }
       if (state === "activating") state = "failed";
       return false;
     }

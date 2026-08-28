@@ -110,6 +110,7 @@ import AppMessageDialog, {
 import CloudBackupDialog from "./timeline/cloud-backup-dialog";
 import DeleteTrackDialog from "./timeline/delete-track-dialog";
 import TimelineWorkspace from "./timeline/timeline-workspace";
+import { renderBuiltinTimelineBrowserWorkspace } from "./timeline/timeline-workspace-renderer";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import type {
   DashboardTimelineModel,
@@ -1047,11 +1048,17 @@ const Timeline: Component<TimelineProps> = (props) => {
     rightSidebarWidthPx: sidebarWidth,
     getContainerElement: () => containerRef,
   });
-  const timelineExtensionHost = createTimelineExtensionHost({
-    browser: {
-      toggle: leftBrowser.toggleOpen,
+  const timelineExtensionHost = createTimelineExtensionHost(
+    {
+      browser: {
+        toggle: leftBrowser.toggleOpen,
+      },
     },
-  });
+    undefined,
+    {
+      browser: renderBuiltinTimelineBrowserWorkspace,
+    },
+  );
   onCleanup(() => {
     void timelineExtensionHost.dispose();
   });
@@ -2497,6 +2504,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         }}
         bottomPanelOffsetPx={bottomPanel.bottomPanelOffsetPx()}
         leftBrowser={timelineBrowser()}
+        workspace={timelineExtensionHost.workspace}
         durationSec={duration()}
         pixelsPerSecond={pixelsPerSecond()}
         viewport={{

@@ -3026,8 +3026,12 @@ bool AudioHost::InstallAsset(
     .channel_count = channel_count,
     .content_hash_prefix = content_hash_prefix,
   };
+  const auto [asset_iterator, inserted] = impl_->assets.emplace(asset_id, std::move(asset));
+  if (!inserted) return false;
+  auto& stored = asset_iterator->second;
+  stored.planes.fill(nullptr);
   for (std::uint32_t channel = 0; channel < channel_count; ++channel) {
-    asset.planes[channel] = asset.samples.data() + static_cast<std::size_t>(channel) * frame_count;
+    stored.planes[channel] = stored.samples.data() + static_cast<std::size_t>(channel) * stored.frame_count;
   }
   const daw_audio_asset_descriptor descriptor{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
@@ -3037,10 +3041,12 @@ bool AudioHost::InstallAsset(
     .frame_count = frame_count,
     .sample_rate_hz = sample_rate_hz,
     .channel_count = channel_count,
-    .planes = asset.planes.data(),
+    .planes = stored.planes.data(),
   };
-  if (daw_audio_core_create_asset(active_core, &descriptor, &asset.handle) != DAW_AUDIO_CORE_OK) return false;
-  impl_->assets.emplace(asset_id, std::move(asset));
+  if (daw_audio_core_create_asset(active_core, &descriptor, &stored.handle) != DAW_AUDIO_CORE_OK) {
+    impl_->assets.erase(asset_iterator);
+    return false;
+  }
   return true;
 }
 

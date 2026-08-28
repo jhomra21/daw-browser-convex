@@ -85,14 +85,13 @@ const MAX_ORDER = 1000
 
 const workspaceKinds: readonly WorkspaceContributionKind[] = ['tab', 'panel', 'view']
 
-const fail = (code: string, message: string): never => {
-  throw new ExtensionKernelError(code, message)
-}
+const fail = (code: string, message: string): ExtensionKernelError =>
+  new ExtensionKernelError(code, message)
 
 const normalizeText = (value: string, field: string, max = MAX_TEXT_LENGTH): string => {
   const normalized = value.trim()
   if (normalized.length === 0 || normalized.length > max) {
-    fail(`invalid-workspace-${field}`, `Workspace ${field} is empty or too long.`)
+    throw fail(`invalid-workspace-${field}`, `Workspace ${field} is empty or too long.`)
   }
   return normalized
 }
@@ -101,14 +100,14 @@ const normalizeContribution = <TValue>(
   contribution: WorkspaceContribution<TValue>,
 ): NormalizedContribution<TValue> => {
   if (!isContributionId(contribution.id)) {
-    fail('invalid-workspace-contribution-id', 'Workspace contribution ID is invalid.')
+    throw fail('invalid-workspace-contribution-id', 'Workspace contribution ID is invalid.')
   }
   if (!workspaceKinds.includes(contribution.kind)) {
-    fail('invalid-workspace-kind', 'Workspace contribution kind is invalid.')
+    throw fail('invalid-workspace-kind', 'Workspace contribution kind is invalid.')
   }
   const order = contribution.order ?? 0
   if (!Number.isInteger(order) || order < MIN_ORDER || order > MAX_ORDER) {
-    fail('invalid-workspace-order', 'Workspace contribution order is outside the bounded range.')
+    throw fail('invalid-workspace-order', 'Workspace contribution order is outside the bounded range.')
   }
   const title = normalizeText(contribution.title, 'title')
   const slot = normalizeText(contribution.slot, 'slot', 128)
@@ -235,36 +234,38 @@ export const createWorkspaceContributionRegistry = <TValue>(): WorkspaceContribu
     contribution: WorkspaceContribution<TValue>,
   ): (() => void) => {
     if (!isExtensionId(providerId)) {
-      fail('invalid-workspace-provider-id', 'Workspace provider ID is invalid.')
+      throw fail('invalid-workspace-provider-id', 'Workspace provider ID is invalid.')
     }
     const normalized = normalizeContribution(contribution)
     if (owned.get(providerId)?.has(normalized.id) === true) {
-      fail('duplicate-workspace-provider-contribution', 'Provider already registered this workspace contribution.')
+      throw fail('duplicate-workspace-provider-contribution', 'Provider already registered this workspace contribution.')
     }
 
     const current = active.get(normalized.id)
     if (current === undefined) {
       if (normalized.replaces !== undefined) {
-        fail('workspace-replacement-target-absent', 'Workspace replacement target is not active.')
+        throw fail('workspace-replacement-target-absent', 'Workspace replacement target is not active.')
       }
       active.set(normalized.id, Object.freeze({ providerId, contribution: normalized }))
       remember(providerId, normalized.id)
       notify()
     } else {
-      if (normalized.replaces === undefined) {
-        fail('workspace-contribution-conflict', 'Workspace contribution ID is already active.')
+      const replacementIntent = normalized.replaces
+      if (replacementIntent === undefined) {
+        throw fail('workspace-contribution-conflict', 'Workspace contribution ID is already active.')
       }
       if (replaced.has(normalized.id)) {
-        fail('workspace-replacement-cycle', 'Nested workspace replacement is not supported.')
+        throw fail('workspace-replacement-cycle', 'Nested workspace replacement is not supported.')
       }
-      if (current.contribution.replacement === undefined) {
-        fail('workspace-replacement-not-allowed', 'Workspace replacement target does not allow replacement.')
+      const replacementPolicy = current.contribution.replacement
+      if (replacementPolicy === undefined) {
+        throw fail('workspace-replacement-not-allowed', 'Workspace replacement target does not allow replacement.')
       }
-      if (current.contribution.replacement.contract !== normalized.replaces.contract) {
-        fail('workspace-replacement-contract-mismatch', 'Workspace replacement contract does not match the target.')
+      if (replacementPolicy.contract !== replacementIntent.contract) {
+        throw fail('workspace-replacement-contract-mismatch', 'Workspace replacement contract does not match the target.')
       }
       if (!sameSurface(current.contribution, normalized) || normalized.replacement !== undefined) {
-        fail('workspace-replacement-surface-mismatch', 'Workspace replacement must preserve the target surface contract.')
+        throw fail('workspace-replacement-surface-mismatch', 'Workspace replacement must preserve the target surface contract.')
       }
 
       replaced.set(normalized.id, current)
@@ -273,7 +274,7 @@ export const createWorkspaceContributionRegistry = <TValue>(): WorkspaceContribu
         contribution: Object.freeze({
           ...current.contribution,
           replacement: undefined,
-          replaces: normalized.replaces,
+          replaces: replacementIntent,
           value: normalized.value,
         }),
       }))

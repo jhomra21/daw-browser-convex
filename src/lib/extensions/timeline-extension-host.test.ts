@@ -27,6 +27,34 @@ test("dispatches the browser shortcut through the kernel after synchronous fallb
   expect(kernel.snapshot().commands).toEqual([]);
 });
 
+test("registers the browser workspace surface through the same extension lifecycle", async () => {
+  const kernel = createExtensionKernel();
+  const browserRenderer = { render: "browser" };
+  const host = createTimelineExtensionHost(
+    { browser: { toggle: () => {} } },
+    kernel,
+    { browser: browserRenderer },
+  );
+
+  expect(await host.activation).toBeTrue();
+  expect(host.workspace.get("workspace.browser")).toEqual({
+    id: "workspace.browser",
+    kind: "panel",
+    title: "Browser",
+    slot: "left",
+    order: 0,
+    providerId: "builtin.workspace.browser",
+    value: browserRenderer,
+  });
+  expect(kernel.snapshot().extensions.map((extension) => extension.id)).toContain(
+    "builtin.workspace.browser",
+  );
+
+  await host.dispose();
+  expect(host.workspace.get("workspace.browser")).toBeUndefined();
+  expect(kernel.snapshot().extensions).toEqual([]);
+});
+
 test("rejects editable targets, shifted chords, and commands after disposal", async () => {
   let toggles = 0;
   const host = createTimelineExtensionHost({

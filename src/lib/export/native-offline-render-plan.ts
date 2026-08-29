@@ -14,6 +14,10 @@ import {
   type NativeVstAutomationSegment,
 } from '@daw-browser/audio-engine/native-host-wire'
 import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
+import {
+  nativeProcessorAutomationEventsAtCallbackBoundaries,
+  nativeProcessorAutomationEventsForSchedule,
+} from '~/lib/desktop/native-processor-automation'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
@@ -21,17 +25,15 @@ import { nativeExternalAttachmentPlanSchema, type NativeExternalAttachmentPlan }
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import {
   nativeAudioHostMaximumAssetChannels,
-  nativeAudioHostMaximumAssetFrames,
+  nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumInstalledAssets,
   nativeAudioHostMaximumInstrumentEvents,
   nativeAudioHostMaximumScheduleAutomationSegments,
   nativeAudioHostMaximumScheduleRecords,
   nativeAudioHostMaximumSourceEvents,
 } from '@daw-browser/desktop-protocol/native-audio-host'
-import {
-  isExternalVstAutomationEnvelope,
-  projectNativeVstAutomationSegments,
-} from '~/lib/native-vst-automation'
+import { projectNativeVstAutomationSegments } from '~/lib/native-vst-automation'
+import { chunkNativePcmProjection } from '@daw-browser/audio-engine/native-pcm-chunking'
 
 export const nativeExternalLatencyFrames = (
   attachments: NativeExternalAttachmentPlan | undefined,
@@ -74,6 +76,13 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
     }
   })
   return { sessionAssets, assets }
+}
+
+const transferableBuffer = (plane: Float32Array) => {
+  if (!(plane.buffer instanceof ArrayBuffer)) {
+    throw new Error('Native export PCM must be backed by transferable ArrayBuffers.')
+  }
+  return plane.buffer
 }
 
 const nativeOfflineBlockFrames = (
@@ -155,12 +164,6 @@ export const compileNativeOfflineRenderPlan = (input: {
     : undefined
   const unsupported: string[] = []
   if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
-  const unsupportedAutomation = input.automationEnvelopes.filter((envelope) => (
-    envelope.enabled && !isExternalVstAutomationEnvelope(envelope, externalAttachments)
-  ))
-  if (unsupportedAutomation.length > 0) {
-    unsupported.push('Native Phase A export supports VST3 parameter automation only.')
-  }
   for (const track of input.tracks) {
     for (const clip of track.clips) {
       if (clip.audioWarp?.enabled === true) unsupported.push(`${clip.id}: Native Phase A export does not support warp.`)
@@ -194,7 +197,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     timeOrigin: { timelineSec: sourceBounds.startSec, frame: 0 },
     rangeEndSec: sourceBounds.endSec,
     tracks: input.tracks,
-    automationEnvelopes: [],
+    automationEnvelopes: input.automationEnvelopes,
     arpeggiators: new Map(Object.keys(input.fx.trackFx ?? {}).map((trackId) => {
       const arp = input.fx.trackFx?.[trackId]?.arp
       return [trackId, arp?.enabled ? arp : undefined]
@@ -203,19 +206,47 @@ export const compileNativeOfflineRenderPlan = (input: {
     eventRangeStartSec: sourceBounds.startSec,
     noteScheduleStartSec: sourceBounds.startSec,
   })
-  if (schedule.events.some((event) => event.type !== 'note-on' && event.type !== 'note-off')) {
-    throw new Error('Native Phase A export does not support MIDI expression.')
+  if (schedule.events.some((event) => event.type === 'parameter-restore' && event.target.parameterId !== 'mixer.gain')) {
+    throw new Error('Native Phase A export contains unsupported transient MIDI expression.')
   }
-  const { sessionAssets, assets } = nativeAssets(snapshot)
+  const chunked = chunkNativePcmProjection({
+    graph: snapshot.graph,
+    assets: snapshot.assets.map(({ asset, pcm }) => ({ asset, pcm })),
+    events: snapshot.events,
+    firstSequence: 1,
+  })
+  if ('supported' in chunked && !chunked.supported) {
+    throw new Error(chunked.reason)
+  }
+  if ('supported' in chunked) {
+    throw new Error('Native PCM chunk projection result is invalid.')
+  }
+  const nativeSnapshot: Extract<PortableExportSnapshot, { supported: true }> = {
+    ...snapshot,
+    graph: { ...snapshot.graph, assets: chunked.assets.map(({ asset }) => asset) },
+    assets: chunked.assets.map(({ asset, pcm }) => ({
+      asset,
+      pcm,
+      transferables: pcm.planes.map(transferableBuffer),
+    })),
+    events: chunked.events,
+  }
+  const { sessionAssets, assets } = nativeAssets(nativeSnapshot)
   if (
     assets.length > nativeAudioHostMaximumInstalledAssets
     || assets.some((asset) => asset.channelCount > nativeAudioHostMaximumAssetChannels
-      || asset.frameCount > nativeAudioHostMaximumAssetFrames)
+      || asset.frameCount > nativeAudioHostMaximumAssetFramesForChannels(asset.channelCount))
   ) {
     throw new Error('Native Phase A export exceeds the offline asset capacity.')
   }
   const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz)
   const blockFrames = nativeOfflineBlockFrames(totalFrames, externalAttachments)
+  const processorAutomationEvents = nativeProcessorAutomationEventsAtCallbackBoundaries(
+    nativeProcessorAutomationEventsForSchedule(snapshot.graph, schedule.events),
+    blockFrames,
+    0,
+    totalFrames,
+  )
   const noteEvents = schedule.events.filter((event): event is Extract<typeof event, { type: 'note-on' | 'note-off' }> => (
     event.type === 'note-on' || event.type === 'note-off'
   ))
@@ -229,7 +260,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     note: event.pitch,
     value: event.type === 'note-on' ? event.velocity : 0,
   }))
-  const sampleSourceEvents = snapshot.events.filter((event) => event.startFrame < totalFrames)
+  const sampleSourceEvents = nativeSnapshot.events.filter((event) => event.startFrame < totalFrames)
   const scheduleWindows: Array<Uint8Array> = []
   const automationSegments: NativeVstAutomationSegment[] = []
   const sortedInstrumentEvents = [...instrumentEvents].sort((left, right) => (
@@ -268,10 +299,15 @@ export const compileNativeOfflineRenderPlan = (input: {
       const instrumentCount = nextInstrumentOffset - instrumentOffset
       const sourceCount = nextSourceOffset - sourceOffset
       windowAutomation = automationForWindow(windowStart, windowEnd)
+      const windowProcessorAutomation = processorAutomationEvents.filter((event) => (
+        event.frame >= windowStart && event.frame < windowEnd
+      ))
       const fits = instrumentCount <= nativeAudioHostMaximumInstrumentEvents
         && sourceCount <= nativeAudioHostMaximumSourceEvents
         && windowAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
-        && instrumentCount + sourceCount + windowAutomation.length <= nativeAudioHostMaximumScheduleRecords
+        && windowProcessorAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
+        && instrumentCount + sourceCount + windowAutomation.length + windowProcessorAutomation.length
+          <= nativeAudioHostMaximumScheduleRecords
       if (fits) break
       if (windowEnd <= windowStart + 1) {
         throw new Error('Native Phase A export contains too many scheduled events at one frame.')
@@ -289,6 +325,9 @@ export const compileNativeOfflineRenderPlan = (input: {
       instrumentEvents: sortedInstrumentEvents.slice(instrumentOffset, nextInstrumentOffset),
       sampleSourceEvents: sortedSourceEvents.slice(sourceOffset, nextSourceOffset),
       vstAutomationSegments: windowAutomation,
+      processorAutomationEvents: processorAutomationEvents.filter((event) => (
+        event.frame >= windowStart && event.frame < Math.min(totalFrames, windowEnd)
+      )),
       assets: sessionAssets,
     }))
     instrumentOffset = nextInstrumentOffset
@@ -304,7 +343,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   })
   const scheduleBytes = scheduleWindows[0]
   if (!scheduleBytes) throw new Error('Native Phase A export did not produce a schedule.')
-  const instrumentStates = snapshot.graph.nodes.flatMap((node) => (
+  const instrumentStates = nativeSnapshot.graph.nodes.flatMap((node) => (
     node.kind === 'instrument' && node.instrument
       ? [{ nodeId: node.id, state: node.instrument }]
       : []
@@ -315,7 +354,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     channelCount: input.channelCount,
     totalFrames,
     blockFrames,
-    graph: serializeNativeGraph(snapshot.graph),
+    graph: serializeNativeGraph(nativeSnapshot.graph),
     externalAttachments: externalAttachments ? externalAttachments : undefined,
     capturedVstStates: input.capturedVstStates ? input.capturedVstStates : undefined,
     instrumentStates: instrumentStates.length === 0 ? undefined : serializeNativeInstrumentStates(instrumentStates, sessionAssets),

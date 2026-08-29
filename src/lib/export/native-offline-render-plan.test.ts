@@ -5,22 +5,43 @@ import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
 
-class TestAudioBuffer implements AudioBuffer {
-  readonly duration = 4 / 48_000
-  readonly length = 4
-  readonly numberOfChannels = 2
-  readonly sampleRate = 48_000
-  private readonly channels = [new Float32Array([0, 0.25, -0.5, 1]), new Float32Array([1, -0.5, 0.25, 0])]
+const defaultChannels = () => {
+  const left = new Float32Array(new ArrayBuffer(4 * Float32Array.BYTES_PER_ELEMENT))
+  const right = new Float32Array(new ArrayBuffer(4 * Float32Array.BYTES_PER_ELEMENT))
+  left.set([0, 0.25, -0.5, 1])
+  right.set([1, -0.5, 0.25, 0])
+  return [left, right]
+}
 
-  copyFromChannel(destination: Float32Array, channel: number, bufferOffset = 0) {
+class TestAudioBuffer implements AudioBuffer {
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels: number
+  readonly sampleRate: number
+  private readonly channels: readonly Float32Array<ArrayBuffer>[]
+
+  constructor(
+    channels: readonly Float32Array<ArrayBuffer>[] = [
+      ...defaultChannels(),
+    ],
+    sampleRate = 48_000,
+  ) {
+    this.channels = channels
+    this.length = channels[0]?.length ?? 0
+    this.numberOfChannels = channels.length
+    this.sampleRate = sampleRate
+    this.duration = this.length / sampleRate
+  }
+
+  copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, bufferOffset = 0) {
     destination.set(this.channels[channel]?.subarray(bufferOffset, bufferOffset + destination.length))
   }
 
-  copyToChannel(source: Float32Array, channel: number, bufferOffset = 0) {
+  copyToChannel(source: Float32Array<ArrayBuffer>, channel: number, bufferOffset = 0) {
     this.channels[channel]?.set(source, bufferOffset)
   }
 
-  getChannelData(channel: number) {
+  getChannelData(channel: number): Float32Array<ArrayBuffer> {
     const data = this.channels[channel]
     if (!data) throw new Error(`Missing channel ${channel}.`)
     return data
@@ -117,7 +138,7 @@ const automationSegmentsFromSchedule = (payload: Uint8Array): DecodedAutomationS
   const sourceCount = view.getUint32(48, true)
   const automationCount = view.getUint32(52, true)
   const decoder = new TextDecoder()
-  let offset = 56 + instrumentCount * 48 + sourceCount * 112
+  let offset = 60 + instrumentCount * 48 + sourceCount * 112
   return Array.from({ length: automationCount }, () => {
     const instanceLength = view.getUint32(offset, true)
     offset += 4
@@ -155,6 +176,37 @@ test('compiles a native plan that remains directly structured-cloneable', () => 
 
   expect(() => structuredClone(plan)).not.toThrow()
   expect(structuredClone(plan)).toEqual(plan)
+})
+
+test('chunks long stereo assets for a custom offline export range', () => {
+  const frameCount = 12 * 48_000
+  const longTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      duration: frameCount / 48_000,
+      buffer: new TestAudioBuffer([
+        new Float32Array(frameCount),
+        new Float32Array(frameCount),
+      ]),
+    } satisfies Clip<AudioBuffer>],
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [longTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 2, endSec: 10 },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+  })
+
+  expect(plan.totalFrames).toBe(8 * 48_000)
+  expect(plan.assets).toHaveLength(5)
+  expect(plan.assets.every((asset) => asset.frameCount <= 131_069)).toBe(true)
+  expect(new DataView(plan.schedule.buffer).getUint32(48, true)).toBeGreaterThan(1)
 })
 
 test('renders VST parameter automation into native offline schedule windows', () => {
@@ -246,8 +298,8 @@ test('rejects VST automation that exceeds the worker callback event capacity', (
   })).toThrow('Native VST3 export exceeds the callback event capacity')
 })
 
-test('still rejects enabled automation that is not a VST parameter envelope', () => {
-  expect(() => compileNativeOfflineRenderPlan({
+test('renders track volume automation into native processor schedule events', () => {
+  const exportPlan = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [automationEnvelope('volume', [
@@ -260,7 +312,32 @@ test('still rejects enabled automation that is not a VST parameter envelope', ()
     channelCount: 2,
     tailFrames: 0,
     externalAttachments: attachmentPlan(),
-  })).toThrow('Native Phase A export supports VST3 parameter automation only.')
+  })
+  const view = new DataView(exportPlan.schedule.buffer, exportPlan.schedule.byteOffset, exportPlan.schedule.byteLength)
+  expect(view.getUint32(56, true)).toBe(1)
+  const processorOffset = 60 + view.getUint32(48, true) * 112
+  expect(Number(view.getBigUint64(processorOffset, true))).toBeGreaterThan(0)
+  expect(view.getUint32(processorOffset + 8, true)).toBe(26)
+  expect(view.getUint32(processorOffset + 12, true)).toBe(0)
+  expect(Number(view.getBigUint64(processorOffset + 16, true))).toBe(0)
+  expect(view.getFloat32(processorOffset + 32, true)).toBe(0.5)
+})
+
+test('rejects unsupported native automation targets', () => {
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [track],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [automationEnvelope('unsupported.parameter', [
+      { id: 'unsupported', timeSec: 0, value: 0.5, interpolation: 'hold' },
+    ])],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    externalAttachments: attachmentPlan(),
+  })).toThrow('Native mixer automation parameter')
 })
 
 test('partitions many uniquely timed source events without rescanning earlier events', () => {

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import {
   nativeAudioHostMaximumInMemoryPcmBytes,
+  nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPcmBytes,
   nativeOfflineRenderPlanSchema,
@@ -49,6 +50,13 @@ test("rejects binary control payloads above the native frame limit", () => {
     graph: new Uint8Array(nativeAudioHostMaximumPayloadBytes + 1),
   })
   expect(result.success).toBe(false)
+})
+
+test("uses payload-safe mono and stereo asset frame capacities", () => {
+  expect(nativeAudioHostMaximumAssetFramesForChannels(1)).toBe(262_138)
+  expect(nativeAudioHostMaximumAssetFramesForChannels(2)).toBe(131_069)
+  expect(nativeAudioHostMaximumAssetFramesForChannels(1) * 4 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
+  expect(nativeAudioHostMaximumAssetFramesForChannels(2) * 8 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
 })
 
 test("rejects malformed PCM asset dimensions", () => {

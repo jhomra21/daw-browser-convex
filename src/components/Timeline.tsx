@@ -34,6 +34,7 @@ import {
   collectTrackDescendantIds,
   isLocalId,
   automationTargetKey,
+  createAutomationTarget,
   type TrackInstrumentParams,
 } from "@daw-browser/shared";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
@@ -775,6 +776,9 @@ const Timeline: Component<TimelineProps> = (props) => {
   const automation = useTimelineAutomationController({
     projectId,
     userId,
+    tracks: renderTracks,
+    masterVolume: masterVolume.volume,
+    masterReady: masterVolume.ready,
     remoteRows: () => fullView.data?.automationEnvelopes,
     remoteEffects: () =>
       fullView.data?.effects.flatMap((effect) => {
@@ -797,6 +801,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     playheadSec,
     selectedTrackId: selection.selectedTrackId,
     pushHistory,
+    onPersistenceError: (error) => {
+      localProject.setLocalSaveFailure(
+        error instanceof Error ? error.message : "Automation could not be saved.",
+      );
+    },
   });
   const vstParameterFeedback = createVstParameterFeedbackController({
     projectId,
@@ -2372,11 +2381,11 @@ const Timeline: Component<TimelineProps> = (props) => {
         automation.overrideTarget(
           targetKey === "master"
             ? automationTargetKey(
-                { kind: "master", effectInstanceId },
+                createAutomationTarget({ kind: "master" }, effectInstanceId),
                 parameterId,
               )
             : automationTargetKey(
-                { kind: "track", trackId: targetKey, effectInstanceId },
+                createAutomationTarget({ kind: "track", trackId: targetKey }, effectInstanceId),
                 parameterId,
               ),
         );

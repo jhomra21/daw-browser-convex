@@ -4,7 +4,7 @@ import {
   normalizeExportTailPolicy,
   normalizeWavEncodingSettings,
 } from '@daw-browser/audio-engine/export-fidelity'
-import type { ExportAudioFormat, MidiClip } from '@daw-browser/shared'
+import { createAutomationTarget, type ExportAudioFormat, type MidiClip } from '@daw-browser/shared'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExportEncodingSettings, ExportRenderSettings } from '~/lib/export/export-settings'
@@ -166,15 +166,11 @@ const cloneAutomationEnvelope = (envelope: ExportAutomationPatch['envelope']) =>
       id: envelope.id,
       projectId: envelope.projectId,
       target: envelope.target.kind === 'track'
-        ? {
-          kind: envelope.target.kind,
-          trackId: envelope.target.trackId,
-          effectInstanceId: envelope.target.effectInstanceId,
-        }
-        : {
-          kind: envelope.target.kind,
-          effectInstanceId: envelope.target.effectInstanceId,
-        },
+        ? createAutomationTarget(
+          { kind: 'track', trackId: envelope.target.trackId },
+          envelope.target.effectInstanceId,
+        )
+        : createAutomationTarget({ kind: 'master' }, envelope.target.effectInstanceId),
       targetKey: envelope.targetKey,
       parameterId: envelope.parameterId,
       enabled: envelope.enabled,

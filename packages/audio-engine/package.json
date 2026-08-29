@@ -23,6 +23,7 @@
     "./recording-protocol": "./src/recording/recording-protocol.ts",
     "./portable-wasm-protocol": "./src/portable-wasm-protocol.ts",
     "./native-host-wire": "./src/native-host-wire.ts",
+    "./native-pcm-chunking": "./src/native-pcm-chunking.ts",
     "./live-native-projection": "./src/live-native-projection.ts",
     "./live-mixer-runtime": "./src/live-mixer-runtime.ts",
     "./portable-clip-projector": "./src/portable-clip-projector.ts",

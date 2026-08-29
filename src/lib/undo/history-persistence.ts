@@ -4,6 +4,7 @@ import {
   assert,
   assertDefined,
   automationTargetKey,
+  createAutomationTarget,
   buildClipCreatePayload,
   isJsonObject,
   isJsonString,
@@ -69,11 +70,10 @@ export const rebaseTrackAutomationEnvelope = (
       : synthKey
         ? synthAutomationKey(trackId, synthKey.instanceId, synthKey.parameterId)
         : envelope.parameterId;
-  const target: AutomationEnvelope["target"] = {
-    kind: "track",
-    trackId,
-    effectInstanceId: envelope.target.effectInstanceId,
-  };
+  const target: AutomationEnvelope["target"] = createAutomationTarget(
+    { kind: "track", trackId },
+    envelope.target.effectInstanceId,
+  );
   return {
     ...envelope,
     target,

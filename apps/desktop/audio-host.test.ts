@@ -54,7 +54,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v4"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v5"), u32(0), u32(1),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -226,7 +226,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x10,
+        0x00, 0x00, 0x00, 0x11,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),

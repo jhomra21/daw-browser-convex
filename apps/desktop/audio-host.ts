@@ -18,6 +18,7 @@ import {
   nativeAudioHostMagic as magic,
   nativeAudioHostMaximumAssetChannels as maximumAssetChannels,
   nativeAudioHostMaximumAssetFrames as maximumAssetFrames,
+  nativeAudioHostMaximumAssetFramesForChannels as maximumAssetFramesForChannels,
   nativeAudioHostMaximumDeviceIdBytes as maximumDeviceIdBytes,
   nativeAudioHostMaximumMeterEntries as maximumMeterEntries,
   nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
@@ -105,7 +106,7 @@ const {
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 const requiredHostCapabilities = 0x000003ff
-const nativeAudioHostArtifactId = "daw-audio-host-macos/v4"
+const nativeAudioHostArtifactId = "daw-audio-host-macos/v5"
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
 const nativeOfflineStageTimeoutMs = 10_000
@@ -253,7 +254,7 @@ const serializeAssetInstall = (input: NativeHostPcmAsset) => {
     || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
     || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
     || !Number.isSafeInteger(expectedPcmBytes)
-    || expectedPcmBytes > maximumPayloadBytes - assetInstallHeaderBytes
+    || input.frameCount > maximumAssetFramesForChannels(input.channelCount)
     || input.planarPcm.byteLength !== expectedPcmBytes
     || hash.byteLength !== 8
   ) return undefined

@@ -2,7 +2,7 @@ export const nativeAudioHostMagic = 0x44415748
 import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 16
+export const nativeAudioHostProtocolVersion = 17
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
@@ -74,6 +74,15 @@ export const nativeAudioHostAssetInstallHeaderBytes = 24
 export const nativeAudioHostMaximumAssetChannels = 64
 export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
+export const nativeAudioHostMaximumAssetFramesForChannels = (channelCount: number) => Math.min(
+  nativeAudioHostMaximumAssetFrames,
+  Number.isSafeInteger(channelCount) && channelCount > 0
+    ? Math.floor(
+      (nativeAudioHostMaximumPayloadBytes - nativeAudioHostAssetInstallHeaderBytes)
+        / (Float32Array.BYTES_PER_ELEMENT * channelCount),
+    )
+    : 0,
+)
 export const nativeAudioHostMaximumVstStringBytes = 256
 export const nativeAudioHostMaximumVstPathBytes = 4_096
 export const nativeAudioHostVstAttachFingerprintBytes = 32
@@ -84,7 +93,7 @@ export const nativeAudioHostMaximumProcessorEvents = 256
 export const nativeAudioHostMaximumInstrumentEvents = 256
 export const nativeAudioHostMaximumSourceEvents = 256
 export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
-export const nativeAudioHostScheduleWindowHeaderBytes = 56
+export const nativeAudioHostScheduleWindowHeaderBytes = 60
 export const nativeAudioHostScheduleProgressBytes = 80
 export const nativeAudioHostMaximumSampleRateHz = 384_000
 export const nativeAudioHostMaximumFramesPerBlock = 8_192
@@ -112,7 +121,7 @@ const nativeOfflinePcmAssetSchema = z.object({
   const byteLength = value.frameCount * value.channelCount * Float32Array.BYTES_PER_ELEMENT
   if (
     !Number.isSafeInteger(byteLength)
-    || byteLength > nativeAudioHostMaximumPayloadBytes - nativeAudioHostAssetInstallHeaderBytes
+    || value.frameCount > nativeAudioHostMaximumAssetFramesForChannels(value.channelCount)
     || value.planarPcm.byteLength !== byteLength
   ) {
     context.addIssue({ code: "custom", path: ["planarPcm"], message: "PCM byte length does not match its dimensions." })

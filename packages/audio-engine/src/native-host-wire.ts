@@ -582,8 +582,13 @@ export type NativeScheduleWindow = {
   instrumentEvents?: readonly NativeInstrumentEvent[]
   sampleSourceEvents?: readonly NativeSourceEvent[]
   vstAutomationSegments?: readonly NativeVstAutomationSegment[]
+  processorAutomationEvents?: readonly NativeProcessorAutomationEvent[]
   assets?: readonly NativeSessionAsset[]
 }
+
+export type NativeProcessorAutomationEvent =
+  | { kind: "set"; processorInstanceId: number; parameterTarget: number; frame: number; value: number }
+  | { kind: "linear"; processorInstanceId: number; parameterTarget: number; frame: number; endFrame: number; startValue: number; endValue: number }
 
 export type NativeVstAutomationSegment = {
   instanceId: string
@@ -616,6 +621,7 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   const instrumentEvents = window.instrumentEvents ?? []
   const sampleSourceEvents = window.sampleSourceEvents ?? []
   const vstAutomationSegments = window.vstAutomationSegments ?? []
+  const processorAutomationEvents = window.processorAutomationEvents ?? []
   const encodedInstanceIds = vstAutomationSegments.map((segment) => nativeTextEncoder.encode(segment.instanceId))
   const windowId = window.windowId ?? 1
   const chunkIndex = window.chunkIndex ?? 0
@@ -631,11 +637,12 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
     || !Number.isSafeInteger(chunkCount) || chunkCount <= 0
     || chunkCount > nativeAudioHostMaximumScheduleChunks
     || chunkIndex >= chunkCount
-    || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length
+    || instrumentEvents.length + sampleSourceEvents.length + vstAutomationSegments.length + processorAutomationEvents.length
       > nativeAudioHostMaximumScheduleRecords
     || instrumentEvents.length > nativeAudioHostMaximumInstrumentEvents
     || sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents
     || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments
+    || processorAutomationEvents.length > nativeAudioHostMaximumScheduleAutomationSegments
     || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame)
     || sampleSourceEvents.some((event) => event.startFrame < window.startFrame || event.startFrame >= window.endFrame)
     || vstAutomationSegments.some((segment, index) => (
@@ -649,11 +656,20 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
       || encodedInstanceIds[index]?.byteLength === 0
       || (encodedInstanceIds[index]?.byteLength ?? 0) > nativeAudioHostMaximumScheduleInstanceIdBytes
     ))
+    || processorAutomationEvents.some((event) => (
+      !Number.isSafeInteger(event.processorInstanceId) || event.processorInstanceId <= 0
+      || !Number.isInteger(event.parameterTarget) || event.parameterTarget <= 0 || event.parameterTarget > 0xffff_ffff
+      || !Number.isSafeInteger(event.frame) || event.frame < window.startFrame || event.frame >= window.endFrame
+      || (event.kind === "linear"
+        ? !Number.isSafeInteger(event.endFrame) || event.endFrame <= event.frame || event.endFrame > window.endFrame
+          || !Number.isFinite(event.startValue) || !Number.isFinite(event.endValue)
+        : !Number.isFinite(event.value))
+    ))
   ) throw new Error("Native schedule window is invalid.")
   const instrumentBytes = serializeNativeInstrumentEvents(window.epoch, instrumentEvents)
   const sourceBytes = serializeNativeSourceEvents(sampleSourceEvents, window.assets ?? [])
   const automationBytes = encodedInstanceIds.reduce((total, instanceBytes) => total + 44 + instanceBytes.byteLength, 0)
-  const output = new Uint8Array(56 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes)
+  const output = new Uint8Array(60 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes + processorAutomationEvents.length * 40)
   const view = new DataView(output.buffer)
   view.setUint32(0, window.revision, true)
   view.setUint32(4, window.epoch, true)
@@ -666,7 +682,8 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   view.setUint32(44, instrumentEvents.length, true)
   view.setUint32(48, sampleSourceEvents.length, true)
   view.setUint32(52, vstAutomationSegments.length, true)
-  let offset = 56
+  view.setUint32(56, processorAutomationEvents.length, true)
+  let offset = 60
   output.set(instrumentBytes.subarray(4), offset)
   offset += instrumentBytes.byteLength - 4
   output.set(sourceBytes.subarray(4), offset)
@@ -689,6 +706,16 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
     offset += 8
     view.setUint32(offset, segment.interpolation === "linear" ? 1 : 0, true)
     offset += 4
+  }
+  for (const event of processorAutomationEvents) {
+    view.setBigUint64(offset, BigInt(event.processorInstanceId), true)
+    view.setUint32(offset + 8, event.parameterTarget, true)
+    view.setUint32(offset + 12, event.kind === "linear" ? 1 : 0, true)
+    view.setBigUint64(offset + 16, BigInt(event.frame), true)
+    view.setBigUint64(offset + 24, BigInt(event.kind === "linear" ? event.endFrame : event.frame), true)
+    view.setFloat32(offset + 32, event.kind === "linear" ? event.startValue : event.value, true)
+    view.setFloat32(offset + 36, event.kind === "linear" ? event.endValue : event.value, true)
+    offset += 40
   }
   return output
 }
@@ -815,7 +842,17 @@ export const serializeNativeSourceEvents = (
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
   let offset = 4
-  for (const event of events) {
+  let previousStartFrame: number | undefined
+  let previousSequence: number | undefined
+  for (const [index, event] of events.entries()) {
+    if (previousStartFrame !== undefined && (
+      event.startFrame < previousStartFrame
+      || (event.startFrame === previousStartFrame && event.sequence <= (previousSequence ?? 0))
+    )) {
+      throw new Error(
+        `Native source events must be sorted by (startFrame, sequence); record ${index} is out of order.`,
+      )
+    }
     const assetId = assetIds.get(event.assetId)
     if (assetId === undefined) throw new Error(`Native session asset is missing: ${event.assetId}`)
     if (
@@ -830,6 +867,8 @@ export const serializeNativeSourceEvents = (
       || !Number.isFinite(event.sourceOffsetFraction ?? 0)
       || (event.sourceOffsetFraction ?? 0) < 0 || (event.sourceOffsetFraction ?? 0) >= 1
     ) throw new Error("Native source event is invalid.")
+    previousStartFrame = event.startFrame
+    previousSequence = event.sequence
     view.setUint32(offset, event.epoch, true)
     view.setBigUint64(offset + 4, BigInt(event.sequence), true)
     writeId(view, offset + 12, event.sourceNodeId)

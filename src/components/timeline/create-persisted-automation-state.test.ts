@@ -205,6 +205,31 @@ describe('createPersistedAutomationState', () => {
     })
   })
 
+  test('persists one empty-lane seed and does not reseed an existing envelope', async () => {
+    await createRoot(async (dispose) => {
+      let persisted: AutomationEnvelope[] = []
+      let writes = 0
+      const state = createPersistedAutomationState({
+        targetKey: () => trackEnvelope.targetKey,
+        envelopes: () => persisted,
+        applyToEngine: () => {},
+        persistEnvelope: (next) => {
+          writes += 1
+          persisted = [next]
+        },
+        deleteEnvelope: () => {},
+      })
+
+      await state.commitEnvelope({
+        ...trackEnvelope,
+        points: [{ id: 'seed', timeSec: 0, value: 0.42, interpolation: 'linear' }],
+      })
+      expect(writes).toBe(1)
+      expect(persisted[0]?.points).toHaveLength(1)
+      dispose()
+    })
+  })
+
   test('applies remote point changes even when updatedAt is unchanged', async () => {
     await createRoot(async (dispose) => {
       let persisted: AutomationEnvelope[] = [envelope]

@@ -250,7 +250,7 @@ export function useTimelinePlayback(
     bridge: audioHostBridge,
     getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
-    reportUnavailable: import.meta.env.VITE_DESKTOP === "true",
+    reportUnavailable: requiresNativeAudio,
     createBuffer: (channels, frames, sampleRate) => (
       audioEngine.getAudioContext?.()?.createBuffer(channels, frames, sampleRate)
       ?? new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate })

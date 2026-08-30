@@ -5,6 +5,7 @@ import {
   type ExportAudioFormat,
 } from "@daw-browser/shared"
 import { saveCloudExport } from "~/lib/cloud-export"
+import { exportOutputPickerStatus } from "~/lib/export/export-output-picker-status"
 import { z } from "zod"
 
 type CapabilityWriter = {
@@ -133,6 +134,15 @@ type DesktopRendererExportBridge = DesktopCapabilityBridge & {
 
 const exportCanceled = () => new DOMException("The export was canceled.", "AbortError")
 
+const pickExportOutput = async <Value>(pick: () => Promise<Value>): Promise<Value> => {
+  exportOutputPickerStatus.set(true)
+  try {
+    return await pick()
+  } finally {
+    exportOutputPickerStatus.set(false)
+  }
+}
+
 export const createDesktopRendererExportOutputTargetFactory = (
   bridge: DesktopRendererExportBridge,
 ): ExportOutputTargetFactory => ({
@@ -158,7 +168,7 @@ export const createDesktopRendererExportOutputTargetFactory = (
     }
     const requestId = crypto.randomUUID()
     if (input.multiFormat) {
-      const selected = await bridge.pickOutputDirectory(requestId)
+      const selected = await pickExportOutput(() => bridge.pickOutputDirectory(requestId))
       if (selected.canceled) {
         await bridge.releaseExportOutput(requestId)
         throw exportCanceled()
@@ -173,7 +183,7 @@ export const createDesktopRendererExportOutputTargetFactory = (
         dispose: async () => { await bridge.releaseExportOutput(requestId) },
       }
     }
-    const selected = await bridge.pickOutputFile(requestId, input.firstFormat)
+    const selected = await pickExportOutput(() => bridge.pickOutputFile(requestId, input.firstFormat))
     if (selected.canceled) {
       await bridge.releaseExportOutput(requestId)
       throw exportCanceled()

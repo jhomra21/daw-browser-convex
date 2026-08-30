@@ -15,6 +15,20 @@ export type AutomationTarget =
   | { kind: 'track'; trackId: string; effectInstanceId?: string }
   | { kind: 'master'; effectInstanceId?: string }
 
+export const createAutomationTarget = (
+  owner: AutomationTarget,
+  effectInstanceId?: string,
+): AutomationTarget => {
+  if (owner.kind === 'track') {
+    return effectInstanceId === undefined
+      ? { kind: 'track', trackId: owner.trackId }
+      : { kind: 'track', trackId: owner.trackId, effectInstanceId }
+  }
+  return effectInstanceId === undefined
+    ? { kind: 'master' }
+    : { kind: 'master', effectInstanceId }
+}
+
 export type AutomationEnvelope = {
   id: string
   projectId: string
@@ -56,9 +70,9 @@ export const automationEnvelopeFromRow = (
   const effectInstanceId = row.effectInstanceId
   if (effectInstanceId !== undefined && effectInstanceId.length === 0) return null
   const target: AutomationTarget | null = row.targetKind === 'master'
-    ? { kind: 'master', effectInstanceId }
+    ? createAutomationTarget({ kind: 'master' }, effectInstanceId)
     : row.trackId
-      ? { kind: 'track', trackId: row.trackId, effectInstanceId }
+      ? createAutomationTarget({ kind: 'track', trackId: row.trackId }, effectInstanceId)
       : null
   if (!target) return null
   return {

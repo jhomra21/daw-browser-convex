@@ -23,6 +23,41 @@ class TestAudioBuffer implements AudioBuffer {
   getChannelData() { return new Float32Array(this.length) }
 }
 
+class LongStereoAudioBuffer implements AudioBuffer {
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels = 2
+  readonly sampleRate = 48_000
+  private readonly channels: readonly Float32Array<ArrayBuffer>[]
+
+  constructor(length: number) {
+    this.length = length
+    this.duration = length / this.sampleRate
+    this.channels = [
+      new Float32Array(new ArrayBuffer(length * Float32Array.BYTES_PER_ELEMENT)),
+      new Float32Array(new ArrayBuffer(length * Float32Array.BYTES_PER_ELEMENT)),
+    ]
+  }
+
+  copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const source = this.channels[channel]
+    if (!source) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source.subarray(offset, offset + destination.length))
+  }
+
+  copyToChannel(source: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const destination = this.channels[channel]
+    if (!destination) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source, offset)
+  }
+
+  getChannelData(channel: number): Float32Array<ArrayBuffer> {
+    const samples = this.channels[channel]
+    if (!samples) throw new Error(`Missing channel ${channel}.`)
+    return samples
+  }
+}
+
 const sourceTrack: RuntimeTrack = {
   id: "audio",
   name: "Audio",
@@ -216,11 +251,45 @@ const instrumentEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatM
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const count = view.getUint32(44, true)
   return Array.from({ length: count }, (_, index) => {
-    const offset = 56 + index * 48
+    const offset = 60 + index * 48
     return {
       noteId: view.getBigUint64(offset + 8, true),
       frame: view.getUint32(offset + 28, true),
       type: view.getUint32(offset + 32, true),
+    }
+  })
+})
+
+const sourceEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const count = view.getUint32(48, true)
+  return Array.from({ length: count }, (_, index) => {
+    const offset = 60 + index * 112
+    return {
+      assetId: view.getUint32(offset + 20, true),
+      sequence: Number(view.getBigUint64(offset + 4, true)),
+      startFrame: Number(view.getBigInt64(offset + 24, true)),
+      stopFrame: Number(view.getBigInt64(offset + 32, true)),
+      sourceOffsetFrame: Number(view.getBigUint64(offset + 40, true)),
+      sourceFrameCount: Number(view.getBigUint64(offset + 48, true)),
+      sourceOffsetFraction: view.getFloat32(offset + 92, true),
+    }
+  })
+})
+
+const processorEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const instrumentCount = view.getUint32(44, true)
+  const sourceCount = view.getUint32(48, true)
+  const processorCount = view.getUint32(56, true)
+  const offset = 60 + instrumentCount * 48 + sourceCount * 112
+  return Array.from({ length: processorCount }, (_, index) => {
+    const eventOffset = offset + index * 40
+    return {
+      processorInstanceId: Number(view.getBigUint64(eventOffset, true)),
+      parameterTarget: view.getUint32(eventOffset + 8, true),
+      frame: Number(view.getBigUint64(eventOffset + 16, true)),
+      value: view.getFloat32(eventOffset + 32, true),
     }
   })
 })
@@ -414,6 +483,93 @@ test("retries one rejected source window without changing its ledger", async () 
   expect(view.getUint32(44, true)).toBe(0)
 })
 
+test("schedules a later native PCM chunk and preserves its seam", async () => {
+  const frameCount = 12 * 48_000
+  const track: RuntimeTrack = {
+    ...sourceTrack,
+    clips: [{
+      ...sourceTrack.clips[0]!,
+      duration: frameCount / 48_000,
+      buffer: new LongStereoAudioBuffer(frameCount),
+    }],
+  }
+  const snapshot = snapshotFor(track)
+  const projection = compileLiveNativeProjection({
+    tracks: snapshot.tracks,
+    bpm: snapshot.bpm,
+    sampleRateHz: 48_000,
+    revision: snapshot.revision,
+    epoch: 1,
+    firstSequence: 1,
+    fx: snapshot.mixer.fx,
+  })
+  if (!projection.supported) throw new Error(projection.reasons.join(" "))
+  const fixture = bridgeFor()
+  const coordinator = createNativeScheduleCoordinator({
+    bridge: fixture.bridge,
+    snapshot,
+    graph: projection.graph,
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 512 },
+    assets: projection.assets.map((entry, index) => ({
+      asset: { version: audioCoreContractVersion, ...entry.asset },
+      sessionAssetId: index + 1,
+    })),
+    nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
+    startFrame: 130_000,
+  })
+  await coordinator.prime(130_000)
+  const events = sourceEventsFrom(fixture.payloads)
+  expect(events.length).toBeGreaterThanOrEqual(2)
+  expect(new Set(events.map((event) => event.assetId)).size).toBeGreaterThanOrEqual(2)
+  expect(events[0]?.stopFrame).toBeLessThanOrEqual(events[1]?.startFrame ?? Number.MAX_SAFE_INTEGER)
+  expect(events[1]?.sourceOffsetFrame).toBe(0)
+  expect(events[1]?.sourceOffsetFraction).toBe(0)
+})
+
+test("sorts source events after opposite track traversal and active volume automation", async () => {
+  const earlyTrack: RuntimeTrack = {
+    ...sourceTrack,
+    id: "early",
+    clips: [{ ...sourceTrack.clips[0]!, id: "early-clip", sourceAssetKey: "early-asset", startSec: 0 }],
+  }
+  const lateTrack: RuntimeTrack = {
+    ...sourceTrack,
+    id: "late",
+    clips: [{ ...sourceTrack.clips[0]!, id: "late-clip", sourceAssetKey: "late-asset", startSec: 1 }],
+  }
+  const base = snapshotForTracks([lateTrack, earlyTrack])
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [{
+        id: "early-volume",
+        projectId: "project:1",
+        target: { kind: "track" as const, trackId: "early" },
+        targetKey: "early-volume",
+        parameterId: "volume",
+        enabled: true,
+        points: [{ id: "volume", timeSec: 0, value: 0.5, interpolation: "hold" as const }],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  const events = sourceEventsFrom(fixture.payloads)
+  expect(events.map((event) => event.startFrame)).toEqual([0, 48_000])
+  expect(events.map((event) => event.sequence)).toEqual(
+    [...events].sort((left, right) => left.startFrame - right.startFrame || left.sequence - right.sequence)
+      .map((event) => event.sequence),
+  )
+  expect(new Set(events.map((event) => event.sequence)).size).toBe(events.length)
+  expect(processorEventsFrom(fixture.payloads)).toMatchObject([
+    { parameterTarget: 26, frame: 0, value: 0.5 },
+  ])
+})
+
 test("coalesces a synchronous completion progress callback during final submission", async () => {
   const fixture = bridgeFor()
   const snapshot = snapshotFor({
@@ -594,8 +750,8 @@ test("moves a note-off at a window boundary into the following window", async ()
   if (!second) return
   const view = new DataView(second.buffer)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(56 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).toBe(2)
+  expect(view.getUint32(60 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).toBe(2)
   const events = instrumentEventsFrom(fixture.payloads)
   expect(events.filter((event) => event.type === 1)).toHaveLength(1)
   expect(events.filter((event) => event.type === 2)).toHaveLength(1)
@@ -644,8 +800,8 @@ test("extends the final schedule window so the final note-off is accepted", asyn
   expect(view.getUint32(24, true)).toBe(96_001)
   expect(view.getUint32(40, true)).toBe(1)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(56 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).toBe(2)
+  expect(view.getUint32(60 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).toBe(2)
 })
 
 test("projects repeated loop iterations onto monotonic native frames", async () => {
@@ -803,9 +959,9 @@ test("publishes a spanning note-on and later note-off in one logical window", as
   if (!payload) return
   const view = new DataView(payload.buffer)
   expect(view.getUint32(44, true)).toBe(2)
-  expect(view.getUint32(56 + 28, true)).toBe(48_000)
-  expect(view.getUint32(56 + 48 + 28, true)).toBe(96_000)
-  expect(view.getUint32(56 + 32, true)).not.toBe(view.getUint32(56 + 48 + 32, true))
+  expect(view.getUint32(60 + 28, true)).toBe(48_000)
+  expect(view.getUint32(60 + 48 + 28, true)).toBe(96_000)
+  expect(view.getUint32(60 + 32, true)).not.toBe(view.getUint32(60 + 48 + 32, true))
 })
 
 test("projects non-empty VST automation segments across start, seek, and end boundaries", () => {
@@ -850,6 +1006,81 @@ test("projects non-empty VST automation segments across start, seek, and end bou
     48_000,
   )
   expect(endBoundary.every((segment) => segment.startFrame < segment.endFrame)).toBeTrue()
+})
+
+test("projects track and master volume automation into native processor events", async () => {
+  const base = snapshotFor(sourceTrack)
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [
+        {
+          id: "track-volume",
+          projectId: "project:1",
+          target: { kind: "track" as const, trackId: sourceTrack.id },
+          targetKey: "track-volume",
+          parameterId: "volume",
+          enabled: true,
+          points: [{ id: "track-volume", timeSec: 0, value: 0.5, interpolation: "hold" as const }],
+          updatedAt: 1,
+        },
+        {
+          id: "master-volume",
+          projectId: "project:1",
+          target: { kind: "master" as const },
+          targetKey: "master-volume",
+          parameterId: "volume",
+          enabled: true,
+          points: [{ id: "master-volume", timeSec: 0, value: 0.75, interpolation: "hold" as const }],
+          updatedAt: 1,
+        },
+      ],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  expect(processorEventsFrom(fixture.payloads)).toMatchObject([
+    { parameterTarget: 26, frame: 0, value: 0.5 },
+    { parameterTarget: 26, frame: 0, value: 0.75 },
+  ])
+})
+
+test("converts native volume ramps into callback-safe processor events", async () => {
+  const longTrack: RuntimeTrack = {
+    ...sourceTrack,
+    clips: [{
+      ...sourceTrack.clips[0]!,
+      duration: 1024 / 48_000,
+      buffer: new LongStereoAudioBuffer(1024),
+    }],
+  }
+  const base = snapshotFor(longTrack)
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [{
+        id: "track-volume-ramp",
+        projectId: "project:1",
+        target: { kind: "track" as const, trackId: longTrack.id },
+        targetKey: "track-volume-ramp",
+        parameterId: "volume",
+        enabled: true,
+        points: [
+          { id: "start", timeSec: 0, value: 0.5, interpolation: "linear" as const },
+          { id: "end", timeSec: 12 / 48_000, value: 1, interpolation: "hold" as const },
+        ],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  expect(processorEventsFrom(fixture.payloads)).toMatchObject([
+    { parameterTarget: 26, frame: 0, value: 0.5 },
+    { parameterTarget: 26, frame: 12, value: 1 },
+  ])
 })
 
 test("does not let persisted parameter initialization suppress scheduled automation", () => {

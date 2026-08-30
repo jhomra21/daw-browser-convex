@@ -203,6 +203,7 @@ const createNativeHookBridge = (
   },
   initialBeginGate?: Promise<NativeTransactionReply>,
   transportGate?: Promise<{ ok: true } | { ok: false; error: string }>,
+  failureMessage = 'failed',
 ) => {
   const calls: string[] = []
   const transportStates: boolean[] = []
@@ -211,7 +212,7 @@ const createNativeHookBridge = (
   const reply = (name: string) => async () => {
     calls.push(name)
     const failureName = isFailureResolver(failure) ? failure() : failure
-    if (name === failureName) return { ok: false as const, error: 'failed' }
+    if (name === failureName) return { ok: false as const, error: failureMessage }
     if (name === "begin" && beginGate) return beginGate
     if (name === "begin") return { ok: true as const, transactionToken: nativeTransactionToken }
     return { ok: true as const }
@@ -3239,6 +3240,73 @@ test('re-establishes paused native preview after structural fingerprint disposal
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(fixture.calls.filter((call) => call === 'begin').length).toBeGreaterThan(beginsBefore)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
+test('keeps optional paused structural rebuilds idle when native preview becomes unavailable', async () => {
+  const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
+  expect(source).toContain('reportUnavailable: requiresNativeAudio')
+
+  const previousWindow = globalThis.window
+  let failBegin = false
+  const fixture = createNativeHookBridge(
+    () => failBegin ? 'begin' : undefined,
+    undefined,
+    undefined,
+    undefined,
+    'The native audio session is unavailable.',
+  )
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(
+          createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+          { getTracks: () => [track] },
+          {
+            requiresNativeAudio: false,
+            enabled: () => true,
+            projectId: () => 'project',
+            compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: [track],
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+              sidechainRoutes: [],
+            }),
+            reportFault: (message) => faults.push(message),
+          },
+        )
+
+        await playback.handlePlay([track])
+        await playback.handlePause()
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+
+        failBegin = true
+        await expect(playback.restartTimelineSchedule([track], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          playheadSec: 0,
+          owner: 'native',
+          projectId: 'project',
+        })).rejects.toThrow('prepared native playback graph could not be rebuilt')
+
+        expect(faults).toEqual([])
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.backendDiagnostics().activeBackend).toBe('idle')
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        expect(playback.usesLegacyAudioEngine()).toBeTrue()
         dispose()
       })
     })

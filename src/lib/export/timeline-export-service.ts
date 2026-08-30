@@ -22,6 +22,8 @@ type TimelineExportDependencies = {
   nativeRendererRequired?: boolean
   runTimelineExport?: typeof runTimelineExport
   getTracks: () => RuntimeTrack[]
+  getProjectGeneration: () => number
+  createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   getBpm: () => number
   getTimeSignature?: () => { numerator: number; denominator: number }
   getMasterVolume: () => number
@@ -75,6 +77,39 @@ type SubmittedExport = {
   completion: Promise<ExportOutcome>
 }
 
+type ExportPreparationStage =
+  | "flush-midi"
+  | "flush-effects"
+  | "render-state"
+  | "local-project"
+  | "native-attachments"
+
+const traceExportPreparation = async <Value>(
+  traceId: string,
+  stage: ExportPreparationStage,
+  run: () => Promise<Value>,
+): Promise<Value> => {
+  const startedAt = performance.now()
+  console.info("[export-preparation] start", { traceId, stage })
+  try {
+    const value = await run()
+    console.info("[export-preparation] complete", {
+      traceId,
+      stage,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    })
+    return value
+  } catch (error) {
+    console.error("[export-preparation] failed", {
+      traceId,
+      stage,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : "Unknown export preparation failure.",
+    })
+    throw error
+  }
+}
+
 const snapshotStemInput = (input: TimelineStemExportInput): TimelineStemExportInput => {
   const settings = snapshotExportSettings(input)
   if (input.stemSelection === "all-tracks") {
@@ -97,6 +132,7 @@ const snapshotStemInput = (input: TimelineStemExportInput): TimelineStemExportIn
 type ExportRequestSnapshot = {
   settings: ExportSettings
   tracks: RuntimeTrack[]
+  projectGeneration: number
   bpm: number
   timeSignature?: { numerator: number; denominator: number }
   masterVolume: number
@@ -146,18 +182,34 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     }
   }
   const snapshotRequest = async (settings: ExportSettings) => {
+    const traceId = crypto.randomUUID()
+    console.info("[export-preparation] begin", { traceId, native: dependencies.nativeRendererRequired === true })
     let projectId = dependencies.getProjectId()
+    let projectGeneration = dependencies.getProjectGeneration()
     let tracks: RuntimeTrack[] | undefined
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (projectId) await flushMidiProjectWrites(projectId)
-      if (dependencies.getProjectId() === projectId) {
+      if (projectId) {
+        await traceExportPreparation(traceId, "flush-midi", () => flushMidiProjectWrites(projectId!))
+      }
+      if (
+        dependencies.getProjectId() === projectId
+        && dependencies.getProjectGeneration() === projectGeneration
+      ) {
         const currentTracks = dependencies.getTracks()
         tracks = projectId ? projectMidiProjectTracks(projectId, currentTracks) : currentTracks
-        if (dependencies.getProjectId() === projectId) break
+        if (
+          dependencies.getProjectId() === projectId
+          && dependencies.getProjectGeneration() === projectGeneration
+        ) break
       }
       projectId = dependencies.getProjectId()
+      projectGeneration = dependencies.getProjectGeneration()
     }
-    if (!tracks || dependencies.getProjectId() !== projectId) {
+    if (
+      !tracks
+      || dependencies.getProjectId() !== projectId
+      || dependencies.getProjectGeneration() !== projectGeneration
+    ) {
       throw new Error("Project changed while preparing export.")
     }
     const snapshotClips = new Map<string, RuntimeTrack["clips"][number]>()
@@ -177,8 +229,13 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       })
     }
     const effectsSnapshot = dependencies.getEffectsExportSnapshot()
-    await effectsSnapshot?.flushPending()
-    if (dependencies.getProjectId() !== projectId) {
+    if (effectsSnapshot) {
+      await traceExportPreparation(traceId, "flush-effects", () => effectsSnapshot.flushPending())
+    }
+    if (
+      dependencies.getProjectId() !== projectId
+      || dependencies.getProjectGeneration() !== projectGeneration
+    ) {
       throw new Error("Project changed while preparing export.")
     }
     const userId = dependencies.getUserId()
@@ -191,7 +248,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       : undefined
     const automationPatches = snapshotAutomationPatches(dependencies.getAutomationPatches())
     const sidechainRoutes = snapshotSidechainRoutes(effectsSnapshot?.snapshotSidechainRoutes() ?? dependencies.getSidechainRoutes())
-    const renderStateSnapshot = await createExportRenderStateSnapshot({
+    const renderStateSnapshot = await traceExportPreparation(traceId, "render-state", () => createExportRenderStateSnapshot({
       projectId,
       userId,
       masterVolume,
@@ -199,13 +256,17 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       cloudRows,
       effectsProjection,
       automationPatches,
-    })
+    }))
     const hydratedRenderStateSnapshot = effectsSnapshot?.hydrateInstrumentBuffers?.(renderStateSnapshot) ?? renderStateSnapshot
     const localProject = projectId
-      ? isLocalId("project", projectId) || await getLocalProject(projectId) !== undefined
+      ? isLocalId("project", projectId) || await traceExportPreparation(
+        traceId,
+        "local-project",
+        () => getLocalProject(projectId!),
+      ) !== undefined
       : false
-    const nativeExternalAttachments = dependencies.nativeRendererRequired
-      ? await dependencies.getNativeOfflineExternalAttachments?.({
+    const nativeExternalAttachments = dependencies.nativeRendererRequired && dependencies.getNativeOfflineExternalAttachments
+      ? await traceExportPreparation(traceId, "native-attachments", () => dependencies.getNativeOfflineExternalAttachments!({
         projectId: projectId ?? "",
         localProject,
         tracks: capturedTracks,
@@ -213,11 +274,19 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
         bpm,
         timeSignature,
         sidechainRoutes,
-      })
+      }))
       : undefined
+    if (
+      dependencies.getProjectId() !== projectId
+      || dependencies.getProjectGeneration() !== projectGeneration
+    ) {
+      throw new Error("Project changed while preparing export.")
+    }
+    console.info("[export-preparation] complete", { traceId })
     return {
       settings: snapshotExportSettings(settings),
       tracks: capturedTracks,
+      projectGeneration,
       bpm,
       timeSignature,
       masterVolume,
@@ -244,6 +313,8 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     ...snapshot.settings,
     nativeRendererRequired: dependencies.nativeRendererRequired,
     getTracks: () => snapshot.tracks,
+    projectGeneration: snapshot.projectGeneration,
+    createBuffer: dependencies.createBuffer,
     bpm: snapshot.bpm,
     timeSignature,
     masterVolume: snapshot.masterVolume,

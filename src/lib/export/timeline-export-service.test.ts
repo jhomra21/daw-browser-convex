@@ -374,6 +374,7 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
   const queue = createExportQueue(() => "job-solid-runtime")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => tracks,
     getBpm: () => 120,
     getMasterVolume: () => 1,
@@ -431,6 +432,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
   const queue = createExportQueue(() => "job-hydrated-sampler")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     nativeRendererRequired: true,
     nativeOfflineRenderer: async () => buffer,
     runTimelineExport: async (input) => {
@@ -523,6 +525,7 @@ test("snapshot failure rejects before queue insertion or output target creation"
   }
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => [],
     getBpm: () => 120,
     getMasterVolume: () => 1,
@@ -561,6 +564,7 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
   }
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     nativeRendererRequired: true,
     getTracks: () => {
       trackReads += 1
@@ -605,6 +609,7 @@ test("native export preflight rejects oversized PCM before external state captur
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     nativeRendererRequired: true,
     nativeOfflineRenderer: async () => {
       throw new Error("unreachable")
@@ -652,6 +657,7 @@ test("restarts export capture through successive project switches during MIDI fl
   const queue = createExportQueue(() => "job-project-switch")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => [{ id: `track-${projectId}`, name: projectId, volume: 1, clips: [] }],
     getBpm: () => 120,
     getMasterVolume: () => 1,
@@ -673,6 +679,71 @@ test("restarts export capture through successive project switches during MIDI fl
   expect(prepared.snapshot.tracks).toEqual([
     expect.objectContaining({ id: "track-project-c" }),
   ])
+  queue.dispose()
+})
+
+test("captures mounted project generation with the export snapshot", async () => {
+  let capturedGeneration = 0
+  const queue = createExportQueue(() => "job-generation-capture")
+  const service = createTimelineExportService({
+    queue,
+    getProjectGeneration: () => 9,
+    runTimelineExport: async (input) => {
+      capturedGeneration = input.projectGeneration
+      return { type: "success", outputs: [] }
+    },
+    getTracks: () => [],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => undefined,
+    getUserId: () => undefined,
+    getCloudRenderRows: () => undefined,
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => undefined,
+    getSidechainRoutes: () => [],
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+  const submitted = await service.submitTimelineExport(settings, {
+    async createMixdownTarget() {
+      throw new Error("unexpected output target")
+    },
+    async createStemTarget() {
+      throw new Error("unexpected stem target")
+    },
+  })
+
+  expect(await submitted.completion).toEqual({ type: "success", outputs: [] })
+  expect(capturedGeneration).toBe(9)
+  queue.dispose()
+})
+
+test("rejects a native snapshot if generation changes while capturing attachments", async () => {
+  let generation = 9
+  const queue = createExportQueue(() => "job-native-generation")
+  const service = createTimelineExportService({
+    queue,
+    nativeRendererRequired: true,
+    nativeOfflineRenderer: async () => new TestAudioBuffer(),
+    getProjectGeneration: () => generation,
+    getTracks: () => [],
+    getBpm: () => 120,
+    getMasterVolume: () => 1,
+    getProjectId: () => undefined,
+    getUserId: () => undefined,
+    getCloudRenderRows: () => undefined,
+    getAutomationPatches: () => [],
+    getEffectsExportSnapshot: () => undefined,
+    getSidechainRoutes: () => [],
+    getNativeOfflineExternalAttachments: async () => {
+      generation = 10
+      return undefined
+    },
+    loadCapturedClipBuffer: async () => ({ status: "missing" }),
+  })
+
+  await expect(service.prepareTimelineExport(settings)).rejects.toThrow(
+    "Project changed while preparing export.",
+  )
   queue.dispose()
 })
 
@@ -698,6 +769,7 @@ test("captures effects projection and routes after flushing effect persistence",
   const queue = createExportQueue(() => "job-pre-flush")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => tracks,
     getBpm: () => bpm,
     getMasterVolume: () => masterVolume,
@@ -754,6 +826,7 @@ test("rejects when effects flushing switches projects before capturing remaining
   })
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => [{ id: "track-before", name: "before", volume: 1, clips: [] }],
     getBpm: () => 120,
     getMasterVolume: () => 1,
@@ -805,6 +878,7 @@ test("hydrates queued clips from captured media identity after live replacement"
   const queue = createExportQueue(() => "job-captured")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     runTimelineExport: async (input) => {
       renderedTracks = input.getTracks()
       for (const track of renderedTracks) {
@@ -881,6 +955,7 @@ test("derives a captured default sample URL without replacing its asset identity
   const queue = createExportQueue(() => "job-default-sample")
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     runTimelineExport: async (input) => {
       for (const track of input.getTracks()) {
         for (const clip of track.clips) {
@@ -943,8 +1018,9 @@ test("derives a captured default sample URL without replacing its asset identity
   queue.dispose()
 })
 
-test("a queued export renders the submission generation after live project mutation", async () => {
-  const projectId = "project:queued-generation"
+test("a queued export renders its snapshot after a live project switch", async () => {
+  let projectId = "project:queued-generation"
+  let generation = 1
   const trackId = "track:queued-generation"
   const target: AutomationTarget = { kind: "track", trackId }
   const submissionAutomation: AutomationEnvelope = {
@@ -1012,7 +1088,9 @@ test("a queued export renders the submission generation after live project mutat
   }]
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => generation,
     runTimelineExport: async (input) => {
+      expect(input.getProjectGeneration).toBeUndefined()
       rendered = {
         tracks: input.getTracks(),
         bpm: input.bpm,
@@ -1051,6 +1129,8 @@ test("a queued export renders the submission generation after live project mutat
   bpm = 90
   masterVolume = 1
   sidechainRoutes = []
+  projectId = "project:mounted-after-submission"
+  generation = 2
   await Promise.all([
     setLocalEffectInstance(projectId, trackId, "utility", liveUtility, { instanceId: "utility-queued" }),
     setLocalAutomationEnvelope(projectId, liveAutomation),
@@ -1082,6 +1162,7 @@ test("active cancellation remains running until stalled clip loading settles", a
   })
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => [{
       id: "track-stalled",
       name: "Stalled",
@@ -1138,6 +1219,7 @@ test("queued cancellation publishes canceled only after completion settlement", 
   })
   const service = createTimelineExportService({
     queue,
+    getProjectGeneration: () => 1,
     getTracks: () => [],
     getBpm: () => 120,
     getMasterVolume: () => 1,

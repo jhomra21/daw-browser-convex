@@ -97,6 +97,8 @@ import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
+import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
+import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -268,6 +270,7 @@ const editorStateAckSchema = z.object({
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
+const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
 const appName = "daw-browser"
 const sanitizeNativeVst3DiagnosticError = (error: Error | undefined) => {
   const message = error?.message ?? "The native VST editor session is unavailable."
@@ -338,8 +341,10 @@ let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
 let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
-let offlineRenderJob: { jobId: string; controller: AbortController } | undefined
+let offlineRenderJob: { jobId: string; controller: AbortController; nextSequence: number } | undefined
+const offlinePcmAcks = createOfflinePcmAckTracker()
 const abortOfflineRenderJobs = () => {
+  offlinePcmAcks.cancel(new DOMException("Native offline rendering canceled.", "AbortError"))
   offlineRenderJob?.controller.abort()
 }
 let nativeVst3EditorSessionManager: ReturnType<typeof createNativeVst3EditorSessionManager> | undefined
@@ -923,7 +928,7 @@ const registerIpc = () => {
   const catalogStoreFor = (event: Electron.IpcMainInvokeEvent) => (
     catalogAllowed(event) ? pluginCatalogStore : undefined
   )
-  const audioHostAllowed = (event: Electron.IpcMainInvokeEvent) => (
+  const audioHostAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
     process.platform === "darwin"
     && process.arch === "arm64"
     && window_ !== undefined
@@ -932,6 +937,15 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
+  ipcMain.on(offlinePcmAckChannel, (event, value) => {
+    if (!audioHostAllowed(event)) return
+    const parsed = offlinePcmAckSchema.safeParse(value)
+    if (!parsed.success) {
+      offlinePcmAcks.cancel(new Error("The native offline PCM acknowledgement is invalid."))
+      return
+    }
+    offlinePcmAcks.acknowledge(parsed.data)
+  })
   const offlinePlan = (value: NativeOfflineRenderPlan): NativeOfflineRenderPlan | undefined => {
     for (const state of value.capturedVstStates ?? []) {
       if (createHash("sha256").update(state.bytes).digest("hex") !== state.sha256) return undefined
@@ -960,7 +974,7 @@ const registerIpc = () => {
     const controller = new AbortController()
     const cancelOnDestroy = () => controller.abort()
     event.sender.once("destroyed", cancelOnDestroy)
-    const job = { jobId, controller }
+    const job = { jobId, controller, nextSequence: 1 }
     offlineRenderJob = job
     try {
       let vstAttachments: Awaited<ReturnType<typeof resolveNativeVst3AttachmentPlan>> | undefined
@@ -985,13 +999,22 @@ const registerIpc = () => {
         vstAttachments,
         signal: controller.signal,
         onChunk: (chunk) => {
-          sendRendererMessage("daw:audio-host:offline-pcm", { jobId, chunk })
+          if (offlineRenderJob !== job) throw new Error("The native offline render is no longer active.")
+          const sequence = job.nextSequence
+          job.nextSequence += 1
+          const endFrame = chunk.startFrame + chunk.frameCount
+          const acknowledgment = offlinePcmAcks.begin({ jobId, sequence, endFrame })
+          if (!sendRendererMessage("daw:audio-host:offline-pcm", { jobId, sequence, chunk })) {
+            offlinePcmAcks.cancel(new Error("Renderer unavailable."))
+          }
+          return acknowledgment
         },
       })
       return { ok: true as const }
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : "Native offline rendering failed." }
     } finally {
+      offlinePcmAcks.cancel(new Error("The native offline render is no longer active."))
       event.sender.removeListener("destroyed", cancelOnDestroy)
       if (offlineRenderJob === job) offlineRenderJob = undefined
     }

@@ -1,6 +1,7 @@
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import {
   automationTargetKey,
+  createAutomationTarget,
   normalizeSharedUngroupRestoreAutomation,
   normalizeSharedUngroupRestoreEffects,
   isJsonBoolean,
@@ -140,21 +141,20 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
   }
   const automationByTargetKey = new Map(input.automation.map((envelope) => [
     automationTargetKey(
-      { kind: 'track', trackId: input.groupTrack.id, effectInstanceId: envelope.target.effectInstanceId },
+      createAutomationTarget({ kind: 'track', trackId: input.groupTrack.id }, envelope.target.effectInstanceId),
       envelope.parameterId,
     ),
     envelope,
   ]))
   const automation = input.result.automation.flatMap((committed) => {
     const local = automationByTargetKey.get(automationTargetKey(
-      { kind: 'track', trackId: input.groupTrack.id, effectInstanceId: committed.effectInstanceId },
+      createAutomationTarget({ kind: 'track', trackId: input.groupTrack.id }, committed.effectInstanceId),
       committed.parameterId,
     ))
-    const target: AutomationEnvelope['target'] = {
-      kind: 'track',
-      trackId: input.groupTrack.id,
-      effectInstanceId: committed.effectInstanceId,
-    }
+    const target: AutomationEnvelope['target'] = createAutomationTarget(
+      { kind: 'track', trackId: input.groupTrack.id },
+      committed.effectInstanceId,
+    )
     return local ? [{
       ...local,
       target,

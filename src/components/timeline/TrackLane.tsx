@@ -5,7 +5,7 @@ import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
 import { clipRangeOverlap, type TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import ClipComponent, { type ClipContextMenuActions } from './ClipComponent'
 import AutomationLane from './automation-lane'
-import type { AutomationEnvelope, AutomationParameterSelection } from '@daw-browser/shared'
+import { createAutomationTarget, type AutomationEnvelope, type AutomationParameterSelection } from '@daw-browser/shared'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
@@ -99,7 +99,9 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${props.layout.clipLaneHeightPx - 1}px` }} />
       {props.automation.visible && props.layout.automationHeightPx > 0 ? (
         <div
-          class="absolute inset-x-0 z-30 border-t border-automation/30 bg-timeline-background/95"
+          data-timeline-automation-surface="true"
+          data-track-id={props.track.id}
+          class="absolute inset-x-0 z-30 pointer-events-auto border-t border-automation/30 bg-timeline-background/95"
           style={{ top: `${props.layout.clipLaneHeightPx}px`, height: `${props.layout.automationHeightPx}px` }}
         >
           <For each={props.automation.selections}>
@@ -113,7 +115,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               >
                 <AutomationLane
                   projectId={props.automation.projectId}
-                  target={{ kind: 'track', trackId: props.track.id, effectInstanceId: selection.effectInstanceId }}
+                  target={createAutomationTarget({ kind: 'track', trackId: props.track.id }, selection.effectInstanceId)}
                   parameterId={selection.parameterId}
                   envelope={props.automation.envelopeForSelection(selection)}
                   durationSec={props.automation.durationSec}

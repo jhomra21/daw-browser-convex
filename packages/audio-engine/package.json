@@ -16,6 +16,7 @@
     "./export-range": "./src/export-range.ts",
     "./export-mixdown": "./src/export-mixdown.ts",
     "./loudness-analyzer": "./src/loudness-analyzer.ts",
+    "./media-pages": "./src/media-pages.ts",
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./reliability-characterization": "./src/reliability-characterization.ts",
     "./spectral-core": "./src/spectral-core.ts",

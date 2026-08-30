@@ -1,13 +1,20 @@
-import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSourceIdentity } from './types'
+import {
+  peakAssetFormatVersion,
+  type PeakAssetRecord,
+  type PeakChunkRecord,
+  type PeakLevelRecord,
+  type WaveformSourceIdentity,
+} from './types'
 
 const DB_NAME = 'audio-peaks-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const META_STORE = 'asset-meta'
 const CHUNK_STORE = 'asset-chunks'
 
 let dbPromise: Promise<IDBDatabase | null> | null = null
 
 type RecordFields = {
+  formatVersion?: unknown
   assetKey?: unknown
   durationSec?: unknown
   sampleRate?: unknown
@@ -56,6 +63,7 @@ const isPeakLevelRecord = <Value>(value: Value): value is Value & PeakLevelRecor
 
 const isPeakAssetRecord = <Value>(value: Value): value is Value & PeakAssetRecord => (
   isRecord(value)
+  && value.formatVersion === peakAssetFormatVersion
   && isString(value.assetKey)
   && isNumber(value.durationSec)
   && isNumber(value.sampleRate)
@@ -85,10 +93,16 @@ async function getDb() {
     dbPromise = new Promise((resolve) => {
       try {
         const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION)
-        request.onupgradeneeded = () => {
+        request.onupgradeneeded = (event) => {
           const db = request.result
-          if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE)
-          if (!db.objectStoreNames.contains(CHUNK_STORE)) db.createObjectStore(CHUNK_STORE)
+          const hadMetaStore = db.objectStoreNames.contains(META_STORE)
+          const hadChunkStore = db.objectStoreNames.contains(CHUNK_STORE)
+          if (!hadMetaStore) db.createObjectStore(META_STORE)
+          if (!hadChunkStore) db.createObjectStore(CHUNK_STORE)
+          if (event.oldVersion < DB_VERSION) {
+            if (hadMetaStore) request.transaction?.objectStore(META_STORE).clear()
+            if (hadChunkStore) request.transaction?.objectStore(CHUNK_STORE).clear()
+          }
         }
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => resolve(null)

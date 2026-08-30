@@ -15,8 +15,10 @@ import {
   packagedAudioHostPath,
   probeNativeAudioOutputDevice,
   renderNativeOffline,
+  createNativeOfflineFrameMailbox,
   createNativeOfflineStdoutPump,
   runAudioHostDiagnostic,
+  isNativeOfflineTelemetryFrame,
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
 } from "./audio-host"
@@ -118,6 +120,15 @@ const editorStatus = () => frame(42, Buffer.concat([
 const offlineChunk = (startFrame, value) => frame(54, Buffer.concat([
   u64(startFrame), u32(1), u32(1), f32(value),
 ]))
+const offlineScheduleBurst = () => Buffer.concat([
+  scheduleProgress(), scheduleProgress(), scheduleProgress(), scheduleProgress(), scheduleProgress(),
+])
+const offlineTelemetryBurst = () => Buffer.concat([
+  workerNotification(), meterBatch(), scheduleProgress(),
+])
+const offlineError = (message) => frame(56, Buffer.concat([
+  u32(Buffer.byteLength(message)), Buffer.from(message),
+]))
 const vstPlaybackFlag = (payload) => {
   let offset = 0
   for (let index = 0; index < 5; index += 1) {
@@ -187,6 +198,27 @@ process.stdin.on("data", (chunk) => {
         offlineChunk(3, 0.4),
         offlineChunk(4, 0.5),
         frame(55, u64(5)),
+      ]))
+    } else if (type === 53 && process.env.MODE === "offline-schedule-burst") {
+      process.stdout.write(Buffer.concat([
+        offlineScheduleBurst(),
+        ack(type),
+        offlineChunk(0, 0.1),
+        frame(55, u64(1)),
+      ]))
+    } else if (type === 53 && process.env.MODE === "offline-telemetry") {
+      process.stdout.write(Buffer.concat([
+        offlineTelemetryBurst(),
+        offlineTelemetryBurst(),
+        ack(type),
+        offlineChunk(0, 0.1),
+        offlineTelemetryBurst(),
+        frame(55, u64(1)),
+      ]))
+    } else if (type === 53 && process.env.MODE === "offline-error-after-telemetry") {
+      process.stdout.write(Buffer.concat([
+        offlineTelemetryBurst(),
+        offlineError("exact native offline error"),
       ]))
     } else if (type === 53 && process.env.MODE === "offline-periodic") {
       process.stdout.write(ack(type))
@@ -261,6 +293,179 @@ test("propagates bounded offline renderer stderr and exit diagnostics", async ()
       signal: new AbortController().signal,
       onChunk: () => undefined,
     })).rejects.toThrow("offline child failed to start")
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("filters only the proven offline telemetry frame types", () => {
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.notification)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.meterBatch)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.scheduleProgress)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.spectrumFrame)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.ack)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.offlineComplete)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.offlineError)).toBeFalse()
+})
+
+test("latches an offline mailbox failure after a resolved frame", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const frame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const originalError = new Error("original failure")
+
+  mailbox.push(frame)
+  await expect(mailbox.next()).resolves.toBe(frame)
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("latches an offline mailbox failure before its first read", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const originalError = new Error("original failure")
+
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("rejects a pending offline mailbox read with the original failure", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const originalError = new Error("original failure")
+  const pending = mailbox.next()
+
+  mailbox.fail(originalError)
+
+  await expect(pending).rejects.toBe(originalError)
+})
+
+test("delivers offline mailbox frames before and after reads", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const firstFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const secondFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.offlineComplete) ?? Buffer.alloc(0)
+
+  mailbox.push(firstFrame)
+  await expect(mailbox.next()).resolves.toBe(firstFrame)
+  const pending = mailbox.next()
+  mailbox.push(secondFrame)
+  await expect(pending).resolves.toBe(secondFrame)
+})
+
+test("offline mailbox terminal failure wins over queued frames", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const queuedFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const originalError = new Error("original failure")
+
+  mailbox.push(queuedFrame)
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("preserves required and unknown response queue overflow protection at four frames", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const frames = [
+    nativeAudioHostControlTypes.ack,
+    nativeAudioHostControlTypes.offlineComplete,
+    nativeAudioHostControlTypes.offlineError,
+    0xffff_ff00,
+    nativeAudioHostControlTypes.hostCapabilities,
+  ].map((type) => encodeNativeAudioHostControlFrame(type) ?? Buffer.alloc(0))
+
+  expect(mailbox.push(frames[0])).toBeTrue()
+  expect(mailbox.push(frames[1])).toBeTrue()
+  expect(mailbox.push(frames[2])).toBeTrue()
+  expect(mailbox.push(frames[3])).toBeTrue()
+  expect(mailbox.push(frames[4])).toBeFalse()
+  await expect(mailbox.next()).resolves.toBe(frames[0])
+})
+
+test("drops more than four schedule progress frames before the response mailbox", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-schedule-burst-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-schedule-burst exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => { chunks.push(chunk.startFrame) },
+    })
+    expect(chunks).toEqual([0])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("drops mixed proven offline telemetry while preserving acknowledgement and completion", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-telemetry-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-telemetry exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => { chunks.push(chunk.startFrame) },
+    })
+    expect(chunks).toEqual([0])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("preserves the exact native offline error after telemetry", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-error-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-error-after-telemetry exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    await expect(renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+    })).rejects.toThrow("exact native offline error")
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

@@ -112,6 +112,12 @@ const maximumOfflineQueuedFrames = 4
 const nativeOfflineStageTimeoutMs = 10_000
 const nativeOfflineCompletionInactivityTimeoutMs = 10_000
 
+export const isNativeOfflineTelemetryFrame = (frameType: number) => (
+  frameType === notificationType
+  || frameType === meterBatchType
+  || frameType === scheduleProgressType
+)
+
 const deviceState = (value: number): AudioHostHello["deviceState"] | undefined => {
   if (value === 0) return "idle"
   if (value === 1) return "configured"
@@ -683,6 +689,59 @@ export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInpu
   }
 }
 
+export const createNativeOfflineFrameMailbox = () => {
+  const frames: Buffer[] = []
+  let terminalError: Error | undefined
+  let closedError: Error | undefined
+  let resolveNext: ((frame: Buffer) => void) | undefined
+  let rejectNext: ((error: Error) => void) | undefined
+
+  const rejectPending = (error: Error) => {
+    const reject = rejectNext
+    resolveNext = undefined
+    rejectNext = undefined
+    reject?.(error)
+  }
+
+  return {
+    push(frame: Buffer) {
+      if (terminalError || closedError) return true
+      const resolve = resolveNext
+      resolveNext = undefined
+      rejectNext = undefined
+      if (resolve) {
+        resolve(frame)
+        return true
+      }
+      if (frames.length >= maximumOfflineQueuedFrames) return false
+      frames.push(frame)
+      return true
+    },
+    next() {
+      if (terminalError) return Promise.reject<Buffer>(terminalError)
+      if (closedError) return Promise.reject<Buffer>(closedError)
+      const queued = frames.shift()
+      if (queued) return Promise.resolve(queued)
+      return new Promise<Buffer>((resolve, reject) => {
+        resolveNext = resolve
+        rejectNext = reject
+      })
+    },
+    fail(error: Error) {
+      if (terminalError || closedError) return
+      terminalError = error
+      frames.length = 0
+      rejectPending(error)
+    },
+    close() {
+      if (terminalError || closedError) return
+      closedError = new Error("The native offline renderer is unavailable.")
+      frames.length = 0
+      rejectPending(closedError)
+    },
+  }
+}
+
 export const renderNativeOffline = async (input: {
   hostPath: string
   plan: NativeOfflineRenderPlan
@@ -709,10 +768,8 @@ export const renderNativeOffline = async (input: {
     env: { PATH: "/usr/bin:/bin" },
     stdio: ["pipe", "pipe", "pipe"],
   })
-  const frames: Buffer[] = []
   let finished = false
-  let resolveFrame: ((frame: Buffer) => void) | undefined
-  let rejectFrame: ((error: Error) => void) | undefined
+  const mailbox = createNativeOfflineFrameMailbox()
   let refreshCompletionWatchdog: (() => void) | undefined
   const schedule = input.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs))
   const cancelScheduled = input.cancelScheduled ?? ((timer) => clearTimeout(timer))
@@ -735,20 +792,12 @@ export const renderNativeOffline = async (input: {
   const fail = (error: Error) => {
     if (finished) return
     finished = true
-    const reject = rejectFrame
-    resolveFrame = undefined
-    rejectFrame = undefined
-    reject?.(error)
+    mailbox.fail(error)
     stopPump()
     terminate()
   }
   const nextFrame = () => {
-    const queued = frames.shift()
-    if (queued) return Promise.resolve(queued)
-    return new Promise<Buffer>((resolve, reject) => {
-      resolveFrame = resolve
-      rejectFrame = reject
-    })
+    return mailbox.next()
   }
   const consumeOfflinePcmChunk = (frame: Buffer) => {
     const payload = frame.subarray(headerBytes)
@@ -773,12 +822,10 @@ export const renderNativeOffline = async (input: {
     return input.onChunk({ startFrame, frameCount, channelCount, planes })
   }
   const onStdoutFrame = (frame: Buffer) => {
-    const resolve = resolveFrame
-    resolveFrame = undefined
-    rejectFrame = undefined
-    if (resolve) resolve(frame)
-    else if (frames.length < maximumOfflineQueuedFrames) frames.push(frame)
-    else fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
+    if (isNativeOfflineTelemetryFrame(frame.readUInt32BE(8))) return
+    if (!mailbox.push(frame)) {
+      fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
+    }
   }
   const pump = createNativeOfflineStdoutPump({
     onFrame: onStdoutFrame,
@@ -914,6 +961,7 @@ export const renderNativeOffline = async (input: {
     finished = true
   } finally {
     finished = true
+    mailbox.close()
     input.signal.removeEventListener("abort", abort)
     stopPump()
     child.stdout.removeListener("data", pump.push)

@@ -4,6 +4,7 @@ import {
   compilePortableExportSnapshot,
   type PortableExportSnapshot,
 } from '@daw-browser/audio-engine/portable-export-snapshot'
+import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
 import {
   mapNativeSessionAssets,
   serializeNativeGraph,
@@ -146,6 +147,8 @@ export const compileNativeOfflineRenderPlan = (input: {
   sampleRateHz: number
   channelCount: 1 | 2
   tailFrames: number
+  projectGeneration: number
+  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
   externalAttachments?: NativeExternalAttachmentPlan
   capturedVstStates?: readonly {
     instanceId: string
@@ -165,9 +168,6 @@ export const compileNativeOfflineRenderPlan = (input: {
   const unsupported: string[] = []
   if (input.sidechainRoutes.length > 0) unsupported.push('Native Phase A export does not support sidechain routing.')
   for (const track of input.tracks) {
-    for (const clip of track.clips) {
-      if (clip.audioWarp?.enabled === true) unsupported.push(`${clip.id}: Native Phase A export does not support warp.`)
-    }
     if (input.fx.trackFx?.[track.id]?.arp?.enabled) {
       unsupported.push(`${track.id}: Native Phase A export does not support arpeggiators.`)
     }
@@ -186,6 +186,8 @@ export const compileNativeOfflineRenderPlan = (input: {
     sidechainRoutes: [],
     allowInstruments: true,
     externalLatencyFrames,
+    projectGeneration: input.projectGeneration,
+    preparedStretchAssets: input.preparedStretchAssets,
     capabilityTarget: 'native',
   })
   if (!snapshot.supported) throw new Error(snapshot.reasons.join(' '))
@@ -268,7 +270,10 @@ export const compileNativeOfflineRenderPlan = (input: {
   ))
   const sortedSourceEvents = [...sampleSourceEvents].sort((left, right) => (
     left.startFrame - right.startFrame || left.sequence - right.sequence
-  ))
+  )).map((event, index) => ({
+    ...event,
+    sequence: index + 1,
+  }))
   const automationForWindow = (startFrame: number, endFrame: number) => (
     projectNativeVstAutomationSegments({
       automationEnvelopes: input.automationEnvelopes,

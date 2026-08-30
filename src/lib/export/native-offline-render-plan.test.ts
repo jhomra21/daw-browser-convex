@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import { externalAutomationParameterId, type AutomationEnvelope } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
+import { compilePortableExportSnapshot } from '@daw-browser/audio-engine/portable-export-snapshot'
 
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
 
@@ -108,6 +110,45 @@ const track: Track<AudioBuffer> = {
   } satisfies Clip<AudioBuffer>],
 }
 
+const preparedStretchAsset = (
+  clipId: string,
+  projectGeneration: number,
+  frameCount = 4,
+  sampleRateHz = 48_000,
+  timelineStartSec = 0,
+): PortablePreparedStretchAsset => {
+  const planes = frameCount === 4
+    ? [
+      new Float32Array([0.5, 0.25, 0, -0.25]),
+      new Float32Array([-0.5, -0.25, 0, 0.25]),
+    ]
+    : [
+      new Float32Array(frameCount),
+      new Float32Array(frameCount),
+    ]
+  const assetId = `portable-stretch:${projectGeneration}:${clipId}`
+  return {
+    clipId,
+    sourceAssetKey: 'asset-1',
+    sourceDurationSec: frameCount / sampleRateHz,
+    projectGeneration,
+    projectAssetId: assetId,
+    portableAssetId: assetId,
+    asset: {
+      version: 1,
+      assetId,
+      frameCount,
+      sampleRateHz,
+      channelCount: 2,
+    },
+    pcm: { frameCount, planes },
+    transferables: planes.map((plane) => plane.buffer),
+    timelineStartSec,
+    timelineDurationSec: frameCount / sampleRateHz,
+    sourceStartSec: 0,
+  }
+}
+
 const automationEnvelope = (
   parameterId: string,
   points: AutomationEnvelope['points'],
@@ -160,6 +201,31 @@ const automationSegmentsFromSchedule = (payload: Uint8Array): DecodedAutomationS
   })
 }
 
+const sourceEventsFromSchedule = (payload: Uint8Array) => {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const instrumentCount = view.getUint32(44, true)
+  const sourceCount = view.getUint32(48, true)
+  return Array.from({ length: sourceCount }, (_, index) => {
+    const offset = 60 + instrumentCount * 48 + index * 112
+    return {
+      assetSessionId: view.getUint32(offset + 20, true),
+      sequence: Number(view.getBigUint64(offset + 4, true)),
+      startFrame: Number(view.getBigInt64(offset + 24, true)),
+      stopFrame: Number(view.getBigInt64(offset + 32, true)),
+      sourceOffsetFrame: Number(view.getBigUint64(offset + 40, true)),
+      sourceFrameCount: Number(view.getBigUint64(offset + 48, true)),
+    }
+  })
+}
+
+const sourceEventFromSchedule = (payload: Uint8Array) => {
+  const events = sourceEventsFromSchedule(payload)
+  if (events.length !== 1) throw new Error(`Expected one source event, got ${events.length}.`)
+  const event = events[0]
+  if (!event) throw new Error('Expected one decoded source event.')
+  return event
+}
+
 test('compiles a native plan that remains directly structured-cloneable', () => {
   const plan = compileNativeOfflineRenderPlan({
     tracks: [track],
@@ -171,6 +237,7 @@ test('compiles a native plan that remains directly structured-cloneable', () => 
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: attachmentPlan(),
   })
 
@@ -201,12 +268,357 @@ test('chunks long stereo assets for a custom offline export range', () => {
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
   })
 
   expect(plan.totalFrames).toBe(8 * 48_000)
   expect(plan.assets).toHaveLength(5)
   expect(plan.assets.every((asset) => asset.frameCount <= 131_069)).toBe(true)
   expect(new DataView(plan.schedule.buffer).getUint32(48, true)).toBeGreaterThan(1)
+})
+
+test('accepts prepared Stretch PCM with custom range timing', () => {
+  const warpedTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [warpedTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7)],
+  })
+
+  expect(plan.assets).toHaveLength(1)
+  expect(plan.assets[0]?.planarPcm.byteLength).toBe(4 * 2 * Float32Array.BYTES_PER_ELEMENT)
+  expect(plan.totalFrames).toBeGreaterThan(0)
+  expect(new Float32Array(plan.assets[0]!.planarPcm.buffer)).toEqual(new Float32Array([
+    0.5, 0.25, 0, -0.25, -0.5, -0.25, 0, 0.25,
+  ]))
+  expect(sourceEventFromSchedule(plan.schedule)).toEqual({
+    assetSessionId: 1,
+    sequence: 1,
+    startFrame: 0,
+    stopFrame: 4,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 4,
+  })
+})
+
+test('rebases prepared Stretch source timing and offsets for a custom range', () => {
+  const warpedTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [warpedTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 1 / 48_000, endSec: 3 / 48_000 },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7)],
+  })
+
+  expect(sourceEventFromSchedule(plan.schedule)).toMatchObject({
+    startFrame: 0,
+    stopFrame: 3,
+    sourceOffsetFrame: 1,
+    sourceFrameCount: 3,
+  })
+})
+
+test('chunks long prepared Stretch PCM instead of rejecting the asset', () => {
+  const frameCount = 262_144
+  const warpedTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      duration: frameCount / 48_000,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [warpedTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7, frameCount)],
+  })
+
+  expect(plan.assets.length).toBeGreaterThan(1)
+  expect(plan.assets.every((asset) => asset.frameCount <= 131_069)).toBe(true)
+  expect(new DataView(plan.schedule.buffer).getUint32(48, true)).toBeGreaterThan(1)
+})
+
+test('preserves the existing no-warp native source projection', () => {
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [track],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 1,
+  })
+
+  expect(plan.assets).toHaveLength(1)
+  expect(sourceEventFromSchedule(plan.schedule)).toMatchObject({
+    startFrame: 0,
+    stopFrame: 4,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 4,
+  })
+})
+
+test('re-sequences offline source events in chronological enqueue order across chunk windows', () => {
+  const sampleRateHz = 44_100
+  const stretchStartSec = 29.5
+  const stretchFrameCount = 110_250
+  const longStartSec = 70.5
+  const longFrameCount = 4 * 48_000
+  const traversalOrderTracks: Track<AudioBuffer>[] = [
+    {
+      ...track,
+      id: 'early-track',
+      clips: [{
+        ...track.clips[0]!,
+        id: 'early-clip',
+        startSec: 4,
+      } satisfies Clip<AudioBuffer>],
+    },
+    {
+      ...track,
+      id: 'second-track',
+      clips: [{
+        ...track.clips[0]!,
+        id: 'second-clip',
+        startSec: 8,
+      } satisfies Clip<AudioBuffer>],
+    },
+    {
+      ...track,
+      id: 'long-track',
+      clips: [{
+        ...track.clips[0]!,
+        id: 'long-clip',
+        startSec: longStartSec,
+        duration: longFrameCount / 48_000,
+        sourceAssetKey: 'asset-long',
+        buffer: new TestAudioBuffer([
+          new Float32Array(longFrameCount),
+          new Float32Array(longFrameCount),
+        ]),
+      } satisfies Clip<AudioBuffer>],
+    },
+    {
+      ...track,
+      id: 'stretch-track',
+      clips: [{
+        ...track.clips[0]!,
+        id: 'stretch-clip',
+        startSec: stretchStartSec,
+        duration: stretchFrameCount / sampleRateHz,
+        audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+      } satisfies Clip<AudioBuffer>],
+    },
+    {
+      ...track,
+      id: 'trailing-track',
+      clips: Array.from({ length: 2_050 }, (_, index) => ({
+        ...track.clips[0]!,
+        id: `trailing-clip-${index}`,
+        startSec: 100 + index * 0.01,
+      } satisfies Clip<AudioBuffer>)),
+    },
+  ]
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: traversalOrderTracks,
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset(
+      'stretch-clip',
+      7,
+      stretchFrameCount,
+      sampleRateHz,
+      stretchStartSec,
+    )],
+  })
+  const payloads = plan.scheduleWindows ?? [plan.schedule]
+  const events = payloads.flatMap(sourceEventsFromSchedule)
+  const assetBySessionId = new Map(plan.assets.map((asset, index) => [index + 1, asset]))
+
+  expect(events.map((event) => event.startFrame)).toEqual(
+    [...events].map((event) => event.startFrame).sort((left, right) => left - right),
+  )
+  expect(events.every((event, index) => index === 0 || event.sequence > events[index - 1]!.sequence)).toBe(true)
+  expect(events.every((event) => {
+    const asset = assetBySessionId.get(event.assetSessionId)
+    return asset !== undefined
+      && event.sourceOffsetFrame >= 0
+      && event.sourceFrameCount > 0
+      && event.sourceOffsetFrame + event.sourceFrameCount <= asset.frameCount
+  })).toBe(true)
+  const stretchEvent = events.find((event) => event.startFrame === Math.round(stretchStartSec * sampleRateHz))
+  expect(stretchEvent).toMatchObject({
+    stopFrame: Math.round((stretchStartSec + stretchFrameCount / sampleRateHz) * sampleRateHz),
+    sourceFrameCount: stretchFrameCount,
+  })
+  expect(events.filter((event) => {
+    const startFrame = Math.round(longStartSec * sampleRateHz)
+    return event.startFrame >= startFrame
+      && event.startFrame < startFrame + 4 * sampleRateHz
+  })).toHaveLength(2)
+  expect(payloads.length).toBeGreaterThan(1)
+})
+
+test('returns native Stretch diagnostics for missing, stale, and unsupported warp assets', () => {
+  const stretchTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [stretchTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+  })).toThrow('portable export requires a pre-rendered Stretch asset')
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [stretchTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 8,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7)],
+  })).toThrow('stale project generation')
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120 },
+      } satisfies Clip<AudioBuffer>],
+    }],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [],
+  })).toThrow('repitch warp is not supported')
+})
+
+test('preserves structured missing-asset diagnostics at the portable snapshot boundary', () => {
+  const result = compilePortableExportSnapshot({
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+      } satisfies Clip<AudioBuffer>],
+    }],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    projectGeneration: 7,
+    capabilityTarget: 'native',
+  })
+
+  expect(result).toMatchObject({
+    supported: false,
+    diagnostics: [{
+      code: 'stretch-prepared-asset-required',
+      clipId: 'clip-1',
+    }],
+  })
+})
+
+test('keeps VST and native processor automation with prepared Stretch', () => {
+  const attachment = attachmentPlan()
+  const warpedTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  const parameterId = externalAutomationParameterId(attachment.attachments[0]!.instanceId, 7)
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [warpedTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [
+      automationEnvelope(parameterId, [{ id: 'vst', timeSec: 0, value: 0.5, interpolation: 'hold' }]),
+      automationEnvelope('volume', [{ id: 'mixer', timeSec: 0, value: 0.5, interpolation: 'hold' }]),
+    ],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7)],
+    externalAttachments: attachment,
+  })
+
+  const view = new DataView(plan.schedule.buffer)
+  expect(plan.assets).toHaveLength(1)
+  expect(view.getUint32(52, true)).toBeGreaterThan(0)
+  expect(view.getUint32(56, true)).toBeGreaterThan(0)
 })
 
 test('renders VST parameter automation into native offline schedule windows', () => {
@@ -225,6 +637,7 @@ test('renders VST parameter automation into native offline schedule windows', ()
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: plan,
   })
 
@@ -256,6 +669,7 @@ test('rebases VST automation to frame zero for a custom export range', () => {
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: plan,
   })
 
@@ -294,6 +708,7 @@ test('rejects VST automation that exceeds the worker callback event capacity', (
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: constrainedPlan,
   })).toThrow('Native VST3 export exceeds the callback event capacity')
 })
@@ -311,6 +726,7 @@ test('renders track volume automation into native processor schedule events', ()
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: attachmentPlan(),
   })
   const view = new DataView(exportPlan.schedule.buffer, exportPlan.schedule.byteOffset, exportPlan.schedule.byteLength)
@@ -336,6 +752,7 @@ test('rejects unsupported native automation targets', () => {
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
     externalAttachments: attachmentPlan(),
   })).toThrow('Native mixer automation parameter')
 })
@@ -365,6 +782,7 @@ test('partitions many uniquely timed source events without rescanning earlier ev
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
+    projectGeneration: 1,
   })
 
   expect(plan.scheduleWindows?.length).toBe(2)

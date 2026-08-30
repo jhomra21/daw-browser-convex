@@ -546,6 +546,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       }
     },
     getTracks: renderTracks,
+    getProjectGeneration: mountedProjectGeneration,
+    createBuffer: (channels, frames, sampleRate) => (
+      audioEngine.getAudioContext?.()?.createBuffer(channels, frames, sampleRate)
+      ?? new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate })
+    ),
     getBpm: bpm,
     getTimeSignature: () => ({
       numerator: fullView.data?.project.timeSignatureNumerator ?? 4,

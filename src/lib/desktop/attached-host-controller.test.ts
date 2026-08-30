@@ -74,6 +74,7 @@ const prepared: PreparedTimelineExport = {
         midi: { wave: "sine", notes: [] },
       }],
     }],
+    projectGeneration: 1,
     bpm: 120,
     masterVolume: 1,
     projectId: "project-1",

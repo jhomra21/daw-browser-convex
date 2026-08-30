@@ -15,11 +15,16 @@ import {
   packagedAudioHostPath,
   probeNativeAudioOutputDevice,
   renderNativeOffline,
+  createNativeOfflineStdoutPump,
   runAudioHostDiagnostic,
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
 } from "./audio-host"
-import { nativeAudioHostControlTypes, nativeAudioHostProtocolVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import { createOfflinePcmAckTracker, deliverOfflinePcmChunk } from "./offline-pcm-ack"
+import {
+  nativeAudioHostControlTypes,
+  nativeAudioHostProtocolVersion,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 
 const hostScript = `
 const u32 = (value) => {
@@ -284,12 +289,226 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
         schedule: new Uint8Array([1]),
       },
       signal: new AbortController().signal,
-      onChunk: (chunk) => chunks.push(chunk.startFrame),
+      onChunk: (chunk) => {
+        chunks.push(chunk.startFrame)
+      },
     })
     expect(chunks).toEqual([0, 1, 2, 3, 4])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test("serializes the offline PCM sink and keeps completion behind the final sink", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: string[] = []
+  const pauses: string[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: (frame) => delivered.push(frame.readUInt32BE(8) === 55 ? "complete" : "other"),
+    onPcmFrame: async (frame) => {
+      delivered.push(`pcm-${frame.readBigUInt64BE(16).toString()}`)
+      if (frame.readBigUInt64BE(16) === 0n) await deferred.promise
+    },
+    onError: (error) => { throw error },
+    pause: () => pauses.push("pause"),
+    resume: () => pauses.push("resume"),
+  })
+  const pcmFrame = (startFrame: number) => {
+    const payload = Buffer.alloc(20)
+    payload.writeBigUInt64BE(BigInt(startFrame), 0)
+    payload.writeUInt32BE(1, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.writeFloatBE(startFrame + 0.25, 16)
+    return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  }
+  pump.push(Buffer.concat([
+    pcmFrame(0),
+    pcmFrame(1),
+    encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0),
+  ]))
+  await Promise.resolve()
+  expect(delivered).toEqual(["pcm-0"])
+  expect(pump.sinkBusy()).toBeTrue()
+  deferred.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(delivered).toEqual(["pcm-0", "pcm-1", "complete"])
+  expect(pauses).toEqual(["pause", "pause", "resume"])
+  pump.stop()
+})
+
+test("preserves split frames and partial following PCM while one sink is pending", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: number[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => delivered.push(99),
+    onPcmFrame: async (frame) => {
+      const startFrame = Number(frame.readBigUInt64BE(16))
+      delivered.push(startFrame)
+      if (startFrame === 0) await deferred.promise
+    },
+    onError: (error) => { throw error },
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  const pcmFrame = (startFrame: number, frameCount: number) => {
+    const payload = Buffer.alloc(16 + frameCount * 4)
+    payload.writeBigUInt64BE(BigInt(startFrame), 0)
+    payload.writeUInt32BE(frameCount, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.fill(startFrame, 16)
+    return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  }
+  const first = pcmFrame(0, 32)
+  const second = pcmFrame(32, 1_024)
+  const completion = encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0)
+  pump.push(Buffer.concat([first, second.subarray(0, 2_600)]))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(delivered).toEqual([0])
+  expect(pump.bufferedBytes()).toBe(2_600)
+  deferred.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  pump.push(Buffer.concat([second.subarray(2_600), completion]))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(delivered).toEqual([0, 32, 99])
+  expect(pump.bufferedBytes()).toBe(0)
+})
+
+test("fails and stops when the asynchronous offline sink rejects", async () => {
+  const deferred = Promise.withResolvers<Error>()
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => undefined,
+    onPcmFrame: async () => { throw new Error("sink failed") },
+    onError: (error) => deferred.resolve(error),
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  const payload = Buffer.alloc(20)
+  payload.writeUInt32BE(1, 8)
+  payload.writeUInt32BE(1, 12)
+  pump.push(encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0))
+  await expect(deferred.promise).resolves.toThrow("sink failed")
+  expect(pump.sinkBusy()).toBeFalse()
+  expect(pump.bufferedBytes()).toBe(0)
+})
+
+test("does not resume or process buffered PCM after abort stops the render", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: number[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => undefined,
+    onPcmFrame: async (frame) => {
+      delivered.push(Number(frame.readBigUInt64BE(16)))
+      await deferred.promise
+    },
+    onError: () => undefined,
+    pause: () => undefined,
+    resume: () => { delivered.push(100) },
+  })
+  const payload = Buffer.alloc(20)
+  payload.writeUInt32BE(1, 8)
+  payload.writeUInt32BE(1, 12)
+  const first = encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  pump.push(Buffer.concat([first, first]))
+  pump.stop()
+  deferred.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(delivered).toEqual([0])
+})
+
+test("moves 128 MiB through one bounded asynchronous sink without loss or duplication", async () => {
+  const frameCount = 128 * 1024 * 1024 / Float32Array.BYTES_PER_ELEMENT
+  const framesPerChunk = 131_072
+  const expectedChunks = frameCount / framesPerChunk
+  let sinkInFlight = 0
+  let maximumSinkInFlight = 0
+  let renderedFrames = 0
+  let renderedBytes = 0
+  let complete = false
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: (frame) => {
+      expect(frame.readUInt32BE(8)).toBe(55)
+      complete = true
+    },
+    onPcmFrame: async (frame) => {
+      sinkInFlight += 1
+      maximumSinkInFlight = Math.max(maximumSinkInFlight, sinkInFlight)
+      const startFrame = Number(frame.readBigUInt64BE(16))
+      const count = frame.readUInt32BE(24)
+      expect(startFrame).toBe(renderedFrames)
+      expect(count).toBe(framesPerChunk)
+      renderedFrames += count
+      renderedBytes += count * Float32Array.BYTES_PER_ELEMENT
+      sinkInFlight -= 1
+    },
+    onError: (error) => { throw error },
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  for (let index = 0; index < expectedChunks; index += 1) {
+    const payload = Buffer.alloc(16 + framesPerChunk * Float32Array.BYTES_PER_ELEMENT)
+    payload.writeBigUInt64BE(BigInt(index * framesPerChunk), 0)
+    payload.writeUInt32BE(framesPerChunk, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.fill(index & 0xff, 16)
+    pump.push(encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  pump.push(encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(renderedFrames).toBe(frameCount)
+  expect(renderedBytes).toBe(128 * 1024 * 1024)
+  expect(maximumSinkInFlight).toBe(1)
+  expect(complete).toBeTrue()
+  expect(pump.maximumBufferedBytes()).toBeLessThanOrEqual(1_048_576)
+})
+
+test("tracks only the exact active offline PCM acknowledgement", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  expect(() => tracker.begin({ jobId: "job-1", sequence: 2, endFrame: 1_024 })).toThrow("already pending")
+  expect(tracker.acknowledge({ jobId: "job-2", sequence: 1, endFrame: 512 })).toBeFalse()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 2, endFrame: 512 })).toBeFalse()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 513 })).toBeFalse()
+  expect(tracker.hasPending()).toBeTrue()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 512 })).toBeTrue()
+  await expect(pending).resolves.toBeUndefined()
+  expect(tracker.hasPending()).toBeFalse()
+})
+
+test("captures offline PCM acknowledgement before listener mutation", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  let sent: { jobId: string; sequence: number; endFrame: number } | undefined
+  await deliverOfflinePcmChunk(
+    "job-1",
+    1,
+    { startFrame: 256, frameCount: 256, channelCount: 1, planes: [new Float32Array(256)] },
+    async (chunk) => {
+      chunk.startFrame = 0
+      chunk.frameCount = 1
+    },
+    (ack) => {
+      sent = ack
+      expect(tracker.acknowledge(ack)).toBeTrue()
+    },
+  )
+  await expect(pending).resolves.toBeUndefined()
+  expect(sent).toEqual({ jobId: "job-1", sequence: 1, endFrame: 512 })
+})
+
+test("cancels a pending offline PCM acknowledgement without allowing stale release", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  tracker.cancel(new DOMException("canceled", "AbortError"))
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 512 })).toBeFalse()
+  expect(tracker.hasPending()).toBeFalse()
 })
 
 test("allows offline completion after the aggregate deadline while valid PCM continues", async () => {
@@ -321,7 +540,9 @@ test("allows offline completion after the aggregate deadline while valid PCM con
         schedule: new Uint8Array([1]),
       },
       signal: new AbortController().signal,
-      onChunk: (chunk) => chunks.push(chunk.startFrame),
+      onChunk: (chunk) => {
+        chunks.push(chunk.startFrame)
+      },
       completionInactivityMs: 50,
       schedule,
     })

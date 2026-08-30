@@ -607,12 +607,88 @@ const encodeOfflineStart = (plan: NativeOfflineRenderPlan) => {
   return output
 }
 
+type NativeOfflineStdoutPumpInput = {
+  onFrame: (frame: Buffer) => void
+  onPcmFrame: (frame: Buffer) => Promise<void>
+  isPcmFrame: (frame: Buffer) => boolean
+  onError: (error: Error) => void
+  pause: () => void
+  resume: () => void
+}
+
+export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInput) => {
+  let buffer = Buffer.alloc(0)
+  let maximumBufferedBytes = 0
+  let sinkBusy = false
+  let stopped = false
+  let pumping = false
+
+  const pump = () => {
+    if (stopped || sinkBusy || pumping) return
+    pumping = true
+    try {
+      while (!stopped && !sinkBusy && buffer.byteLength >= headerBytes) {
+        const payloadBytes = buffer.readUInt32BE(12)
+        if (payloadBytes > maximumPayloadBytes) {
+          stopped = true
+          input.onError(new Error("The native offline renderer returned an oversized frame."))
+          return
+        }
+        if (buffer.byteLength < headerBytes + payloadBytes) return
+        const frame = buffer.subarray(0, headerBytes + payloadBytes)
+        buffer = buffer.subarray(frame.byteLength)
+        if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) {
+          stopped = true
+          input.onError(new Error("The native offline renderer returned an invalid frame."))
+          return
+        }
+        if (!input.isPcmFrame(frame)) {
+          input.onFrame(frame)
+          continue
+        }
+        sinkBusy = true
+        input.pause()
+        void Promise.resolve().then(() => input.onPcmFrame(frame)).then(
+          () => {
+            sinkBusy = false
+            if (stopped) return
+            pump()
+            if (!sinkBusy && !stopped) input.resume()
+          },
+          (error) => {
+            stopped = true
+            sinkBusy = false
+            input.onError(error instanceof Error ? error : new Error("The native offline PCM sink failed."))
+          },
+        )
+      }
+    } finally {
+      pumping = false
+    }
+  }
+
+  return {
+    push(chunk: Buffer) {
+      if (stopped) return
+      buffer = Buffer.concat([buffer, chunk])
+      pump()
+      maximumBufferedBytes = Math.max(maximumBufferedBytes, buffer.byteLength)
+    },
+    stop() {
+      stopped = true
+    },
+    bufferedBytes: () => buffer.byteLength,
+    maximumBufferedBytes: () => maximumBufferedBytes,
+    sinkBusy: () => sinkBusy,
+  }
+}
+
 export const renderNativeOffline = async (input: {
   hostPath: string
   plan: NativeOfflineRenderPlan
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
-  onChunk: (chunk: NativeOfflinePcmChunk) => void
+  onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>
   completionInactivityMs?: number
   schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
@@ -633,7 +709,6 @@ export const renderNativeOffline = async (input: {
     env: { PATH: "/usr/bin:/bin" },
     stdio: ["pipe", "pipe", "pipe"],
   })
-  let buffer = Buffer.alloc(0)
   const frames: Buffer[] = []
   let finished = false
   let resolveFrame: ((frame: Buffer) => void) | undefined
@@ -656,6 +731,7 @@ export const renderNativeOffline = async (input: {
     const diagnostic = stderrText()
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
+  let stopPump = () => {}
   const fail = (error: Error) => {
     if (finished) return
     finished = true
@@ -663,6 +739,7 @@ export const renderNativeOffline = async (input: {
     resolveFrame = undefined
     rejectFrame = undefined
     reject?.(error)
+    stopPump()
     terminate()
   }
   const nextFrame = () => {
@@ -693,42 +770,29 @@ export const renderNativeOffline = async (input: {
     const planes = Array.from({ length: channelCount }, (_, channel) => (
       samples.subarray(channel * frameCount, (channel + 1) * frameCount)
     ))
-    input.onChunk({ startFrame, frameCount, channelCount, planes })
-    refreshCompletionWatchdog?.()
+    return input.onChunk({ startFrame, frameCount, channelCount, planes })
   }
-  const onStdoutData = (chunk: Buffer) => {
-    buffer = Buffer.concat([buffer, chunk])
-    while (buffer.byteLength >= headerBytes) {
-      const payloadBytes = buffer.readUInt32BE(12)
-      if (payloadBytes > maximumPayloadBytes) {
-        fail(new Error("The native offline renderer returned an oversized frame."))
-        return
-      }
-      if (buffer.byteLength < headerBytes + payloadBytes) return
-      const frame = buffer.subarray(0, headerBytes + payloadBytes)
-      buffer = buffer.subarray(frame.byteLength)
-      if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) {
-        fail(new Error("The native offline renderer returned an invalid frame."))
-        return
-      }
-      if (frame.readUInt32BE(8) === offlinePcmChunkType) {
-        try {
-          consumeOfflinePcmChunk(frame)
-        } catch (error) {
-          fail(error instanceof Error ? error : new Error("The native offline renderer returned an invalid PCM chunk."))
-          return
-        }
-        continue
-      }
-      const resolve = resolveFrame
-      resolveFrame = undefined
-      rejectFrame = undefined
-      if (resolve) resolve(frame)
-      else if (frames.length < maximumOfflineQueuedFrames) frames.push(frame)
-      else fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
-    }
+  const onStdoutFrame = (frame: Buffer) => {
+    const resolve = resolveFrame
+    resolveFrame = undefined
+    rejectFrame = undefined
+    if (resolve) resolve(frame)
+    else if (frames.length < maximumOfflineQueuedFrames) frames.push(frame)
+    else fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
   }
-  child.stdout.on("data", onStdoutData)
+  const pump = createNativeOfflineStdoutPump({
+    onFrame: onStdoutFrame,
+    onPcmFrame: async (frame) => {
+      await consumeOfflinePcmChunk(frame)
+      refreshCompletionWatchdog?.()
+    },
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === offlinePcmChunkType,
+    onError: (error) => fail(error),
+    pause: () => child.stdout.pause(),
+    resume: () => child.stdout.resume(),
+  })
+  stopPump = pump.stop
+  child.stdout.on("data", pump.push)
   child.stderr.on("data", (chunk: Buffer) => {
     if (stderr.byteLength >= maximumOfflineStderrBytes) {
       stderrTruncated = true
@@ -851,7 +915,8 @@ export const renderNativeOffline = async (input: {
   } finally {
     finished = true
     input.signal.removeEventListener("abort", abort)
-    child.stdout.removeListener("data", onStdoutData)
+    stopPump()
+    child.stdout.removeListener("data", pump.push)
     child.removeListener("error", onError)
     child.removeListener("close", onClose)
     terminate()

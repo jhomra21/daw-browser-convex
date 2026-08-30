@@ -77,6 +77,8 @@ test("mixdown preflight runs before output target creation and clip hydration", 
       }],
     }],
     bpm: 120,
+    projectGeneration: 1,
+    getProjectGeneration: () => 1,
     masterVolume: 1,
     range: { mode: "whole" },
     formats: ["mp3"],
@@ -166,6 +168,8 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
         }],
       }],
       bpm: 120,
+      projectGeneration: 1,
+      getProjectGeneration: () => 1,
       masterVolume: 1,
       range: { mode: "whole" },
       formats: ["wav"],
@@ -253,6 +257,8 @@ test("stem preflight uses the renderer stem selection before opening output", as
   const outcome = await runStemExport({
     getTracks: () => tracks,
     bpm: 120,
+    projectGeneration: 1,
+    getProjectGeneration: () => 1,
     masterVolume: 1,
     range: { mode: "whole" },
     formats: ["wav"],
@@ -323,6 +329,8 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
         }],
       }],
       bpm: 120,
+      projectGeneration: 1,
+      getProjectGeneration: () => 1,
       masterVolume: 1,
       range: { mode: "whole" },
       formats: ["wav"],
@@ -385,10 +393,17 @@ test("instrument hydration settles as canceled when its sample fetch stalls", as
 })
 
 class TestDecodedAudioBuffer implements AudioBuffer {
-  readonly duration = 1
-  readonly length = 48_000
-  readonly numberOfChannels = 2
-  readonly sampleRate = 48_000
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels: number
+  readonly sampleRate: number
+
+  constructor(length = 48_000, sampleRate = 48_000, numberOfChannels = 2) {
+    this.length = length
+    this.sampleRate = sampleRate
+    this.numberOfChannels = numberOfChannels
+    this.duration = length / sampleRate
+  }
 
   copyFromChannel(destination: Float32Array) {
     destination.fill(0)
@@ -549,6 +564,8 @@ test("instrument export preload reads local-asset bytes with the project context
         }],
       }],
       bpm: 120,
+      projectGeneration: 1,
+      getProjectGeneration: () => 1,
       masterVolume: 1,
       range: { mode: "whole" },
       formats: ["wav"],
@@ -597,4 +614,281 @@ test("instrument export preload reads local-asset bytes with the project context
     else Reflect.deleteProperty(globalThis, "OfflineAudioContext")
     await deleteLocalProject(project.id)
   }
+})
+
+test("native export prepares Stretch after hydration and normalizes its PCM", async () => {
+  const originalAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
+  let preparedAsset: {
+    sampleRateHz: number
+    frameCount: number
+    planarPcm: Uint8Array
+  } | undefined
+  const source = new TestDecodedAudioBuffer()
+  try {
+    const outcome = await runTimelineExport({
+      nativeRendererRequired: true,
+      getTracks: () => [{
+        id: "track-stretch",
+        name: "Stretch",
+        volume: 1,
+        clips: [{
+          id: "clip-stretch",
+          name: "Stretch clip",
+          color: "#fff",
+          startSec: 0,
+          duration: 1,
+          sourceAssetKey: "asset:stretch",
+          audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+          buffer: source,
+        }],
+      }],
+      bpm: 120,
+      projectGeneration: 7,
+      getProjectGeneration: () => 7,
+      masterVolume: 1,
+      range: { mode: "whole" },
+      formats: ["wav"],
+      render,
+      encoding,
+      projectId: undefined,
+      userId: undefined,
+      sidechainRoutes: [],
+      loadCapturedClipBuffer: async () => undefined,
+      signal: new AbortController().signal,
+      outputTargets: {
+        resourceLimits: desktopLimits,
+        async createMixdownTarget() {
+          return {
+            openFile: async () => undefined,
+            saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
+          }
+        },
+        async createStemTarget() {
+          throw new Error("unexpected stem target")
+        },
+      },
+      renderStateSnapshot,
+      createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+      nativeOfflineRenderer: async (plan) => {
+        const asset = plan.assets[0]
+        if (asset) {
+          preparedAsset = {
+            sampleRateHz: asset.sampleRateHz,
+            frameCount: asset.frameCount,
+            planarPcm: asset.planarPcm,
+          }
+        }
+        throw new NativeOfflineRenderError("stop after native Stretch planning")
+      },
+    })
+
+    expect(outcome).toEqual({
+      type: "error",
+      message: "stop after native Stretch planning",
+      failureOwner: "native",
+      outputs: [],
+    })
+    expect(preparedAsset?.sampleRateHz).toBe(render.sampleRate)
+    expect(preparedAsset?.frameCount).toBe(render.sampleRate)
+    expect(preparedAsset?.planarPcm.byteLength).toBe(render.sampleRate * 2 * Float32Array.BYTES_PER_ELEMENT)
+  } finally {
+    if (originalAudioBuffer) Object.defineProperty(globalThis, "AudioBuffer", originalAudioBuffer)
+    else Reflect.deleteProperty(globalThis, "AudioBuffer")
+  }
+})
+
+test("native Stretch preparation hydrates first and surfaces structured diagnostics", async () => {
+  const source = new TestDecodedAudioBuffer(48_000, 48_000, 3)
+  const clip: RuntimeTrack["clips"][number] = {
+    id: "clip-stretch-diagnostic",
+    name: "Stretch clip",
+    color: "#fff",
+    startSec: 0,
+    duration: 1,
+    sourceAssetKey: "asset:stretch",
+    audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+  }
+  let hydrated = false
+  let opened = false
+  const outcome = await runTimelineExport({
+    nativeRendererRequired: true,
+    getTracks: () => [{
+      id: "track-stretch-diagnostic",
+      name: "Stretch",
+      volume: 1,
+      clips: [clip],
+    }],
+    bpm: 120,
+    projectGeneration: 7,
+    getProjectGeneration: () => 7,
+    masterVolume: 1,
+    range: { mode: "whole" },
+    formats: ["wav"],
+    render,
+    encoding,
+    projectId: undefined,
+    userId: undefined,
+    sidechainRoutes: [],
+    loadCapturedClipBuffer: async (capturedClip) => {
+      capturedClip.buffer = source
+      hydrated = true
+    },
+    signal: new AbortController().signal,
+    outputTargets: {
+      resourceLimits: desktopLimits,
+      async createMixdownTarget() {
+        opened = true
+        return {
+          openFile: async () => undefined,
+          saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
+        }
+      },
+      async createStemTarget() {
+        throw new Error("unexpected stem target")
+      },
+    },
+    renderStateSnapshot,
+    createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+    nativeOfflineRenderer: async () => {
+      throw new Error("native renderer should not run")
+    },
+  })
+
+  expect(hydrated).toBe(true)
+  expect(opened).toBe(false)
+  expect(outcome).toMatchObject({
+    type: "error",
+    message: "clip-stretch-diagnostic: Stretch source audio must be mono or stereo.",
+  })
+})
+
+test("native custom-range export ignores out-of-range Stretch preparation", async () => {
+  const source = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+  let hydrated = false
+  const outcome = await runTimelineExport({
+    nativeRendererRequired: true,
+    getTracks: () => [{
+      id: "track-stretch-range",
+      name: "Stretch range",
+      volume: 1,
+      clips: [{
+        id: "clip-stretch-in-range",
+        name: "In range",
+        color: "#fff",
+        startSec: 0,
+        duration: 1,
+        sourceAssetKey: "asset:in-range",
+        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+        buffer: source,
+      }, {
+        id: "clip-stretch-out-of-range",
+        name: "Out of range",
+        color: "#fff",
+        startSec: 2,
+        duration: 1,
+        sourceAssetKey: "asset:out-of-range",
+        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+      }],
+    }],
+    bpm: 120,
+    projectGeneration: 7,
+    getProjectGeneration: () => 7,
+    masterVolume: 1,
+    range: { mode: "custom", startSec: 0, endSec: 1 },
+    formats: ["wav"],
+    render,
+    encoding,
+    projectId: undefined,
+    userId: undefined,
+    sidechainRoutes: [],
+    loadCapturedClipBuffer: async (clip) => {
+      hydrated = true
+      clip.buffer = source
+    },
+    signal: new AbortController().signal,
+    outputTargets: {
+      resourceLimits: desktopLimits,
+      async createMixdownTarget() {
+        return {
+          openFile: async () => undefined,
+          saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
+        }
+      },
+      async createStemTarget() {
+        throw new Error("unexpected output target")
+      },
+    },
+    renderStateSnapshot,
+    createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+    nativeOfflineRenderer: async () => {
+      throw new NativeOfflineRenderError("stop after native custom-range planning")
+    },
+  })
+
+  expect(hydrated).toBeFalse()
+  expect(outcome).toEqual({
+    type: "error",
+    message: "stop after native custom-range planning",
+    failureOwner: "native",
+    outputs: [],
+  })
+})
+
+test("native export rejects a stale project generation after Stretch preparation", async () => {
+  const source = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+  let generation = 7
+  const outcome = await runTimelineExport({
+    nativeRendererRequired: true,
+    getTracks: () => [{
+      id: "track-stretch-stale",
+      name: "Stretch",
+      volume: 1,
+      clips: [{
+        id: "clip-stretch-stale",
+        name: "Stretch clip",
+        color: "#fff",
+        startSec: 0,
+        duration: 1,
+        sourceAssetKey: "asset:stretch",
+        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+        buffer: source,
+      }],
+    }],
+    bpm: 120,
+    projectGeneration: 7,
+    getProjectGeneration: () => generation,
+    masterVolume: 1,
+    range: { mode: "whole" },
+    formats: ["wav"],
+    render: { ...render, sampleRate: 44_100 },
+    encoding,
+    projectId: undefined,
+    userId: undefined,
+    sidechainRoutes: [],
+    loadCapturedClipBuffer: async () => undefined,
+    signal: new AbortController().signal,
+    outputTargets: {
+      resourceLimits: desktopLimits,
+      async createMixdownTarget() {
+        throw new Error("unexpected output target")
+      },
+      async createStemTarget() {
+        throw new Error("unexpected stem target")
+      },
+    },
+    renderStateSnapshot,
+    createBuffer: (channels, frames, sampleRate) => {
+      generation = 8
+      return new TestDecodedAudioBuffer(frames, sampleRate, channels)
+    },
+    nativeOfflineRenderer: async () => {
+      throw new Error("native renderer should not run")
+    },
+  })
+
+  expect(outcome).toEqual({
+    type: "error",
+    message: "Project changed while preparing export.",
+    outputs: [],
+  })
 })

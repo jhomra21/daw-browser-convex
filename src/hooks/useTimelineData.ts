@@ -71,6 +71,22 @@ export const deleteCurrentCloudProjectAccess = async (input: {
   return result
 }
 
+export const deleteCurrentLocalProjectAccess = async (input: {
+  flushPendingWrites: () => Promise<void>
+  createDestination: () => Promise<string>
+  reloadProjects: () => Promise<void>
+  navigate: (projectId: string) => Promise<void>
+  deleteCurrentProject: () => Promise<void>
+}) => {
+  await input.flushPendingWrites()
+  const destinationProjectId = await input.createDestination()
+  await input.reloadProjects()
+  await input.navigate(destinationProjectId)
+  await input.flushPendingWrites()
+  await input.deleteCurrentProject()
+  await input.reloadProjects()
+}
+
 type EnsureOwnedRoomOptions = {
   showAlertOnError?: boolean
 }
@@ -444,13 +460,18 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   const deleteProject = async (targetProjectId: string) => {
     if (isLocalId('project', targetProjectId) && hasLocalProject(targetProjectId)) {
       try {
-        await flushLocalProjectPendingWrites(targetProjectId)
-        await deleteLocalProject(targetProjectId)
-        await loadLocalProjects()
         if (targetProjectId === projectId()) {
-          const replacement = await createLocalProject('Untitled')
+          await deleteCurrentLocalProjectAccess({
+            flushPendingWrites: async () => await flushLocalProjectPendingWrites(targetProjectId),
+            createDestination: async () => (await createLocalProject('Untitled')).id,
+            reloadProjects: async () => await loadLocalProjects(),
+            navigate: async (destinationProjectId) => await navigateToRoom(destinationProjectId),
+            deleteCurrentProject: async () => await deleteLocalProject(targetProjectId),
+          })
+        } else {
+          await flushLocalProjectPendingWrites(targetProjectId)
+          await deleteLocalProject(targetProjectId)
           await loadLocalProjects()
-          await navigateToRoom(replacement.id)
         }
       } catch {
         input.notify('Local project delete failed', 'This local project could not be deleted.')

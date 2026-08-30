@@ -1,3 +1,5 @@
+export const peakAssetFormatVersion = 2
+
 export type PeakChunkRecord = {
   chunkKey: string
   startSec: number
@@ -12,6 +14,7 @@ export type PeakLevelRecord = {
 }
 
 export type PeakAssetRecord = {
+  formatVersion: typeof peakAssetFormatVersion
   assetKey: string
   durationSec: number
   sampleRate: number
@@ -38,6 +41,11 @@ export type WaveformSliceRequest = EnsureWaveformAssetOptions & {
   sourceStartSec: number
   sourceEndSec: number
   bins: number
+}
+
+export type WaveformPeakChannelSlice = {
+  channels: Uint8Array[]
+  columns: number
 }
 
 export type WaveformDrawOptions = {

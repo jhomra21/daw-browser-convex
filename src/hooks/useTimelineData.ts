@@ -82,6 +82,7 @@ export const deleteCurrentLocalProjectAccess = async (input: {
   const destinationProjectId = await input.createDestination()
   await input.reloadProjects()
   await input.navigate(destinationProjectId)
+  await input.flushPendingWrites()
   await input.deleteCurrentProject()
   await input.reloadProjects()
 }

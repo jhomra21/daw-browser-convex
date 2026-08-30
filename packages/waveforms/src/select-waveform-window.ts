@@ -27,7 +27,7 @@ function selectPeakLevel(record: PeakAssetRecord, request: WaveformSliceRequest,
   for (const level of levels) {
     if (level.peaksPerSecond >= requestedPeaksPerSecond) return level
   }
-  return levels[levels.length - 1]
+  return null
 }
 
 function getWaveformWindow(level: PeakLevelRecord, record: PeakAssetRecord, request: WaveformSliceRequest): WaveformWindow {

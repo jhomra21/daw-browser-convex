@@ -747,7 +747,7 @@ int main() {
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v4");
+      WriteString(response, "daw-audio-host-macos/v5");
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       if (!WriteFrame(daw::audio_host_macos::ControlType::kHostCapabilities, response)) return EXIT_FAILURE;

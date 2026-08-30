@@ -59,13 +59,14 @@ const createEnvelope = (props: AutomationLaneProps, points: AutomationPoint[]): 
 export default function AutomationLane(props: AutomationLaneProps) {
   const [selectedPointId, setSelectedPointId] = createSignal<string | null>(null)
   const [hoveredPointId, setHoveredPointId] = createSignal<string | null>(null)
+  const [draftPoints, setDraftPoints] = createSignal<AutomationPoint[] | undefined>(undefined)
   let root: HTMLDivElement | undefined
   let cleanupDrag: (() => void) | undefined
 
   const descriptor = createMemo(() => getAutomationParameterDescriptor(props.parameterId))
   const targetKey = createMemo(() => automationTargetKey(props.target, props.parameterId))
   const height = () => props.heightPx || root?.clientHeight || 36
-  const points = createMemo(() => props.envelope?.points ?? [])
+  const points = createMemo(() => draftPoints() ?? props.envelope?.points ?? [])
   const valueToY = (value: number) => {
     const desc = descriptor()
     if (!desc) return height() / 2
@@ -169,46 +170,70 @@ export default function AutomationLane(props: AutomationLaneProps) {
     props.onCommit(createEnvelope(props, nextPoints), targetKey())
   }
 
-  const previewPoints = (nextPoints: AutomationPoint[]) => {
-    if (nextPoints.length === 0) {
-      props.onPreview(undefined)
-      return
-    }
-    props.onPreview(createEnvelope(props, nextPoints))
-  }
-
   const startDrag = (pointId: string, event: PointerEvent) => {
     event.stopPropagation()
     if (event.button !== 0) return
     event.preventDefault()
     root?.focus()
+    const pointerId = event.pointerId
+    let dragActive = true
+    const initialPoints = points()
+    setDraftPoints(initialPoints)
     setSelectedPointId(pointId)
     const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return
       const nextPoint = pointFromEvent(moveEvent)
       if (!nextPoint) return
-      previewPoints(points().map((point) => point.id === pointId ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value } : point))
+      setDraftPoints((currentPoints) => (currentPoints ?? initialPoints).map((point) => point.id === pointId
+        ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value }
+        : point))
     }
     const cleanup = () => {
+      if (!dragActive) return
+      dragActive = false
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancel)
+      root?.removeEventListener('lostpointercapture', lostPointerCapture)
+      if (root?.hasPointerCapture(pointerId)) root.releasePointerCapture(pointerId)
       if (cleanupDrag === cleanup) cleanupDrag = undefined
     }
     const up = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return
+      if (!root?.hasPointerCapture(pointerId)) {
+        cancel(upEvent)
+        return
+      }
       cleanup()
       const nextPoint = pointFromEvent(upEvent)
-      if (!nextPoint) return
-      commitPoints(points().map((point) => point.id === pointId ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value } : point))
+      const finalPoints = nextPoint
+        ? (draftPoints() ?? initialPoints).map((point) => point.id === pointId
+          ? { ...point, timeSec: nextPoint.timeSec, value: nextPoint.value }
+          : point)
+        : undefined
+      setDraftPoints(undefined)
+      if (finalPoints) commitPoints(finalPoints)
     }
-    const cancel = () => {
+    const cancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return
       cleanup()
+      setDraftPoints(undefined)
+      props.onCancelPreview(targetKey())
+    }
+    const lostPointerCapture = (lostEvent: Event) => {
+      if (!dragActive) return
+      if ('pointerId' in lostEvent && lostEvent.pointerId !== pointerId) return
+      cleanup()
+      setDraftPoints(undefined)
       props.onCancelPreview(targetKey())
     }
     cleanupDrag?.()
     cleanupDrag = cleanup
+    root?.setPointerCapture(pointerId)
+    root?.addEventListener('lostpointercapture', lostPointerCapture)
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up, { once: true })
-    window.addEventListener('pointercancel', cancel, { once: true })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
   }
 
   const addPoint = (event: MouseEvent) => {
@@ -319,6 +344,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
 
   onCleanup(() => {
     cleanupDrag?.()
+    setDraftPoints(undefined)
     props.onCancelPreview(targetKey())
   })
 
@@ -327,6 +353,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
       ref={(element) => {
         root = element
       }}
+      data-timeline-automation-lane="true"
       tabIndex={0}
       data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"
@@ -334,8 +361,14 @@ export default function AutomationLane(props: AutomationLaneProps) {
         event.stopPropagation()
         root?.focus()
       }}
-      onDblClick={addPoint}
-      onContextMenu={(event) => setContextMenuPosition({ clientX: event.clientX, clientY: event.clientY })}
+      onDblClick={(event) => {
+        event.stopPropagation()
+        event.preventDefault()
+        addPoint(event)
+      }}
+      onContextMenu={(event) => {
+        setContextMenuPosition({ clientX: event.clientX, clientY: event.clientY })
+      }}
       onKeyDown={onKeyDown}
     >
       <svg class="h-full w-full overflow-visible" aria-hidden="true">
@@ -354,7 +387,11 @@ export default function AutomationLane(props: AutomationLaneProps) {
                 setSelectedPointId(point.id)
                 setContextMenuPosition({ clientX: event.clientX, clientY: event.clientY })
               }}
-              onDblClick={(event) => event.stopPropagation()}
+              onDblClick={(event) => {
+                event.stopPropagation()
+                event.preventDefault()
+                addPoint(event)
+              }}
               onPointerEnter={() => setHoveredPointId(point.id)}
               onPointerLeave={() => setHoveredPointId((current) => current === point.id ? null : current)}
               class="cursor-grab"

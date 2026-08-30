@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
-import { automationTargetKey, synthAutomationKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
+import { automationTargetKey, createAutomationTarget, parseJsonValue, synthAutomationKey, type AutomationEnvelope, type AutomationTarget } from '@daw-browser/shared'
 import { loadLocalAutomationEnvelopes, normalizeLocalAutomationEnvelopes, setLocalAutomationEnvelope } from './local-automation'
 
 const envelope = (input: Partial<AutomationEnvelope> & Pick<AutomationEnvelope, 'id' | 'target' | 'targetKey' | 'parameterId' | 'updatedAt'>): AutomationEnvelope => ({
@@ -34,6 +34,52 @@ describe('normalizeLocalAutomationEnvelopes', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.id).toBe('new')
     expect(rows[0]?.targetKey).toBe(automationTargetKey(target, 'volume'))
+  })
+
+  test('persists JSON-safe mixer targets and preserves effect identities', async () => {
+    const legacyTarget = { kind: 'track' as const, trackId: 'track:legacy', effectInstanceId: undefined }
+    const legacyEnvelope = envelope({
+      id: 'legacy-mixer-envelope',
+      target: legacyTarget,
+      targetKey: automationTargetKey(legacyTarget, 'volume'),
+      parameterId: 'volume',
+      updatedAt: 1,
+    })
+    expect(parseJsonValue(legacyEnvelope)).toBeUndefined()
+
+    const mixerTarget = createAutomationTarget({ kind: 'track', trackId: 'track:canonical' })
+    const effectTarget = createAutomationTarget({ kind: 'track', trackId: 'track:canonical' }, 'delay:one')
+    expect(parseJsonValue(envelope({
+      id: 'canonical-mixer-envelope',
+      target: mixerTarget,
+      targetKey: automationTargetKey(mixerTarget, 'volume'),
+      parameterId: 'volume',
+      updatedAt: 1,
+    }))).toBeDefined()
+    expect(Object.hasOwn(mixerTarget, 'effectInstanceId')).toBe(false)
+    expect(effectTarget.effectInstanceId).toBe('delay:one')
+    await expect(setLocalAutomationEnvelope('project:canonical', envelope({
+      id: 'canonical-mixer-envelope',
+      target: mixerTarget,
+      targetKey: 'legacy:mixer',
+      parameterId: 'volume',
+      updatedAt: 1,
+    }))).resolves.toMatchObject({ target: mixerTarget })
+    await setLocalAutomationEnvelope('project:canonical', envelope({
+      id: 'canonical-effect-envelope',
+      target: effectTarget,
+      targetKey: 'legacy:effect',
+      parameterId: 'delay.feedback',
+      updatedAt: 2,
+    }))
+    await expect(loadLocalAutomationEnvelopes('project:canonical')).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'canonical-effect-envelope',
+          target: effectTarget,
+        }),
+      ]),
+    )
   })
 
   test('drops malformed and unsupported effect rows', () => {

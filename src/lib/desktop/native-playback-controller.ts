@@ -24,6 +24,7 @@ import {
   preparePortableStretchAssets,
   type PortablePreparedStretchAsset,
 } from "@daw-browser/audio-engine/portable-stretch-preparation"
+import type { NativePcmChunkDescriptor } from "@daw-browser/audio-engine/native-pcm-chunking"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostDeviceConfiguration,
@@ -36,7 +37,6 @@ import type {
   NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
-import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type {
   LivePlaybackCompileContext,
@@ -243,38 +243,6 @@ const nativeStretchPreparationMaximumBytes =
 const nativeAssetCapacityError =
   `Native playback exceeds the installed audio asset capacity of ${nativeAudioHostMaximumInstalledAssets} assets.`
 
-const countNonStretchNativeAssets = (snapshot: LivePlaybackSnapshot): number => {
-  const assetKeys = new Set<string>()
-  const addAsset = (assetKey: string, buffer: AudioBuffer | undefined) => {
-    if (buffer) assetKeys.add(assetKey)
-  }
-  for (const track of snapshot.tracks) {
-    for (const clip of track.clips) {
-      if (clip.audioWarp?.enabled === true) continue
-      if (clip.midi || !clip.sourceAssetKey) continue
-      addAsset(clip.sourceAssetKey, clip.buffer ?? undefined)
-    }
-  }
-  for (const entry of Object.values(snapshot.mixer.fx.trackFx ?? {})) {
-    const instrument = entry.instrument
-    if (instrument?.kind === "sampler" && entry.samplerBuffers) {
-      for (const zone of instrument.params.zones) {
-        addAsset(zone.sample.assetKey, entry.samplerBuffers.get(zone.id))
-      }
-    }
-    if (instrument?.kind === "drum-rack" && entry.drumRackBuffers) {
-      for (const pad of instrument.params.pads) {
-        const buffer = pad.sample ? entry.drumRackBuffers.get(pad.id) : undefined
-        if (pad.sample) addAsset(pad.sample.assetKey, buffer)
-      }
-    }
-    if (instrument?.kind === "granular" && entry.granularBuffer && instrument.params.zone) {
-      addAsset(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
-    }
-  }
-  return assetKeys.size
-}
-
 const nativeVstParameterEventsForSnapshot = (
   snapshot: LivePlaybackSnapshot,
   includeCurrent = true,
@@ -333,6 +301,7 @@ export const createNativePlaybackController = (input: {
   let installedAssetIds: readonly number[] = []
   let installedAssets: readonly NativeSessionAsset[] = []
   let preparedStretchAssetsForSession: readonly PortablePreparedStretchAsset[] = []
+  let nativePcmChunkDescriptorsForSession: readonly NativePcmChunkDescriptor[] = []
   let preparedSnapshot: LivePlaybackSnapshot | undefined
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let unsubscribeMeters: (() => void) | undefined
@@ -608,6 +577,7 @@ export const createNativePlaybackController = (input: {
     sampleRateHz: number
     assets: readonly NativeSessionAsset[]
     preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+    nativePcmChunkDescriptors?: readonly NativePcmChunkDescriptor[]
     projectGeneration?: number
     startFrame: number
     graph?: AudioCoreGraphSnapshot
@@ -638,6 +608,7 @@ export const createNativePlaybackController = (input: {
       },
       assets: options.assets,
       preparedStretchAssets: options.preparedStretchAssets,
+      nativePcmChunkDescriptors: options.nativePcmChunkDescriptors,
       projectGeneration: options.projectGeneration,
       startFrame: options.startFrame,
       onFault: (error) => {
@@ -705,6 +676,7 @@ export const createNativePlaybackController = (input: {
     installedAssets = []
     installedAssetIds = []
     preparedStretchAssetsForSession = []
+    nativePcmChunkDescriptorsForSession = []
     sampleRate = 0
     maximumFramesPerBlock = 0
     transportFrame = 0
@@ -813,6 +785,7 @@ export const createNativePlaybackController = (input: {
             sampleRateHz: sampleRate,
             assets: installedAssets,
             preparedStretchAssets: preparedStretchAssetsForSession,
+            nativePcmChunkDescriptors: nativePcmChunkDescriptorsForSession,
             projectGeneration: safePreparedProjectGeneration(projectGeneration),
             startFrame: frame,
             graph: preparedGraph,
@@ -890,6 +863,7 @@ export const createNativePlaybackController = (input: {
       preparedGraph = undefined
       installedAssets = []
       preparedStretchAssetsForSession = []
+      nativePcmChunkDescriptorsForSession = []
       sampleRate = 0
       maximumFramesPerBlock = 0
       await Promise.allSettled([
@@ -967,18 +941,10 @@ export const createNativePlaybackController = (input: {
         return unavailable("The native VST3 graph cannot activate with the current sidechain routing.")
       }
       if (snapshot.requiresNativePlayback && !attachmentPlan) return unavailable("The active VST3 attachment plan is unavailable.")
-      if (snapshot.mixer.automationEnvelopes.some((envelope) => (
-        envelope.enabled && parseExternalAutomationParameterId(envelope.parameterId) === null
-      ))) {
-        return unavailable("Native playback supports automation only for active VST3 parameters.")
-      }
       const hasStretchClips = snapshot.tracks.some((track) => track.clips.some(isPortableStretchClip))
       preparedStretchAssetsForSession = []
       let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
       if (hasStretchClips) {
-        const remainingStretchAssetCapacity = nativeAudioHostMaximumInstalledAssets
-          - countNonStretchNativeAssets(snapshot)
-        if (remainingStretchAssetCapacity <= 0) return unavailable(nativeAssetCapacityError)
         const createBuffer = input.createBuffer
         if (!createBuffer) return unavailable("Native Stretch playback requires an AudioBuffer creation function.")
         const preparationAbortController = new AbortController()
@@ -989,8 +955,7 @@ export const createNativePlaybackController = (input: {
             projectBpm: snapshot.bpm,
             projectGeneration: safePreparedProjectGeneration(projectGeneration),
             requiredSampleRateHz: deviceReply.device.nominalSampleRateHz,
-            maximumFrameCount: nativeAudioHostMaximumAssetFrames,
-            maximumAssetCount: remainingStretchAssetCapacity,
+            maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
             maximumPreparationBytes: nativeStretchPreparationMaximumBytes,
             createBuffer,
             signal: preparationAbortController.signal,
@@ -1100,6 +1065,7 @@ export const createNativePlaybackController = (input: {
         sampleRateHz: deviceReply.device.nominalSampleRateHz,
         assets,
         preparedStretchAssets,
+        nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
         projectGeneration: safePreparedProjectGeneration(projectGeneration),
         startFrame: initialFrame,
         graph: nativeGraph,
@@ -1124,6 +1090,7 @@ export const createNativePlaybackController = (input: {
       installedAssetIds = assets.map(({ sessionAssetId }) => sessionAssetId)
       installedAssets = assets
       preparedStretchAssetsForSession = preparedStretchAssets
+      nativePcmChunkDescriptorsForSession = projection.nativePcmChunkDescriptors
       preparedSnapshot = runtimeSnapshot
       preparedGraph = nativeGraph
       sampleRate = deviceReply.device.nominalSampleRateHz
@@ -1310,6 +1277,7 @@ export const createNativePlaybackController = (input: {
         sampleRateHz: sampleRate,
         assets: installedAssets,
         preparedStretchAssets: preparedStretchAssetsForSession,
+        nativePcmChunkDescriptors: nativePcmChunkDescriptorsForSession,
         projectGeneration: preparedProjectGeneration === undefined
           ? undefined
           : safePreparedProjectGeneration(preparedProjectGeneration),
@@ -1320,38 +1288,55 @@ export const createNativePlaybackController = (input: {
     scheduleCoordinator?.dispose()
     nextCoordinator?.install()
     scheduleCoordinator = nextCoordinator
+    const ownsTransition = () => transitionGeneration === preparedTransportTransitionGeneration
+      && scheduleCoordinator === nextCoordinator
+      && !nextCoordinator?.isDisposed()
     const transitionId = ++nextTransportTransitionId
     if (!preparedSnapshot) return false
-    assertReply(await bridge.session.setTransport(
-      nativeTransportFor(preparedSnapshot, transportEpoch, false, frame, transitionId),
-    ))
-    if (transitionGeneration !== preparedTransportTransitionGeneration) return false
-    await nextCoordinator?.waitForTransition(transitionId, false)
-    if (transitionGeneration !== preparedTransportTransitionGeneration) return false
-    if (releaseTransportNotes) {
-      const instrumentNodeIds = preparedGraph?.nodes
-        .filter((node) => node.kind === "instrument")
-        .map((node) => node.id) ?? []
-      const releasePromises = instrumentNodeIds.map((nodeId) => {
-        const sequence = nextLiveEventSequence++
-        return queueLiveInstrumentEvent({
-          nodeId,
-          noteId: 1,
-          sequence,
-          // Urgent live events are applied in the next realtime block.
-          frameOffset: 0,
-          type: "transport-release",
-          channel: 0,
-          note: 0,
-          value: 0,
-        }).then((queued) => ({ queued, sequence }))
-      })
-      const releases = await Promise.all(releasePromises)
-      const lastSequence = releases.reduce(
-        (maximum, release) => release.queued ? Math.max(maximum, release.sequence) : maximum,
-        0,
+    try {
+      assertReply(await bridge.session.setTransport(
+        nativeTransportFor(preparedSnapshot, transportEpoch, false, frame, transitionId),
+      ))
+      if (!ownsTransition()) return false
+      await nextCoordinator?.waitForTransition(transitionId, false)
+      if (!ownsTransition()) return false
+      if (releaseTransportNotes) {
+        const instrumentNodeIds = preparedGraph?.nodes
+          .filter((node) => node.kind === "instrument")
+          .map((node) => node.id) ?? []
+        const releasePromises = instrumentNodeIds.map((nodeId) => {
+          const sequence = nextLiveEventSequence++
+          return queueLiveInstrumentEvent({
+            nodeId,
+            noteId: 1,
+            sequence,
+            // Urgent live events are applied in the next realtime block.
+            frameOffset: 0,
+            type: "transport-release",
+            channel: 0,
+            note: 0,
+            value: 0,
+          }).then((queued) => ({ queued, sequence }))
+        })
+        const releases = await Promise.all(releasePromises)
+        const lastSequence = releases.reduce(
+          (maximum, release) => release.queued ? Math.max(maximum, release.sequence) : maximum,
+          0,
+        )
+        if (lastSequence > 0) await nextCoordinator?.waitForUrgent(BigInt(lastSequence))
+        if (!ownsTransition()) return false
+      }
+      // A new epoch starts with no accepted schedule. Prime it while stopped
+      // so a same-frame resume can run only after native lookahead exists.
+      await nextCoordinator?.prime(frame)
+      if (!ownsTransition()) return false
+      await nextCoordinator?.waitForAccepted(
+        frame + Math.min(maximumFramesPerBlock, nextCoordinator.scheduleEndFrame() - frame),
       )
-      if (lastSequence > 0) await nextCoordinator?.waitForUrgent(BigInt(lastSequence))
+      if (!ownsTransition()) return false
+    } catch (error) {
+      if (!ownsTransition()) return false
+      throw error
     }
     transportFrame = frame
     active = false

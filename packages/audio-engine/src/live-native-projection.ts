@@ -1,5 +1,5 @@
 import type { Track } from '@daw-browser/timeline-core/types'
-import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
+import type { AudioCoreGraphSnapshot, PlanarPcm } from '../../audio-core-contract/src/index'
 import { normalizeDelayParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
 import { compilePortableExportSnapshot } from './portable-export-snapshot'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
@@ -7,6 +7,11 @@ import type { ExportFx } from './export-types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
+import {
+  chunkNativePcmProjection,
+  type NativePcmChunkDescriptor,
+  type NativeProjectedSourceEvent,
+} from './native-pcm-chunking'
 
 export type LiveNativePcmAsset = {
   asset: { assetId: string; frameCount: number; sampleRateHz: number; channelCount: number }
@@ -18,7 +23,8 @@ export type LiveNativeProjection =
     supported: true
     graph: AudioCoreGraphSnapshot
     assets: readonly LiveNativePcmAsset[]
-    events: readonly AudioCoreSampleSourceEventDto[]
+    events: readonly NativeProjectedSourceEvent[]
+    nativePcmChunkDescriptors: readonly NativePcmChunkDescriptor[]
   }
   | { supported: false; reasons: readonly string[] }
 
@@ -42,7 +48,7 @@ export type LiveNativeCapabilityMatrix = {
   midi: true
   instruments: true
   effects: false
-  automation: false
+  automation: true
   externalPlugins: false
 }
 
@@ -53,7 +59,7 @@ export const liveNativeCapabilityMatrix = {
   midi: true,
   instruments: true,
   effects: false,
-  automation: false,
+  automation: true,
   externalPlugins: false,
 } satisfies LiveNativeCapabilityMatrix
 
@@ -131,10 +137,19 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     capabilityTarget: 'native',
   })
   if (!compiled.supported) return compiled
-  return {
-    supported: true,
+  const chunked = chunkNativePcmProjection({
     graph: compiled.graph,
     assets: compiled.assets.map(({ asset, pcm }) => ({ asset, pcm })),
     events: compiled.events,
+    firstSequence: input.firstSequence,
+  })
+  if ('supported' in chunked && !chunked.supported) return { supported: false, reasons: [chunked.reason] }
+  if ('supported' in chunked) throw new Error('Native PCM chunk projection result is invalid.')
+  return {
+    supported: true,
+    graph: { ...compiled.graph, assets: chunked.assets.map(({ asset }) => asset) },
+    assets: chunked.assets,
+    events: chunked.events,
+    nativePcmChunkDescriptors: chunked.descriptors,
   }
 }

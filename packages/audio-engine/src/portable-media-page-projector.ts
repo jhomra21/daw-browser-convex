@@ -38,6 +38,12 @@ export type PortableMediaPageProjection =
 const frameAt = (seconds: number, sampleRateHz: number) => Math.round(seconds * sampleRateHz)
 const finitePositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0
 const sourceFrameEpsilon = 1e-6
+type ProjectClipPagesResult =
+  | { events: PortableProjectedSourceEvent[]; reason?: never }
+  | { events?: never; reason: string }
+
+const projectedEvents = (events: PortableProjectedSourceEvent[]): ProjectClipPagesResult => ({ events })
+const unsupportedProjection = (reason: string): ProjectClipPagesResult => ({ reason })
 
 const clipSourceMetadata = (clip: Clip) => {
   if (!clip.sourceAssetKey
@@ -65,11 +71,13 @@ const projectClipPages = (input: {
   epoch: number
   firstSequence: number
   includeStableIdentity: boolean
-}): { events?: PortableProjectedSourceEvent[]; reason?: string } => {
+}): ProjectClipPagesResult => {
   const metadata = clipSourceMetadata(input.clip)
-  if (!metadata) return { reason: pageReason(input.clip, 'persisted source metadata is required for paged playback.') }
+  if (!metadata) {
+    return unsupportedProjection(pageReason(input.clip, 'persisted source metadata is required for paged playback.'))
+  }
   if (input.clip.audioWarp?.enabled === true) {
-    return { reason: pageReason(input.clip, 'paged playback does not yet support warped audio.') }
+    return unsupportedProjection(pageReason(input.clip, 'paged playback does not yet support warped audio.'))
   }
   const map = getAudioClipTimeMap({
     clip: input.clip,
@@ -78,24 +86,28 @@ const projectClipPages = (input: {
     rangeStartSec: input.rangeStartSec,
     rangeEndSec: input.rangeEndSec,
   })
-  if (!map) return { events: [] }
-  if (map.mode !== 'raw') return { reason: pageReason(input.clip, 'paged playback requires raw source timing.') }
+  if (!map) return projectedEvents([])
+  if (map.mode !== 'raw') {
+    return unsupportedProjection(pageReason(input.clip, 'paged playback requires raw source timing.'))
+  }
 
   const orderedPages = [...input.pages].sort((left, right) => left.sourceStartFrame - right.sourceStartFrame)
-  if (orderedPages.length === 0) return { reason: pageReason(input.clip, 'requested source pages are not prepared.') }
+  if (orderedPages.length === 0) {
+    return unsupportedProjection(pageReason(input.clip, 'requested source pages are not prepared.'))
+  }
   for (const page of orderedPages) {
     if (page.sourceAssetId !== metadata.sourceAssetKey
       || !Number.isSafeInteger(page.sourceStartFrame) || page.sourceStartFrame < 0
       || page.asset.sampleRateHz !== metadata.sampleRateHz
       || page.asset.channelCount !== metadata.channelCount
       || !finitePositiveInteger(page.asset.frameCount)) {
-      return { reason: pageReason(input.clip, 'prepared source page metadata is inconsistent.') }
+      return unsupportedProjection(pageReason(input.clip, 'prepared source page metadata is inconsistent.'))
     }
   }
 
   const sourceStartPosition = map.sourceStartSec * metadata.sampleRateHz
   const sourceEndPosition = map.sourceEndSec * metadata.sampleRateHz
-  if (!(sourceEndPosition > sourceStartPosition)) return { events: [] }
+  if (!(sourceEndPosition > sourceStartPosition)) return projectedEvents([])
 
   const fades = normalizeClipFades(input.clip.fades, input.clip.duration)
   const events: PortableProjectedSourceEvent[] = []
@@ -106,7 +118,9 @@ const projectClipPages = (input: {
     if (pageEnd <= sourceStartPosition + sourceFrameEpsilon) continue
     if (pageStart >= sourceEndPosition - sourceFrameEpsilon) break
     if (pageStart > coveredThrough + sourceFrameEpsilon) {
-      return { reason: pageReason(input.clip, `prepared source pages contain a gap at source frame ${Math.floor(coveredThrough)}.`) }
+      return unsupportedProjection(
+        pageReason(input.clip, `prepared source pages contain a gap at source frame ${Math.floor(coveredThrough)}.`),
+      )
     }
 
     const overlapStart = Math.max(sourceStartPosition, coveredThrough, pageStart)
@@ -160,9 +174,11 @@ const projectClipPages = (input: {
   }
 
   if (coveredThrough < sourceEndPosition - sourceFrameEpsilon) {
-    return { reason: pageReason(input.clip, `prepared source pages end before source frame ${Math.ceil(sourceEndPosition)}.`) }
+    return unsupportedProjection(
+      pageReason(input.clip, `prepared source pages end before source frame ${Math.ceil(sourceEndPosition)}.`),
+    )
   }
-  return { events }
+  return projectedEvents(events)
 }
 
 export const projectPortableMediaPageEvents = (

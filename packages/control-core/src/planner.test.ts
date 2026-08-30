@@ -1000,6 +1000,52 @@ const externalSnapshotProcessor = {
   },
 };
 
+test("matches external automation to the projected VST3 processor identity", () => {
+  const base = snapshot();
+  base.processors.push(externalSnapshotProcessor);
+  const plan = planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "automation.set",
+      target: { kind: "track", track: persisted("track-1") },
+      effect: persisted("external-plugin:instance-1"),
+      parameterId: "vst3:instance-1:1",
+      enabled: true,
+      points: [],
+    }],
+  });
+  expect(plan.applied).toBe(true);
+  expect(plan.snapshot.automation).toContainEqual({
+    target: { trackId: "track-1" },
+    effectInstanceId: "instance-1",
+    parameterId: "vst3:instance-1:1",
+    enabled: true,
+    points: [],
+  });
+  expect(() => planControlRequestV1(snapshot(), {
+    projectId: "project-1",
+    actions: [{
+      kind: "automation.set",
+      target: { kind: "track", track: persisted("track-1") },
+      effect: persisted("effect-1"),
+      parameterId: "vst3:instance-1:1",
+      enabled: true,
+      points: [],
+    }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }));
+  expect(() => planControlRequestV1(base, {
+    projectId: "project-1",
+    actions: [{
+      kind: "automation.set",
+      target: { kind: "track", track: persisted("track-1") },
+      effect: persisted("external-plugin:instance-1"),
+      parameterId: "vst3:other-instance:1",
+      enabled: true,
+      points: [],
+    }],
+  })).toThrow(expect.objectContaining({ code: "validation", actionIndex: 0 }));
+});
+
 test("rejects direct track deletion when the track has an external VST processor", () => {
   const base = snapshot();
   base.processors.push(externalSnapshotProcessor);

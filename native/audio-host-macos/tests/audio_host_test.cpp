@@ -69,6 +69,16 @@ void AppendBeU64(std::vector<std::uint8_t>& bytes, const std::uint64_t value) {
   }
 }
 
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((noinline))
+#endif
+void ClobberStack() {
+  volatile std::uint8_t storage[32 * 1024]{};
+  for (std::size_t index = 0; index < sizeof(storage); ++index) {
+    storage[index] = static_cast<std::uint8_t>(index);
+  }
+}
+
 std::vector<std::uint8_t> GraphSnapshot(
   const std::uint32_t revision,
   const float gain,
@@ -118,7 +128,7 @@ std::vector<std::uint8_t> GraphSnapshot(
     AppendLeU32(payload, 0);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
-    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 1);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 1);
@@ -131,6 +141,7 @@ std::vector<std::uint8_t> GraphSnapshot(
     AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 0);
+    AppendLeU32(payload, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
   }
   std::vector<std::uint8_t> frame;
   AppendBeU64(frame, revision);
@@ -324,7 +335,7 @@ std::vector<std::uint8_t> ProcessorStatePatch(const std::uint32_t revision, cons
   AppendLeU32(payload, 0);
   AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
   AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
-  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 1);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 1);
@@ -337,6 +348,7 @@ std::vector<std::uint8_t> ProcessorStatePatch(const std::uint32_t revision, cons
   AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
+  AppendLeU32(payload, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
   return payload;
 }
 
@@ -373,6 +385,30 @@ std::vector<std::uint8_t> ScheduleWindow(
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  return payload;
+}
+
+std::vector<std::uint8_t> ScheduleProcessorSetWindow(
+  const std::uint32_t revision,
+  const std::uint32_t epoch,
+  const std::uint64_t window_id,
+  const std::uint64_t start_frame,
+  const std::uint64_t end_frame,
+  const std::uint64_t processor_instance_id,
+  const std::uint32_t parameter_target,
+  const std::uint64_t frame,
+  const float value
+) {
+  auto payload = ScheduleWindow(revision, epoch, window_id, start_frame, end_frame, 0, 1, false);
+  WriteLeU32(payload, 56, 1);
+  AppendLeU64(payload, processor_instance_id);
+  AppendLeU32(payload, parameter_target);
+  AppendLeU32(payload, 0);
+  AppendLeU64(payload, frame);
+  AppendLeU64(payload, frame);
+  AppendLeFloat(payload, value);
+  AppendLeFloat(payload, value);
   return payload;
 }
 
@@ -618,7 +654,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x11,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -923,6 +959,71 @@ void TestNativeVstAttachmentBoundsAndLatencyContract() {
   assert(!host.AttachNativeVst(reference));
 }
 
+void TestInstalledAssetSurvivesCallerLifetimeAndMapGrowth() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+
+  const std::array<float, 8> target_samples{
+    0.25F, 0.5F, 0.75F, 1.0F,
+    -0.25F, -0.5F, -0.75F, -1.0F,
+  };
+  assert(host.InstallAsset(1, 4, 48'000, 2, 0, target_samples));
+  ClobberStack();
+  const std::array<float, 8> extra_samples{
+    2.0F, 2.0F, 2.0F, 2.0F,
+    -2.0F, -2.0F, -2.0F, -2.0F,
+  };
+  for (std::uint32_t asset_id = 2; asset_id <= daw::audio_host_macos::kMaximumInstalledAssets; ++asset_id) {
+    assert(host.InstallAsset(asset_id, 4, 48'000, 2, asset_id, extra_samples));
+  }
+  ClobberStack();
+
+  std::vector<std::uint8_t> source_event;
+  AppendLeU32(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 1.0F);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.5F);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.5F);
+  assert(host.QueueSourceEvents(source_event));
+
+  std::array<float, 4> input_left{};
+  std::array<float, 4> input_right{};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  for (std::size_t frame = 0; frame < 4; ++frame) {
+    assert(output_left[frame] == target_samples[frame]);
+    assert(output_right[frame] == target_samples[4 + frame]);
+  }
+  host.Stop();
+}
+
 void TestNativeVstRuntimeControlBounds() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1078,6 +1179,33 @@ void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
   assert(!host.PrepareAndPublishGraph(1, empty_graph));
   const std::array<std::uint8_t, 5> malformed_events{1, 0, 0, 0, 0};
   assert(!host.QueueParameterEvents(malformed_events));
+}
+
+void TestScheduledProcessorSetUsesAbsoluteFrame() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F, 0, true)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  assert(host.QueueScheduleWindow(ScheduleProcessorSetWindow(
+    2, 1, 1, 0, 4, 77, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB, 2, -6.0F
+  )));
+  std::array<float, 4> left{{1.0F, 1.0F, 1.0F, 1.0F}};
+  std::array<float, 4> right = left;
+  std::array<float, 4> out_left{};
+  std::array<float, 4> out_right{};
+  const std::array<const float*, 2> input{{left.data(), right.data()}};
+  const std::array<float*, 2> output{{out_left.data(), out_right.data()}};
+  assert(host.ProcessPlanar(input, output, 4));
+  assert(host.diagnostics().rejected_blocks == 0);
+  host.Stop();
 }
 
 void TestScheduleWindowCompletionSemantics() {
@@ -1495,9 +1623,11 @@ int main() {
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();
   TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();
+  TestInstalledAssetSurvivesCallerLifetimeAndMapGrowth();
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
+  TestScheduledProcessorSetUsesAbsoluteFrame();
   TestScheduleWindowCompletionSemantics();
   TestScheduleWindowRollback();
   TestLargeFinalScheduleWindowUsesPersistentStaging();

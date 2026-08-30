@@ -41,7 +41,7 @@ import type {
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types";
 import type { ClipFades } from "@daw-browser/timeline-core/clip-fades";
-import { automationTargetKey } from "@daw-browser/shared";
+import { automationTargetKey, createAutomationTarget } from "@daw-browser/shared";
 import type { TimelineWorkspaceAutomationModel } from "~/hooks/useTimelineAutomationController";
 import TimelineContextMenu, {
   type TimelineContextMenuItem,
@@ -277,10 +277,8 @@ export default function TimelineWorkspace(props: Props) {
     props.automation.lanes.selectedTargetsByOwnerKey.master ?? {
       parameterId: "volume",
     };
-  const masterTarget = () => ({
-    kind: "master" as const,
-    effectInstanceId: masterSelection().effectInstanceId,
-  });
+  const masterTarget = () =>
+    createAutomationTarget({ kind: "master" }, masterSelection().effectInstanceId);
   const masterTargetKey = () =>
     automationTargetKey(masterTarget(), masterSelection().parameterId);
   const fallbackMenuItems = (): TimelineContextMenuItem[] => [
@@ -349,11 +347,10 @@ export default function TimelineWorkspace(props: Props) {
               envelopeForSelection: (selection) =>
                 props.automation.envelopes.byTargetKey.get(
                   automationTargetKey(
-                    {
-                      kind: "track",
-                      trackId: laneProps.row.trackId,
-                      effectInstanceId: selection.effectInstanceId,
-                    },
+                    createAutomationTarget(
+                      { kind: "track", trackId: laneProps.row.trackId },
+                      selection.effectInstanceId,
+                    ),
                     selection.parameterId,
                   ),
                 ),

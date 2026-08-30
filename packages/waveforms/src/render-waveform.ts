@@ -1,7 +1,7 @@
 import { decodePeakByte } from './extract-peaks'
 import type { WaveformDrawOptions } from './types'
 
-const DEFAULT_MAX_HEIGHT_FRACTION = 0.36
+const DEFAULT_MAX_HEIGHT_FRACTION = 0.9
 
 export function drawWaveformPeaks(options: WaveformDrawOptions) {
   const {
@@ -21,34 +21,27 @@ export function drawWaveformPeaks(options: WaveformDrawOptions) {
     ? Math.max(0, Math.min(1, maxHeightFraction))
     : DEFAULT_MAX_HEIGHT_FRACTION
 
-  let peak = 0
-  for (let i = 0; i < drawCols; i++) {
-    const min = decodePeakByte(peaks[i * 2])
-    const max = decodePeakByte(peaks[i * 2 + 1])
-    const amplitude = Math.max(Math.abs(min), Math.abs(max))
-    if (amplitude > peak) peak = amplitude
-  }
-
   const halfH = contentH / 2
   const midY = topY + halfH
-  const gain = peak > normalizedMaxHeightFraction
-    ? normalizedMaxHeightFraction / peak
-    : 1
 
   ctx.fillStyle = fillStyle
   for (let i = 0; i < drawCols; i++) {
-    const min = decodePeakByte(peaks[i * 2])
-    const max = decodePeakByte(peaks[i * 2 + 1])
-    const amplitude = Math.max(Math.abs(min), Math.abs(max))
     const amplitudeScale = options.amplitudeScaleAtColumn?.(i) ?? 1
-    const scale = Number.isFinite(amplitudeScale)
+    const columnScale = Number.isFinite(amplitudeScale)
       ? Math.max(0, Math.min(1, amplitudeScale))
       : 0
-    const halfHeight = Math.min(halfH, amplitude * scale * halfH * gain)
-    if (halfHeight <= 0.35) continue
-    const top = Math.max(topY, midY - halfHeight)
-    const height = Math.min(contentH, Math.max(1, halfHeight * 2))
-    ctx.fillRect(padPx + i, top, 1, height)
+    if (columnScale === 0 || normalizedMaxHeightFraction === 0) continue
+
+    const min = decodePeakByte(peaks[i * 2]) * columnScale * normalizedMaxHeightFraction
+    const max = decodePeakByte(peaks[i * 2 + 1]) * columnScale * normalizedMaxHeightFraction
+    if (min === 0 && max === 0) continue
+
+    const upper = Math.max(min, max)
+    const lower = Math.min(min, max)
+    const rangeTop = Math.max(topY, Math.min(topY + contentH, midY - upper * halfH))
+    const rangeBottom = Math.max(topY, Math.min(topY + contentH, midY - lower * halfH))
+    const height = Math.max(1, rangeBottom - rangeTop)
+    ctx.fillRect(padPx + i, rangeTop, 1, height)
   }
 
   const audioEndX = Math.min(cssW, padPx + drawCols)

@@ -28,7 +28,7 @@ export const readAudioFileMetadata = async (file: File): Promise<AudioSourceMeta
   try {
     if (!(await input.canRead())) fail('Audio file has an unsupported or unrecognizable format.')
     const track = await input.getPrimaryAudioTrack()
-    if (!track) fail('File does not contain an audio track.')
+    if (!track) throw new AudioFileMetadataError('File does not contain an audio track.')
 
     const metadataDuration = await track.getDurationFromMetadata({ skipLiveWait: true })
     const durationSec = metadataDuration ?? await track.computeDuration({

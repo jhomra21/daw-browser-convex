@@ -64,6 +64,7 @@ test('navigates to a prepared local replacement before deleting the current loca
     'create',
     'reload',
     'navigate:next-project',
+    'flush',
     'delete',
     'reload',
   ])

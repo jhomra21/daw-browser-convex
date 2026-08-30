@@ -48,6 +48,14 @@ export type WaveformPeakChannelSlice = {
   columns: number
 }
 
+export type WaveformSampleChannelSlice = {
+  channels: Float32Array[]
+  firstFrame: number
+  sampleRate: number
+  sourceStartSec: number
+  sourceEndSec: number
+}
+
 export type WaveformDrawOptions = {
   ctx: Pick<
     CanvasRenderingContext2D,
@@ -64,4 +72,23 @@ export type WaveformDrawOptions = {
   boundaryStyle?: string
   maxHeightFraction?: number
   amplitudeScaleAtColumn?: (column: number) => number
+  drawBoundary?: boolean
+}
+
+export type WaveformSampleDrawOptions = {
+  ctx: Pick<
+    CanvasRenderingContext2D,
+    'fillStyle' | 'strokeStyle' | 'lineWidth' | 'beginPath' | 'moveTo' | 'lineTo' | 'stroke' | 'arc' | 'fill'
+  >
+  samples: WaveformSampleChannelSlice
+  padPx: number
+  topY: number
+  contentH: number
+  cssW: number
+  strokeStyle?: string
+  pointStyle?: string
+  lineWidth?: number
+  verticalZoom?: number
+  showPoints?: boolean
+  pointRadiusPx?: number
 }

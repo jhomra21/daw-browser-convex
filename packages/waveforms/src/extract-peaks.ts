@@ -16,7 +16,7 @@ function clampSample(value: number) {
   return Math.max(-1, Math.min(1, value))
 }
 
-function quantizeSample(value: number) {
+export function encodePeakByte(value: number) {
   return Math.max(0, Math.min(255, Math.round((clampSample(value) + 1) * 127.5)))
 }
 
@@ -82,8 +82,8 @@ function extractChunkPeaks(
         if (value < min) min = value
         if (value > max) max = value
       }
-      data[byteOffset + index * 2] = quantizeSample(min)
-      data[byteOffset + index * 2 + 1] = quantizeSample(max)
+      data[byteOffset + index * 2] = encodePeakByte(min)
+      data[byteOffset + index * 2 + 1] = encodePeakByte(max)
     }
   }
 

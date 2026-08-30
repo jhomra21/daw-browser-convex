@@ -43,7 +43,7 @@ const TimelineChrome: Component<TimelineChromeProps> = (props) => (
         />
       )}
     </Show>
-    <TimelinePanels {...props.panels} />
+    <TimelinePanels panels={props.panels} />
   </>
 );
 

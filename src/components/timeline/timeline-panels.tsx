@@ -112,18 +112,26 @@ export type TimelinePanelsProps = {
   }
 }
 
-const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
-  const floatingButtonOffset = () => props.chat.bottomOffsetPx > 0 ? `${props.chat.bottomOffsetPx}px` : '16px'
-  const canUseSharedChat = () => Boolean(props.chat.projectId && !isLocalId('project', props.chat.projectId))
+type TimelinePanelsContainerProps = {
+  panels: TimelinePanelsProps
+}
+
+const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
+  const panels = () => props.panels
+  const floatingButtonOffset = () => panels().chat.bottomOffsetPx > 0 ? `${panels().chat.bottomOffsetPx}px` : '16px'
+  const canUseSharedChat = () => {
+    const projectId = panels().chat.projectId
+    return Boolean(projectId && !isLocalId('project', projectId))
+  }
 
   createEffect(() => {
-    if (!canUseSharedChat() && props.chat.sharedChatOpen) {
-      props.chat.closeSharedChat()
+    if (!canUseSharedChat() && panels().chat.sharedChatOpen) {
+      panels().chat.closeSharedChat()
     }
   })
 
   return (
-    <ExportProvider queue={props.exportQueue} service={props.exportService}>
+    <ExportProvider queue={panels().exportQueue} service={panels().exportService}>
       <Show when={canUseSharedChat()}>
         <Button
           variant="outline"
@@ -131,103 +139,103 @@ const TimelinePanels: Component<TimelinePanelsProps> = (props) => {
           class="fixed left-4 z-40 bg-muted text-foreground hover:bg-secondary"
           style={{ bottom: floatingButtonOffset() }}
           aria-label="Toggle Room Chat"
-          onClick={props.chat.toggleSharedChat}
+          onClick={panels().chat.toggleSharedChat}
         >
           Room Chat
         </Button>
       </Show>
 
-      <Show when={canUseSharedChat() && props.chat.sharedChatOpen}>
+      <Show when={canUseSharedChat() && panels().chat.sharedChatOpen}>
         <Suspense fallback={null}>
           <SharedChat
-            isOpen={props.chat.sharedChatOpen}
-            onClose={props.chat.closeSharedChat}
-            projectId={props.chat.projectId}
-            userId={props.chat.userId}
-            bottomOffsetPx={props.chat.bottomOffsetPx}
+            isOpen={panels().chat.sharedChatOpen}
+            onClose={panels().chat.closeSharedChat}
+            projectId={panels().chat.projectId}
+            userId={panels().chat.userId}
+            bottomOffsetPx={panels().chat.bottomOffsetPx}
           />
         </Suspense>
       </Show>
 
       <EffectsPanel
-        isOpen={props.effectsPanel.isOpen}
-        showOpenButton={props.effectsPanel.showOpenButton}
-        shell={props.effectsPanel.shell}
-        clipTab={props.effectsPanel.clipTab}
-        selectedFXTarget={props.effectsPanel.selectedFXTarget}
-        tracks={props.effectsPanel.tracks}
-          sidechainRoutes={props.effectsPanel.sidechainRoutes}
-        onClose={props.effectsPanel.onClose}
-        onOpen={props.effectsPanel.onOpen}
-        audioEngine={props.effectsPanel.audioEngine}
-        spectrumProvider={props.effectsPanel.spectrumProvider}
-        projectId={props.effectsPanel.projectId}
-        userId={props.effectsPanel.userId}
-        canWriteTrackRouting={props.effectsPanel.canWriteTrackRouting}
-        grantClipWrite={props.effectsPanel.grantClipWrite}
-        playheadSec={props.effectsPanel.playheadSec}
-        onSelectClip={props.effectsPanel.onSelectClip}
-        insertLocalClip={props.effectsPanel.insertLocalClip}
-        onEffectParamsCommitted={props.effectsPanel.onEffectParamsCommitted}
-        onStructuralPlaybackChange={props.effectsPanel.onStructuralPlaybackChange}
-        usesLegacyAudioEngine={props.effectsPanel.usesLegacyAudioEngine}
-        projectGeneration={props.effectsPanel.projectGeneration}
-        onEffectParamsPreview={props.effectsPanel.onEffectParamsPreview}
-        onEffectParamsFlush={props.effectsPanel.onEffectParamsFlush}
-        onPreviewNote={props.effectsPanel.onPreviewNote}
-        onEffectInstanceParamsReplayChange={props.effectsPanel.onEffectInstanceParamsReplayChange}
-        onLocalSaveFailed={props.effectsPanel.onLocalSaveFailed}
-        onDeviceInsertActionsChange={props.effectsPanel.onDeviceInsertActionsChange}
-        onExportSnapshotChange={props.effectsPanel.onExportSnapshotChange}
-        onEffectChainElementChange={props.effectsPanel.onEffectChainElementChange}
-        autoOpenExternalProcessorId={props.effectsPanel.autoOpenExternalProcessorId}
-        onExternalProcessorAutoOpenHandled={props.effectsPanel.onExternalProcessorAutoOpenHandled}
-        onExternalProcessorUpdated={props.effectsPanel.onExternalProcessorUpdated}
-        captureStructuralPlaybackIntent={props.effectsPanel.captureStructuralPlaybackIntent}
-        onMixedReorderCommitted={props.effectsPanel.onMixedReorderCommitted}
-        automationEnvelopes={props.effectsPanel.automationEnvelopes}
-        evaluatedValuesByTargetKey={props.effectsPanel.evaluatedValuesByTargetKey}
-        onSelectAutomationParameter={props.effectsPanel.onSelectAutomationParameter}
-        onManualAutomationOverride={props.effectsPanel.onManualAutomationOverride}
+        isOpen={panels().effectsPanel.isOpen}
+        showOpenButton={panels().effectsPanel.showOpenButton}
+        shell={panels().effectsPanel.shell}
+        clipTab={panels().effectsPanel.clipTab}
+        selectedFXTarget={panels().effectsPanel.selectedFXTarget}
+        tracks={panels().effectsPanel.tracks}
+        sidechainRoutes={panels().effectsPanel.sidechainRoutes}
+        onClose={panels().effectsPanel.onClose}
+        onOpen={panels().effectsPanel.onOpen}
+        audioEngine={panels().effectsPanel.audioEngine}
+        spectrumProvider={panels().effectsPanel.spectrumProvider}
+        projectId={panels().effectsPanel.projectId}
+        userId={panels().effectsPanel.userId}
+        canWriteTrackRouting={panels().effectsPanel.canWriteTrackRouting}
+        grantClipWrite={panels().effectsPanel.grantClipWrite}
+        playheadSec={panels().effectsPanel.playheadSec}
+        onSelectClip={panels().effectsPanel.onSelectClip}
+        insertLocalClip={panels().effectsPanel.insertLocalClip}
+        onEffectParamsCommitted={panels().effectsPanel.onEffectParamsCommitted}
+        onStructuralPlaybackChange={panels().effectsPanel.onStructuralPlaybackChange}
+        usesLegacyAudioEngine={panels().effectsPanel.usesLegacyAudioEngine}
+        projectGeneration={panels().effectsPanel.projectGeneration}
+        onEffectParamsPreview={panels().effectsPanel.onEffectParamsPreview}
+        onEffectParamsFlush={panels().effectsPanel.onEffectParamsFlush}
+        onPreviewNote={panels().effectsPanel.onPreviewNote}
+        onEffectInstanceParamsReplayChange={panels().effectsPanel.onEffectInstanceParamsReplayChange}
+        onLocalSaveFailed={panels().effectsPanel.onLocalSaveFailed}
+        onDeviceInsertActionsChange={panels().effectsPanel.onDeviceInsertActionsChange}
+        onExportSnapshotChange={panels().effectsPanel.onExportSnapshotChange}
+        onEffectChainElementChange={panels().effectsPanel.onEffectChainElementChange}
+        autoOpenExternalProcessorId={panels().effectsPanel.autoOpenExternalProcessorId}
+        onExternalProcessorAutoOpenHandled={panels().effectsPanel.onExternalProcessorAutoOpenHandled}
+        onExternalProcessorUpdated={panels().effectsPanel.onExternalProcessorUpdated}
+        captureStructuralPlaybackIntent={panels().effectsPanel.captureStructuralPlaybackIntent}
+        onMixedReorderCommitted={panels().effectsPanel.onMixedReorderCommitted}
+        automationEnvelopes={panels().effectsPanel.automationEnvelopes}
+        evaluatedValuesByTargetKey={panels().effectsPanel.evaluatedValuesByTargetKey}
+        onSelectAutomationParameter={panels().effectsPanel.onSelectAutomationParameter}
+        onManualAutomationOverride={panels().effectsPanel.onManualAutomationOverride}
       />
 
-      <Show when={props.sampleDetailPanel.isOpen && props.sampleDetailPanel.selectedClip}>
+      <Show when={panels().sampleDetailPanel.isOpen && panels().sampleDetailPanel.selectedClip}>
         {(clip) => (
           <SampleDetailPanel
             clip={clip()}
-            projectBpm={props.sampleDetailPanel.projectBpm}
-            audioEngine={props.sampleDetailPanel.audioEngine}
-            bpmDetection={props.sampleDetailPanel.bpmDetection}
-            ensureClipBuffer={props.sampleDetailPanel.ensureClipBuffer}
-            canWriteClip={props.sampleDetailPanel.canWriteClip}
-            onWarpChange={props.sampleDetailPanel.onChange}
-            onGainChange={props.sampleDetailPanel.onGainChange}
-            onMarkerDragStateChange={props.sampleDetailPanel.onMarkerDragStateChange}
-            shell={props.sampleDetailPanel.shell}
-            onClose={props.sampleDetailPanel.onClose}
-            onHide={props.sampleDetailPanel.onHide}
+            projectBpm={panels().sampleDetailPanel.projectBpm}
+            audioEngine={panels().sampleDetailPanel.audioEngine}
+            bpmDetection={panels().sampleDetailPanel.bpmDetection}
+            ensureClipBuffer={panels().sampleDetailPanel.ensureClipBuffer}
+            canWriteClip={panels().sampleDetailPanel.canWriteClip}
+            onWarpChange={panels().sampleDetailPanel.onChange}
+            onGainChange={panels().sampleDetailPanel.onGainChange}
+            onMarkerDragStateChange={panels().sampleDetailPanel.onMarkerDragStateChange}
+            shell={panels().sampleDetailPanel.shell}
+            onClose={panels().sampleDetailPanel.onClose}
+            onHide={panels().sampleDetailPanel.onHide}
           />
         )}
       </Show>
 
-      <Show when={props.exportDialog.isOpen}>
+      <Show when={panels().exportDialog.isOpen}>
         <ExportDialog
-          isOpen={props.exportDialog.isOpen}
-          onClose={props.exportDialog.onClose}
-          getTracks={props.exportDialog.getTracks}
-          selectedTrackIds={props.exportDialog.selectedTrackIds}
-          bpm={props.exportDialog.bpm}
-          masterVolume={props.exportDialog.masterVolume}
-          loopEnabled={props.exportDialog.loopEnabled}
-          loopStartSec={props.exportDialog.loopStartSec}
-          loopEndSec={props.exportDialog.loopEndSec}
-          projectId={props.exportDialog.projectId}
-          userId={props.exportDialog.userId}
-          sidechainRoutes={props.exportDialog.sidechainRoutes}
-          ensureClipBuffer={props.exportDialog.ensureClipBuffer}
+          isOpen={panels().exportDialog.isOpen}
+          onClose={panels().exportDialog.onClose}
+          getTracks={panels().exportDialog.getTracks}
+          selectedTrackIds={panels().exportDialog.selectedTrackIds}
+          bpm={panels().exportDialog.bpm}
+          masterVolume={panels().exportDialog.masterVolume}
+          loopEnabled={panels().exportDialog.loopEnabled}
+          loopStartSec={panels().exportDialog.loopStartSec}
+          loopEndSec={panels().exportDialog.loopEndSec}
+          projectId={panels().exportDialog.projectId}
+          userId={panels().exportDialog.userId}
+          sidechainRoutes={panels().exportDialog.sidechainRoutes}
+          ensureClipBuffer={panels().exportDialog.ensureClipBuffer}
         />
       </Show>
-      <Show when={!props.exportDialog.isOpen}>
+      <Show when={!panels().exportDialog.isOpen}>
         <ExportProgressOverlay />
       </Show>
     </ExportProvider>

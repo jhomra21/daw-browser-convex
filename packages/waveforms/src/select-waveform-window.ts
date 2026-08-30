@@ -1,7 +1,13 @@
 import { ensurePeakAsset, loadPeakChunkData } from './asset-store'
 import { SILENCE_BYTE } from './extract-peaks'
 import { resamplePeakPairs } from './resample-peak-pairs'
-import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSliceRequest } from './types'
+import type {
+  PeakAssetRecord,
+  PeakChunkRecord,
+  PeakLevelRecord,
+  WaveformPeakChannelSlice,
+  WaveformSliceRequest,
+} from './types'
 
 type WaveformWindow = {
   startSec: number
@@ -42,8 +48,14 @@ function getWindowEndOffset(chunk: PeakChunkRecord, windowEndSec: number, peaksP
   return Math.min(chunk.peakCount, Math.ceil((windowEndSec - chunk.startSec) * peaksPerSecond))
 }
 
-async function loadWindowSourceData(level: PeakLevelRecord, window: WaveformWindow) {
-  const source = new Uint8Array(window.peakCount * 2)
+const channelByteOffset = (channel: number, peakCount: number) => channel * peakCount * 2
+
+async function loadWindowSourceData(
+  level: PeakLevelRecord,
+  record: PeakAssetRecord,
+  window: WaveformWindow,
+): Promise<Uint8Array | null> {
+  const source = new Uint8Array(window.peakCount * record.channelCount * 2)
   source.fill(SILENCE_BYTE)
   if (window.endSec <= window.startSec) return source
 
@@ -51,6 +63,8 @@ async function loadWindowSourceData(level: PeakLevelRecord, window: WaveformWind
     if (chunk.endSec <= window.startSec || chunk.startSec >= window.endSec) continue
     const data = await loadPeakChunkData(chunk.chunkKey)
     if (!data) continue
+    if (data.length !== chunk.peakCount * record.channelCount * 2) return null
+
     const overlapStartSec = Math.max(window.startSec, chunk.startSec)
     const overlapEndSec = Math.min(window.endSec, chunk.endSec)
     const sourceStartOffset = getWindowStartOffset(chunk, overlapStartSec, level.peaksPerSecond)
@@ -60,20 +74,51 @@ async function loadWindowSourceData(level: PeakLevelRecord, window: WaveformWind
     const targetStartOffset = Math.max(0, Math.floor((overlapStartSec - window.startSec) * level.peaksPerSecond))
     const availableBins = Math.min(copyBins, window.peakCount - targetStartOffset)
     if (availableBins <= 0) continue
-    source.set(
-      data.subarray(sourceStartOffset * 2, (sourceStartOffset + availableBins) * 2),
-      targetStartOffset * 2,
-    )
+
+    for (let channel = 0; channel < record.channelCount; channel += 1) {
+      const chunkChannelStart = channelByteOffset(channel, chunk.peakCount)
+      const sourceStart = chunkChannelStart + sourceStartOffset * 2
+      const sourceEnd = sourceStart + availableBins * 2
+      const targetStart = channelByteOffset(channel, window.peakCount) + targetStartOffset * 2
+      source.set(data.subarray(sourceStart, sourceEnd), targetStart)
+    }
   }
 
   return source
 }
 
-function resampleWindow(source: Uint8Array, bins: number) {
-  return resamplePeakPairs(source, bins)
+function resampleWindowChannels(
+  source: Uint8Array,
+  sourceBins: number,
+  channelCount: number,
+  targetBins: number,
+): WaveformPeakChannelSlice {
+  const columns = Math.max(1, Math.floor(targetBins))
+  const channels = Array.from({ length: channelCount }, (_, channel) => {
+    const start = channelByteOffset(channel, sourceBins)
+    return resamplePeakPairs(source.subarray(start, start + sourceBins * 2), columns)
+  })
+  return { channels, columns }
 }
 
-export async function getWaveformSlice(request: WaveformSliceRequest): Promise<Uint8Array | null> {
+function collapsePeakChannels(slice: WaveformPeakChannelSlice) {
+  const output = new Uint8Array(slice.columns * 2)
+  for (let column = 0; column < slice.columns; column += 1) {
+    let min = 255
+    let max = 0
+    for (const channel of slice.channels) {
+      const channelMin = channel[column * 2] ?? SILENCE_BYTE
+      const channelMax = channel[column * 2 + 1] ?? SILENCE_BYTE
+      if (channelMin < min) min = channelMin
+      if (channelMax > max) max = channelMax
+    }
+    output[column * 2] = min
+    output[column * 2 + 1] = max
+  }
+  return output
+}
+
+export async function getWaveformChannelSlice(request: WaveformSliceRequest): Promise<WaveformPeakChannelSlice | null> {
   const record = await ensurePeakAsset(request)
   if (!record) return null
   const startSec = Math.max(0, request.sourceStartSec)
@@ -81,6 +126,11 @@ export async function getWaveformSlice(request: WaveformSliceRequest): Promise<U
   const level = selectPeakLevel(record, request, startSec, endSec)
   if (!level) return null
   const window = getWaveformWindow(level, record, request)
-  const source = await loadWindowSourceData(level, window)
-  return resampleWindow(source, request.bins)
+  const source = await loadWindowSourceData(level, record, window)
+  return source ? resampleWindowChannels(source, window.peakCount, record.channelCount, request.bins) : null
+}
+
+export async function getWaveformSlice(request: WaveformSliceRequest): Promise<Uint8Array | null> {
+  const slice = await getWaveformChannelSlice(request)
+  return slice ? collapsePeakChannels(slice) : null
 }

@@ -32,7 +32,11 @@ import { assertBrowserExportHasNoLiveExternalPlugins } from '@daw-browser/extern
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
 import { NativeOfflineRenderError, type NativeOfflineRenderer } from '~/lib/export/desktop-native-offline-renderer'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
-import { nativeAudioHostMaximumInMemoryPcmBytes } from '@daw-browser/desktop-protocol/native-audio-host'
+import {
+  nativeAudioHostMaximumInstalledAssets,
+  nativeAudioHostMaximumInMemoryPcmBytes,
+} from '@daw-browser/desktop-protocol/native-audio-host'
+import { preparePortableStretchAssets, isPortableStretchClip, type PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 type RoomEffectParams = RoomEffectRow['params']
@@ -79,6 +83,9 @@ type TimelineExportRequest = {
   encoding: ExportEncodingSettings
   projectId?: string
   userId?: string
+  projectGeneration: number
+  getProjectGeneration?: () => number
+  createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   sidechainRoutes: ExternalSidechainRoute[]
   loadCapturedClipBuffer: (clip: RuntimeClip, signal: AbortSignal) => Promise<void>
   signal: AbortSignal
@@ -566,13 +573,30 @@ type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'loadCapturedClipBuf
   range: ExportRange
 }
 
-async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
-  const { startSec: rangeStart, endSec: rangeEnd } = getExportRangeBounds(input.tracks, input.range)
-  const intersects = (clip: RuntimeClip) => {
-    const clipStart = clip.startSec
+const createExportRangeClipPredicate = (
+  tracks: readonly RuntimeTrack[],
+  range: ExportRange,
+): ((clip: RuntimeClip) => boolean) => {
+  const { startSec: rangeStart, endSec: rangeEnd } = getExportRangeBounds(tracks, range)
+  return (clip) => {
     const clipEnd = clip.startSec + clip.duration
-    return clipEnd > rangeStart && clipStart < rangeEnd
+    return clipEnd > rangeStart && clip.startSec < rangeEnd
   }
+}
+
+const filterTracksToExportRange = (
+  tracks: readonly RuntimeTrack[],
+  range: ExportRange,
+) => {
+  const intersects = createExportRangeClipPredicate(tracks, range)
+  return tracks.map((track) => ({
+    ...track,
+    clips: track.clips.filter(intersects),
+  }))
+}
+
+async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
+  const intersects = createExportRangeClipPredicate(input.tracks, input.range)
   const jobs: (() => Promise<void>)[] = []
   for (const track of input.tracks) {
     for (const clip of track.clips) {
@@ -818,9 +842,37 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       loadInstrumentExportBuffers(fx, input.signal, undefined, localProjectId),
     ])
     throwIfExportAborted(input.signal)
+    let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
+    const nativeTracks = input.nativeRendererRequired
+      ? filterTracksToExportRange(preloadTracks, input.range)
+      : preloadTracks
+    if (input.nativeRendererRequired && nativeTracks.some((track) => track.clips.some(isPortableStretchClip))) {
+      const preparation = await preparePortableStretchAssets({
+        tracks: nativeTracks,
+        projectBpm: input.bpm,
+        projectGeneration: input.projectGeneration,
+        requiredSampleRateHz: input.render.sampleRate,
+        maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
+        maximumPreparationBytes: nativeAudioHostMaximumInMemoryPcmBytes,
+        createBuffer: input.createBuffer ?? ((channels, frames, sampleRate) => new AudioBuffer({
+          numberOfChannels: channels,
+          length: frames,
+          sampleRate,
+        })),
+        signal: input.signal,
+      })
+      throwIfExportAborted(input.signal)
+      if (!preparation.supported) {
+        throw new Error(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(' '))
+      }
+      preparedStretchAssets = preparation.assets
+    }
+    if (input.getProjectGeneration && input.getProjectGeneration() !== input.projectGeneration) {
+      throw new Error('Project changed while preparing export.')
+    }
     const nativePlan = input.nativeRendererRequired
       ? compileNativeOfflineRenderPlan({
-        tracks: preloadTracks,
+        tracks: nativeTracks,
         fx,
         automationEnvelopes,
         sidechainRoutes: input.sidechainRoutes,
@@ -830,6 +882,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         sampleRateHz: input.render.sampleRate,
         channelCount: input.render.numberOfChannels,
         tailFrames: Math.ceil(tailMaximumSec * input.render.sampleRate),
+        projectGeneration: input.projectGeneration,
+        preparedStretchAssets,
         externalAttachments: input.renderStateSnapshot.nativeExternalAttachments,
         capturedVstStates: input.renderStateSnapshot.capturedVstStates,
       })

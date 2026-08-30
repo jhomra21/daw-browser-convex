@@ -9,6 +9,7 @@ import {
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import {
   automationTargetKey,
+  createAutomationTarget,
   getAutomationParameterOptionsForTarget,
   isClipKindCompatibleWithTrack,
   type AutomationEnvelope,
@@ -191,11 +192,10 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     };
   const selectedAutomationTargetKey = () =>
     automationTargetKey(
-      {
-        kind: "track",
-        trackId: track.id,
-        effectInstanceId: selectedAutomationSelection().effectInstanceId,
-      },
+      createAutomationTarget(
+        { kind: "track", trackId: track.id },
+        selectedAutomationSelection().effectInstanceId,
+      ),
       selectedAutomationSelection().parameterId,
     );
 
@@ -227,11 +227,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       (option) =>
         !visible.has(
           automationTargetKey(
-            {
-              kind: "track",
-              trackId: track.id,
-              effectInstanceId: option.effectInstanceId,
-            },
+            createAutomationTarget({ kind: "track", trackId: track.id }, option.effectInstanceId),
             option.parameterId,
           ),
         ),
@@ -915,11 +911,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   ).find(
                     (option) =>
                       automationTargetKey(
-                        {
-                          kind: "track",
-                          trackId: track.id,
-                          effectInstanceId: option.effectInstanceId,
-                        },
+                        createAutomationTarget({ kind: "track", trackId: track.id }, option.effectInstanceId),
                         option.parameterId,
                       ) === targetKey,
                   ) ?? { parameterId: "volume" }

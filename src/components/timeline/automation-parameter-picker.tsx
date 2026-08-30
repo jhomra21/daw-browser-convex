@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import {
   automationTargetKey,
+  createAutomationTarget,
   getAutomationParameterOptionsForTarget,
   type AutomationParameterSelection,
   type AutomationTargetDeviceInstance,
@@ -17,7 +18,7 @@ type AutomationParameterPickerProps = {
 }
 
 const selectionKey = (target: AutomationTarget, selection: AutomationParameterSelection) => automationTargetKey(
-  { ...target, effectInstanceId: selection.effectInstanceId },
+  createAutomationTarget(target, selection.effectInstanceId),
   selection.parameterId,
 )
 

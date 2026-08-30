@@ -1,5 +1,6 @@
 import {
   automationTargetKey,
+  createAutomationTarget,
   createAudioEffectInstanceId,
   createInstrumentInstanceId,
   AUDIO_EFFECT_ORDER,
@@ -164,9 +165,9 @@ export const materializeLocalControlSnapshot = (
       item.processor.kind === 'external-vst3' ? [item.id] : []
     )))],
     ['automation-envelope', new Set(snapshot.automation.map((item) => automationTargetKey(
-      'master' in item.target
-        ? { kind: 'master', effectInstanceId: item.effectInstanceId }
-        : { kind: 'track', trackId: item.target.trackId, effectInstanceId: item.effectInstanceId },
+    'master' in item.target
+      ? createAutomationTarget({ kind: 'master' }, item.effectInstanceId)
+      : createAutomationTarget({ kind: 'track', trackId: item.target.trackId }, item.effectInstanceId),
       item.parameterId,
     )))],
     ['sidechain-route', new Set(snapshot.sidechains.map((item) => (
@@ -293,8 +294,8 @@ export const materializeLocalControlSnapshot = (
   }
   for (const item of snapshot.automation) {
     const target: AutomationTarget = 'master' in item.target
-      ? { kind: 'master', effectInstanceId: item.effectInstanceId }
-      : { kind: 'track', trackId: item.target.trackId, effectInstanceId: item.effectInstanceId }
+      ? createAutomationTarget({ kind: 'master' }, item.effectInstanceId)
+      : createAutomationTarget({ kind: 'track', trackId: item.target.trackId }, item.effectInstanceId)
     const id = automationTargetKey(target, item.parameterId)
     const existing = automation.get(id)?.value
     entities.push(createLocalProjectEntityRow('automation-envelope', id, {

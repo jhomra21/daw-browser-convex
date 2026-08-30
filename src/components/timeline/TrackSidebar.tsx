@@ -13,6 +13,7 @@ import {
   assertDefined,
   automationEnvelopeValueRange,
   automationTargetKey,
+  createAutomationTarget,
   normalizeMixerVolume,
   type AutomationEnvelope,
 } from "@daw-browser/shared";
@@ -340,7 +341,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
     const selected = props.automation.lanes.selectedTargetsByOwnerKey
       .master ?? { parameterId: "volume" };
     const selectedTargetKey = automationTargetKey(
-      { kind: "master", effectInstanceId: selected.effectInstanceId },
+      createAutomationTarget({ kind: "master" }, selected.effectInstanceId),
       selected.parameterId,
     );
     for (const envelope of props.automation.envelopes.byTargetKey.values()) {

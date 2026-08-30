@@ -15,11 +15,18 @@ import {
   packagedAudioHostPath,
   probeNativeAudioOutputDevice,
   renderNativeOffline,
+  createNativeOfflineFrameMailbox,
+  createNativeOfflineStdoutPump,
   runAudioHostDiagnostic,
+  isNativeOfflineTelemetryFrame,
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
 } from "./audio-host"
-import { nativeAudioHostControlTypes, nativeAudioHostProtocolVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import { createOfflinePcmAckTracker, deliverOfflinePcmChunk } from "./offline-pcm-ack"
+import {
+  nativeAudioHostControlTypes,
+  nativeAudioHostProtocolVersion,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 
 const hostScript = `
 const u32 = (value) => {
@@ -54,7 +61,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v4"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v5"), u32(0), u32(1),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -112,6 +119,15 @@ const editorStatus = () => frame(42, Buffer.concat([
 ]))
 const offlineChunk = (startFrame, value) => frame(54, Buffer.concat([
   u64(startFrame), u32(1), u32(1), f32(value),
+]))
+const offlineScheduleBurst = () => Buffer.concat([
+  scheduleProgress(), scheduleProgress(), scheduleProgress(), scheduleProgress(), scheduleProgress(),
+])
+const offlineTelemetryBurst = () => Buffer.concat([
+  workerNotification(), meterBatch(), scheduleProgress(),
+])
+const offlineError = (message) => frame(56, Buffer.concat([
+  u32(Buffer.byteLength(message)), Buffer.from(message),
 ]))
 const vstPlaybackFlag = (payload) => {
   let offset = 0
@@ -183,6 +199,27 @@ process.stdin.on("data", (chunk) => {
         offlineChunk(4, 0.5),
         frame(55, u64(5)),
       ]))
+    } else if (type === 53 && process.env.MODE === "offline-schedule-burst") {
+      process.stdout.write(Buffer.concat([
+        offlineScheduleBurst(),
+        ack(type),
+        offlineChunk(0, 0.1),
+        frame(55, u64(1)),
+      ]))
+    } else if (type === 53 && process.env.MODE === "offline-telemetry") {
+      process.stdout.write(Buffer.concat([
+        offlineTelemetryBurst(),
+        offlineTelemetryBurst(),
+        ack(type),
+        offlineChunk(0, 0.1),
+        offlineTelemetryBurst(),
+        frame(55, u64(1)),
+      ]))
+    } else if (type === 53 && process.env.MODE === "offline-error-after-telemetry") {
+      process.stdout.write(Buffer.concat([
+        offlineTelemetryBurst(),
+        offlineError("exact native offline error"),
+      ]))
     } else if (type === 53 && process.env.MODE === "offline-periodic") {
       process.stdout.write(ack(type))
       let startFrame = 0
@@ -226,7 +263,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x10,
+        0x00, 0x00, 0x00, 0x11,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -261,6 +298,179 @@ test("propagates bounded offline renderer stderr and exit diagnostics", async ()
   }
 })
 
+test("filters only the proven offline telemetry frame types", () => {
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.notification)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.meterBatch)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.scheduleProgress)).toBeTrue()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.spectrumFrame)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.ack)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.offlineComplete)).toBeFalse()
+  expect(isNativeOfflineTelemetryFrame(nativeAudioHostControlTypes.offlineError)).toBeFalse()
+})
+
+test("latches an offline mailbox failure after a resolved frame", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const frame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const originalError = new Error("original failure")
+
+  mailbox.push(frame)
+  await expect(mailbox.next()).resolves.toBe(frame)
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("latches an offline mailbox failure before its first read", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const originalError = new Error("original failure")
+
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("rejects a pending offline mailbox read with the original failure", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const originalError = new Error("original failure")
+  const pending = mailbox.next()
+
+  mailbox.fail(originalError)
+
+  await expect(pending).rejects.toBe(originalError)
+})
+
+test("delivers offline mailbox frames before and after reads", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const firstFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const secondFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.offlineComplete) ?? Buffer.alloc(0)
+
+  mailbox.push(firstFrame)
+  await expect(mailbox.next()).resolves.toBe(firstFrame)
+  const pending = mailbox.next()
+  mailbox.push(secondFrame)
+  await expect(pending).resolves.toBe(secondFrame)
+})
+
+test("offline mailbox terminal failure wins over queued frames", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const queuedFrame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.ack) ?? Buffer.alloc(0)
+  const originalError = new Error("original failure")
+
+  mailbox.push(queuedFrame)
+  mailbox.fail(originalError)
+
+  await expect(mailbox.next()).rejects.toBe(originalError)
+})
+
+test("preserves required and unknown response queue overflow protection at four frames", async () => {
+  const mailbox = createNativeOfflineFrameMailbox()
+  const frames = [
+    nativeAudioHostControlTypes.ack,
+    nativeAudioHostControlTypes.offlineComplete,
+    nativeAudioHostControlTypes.offlineError,
+    0xffff_ff00,
+    nativeAudioHostControlTypes.hostCapabilities,
+  ].map((type) => encodeNativeAudioHostControlFrame(type) ?? Buffer.alloc(0))
+
+  expect(mailbox.push(frames[0])).toBeTrue()
+  expect(mailbox.push(frames[1])).toBeTrue()
+  expect(mailbox.push(frames[2])).toBeTrue()
+  expect(mailbox.push(frames[3])).toBeTrue()
+  expect(mailbox.push(frames[4])).toBeFalse()
+  await expect(mailbox.next()).resolves.toBe(frames[0])
+})
+
+test("drops more than four schedule progress frames before the response mailbox", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-schedule-burst-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-schedule-burst exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => { chunks.push(chunk.startFrame) },
+    })
+    expect(chunks).toEqual([0])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("drops mixed proven offline telemetry while preserving acknowledgement and completion", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-telemetry-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-telemetry exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const chunks: number[] = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: (chunk) => { chunks.push(chunk.startFrame) },
+    })
+    expect(chunks).toEqual([0])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("preserves the exact native offline error after telemetry", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-error-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-error-after-telemetry exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    await expect(renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+    })).rejects.toThrow("exact native offline error")
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test("consumes offline PCM bursts while waiting for the start acknowledgement", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-burst-"))
   const hostPath = path.join(directory, "host.mjs")
@@ -284,12 +494,226 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
         schedule: new Uint8Array([1]),
       },
       signal: new AbortController().signal,
-      onChunk: (chunk) => chunks.push(chunk.startFrame),
+      onChunk: (chunk) => {
+        chunks.push(chunk.startFrame)
+      },
     })
     expect(chunks).toEqual([0, 1, 2, 3, 4])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test("serializes the offline PCM sink and keeps completion behind the final sink", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: string[] = []
+  const pauses: string[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: (frame) => delivered.push(frame.readUInt32BE(8) === 55 ? "complete" : "other"),
+    onPcmFrame: async (frame) => {
+      delivered.push(`pcm-${frame.readBigUInt64BE(16).toString()}`)
+      if (frame.readBigUInt64BE(16) === 0n) await deferred.promise
+    },
+    onError: (error) => { throw error },
+    pause: () => pauses.push("pause"),
+    resume: () => pauses.push("resume"),
+  })
+  const pcmFrame = (startFrame: number) => {
+    const payload = Buffer.alloc(20)
+    payload.writeBigUInt64BE(BigInt(startFrame), 0)
+    payload.writeUInt32BE(1, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.writeFloatBE(startFrame + 0.25, 16)
+    return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  }
+  pump.push(Buffer.concat([
+    pcmFrame(0),
+    pcmFrame(1),
+    encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0),
+  ]))
+  await Promise.resolve()
+  expect(delivered).toEqual(["pcm-0"])
+  expect(pump.sinkBusy()).toBeTrue()
+  deferred.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(delivered).toEqual(["pcm-0", "pcm-1", "complete"])
+  expect(pauses).toEqual(["pause", "pause", "resume"])
+  pump.stop()
+})
+
+test("preserves split frames and partial following PCM while one sink is pending", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: number[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => delivered.push(99),
+    onPcmFrame: async (frame) => {
+      const startFrame = Number(frame.readBigUInt64BE(16))
+      delivered.push(startFrame)
+      if (startFrame === 0) await deferred.promise
+    },
+    onError: (error) => { throw error },
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  const pcmFrame = (startFrame: number, frameCount: number) => {
+    const payload = Buffer.alloc(16 + frameCount * 4)
+    payload.writeBigUInt64BE(BigInt(startFrame), 0)
+    payload.writeUInt32BE(frameCount, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.fill(startFrame, 16)
+    return encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  }
+  const first = pcmFrame(0, 32)
+  const second = pcmFrame(32, 1_024)
+  const completion = encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0)
+  pump.push(Buffer.concat([first, second.subarray(0, 2_600)]))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(delivered).toEqual([0])
+  expect(pump.bufferedBytes()).toBe(2_600)
+  deferred.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  pump.push(Buffer.concat([second.subarray(2_600), completion]))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(delivered).toEqual([0, 32, 99])
+  expect(pump.bufferedBytes()).toBe(0)
+})
+
+test("fails and stops when the asynchronous offline sink rejects", async () => {
+  const deferred = Promise.withResolvers<Error>()
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => undefined,
+    onPcmFrame: async () => { throw new Error("sink failed") },
+    onError: (error) => deferred.resolve(error),
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  const payload = Buffer.alloc(20)
+  payload.writeUInt32BE(1, 8)
+  payload.writeUInt32BE(1, 12)
+  pump.push(encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0))
+  await expect(deferred.promise).resolves.toThrow("sink failed")
+  expect(pump.sinkBusy()).toBeFalse()
+  expect(pump.bufferedBytes()).toBe(0)
+})
+
+test("does not resume or process buffered PCM after abort stops the render", async () => {
+  const deferred = Promise.withResolvers<void>()
+  const delivered: number[] = []
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: () => undefined,
+    onPcmFrame: async (frame) => {
+      delivered.push(Number(frame.readBigUInt64BE(16)))
+      await deferred.promise
+    },
+    onError: () => undefined,
+    pause: () => undefined,
+    resume: () => { delivered.push(100) },
+  })
+  const payload = Buffer.alloc(20)
+  payload.writeUInt32BE(1, 8)
+  payload.writeUInt32BE(1, 12)
+  const first = encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0)
+  pump.push(Buffer.concat([first, first]))
+  pump.stop()
+  deferred.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(delivered).toEqual([0])
+})
+
+test("moves 128 MiB through one bounded asynchronous sink without loss or duplication", async () => {
+  const frameCount = 128 * 1024 * 1024 / Float32Array.BYTES_PER_ELEMENT
+  const framesPerChunk = 131_072
+  const expectedChunks = frameCount / framesPerChunk
+  let sinkInFlight = 0
+  let maximumSinkInFlight = 0
+  let renderedFrames = 0
+  let renderedBytes = 0
+  let complete = false
+  const pump = createNativeOfflineStdoutPump({
+    isPcmFrame: (frame) => frame.readUInt32BE(8) === 54,
+    onFrame: (frame) => {
+      expect(frame.readUInt32BE(8)).toBe(55)
+      complete = true
+    },
+    onPcmFrame: async (frame) => {
+      sinkInFlight += 1
+      maximumSinkInFlight = Math.max(maximumSinkInFlight, sinkInFlight)
+      const startFrame = Number(frame.readBigUInt64BE(16))
+      const count = frame.readUInt32BE(24)
+      expect(startFrame).toBe(renderedFrames)
+      expect(count).toBe(framesPerChunk)
+      renderedFrames += count
+      renderedBytes += count * Float32Array.BYTES_PER_ELEMENT
+      sinkInFlight -= 1
+    },
+    onError: (error) => { throw error },
+    pause: () => undefined,
+    resume: () => undefined,
+  })
+  for (let index = 0; index < expectedChunks; index += 1) {
+    const payload = Buffer.alloc(16 + framesPerChunk * Float32Array.BYTES_PER_ELEMENT)
+    payload.writeBigUInt64BE(BigInt(index * framesPerChunk), 0)
+    payload.writeUInt32BE(framesPerChunk, 8)
+    payload.writeUInt32BE(1, 12)
+    payload.fill(index & 0xff, 16)
+    pump.push(encodeNativeAudioHostControlFrame(54, payload) ?? Buffer.alloc(0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  pump.push(encodeNativeAudioHostControlFrame(55) ?? Buffer.alloc(0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(renderedFrames).toBe(frameCount)
+  expect(renderedBytes).toBe(128 * 1024 * 1024)
+  expect(maximumSinkInFlight).toBe(1)
+  expect(complete).toBeTrue()
+  expect(pump.maximumBufferedBytes()).toBeLessThanOrEqual(1_048_576)
+})
+
+test("tracks only the exact active offline PCM acknowledgement", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  expect(() => tracker.begin({ jobId: "job-1", sequence: 2, endFrame: 1_024 })).toThrow("already pending")
+  expect(tracker.acknowledge({ jobId: "job-2", sequence: 1, endFrame: 512 })).toBeFalse()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 2, endFrame: 512 })).toBeFalse()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 513 })).toBeFalse()
+  expect(tracker.hasPending()).toBeTrue()
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 512 })).toBeTrue()
+  await expect(pending).resolves.toBeUndefined()
+  expect(tracker.hasPending()).toBeFalse()
+})
+
+test("captures offline PCM acknowledgement before listener mutation", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  let sent: { jobId: string; sequence: number; endFrame: number } | undefined
+  await deliverOfflinePcmChunk(
+    "job-1",
+    1,
+    { startFrame: 256, frameCount: 256, channelCount: 1, planes: [new Float32Array(256)] },
+    async (chunk) => {
+      chunk.startFrame = 0
+      chunk.frameCount = 1
+    },
+    (ack) => {
+      sent = ack
+      expect(tracker.acknowledge(ack)).toBeTrue()
+    },
+  )
+  await expect(pending).resolves.toBeUndefined()
+  expect(sent).toEqual({ jobId: "job-1", sequence: 1, endFrame: 512 })
+})
+
+test("cancels a pending offline PCM acknowledgement without allowing stale release", async () => {
+  const tracker = createOfflinePcmAckTracker()
+  const pending = tracker.begin({ jobId: "job-1", sequence: 1, endFrame: 512 })
+  tracker.cancel(new DOMException("canceled", "AbortError"))
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(tracker.acknowledge({ jobId: "job-1", sequence: 1, endFrame: 512 })).toBeFalse()
+  expect(tracker.hasPending()).toBeFalse()
 })
 
 test("allows offline completion after the aggregate deadline while valid PCM continues", async () => {
@@ -321,7 +745,9 @@ test("allows offline completion after the aggregate deadline while valid PCM con
         schedule: new Uint8Array([1]),
       },
       signal: new AbortController().signal,
-      onChunk: (chunk) => chunks.push(chunk.startFrame),
+      onChunk: (chunk) => {
+        chunks.push(chunk.startFrame)
+      },
       completionInactivityMs: 50,
       schedule,
     })

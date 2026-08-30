@@ -1120,6 +1120,9 @@ struct AudioHost::Impl {
     std::uint64_t window_id = 0;
     std::uint64_t absolute_frame = 0;
     bool scheduled = false;
+    bool processor_linear = false;
+    std::uint64_t processor_end_frame = 0;
+    float processor_end_value = 0.0F;
     std::uint32_t processor_revision = 0;
     std::uint32_t processor_epoch = 0;
     std::uint64_t processor_sequence = 0;
@@ -1291,6 +1294,7 @@ struct AudioHost::Impl {
   ControlLane<kUrgentQueueCapacity> urgent_queue{};
   ControlLane<kInstrumentQueueCapacity> instrument_queue{};
   ControlLane<kSourceQueueCapacity> source_queue{};
+  ControlLane<kProcessorQueueCapacity> scheduled_processor_queue{};
   ControlLane<kProcessorQueueCapacity> processor_queue{};
   RealtimeProcessScratch realtime_process_scratch{};
   bool graph_prepared = false;
@@ -1591,6 +1595,8 @@ struct AudioHost::Impl {
     urgent_queue.read.store(urgent_queue.write.load(std::memory_order_acquire), std::memory_order_release);
     instrument_queue.read.store(instrument_queue.write.load(std::memory_order_acquire), std::memory_order_release);
     source_queue.read.store(source_queue.write.load(std::memory_order_acquire), std::memory_order_release);
+    scheduled_processor_queue.read.store(
+      scheduled_processor_queue.write.load(std::memory_order_acquire), std::memory_order_release);
     processor_queue.read.store(processor_queue.write.load(std::memory_order_acquire), std::memory_order_release);
     transport_queue.read.store(transport_queue.write.load(std::memory_order_acquire), std::memory_order_release);
     published_schedule_window_id.store(0, std::memory_order_release);
@@ -1629,7 +1635,8 @@ struct AudioHost::Impl {
   }
   [[nodiscard]] bool HasQueuedControl() const {
     return HasQueuedControl(urgent_queue) || HasQueuedControl(instrument_queue)
-      || HasQueuedControl(source_queue) || HasQueuedControl(processor_queue);
+      || HasQueuedControl(source_queue) || HasQueuedControl(scheduled_processor_queue)
+      || HasQueuedControl(processor_queue);
   }
   [[nodiscard]] daw_audio_core_handle CreateRevisionCore(const std::uint32_t revision) {
     daw_audio_core_handle core = 0;
@@ -1888,6 +1895,8 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->instrument_queue.write.store(0, std::memory_order_release);
   impl_->source_queue.read.store(0, std::memory_order_release);
   impl_->source_queue.write.store(0, std::memory_order_release);
+  impl_->scheduled_processor_queue.read.store(0, std::memory_order_release);
+  impl_->scheduled_processor_queue.write.store(0, std::memory_order_release);
   impl_->processor_queue.read.store(0, std::memory_order_release);
   impl_->processor_queue.write.store(0, std::memory_order_release);
   impl_->worker_notifications.mute_requested.store(false, std::memory_order_release);
@@ -2451,7 +2460,7 @@ bool AudioHost::QueueSourceEvents(const std::span<const std::uint8_t> payload) {
 }
 
 bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload) {
-  if (payload.size() < 56 || impl_->prepared_core != 0) return false;
+  if (payload.size() < 60 || impl_->prepared_core != 0) return false;
   const std::uint32_t revision = ReadLeU32(payload.data());
   const std::uint32_t epoch = ReadLeU32(payload.data() + 4);
   const std::uint64_t window_id = ReadLeU64(payload.data() + 8);
@@ -2463,16 +2472,18 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
   const std::uint32_t instrument_count = ReadLeU32(payload.data() + 44);
   const std::uint32_t source_count = ReadLeU32(payload.data() + 48);
   const std::uint32_t automation_count = ReadLeU32(payload.data() + 52);
+  const std::uint32_t processor_automation_count = ReadLeU32(payload.data() + 56);
   if (revision == 0 || revision != impl_->active_revision.load(std::memory_order_acquire)
     || epoch == 0 || epoch != impl_->transport_epoch.load(std::memory_order_acquire)
     || window_id == 0 || start_frame >= end_frame || end_frame > std::numeric_limits<std::int64_t>::max()
     || chunk_count == 0 || chunk_count > kMaximumScheduleChunks || chunk_index >= chunk_count
     || ends_schedule > 1
     || (ends_schedule == 1 && chunk_index + 1 != chunk_count)
-    || instrument_count + source_count + automation_count > kMaximumScheduleRecords
+    || instrument_count + source_count + automation_count + processor_automation_count > kMaximumScheduleRecords
     || instrument_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS
     || source_count > DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS
-    || automation_count > kMaximumScheduleAutomationSegments) return false;
+    || automation_count > kMaximumScheduleAutomationSegments
+    || processor_automation_count > kMaximumScheduleAutomationSegments) return false;
   if (impl_->last_accepted_schedule_epoch != epoch) {
     impl_->last_accepted_schedule_window_id = 0;
     impl_->last_accepted_schedule_epoch = epoch;
@@ -2611,7 +2622,7 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
   if (staging.received_chunks[chunk_index]) {
     return staging.chunk_digests[chunk_index] == digest;
   }
-  std::size_t offset = 56;
+  std::size_t offset = 60;
   std::uint64_t previous_frame = 0;
   std::uint64_t previous_sequence = 0;
   bool has_previous = false;
@@ -2767,6 +2778,53 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     has_previous_automation = true;
     offset += 40;
   }
+  std::uint64_t previous_processor_frame = 0;
+  std::uint64_t previous_processor_instance = 0;
+  std::uint32_t previous_processor_target = 0;
+  bool has_previous_processor = false;
+  for (std::uint32_t index = 0; index < processor_automation_count; ++index) {
+    if (offset + 40 > payload.size()) return false;
+    const auto* bytes = payload.data() + offset;
+    const std::uint64_t processor_instance = ReadLeU64(bytes);
+    const std::uint32_t parameter_target = ReadLeU32(bytes + 8);
+    const std::uint32_t kind = ReadLeU32(bytes + 12);
+    const std::uint64_t frame = ReadLeU64(bytes + 16);
+    const std::uint64_t processor_end_frame = ReadLeU64(bytes + 24);
+    const float start_value = ReadLeFloat(bytes + 32);
+    const float end_value = ReadLeFloat(bytes + 36);
+    if (processor_instance == 0 || parameter_target == 0 || kind > 1
+      || frame < start_frame || frame >= end_frame
+      || !std::isfinite(start_value) || !std::isfinite(end_value)
+      || (kind == 0 && processor_end_frame != frame)
+      || (kind == 1 && (processor_end_frame <= frame || processor_end_frame > end_frame))
+      || (has_previous_processor && (frame < previous_processor_frame
+        || (frame == previous_processor_frame && (processor_instance < previous_processor_instance
+          || (processor_instance == previous_processor_instance
+            && parameter_target <= previous_processor_target)))))
+      || staging.record_count >= staging.events.size()) return false;
+    Impl::QueuedControlEvent event{};
+    event.kind = Impl::QueuedControlKind::kProcessor;
+    event.window_id = window_id;
+    event.absolute_frame = frame;
+    event.scheduled = true;
+    event.processor_linear = kind == 1;
+    event.processor_end_frame = processor_end_frame;
+    event.processor_end_value = end_value;
+    event.processor_revision = revision;
+    event.processor_epoch = epoch;
+    event.processor = {
+      .processor_instance_id = processor_instance,
+      .parameter_target = parameter_target,
+      .frame_offset = 0,
+      .value = start_value,
+    };
+    staging.events[staging.record_count++] = event;
+    previous_processor_frame = frame;
+    previous_processor_instance = processor_instance;
+    previous_processor_target = parameter_target;
+    has_previous_processor = true;
+    offset += 40;
+  }
   if (offset != payload.size()) return false;
   staging.received_chunks[chunk_index] = true;
   staging.chunk_digests[chunk_index] = digest;
@@ -2780,9 +2838,17 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     std::count_if(staging.events.begin(), staging.events.begin() + staging.record_count,
       [](const auto& event) { return event.kind == Impl::QueuedControlKind::kInstrument; })
   );
-  const std::uint32_t source_events = static_cast<std::uint32_t>(staging.record_count) - instrument_events;
+  const std::uint32_t source_events = static_cast<std::uint32_t>(
+    std::count_if(staging.events.begin(), staging.events.begin() + staging.record_count,
+      [](const auto& event) { return event.kind == Impl::QueuedControlKind::kSource; })
+  );
+  const std::uint32_t processor_events = static_cast<std::uint32_t>(
+    std::count_if(staging.events.begin(), staging.events.begin() + staging.record_count,
+      [](const auto& event) { return event.kind == Impl::QueuedControlKind::kProcessor; })
+  );
   if (!impl_->HasCapacity(Impl::QueuedControlKind::kInstrument, instrument_events)
-    || !impl_->HasCapacity(Impl::QueuedControlKind::kSource, source_events)) {
+    || !impl_->HasCapacity(Impl::QueuedControlKind::kSource, source_events)
+    || !Impl::HasCapacity(impl_->scheduled_processor_queue, processor_events)) {
     staging.clear();
     return false;
   }
@@ -2803,7 +2869,11 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     }
   }
   for (std::size_t index = 0; index < staging.record_count; ++index) {
-    if (!impl_->EnqueueControlEvent(staging.events[index])) {
+    const auto& event = staging.events[index];
+    const bool queued = event.kind == Impl::QueuedControlKind::kProcessor
+      ? Impl::EnqueueControlEvent(impl_->scheduled_processor_queue, event)
+      : impl_->EnqueueControlEvent(event);
+    if (!queued) {
       staging.clear();
       return false;
     }
@@ -3026,8 +3096,12 @@ bool AudioHost::InstallAsset(
     .channel_count = channel_count,
     .content_hash_prefix = content_hash_prefix,
   };
+  const auto [asset_iterator, inserted] = impl_->assets.emplace(asset_id, std::move(asset));
+  if (!inserted) return false;
+  auto& stored = asset_iterator->second;
+  stored.planes.fill(nullptr);
   for (std::uint32_t channel = 0; channel < channel_count; ++channel) {
-    asset.planes[channel] = asset.samples.data() + static_cast<std::size_t>(channel) * frame_count;
+    stored.planes[channel] = stored.samples.data() + static_cast<std::size_t>(channel) * stored.frame_count;
   }
   const daw_audio_asset_descriptor descriptor{
     .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
@@ -3037,10 +3111,12 @@ bool AudioHost::InstallAsset(
     .frame_count = frame_count,
     .sample_rate_hz = sample_rate_hz,
     .channel_count = channel_count,
-    .planes = asset.planes.data(),
+    .planes = stored.planes.data(),
   };
-  if (daw_audio_core_create_asset(active_core, &descriptor, &asset.handle) != DAW_AUDIO_CORE_OK) return false;
-  impl_->assets.emplace(asset_id, std::move(asset));
+  if (daw_audio_core_create_asset(active_core, &descriptor, &stored.handle) != DAW_AUDIO_CORE_OK) {
+    impl_->assets.erase(asset_iterator);
+    return false;
+  }
   return true;
 }
 
@@ -3886,6 +3962,35 @@ bool AudioHost::ProcessPlanar(
     const auto block_end_frame = block_start_frame + static_cast<std::int64_t>(frames);
     const auto applied_epoch = impl_->applied_transport_epoch.load(std::memory_order_acquire);
     const auto published_window = impl_->published_schedule_window_id.load(std::memory_order_acquire);
+    const auto drain_scheduled_processor_lane = [&]<std::size_t Capacity>(Impl::ControlLane<Capacity>& lane) {
+      std::uint32_t read = lane.read.load(std::memory_order_relaxed);
+      const std::uint32_t write = lane.write.load(std::memory_order_acquire);
+      while (read != write) {
+        const auto& event = lane.events[read % Capacity];
+        if (event.processor_revision != impl_->active_revision.load(std::memory_order_acquire)
+          || event.processor_epoch != applied_epoch) {
+          ++read;
+          continue;
+        }
+        if (!impl_->applied_transport_running.load(std::memory_order_acquire)) break;
+        if (event.window_id > published_window) break;
+        if (event.absolute_frame >= static_cast<std::uint64_t>(block_end_frame)) break;
+        if (event.absolute_frame < static_cast<std::uint64_t>(block_start_frame)) {
+          ++read;
+          continue;
+        }
+        if (processor_event_count >= processor_events.size()) return false;
+        processor_events[processor_event_count] = event.processor;
+        processor_events[processor_event_count].frame_offset = event.absolute_frame <= static_cast<std::uint64_t>(block_start_frame)
+          ? 0
+          : static_cast<std::uint32_t>(event.absolute_frame - static_cast<std::uint64_t>(block_start_frame));
+        ++processor_event_count;
+        if (event.processor_linear) return false;
+        ++read;
+      }
+      lane.read.store(read, std::memory_order_release);
+      return true;
+    };
     const auto drain_processor_lane = [&]<std::size_t Capacity>(Impl::ControlLane<Capacity>& lane) {
       std::uint32_t read = lane.read.load(std::memory_order_relaxed);
       const std::uint32_t write = lane.write.load(std::memory_order_acquire);
@@ -3955,6 +4060,7 @@ bool AudioHost::ProcessPlanar(
     };
     if (!drain_instrument_lane(impl_->urgent_queue)
       || !drain_instrument_lane(impl_->instrument_queue)
+      || !drain_scheduled_processor_lane(impl_->scheduled_processor_queue)
       || !drain_processor_lane(impl_->processor_queue)
       || !drain_source_lane(impl_->source_queue)) {
       const auto reason = instrument_event_count >= instrument_events.size()
@@ -3965,13 +4071,21 @@ bool AudioHost::ProcessPlanar(
       impl_->RejectBlock(reason, callback_attempt);
       return false;
     }
-    std::sort(processor_events.begin(), processor_events.begin() + processor_event_count,
-      [](const auto& left, const auto& right) {
-        return left.processor_instance_id < right.processor_instance_id
-          || (left.processor_instance_id == right.processor_instance_id && (
-            left.frame_offset < right.frame_offset
-            || (left.frame_offset == right.frame_offset && left.parameter_target < right.parameter_target)));
-      });
+    const auto processor_before = [](const auto& left, const auto& right) {
+      return left.processor_instance_id < right.processor_instance_id
+        || (left.processor_instance_id == right.processor_instance_id && (
+          left.frame_offset < right.frame_offset
+          || (left.frame_offset == right.frame_offset && left.parameter_target < right.parameter_target)));
+    };
+    for (std::uint32_t index = 1; index < processor_event_count; ++index) {
+      const auto event = processor_events[index];
+      std::uint32_t position = index;
+      while (position > 0 && processor_before(event, processor_events[position - 1])) {
+        processor_events[position] = processor_events[position - 1];
+        --position;
+      }
+      processor_events[position] = event;
+    }
     std::sort(instrument_events.begin(), instrument_events.begin() + instrument_event_count,
       [](const auto& left, const auto& right) {
         return left.frame_offset < right.frame_offset

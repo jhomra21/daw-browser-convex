@@ -175,7 +175,9 @@ Stateful plugins need valid captured state. Stateless plugins use defaults plus 
 
 The export path waits for the render result before plugin teardown. Offline workers do not initialize unused AppKit editor state.
 
-Current limitation: Native Phase A export rejects projects that contain automation. The packaged campaign independently verified a one-second stereo 48 kHz 16-bit PCM VST export without automation. The file was 192,044 bytes and contained nonzero signal.
+Native Phase A mixdown projects enabled VST3 parameter automation into the same scheduled automation representation consumed by the native VST worker. Hold and linear interpolation are preserved, custom export ranges are rebased to offline frame zero, and the planner checks each worker's frame and callback-event limits before rendering. Mixer and built-in-effect automation remain unsupported in Native Phase A and are rejected instead of being silently omitted.
+
+The packaged merge campaign independently verified a one-second stereo 48 kHz 16-bit PCM VST export without automation. The file was 192,044 bytes and contained nonzero signal. VST automation export was added after that campaign, so a fresh packaged run is required before treating that path as runtime-certified evidence.
 
 ## Packaged acceptance
 
@@ -206,5 +208,6 @@ See the [runtime acceptance report](../acceptance-reports/control-platform-runti
 - Every launch rechecks the current plugin files.
 - Device availability, bus layout, editor support, state support, plugin behavior, or architecture can make an instance unavailable.
 - Public control does not expose arbitrary plugin insertion, removal, editor control, or worker control.
-- Native Phase A export rejects projects that contain automation.
+- Native Phase A mixdown supports VST3 parameter automation but still rejects mixer and built-in-effect automation.
+- Native stem export with VST3 remains outside the current native offline mixdown path.
 - VST worker processes do not sandbox malicious plugin code.

@@ -15,6 +15,7 @@ import {
 } from '@daw-browser/control-core'
 import {
   automationTargetKey,
+  createAutomationTarget,
   createAudioEffectInstanceId,
   createInstrumentInstanceId,
   createLocalClipId,
@@ -358,8 +359,8 @@ const canonicalEntityKeys = (snapshot: ControlPlanV1['snapshot']) => new Set([
   )),
   ...snapshot.automation.map((item) => `automation-envelope:${automationTargetKey(
     'master' in item.target
-      ? { kind: 'master', effectInstanceId: item.effectInstanceId }
-      : { kind: 'track', trackId: item.target.trackId, effectInstanceId: item.effectInstanceId },
+      ? createAutomationTarget({ kind: 'master' }, item.effectInstanceId)
+      : createAutomationTarget({ kind: 'track', trackId: item.target.trackId }, item.effectInstanceId),
     item.parameterId,
   )}`),
   ...snapshot.sidechains.map((item) => `sidechain-route:${localSidechainRouteRowId(

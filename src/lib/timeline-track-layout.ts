@@ -20,6 +20,19 @@ export type TimelineTrackLayout = {
   returnHeightPx: number
 }
 
+export type TimelineTrackLaneHitRegion = 'clip' | 'automation'
+
+export const timelineTrackLaneHitRegion = (
+  row: Pick<TimelineTrackLayoutRow, 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>,
+  localY: number,
+): TimelineTrackLaneHitRegion => (
+  row.automationHeightPx > 0
+  && localY >= row.clipLaneHeightPx
+  && localY < row.heightPx
+    ? 'automation'
+    : 'clip'
+)
+
 type TrackTreeNode = {
   trackId: Track['id']
   children: TrackTreeNode[]

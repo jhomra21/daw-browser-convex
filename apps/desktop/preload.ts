@@ -39,9 +39,12 @@ import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared
 import { z } from "zod"
 import type { DesktopBridge, DesktopVstEditorCapturedState, DesktopVstEditorState } from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
+import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
+import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
+const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
 const applicationMenuCommandChannel = "daw:application-menu:command"
 const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
@@ -55,15 +58,6 @@ const incomingMessageSchema = z.object({
   generation: z.number().int().safe(),
   frame: z.union([desktopCancelSchemaV1, desktopTrustedRendererRequestSchemaV1]),
   trustedActorSubject: z.string().regex(/^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).optional(),
-}).passthrough()
-const offlinePcmChunkSchema = z.object({
-  jobId: z.string(),
-  chunk: z.object({
-    startFrame: z.number().int().safe().min(0),
-    frameCount: z.number().int().safe().positive(),
-    channelCount: z.union([z.literal(1), z.literal(2)]),
-    planes: z.array(z.instanceof(Float32Array)),
-  }).passthrough(),
 }).passthrough()
 const vstEditorStateSchema = z.object({
   projectId: z.string(),
@@ -301,18 +295,29 @@ const desktopBridge = {
         start: async (
           jobId: string,
           plan: NativeOfflineRenderPlan,
-          listener: (chunk: NativeOfflinePcmChunk) => void,
+          listener: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
         ) => {
           if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
             return { ok: false as const, error: "The native offline render plan is invalid." }
           }
           const notify = ipcRendererListener((_event, value) => {
-            const parsed = offlinePcmChunkSchema.safeParse(value)
-            if (!parsed.success
-              || parsed.data.jobId !== jobId
+            const parsed = offlinePcmMessageSchema.safeParse(value)
+            if (!parsed.success) {
+              void ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId).catch(() => undefined)
+              return
+            }
+            if (parsed.data.jobId !== jobId
               || parsed.data.chunk.planes.length !== parsed.data.chunk.channelCount
               || !parsed.data.chunk.planes.every((plane) => plane.length === parsed.data.chunk.frameCount)) return
-            listener(parsed.data.chunk)
+            void deliverOfflinePcmChunk(
+              jobId,
+              parsed.data.sequence,
+              parsed.data.chunk,
+              listener,
+              (ack) => ipcRenderer.send(offlinePcmAckChannel, ack),
+            ).catch(() => {
+              void ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId).catch(() => undefined)
+            })
           })
           ipcRenderer.on("daw:audio-host:offline-pcm", notify)
           try {

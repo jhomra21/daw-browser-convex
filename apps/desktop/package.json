@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "main": ".vite/build/main.js",
   "scripts": {
-    "start": "electron-forge start",
+    "start": "bun scripts/run-local.ts start",
     "package": "bun scripts/run-local.ts package",
     "make": "bun scripts/run-release.ts make",
     "check": "bun --bun tsc --noEmit -p tsconfig.json",

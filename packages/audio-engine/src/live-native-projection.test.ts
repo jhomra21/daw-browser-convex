@@ -11,20 +11,44 @@ import {
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import { compileLiveNativeProjection } from './live-native-projection'
 
+const defaultSamples = () => {
+  const samples = new Float32Array(new ArrayBuffer(4 * Float32Array.BYTES_PER_ELEMENT))
+  samples.set([0, 0.25, -0.5, 1])
+  return samples
+}
+
 class TestAudioBuffer implements AudioBuffer {
-  readonly duration = 4 / 48_000
-  readonly length = 4
-  readonly numberOfChannels = 1
-  readonly sampleRate = 48_000
-  private readonly samples = new Float32Array([0, 0.25, -0.5, 1])
-  copyFromChannel(destination: Float32Array, _channel: number, offset = 0) {
-    destination.set(this.samples.subarray(offset, offset + destination.length))
+  readonly duration: number
+  readonly length: number
+  readonly numberOfChannels: number
+  readonly sampleRate: number
+
+  constructor(
+    private readonly channels: Float32Array<ArrayBuffer>[] = [
+      defaultSamples(),
+    ],
+    sampleRate = 48_000,
+  ) {
+    this.length = channels[0]?.length ?? 0
+    this.numberOfChannels = channels.length
+    this.sampleRate = sampleRate
+    this.duration = this.length / sampleRate
   }
-  copyToChannel(source: Float32Array, _channel: number, offset = 0) {
-    this.samples.set(source, offset)
+
+  copyFromChannel(destination: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const source = this.channels[channel]
+    if (!source) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source.subarray(offset, offset + destination.length))
   }
-  getChannelData(_channel: number) {
-    return this.samples
+  copyToChannel(source: Float32Array<ArrayBuffer>, channel: number, offset = 0) {
+    const destination = this.channels[channel]
+    if (!destination) throw new Error(`Missing channel ${channel}.`)
+    destination.set(source, offset)
+  }
+  getChannelData(_channel: number): Float32Array<ArrayBuffer> {
+    const channel = this.channels[_channel]
+    if (!channel) throw new Error(`Missing channel ${_channel}.`)
+    return channel
   }
 }
 
@@ -75,6 +99,27 @@ test('projects deterministic copied PCM for supported source-only sessions', () 
     pcm: expect.objectContaining({ planes: [new Float32Array([0, 0.25, -0.5, 1])] }),
   })])
   expect(result.events).toHaveLength(1)
+})
+
+test('chunks a 12-second stereo source into payload-safe native assets', () => {
+  const frameCount = 12 * 48_000
+  const longClip = {
+    ...clip,
+    duration: frameCount / 48_000,
+    buffer: new TestAudioBuffer([
+      new Float32Array(frameCount),
+      new Float32Array(frameCount),
+    ]),
+  }
+  const result = compile([track({ clips: [longClip] })])
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets.length).toBeGreaterThan(1)
+  expect(result.assets.every(({ asset: entry }) => (
+    entry.frameCount <= (entry.channelCount === 1 ? 262_138 : 131_069)
+  ))).toBe(true)
+  expect(result.nativePcmChunkDescriptors).toHaveLength(1)
+  expect(result.nativePcmChunkDescriptors[0]?.chunks).toHaveLength(5)
+  expect(result.events).toHaveLength(5)
 })
 
 test('skips source-exhausted clips without rejecting the native projection', () => {

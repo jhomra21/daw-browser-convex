@@ -570,6 +570,38 @@ const nativeLiveInstrumentEvents = (payloads: readonly Uint8Array[]) =>
 const nativeTransportReleaseEvents = (payloads: readonly Uint8Array[]) =>
   decodeNativeInstrumentEvents(payloads).filter(({ type }) => type === 103)
 
+const decodeNativeSourceEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer)
+  const instrumentCount = view.getUint32(44, true)
+  const sourceCount = view.getUint32(48, true)
+  const sourceOffset = 60 + instrumentCount * 48
+  return Array.from({ length: sourceCount }, (_, index) => {
+    const offset = sourceOffset + index * 112
+    return {
+      epoch: view.getUint32(4, true),
+      assetId: view.getUint32(offset + 20, true),
+      startFrame: Number(view.getBigInt64(offset + 24, true)),
+      stopFrame: Number(view.getBigInt64(offset + 32, true)),
+    }
+  })
+})
+
+const decodeNativeProcessorEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer)
+  const instrumentCount = view.getUint32(44, true)
+  const sourceCount = view.getUint32(48, true)
+  const processorCount = view.getUint32(56, true)
+  const processorOffset = 60 + instrumentCount * 48 + sourceCount * 112
+  return Array.from({ length: processorCount }, (_, index) => {
+    const offset = processorOffset + index * 40
+    return {
+      epoch: view.getUint32(4, true),
+      frame: Number(view.getBigUint64(offset + 16, true)),
+      value: view.getFloat32(offset + 32, true),
+    }
+  })
+})
+
 test("commits a supported native session before starting and tears it down deterministically", async () => {
   const fixture = createBridge()
   const controller = createNativePlaybackController({
@@ -709,7 +741,7 @@ test("does not begin a native transaction when Stretch preparation fails", async
   expect(faults[0]).toContain("portable Stretch preparation failed")
 })
 
-test("rejects Stretch before rendering when raw native assets consume capacity", async () => {
+test("rejects the 65th native asset after final projection", async () => {
   const fixture = createBridge()
   const faults: string[] = []
   const snapshotInput = inputWithRawAssetsAndStretch(64)
@@ -729,12 +761,12 @@ test("rejects Stretch before rendering when raw native assets consume capacity",
   })
 
   expect(await controller.start(snapshotInput.transport)).toBe("unavailable")
-  expect(createBufferCalls).toBe(0)
+  expect(createBufferCalls).toBe(1)
   expect(fixture.calls).toEqual([])
   expect(faults[0]).toContain("installed audio asset capacity")
 })
 
-test("admits Stretch when one native asset slot remains", async () => {
+test("accepts an expanded session at the 64-asset native boundary", async () => {
   const fixture = createBridge()
   const snapshotInput = inputWithRawAssetsAndStretch(63)
   const controller = createNativePlaybackController({
@@ -2085,6 +2117,79 @@ test("pause and resume retain the prepared native graph and installed assets", a
   expect(controller.isActive()).toBeTrue()
   expect(controller.isPrepared()).toBeTrue()
   expect(fixture.calls).not.toContain("release")
+})
+
+test("primes each advancing prepared resume with active source and automation windows", async () => {
+  const fixture = createBridge()
+  const track = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      duration: 5,
+      buffer: new TestAudioBuffer([
+        new Float32Array(270_000),
+        new Float32Array(270_000),
+      ]),
+    }],
+  }
+  const snapshotInput: LivePlaybackSnapshotInput = {
+    ...input(track),
+    renderState: {
+      ...input(track).renderState,
+      automationEnvelopes: [{
+        id: "volume-automation",
+        projectId: "project:1",
+        target: { kind: "track", trackId: "track" },
+        targetKey: automationTargetKey({ kind: "track", trackId: "track" }, "volume"),
+        parameterId: "volume",
+        enabled: true,
+        points: [
+          { id: "start", timeSec: 0, value: 0.25, interpolation: "linear" },
+          { id: "end", timeSec: 6, value: 0.75, interpolation: "linear" },
+        ],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(snapshotInput),
+  })
+
+  await expect(controller.start(snapshotInput.transport)).resolves.toBe("started")
+  await controller.pause(3)
+  await expect(controller.start({ ...snapshotInput.transport, playheadSec: 3 })).resolves.toBe("started")
+  await controller.pause(3.5)
+  await expect(controller.start({ ...snapshotInput.transport, playheadSec: 3.5 })).resolves.toBe("started")
+
+  const runningTransports = fixture.transports.filter(({ running }) => running)
+  expect(runningTransports.map(({ epoch, frame }) => ({ epoch, frame }))).toEqual([
+    { epoch: 1, frame: 0 },
+    { epoch: 2, frame: 144_000 },
+    { epoch: 3, frame: 168_000 },
+  ])
+  const sourceEvents = decodeNativeSourceEvents(fixture.schedulePayloads)
+  expect(new Set(sourceEvents.filter((event) => event.epoch === 1).map((event) => event.assetId)).size).toBe(1)
+  expect(new Set(sourceEvents.filter((event) => event.epoch === 2).map((event) => event.assetId)).size).toBe(1)
+  expect(sourceEvents.find((event) => event.epoch === 2)?.assetId)
+    .not.toBe(sourceEvents.find((event) => event.epoch === 1)?.assetId)
+  for (const transport of runningTransports) {
+    const windows = fixture.schedulePayloads.filter((payload) => {
+      const view = new DataView(payload.buffer)
+      return view.getUint32(4, true) === transport.epoch
+        && Number(view.getBigUint64(16, true)) <= transport.frame
+        && Number(view.getBigUint64(24, true)) > transport.frame
+    })
+    expect(windows.length).toBeGreaterThan(0)
+    expect(windows.some((payload) => decodeNativeSourceEvents([payload]).some((event) => (
+      event.startFrame <= transport.frame && event.stopFrame > transport.frame
+    )))).toBeTrue()
+    expect(windows.some((payload) => decodeNativeProcessorEvents([payload]).some((event) => (
+      event.frame >= transport.frame
+    )))).toBeTrue()
+  }
+
+  await controller.dispose()
 })
 
 test("rebuilds the coordinator when same-frame resume changes loop scheduling", async () => {

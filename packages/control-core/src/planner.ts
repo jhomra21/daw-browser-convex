@@ -18,6 +18,7 @@ import {
   midiMappingDescriptor,
   trackCreationCollapsed,
   parseGranularAutomationKey,
+  parseExternalAutomationParameterId,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
   granularAutomationKey,
@@ -533,7 +534,13 @@ const validateAutomationTarget = (
   if (descriptor.owner !== 'mixer') {
     const requiredEffect = effect
       ?? planError(actionIndex, 'validation', 'Effect automation requires an effect instance.')
-    if (requiredEffect.processor.kind !== descriptor.owner) {
+    const externalParameter = descriptor.owner === 'external'
+      ? parseExternalAutomationParameterId(action.parameterId)
+      : undefined
+    if (
+      requiredEffect.processor.kind !== (descriptor.owner === 'external' ? 'external-vst3' : descriptor.owner)
+      || (descriptor.owner === 'external' && externalParameter?.instanceId !== requiredEffect.instanceId)
+    ) {
       planError(actionIndex, 'validation', 'Automation effect instance does not belong to this target.')
     }
   }

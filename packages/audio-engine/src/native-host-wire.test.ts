@@ -134,6 +134,32 @@ test("serializes source events using the session asset identifier", () => {
   expect(view.getBigInt64(64, true)).toBe(7n)
 })
 
+test("rejects source events that are not sorted by native schedule order", () => {
+  const event = (startFrame: number, sequence: number) => ({
+    epoch: 1,
+    sequence,
+    sourceNodeId: "source",
+    assetId: "a",
+    startFrame,
+    stopFrame: startFrame + 1,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 1,
+    gain: 1,
+    fadeInStartFrame: startFrame,
+    fadeInEndFrame: startFrame,
+    fadeOutStartFrame: startFrame + 1,
+    fadeOutEndFrame: startFrame + 1,
+  })
+  expect(() => serializeNativeScheduleWindow({
+    revision: 1,
+    epoch: 1,
+    startFrame: 0,
+    endFrame: 100,
+    sampleSourceEvents: [event(20, 2), event(10, 3)],
+    assets: mapNativeSessionAssets([asset("a")]),
+  })).toThrow("sorted by (startFrame, sequence)")
+})
+
 test("serializes absent native fade curves with defaults and keeps signed anchors", () => {
   const bytes = serializeNativeSourceEvents([{
     epoch: 1,
@@ -309,10 +335,10 @@ test("serializes bounded native schedule ownership events", () => {
     }],
   })
   const view = new DataView(bytes.buffer)
-  expect(bytes.byteLength).toBe(104)
+  expect(bytes.byteLength).toBe(108)
   expect(view.getUint32(0, true)).toBe(4)
   expect(view.getUint32(40, true)).toBe(1)
-  expect(view.getUint32(56 + 32, true)).toBe(104)
+  expect(view.getUint32(60 + 32, true)).toBe(104)
   expect(() => serializeNativeScheduleWindow({
     revision: 4, epoch: 2, startFrame: 100, endFrame: 200, windowId: 9,
     instrumentEvents: [{ nodeId: "track", noteId: 1, sequence: 1, frameOffset: 200, type: "live-note-off", channel: 0, note: 60, value: 0 }],

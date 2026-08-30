@@ -11,7 +11,7 @@ type DesktopNativeOfflineRendererBridge = {
   start(
     jobId: string,
     plan: NativeOfflineRenderPlan,
-    onChunk: (chunk: NativeOfflinePcmChunk) => void,
+    onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
   ): Promise<{ ok: true } | { ok: false; error: string }>
   cancel(jobId: string): Promise<{ accepted: boolean }>
 }

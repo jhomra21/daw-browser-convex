@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
+import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, createAutomationTarget, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { synthAutomationKey } from './synth-automation'
 import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
@@ -16,6 +16,20 @@ describe('automation helpers', () => {
       { kind: 'track', trackId: 'track:1', effectInstanceId: 'compressor:a:b' },
       'compressor.thresholdDb',
     )).toBe('automation:v2:["track","track:1","compressor:a:b","compressor.thresholdDb"]')
+  })
+
+  test('creates JSON-safe targets with optional effect identities', () => {
+    const mixerTarget = createAutomationTarget({ kind: 'track', trackId: 'track-1' })
+    const effectTarget = createAutomationTarget({ kind: 'track', trackId: 'track-1' }, 'delay-1')
+
+    expect(mixerTarget).toEqual({ kind: 'track', trackId: 'track-1' })
+    expect(Object.hasOwn(mixerTarget, 'effectInstanceId')).toBe(false)
+    expect(effectTarget).toEqual({
+      kind: 'track',
+      trackId: 'track-1',
+      effectInstanceId: 'delay-1',
+    })
+    expect(Object.hasOwn(effectTarget, 'effectInstanceId')).toBe(true)
   })
 
   test('derives canonical cloud rows without losing processor identity', () => {

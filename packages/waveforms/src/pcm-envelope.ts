@@ -42,13 +42,15 @@ export function createPcmEnvelopeAccumulator(input: PcmEnvelopeAccumulatorInput)
   const append = (page: WaveformPcmPage) => {
     if (!validNonNegativeInteger(page.startFrame)
       || !validPositiveInteger(page.frameCount)
+      || !Number.isSafeInteger(page.startFrame + page.frameCount)
       || page.planes.length !== input.channelCount
       || page.planes.some((plane) => plane.length < page.frameCount)) {
       throw new Error('PCM waveform page metadata is inconsistent.')
     }
 
+    const pageEndFrame = page.startFrame + page.frameCount
     const overlapStart = Math.max(input.startFrame, page.startFrame)
-    const overlapEnd = Math.min(input.endFrame, page.startFrame + page.frameCount)
+    const overlapEnd = Math.min(input.endFrame, pageEndFrame)
     for (let frame = overlapStart; frame < overlapEnd; frame += 1) {
       const column = Math.min(
         input.columns - 1,

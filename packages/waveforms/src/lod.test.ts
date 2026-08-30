@@ -58,7 +58,9 @@ describe('selectWaveformLod', () => {
 
   test('rejects invalid viewport or source metadata', () => {
     expect(selectWaveformLod({ sampleRate: 0, sourceStartSec: 0, sourceEndSec: 1, widthPx: 100 })).toBeNull()
+    expect(selectWaveformLod({ sampleRate: 48_000, sourceStartSec: -0.1, sourceEndSec: 1, widthPx: 100 })).toBeNull()
     expect(selectWaveformLod({ sampleRate: 48_000, sourceStartSec: 1, sourceEndSec: 1, widthPx: 100 })).toBeNull()
+    expect(selectWaveformLod({ sampleRate: 48_000, sourceStartSec: 0, sourceEndSec: Number.POSITIVE_INFINITY, widthPx: 100 })).toBeNull()
     expect(selectWaveformLod({ sampleRate: 48_000, sourceStartSec: 0, sourceEndSec: 1, widthPx: 0 })).toBeNull()
   })
 })

@@ -30,6 +30,8 @@ type SelectWaveformLodInput = {
 export function selectWaveformLod(input: SelectWaveformLodInput): WaveformLod | null {
   const durationSec = input.sourceEndSec - input.sourceStartSec
   if (!Number.isFinite(input.sampleRate) || input.sampleRate <= 0
+    || !Number.isFinite(input.sourceStartSec) || input.sourceStartSec < 0
+    || !Number.isFinite(input.sourceEndSec)
     || !Number.isFinite(durationSec) || durationSec <= 0
     || !Number.isFinite(input.widthPx) || input.widthPx <= 0) return null
 

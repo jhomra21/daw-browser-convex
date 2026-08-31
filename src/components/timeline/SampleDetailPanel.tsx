@@ -9,6 +9,7 @@ import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from 
 
 type SampleDetailPanelProps = {
   clip: Clip<AudioBuffer>;
+  projectId?: string;
   projectBpm: number;
   audioEngine: AudioEngine;
   bpmDetection: BpmDetectionService;
@@ -61,8 +62,8 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
         />
         <SampleDetailWaveform
           clip={props.clip}
+          projectId={props.projectId}
           projectBpm={props.projectBpm}
-          ensureClipBuffer={props.ensureClipBuffer}
           canWrite={canWrite()}
           onMarkerDragStateChange={props.onMarkerDragStateChange}
           onWarpChange={(audioWarp) => props.onWarpChange(props.clip, audioWarp)}

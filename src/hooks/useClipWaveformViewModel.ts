@@ -244,16 +244,14 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     }
     const visibleCenterSec = (range.startSec + range.endSec) / 2
 
-    void Promise.all(visibleSegments.map(async (segment): Promise<ClipWaveformPeakSegment> => {
+    const resolveSegmentPeaks = async (segment: SourceSegment) => {
       const lod = selectWaveformLod({
         sampleRate,
         sourceStartSec: segment.sourceStartSec,
         sourceEndSec: segment.sourceEndSec,
         widthPx: segment.drawCols,
       })
-      if (!lod) {
-        return { drawStartPx: segment.drawStartPx, drawCols: segment.drawCols, peaks: null }
-      }
+      if (!lod) return null
 
       if (lod.mode === 'cached-peaks') {
         const cached = await getWaveformChannelSlice({
@@ -265,43 +263,37 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           sourceEndSec: segment.sourceEndSec,
           bins: segment.drawCols,
         })
-        if (cached) {
-          return { drawStartPx: segment.drawStartPx, drawCols: segment.drawCols, peaks: cached }
-        }
+        if (cached) return cached
       }
 
-      const peaks = current.buffer
-        ? resolveBufferEnvelope(current.buffer, segment, channelCount)
-        : await arrangementWaveformPcmScheduler.request({
-          assetKey,
-          source,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          columns: segment.drawCols,
-          sampleRate,
-          channelCount,
-          priority: Math.abs((segment.timelineStartSec + segment.timelineEndSec) / 2 - visibleCenterSec),
-          signal: abortController.signal,
+      if (current.buffer) return resolveBufferEnvelope(current.buffer, segment, channelCount)
+      return await arrangementWaveformPcmScheduler.request({
+        assetKey,
+        source,
+        sourceStartSec: segment.sourceStartSec,
+        sourceEndSec: segment.sourceEndSec,
+        columns: segment.drawCols,
+        sampleRate,
+        channelCount,
+        priority: Math.abs((segment.timelineStartSec + segment.timelineEndSec) / 2 - visibleCenterSec),
+        signal: abortController.signal,
+      })
+    }
+
+    for (let index = 0; index < visibleSegments.length; index += 1) {
+      const segment = visibleSegments[index]
+      if (!segment) continue
+      void resolveSegmentPeaks(segment)
+        .then((peaks) => {
+          if (currentRequestId !== requestId || abortController.signal.aborted) return
+          setPeakSegments((currentSegments) => currentSegments.map((currentSegment, segmentIndex) => (
+            segmentIndex === index
+              ? { drawStartPx: segment.drawStartPx, drawCols: segment.drawCols, peaks }
+              : currentSegment
+          )))
         })
-
-      return {
-        drawStartPx: segment.drawStartPx,
-        drawCols: segment.drawCols,
-        peaks,
-      }
-    }))
-      .then((next) => {
-        if (currentRequestId !== requestId || abortController.signal.aborted) return
-        setPeakSegments(next)
-      })
-      .catch(() => {
-        if (currentRequestId !== requestId || abortController.signal.aborted) return
-        setPeakSegments(visibleSegments.map((segment) => ({
-          drawStartPx: segment.drawStartPx,
-          drawCols: segment.drawCols,
-          peaks: null,
-        })))
-      })
+        .catch(() => {})
+    }
   })
 
   onCleanup(() => {

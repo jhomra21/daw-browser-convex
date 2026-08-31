@@ -52,4 +52,15 @@ describe('getWaveformChannelSlice', () => {
 
     expect(slice).toBeNull()
   })
+
+  test('does not decode a source when no cached asset is available', async () => {
+    const slice = await getWaveformChannelSlice({
+      assetKey: 'asset-without-source',
+      sourceStartSec: 0,
+      sourceEndSec: 1,
+      bins: 400,
+    })
+
+    expect(slice).toBeNull()
+  })
 })

@@ -17,7 +17,7 @@ export function createPcmSampleWindowCollector(input: PcmSampleWindowInput) {
   if (!validNonNegativeInteger(input.startFrame)
     || !validPositiveInteger(input.endFrame)
     || input.endFrame <= input.startFrame
-    || !Number.isFinite(input.sampleRate) || input.sampleRate <= 0
+    || !validPositiveInteger(input.sampleRate)
     || !validPositiveInteger(input.channelCount)
     || !Number.isFinite(input.sourceStartSec) || input.sourceStartSec < 0
     || !Number.isFinite(input.sourceEndSec) || input.sourceEndSec <= input.sourceStartSec) {
@@ -25,7 +25,12 @@ export function createPcmSampleWindowCollector(input: PcmSampleWindowInput) {
   }
 
   const frameCount = input.endFrame - input.startFrame
+  if (!validPositiveInteger(frameCount)) {
+    throw new Error('PCM waveform sample window bounds are invalid.')
+  }
   const channels = Array.from({ length: input.channelCount }, () => new Float32Array(frameCount))
+  let previousPageEndFrame = 0
+  let hasPreviousPage = false
 
   const append = (page: WaveformPcmPage) => {
     if (!validNonNegativeInteger(page.startFrame)
@@ -37,6 +42,11 @@ export function createPcmSampleWindowCollector(input: PcmSampleWindowInput) {
     }
 
     const pageEndFrame = page.startFrame + page.frameCount
+    if (hasPreviousPage && page.startFrame < previousPageEndFrame) {
+      throw new Error('PCM waveform pages overlap or are out of order.')
+    }
+    previousPageEndFrame = pageEndFrame
+    hasPreviousPage = true
     const overlapStart = Math.max(input.startFrame, page.startFrame)
     const overlapEnd = Math.min(input.endFrame, pageEndFrame)
     if (overlapEnd <= overlapStart) return

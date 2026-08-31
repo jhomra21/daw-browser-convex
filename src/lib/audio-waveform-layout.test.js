@@ -121,6 +121,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 4,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 14,
     })
   })
 
@@ -143,6 +145,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 2.5 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 1.25,
       sourceEndSec: 3.25,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 12.5,
     })
   })
 
@@ -165,6 +169,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 1000,
       sourceStartSec: 1.25,
       sourceEndSec: 3.25,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 12.5,
     })
   })
 
@@ -187,6 +193,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 179,
       sourceStartSec: 1,
       sourceEndSec: 4.488888889,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 14,
     })
   })
 
@@ -210,6 +218,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 125,
       sourceStartSec: 1.25,
       sourceEndSec: 2,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 12.5,
     })
   })
 
@@ -263,6 +273,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 4,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 16,
     })
   })
 
@@ -284,6 +296,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 3,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 16,
     })
   })
 
@@ -307,6 +321,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 2,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 14,
     })
   })
 
@@ -330,6 +346,8 @@ describe('getAudioWaveformLayout', () => {
       audioEndPx: 4 * DEFAULT_PIXELS_PER_SECOND,
       sourceStartSec: 0,
       sourceEndSec: 3.5,
+      visibleTimelineStartSec: 10,
+      visibleTimelineEndSec: 14,
     })
   })
 
@@ -355,8 +373,22 @@ describe('getAudioWaveformLayout', () => {
     )
 
     expect(layout.segments).toEqual([
-      { drawCols: 200, sourceStartSec: 0, sourceEndSec: 0.5 },
-      { drawCols: 200, sourceStartSec: 0.5, sourceEndSec: 2 },
+      {
+        drawStartPx: 0,
+        drawCols: 200,
+        timelineStartSec: 10,
+        timelineEndSec: 12,
+        sourceStartSec: 0,
+        sourceEndSec: 0.5,
+      },
+      {
+        drawStartPx: 200,
+        drawCols: 200,
+        timelineStartSec: 12,
+        timelineEndSec: 14,
+        sourceStartSec: 0.5,
+        sourceEndSec: 2,
+      },
     ])
   })
 })

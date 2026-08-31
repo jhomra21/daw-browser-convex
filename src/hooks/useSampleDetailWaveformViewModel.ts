@@ -74,8 +74,18 @@ type WaveformRequestView = {
 type PcmSourceResolver = () => Promise<DecodeAudioPageSource | null>
 
 const frameBounds = (segment: SourceSegment, sampleRate: number) => {
-  const startFrame = Math.max(0, Math.floor(segment.sourceStartSec * sampleRate))
-  const endFrame = Math.max(startFrame + 1, Math.ceil(segment.sourceEndSec * sampleRate))
+  if (!Number.isSafeInteger(sampleRate) || sampleRate <= 0
+    || !Number.isFinite(segment.sourceStartSec) || segment.sourceStartSec < 0
+    || !Number.isFinite(segment.sourceEndSec) || segment.sourceEndSec <= segment.sourceStartSec) {
+    return null
+  }
+  const rawStartFrame = segment.sourceStartSec * sampleRate
+  const rawEndFrame = segment.sourceEndSec * sampleRate
+  if (!Number.isFinite(rawStartFrame) || !Number.isFinite(rawEndFrame)) return null
+  const startFrame = Math.floor(rawStartFrame)
+  if (!Number.isSafeInteger(startFrame) || startFrame >= Number.MAX_SAFE_INTEGER) return null
+  const endFrame = Math.max(startFrame + 1, Math.ceil(rawEndFrame))
+  if (!Number.isSafeInteger(endFrame) || endFrame <= startFrame) return null
   return { startFrame, endFrame }
 }
 
@@ -111,7 +121,9 @@ async function resolvePcmEnvelope(
   segment: SourceSegment,
   signal: AbortSignal,
 ): Promise<RenderPeakSegment | null> {
-  const { startFrame, endFrame } = frameBounds(segment, view.sampleRate)
+  const bounds = frameBounds(segment, view.sampleRate)
+  if (!bounds) return null
+  const { startFrame, endFrame } = bounds
   const accumulator = createPcmEnvelopeAccumulator({
     startFrame,
     endFrame,
@@ -149,7 +161,9 @@ async function resolvePcmSamples(
   showPoints: boolean,
   signal: AbortSignal,
 ): Promise<RenderSampleSegment | null> {
-  const { startFrame, endFrame } = frameBounds(segment, view.sampleRate)
+  const bounds = frameBounds(segment, view.sampleRate)
+  if (!bounds) return null
+  const { startFrame, endFrame } = bounds
   const collector = createPcmSampleWindowCollector({
     startFrame,
     endFrame,
@@ -197,22 +211,24 @@ async function resolveSegment(
   })
   if (!lod) return null
 
-  if (lod.mode === 'cached-peaks' && view.assetKey) {
-    const peaks = await getWaveformChannelSlice({
-      assetKey: view.assetKey,
-      sourceIdentity: view.sourceIdentity,
-      sampleUrl: view.sampleUrl,
-      buffer: view.buffer,
-      sourceStartSec: segment.sourceStartSec,
-      sourceEndSec: segment.sourceEndSec,
-      bins: segment.drawCols,
-    })
-    if (peaks) {
-      return {
-        mode: 'peaks',
-        drawStartPx: segment.drawStartPx,
-        drawCols: segment.drawCols,
-        peaks,
+  if (lod.mode === 'cached-peaks') {
+    if (view.assetKey) {
+      const peaks = await getWaveformChannelSlice({
+        assetKey: view.assetKey,
+        sourceIdentity: view.sourceIdentity,
+        sampleUrl: undefined,
+        buffer: view.buffer,
+        sourceStartSec: segment.sourceStartSec,
+        sourceEndSec: segment.sourceEndSec,
+        bins: segment.drawCols,
+      })
+      if (peaks) {
+        return {
+          mode: 'peaks',
+          drawStartPx: segment.drawStartPx,
+          drawCols: segment.drawCols,
+          peaks,
+        }
       }
     }
     return resolvePcmEnvelope(view, getSource, segment, signal)
@@ -222,7 +238,11 @@ async function resolveSegment(
     return resolvePcmEnvelope(view, getSource, segment, signal)
   }
 
-  return resolvePcmSamples(view, getSource, segment, lod.showPoints, signal)
+  if (lod.mode === 'pcm-line') {
+    return resolvePcmSamples(view, getSource, segment, lod.showPoints, signal)
+  }
+
+  return null
 }
 
 export function useSampleDetailWaveformViewModel(options: SampleDetailWaveformViewModelOptions) {
@@ -239,7 +259,10 @@ export function useSampleDetailWaveformViewModel(options: SampleDetailWaveformVi
       sourceSampleRate: clip.sourceSampleRate,
       sourceChannelCount: clip.sourceChannelCount,
     })
-    if (!metadata || clip.midi) return null
+    if (!metadata || clip.midi
+      || !Number.isFinite(metadata.durationSec) || metadata.durationSec <= 0
+      || !Number.isSafeInteger(metadata.sampleRate) || metadata.sampleRate <= 0
+      || !Number.isSafeInteger(metadata.channelCount) || metadata.channelCount <= 0) return null
 
     const width = options.cssWidthPx()
     const viewport = options.viewport()

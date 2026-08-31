@@ -83,6 +83,7 @@ export type TimelinePanelsProps = {
   sampleDetailPanel: {
     isOpen: boolean
     selectedClip?: Clip<AudioBuffer>
+    projectId?: string
     projectBpm: number
     audioEngine: AudioEngine
     bpmDetection: BpmDetectionService
@@ -203,6 +204,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         {(clip) => (
           <SampleDetailPanel
             clip={clip()}
+            projectId={panels().sampleDetailPanel.projectId}
             projectBpm={panels().sampleDetailPanel.projectBpm}
             audioEngine={panels().sampleDetailPanel.audioEngine}
             bpmDetection={panels().sampleDetailPanel.bpmDetection}

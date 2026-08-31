@@ -69,6 +69,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   });
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);
+  const clipAudioStartSec = createMemo(() => Math.max(0, props.clip.leftPadSec ?? 0));
   const sourceBeatOffset = createMemo(() => props.clip.audioWarp?.sourceBeatOffset ?? 0);
   const warpMarkers = createMemo(() => props.clip.audioWarp?.markers ?? []);
   const markerWarpActive = createMemo(() => warpMarkers().length >= 2);
@@ -78,7 +79,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   const secondsPerBeat = createMemo(() => 60 / Math.max(1, props.projectBpm));
   const markerX = createMemo(() => sampleDetailWaveformXAtTime({
     viewport: viewport(),
-    timeSec: Math.max(0, props.clip.leftPadSec ?? 0) + visibleSourceBeatOffset() * secondsPerBeat(),
+    timeSec: clipAudioStartSec() + visibleSourceBeatOffset() * secondsPerBeat(),
     widthPx: waveformWidthPx(),
   }));
 
@@ -102,6 +103,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     onCleanup(() => resizeObserver.disconnect());
   });
 
+  onCleanup(() => {
+    if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
+  });
+
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {
     const canvas = canvasRef;
     if (!canvas) return viewport().startSec;
@@ -115,12 +120,12 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   };
 
   const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">) => {
-    const rawBeat = clipTimeFromPointer(event) / secondsPerBeat();
-    return event.altKey ? rawBeat : Math.round(rawBeat);
+    const rawBeat = (clipTimeFromPointer(event) - clipAudioStartSec()) / secondsPerBeat();
+    return Math.max(0, event.altKey ? rawBeat : Math.round(rawBeat));
   };
 
   const previewOffsetFromPointer = (event: PointerEvent) => {
-    const rawOffset = (clipTimeFromPointer(event) - Math.max(0, props.clip.leftPadSec ?? 0)) / secondsPerBeat();
+    const rawOffset = (clipTimeFromPointer(event) - clipAudioStartSec()) / secondsPerBeat();
     const snapped = event.altKey
       ? rawOffset
       : Math.round(rawOffset / SOURCE_BEAT_OFFSET_SNAP) * SOURCE_BEAT_OFFSET_SNAP;
@@ -164,10 +169,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   const handleWheel = (event: WheelEvent) => {
     if (!canvasRef || sourceSampleRate() <= 0) return;
-    event.preventDefault();
     const bounds = canvasRef.getBoundingClientRect();
     const current = viewport();
     if (!event.ctrlKey && !event.metaKey && Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      event.preventDefault();
       const visibleDurationSec = current.endSec - current.startSec;
       setViewport(panSampleDetailWaveformViewport({
         viewport: current,
@@ -177,7 +182,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       }));
       return;
     }
+    if (!event.ctrlKey && !event.metaKey) return;
 
+    event.preventDefault();
     const anchorFraction = Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width)));
     setViewport(zoomSampleDetailWaveformViewport({
       viewport: current,
@@ -344,7 +351,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
             const preview = createMemo(() => dragMarker()?.id === marker.id ? dragMarker() ?? marker : marker);
             const markerLeft = createMemo(() => sampleDetailWaveformXAtTime({
               viewport: viewport(),
-              timeSec: preview().timelineBeat * secondsPerBeat(),
+              timeSec: clipAudioStartSec() + preview().timelineBeat * secondsPerBeat(),
               widthPx: waveformWidthPx(),
             }));
             return (
@@ -376,7 +383,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                   const previous = markers[index() - 1];
                   const next = markers[index() + 1];
                   const lower = previous ? previous.timelineBeat + MIN_MARKER_GAP_BEATS : 0;
-                  const upper = next ? next.timelineBeat - MIN_MARKER_GAP_BEATS : getClipBeatWidth(props.clip.duration, props.projectBpm);
+                  const upper = next
+                    ? next.timelineBeat - MIN_MARKER_GAP_BEATS
+                    : getClipBeatWidth(Math.max(0, props.clip.duration - clipAudioStartSec()), props.projectBpm);
                   const timelineBeat = Math.min(upper, Math.max(lower, beat));
                   const current = dragMarker();
                   if (current?.timelineBeat === timelineBeat && current.sourceBeat === marker.sourceBeat) return;
@@ -385,13 +394,24 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 onPointerUp={(event) => {
                   const dragged = dragMarker();
                   if (!dragged || dragged.id !== marker.id) return;
-                  event.currentTarget.releasePointerCapture(event.pointerId);
                   setDragMarker(undefined);
                   props.onMarkerDragStateChange?.(false);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
                   if (dragged.timelineBeat === marker.timelineBeat && dragged.sourceBeat === marker.sourceBeat) return;
                   commitMarkers(warpMarkers().map((entry) => entry.id === marker.id ? dragged : entry));
                 }}
-                onPointerCancel={() => {
+                onPointerCancel={(event) => {
+                  if (dragMarker()?.id !== marker.id) return;
+                  setDragMarker(undefined);
+                  props.onMarkerDragStateChange?.(false);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                }}
+                onLostPointerCapture={() => {
+                  if (dragMarker()?.id !== marker.id) return;
                   setDragMarker(undefined);
                   props.onMarkerDragStateChange?.(false);
                 }}
@@ -432,15 +452,25 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 if (!isDraggingMarker()) return;
                 event.preventDefault();
                 const nextOffset = previewOffsetFromPointer(event);
-                event.currentTarget.releasePointerCapture(event.pointerId);
                 setIsDraggingMarker(false);
                 props.onMarkerDragStateChange?.(false);
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
                 setDragPreviewOffset(undefined);
                 commitSourceBeatOffset(nextOffset);
               }}
               onPointerCancel={(event) => {
                 if (!isDraggingMarker()) return;
-                event.currentTarget.releasePointerCapture(event.pointerId);
+                setIsDraggingMarker(false);
+                props.onMarkerDragStateChange?.(false);
+                setDragPreviewOffset(undefined);
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+              }}
+              onLostPointerCapture={() => {
+                if (!isDraggingMarker()) return;
                 setIsDraggingMarker(false);
                 props.onMarkerDragStateChange?.(false);
                 setDragPreviewOffset(undefined);

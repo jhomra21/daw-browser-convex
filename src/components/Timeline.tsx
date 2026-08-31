@@ -2403,6 +2403,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     sampleDetailPanel: {
       isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
       selectedClip: sampleDetail.selectedClip(),
+      projectId: projectId(),
       projectBpm: bpm(),
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,

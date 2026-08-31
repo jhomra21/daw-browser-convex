@@ -66,4 +66,30 @@ describe('createPcmSampleWindowCollector', () => {
       planes: [new Float32Array(2)],
     })).toThrow('PCM waveform page metadata is inconsistent.')
   })
+
+  test('rejects overlapping or out-of-order pages instead of overwriting samples', () => {
+    const collector = createPcmSampleWindowCollector({
+      startFrame: 0,
+      endFrame: 6,
+      sampleRate: 48_000,
+      channelCount: 1,
+      sourceStartSec: 0,
+      sourceEndSec: 6 / 48_000,
+    })
+
+    collector.append(page(0, [[0, 1, 2]]))
+    expect(() => collector.append(page(2, [[3, 4]]))).toThrow('PCM waveform pages overlap or are out of order.')
+    expect(() => collector.append(page(-1, [[3]]))).toThrow('PCM waveform page metadata is inconsistent.')
+  })
+
+  test('rejects unsafe sample-rate metadata before allocating a window', () => {
+    expect(() => createPcmSampleWindowCollector({
+      startFrame: 0,
+      endFrame: 2,
+      sampleRate: Number.MAX_SAFE_INTEGER + 1,
+      channelCount: 1,
+      sourceStartSec: 0,
+      sourceEndSec: 1,
+    })).toThrow('PCM waveform sample window bounds are invalid.')
+  })
 })

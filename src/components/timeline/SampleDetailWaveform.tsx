@@ -1,4 +1,4 @@
-import { For, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
 import { drawWaveformPeaks, drawWaveformSamples } from "@daw-browser/waveforms/render-waveform";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
@@ -235,11 +235,11 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }
 
     const renderSegments = waveform.renderSegments();
-    const channelCount = renderSegments.find((segment) => (
+    const firstPopulatedSegment = renderSegments.find((segment) => (
       segment.mode === "peaks" ? segment.peaks.channels.length > 0 : segment.samples.channels.length > 0
     ));
-    const visibleChannelCount = channelCount
-      ? (channelCount.mode === "peaks" ? channelCount.peaks.channels.length : channelCount.samples.channels.length)
+    const visibleChannelCount = firstPopulatedSegment
+      ? (firstPopulatedSegment.mode === "peaks" ? firstPopulatedSegment.peaks.channels.length : firstPopulatedSegment.samples.channels.length)
       : Math.max(1, props.clip.buffer?.numberOfChannels ?? props.clip.sourceChannelCount ?? 1);
     const contentTop = 16;
     const contentHeight = Math.max(1, height - 32);
@@ -293,17 +293,8 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }
   };
 
-  createMemo(() => {
-    void waveform.renderSegments();
-    void waveform.loading();
-    void viewport();
-    void waveformWidthPx();
-    void waveformHeightPx();
-    void props.projectBpm;
-    void props.clip.audioWarp;
-    void visibleSourceBeatOffset();
+  createEffect(() => {
     draw();
-    return undefined;
   });
 
   return (

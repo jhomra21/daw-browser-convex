@@ -28,6 +28,16 @@ describe('sample detail waveform viewport', () => {
     expect(next.startSec + (next.endSec - next.startSec) * 0.25).toBeCloseTo(2.5)
   })
 
+  test('zooms symmetrically around the center', () => {
+    expect(zoomSampleDetailWaveformViewport({
+      viewport: { startSec: 2, endSec: 8 },
+      clipDurationSec: 10,
+      sampleRate: 48_000,
+      anchorFraction: 0.5,
+      zoomFactor: 2,
+    })).toEqual({ startSec: 3.5, endSec: 6.5 })
+  })
+
   test('clamps zoom and pan at clip boundaries without changing visible duration', () => {
     const zoomed = zoomSampleDetailWaveformViewport({
       viewport: { startSec: 0, endSec: 10 },
@@ -45,6 +55,13 @@ describe('sample detail waveform viewport', () => {
       deltaSec: 20,
     })
     expect(panned).toEqual({ startSec: 5, endSec: 10 })
+
+    expect(panSampleDetailWaveformViewport({
+      viewport: panned,
+      clipDurationSec: 10,
+      sampleRate: 48_000,
+      deltaSec: Number.NaN,
+    })).toEqual(panned)
   })
 
   test('never zooms past two source samples', () => {
@@ -57,7 +74,19 @@ describe('sample detail waveform viewport', () => {
 
   test('maps viewport time and pixels directly', () => {
     const viewport = { startSec: 2, endSec: 6 }
+    expect(sampleDetailWaveformTimeAtX({ viewport, xPx: 0, widthPx: 600 })).toBe(2)
+    expect(sampleDetailWaveformTimeAtX({ viewport, xPx: 600, widthPx: 600 })).toBe(6)
     expect(sampleDetailWaveformTimeAtX({ viewport, xPx: 300, widthPx: 600 })).toBe(4)
     expect(sampleDetailWaveformXAtTime({ viewport, timeSec: 5, widthPx: 600 })).toBe(450)
+    expect(sampleDetailWaveformXAtTime({ viewport, timeSec: 4, widthPx: 600 })).toBe(300)
+    expect(sampleDetailWaveformTimeAtX({
+      viewport,
+      xPx: sampleDetailWaveformXAtTime({ viewport, timeSec: 5, widthPx: 600 }),
+      widthPx: 600,
+    })).toBe(5)
+    expect(sampleDetailWaveformTimeAtX({ viewport, xPx: -150, widthPx: 600 })).toBe(1)
+    expect(sampleDetailWaveformTimeAtX({ viewport, xPx: 750, widthPx: 600 })).toBe(7)
+    expect(sampleDetailWaveformXAtTime({ viewport, timeSec: 1, widthPx: 600 })).toBe(-150)
+    expect(sampleDetailWaveformXAtTime({ viewport, timeSec: 7, widthPx: 600 })).toBe(750)
   })
 })

@@ -72,4 +72,48 @@ describe('getAudioWaveformLayout viewport', () => {
 
     expect(layout.drawCols).toBe(0)
   })
+
+  test('positions marker-warp segments across a partial viewport boundary', () => {
+    const layout = getAudioWaveformLayout(
+      clip({
+        duration: 4,
+        sourceDurationSec: 4,
+        audioWarp: {
+          enabled: true,
+          mode: 'stretch',
+          sourceBpm: 120,
+          markers: [
+            { id: 'marker-0', sourceBeat: 0, timelineBeat: 0 },
+            { id: 'marker-1', sourceBeat: 2, timelineBeat: 1 },
+            { id: 'marker-2', sourceBeat: 4, timelineBeat: 4 },
+          ],
+        },
+      }),
+      1_000,
+      4,
+      120,
+      { startSec: 10.25, endSec: 11.5 },
+    )
+
+    expect(layout.sourceStartSec).toBe(0.5)
+    expect(layout.sourceEndSec).toBeCloseTo(5 / 3)
+    expect(layout.segments).toEqual([
+      {
+        drawStartPx: 0,
+        drawCols: 200,
+        timelineStartSec: 10.25,
+        timelineEndSec: 10.5,
+        sourceStartSec: 0.5,
+        sourceEndSec: 1,
+      },
+      {
+        drawStartPx: 200,
+        drawCols: 800,
+        timelineStartSec: 10.5,
+        timelineEndSec: 11.5,
+        sourceStartSec: 1,
+        sourceEndSec: 1.666666667,
+      },
+    ])
+  })
 })

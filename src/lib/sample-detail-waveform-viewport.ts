@@ -82,7 +82,7 @@ export function sampleDetailWaveformTimeAtX(input: {
   widthPx: number
 }) {
   const fraction = input.widthPx > 0 && Number.isFinite(input.widthPx)
-    ? clampUnit(input.xPx / input.widthPx)
+    ? input.xPx / input.widthPx
     : 0
   return input.viewport.startSec + (input.viewport.endSec - input.viewport.startSec) * fraction
 }

@@ -289,8 +289,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
 
     const layout = waveform.layout();
-    const { padPx, drawCols, audioStartPx, audioEndPx } = layout;
-    const peaks = waveform.peaks();
+    const { drawCols, audioStartPx, audioEndPx } = layout;
     if (drawCols <= 0) {
       ctx.fillStyle = timelineSurface;
       ctx.fillRect(0, 0, cssW, cssH);
@@ -314,19 +313,22 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       ctx.fillRect(Math.max(0, audioEndPx), 0, cssW - Math.max(0, audioEndPx), cssH);
     }
 
-    if (!peaks) {
-      ctx.strokeStyle = timelineGridMinor;
-      for (let x = audioStartPx; x < audioEndPx; x += 6) {
-        ctx.beginPath();
-        ctx.moveTo(x, cssH);
-        ctx.lineTo(Math.min(audioEndPx, x + 6), 0);
-        ctx.stroke();
-      }
-      return;
-    }
-
     const waveformTop = CLIP_TITLE_HEADER_H + AUDIO_WAVEFORM_PADDING_Y;
     const waveformBoxH = cssH - waveformTop - AUDIO_WAVEFORM_PADDING_Y;
+    const waveformBottom = waveformTop + waveformBoxH;
+    const segments = waveform.peakSegments();
+    let channelCount = Math.max(
+      1,
+      props.clip.buffer?.numberOfChannels
+        ?? props.clip.sourceChannelCount
+        ?? 1,
+    );
+    for (const segment of segments) {
+      if (!segment.peaks || segment.peaks.channels.length === 0) continue;
+      channelCount = segment.peaks.channels.length;
+      break;
+    }
+    const channelHeight = waveformBoxH / channelCount;
     const duration = Math.max(0, props.clip.duration);
     const fades = normalizeClipFades(props.clip.fades, duration);
     const hasEffectiveFade = fades.fadeInStartSec > 0
@@ -334,26 +336,60 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       || fades.fadeOutSec > 0
       || fades.fadeOutEndSec > 0;
 
-    drawWaveformPeaks({
-      ctx,
-      peaks,
-      drawCols,
-      padPx,
-      topY: waveformTop,
-      contentH: waveformBoxH,
-      cssW,
-      cssH,
-      fillStyle: contentColor,
-      boundaryStyle: timelineGridMajor,
-      maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
-      amplitudeScaleAtColumn: hasEffectiveFade
-        ? (column) => normalizedFadeGainAtClipTime(
+    ctx.strokeStyle = timelineGridMinor;
+    for (const segment of segments) {
+      const drawStartPx = Math.max(0, Math.min(cssW, segment.drawStartPx));
+      const drawEndPx = Math.max(
+        drawStartPx,
+        Math.min(cssW, segment.drawStartPx + segment.drawCols),
+      );
+      if (drawEndPx <= drawStartPx) continue;
+
+      if (!segment.peaks) {
+        for (let x = drawStartPx; x < drawEndPx; x += 6) {
+          ctx.beginPath();
+          ctx.moveTo(x, waveformBottom);
+          ctx.lineTo(Math.min(drawEndPx, x + 6), waveformTop);
+          ctx.stroke();
+        }
+        continue;
+      }
+
+      const amplitudeScaleAtColumn = hasEffectiveFade
+        ? (column: number) => normalizedFadeGainAtClipTime(
           fades,
           duration,
-          ((padPx + column + 0.5) / cssW) * duration,
+          ((segment.drawStartPx + column + 0.5) / cssW) * duration,
         )
-        : undefined,
-    });
+        : undefined;
+      for (let channelIndex = 0; channelIndex < segment.peaks.channels.length; channelIndex += 1) {
+        const peaks = segment.peaks.channels[channelIndex];
+        if (!peaks) continue;
+        drawWaveformPeaks({
+          ctx,
+          peaks,
+          drawCols: segment.drawCols,
+          padPx: segment.drawStartPx,
+          topY: waveformTop + channelIndex * channelHeight,
+          contentH: channelHeight,
+          cssW,
+          cssH,
+          fillStyle: contentColor,
+          boundaryStyle: timelineGridMajor,
+          maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
+          amplitudeScaleAtColumn,
+          drawBoundary: false,
+        });
+      }
+    }
+
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      const centerY = waveformTop + channelIndex * channelHeight + channelHeight / 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.max(0, audioStartPx), Math.floor(centerY) + 0.5);
+      ctx.lineTo(Math.min(cssW, audioEndPx), Math.floor(centerY) + 0.5);
+      ctx.stroke();
+    }
   }
 
   createEffect(() => {
@@ -380,7 +416,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       : "";
     void midiSignature;
     void props.bpm;
-    void waveform.peaks();
+    void waveform.peakSegments();
     void props.viewportRedrawVersion;
     drawWaveform();
   });

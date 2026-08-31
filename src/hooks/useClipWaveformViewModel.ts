@@ -145,8 +145,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
 
   const peaks = createMemo(() => {
     const segments = peakSegments()
-    if (segments.length === 0 || segments.some((segment) => !segment.peaks)) return null
-    return concatPeakSegments(segments.map((segment) => collapsePeakChannels(segment.peaks!)))
+    const complete = segments.flatMap((segment) => segment.peaks ? [segment.peaks] : [])
+    if (complete.length === 0 || complete.length !== segments.length) return null
+    return concatPeakSegments(complete.map(collapsePeakChannels))
   })
 
   onCleanup(() => {

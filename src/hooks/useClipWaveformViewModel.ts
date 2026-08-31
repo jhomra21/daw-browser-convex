@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
+import { getWaveformChannelSlice } from '@daw-browser/waveforms/select-waveform-window'
+import type { WaveformPeakChannelSlice } from '@daw-browser/waveforms/types'
 import { resolveClipSampleUrl } from '@daw-browser/shared'
 import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
 import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
@@ -16,19 +17,14 @@ type ClipWaveformViewModelOptions = {
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
-const concatPeakSegments = (segments: Uint8Array[]) => {
-  const totalLength = segments.reduce((sum, segment) => sum + segment.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const segment of segments) {
-    result.set(segment, offset)
-    offset += segment.length
-  }
-  return result
+export type ClipWaveformPeakSegment = {
+  drawStartPx: number
+  drawCols: number
+  peaks: WaveformPeakChannelSlice | null
 }
 
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
-  const [peaks, setPeaks] = createSignal<Uint8Array | null>(null)
+  const [peakSegments, setPeakSegments] = createSignal<ClipWaveformPeakSegment[]>([])
   let requestId = 0
 
   const view = createMemo(() => {
@@ -45,6 +41,14 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       sourceSampleRate: clip.sourceSampleRate,
       sourceChannelCount: clip.sourceChannelCount,
     })
+    const segments = layout.segments ?? (layout.drawCols > 0
+      ? [{
+        drawStartPx: layout.padPx,
+        drawCols: layout.drawCols,
+        sourceStartSec: layout.sourceStartSec,
+        sourceEndSec: layout.sourceEndSec,
+      }]
+      : [])
 
     return {
       assetKey,
@@ -53,6 +57,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       layout,
       midi,
       sampleUrl,
+      segments,
       sourceIdentity: assetKey && metadata ? { assetKey, ...metadata } : undefined,
     }
   })
@@ -62,11 +67,11 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const current = view()
 
     if (current.midi) {
-      setPeaks(null)
+      setPeakSegments([])
       return
     }
-    if (current.layout.drawCols <= 0 || current.layout.sourceDurationSec <= 0 || !current.assetKey) {
-      setPeaks(null)
+    if (current.segments.length === 0 || !current.assetKey) {
+      setPeakSegments([])
       return
     }
     const assetKey = current.assetKey
@@ -74,39 +79,38 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       if (!current.clip.mediaStatus) {
         void options.ensureClipBuffer?.(current.clip.id)
       }
-      setPeaks(null)
+      setPeakSegments(current.segments.map((segment) => ({
+        drawStartPx: segment.drawStartPx,
+        drawCols: segment.drawCols,
+        peaks: null,
+      })))
       return
     }
 
-    const segments = current.layout.segments
-      ? current.layout.segments
-      : [{
-        drawCols: current.layout.drawCols,
-        sourceStartSec: current.layout.sourceStartSec,
-        sourceEndSec: current.layout.sourceEndSec,
-      }]
-
-    void Promise.all(segments.map((segment) => getWaveformSlice({
-      assetKey,
-      sourceIdentity: current.sourceIdentity,
-      sampleUrl: current.sampleUrl,
-      buffer: current.buffer,
-      sourceStartSec: segment.sourceStartSec,
-      sourceEndSec: segment.sourceEndSec,
-      bins: segment.drawCols,
+    void Promise.all(current.segments.map(async (segment): Promise<ClipWaveformPeakSegment> => ({
+      drawStartPx: segment.drawStartPx,
+      drawCols: segment.drawCols,
+      peaks: await getWaveformChannelSlice({
+        assetKey,
+        sourceIdentity: current.sourceIdentity,
+        sampleUrl: current.sampleUrl,
+        buffer: current.buffer,
+        sourceStartSec: segment.sourceStartSec,
+        sourceEndSec: segment.sourceEndSec,
+        bins: segment.drawCols,
+      }),
     })))
       .then((next) => {
         if (currentRequestId !== requestId) return
-        const complete = next.flatMap((segment) => segment ? [segment] : [])
-        if (complete.length !== next.length) {
-          setPeaks(null)
-          return
-        }
-        setPeaks(complete.length === 1 ? complete[0] : concatPeakSegments(complete))
+        setPeakSegments(next)
       })
       .catch(() => {
         if (currentRequestId !== requestId) return
-        setPeaks(null)
+        setPeakSegments(current.segments.map((segment) => ({
+          drawStartPx: segment.drawStartPx,
+          drawCols: segment.drawCols,
+          peaks: null,
+        })))
       })
   })
 
@@ -116,6 +120,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
 
   return {
     layout: () => view().layout,
-    peaks,
+    peakSegments,
   }
 }

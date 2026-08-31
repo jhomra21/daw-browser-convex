@@ -93,15 +93,24 @@ export function drawWaveformSamples(options: WaveformSampleDrawOptions) {
 
   const verticalZoom = normalizeVerticalZoom(options.verticalZoom)
   const channelHeight = contentH / samples.channels.length
-  const drawWidth = Math.max(0, cssW - padPx * 2)
+  const legacyStart = padPx
+  const legacyWidth = Math.max(0, cssW - padPx * 2)
+  const drawStart = options.drawStartPx === undefined
+    ? legacyStart
+    : Math.max(0, Math.min(cssW, options.drawStartPx))
+  const requestedDrawWidth = options.drawWidthPx === undefined ? legacyWidth : options.drawWidthPx
+  const drawWidth = Number.isFinite(requestedDrawWidth)
+    ? Math.max(0, Math.min(cssW - drawStart, requestedDrawWidth))
+    : 0
   const durationSec = samples.sourceEndSec - samples.sourceStartSec
   const pointRadius = Number.isFinite(pointRadiusPx) ? Math.max(0.5, Math.min(4, pointRadiusPx)) : DEFAULT_SAMPLE_POINT_RADIUS_PX
+  if (drawWidth <= 0) return
 
   const position = (frameOffset: number, channelIndex: number, value: number) => {
     const frame = samples.firstFrame + frameOffset
     const timestamp = frame / samples.sampleRate
     if (timestamp < samples.sourceStartSec || timestamp > samples.sourceEndSec) return null
-    const x = padPx + ((timestamp - samples.sourceStartSec) / durationSec) * drawWidth
+    const x = drawStart + ((timestamp - samples.sourceStartSec) / durationSec) * drawWidth
     const channelTop = topY + channelIndex * channelHeight
     const centerY = channelTop + channelHeight / 2
     return {

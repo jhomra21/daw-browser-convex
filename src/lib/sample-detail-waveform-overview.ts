@@ -12,7 +12,11 @@ type OverviewViewportRectInput = {
 const isPositiveFinite = (value: number) => Number.isFinite(value) && value > 0
 
 export function getSampleDetailWaveformOverviewViewportRect(input: OverviewViewportRectInput) {
-  if (!isPositiveFinite(input.clipDurationSec) || !isPositiveFinite(input.widthPx)) {
+  if (!isPositiveFinite(input.clipDurationSec)
+    || !isPositiveFinite(input.widthPx)
+    || !Number.isFinite(input.viewport.startSec)
+    || !Number.isFinite(input.viewport.endSec)
+    || input.viewport.endSec < input.viewport.startSec) {
     return { leftPx: 0, widthPx: 0 }
   }
 
@@ -43,7 +47,15 @@ export function moveSampleDetailWaveformOverviewViewport(input: {
   pointerSec: number
   grabOffsetSec: number
 }) {
-  if (!Number.isFinite(input.pointerSec) || !Number.isFinite(input.grabOffsetSec)) return input.viewport
+  if (!Number.isFinite(input.pointerSec)
+    || !Number.isFinite(input.grabOffsetSec)
+    || !isPositiveFinite(input.clipDurationSec)
+    || !isPositiveFinite(input.sampleRate)
+    || !Number.isFinite(input.viewport.startSec)
+    || !Number.isFinite(input.viewport.endSec)
+    || input.viewport.endSec <= input.viewport.startSec) {
+    return input.viewport
+  }
   const requestedStartSec = input.pointerSec - input.grabOffsetSec
   return panSampleDetailWaveformViewport({
     viewport: input.viewport,

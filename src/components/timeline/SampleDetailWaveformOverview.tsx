@@ -30,6 +30,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
   const appPreferences = useAppPreferences()
   let canvasRef: HTMLCanvasElement | undefined
   let overviewRef: HTMLButtonElement | undefined
+  let capturedPointerId: number | undefined
   const [widthPx, setWidthPx] = createSignal(DEFAULT_OVERVIEW_WIDTH_PX)
   const [grabOffsetSec, setGrabOffsetSec] = createSignal<number>()
   const sourceSampleRate = createMemo(() => props.clip.buffer?.sampleRate ?? props.clip.sourceSampleRate ?? 0)
@@ -67,7 +68,13 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     onCleanup(() => resizeObserver.disconnect())
   })
 
-  onCleanup(() => setGrabOffsetSec(undefined))
+  onCleanup(() => {
+    setGrabOffsetSec(undefined)
+    if (overviewRef && capturedPointerId !== undefined && overviewRef.hasPointerCapture(capturedPointerId)) {
+      overviewRef.releasePointerCapture(capturedPointerId)
+    }
+    capturedPointerId = undefined
+  })
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, 'clientX'>) => {
     const element = overviewRef
@@ -162,11 +169,12 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
       ref={(element) => { overviewRef = element || undefined }}
       type="button"
       aria-label="Waveform overview; drag to pan"
-      class="relative h-10 w-full shrink-0 cursor-grab overflow-hidden border border-border bg-timeline-background p-0 active:cursor-grabbing"
+      class="relative h-10 w-full shrink-0 cursor-grab touch-none overflow-hidden border border-border bg-timeline-background p-0 active:cursor-grabbing"
       onPointerDown={(event) => {
         if (sourceSampleRate() <= 0) return
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
+        capturedPointerId = event.pointerId
         const pointerSec = clipTimeFromPointer(event)
         const offset = getSampleDetailWaveformOverviewGrabOffset(props.viewport, pointerSec)
         setGrabOffsetSec(offset)
@@ -187,17 +195,22 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
         if (grabOffsetSec() === undefined) return
         moveViewportToPointer(event)
         setGrabOffsetSec(undefined)
+        capturedPointerId = undefined
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
       }}
       onPointerCancel={(event) => {
         setGrabOffsetSec(undefined)
+        capturedPointerId = undefined
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
       }}
-      onLostPointerCapture={() => setGrabOffsetSec(undefined)}
+      onLostPointerCapture={() => {
+        setGrabOffsetSec(undefined)
+        capturedPointerId = undefined
+      }}
       onKeyDown={(event) => {
         if (sourceSampleRate() <= 0) return
         if (event.key === 'Home') {

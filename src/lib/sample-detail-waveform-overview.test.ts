@@ -82,3 +82,48 @@ test('invalid overview geometry is inert', () => {
     grabOffsetSec: 0.5,
   })).toEqual(viewport)
 })
+
+test('invalid viewport fields produce zero overview geometry', () => {
+  expect(getSampleDetailWaveformOverviewViewportRect({
+    viewport: { startSec: Number.NaN, endSec: 2 },
+    clipDurationSec: 10,
+    widthPx: 500,
+  })).toEqual({ leftPx: 0, widthPx: 0 })
+
+  expect(getSampleDetailWaveformOverviewViewportRect({
+    viewport: { startSec: 4, endSec: Number.POSITIVE_INFINITY },
+    clipDurationSec: 10,
+    widthPx: 500,
+  })).toEqual({ leftPx: 0, widthPx: 0 })
+
+  expect(getSampleDetailWaveformOverviewViewportRect({
+    viewport: { startSec: 6, endSec: 2 },
+    clipDurationSec: 10,
+    widthPx: 500,
+  })).toEqual({ leftPx: 0, widthPx: 0 })
+})
+
+test('invalid viewport movement is inert', () => {
+  const viewport = { startSec: 1, endSec: 3 }
+  expect(moveSampleDetailWaveformOverviewViewport({
+    viewport: { startSec: Number.NaN, endSec: 3 },
+    clipDurationSec: 10,
+    sampleRate: 48_000,
+    pointerSec: 4,
+    grabOffsetSec: 1,
+  })).toEqual({ startSec: Number.NaN, endSec: 3 })
+  expect(moveSampleDetailWaveformOverviewViewport({
+    viewport,
+    clipDurationSec: 0,
+    sampleRate: 48_000,
+    pointerSec: 4,
+    grabOffsetSec: 1,
+  })).toEqual(viewport)
+  expect(moveSampleDetailWaveformOverviewViewport({
+    viewport,
+    clipDurationSec: 10,
+    sampleRate: Number.NaN,
+    pointerSec: 4,
+    grabOffsetSec: 1,
+  })).toEqual(viewport)
+})

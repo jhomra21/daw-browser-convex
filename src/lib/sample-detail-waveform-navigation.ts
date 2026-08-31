@@ -19,10 +19,28 @@ type SelectionViewportInput = {
   sampleRate: number
 }
 
+export type SampleDetailWaveformViewportHistoryPopResult = {
+  history: SampleDetailWaveformViewport[]
+  viewport?: SampleDetailWaveformViewport
+}
+
 const isPositiveFinite = (value: number) => Number.isFinite(value) && value > 0
 const sameViewport = (a: SampleDetailWaveformViewport, b: SampleDetailWaveformViewport) => (
   a.startSec === b.startSec && a.endSec === b.endSec
 )
+const isValidViewport = (viewport: SampleDetailWaveformViewport) => (
+  Number.isFinite(viewport.startSec)
+  && viewport.startSec >= 0
+  && Number.isFinite(viewport.endSec)
+  && viewport.endSec > viewport.startSec
+)
+const isValidViewportHistory = (history: readonly SampleDetailWaveformViewport[]) => {
+  for (let index = 0; index < history.length; index += 1) {
+    const viewport = history[index]
+    if (!viewport || !isValidViewport(viewport)) return false
+  }
+  return true
+}
 
 export function createSampleDetailWaveformSelection(input: {
   anchorSec: number
@@ -46,7 +64,10 @@ export function getSampleDetailWaveformSelectionRect(input: {
   widthPx: number
 }): SampleDetailWaveformSelectionRect | null {
   const viewportDurationSec = input.viewport.endSec - input.viewport.startSec
-  if (!isPositiveFinite(viewportDurationSec)
+  if (!Number.isFinite(input.viewport.startSec)
+    || input.viewport.startSec < 0
+    || !Number.isFinite(input.viewport.endSec)
+    || !isPositiveFinite(viewportDurationSec)
     || !isPositiveFinite(input.widthPx)
     || !Number.isFinite(input.selection.startSec)
     || !Number.isFinite(input.selection.endSec)
@@ -91,9 +112,8 @@ export function pushSampleDetailWaveformViewportHistory(
   history: readonly SampleDetailWaveformViewport[],
   viewport: SampleDetailWaveformViewport,
 ) {
-  if (!Number.isFinite(viewport.startSec)
-    || !Number.isFinite(viewport.endSec)
-    || viewport.endSec <= viewport.startSec) return [...history]
+  if (!isValidViewportHistory(history)) return []
+  if (!isValidViewport(viewport)) return [...history]
   const previous = history[history.length - 1]
   return previous && sameViewport(previous, viewport)
     ? [...history]
@@ -102,10 +122,8 @@ export function pushSampleDetailWaveformViewportHistory(
 
 export function popSampleDetailWaveformViewportHistory(
   history: readonly SampleDetailWaveformViewport[],
-): {
-  history: SampleDetailWaveformViewport[]
-  viewport?: SampleDetailWaveformViewport
-} {
+): SampleDetailWaveformViewportHistoryPopResult {
+  if (!isValidViewportHistory(history)) return { history: [] }
   const viewport = history[history.length - 1]
   if (!viewport) return { history: [] }
   return {

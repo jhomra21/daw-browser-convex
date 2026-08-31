@@ -35,6 +35,19 @@ test('maps only the visible part of a selection into viewport pixels', () => {
   })).toBeNull()
 })
 
+test('rejects malformed selection rectangle viewports', () => {
+  expect(getSampleDetailWaveformSelectionRect({
+    selection: { startSec: 1, endSec: 2 },
+    viewport: { startSec: Number.NaN, endSec: 4 },
+    widthPx: 400,
+  })).toBeNull()
+  expect(getSampleDetailWaveformSelectionRect({
+    selection: { startSec: -1, endSec: 2 },
+    viewport: { startSec: -1, endSec: 4 },
+    widthPx: 400,
+  })).toBeNull()
+})
+
 test('zooms to a selection while preserving the two-sample minimum', () => {
   expect(getSampleDetailWaveformSelectionViewport({
     selection: { startSec: 3, endSec: 5 },
@@ -106,4 +119,25 @@ test('invalid selection and history inputs fail closed', () => {
     { startSec: 2, endSec: 2 },
   )).toEqual([{ startSec: 0, endSec: 1 }])
   expect(popSampleDetailWaveformViewportHistory([])).toEqual({ history: [] })
+})
+
+test('selection zoom rejects selections fully outside the clip', () => {
+  expect(getSampleDetailWaveformSelectionViewport({
+    selection: { startSec: -5, endSec: -1 },
+    clipDurationSec: 10,
+    sampleRate: 48_000,
+  })).toBeNull()
+  expect(getSampleDetailWaveformSelectionViewport({
+    selection: { startSec: 11, endSec: 12 },
+    clipDurationSec: 10,
+    sampleRate: 48_000,
+  })).toBeNull()
+})
+
+test('viewport history rejects malformed entries without mutating input', () => {
+  const malformed = [{ startSec: 0, endSec: 1 }, { startSec: 2, endSec: Number.NaN }]
+  const snapshot = malformed.map((viewport) => ({ ...viewport }))
+  expect(pushSampleDetailWaveformViewportHistory(malformed, { startSec: 3, endSec: 4 })).toEqual([])
+  expect(malformed).toEqual(snapshot)
+  expect(popSampleDetailWaveformViewportHistory(malformed)).toEqual({ history: [] })
 })

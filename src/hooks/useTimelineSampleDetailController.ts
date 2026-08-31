@@ -69,8 +69,8 @@ export function useTimelineSampleDetailController(options: Options) {
       event.preventDefault();
       close();
     };
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    onCleanup(() => window.removeEventListener("keydown", handleKeyDown, { capture: true }));
+    window.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
   });
 
   const changeGain = async (clip: Clip, gain: number) => {

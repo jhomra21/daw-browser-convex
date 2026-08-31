@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, type Component } from "solid-js";
 import { drawWaveformPeaks, drawWaveformSamples } from "@daw-browser/waveforms/render-waveform";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
@@ -182,17 +182,6 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     onCleanup(() => resizeObserver.disconnect());
   });
 
-  onCleanup(() => {
-    if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
-    const canvas = canvasRef;
-    if (canvas && selectionPointerId !== undefined && canvas.hasPointerCapture(selectionPointerId)) {
-      canvas.releasePointerCapture(selectionPointerId);
-    }
-    selectionPointerId = undefined;
-    selectionAnchorSec = undefined;
-    selectionBeforeDrag = undefined;
-  });
-
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {
     const canvas = canvasRef;
     if (!canvas) return viewport().startSec;
@@ -220,10 +209,32 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     selectionBeforeDrag = undefined;
   };
 
+  const releaseSelectionPointerCapture = (pointerId: number | undefined = selectionPointerId) => {
+    const canvas = canvasRef;
+    if (canvas && pointerId !== undefined && canvas.hasPointerCapture(pointerId)) {
+      canvas.releasePointerCapture(pointerId);
+    }
+  };
+
+  const resetSelectionDrag = () => {
+    const pointerId = selectionPointerId;
+    clearSelectionDrag();
+    releaseSelectionPointerCapture(pointerId);
+  };
+
   const cancelSelectionDrag = () => {
     setSelection(selectionBeforeDrag);
     clearSelectionDrag();
   };
+
+  createEffect(on(() => props.clip.id, () => {
+    onCleanup(() => resetSelectionDrag());
+  }));
+
+  onCleanup(() => {
+    if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
+    resetSelectionDrag();
+  });
 
   const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">) => {
     const rawBeat = (clipTimeFromPointer(event) - clipAudioStartSec()) / secondsPerBeat();
@@ -519,6 +530,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
               }
               if (key === "escape" && selection()) {
                 event.preventDefault();
+                event.stopPropagation();
                 setSelection(undefined);
                 return;
               }

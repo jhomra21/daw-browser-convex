@@ -1,4 +1,4 @@
-import { ALL_FORMATS, AudioSampleSink, BlobSource, Input } from 'mediabunny'
+import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, UrlSource } from 'mediabunny'
 
 const sourceCacheBytes = 8 * 1024 * 1024
 export const defaultDecodedAudioPageFrames = 16_384
@@ -11,6 +11,8 @@ export type DecodedAudioPage = {
   planes: Float32Array[]
 }
 
+export type DecodeAudioPageSource = Blob | string | URL | Request
+
 export type DecodeAudioPagesOptions = {
   startSec?: number
   endSec?: number
@@ -20,8 +22,14 @@ export type DecodeAudioPagesOptions = {
 
 const validPageFrames = (value: number) => Number.isSafeInteger(value) && value > 0
 
+const createInputSource = (source: DecodeAudioPageSource) => (
+  source instanceof Blob
+    ? new BlobSource(source, { maxCacheSize: sourceCacheBytes })
+    : new UrlSource(source, { maxCacheSize: sourceCacheBytes })
+)
+
 export async function* decodeAudioPages(
-  source: Blob,
+  source: DecodeAudioPageSource,
   options: DecodeAudioPagesOptions = {},
 ): AsyncGenerator<DecodedAudioPage> {
   const pageFrames = options.pageFrames ?? defaultDecodedAudioPageFrames
@@ -38,9 +46,17 @@ export async function* decodeAudioPages(
   }
 
   const input = new Input({
-    source: new BlobSource(source, { maxCacheSize: sourceCacheBytes }),
+    source: createInputSource(source),
     formats: ALL_FORMATS,
   })
+  let disposed = false
+  const disposeInput = () => {
+    if (disposed) return
+    disposed = true
+    input.dispose()
+  }
+  const abortInput = () => disposeInput()
+  options.signal?.addEventListener('abort', abortInput, { once: true })
 
   try {
     options.signal?.throwIfAborted()
@@ -78,7 +94,11 @@ export async function* decodeAudioPages(
         sample.close()
       }
     }
+  } catch (error) {
+    options.signal?.throwIfAborted()
+    throw error
   } finally {
-    input.dispose()
+    options.signal?.removeEventListener('abort', abortInput)
+    disposeInput()
   }
 }

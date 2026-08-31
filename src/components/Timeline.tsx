@@ -2493,6 +2493,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       />
 
       <TimelineWorkspace
+        projectId={projectId()}
         containerRef={(el) => {
           containerRef = el;
         }}

@@ -30,6 +30,8 @@ export type ClipContextMenuActions = {
 type ClipComponentProps = {
   clip: RuntimeClip;
   trackId: Track["id"];
+  projectId: string | undefined;
+  visibleRange: { startSec: number; endSec: number };
   isSelected: boolean;
   onPointerDown: (
     trackId: Track["id"],
@@ -48,7 +50,6 @@ type ClipComponentProps = {
   onRetryMedia: (clipId: string) => void;
   onReplaceMedia: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia: (trackId: Track["id"], clipId: string) => void;
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
   bpm: number;
   pixelsPerSecond: number;
   viewportRedrawVersion: number;
@@ -101,9 +102,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
     projectBpm: () => props.bpm,
-    ensureClipBuffer: async (clipId, sampleUrl) => {
-      await props.ensureClipBuffer?.(clipId, sampleUrl);
-    },
+    pixelsPerSecond: () => props.pixelsPerSecond,
+    projectId: () => props.projectId,
+    visibleRange: () => props.visibleRange,
   });
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
   const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);

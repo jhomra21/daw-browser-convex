@@ -82,6 +82,8 @@ export type WaveformSampleDrawOptions = {
   >
   samples: WaveformSampleChannelSlice
   padPx: number
+  drawStartPx?: number
+  drawWidthPx?: number
   topY: number
   contentH: number
   cssW: number

@@ -71,6 +71,8 @@ type WaveformRequestView = {
   layout: ReturnType<typeof getAudioWaveformLayout>
 }
 
+type PcmSourceResolver = () => Promise<DecodeAudioPageSource | null>
+
 const frameBounds = (segment: SourceSegment, sampleRate: number) => {
   const startFrame = Math.max(0, Math.floor(segment.sourceStartSec * sampleRate))
   const endFrame = Math.max(startFrame + 1, Math.ceil(segment.sourceEndSec * sampleRate))
@@ -105,7 +107,7 @@ async function resolvePcmSource(
 
 async function resolvePcmEnvelope(
   view: WaveformRequestView,
-  source: DecodeAudioPageSource | null,
+  getSource: PcmSourceResolver,
   segment: SourceSegment,
   signal: AbortSignal,
 ): Promise<RenderPeakSegment | null> {
@@ -119,7 +121,9 @@ async function resolvePcmEnvelope(
 
   if (view.buffer) {
     accumulator.append(bufferPage(view.buffer))
-  } else if (source) {
+  } else {
+    const source = await getSource()
+    if (!source) return null
     for await (const page of decodeAudioPages(source, {
       startSec: segment.sourceStartSec,
       endSec: segment.sourceEndSec,
@@ -128,8 +132,6 @@ async function resolvePcmEnvelope(
       validateDecodedPage(page, view)
       accumulator.append(page)
     }
-  } else {
-    return null
   }
 
   return {
@@ -142,7 +144,7 @@ async function resolvePcmEnvelope(
 
 async function resolvePcmSamples(
   view: WaveformRequestView,
-  source: DecodeAudioPageSource | null,
+  getSource: PcmSourceResolver,
   segment: SourceSegment,
   showPoints: boolean,
   signal: AbortSignal,
@@ -159,7 +161,9 @@ async function resolvePcmSamples(
 
   if (view.buffer) {
     collector.append(bufferPage(view.buffer))
-  } else if (source) {
+  } else {
+    const source = await getSource()
+    if (!source) return null
     for await (const page of decodeAudioPages(source, {
       startSec: segment.sourceStartSec,
       endSec: segment.sourceEndSec,
@@ -168,8 +172,6 @@ async function resolvePcmSamples(
       validateDecodedPage(page, view)
       collector.append(page)
     }
-  } else {
-    return null
   }
 
   return {
@@ -183,7 +185,7 @@ async function resolvePcmSamples(
 
 async function resolveSegment(
   view: WaveformRequestView,
-  source: DecodeAudioPageSource | null,
+  getSource: PcmSourceResolver,
   segment: SourceSegment,
   signal: AbortSignal,
 ): Promise<SampleDetailWaveformRenderSegment | null> {
@@ -213,14 +215,14 @@ async function resolveSegment(
         peaks,
       }
     }
-    return resolvePcmEnvelope(view, source, segment, signal)
+    return resolvePcmEnvelope(view, getSource, segment, signal)
   }
 
   if (lod.mode === 'pcm-envelope') {
-    return resolvePcmEnvelope(view, source, segment, signal)
+    return resolvePcmEnvelope(view, getSource, segment, signal)
   }
 
-  return resolvePcmSamples(view, source, segment, lod.showPoints, signal)
+  return resolvePcmSamples(view, getSource, segment, lod.showPoints, signal)
 }
 
 export function useSampleDetailWaveformViewModel(options: SampleDetailWaveformViewModelOptions) {
@@ -292,12 +294,17 @@ export function useSampleDetailWaveformViewModel(options: SampleDetailWaveformVi
       return
     }
 
+    let sourcePromise: Promise<DecodeAudioPageSource | null> | undefined
+    const getSource = () => {
+      sourcePromise ??= resolvePcmSource(projectId, current)
+      return sourcePromise
+    }
+
     setLoading(true)
-    void resolvePcmSource(projectId, current)
-      .then(async (source) => {
-        const next = await Promise.all(current.segments.map((segment) => (
-          resolveSegment(current, source, segment, abortController.signal)
-        )))
+    void Promise.all(current.segments.map((segment) => (
+      resolveSegment(current, getSource, segment, abortController.signal)
+    )))
+      .then((next) => {
         if (currentRequestId !== requestId || abortController.signal.aborted) return
         setRenderSegments(next.flatMap((segment) => segment ? [segment] : []))
       })

@@ -29,6 +29,7 @@ type ClipWaveformViewModelOptions = {
   pixelsPerSecond?: Accessor<number>
   projectId?: Accessor<string | undefined>
   visibleRange?: Accessor<TimelineRange>
+  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
 }
 
 type SourceSegment = {
@@ -194,7 +195,11 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   createEffect(() => {
     const currentRequestId = ++requestId
     const current = view()
-    const range = options.visibleRange?.()
+    const requestedRange = options.visibleRange?.()
+    const hasViewportRange = validRange(requestedRange)
+    const range = hasViewportRange
+      ? requestedRange
+      : { startSec: current.clip.startSec, endSec: current.clip.startSec + Math.max(0, current.clip.duration) }
     const projectId = options.projectId?.()
     const abortController = new AbortController()
     onCleanup(() => abortController.abort())
@@ -243,6 +248,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       return sourcePromise
     }
     const visibleCenterSec = (range.startSec + range.endSec) / 2
+    const pcmAssetKey = projectId ? `${projectId}\u0000${assetKey}` : assetKey
 
     const resolveSegmentPeaks = async (segment: SourceSegment) => {
       const lod = selectWaveformLod({
@@ -266,9 +272,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         if (cached) return cached
       }
 
+      if (!hasViewportRange) return null
       if (current.buffer) return resolveBufferEnvelope(current.buffer, segment, channelCount)
       return await arrangementWaveformPcmScheduler.request({
-        assetKey,
+        assetKey: pcmAssetKey,
         source,
         sourceStartSec: segment.sourceStartSec,
         sourceEndSec: segment.sourceEndSec,
@@ -292,7 +299,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
               : currentSegment
           )))
         })
-        .catch(() => {})
+        .catch(() => undefined)
     }
   })
 

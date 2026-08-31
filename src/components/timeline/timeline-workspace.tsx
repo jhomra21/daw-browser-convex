@@ -90,6 +90,7 @@ const createViewportRedrawVersion = () => {
 };
 
 type Props = {
+  projectId: string | undefined;
   containerRef: (el: HTMLDivElement) => void;
   scrollRef: (el: HTMLDivElement) => void;
   returnSectionRef: (el: HTMLDivElement) => void;
@@ -306,6 +307,8 @@ export default function TimelineWorkspace(props: Props) {
         {(visibleTrack) => (
           <TrackLane
             track={visibleTrack()}
+            projectId={props.projectId}
+            visibleRange={props.viewport.visibleRange}
             groupClipOverview={
               groupClipOverviewByTrackId().get(laneProps.row.trackId) ?? []
             }
@@ -330,7 +333,6 @@ export default function TimelineWorkspace(props: Props) {
             onRemoveMissingMedia={(trackId, clipId) => {
               void props.removeMissingMediaClip(trackId, clipId);
             }}
-            ensureClipBuffer={props.ensureClipBuffer}
             bpm={props.bpm}
             pixelsPerSecond={props.pixelsPerSecond}
             viewportRedrawVersion={viewportRedrawVersion()}

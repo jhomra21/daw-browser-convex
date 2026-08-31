@@ -11,6 +11,8 @@ import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/tim
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 
 type TrackLaneProps = {
+  projectId: string | undefined
+  visibleRange: { startSec: number; endSec: number }
   track: Track
   layout: Pick<TimelineTrackLayoutRow, 'topPx' | 'heightPx' | 'clipLaneHeightPx' | 'automationHeightPx'>
   groupClipOverview: GroupClipOverviewSegment[]
@@ -25,7 +27,6 @@ type TrackLaneProps = {
   onRetryMedia: (clipId: string) => void
   onReplaceMedia: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia: (trackId: Track['id'], clipId: string) => void
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   onAddMidiClip?: (trackId: Track['id']) => void
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
@@ -149,6 +150,8 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
             <ClipComponent
               clip={clip}
               trackId={props.track.id}
+              projectId={props.projectId}
+              visibleRange={props.visibleRange}
               isSelected={props.selectedClipIds.has(clip.id)}
               rangeOverlap={clipRangeOverlap(clip, rangeForLane())}
               onPointerDown={props.onClipPointerDown}
@@ -159,7 +162,6 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               onRetryMedia={props.onRetryMedia}
               onReplaceMedia={props.onReplaceMedia}
               onRemoveMissingMedia={props.onRemoveMissingMedia}
-              ensureClipBuffer={props.ensureClipBuffer}
               bpm={props.bpm}
               pixelsPerSecond={props.pixelsPerSecond}
               viewportRedrawVersion={props.viewportRedrawVersion}

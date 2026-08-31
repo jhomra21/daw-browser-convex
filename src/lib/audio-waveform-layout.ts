@@ -3,13 +3,18 @@ import type { Clip } from '@daw-browser/timeline-core/types'
 import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 
 type AudioWaveformLayoutSegment = {
+  drawStartPx: number
   drawCols: number
+  timelineStartSec: number
+  timelineEndSec: number
   sourceStartSec: number
   sourceEndSec: number
 }
 
 type AudioWaveformLayout = {
   sourceDurationSec: number
+  visibleTimelineStartSec: number
+  visibleTimelineEndSec: number
   padPx: number
   drawCols: number
   audioStartPx: number
@@ -17,6 +22,11 @@ type AudioWaveformLayout = {
   sourceStartSec: number
   sourceEndSec: number
   segments?: AudioWaveformLayoutSegment[]
+}
+
+export type AudioWaveformVisibleRange = {
+  startSec: number
+  endSec: number
 }
 
 const roundSeconds = (value: number) => Math.round(value * 1_000_000_000) / 1_000_000_000
@@ -55,37 +65,65 @@ export const getSourceBeatOffsetFromAnchorX = (input: {
   )
 }
 
+const emptyLayout = (
+  sourceDurationSec: number,
+  visibleTimelineStartSec: number,
+  visibleTimelineEndSec: number,
+): AudioWaveformLayout => ({
+  sourceDurationSec,
+  visibleTimelineStartSec,
+  visibleTimelineEndSec,
+  padPx: 0,
+  drawCols: 0,
+  audioStartPx: 0,
+  audioEndPx: 0,
+  sourceStartSec: 0,
+  sourceEndSec: 0,
+})
+
+const resolveVisibleTimelineRange = (
+  clip: Clip<AudioBuffer>,
+  visibleRange?: AudioWaveformVisibleRange,
+) => {
+  const clipStartSec = clip.startSec
+  const clipEndSec = clip.startSec + Math.max(0, clip.duration)
+  if (!visibleRange) return { startSec: clipStartSec, endSec: clipEndSec }
+  if (!Number.isFinite(visibleRange.startSec)
+    || !Number.isFinite(visibleRange.endSec)
+    || visibleRange.endSec <= visibleRange.startSec) return null
+  const startSec = Math.max(clipStartSec, Math.min(clipEndSec, visibleRange.startSec))
+  const endSec = Math.max(startSec, Math.min(clipEndSec, visibleRange.endSec))
+  return endSec > startSec ? { startSec, endSec } : null
+}
+
 export function getAudioWaveformLayout(
   clip: Clip<AudioBuffer>,
   cssW: number,
   bufferDurationSec?: number,
   projectBpm = 120,
+  visibleRange?: AudioWaveformVisibleRange,
 ): AudioWaveformLayout {
   const sourceDurationSec = Math.max(
     bufferDurationSec ?? clip.sourceDurationSec ?? 0,
     0,
   )
+  const range = resolveVisibleTimelineRange(clip, visibleRange)
+  if (!range || !Number.isFinite(cssW) || cssW <= 0) {
+    return emptyLayout(sourceDurationSec, range?.startSec ?? clip.startSec, range?.endSec ?? clip.startSec)
+  }
+
   const map = getAudioClipTimeMap({
     clip,
     bufferDurationSec: sourceDurationSec,
     projectBpm,
-    rangeStartSec: clip.startSec,
-    rangeEndSec: clip.startSec + clip.duration,
+    rangeStartSec: range.startSec,
+    rangeEndSec: range.endSec,
   })
-  if (!map) {
-    return {
-      sourceDurationSec,
-      padPx: 0,
-      drawCols: 0,
-      audioStartPx: 0,
-      audioEndPx: 0,
-      sourceStartSec: 0,
-      sourceEndSec: 0,
-    }
-  }
+  if (!map) return emptyLayout(sourceDurationSec, range.startSec, range.endSec)
 
-  const pixelsPerSecond = cssW / Math.max(1e-6, clip.duration)
-  const padPx = Math.max(0, Math.floor((map.timelineStartSec - clip.startSec) * pixelsPerSecond))
+  const visibleDurationSec = range.endSec - range.startSec
+  const pixelsPerSecond = cssW / visibleDurationSec
+  const padPx = Math.max(0, Math.floor((map.timelineStartSec - range.startSec) * pixelsPerSecond))
   const drawCols = Math.max(
     0,
     Math.min(cssW - padPx, Math.floor(map.timelineDurationSec * pixelsPerSecond)),
@@ -105,12 +143,16 @@ export function getAudioWaveformLayout(
   }).flatMap((segment) => {
     const timelineStartSec = segment.timelineStartSec
     const timelineEndSec = segment.timelineEndSec
-    const segmentStartPx = Math.floor((timelineStartSec - clip.startSec) * pixelsPerSecond)
-    const segmentEndPx = Math.floor((timelineEndSec - clip.startSec) * pixelsPerSecond)
-    const segmentDrawCols = Math.max(0, segmentEndPx - segmentStartPx)
+    const segmentStartPx = Math.floor((timelineStartSec - range.startSec) * pixelsPerSecond)
+    const segmentEndPx = Math.floor((timelineEndSec - range.startSec) * pixelsPerSecond)
+    const drawStartPx = Math.max(0, Math.min(cssW, segmentStartPx))
+    const segmentDrawCols = Math.max(0, Math.min(cssW, segmentEndPx) - drawStartPx)
     if (segmentDrawCols <= 0) return []
     return [{
+      drawStartPx,
       drawCols: segmentDrawCols,
+      timelineStartSec,
+      timelineEndSec,
       sourceStartSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineStartSec)))),
       sourceEndSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineEndSec)))),
     }]
@@ -118,6 +160,8 @@ export function getAudioWaveformLayout(
 
   const layout = {
     sourceDurationSec,
+    visibleTimelineStartSec: range.startSec,
+    visibleTimelineEndSec: range.endSec,
     padPx,
     drawCols,
     audioStartPx,

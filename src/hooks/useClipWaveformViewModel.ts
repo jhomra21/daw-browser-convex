@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
+import { SILENCE_BYTE } from '@daw-browser/waveforms/extract-peaks'
 import { getWaveformChannelSlice } from '@daw-browser/waveforms/select-waveform-window'
 import type { WaveformPeakChannelSlice } from '@daw-browser/waveforms/types'
 import { resolveClipSampleUrl } from '@daw-browser/shared'
@@ -21,6 +22,34 @@ export type ClipWaveformPeakSegment = {
   drawStartPx: number
   drawCols: number
   peaks: WaveformPeakChannelSlice | null
+}
+
+const collapsePeakChannels = (slice: WaveformPeakChannelSlice) => {
+  const output = new Uint8Array(slice.columns * 2)
+  for (let column = 0; column < slice.columns; column += 1) {
+    let min = 255
+    let max = 0
+    for (const channel of slice.channels) {
+      const channelMin = channel[column * 2] ?? SILENCE_BYTE
+      const channelMax = channel[column * 2 + 1] ?? SILENCE_BYTE
+      if (channelMin < min) min = channelMin
+      if (channelMax > max) max = channelMax
+    }
+    output[column * 2] = min
+    output[column * 2 + 1] = max
+  }
+  return output
+}
+
+const concatPeakSegments = (segments: Uint8Array[]) => {
+  const totalLength = segments.reduce((sum, segment) => sum + segment.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const segment of segments) {
+    result.set(segment, offset)
+    offset += segment.length
+  }
+  return result
 }
 
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
@@ -114,6 +143,12 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       })
   })
 
+  const peaks = createMemo(() => {
+    const segments = peakSegments()
+    if (segments.length === 0 || segments.some((segment) => !segment.peaks)) return null
+    return concatPeakSegments(segments.map((segment) => collapsePeakChannels(segment.peaks!)))
+  })
+
   onCleanup(() => {
     requestId += 1
   })
@@ -121,5 +156,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   return {
     layout: () => view().layout,
     peakSegments,
+    peaks,
   }
 }

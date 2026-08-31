@@ -3,6 +3,7 @@ import { drawWaveformPeaks, drawWaveformSamples } from "@daw-browser/waveforms/r
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
 import { useAppPreferences } from "~/context/app-preferences";
+import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
 import { useSampleDetailWaveformViewModel } from "~/hooks/useSampleDetailWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import {
@@ -488,6 +489,12 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
           </div>
         )}
       </div>
+      <SampleDetailWaveformOverview
+        clip={props.clip}
+        projectBpm={props.projectBpm}
+        viewport={viewport()}
+        onViewportChange={setViewport}
+      />
     </div>
   );
 };

@@ -26,6 +26,7 @@ type ClipWaveformViewModelOptions = {
   clip: Accessor<RuntimeClip>
   cssWidthPx: Accessor<number>
   projectBpm: Accessor<number>
+  pixelsPerSecond?: Accessor<number>
   projectId?: Accessor<string | undefined>
   visibleRange?: Accessor<TimelineRange>
 }
@@ -78,27 +79,26 @@ const bufferPage = (buffer: AudioBuffer): DecodedAudioPage => ({
 })
 
 const visibleSegment = (
-  clip: RuntimeClip,
   segment: SourceSegment,
   range: TimelineRange,
+  clipStartSec: number,
   cssWidthPx: number,
+  pixelsPerSecond: number,
 ): SourceSegment | null => {
   const timelineStartSec = Math.max(segment.timelineStartSec, range.startSec)
   const timelineEndSec = Math.min(segment.timelineEndSec, range.endSec)
   if (timelineEndSec <= timelineStartSec) return null
 
   const segmentTimelineDuration = segment.timelineEndSec - segment.timelineStartSec
-  const clipDuration = Math.max(0, clip.duration)
   if (!Number.isFinite(segmentTimelineDuration) || segmentTimelineDuration <= 0
-    || !Number.isFinite(clipDuration) || clipDuration <= 0
-    || !Number.isFinite(cssWidthPx) || cssWidthPx <= 0) return null
+    || !Number.isFinite(cssWidthPx) || cssWidthPx <= 0
+    || !Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0) return null
 
   const startFraction = (timelineStartSec - segment.timelineStartSec) / segmentTimelineDuration
   const endFraction = (timelineEndSec - segment.timelineStartSec) / segmentTimelineDuration
   const sourceDuration = segment.sourceEndSec - segment.sourceStartSec
-  const pixelsPerSecond = cssWidthPx / clipDuration
-  const drawStartPx = Math.max(0, Math.floor((timelineStartSec - clip.startSec) * pixelsPerSecond))
-  const drawEndPx = Math.min(cssWidthPx, Math.ceil((timelineEndSec - clip.startSec) * pixelsPerSecond))
+  const drawStartPx = Math.max(0, Math.floor((timelineStartSec - clipStartSec) * pixelsPerSecond))
+  const drawEndPx = Math.min(cssWidthPx, Math.ceil((timelineEndSec - clipStartSec) * pixelsPerSecond))
   if (drawEndPx <= drawStartPx) return null
 
   return {
@@ -130,9 +130,9 @@ const resolveBufferEnvelope = (
   if (buffer.numberOfChannels !== channelCount || !Number.isSafeInteger(buffer.sampleRate) || buffer.sampleRate <= 0) {
     return null
   }
-  const startFrame = Math.floor(segment.sourceStartSec * buffer.sampleRate)
-  const endFrame = Math.max(startFrame + 1, Math.ceil(segment.sourceEndSec * buffer.sampleRate))
-  if (!Number.isSafeInteger(startFrame) || startFrame < 0
+  const startFrame = Math.max(0, Math.floor(segment.sourceStartSec * buffer.sampleRate))
+  const endFrame = Math.min(buffer.length, Math.ceil(segment.sourceEndSec * buffer.sampleRate))
+  if (!Number.isSafeInteger(startFrame) || startFrame >= buffer.length
     || !Number.isSafeInteger(endFrame) || endFrame <= startFrame) return null
 
   const accumulator = createPcmEnvelopeAccumulator({
@@ -165,7 +165,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       sourceSampleRate: clip.sourceSampleRate,
       sourceChannelCount: clip.sourceChannelCount,
     })
-    const pixelsPerSecond = clip.duration > 0 ? cssWidthPx / clip.duration : 0
+    const pixelsPerSecond = options.pixelsPerSecond?.()
+      ?? (clip.duration > 0 ? cssWidthPx / clip.duration : 0)
     const segments: SourceSegment[] = layout.segments ?? (layout.drawCols > 0 && pixelsPerSecond > 0
       ? [{
         drawStartPx: layout.padPx,
@@ -198,22 +199,31 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const abortController = new AbortController()
     onCleanup(() => abortController.abort())
 
-    if (current.clip.midi || current.segments.length === 0 || !current.assetKey || !validRange(range)) {
+    const assetKey = current.assetKey
+    if (current.clip.midi || current.segments.length === 0 || !assetKey || !validRange(range)) {
       setPeakSegments([])
       return
     }
 
     const sampleRate = current.sampleRate
     const channelCount = current.channelCount
-    if (!Number.isSafeInteger(sampleRate) || !sampleRate || sampleRate <= 0
-      || !Number.isSafeInteger(channelCount) || !channelCount || channelCount <= 0) {
+    if (!sampleRate || !Number.isSafeInteger(sampleRate) || sampleRate <= 0
+      || !channelCount || !Number.isSafeInteger(channelCount) || channelCount <= 0) {
       setPeakSegments([])
       return
     }
 
     const cssWidthPx = options.cssWidthPx()
+    const pixelsPerSecond = options.pixelsPerSecond?.()
+      ?? (current.clip.duration > 0 ? cssWidthPx / current.clip.duration : 0)
     const visibleSegments = current.segments.flatMap((segment) => {
-      const clipped = visibleSegment(current.clip, segment, range, cssWidthPx)
+      const clipped = visibleSegment(
+        segment,
+        range,
+        current.clip.startSec,
+        cssWidthPx,
+        pixelsPerSecond,
+      )
       return clipped ? [clipped] : []
     })
     if (visibleSegments.length === 0) {
@@ -247,7 +257,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
 
       if (lod.mode === 'cached-peaks') {
         const cached = await getWaveformChannelSlice({
-          assetKey: current.assetKey,
+          assetKey,
           sourceIdentity: current.sourceIdentity,
           sampleUrl: undefined,
           buffer: current.buffer,
@@ -263,7 +273,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const peaks = current.buffer
         ? resolveBufferEnvelope(current.buffer, segment, channelCount)
         : await arrangementWaveformPcmScheduler.request({
-          assetKey: current.assetKey,
+          assetKey,
           source,
           sourceStartSec: segment.sourceStartSec,
           sourceEndSec: segment.sourceEndSec,

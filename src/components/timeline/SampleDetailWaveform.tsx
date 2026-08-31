@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
 import { drawWaveformPeaks, drawWaveformSamples } from "@daw-browser/waveforms/render-waveform";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
@@ -6,6 +6,14 @@ import { useAppPreferences } from "~/context/app-preferences";
 import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
 import { useSampleDetailWaveformViewModel } from "~/hooks/useSampleDetailWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
+import {
+  createSampleDetailWaveformSelection,
+  getSampleDetailWaveformSelectionRect,
+  getSampleDetailWaveformSelectionViewport,
+  popSampleDetailWaveformViewportHistory,
+  pushSampleDetailWaveformViewportHistory,
+  type SampleDetailWaveformSelection,
+} from "~/lib/sample-detail-waveform-navigation";
 import {
   fitSampleDetailWaveformViewport,
   panSampleDetailWaveformViewport,
@@ -29,6 +37,16 @@ type ViewportState = {
   viewport: SampleDetailWaveformViewport;
 };
 
+type SelectionState = {
+  clipId: string;
+  selection?: SampleDetailWaveformSelection;
+};
+
+type ViewportHistoryState = {
+  clipId: string;
+  entries: SampleDetailWaveformViewport[];
+};
+
 const WAVEFORM_PANEL_MIN_WIDTH_PX = 480;
 const WAVEFORM_MIN_HEIGHT_PX = 108;
 const DEFAULT_WAVEFORM_WIDTH_PX = 960;
@@ -40,16 +58,28 @@ const getClipBeatWidth = (clipDurationSec: number, projectBpm: number) => (
   clipDurationSec / (60 / Math.max(1, projectBpm))
 );
 
+const sameViewport = (a: SampleDetailWaveformViewport, b: SampleDetailWaveformViewport) => (
+  a.startSec === b.startSec && a.endSec === b.endSec
+);
+
 const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
   let canvasWrapRef: HTMLDivElement | undefined;
   let markerHandleRef: HTMLButtonElement | undefined;
+  let selectionPointerId: number | undefined;
+  let selectionAnchorSec: number | undefined;
+  let selectionBeforeDrag: SampleDetailWaveformSelection | undefined;
   const [waveformWidthPx, setWaveformWidthPx] = createSignal(DEFAULT_WAVEFORM_WIDTH_PX);
   const [waveformHeightPx, setWaveformHeightPx] = createSignal(220);
   const [viewportState, setViewportState] = createSignal<ViewportState>({
     clipId: "",
     viewport: fitSampleDetailWaveformViewport(0),
+  });
+  const [selectionState, setSelectionState] = createSignal<SelectionState>({ clipId: "" });
+  const [viewportHistoryState, setViewportHistoryState] = createSignal<ViewportHistoryState>({
+    clipId: "",
+    entries: [],
   });
   const sourceSampleRate = createMemo(() => props.clip.buffer?.sampleRate ?? props.clip.sourceSampleRate ?? 0);
   const viewport = createMemo(() => {
@@ -57,10 +87,58 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     if (state.clipId !== props.clip.id) return fitSampleDetailWaveformViewport(props.clip.duration);
     return state.viewport;
   });
+  const selection = createMemo(() => {
+    const state = selectionState();
+    return state.clipId === props.clip.id ? state.selection : undefined;
+  });
+  const viewportHistory = createMemo(() => {
+    const state = viewportHistoryState();
+    return state.clipId === props.clip.id ? state.entries : [];
+  });
   const setViewport = (next: SampleDetailWaveformViewport) => {
     setViewportState({ clipId: props.clip.id, viewport: next });
   };
-  const fitViewport = () => setViewport(fitSampleDetailWaveformViewport(props.clip.duration));
+  const setSelection = (next: SampleDetailWaveformSelection | undefined) => {
+    setSelectionState({ clipId: props.clip.id, selection: next });
+  };
+  const setViewportWithHistory = (next: SampleDetailWaveformViewport) => {
+    const current = viewport();
+    if (sameViewport(current, next)) return;
+    setViewportHistoryState((state) => ({
+      clipId: props.clip.id,
+      entries: pushSampleDetailWaveformViewportHistory(
+        state.clipId === props.clip.id ? state.entries : [],
+        current,
+      ),
+    }));
+    setViewport(next);
+  };
+  const fitViewport = () => setViewportWithHistory(fitSampleDetailWaveformViewport(props.clip.duration));
+  const zoomToSelection = () => {
+    const currentSelection = selection();
+    if (!currentSelection) return;
+    const next = getSampleDetailWaveformSelectionViewport({
+      selection: currentSelection,
+      clipDurationSec: props.clip.duration,
+      sampleRate: sourceSampleRate(),
+    });
+    if (next) setViewportWithHistory(next);
+  };
+  const zoomBack = () => {
+    const popped = popSampleDetailWaveformViewportHistory(viewportHistory());
+    if (!popped.viewport) return;
+    setViewportHistoryState({ clipId: props.clip.id, entries: popped.history });
+    setViewport(popped.viewport);
+  };
+  const selectionRect = createMemo(() => {
+    const currentSelection = selection();
+    if (!currentSelection) return null;
+    return getSampleDetailWaveformSelectionRect({
+      selection: currentSelection,
+      viewport: viewport(),
+      widthPx: waveformWidthPx(),
+    });
+  });
   const waveform = useSampleDetailWaveformViewModel({
     projectId: () => props.projectId,
     clip: () => props.clip,
@@ -106,6 +184,13 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   onCleanup(() => {
     if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
+    const canvas = canvasRef;
+    if (canvas && selectionPointerId !== undefined && canvas.hasPointerCapture(selectionPointerId)) {
+      canvas.releasePointerCapture(selectionPointerId);
+    }
+    selectionPointerId = undefined;
+    selectionAnchorSec = undefined;
+    selectionBeforeDrag = undefined;
   });
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {
@@ -118,6 +203,26 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       xPx: x,
       widthPx: bounds.width,
     });
+  };
+
+  const updateSelectionFromPointer = (event: Pick<PointerEvent, "clientX">) => {
+    if (selectionAnchorSec === undefined) return;
+    setSelection(createSampleDetailWaveformSelection({
+      anchorSec: selectionAnchorSec,
+      focusSec: clipTimeFromPointer(event),
+      clipDurationSec: props.clip.duration,
+    }) ?? undefined);
+  };
+
+  const clearSelectionDrag = () => {
+    selectionPointerId = undefined;
+    selectionAnchorSec = undefined;
+    selectionBeforeDrag = undefined;
+  };
+
+  const cancelSelectionDrag = () => {
+    setSelection(selectionBeforeDrag);
+    clearSelectionDrag();
   };
 
   const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">) => {
@@ -320,8 +425,28 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         <div class="flex items-center gap-2 text-xs text-muted-foreground">
           {waveform.loading() ? <span>Loading waveform</span> : null}
           {props.clip.mediaStatus === "permission-denied" ? <span>Permission needed</span> : props.clip.mediaStatus === "missing" ? <span>Missing media</span> : null}
+          <Show when={selection()}>
+            <button
+              type="button"
+              title="Zoom to clip selection (Z)"
+              class="rounded border border-border px-2 py-1 text-foreground hover:bg-secondary"
+              onClick={zoomToSelection}
+            >
+              Zoom Selection
+            </button>
+          </Show>
           <button
             type="button"
+            title="Zoom back (X)"
+            disabled={viewportHistory().length === 0}
+            class="rounded border border-border px-2 py-1 text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={zoomBack}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            title="Fit content to view width (W)"
             class="rounded border border-border px-2 py-1 text-foreground hover:bg-secondary"
             onClick={fitViewport}
           >
@@ -337,16 +462,84 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
           ref={(el) => {
             canvasRef = el || undefined;
           }}
-          class="h-full w-full"
+          class="h-full w-full touch-none"
           on:wheel={handleWheel}
+          onPointerDown={(event) => {
+            if (event.button !== 0 || selectionPointerId !== undefined) return;
+            event.preventDefault();
+            selectionPointerId = event.pointerId;
+            selectionAnchorSec = clipTimeFromPointer(event);
+            selectionBeforeDrag = selection();
+            setSelection(undefined);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (selectionPointerId !== event.pointerId) return;
+            event.preventDefault();
+            updateSelectionFromPointer(event);
+          }}
+          onPointerUp={(event) => {
+            if (selectionPointerId !== event.pointerId) return;
+            event.preventDefault();
+            updateSelectionFromPointer(event);
+            clearSelectionDrag();
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onPointerCancel={(event) => {
+            if (selectionPointerId !== event.pointerId) return;
+            cancelSelectionDrag();
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onLostPointerCapture={(event) => {
+            if (selectionPointerId !== event.pointerId) return;
+            cancelSelectionDrag();
+          }}
           onDblClick={addMarker}
           onKeyDown={(event) => {
+            if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+              const key = event.key.toLowerCase();
+              if (key === "z" && selection()) {
+                event.preventDefault();
+                zoomToSelection();
+                return;
+              }
+              if (key === "x" && viewportHistory().length > 0) {
+                event.preventDefault();
+                zoomBack();
+                return;
+              }
+              if (key === "w") {
+                event.preventDefault();
+                fitViewport();
+                return;
+              }
+              if (key === "escape" && selection()) {
+                event.preventDefault();
+                setSelection(undefined);
+                return;
+              }
+            }
             if (event.key !== "Delete" && event.key !== "Backspace") return;
             event.preventDefault();
             deleteSelectedMarker();
           }}
           tabIndex={0}
         />
+        <Show when={selectionRect()}>
+          {(rect) => (
+            <div
+              class="pointer-events-none absolute inset-y-0 border-x border-sky-300/80 bg-sky-400/10"
+              style={{
+                left: `${rect().leftPx}px`,
+                width: `${rect().widthPx}px`,
+              }}
+            />
+          )}
+        </Show>
         <For each={warpMarkers()}>
           {(marker, index) => {
             const preview = createMemo(() => dragMarker()?.id === marker.id ? dragMarker() ?? marker : marker);

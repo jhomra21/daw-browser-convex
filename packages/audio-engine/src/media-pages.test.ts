@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { decodeAudioPages } from './media-pages'
+import { decodeAudioPages, type DecodedAudioPage } from './media-pages'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)
@@ -40,7 +40,7 @@ class WholeFileReadForbidden extends File {
   }
 }
 
-const pageSummary = (pages: Awaited<ReturnType<typeof collectPages>>) => pages.map((page) => ({
+const pageSummary = (pages: DecodedAudioPage[]) => pages.map((page) => ({
   startFrame: page.startFrame,
   frameCount: page.frameCount,
   sampleRate: page.sampleRate,
@@ -48,7 +48,7 @@ const pageSummary = (pages: Awaited<ReturnType<typeof collectPages>>) => pages.m
 }))
 
 const collectPages = async (source: Parameters<typeof decodeAudioPages>[0]) => {
-  const pages = []
+  const pages: DecodedAudioPage[] = []
   for await (const page of decodeAudioPages(source, { pageFrames: 2 })) pages.push(page)
   return pages
 }

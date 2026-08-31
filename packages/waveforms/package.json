@@ -8,6 +8,7 @@
     "./extract-peaks": "./src/extract-peaks.ts",
     "./lod": "./src/lod.ts",
     "./pcm-envelope": "./src/pcm-envelope.ts",
+    "./pcm-samples": "./src/pcm-samples.ts",
     "./peak-db": "./src/peak-db.ts",
     "./render-waveform": "./src/render-waveform.ts",
     "./resample-peak-pairs": "./src/resample-peak-pairs.ts",

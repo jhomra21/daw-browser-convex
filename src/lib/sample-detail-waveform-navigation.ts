@@ -106,9 +106,10 @@ export function popSampleDetailWaveformViewportHistory(
   history: SampleDetailWaveformViewport[]
   viewport?: SampleDetailWaveformViewport
 } {
-  if (history.length === 0) return { history: [] }
+  const viewport = history[history.length - 1]
+  if (!viewport) return { history: [] }
   return {
     history: history.slice(0, -1),
-    viewport: history[history.length - 1],
+    viewport,
   }
 }

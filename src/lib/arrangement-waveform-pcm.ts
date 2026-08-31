@@ -57,6 +57,9 @@ type Job = {
 
 const validPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0
 const validNonNegativeFinite = (value: number) => Number.isFinite(value) && value >= 0
+const normalizePriority = (value: number | undefined) => (
+  value === undefined ? 0 : Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
+)
 
 const frameBounds = (request: ArrangementWaveformPcmDecodeRequest) => {
   if (!validPositiveInteger(request.sampleRate)
@@ -80,14 +83,14 @@ const frameBounds = (request: ArrangementWaveformPcmDecodeRequest) => {
   return { startFrame, endFrame }
 }
 
-const cacheKey = (request: ArrangementWaveformPcmDecodeRequest) => [
+const cacheKey = (request: ArrangementWaveformPcmDecodeRequest) => JSON.stringify([
   request.assetKey,
   request.sampleRate,
   request.channelCount,
   request.sourceStartSec,
   request.sourceEndSec,
   request.columns,
-].join(':')
+])
 
 const sliceBytes = (slice: WaveformPeakChannelSlice) => (
   slice.channels.reduce((total, channel) => total + channel.byteLength, 0)
@@ -261,7 +264,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
 
     const existing = pending.get(key)
     if (existing) {
-      const priority = Number.isFinite(input.priority) ? input.priority ?? 0 : Number.POSITIVE_INFINITY
+      const priority = normalizePriority(input.priority)
       if (priority < existing.priority) {
         existing.priority = priority
         if (!existing.active) queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
@@ -269,7 +272,6 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
       return subscribe(existing, input.signal)
     }
 
-    const priority = Number.isFinite(input.priority) ? input.priority ?? 0 : Number.POSITIVE_INFINITY
     const job: Job = {
       key,
       request: {
@@ -281,7 +283,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
         sampleRate: input.sampleRate,
         channelCount: input.channelCount,
       },
-      priority,
+      priority: normalizePriority(input.priority),
       sequence: nextSequence,
       controller: new AbortController(),
       subscribers: new Set<Subscriber>(),

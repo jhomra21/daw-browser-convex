@@ -83,12 +83,15 @@ const frameBounds = (request: ArrangementWaveformPcmDecodeRequest) => {
   return { startFrame, endFrame }
 }
 
-const cacheKey = (request: ArrangementWaveformPcmDecodeRequest) => JSON.stringify([
+const cacheKey = (
+  request: ArrangementWaveformPcmDecodeRequest,
+  bounds: { startFrame: number, endFrame: number },
+) => JSON.stringify([
   request.assetKey,
   request.sampleRate,
   request.channelCount,
-  request.sourceStartSec,
-  request.sourceEndSec,
+  bounds.startFrame,
+  bounds.endFrame,
   request.columns,
 ])
 
@@ -172,6 +175,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
     if (job.subscribers.size > 0) return
     if (job.active) {
       job.controller.abort()
+      if (pending.get(job.key) === job) pending.delete(job.key)
       return
     }
     removeQueuedJob(job)
@@ -179,7 +183,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
 
   const cacheValue = (key: string, value: WaveformPeakChannelSlice) => {
     const bytes = sliceBytes(value)
-    if (bytes > maxCacheBytes) return
+    if (maxCacheBytes === 0 || bytes > maxCacheBytes) return
 
     const existing = cache.get(key)
     if (existing) {
@@ -191,7 +195,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
 
     while (cachedBytes > maxCacheBytes && cache.size > 0) {
       const oldestKey = cache.keys().next().value
-      if (typeof oldestKey !== 'string') break
+      if (oldestKey === undefined) break
       const oldest = cache.get(oldestKey)
       cache.delete(oldestKey)
       if (oldest) cachedBytes -= oldest.bytes
@@ -218,22 +222,29 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
 
       job.active = true
       activeCount += 1
-      void decode(job.request, job.controller.signal)
+      let decodePromise: Promise<WaveformPeakChannelSlice | null>
+      try {
+        decodePromise = decode(job.request, job.controller.signal)
+      } catch (error) {
+        decodePromise = Promise.reject(error)
+      }
+      void decodePromise
         .then((value) => {
           if (value && !job.controller.signal.aborted) cacheValue(job.key, value)
-          for (const subscriber of [...job.subscribers]) {
+          if (pending.get(job.key) === job) pending.delete(job.key)
+          for (const subscriber of Array.from(job.subscribers)) {
             settleSubscriber(job, subscriber, value)
           }
         })
         .catch(() => {
-          for (const subscriber of [...job.subscribers]) {
+          if (pending.get(job.key) === job) pending.delete(job.key)
+          for (const subscriber of Array.from(job.subscribers)) {
             settleSubscriber(job, subscriber, null)
           }
         })
         .finally(() => {
           activeCount -= 1
           job.active = false
-          if (pending.get(job.key) === job) pending.delete(job.key)
           pump()
         })
     }
@@ -254,11 +265,12 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
   })
 
   const request = (input: ArrangementWaveformPcmRequest) => {
-    if (input.signal?.aborted || input.assetKey.length === 0 || !frameBounds(input)) {
+    const bounds = frameBounds(input)
+    if (input.signal?.aborted || input.assetKey.length === 0 || !bounds) {
       return Promise.resolve<WaveformPeakChannelSlice | null>(null)
     }
 
-    const key = cacheKey(input)
+    const key = cacheKey(input, bounds)
     const cached = cachedValue(key)
     if (cached) return Promise.resolve(cached)
 
@@ -300,7 +312,7 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
   const clear = () => {
     for (const job of pending.values()) {
       job.controller.abort()
-      for (const subscriber of [...job.subscribers]) settleSubscriber(job, subscriber, null)
+      for (const subscriber of Array.from(job.subscribers)) settleSubscriber(job, subscriber, null)
     }
     pending.clear()
     queue.splice(0, queue.length)

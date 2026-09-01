@@ -2,8 +2,6 @@ import type { ExportAudioFormat } from "@daw-browser/shared"
 import { getExportRangeBounds, type ExportRange } from "@daw-browser/audio-engine/export-range"
 import { getExportTailMaximumSec } from "@daw-browser/audio-engine/export-fidelity"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
-import type {
-  nativeAudioHostMaximumInMemoryPcmBytes} from "@daw-browser/desktop-protocol/native-audio-host";
 import {
   nativeOfflineRenderPcmBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -24,7 +22,6 @@ type PreflightInput = {
     maximumBytes: number
     streaming: true
   }
-  maximumInMemoryPcmBytes?: typeof nativeAudioHostMaximumInMemoryPcmBytes
 }
 
 type ExportResourcePreflight = {
@@ -82,9 +79,6 @@ export const preflightExportResources = (input: PreflightInput): ExportResourceP
   }
   const rawRenderBytes = nativeOfflineRenderPcmBytes(frames, input.render.numberOfChannels)
   if (!Number.isSafeInteger(rawRenderBytes)) throw new Error("Export render buffer is too large.")
-  if (input.maximumInMemoryPcmBytes !== undefined && rawRenderBytes > input.maximumInMemoryPcmBytes) {
-    throw new Error("Native offline render exceeds the 512 MiB in-memory PCM limit.")
-  }
   if (input.resourceLimits && rawRenderBytes > input.resourceLimits.maximumBytes) {
     throw new Error("Export render buffer exceeds the desktop output envelope.")
   }

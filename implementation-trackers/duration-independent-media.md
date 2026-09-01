@@ -73,7 +73,7 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 - [x] Establish duration-independent product invariant.
 - [x] Record current whole-file/whole-PCM boundaries.
-- [ ] Add regression helpers/tests that express duration independence without giant allocations.
+- [x] Add regression helpers/tests that express duration independence without giant allocations.
 
 ### Phase 1 — metadata and import admission
 
@@ -115,9 +115,9 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 6 — streaming export
 
 - [ ] Consume source audio in bounded pages for native/portable export.
-- [ ] Stream native offline PCM chunks directly into encoding/output.
-- [ ] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
-- [ ] Keep cancellation and partial-file cleanup deterministic.
+- [x] Stream native offline PCM chunks directly into encoding/output.
+- [x] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
+- [x] Keep cancellation and partial-file cleanup deterministic.
 
 ### Phase 7 — instrument/warp compatibility
 

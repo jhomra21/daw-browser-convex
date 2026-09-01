@@ -97,6 +97,9 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): NativeOfflinePcmSp
     const handle = await directory.getFileHandle(name, { create })
     return {
       createWritable: async () => {
+        if (!handle.createWritable) {
+          throw new Error('The native offline PCM spool filesystem cannot create writable files.')
+        }
         const writable = await handle.createWritable()
         return {
           write: (data) => writable.write(data),
@@ -194,7 +197,11 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
 
     const removeDirectory = async () => {
       if (state === 'removed') return
-      await sessions.remove(input.sessionId, true).catch(() => undefined)
+      try {
+        await sessions.remove(input.sessionId, true)
+      } catch (error) {
+        if (!(error instanceof DOMException) || error.name !== 'NotFoundError') throw error
+      }
       state = 'removed'
     }
 

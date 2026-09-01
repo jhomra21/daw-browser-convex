@@ -15,7 +15,7 @@ class TestAudioBuffer implements AudioBuffer {
   readonly length: number
   readonly numberOfChannels: number
   readonly sampleRate: number
-  private readonly channels: Float32Array[]
+  private readonly channels: Float32Array<ArrayBuffer>[]
 
   constructor(options: AudioBufferOptions) {
     this.length = options.length
@@ -25,7 +25,7 @@ class TestAudioBuffer implements AudioBuffer {
     this.channels = Array.from({ length: this.numberOfChannels }, () => new Float32Array(this.length))
   }
 
-  getChannelData(channel: number) {
+  getChannelData(channel: number): Float32Array<ArrayBuffer> {
     const data = this.channels[channel]
     if (!data) throw new Error('Missing channel')
     return data

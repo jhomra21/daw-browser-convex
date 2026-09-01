@@ -6,7 +6,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
 import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
-import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-renderer"
+import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
@@ -397,22 +397,31 @@ class TestDecodedAudioBuffer implements AudioBuffer {
   readonly length: number
   readonly numberOfChannels: number
   readonly sampleRate: number
+  private readonly channels: Float32Array<ArrayBuffer>[]
 
   constructor(length = 48_000, sampleRate = 48_000, numberOfChannels = 2) {
     this.length = length
     this.sampleRate = sampleRate
     this.numberOfChannels = numberOfChannels
     this.duration = length / sampleRate
+    this.channels = Array.from(
+      { length: numberOfChannels },
+      () => new Float32Array(length),
+    )
   }
 
-  copyFromChannel(destination: Float32Array) {
-    destination.fill(0)
+  copyFromChannel(destination: Float32Array, channel: number, bufferOffset = 0) {
+    destination.set(this.getChannelData(channel).subarray(bufferOffset, bufferOffset + destination.length))
   }
 
-  copyToChannel() {}
+  copyToChannel(source: Float32Array, channel: number, bufferOffset = 0) {
+    this.getChannelData(channel).set(source, bufferOffset)
+  }
 
-  getChannelData() {
-    return new Float32Array(this.length)
+  getChannelData(channel: number) {
+    const data = this.channels[channel]
+    if (!data) throw new Error("Missing channel")
+    return data
   }
 }
 
@@ -592,7 +601,7 @@ test("instrument export preload reads local-asset bytes with the project context
         fx,
         automationEnvelopes: [],
       },
-      nativeOfflineRenderer: async (plan) => {
+      nativeOfflinePcmRenderer: async (plan) => {
         nativeAssetCount = plan.assets.length
         throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
       },
@@ -669,7 +678,7 @@ test("native export prepares Stretch after hydration and normalizes its PCM", as
       },
       renderStateSnapshot,
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-      nativeOfflineRenderer: async (plan) => {
+      nativeOfflinePcmRenderer: async (plan) => {
         const asset = plan.assets[0]
         if (asset) {
           preparedAsset = {
@@ -749,7 +758,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
     },
     renderStateSnapshot,
     createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("native renderer should not run")
     },
   })
@@ -820,7 +829,7 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
     },
     renderStateSnapshot,
     createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new NativeOfflineRenderError("stop after native custom-range planning")
     },
   })
@@ -881,7 +890,7 @@ test("native export rejects a stale project generation after Stretch preparation
       generation = 8
       return new TestDecodedAudioBuffer(frames, sampleRate, channels)
     },
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("native renderer should not run")
     },
   })

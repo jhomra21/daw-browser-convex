@@ -22,6 +22,7 @@ import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { isRenderableExportTrack, type ExportEncodingSettings, type ExportRenderSettings } from '~/lib/export/export-settings'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
+import { processNativeOfflinePcmSpool } from '~/lib/export/process-native-offline-pcm-spool'
 import type { ExportFileSink, ExportOutputTargetFactory } from '~/lib/export/export-output-targets'
 import { preflightExportResources } from '~/lib/export/export-resource-preflight'
 import { captureLocalExportRenderRowsSnapshot } from '~/lib/export/capture-local-export-render-rows'
@@ -30,7 +31,8 @@ import { listLocalExternalProcessors } from '~/lib/external-plugins'
 import { getLocalProject } from '~/lib/local-project-db'
 import { assertBrowserExportHasNoLiveExternalPlugins } from '@daw-browser/external-plugins'
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
-import { NativeOfflineRenderError, type NativeOfflineRenderer } from '~/lib/export/desktop-native-offline-renderer'
+import { NativeOfflineRenderError, type NativeOfflinePcmRenderer } from '~/lib/export/desktop-native-offline-pcm-renderer'
+import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import {
   nativeAudioHostMaximumInstalledAssets,
@@ -92,7 +94,7 @@ type TimelineExportRequest = {
   onProgress?: (progress: ExportProgress) => void
   outputTargets: ExportOutputTargetFactory
   renderStateSnapshot: ExportRenderStateSnapshot
-  nativeOfflineRenderer?: NativeOfflineRenderer
+  nativeOfflinePcmRenderer?: NativeOfflinePcmRenderer
 }
 
 type StemExportSelection =
@@ -794,13 +796,14 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
   const localMetadataRows: LocalExportMetadataInput[] = []
   let outputTarget: Awaited<ReturnType<ExportOutputTargetFactory["createMixdownTarget"]>> | undefined
   let localProjectId: string | undefined
+  let nativeSpool: NativeOfflinePcmSpoolSession | undefined
   const saveCompletedLocalMetadata = async () => {
     if (!localProjectId) return
     await saveLocalExportMetadataBatch(localProjectId, localMetadataRows)
     localMetadataRows.length = 0
   }
   try {
-    if (input.nativeRendererRequired && !input.nativeOfflineRenderer) {
+    if (input.nativeRendererRequired && !input.nativeOfflinePcmRenderer) {
       throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
     }
     input.onProgress?.({ phase: 'snapshot' })
@@ -818,7 +821,6 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       encoding: input.encoding,
       stemCount: 1,
       resourceLimits: input.outputTargets.resourceLimits,
-      maximumInMemoryPcmBytes: input.nativeRendererRequired ? nativeAudioHostMaximumInMemoryPcmBytes : undefined,
     })
     const projectId = input.projectId
     const localProject = projectId ? await getLocalProject(projectId) : undefined
@@ -898,13 +900,113 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     })
     throwIfExportAborted(input.signal)
     input.onProgress?.({ phase: 'rendering' })
-    let rendered: AudioBuffer
+    let rendered: AudioBuffer | undefined
     if (nativePlan) {
-      const nativeRenderer = input.nativeOfflineRenderer
+      const nativeRenderer = input.nativeOfflinePcmRenderer
       if (!nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
-      rendered = await nativeRenderer(nativePlan, input.signal, (renderedFrames, totalFrames) => {
+      const spool = await nativeRenderer(nativePlan, input.signal, (renderedFrames, totalFrames) => {
         input.onProgress?.({ phase: 'rendering', renderedFrames, totalRenderFrames: totalFrames })
       })
+      nativeSpool = spool
+      const processed = await processNativeOfflinePcmSpool({
+        spool,
+        sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
+        render: input.render,
+        signal: input.signal,
+      })
+      input.onProgress?.({ phase: 'analyzing' })
+      if (input.render.normalization.mode !== 'none') input.onProgress?.({ phase: 'gain' })
+      if (input.render.normalization.mode === 'loudness' && input.render.normalization.limiting === 'true-peak') {
+        input.onProgress?.({ phase: 'limiting' })
+      }
+      input.onProgress?.({ phase: 'verifying', analysis: processed.analysis })
+      const ditherSeed = createExportSeed()
+      let completedFormats = 0
+      for (const format of formats) {
+        const fileName = createMixdownFileName(exportDate, format)
+        const fileSink = await outputTarget.openFile(fileName)
+        try {
+          if (format === 'wav') reportFormatProgress(input, 'quantizing', format, completedFormats, formats.length)
+          reportFormatProgress(input, 'encoding', format, completedFormats, formats.length)
+          const reportEncodingProgress = createEncodingProgressReporter((sizeBytes) => {
+            reportFormatProgress(input, 'encoding', format, completedFormats, formats.length, sizeBytes)
+          })
+          const enc = await exportMixdown.encodeAudioChunks(processed.replay(), {
+            format,
+            bitrate: isLossyExportAudioFormat(format) ? input.encoding.bitrateByFormat[format] : undefined,
+            target: fileSink?.target ?? { mode: 'buffer' },
+            signal: input.signal,
+            onWrite: reportEncodingProgress,
+            wav: input.encoding.wav,
+            ditherSeed,
+          })
+          throwIfExportAborted(input.signal)
+          const committed = await fileSink?.commit()
+          const savedName = fileSink?.name ?? fileName
+          const sizeBytes = committed?.byteLength ?? enc.sizeBytes
+          if (fileSink) {
+            reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+            if (localProjectId) {
+              localMetadataRows.push({
+                name: savedName,
+                format: enc.format,
+                durationSec: enc.durationSec,
+                sampleRate: enc.sampleRate,
+                sizeBytes,
+              })
+            }
+            outputs.push({ destination: 'local', name: savedName, sizeBytes, analysis: processed.analysis })
+          } else {
+            if (!enc.blob) throw new Error('Export did not produce a downloadable file.')
+            reportFormatProgress(input, 'saving', format, completedFormats, formats.length)
+            const saved = await outputTarget.saveBuffer({
+              blob: enc.blob,
+              fileName,
+              types: createSaveTypes(format),
+              format: enc.format,
+              durationSec: enc.durationSec,
+              sampleRate: enc.sampleRate,
+              signal: input.signal,
+            })
+            throwIfExportAborted(input.signal)
+            if (localProjectId) {
+              if (saved.destination !== 'local') {
+                throw new Error('Local export target selected a cloud destination.')
+              }
+              localMetadataRows.push({
+                name: saved.name,
+                format: enc.format,
+                durationSec: enc.durationSec,
+                sampleRate: enc.sampleRate,
+                sizeBytes,
+              })
+              outputs.push({
+                destination: 'local',
+                name: saved.name,
+                sizeBytes,
+                analysis: processed.analysis,
+              })
+            } else {
+              if (saved.destination !== 'cloud') {
+                throw new Error('Cloud export target selected a local destination.')
+              }
+              outputs.push({
+                destination: 'cloud',
+                name: saved.name,
+                url: saved.url,
+                sizeBytes,
+                analysis: processed.analysis,
+              })
+            }
+          }
+        } catch (error) {
+          await fileSink?.abort(error)
+          throw error
+        }
+        completedFormats += 1
+      }
+      await saveCompletedLocalMetadata()
+      return { type: 'success', outputs }
     } else {
       rendered = await exportMixdown.renderMixdown({
         tracks: preloadTracks,
@@ -920,6 +1022,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       })
     }
     throwIfExportAborted(input.signal)
+    if (!rendered) throw new Error('Browser export did not produce audio.')
     const processed = processRenderedExport({
       rendered,
       sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
@@ -1029,10 +1132,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     return {
       type: 'error',
       message: err instanceof Error ? err.message : 'Export failed',
-      failureOwner: err instanceof NativeOfflineRenderError ? err.owner : undefined,
+      failureOwner: err instanceof NativeOfflineRenderError ? 'native' : undefined,
       outputs,
     }
   } finally {
+    try {
+      await nativeSpool?.remove()
+    } catch {}
     try {
       await outputTarget?.dispose?.()
     } catch {}

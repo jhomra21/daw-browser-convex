@@ -7,7 +7,15 @@ import {
   createNativeOfflinePcmSpool,
   type NativeOfflinePcmSpoolSession,
 } from '~/lib/export/native-offline-pcm-spool'
-import { NativeOfflineRenderError } from '~/lib/export/desktop-native-offline-renderer'
+
+export class NativeOfflineRenderError extends Error {
+  readonly owner = 'native'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'NativeOfflineRenderError'
+  }
+}
 
 type DesktopNativeOfflinePcmRendererBridge = {
   start(

@@ -132,7 +132,7 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
-import { createDesktopNativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer";
+import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
@@ -153,8 +153,8 @@ const Timeline: Component<TimelineProps> = (props) => {
   const nativeOfflineBridge = requiresNativeAudio
     ? window.dawDesktop?.audioHost?.offlineRender
     : undefined;
-  const nativeOfflineRenderer = nativeOfflineBridge
-    ? createDesktopNativeOfflineRenderer(nativeOfflineBridge)
+  const nativeOfflinePcmRenderer = nativeOfflineBridge
+    ? createDesktopNativeOfflinePcmRenderer(nativeOfflineBridge)
     : undefined;
   const nativeVstParameterQueue = window.dawDesktop
     ? createNativeVstParameterQueue(async (bytes) => {
@@ -486,7 +486,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const exportService = createTimelineExportService({
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
-    nativeOfflineRenderer,
+    nativeOfflinePcmRenderer,
     getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, localProject, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
       if (!capturedProjectId || !localProject) return undefined
       const processors = (await listLocalExternalProcessors(capturedProjectId))

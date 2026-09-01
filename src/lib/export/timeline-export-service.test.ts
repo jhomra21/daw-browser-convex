@@ -434,7 +434,9 @@ test("uses one hydrated sampled render state for native planning and queued rend
     queue,
     getProjectGeneration: () => 1,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => buffer,
+    nativeOfflinePcmRenderer: async () => {
+      throw new Error("unreachable")
+    },
     runTimelineExport: async (input) => {
       queuedRenderState = input.renderStateSnapshot
       return { type: "success", outputs: [] }
@@ -602,7 +604,7 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
   queue.dispose()
 })
 
-test("native export preflight rejects oversized PCM before external state capture", async () => {
+test("native export admits oversized PCM before external state capture", async () => {
   const queue = createExportQueue(() => "native-memory-limit")
   let externalStateCaptureCalls = 0
   const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
@@ -611,7 +613,7 @@ test("native export preflight rejects oversized PCM before external state captur
     queue,
     getProjectGeneration: () => 1,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("unreachable")
     },
     getTracks: () => [{
@@ -646,8 +648,8 @@ test("native export preflight rejects oversized PCM before external state captur
     ...settings,
     range: { mode: "custom", startSec: 0, endSec: (totalFrames + 0.5) / 96_000 },
     render: { ...settings.render, sampleRate: 96_000 },
-  })).rejects.toThrow("512 MiB in-memory PCM")
-  expect(externalStateCaptureCalls).toBe(0)
+  })).resolves.toBeDefined()
+  expect(externalStateCaptureCalls).toBe(1)
   queue.dispose()
 })
 
@@ -723,7 +725,9 @@ test("rejects a native snapshot if generation changes while capturing attachment
   const service = createTimelineExportService({
     queue,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => new TestAudioBuffer(),
+    nativeOfflinePcmRenderer: async () => {
+      throw new Error("unreachable")
+    },
     getProjectGeneration: () => generation,
     getTracks: () => [],
     getBpm: () => 120,

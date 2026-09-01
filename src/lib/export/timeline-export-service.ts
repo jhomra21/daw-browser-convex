@@ -11,9 +11,8 @@ import type { CapturedClipBufferLoadResult, CapturedClipMediaReference } from "~
 import type { EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller"
 import { flushMidiProjectWrites, projectMidiProjectTracks } from "~/lib/midi/editor-persistence"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
-import type { NativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer"
+import type { NativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import { snapshotAutomationPatches, snapshotExportSettings, snapshotSidechainRoutes, snapshotTimelineTracks } from "~/lib/export/timeline-export-snapshot"
-import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { getLocalProject } from "~/lib/local-project-db"
 
@@ -34,7 +33,7 @@ type TimelineExportDependencies = {
   getEffectsExportSnapshot: () => EffectsPanelExportSnapshot | undefined
   getSidechainRoutes: () => ExternalSidechainRoute[]
   loadCapturedClipBuffer: (reference: CapturedClipMediaReference, signal: AbortSignal) => Promise<CapturedClipBufferLoadResult>
-  nativeOfflineRenderer?: NativeOfflineRenderer
+  nativeOfflinePcmRenderer?: NativeOfflinePcmRenderer
   getNativeOfflineExternalAttachments?: (input: {
     projectId: string | undefined
     localProject: boolean
@@ -177,7 +176,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     }
   }
   const assertNativeMixdownAvailable = () => {
-    if (dependencies.nativeRendererRequired && !dependencies.nativeOfflineRenderer) {
+    if (dependencies.nativeRendererRequired && !dependencies.nativeOfflinePcmRenderer) {
       throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
     }
   }
@@ -217,17 +216,14 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     for (const track of capturedTracks) {
       for (const clip of track.clips) snapshotClips.set(clip.id, clip)
     }
-    if (dependencies.nativeRendererRequired) {
-      preflightExportResources({
-        tracks: capturedTracks,
-        range: settings.range,
-        formats: settings.formats,
-        render: settings.render,
-        encoding: settings.encoding,
-        stemCount: 1,
-        maximumInMemoryPcmBytes: nativeAudioHostMaximumInMemoryPcmBytes,
-      })
-    }
+    preflightExportResources({
+      tracks: capturedTracks,
+      range: settings.range,
+      formats: settings.formats,
+      render: settings.render,
+      encoding: settings.encoding,
+      stemCount: 1,
+    })
     const effectsSnapshot = dependencies.getEffectsExportSnapshot()
     if (effectsSnapshot) {
       await traceExportPreparation(traceId, "flush-effects", () => effectsSnapshot.flushPending())
@@ -322,7 +318,7 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
     userId: snapshot.userId,
     sidechainRoutes: snapshot.sidechainRoutes,
     renderStateSnapshot: snapshot.renderStateSnapshot,
-    nativeOfflineRenderer: dependencies.nativeOfflineRenderer,
+    nativeOfflinePcmRenderer: dependencies.nativeOfflinePcmRenderer,
     loadCapturedClipBuffer: async (clip: RuntimeClip, loadSignal: AbortSignal) => {
       const detached = snapshot.snapshotClips.get(clip.id)
       if (!detached || detached.buffer) return

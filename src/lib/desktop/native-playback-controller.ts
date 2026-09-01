@@ -62,6 +62,7 @@ import {
   encodeNativeBuiltInStateCommit,
   nativeBuiltInTimingForCommit,
 } from "./native-built-in-parameter-mapper"
+import { createNativeTimelinePageManager } from "./native-timeline-page-manager"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
@@ -135,6 +136,9 @@ type NativePlaybackBridge = Pick<
     | "onMeterBatch"
     | "onScheduleProgress"
   > & {
+    createMappedAsset?: NativeSessionBridge["createMappedAsset"]
+    writeMappedAssetPage?: NativeSessionBridge["writeMappedAssetPage"]
+    prepareMappedAssetRange?: NativeSessionBridge["prepareMappedAssetRange"]
     configure: (
       input: NativeHostDeviceConfiguration,
       transactionToken?: string,
@@ -223,16 +227,31 @@ const assertReply: <T extends NativeSessionReply>(reply: T) => asserts reply is 
   if (!reply.ok) throw new Error(reply.error)
 }
 
-const planarBytes = (planes: readonly Float32Array[]) => {
-  const byteLength = planes.reduce((total, plane) => total + plane.byteLength, 0)
-  const output = new Uint8Array(byteLength)
-  let offset = 0
-  for (const plane of planes) {
-    output.set(new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength), offset)
-    offset += plane.byteLength
-  }
+const planarPageBytes = (
+  planes: readonly Float32Array[],
+  startFrame: number,
+  frameCount: number,
+) => {
+  const bytesPerPlane = frameCount * Float32Array.BYTES_PER_ELEMENT
+  const output = new Uint8Array(planes.length * bytesPerPlane)
+  planes.forEach((plane, index) => {
+    output.set(
+      new Uint8Array(
+        plane.buffer,
+        plane.byteOffset + startFrame * Float32Array.BYTES_PER_ELEMENT,
+        bytesPerPlane,
+      ),
+      index * bytesPerPlane,
+    )
+  })
   return output
 }
+
+const planarBytes = (planes: readonly Float32Array[]) => planarPageBytes(
+  planes,
+  0,
+  planes[0]?.length ?? 0,
+)
 
 const nativeStretchPreparationMaximumBytes =
   nativeAudioHostMaximumInstalledAssets
@@ -302,6 +321,7 @@ export const createNativePlaybackController = (input: {
   let installedAssets: readonly NativeSessionAsset[] = []
   let preparedStretchAssetsForSession: readonly PortablePreparedStretchAsset[] = []
   let nativePcmChunkDescriptorsForSession: readonly NativePcmChunkDescriptor[] = []
+  let nativeTimelinePageManager: ReturnType<typeof createNativeTimelinePageManager> | undefined
   let preparedSnapshot: LivePlaybackSnapshot | undefined
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let unsubscribeMeters: (() => void) | undefined
@@ -609,6 +629,7 @@ export const createNativePlaybackController = (input: {
       assets: options.assets,
       preparedStretchAssets: options.preparedStretchAssets,
       nativePcmChunkDescriptors: options.nativePcmChunkDescriptors,
+      pageManager: nativeTimelinePageManager,
       projectGeneration: options.projectGeneration,
       startFrame: options.startFrame,
       onFault: (error) => {
@@ -677,6 +698,8 @@ export const createNativePlaybackController = (input: {
     installedAssetIds = []
     preparedStretchAssetsForSession = []
     nativePcmChunkDescriptorsForSession = []
+    nativeTimelinePageManager?.dispose()
+    nativeTimelinePageManager = undefined
     sampleRate = 0
     maximumFramesPerBlock = 0
     transportFrame = 0
@@ -1020,17 +1043,69 @@ export const createNativePlaybackController = (input: {
         revision: snapshot.revision,
       }, transactionToken))
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
+      if (bridge.session.createMappedAsset && bridge.session.writeMappedAssetPage && bridge.session.prepareMappedAssetRange) {
+        const ordinarySources = projection.assets
+          .filter(({ pcm }) => !pcm)
+          .map(({ asset, sourceAssetKey }) => {
+            const snapshotAsset = snapshot.assets.find((candidate) => candidate.assetId === sourceAssetKey)
+            return {
+              sourceAssetKey,
+              sessionAssetId: assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)?.sessionAssetId ?? 0,
+              frameCount: snapshotAsset?.source?.durationSec !== undefined
+                ? Math.max(1, Math.round(snapshotAsset.source.durationSec * snapshotAsset.source.sampleRate))
+                : asset.frameCount,
+              sampleRateHz: snapshotAsset?.source?.sampleRate ?? asset.sampleRateHz,
+              channelCount: snapshotAsset?.source?.channelCount ?? asset.channelCount,
+              buffer: snapshotAsset?.buffer,
+              sourceKind: snapshotAsset?.sourceKind,
+              sampleUrl: snapshotAsset?.sampleUrl,
+            }
+          })
+          .filter((source) => source.sessionAssetId > 0)
+        nativeTimelinePageManager = createNativeTimelinePageManager({
+          projectId: preparedProjectIdForAttempt,
+          sources: ordinarySources,
+          writePage: async (page, signal) => {
+            signal?.throwIfAborted()
+            const writeMappedAssetPage = bridge.session.writeMappedAssetPage
+            if (!writeMappedAssetPage) throw new Error("The native mapped asset page bridge is unavailable.")
+            assertReply(await writeMappedAssetPage(page, nativeSessionStarted ? undefined : transactionToken))
+          },
+          prepareRange: async (sessionAssetId, startFrame, frameCount, signal) => {
+            signal?.throwIfAborted()
+            const prepareMappedAssetRange = bridge.session.prepareMappedAssetRange
+            if (!prepareMappedAssetRange) throw new Error("The native mapped asset preparation bridge is unavailable.")
+            assertReply(await prepareMappedAssetRange(
+              sessionAssetId,
+              startFrame,
+              frameCount,
+              nativeSessionStarted ? undefined : transactionToken,
+            ))
+          },
+        })
+      }
       for (const { asset, pcm } of projection.assets) {
         startStage = "install-asset"
         const mapping = assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)
         if (!mapping) throw new Error("Native session asset mapping is incomplete.")
-        assertReply(await bridge.session.installAsset({
-          sessionAssetId: mapping.sessionAssetId,
-          frameCount: asset.frameCount,
-          sampleRateHz: asset.sampleRateHz,
-          channelCount: asset.channelCount,
-          planarPcm: planarBytes(pcm.planes),
-        }, transactionToken))
+        if (pcm) {
+          assertReply(await bridge.session.installAsset({
+            sessionAssetId: mapping.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            planarPcm: planarBytes(pcm.planes),
+          }, transactionToken))
+        } else if (bridge.session.createMappedAsset && bridge.session.writeMappedAssetPage && bridge.session.prepareMappedAssetRange) {
+          assertReply(await bridge.session.createMappedAsset({
+            sessionAssetId: mapping.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+          }, transactionToken))
+        } else {
+          throw new Error("Native mapped asset hydration is unavailable.")
+        }
         if (cancelled()) throw new Error("Native playback startup was cancelled.")
       }
       startStage = "publish-graph"

@@ -1024,6 +1024,62 @@ void TestInstalledAssetSurvivesCallerLifetimeAndMapGrowth() {
   host.Stop();
 }
 
+void TestMappedAssetSurvivesGraphPublication() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  assert(host.CreateMappedAsset(1, 4, 48'000, 2, 0));
+  const std::array<float, 8> samples{
+    0.25F, 0.5F, 0.75F, 1.0F,
+    -0.25F, -0.5F, -0.75F, -1.0F,
+  };
+  assert(host.WriteMappedAssetPage(1, 0, 4, samples));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+
+  std::vector<std::uint8_t> source_event;
+  AppendLeU32(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU64(source_event, 1);
+  AppendLeU32(source_event, 1);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 1.0F);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 0);
+  AppendLeU64(source_event, 4);
+  AppendLeU64(source_event, 4);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.5F);
+  AppendLeFloat(source_event, 0.0F);
+  AppendLeFloat(source_event, 0.5F);
+  assert(host.QueueSourceEvents(source_event));
+
+  std::array<float, 4> input_left{};
+  std::array<float, 4> input_right{};
+  std::array<float, 4> output_left{};
+  std::array<float, 4> output_right{};
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+  for (std::size_t frame = 0; frame < 4; ++frame) {
+    assert(output_left[frame] == samples[frame]);
+    assert(output_right[frame] == samples[4 + frame]);
+  }
+  host.Stop();
+}
+
 void TestNativeVstRuntimeControlBounds() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1624,6 +1680,7 @@ int main() {
   TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();
   TestInstalledAssetSurvivesCallerLifetimeAndMapGrowth();
+  TestMappedAssetSurvivesGraphPublication();
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();

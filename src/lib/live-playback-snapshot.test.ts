@@ -77,6 +77,48 @@ test("rejects an invalid revision and unhydrated audio without creating a graph"
   })
 })
 
+test("accepts an ordinary audio clip from persisted metadata without a buffer", () => {
+  const result = compileLivePlaybackSnapshot({
+    ...input,
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        buffer: null,
+        sourceDurationSec: 1,
+        sourceSampleRate: 48_000,
+        sourceChannelCount: 2,
+        sourceKind: "upload",
+      }],
+    }],
+  })
+  expect(result.supported).toBeTrue()
+  if (!result.supported) return
+  expect(result.snapshot.assets).toEqual([{
+    assetId: "asset-a",
+    source: { durationSec: 1, sampleRate: 48_000, channelCount: 2 },
+    sourceKind: "upload",
+  }])
+})
+
+test("rejects persisted ordinary metadata that conflicts with an eager buffer", () => {
+  const result = compileLivePlaybackSnapshot({
+    ...input,
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        sourceDurationSec: 2,
+        buffer,
+      }],
+    }],
+  })
+  expect(result).toEqual({
+    supported: false,
+    reasons: ['Audio asset "asset-a" resolves inconsistently.'],
+  })
+})
+
 test("registers hydrated sampler assets with live portable playback", () => {
   const params = createDefaultSamplerParams()
   const sample = {

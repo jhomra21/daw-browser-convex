@@ -3,6 +3,8 @@ import type {
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
@@ -139,6 +141,10 @@ type NativeSessionBridge = {
     transactionToken?: string
   }): Promise<NativeVstEditorReply>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<NativeSessionReply>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<NativeSessionReply>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<NativeSessionReply>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>

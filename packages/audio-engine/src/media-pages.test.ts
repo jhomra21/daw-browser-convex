@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { decodeAudioPages, type DecodedAudioPage } from './media-pages'
+import { decodeAudioPages, decodedSampleStartFrame, type DecodedAudioPage } from './media-pages'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)
@@ -47,9 +47,12 @@ const pageSummary = (pages: DecodedAudioPage[]) => pages.map((page) => ({
   channelCount: page.channelCount,
 }))
 
-const collectPages = async (source: Parameters<typeof decodeAudioPages>[0]) => {
+const collectPages = async (
+  source: Parameters<typeof decodeAudioPages>[0],
+  options: Parameters<typeof decodeAudioPages>[1] = { pageFrames: 2 },
+) => {
   const pages: DecodedAudioPage[] = []
-  for await (const page of decodeAudioPages(source, { pageFrames: 2 })) pages.push(page)
+  for await (const page of decodeAudioPages(source, options)) pages.push(page)
   return pages
 }
 
@@ -73,4 +76,28 @@ test('decodes URL-backed media through the same bounded page path', async () => 
     { startFrame: 2, frameCount: 2, sampleRate: 48_000, channelCount: 1 },
     { startFrame: 4, frameCount: 1, sampleRate: 48_000, channelCount: 1 },
   ])
+})
+
+test('clips an exact inclusive-start exclusive-end frame range', async () => {
+  const pages = await collectPages(dataUrl(wave()), {
+    startSec: 1 / 48_000,
+    endSec: 4 / 48_000,
+    pageFrames: 2,
+  })
+
+  expect(pageSummary(pages)).toEqual([
+    { startFrame: 1, frameCount: 2, sampleRate: 48_000, channelCount: 1 },
+    { startFrame: 3, frameCount: 1, sampleRate: 48_000, channelCount: 1 },
+  ])
+  expect(pages.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([
+    2000 / 32768,
+    3000 / 32768,
+    4000 / 32768,
+  ])
+})
+
+test('anchors decoded samples to the first media timestamp', () => {
+  expect(decodedSampleStartFrame(12.25, 10.25, 48_000)).toBe(96_000)
+  expect(decodedSampleStartFrame(-1.75, -2.0, 48_000)).toBe(12_000)
+  expect(decodedSampleStartFrame(3.5, 3.5, 48_000)).toBe(0)
 })

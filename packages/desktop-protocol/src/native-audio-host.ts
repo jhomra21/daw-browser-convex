@@ -67,6 +67,10 @@ export const nativeAudioHostControlTypes = {
   offlinePcmChunk: 54,
   offlineComplete: 55,
   offlineError: 56,
+  mappedAssetCreate: 57,
+  mappedAssetWritePage: 58,
+  mappedAssetPrepareRange: 59,
+  mappedAssetRelease: 60,
 } as const
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096
@@ -74,6 +78,15 @@ export const nativeAudioHostAssetInstallHeaderBytes = 24
 export const nativeAudioHostMaximumAssetChannels = 64
 export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
+export const nativeAudioHostMappedAssetPageHeaderBytes = 16
+export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCount: number) => (
+  Number.isSafeInteger(channelCount) && channelCount > 0
+    ? Math.floor(
+      (nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes)
+        / (Float32Array.BYTES_PER_ELEMENT * channelCount),
+    )
+    : 0
+)
 export const nativeAudioHostMaximumAssetFramesForChannels = (channelCount: number) => Math.min(
   nativeAudioHostMaximumAssetFrames,
   Number.isSafeInteger(channelCount) && channelCount > 0

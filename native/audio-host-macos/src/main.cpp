@@ -470,6 +470,44 @@ bool InstallAsset(daw::audio_host_macos::AudioHost& host, const std::vector<std:
   );
 }
 
+bool CreateMappedAsset(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
+  if (payload.size() != 28) return false;
+  return host.CreateMappedAsset(
+    ReadU32(payload.data()),
+    ReadU64(payload.data() + 4),
+    ReadU32(payload.data() + 12),
+    ReadU32(payload.data() + 16),
+    ReadU64(payload.data() + 20)
+  );
+}
+
+bool WriteMappedAssetPage(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
+  constexpr std::size_t header_bytes = 16;
+  if (payload.size() < header_bytes || (payload.size() - header_bytes) % sizeof(float) != 0) return false;
+  const std::uint32_t frame_count = ReadU32(payload.data() + 12);
+  if (frame_count == 0) return false;
+  const std::size_t sample_count = (payload.size() - header_bytes) / sizeof(float);
+  if (sample_count % frame_count != 0) return false;
+  return host.WriteMappedAssetPage(
+    ReadU32(payload.data()),
+    ReadU64(payload.data() + 4),
+    frame_count,
+    std::span<const float>(
+      reinterpret_cast<const float*>(payload.data() + header_bytes),
+      sample_count
+    )
+  );
+}
+
+bool PrepareMappedAssetRange(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
+  if (payload.size() != 20) return false;
+  return host.PrepareMappedAssetRange(
+    ReadU32(payload.data()),
+    ReadU64(payload.data() + 4),
+    ReadU64(payload.data() + 12)
+  );
+}
+
 bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
   std::size_t offset = 0;
   daw::audio_host_macos::NativeVstAttachment attachment{};
@@ -848,6 +886,18 @@ int main() {
         accepted = control_session && control_session->ConfigureInstrumentStates(payload);
         break;
       case daw::audio_host_macos::ControlType::kAssetInstall: accepted = control_session && InstallAsset(*control_session, payload); break;
+      case daw::audio_host_macos::ControlType::kMappedAssetCreate:
+        accepted = control_session && CreateMappedAsset(*control_session, payload);
+        break;
+      case daw::audio_host_macos::ControlType::kMappedAssetWritePage:
+        accepted = control_session && WriteMappedAssetPage(*control_session, payload);
+        break;
+      case daw::audio_host_macos::ControlType::kMappedAssetPrepareRange:
+        accepted = control_session && PrepareMappedAssetRange(*control_session, payload);
+        break;
+      case daw::audio_host_macos::ControlType::kMappedAssetRelease:
+        accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));
+        break;
       case daw::audio_host_macos::ControlType::kAssetRelease:
         accepted = active_session && payload.size() == 4 && active_session->ReleaseAsset(ReadU32(payload.data()));
         break;

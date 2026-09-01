@@ -40,6 +40,8 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
   NativeHostTransport,
@@ -54,6 +56,10 @@ const {
   graphSnapshot: graphSnapshotType,
   assetInstall: assetInstallType,
   assetRelease: assetReleaseType,
+  mappedAssetCreate: mappedAssetCreateType,
+  mappedAssetWritePage: mappedAssetWritePageType,
+  mappedAssetPrepareRange: mappedAssetPrepareRangeType,
+  mappedAssetRelease: mappedAssetReleaseType,
   transport: transportType,
   parameterEvents: parameterEventsType,
   midiEvents: midiEventsType,
@@ -520,6 +526,10 @@ type NativeHostRequestType =
   | typeof deviceConfigureType
   | typeof assetInstallType
   | typeof assetReleaseType
+  | typeof mappedAssetCreateType
+  | typeof mappedAssetWritePageType
+  | typeof mappedAssetPrepareRangeType
+  | typeof mappedAssetReleaseType
   | typeof startType
   | typeof stopType
   | typeof teardownType
@@ -1100,6 +1110,10 @@ export type NativeAudioHostSupervisor = {
   detachVst(instanceId: string, transactionToken?: string): Promise<void>
   executeVstEditorCommand(input: { instanceId: string; command: NativeVstEditorCommand; width?: number; height?: number; anchor?: NativeVstEditorAnchor }, transactionToken?: string): Promise<NativeVstEditorStatus>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<void>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<void>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<void>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<void>
   configureInstrumentStates(bytes: Uint8Array, transactionToken?: string): Promise<void>
@@ -2140,6 +2154,55 @@ export const createNativeAudioHostSupervisor = (
       const payload = serializeAssetInstall(input)
       if (!payload) throw new Error("The native audio host asset is invalid.")
       await request(assetInstallType, payload, transactionToken)
+    },
+    async createMappedAsset(input, transactionToken) {
+      const hash = input.contentHashPrefix ?? 0n
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.frameCount) || input.frameCount <= 0
+        || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
+        || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
+        || hash < 0n || hash > 0xffff_ffff_ffff_ffffn
+      ) throw new Error("The native mapped audio asset is invalid.")
+      const payload = Buffer.alloc(28)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.frameCount), 4)
+      payload.writeUInt32BE(input.sampleRateHz, 12)
+      payload.writeUInt32BE(input.channelCount, 16)
+      payload.writeBigUInt64BE(hash, 20)
+      await request(mappedAssetCreateType, payload, transactionToken)
+    },
+    async writeMappedAssetPage(input, transactionToken) {
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.startFrame) || input.startFrame < 0
+        || !unsigned32(input.frameCount) || input.frameCount === 0
+        || input.planarPcm.byteLength === 0
+        || input.planarPcm.byteLength > maximumPayloadBytes - 16
+        || input.planarPcm.byteLength % (input.frameCount * 4) !== 0
+      ) throw new Error("The native mapped audio page is invalid.")
+      const payload = Buffer.alloc(16 + input.planarPcm.byteLength)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.startFrame), 4)
+      payload.writeUInt32BE(input.frameCount, 12)
+      payload.set(input.planarPcm, 16)
+      await request(mappedAssetWritePageType, payload, transactionToken)
+    },
+    async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
+      if (
+        !unsigned32(sessionAssetId) || sessionAssetId === 0
+        || !Number.isSafeInteger(startFrame) || startFrame < 0
+        || !Number.isSafeInteger(frameCount) || frameCount <= 0
+      ) throw new Error("The native mapped audio range is invalid.")
+      const payload = Buffer.alloc(20)
+      payload.writeUInt32BE(sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(startFrame), 4)
+      payload.writeBigUInt64BE(BigInt(frameCount), 12)
+      await request(mappedAssetPrepareRangeType, payload, transactionToken)
+    },
+    async releaseMappedAsset(sessionAssetId, transactionToken) {
+      if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native mapped audio asset is invalid.")
+      await request(mappedAssetReleaseType, writeUnsigned32(sessionAssetId), transactionToken)
     },
     async releaseAsset(sessionAssetId, transactionToken) {
       if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native audio host asset is invalid.")

@@ -82,17 +82,21 @@ const planarPcm = (buffer: AudioBuffer): PlanarPcm => ({
 
 const assetRegistry = (snapshot: LivePlaybackSnapshot, generation: number): PortableAssetRegistryInput => ({
   projectGeneration: generation,
-  assets: snapshot.assets.map((asset, slot) => ({
-    projectAssetId: asset.assetId,
-    portableAssetId: asset.assetId,
-    projectGeneration: generation,
-    handle: { slot, generation },
-    decoded: {
-      sampleRateHz: asset.buffer.sampleRate,
-      channelCount: asset.buffer.numberOfChannels,
-      frameCount: asset.buffer.length,
-    },
-  })),
+  assets: snapshot.assets.flatMap((asset, slot) => {
+    const buffer = asset.buffer
+    if (!buffer) return []
+    return [{
+      projectAssetId: asset.assetId,
+      portableAssetId: asset.assetId,
+      projectGeneration: generation,
+      handle: { slot, generation },
+      decoded: {
+        sampleRateHz: buffer.sampleRate,
+        channelCount: buffer.numberOfChannels,
+        frameCount: buffer.length,
+      },
+    }]
+  }),
 })
 
 const preparedSession = (
@@ -285,6 +289,7 @@ export const createPortableBrowserPlaybackController = (input: {
       for (const asset of prepared.graph.assets) {
         const source = compilation.snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
         if (!source) throw new Error(`Portable audio asset "${asset.assetId}" is unavailable.`)
+        if (!source.buffer) throw new Error(`Portable playback asset "${source.assetId}" is not hydrated.`)
         const result = await playbackSession.registerAsset(asset, planarPcm(source.buffer), nextEpoch)
         if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
         if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   nativeAudioHostMaximumInMemoryPcmBytes,
   nativeAudioHostMaximumAssetFramesForChannels,
+  nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPcmBytes,
   nativeOfflineRenderPlanSchema,
@@ -57,6 +58,11 @@ test("uses payload-safe mono and stereo asset frame capacities", () => {
   expect(nativeAudioHostMaximumAssetFramesForChannels(2)).toBe(131_069)
   expect(nativeAudioHostMaximumAssetFramesForChannels(1) * 4 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
   expect(nativeAudioHostMaximumAssetFramesForChannels(2) * 8 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
+})
+
+test("uses the mapped-page header and channel count for page capacity", () => {
+  expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(2)).toBe(131_070)
+  expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(64)).toBe(4_095)
 })
 
 test("rejects malformed PCM asset dimensions", () => {

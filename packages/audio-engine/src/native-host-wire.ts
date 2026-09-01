@@ -135,6 +135,21 @@ export type NativeHostPcmAsset = {
   contentHashPrefix?: Uint8Array
 }
 
+export type NativeHostMappedAsset = {
+  sessionAssetId: number
+  frameCount: number
+  sampleRateHz: number
+  channelCount: number
+  contentHashPrefix?: bigint
+}
+
+export type NativeHostMappedAssetPage = {
+  sessionAssetId: number
+  startFrame: number
+  frameCount: number
+  planarPcm: Uint8Array
+}
+
 export type NativeOfflineRenderPlan = {
   /** Versioned, path-free snapshot for the separate device-independent renderer. */
   version: 1

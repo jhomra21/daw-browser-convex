@@ -72,7 +72,7 @@ enum class ContinuityPreparationResult : uint8_t {
 struct AssetSlot {
   uint32_t generation = 1;
   uint32_t revision = 0;
-  uint32_t frame_count = 0;
+  uint64_t frame_count = 0;
   uint32_t sample_rate_hz = 0;
   uint32_t channel_count = 0;
   const float *const *planes = nullptr;
@@ -1663,7 +1663,8 @@ bool decode_processor_state(
   return true;
 }
 
-bool valid_asset_descriptor(const daw_audio_asset_descriptor &descriptor) {
+template <typename Descriptor>
+bool valid_asset_descriptor(const Descriptor &descriptor) {
   if (!valid_abi(descriptor.abi_version)
     || descriptor.revision == 0
     || descriptor.frame_count == 0
@@ -1671,6 +1672,8 @@ bool valid_asset_descriptor(const daw_audio_asset_descriptor &descriptor) {
     || descriptor.channel_count == 0
     || descriptor.channel_count > kMaximumChannels
     || descriptor.planes == nullptr) return false;
+  if (descriptor.frame_count
+    > UINT64_MAX / static_cast<uint64_t>(descriptor.channel_count) / sizeof(float)) return false;
   const uint64_t expected_byte_length = static_cast<uint64_t>(descriptor.frame_count)
     * static_cast<uint64_t>(descriptor.channel_count)
     * sizeof(float);
@@ -6797,6 +6800,24 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_recording_capture_get_diagn
 extern "C" daw_audio_core_result daw_audio_core_create_asset(
   daw_audio_core_handle core_handle,
   const daw_audio_asset_descriptor *descriptor,
+  daw_audio_asset_handle *out_asset) {
+  if (descriptor == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const daw_audio_mapped_asset_descriptor mapped_descriptor{
+    .abi_version = descriptor->abi_version,
+    .revision = descriptor->revision,
+    .byte_length = descriptor->byte_length,
+    .content_hash_prefix = descriptor->content_hash_prefix,
+    .frame_count = descriptor->frame_count,
+    .sample_rate_hz = descriptor->sample_rate_hz,
+    .channel_count = descriptor->channel_count,
+    .planes = descriptor->planes,
+  };
+  return daw_audio_core_create_mapped_asset(core_handle, &mapped_descriptor, out_asset);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_create_mapped_asset(
+  daw_audio_core_handle core_handle,
+  const daw_audio_mapped_asset_descriptor *descriptor,
   daw_audio_asset_handle *out_asset) {
   Core *core = to_core(core_handle);
   if (core == nullptr || descriptor == nullptr || out_asset == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;

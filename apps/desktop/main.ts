@@ -234,6 +234,19 @@ const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachm
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
 const nativeAssetEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionAssetSchema)
 const nativeAssetIdEnvelopeSchema = nativeSessionEnvelopeSchema(positiveUnsigned32Schema)
+const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
+  sessionAssetId: positiveUnsigned32Schema,
+  frameCount: z.number().int().positive().safe(),
+  sampleRateHz: positiveUnsigned32Schema,
+  channelCount: positiveUnsigned32Schema.max(64),
+  contentHashPrefix: z.bigint().nonnegative().max(0xffff_ffff_ffff_ffffn).optional(),
+}).strict())
+const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
+  sessionAssetId: positiveUnsigned32Schema,
+  startFrame: z.number().int().nonnegative().safe(),
+  frameCount: positiveUnsigned32Schema,
+  planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= 1_048_560),
+}).strict())
 const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const nativeTransportEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionTransportSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
@@ -1194,6 +1207,59 @@ const registerIpc = () => {
     if (!supervisor || !envelope.success) return nativeSessionFailure()
     try {
       await supervisor.releaseAsset(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:create-mapped-asset", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeMappedAssetEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.createMappedAsset(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:write-mapped-asset-page", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeMappedAssetPageEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.writeMappedAssetPage(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:prepare-mapped-asset-range", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeSessionEnvelopeSchema(z.object({
+      sessionAssetId: positiveUnsigned32Schema,
+      startFrame: z.number().int().nonnegative().safe(),
+      frameCount: z.number().int().positive().safe(),
+    }).strict()).safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.prepareMappedAssetRange(
+        envelope.data.value.sessionAssetId,
+        envelope.data.value.startFrame,
+        envelope.data.value.frameCount,
+        envelope.data.transactionToken,
+      )
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:release-mapped-asset", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.releaseMappedAsset(envelope.data.value, envelope.data.transactionToken)
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)

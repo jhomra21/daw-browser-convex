@@ -77,10 +77,10 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 1 — metadata and import admission
 
-- [ ] Add MediaBunny-backed audio metadata reader using lazy `BlobSource` input.
-- [ ] Stop requiring whole-file Web Audio decode before a local audio file can be persisted and represented as a clip.
-- [ ] Preserve optional eager `AudioBuffer` cache for short/active media only as an optimization.
-- [ ] Ensure invalid/unsupported audio still fails explicitly.
+- [x] Add MediaBunny-backed audio metadata reader using lazy `BlobSource` input.
+- [x] Stop requiring whole-file Web Audio decode before a local audio file can be persisted and represented as a clip.
+- [x] Preserve optional eager `AudioBuffer` cache for short/active media only as an optimization.
+- [x] Ensure invalid/unsupported audio still fails explicitly.
 
 ### Phase 2 — recording duration independence
 
@@ -92,25 +92,25 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 3 — decoded page source
 
 - [ ] Introduce one bounded decoded-page abstraction shared by import hydration/playback/export consumers.
-- [ ] Decode requested ranges with MediaBunny `AudioSampleSink`.
-- [ ] Close decoded samples promptly and keep a fixed memory budget.
-- [ ] Preserve sample-rate/channel metadata and deterministic frame addressing.
+- [x] Decode requested ranges with MediaBunny `AudioSampleSink`.
+- [x] Close decoded samples promptly and keep a fixed memory budget.
+- [x] Preserve sample-rate/channel metadata and deterministic frame addressing.
 
 ### Phase 4 — timeline/runtime migration
 
-- [ ] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
+- [x] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
 - [ ] Migrate clip hydration away from whole-asset decode.
 - [ ] Ensure seeking, duplicated clips, offsets, fades, and loops request the correct source ranges.
 - [ ] Generate waveform/peak data incrementally without requiring complete decoded PCM.
 
 ### Phase 5 — desktop native file-backed assets
 
-- [ ] Replace whole-PCM `assetInstall` with a duration-independent file/range boundary.
-- [ ] Main/native host owns cache paths; renderer never supplies arbitrary filesystem paths.
-- [ ] Keep IPC messages bounded and sequential.
-- [ ] Keep realtime callback free of blocking I/O/decoding.
-- [ ] Preserve asset lifetime/release/transaction semantics.
-- [ ] Remove native duration-derived `maximumAssetFrames` admission checks.
+- [x] Replace whole-PCM `assetInstall` with a duration-independent file/range boundary.
+- [x] Main/native host owns cache paths; renderer never supplies arbitrary filesystem paths.
+- [x] Keep IPC messages bounded and sequential.
+- [x] Keep realtime callback free of blocking I/O/decoding.
+- [x] Preserve asset lifetime/release/transaction semantics.
+- [x] Remove native duration-derived `maximumAssetFrames` admission checks for mapped ordinary assets; bounded legacy instrument installs remain intentionally capped.
 
 ### Phase 6 — streaming export
 
@@ -127,17 +127,23 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 8 — acceptance
 
-- [ ] Multi-minute imported source persists without complete-file decoding.
-- [ ] Seek near beginning/middle/end and play through native path.
+- [x] Multi-minute imported source persists without complete-file decoding.
+- [x] Seek near beginning/middle/end and play through native path.
 - [ ] Native VST processing works on the long source.
 - [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
 - [ ] Export a long range with bounded process memory.
 - [ ] Corrected Valhalla automation acceptance from PR #51 still passes.
-- [ ] `bun run lint`
-- [ ] `bun run typecheck`
-- [ ] `bun run test`
-- [ ] native CTest/runtime checks on macOS
+- [x] `bun run lint`
+- [x] `bun run typecheck`
+- [x] `bun run test`
+- [x] native CTest/runtime checks on macOS
 - [ ] packaged Electron acceptance on macOS
+
+Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
+snapshots, mapped native page hydration, and hydration-before-schedule are covered
+by focused tests. Native offline planning still consumes `PortableExportSnapshot`
+PCM through `native-pcm-chunking`; it is intentionally not marked complete until
+offline source-page consumption replaces that boundary.
 
 ## Non-goals / real limits
 

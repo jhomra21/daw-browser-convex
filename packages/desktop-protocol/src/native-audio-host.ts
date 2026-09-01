@@ -79,6 +79,7 @@ export const nativeAudioHostMaximumAssetChannels = 64
 export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
 export const nativeAudioHostMappedAssetPageHeaderBytes = 16
+export const nativeAudioHostMaximumMappedAssetRanges = 4_096
 export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCount: number) => (
   Number.isSafeInteger(channelCount) && channelCount > 0
     ? Math.floor(
@@ -152,7 +153,7 @@ const nativeOfflineMappedAssetSchema = z.object({
   ranges: z.array(z.object({
     startFrame: z.number().int().nonnegative().safe(),
     frameCount: z.number().int().positive().safe(),
-  }).strict()).max(4096),
+  }).strict()).max(nativeAudioHostMaximumMappedAssetRanges),
 }).strict().superRefine((value, context) => {
   for (const [index, range] of value.ranges.entries()) {
     if (range.startFrame + range.frameCount > value.frameCount) {

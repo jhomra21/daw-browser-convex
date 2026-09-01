@@ -145,7 +145,9 @@ ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
 covered by focused tests. Native offline planning now emits metadata-only mapped
 ordinary-source descriptors, hydrates only their scheduled source ranges through
 bounded pages before graph publication, and retains `native-pcm-chunking` only
-for eagerly prepared Stretch/instrument PCM.
+for eagerly prepared Stretch/instrument PCM. A fresh unsigned packaged Electron
+launch also reached the local project workspace through the public `daw://app/`
+path; long-media/VST/recording/export acceptance remains open below.
 
 ## Non-goals / real limits
 

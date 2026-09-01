@@ -29,6 +29,7 @@ import {
   nativeAudioHostMaximumAssetChannels,
   nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumInstalledAssets,
+  nativeAudioHostMaximumMappedAssetRanges,
   nativeAudioHostMaximumInstrumentEvents,
   nativeAudioHostMaximumScheduleAutomationSegments,
   nativeAudioHostMaximumScheduleRecords,
@@ -85,15 +86,34 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
     if (!sourceAssetKey) throw new Error(`Native export mapped asset "${asset.assetId}" is missing its source identity.`)
     const ranges = snapshot.events
       .filter((event) => event.assetId === asset.assetId)
-      .map((event) => ({
-        startFrame: Math.max(0, Math.floor(event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0))),
-        frameCount: Math.ceil(
-          event.sourceOffsetFrame
-          + (event.sourceOffsetFraction ?? 0)
-          + event.sourceFrameCount
-          - Math.floor(event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)),
-        ),
-      }))
+      .map((event) => {
+        const sourceOffsetFraction = event.sourceOffsetFraction ?? 0
+        if (
+          !Number.isSafeInteger(event.sourceOffsetFrame)
+          || event.sourceOffsetFrame < 0
+          || !Number.isFinite(sourceOffsetFraction)
+          || sourceOffsetFraction < 0
+          || sourceOffsetFraction >= 1
+          || !Number.isSafeInteger(event.sourceFrameCount)
+          || event.sourceFrameCount <= 0
+        ) {
+          throw new Error(`Native export mapped source "${asset.assetId}" has invalid interpolation bounds.`)
+        }
+        const sourceStart = event.sourceOffsetFrame + sourceOffsetFraction
+        const sourceEnd = sourceStart + event.sourceFrameCount
+        if (
+          !Number.isFinite(sourceStart)
+          || !Number.isFinite(sourceEnd)
+          || sourceStart < 0
+          || sourceEnd <= sourceStart
+          || sourceEnd > asset.frameCount
+        ) {
+          throw new Error(`Native export mapped source "${asset.assetId}" exceeds its source bounds.`)
+        }
+        const startFrame = Math.floor(sourceStart)
+        const endFrame = Math.ceil(sourceEnd)
+        return { startFrame, frameCount: endFrame - startFrame }
+      })
       .filter((range) => range.frameCount > 0)
       .toSorted((left, right) => left.startFrame - right.startFrame)
       .reduce<{ startFrame: number; frameCount: number }[]>((merged, range) => {
@@ -108,6 +128,9 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
         }
         return merged
       }, [])
+    if (ranges.length > nativeAudioHostMaximumMappedAssetRanges) {
+      throw new Error(`Native export mapped source "${asset.assetId}" exceeds the bounded source range count.`)
+    }
     mappedAssets.push({
       sessionAssetId,
       sourceAssetKey,

@@ -15,7 +15,12 @@ import {
   type DesktopApplicationMenuMessage,
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
-import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
+import {
+  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumMappedAssetRanges,
+  nativeAudioHostMaximumPayloadBytes,
+  nativeOfflineRenderPlanSchema,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
@@ -49,6 +54,7 @@ const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
 const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
 const offlineMappedPageRequestChannel = "daw:audio-host:offline-mapped-page-request"
+const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
 const applicationMenuCommandChannel = "daw:application-menu:command"
 const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
@@ -337,25 +343,33 @@ const desktopBridge = {
           const pageNotify = ipcRendererListener((_event, value) => {
             const request = z.object({
               jobId: z.string(),
-              requestId: z.string(),
+              requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
               asset: z.object({
-                sessionAssetId: z.number().int().positive(),
-                sourceAssetKey: z.string(),
+                sessionAssetId: z.number().int().positive().safe(),
+                sourceAssetKey: z.string().min(1),
                 projectId: z.string().optional(),
                 sourceKind: z.enum(["upload", "url", "recording"]).optional(),
                 sampleUrl: z.string().optional(),
-                frameCount: z.number().int().positive(),
-                sampleRateHz: z.number().int().positive(),
-                channelCount: z.number().int().positive(),
+                frameCount: z.number().int().positive().safe(),
+                sampleRateHz: z.number().int().positive().safe(),
+                channelCount: z.number().int().positive().safe().max(64),
                 ranges: z.array(z.object({
-                  startFrame: z.number().int().nonnegative(),
-                  frameCount: z.number().int().positive(),
-                }).strict()),
+                  startFrame: z.number().int().nonnegative().safe(),
+                  frameCount: z.number().int().positive().safe(),
+                }).strict()).max(nativeAudioHostMaximumMappedAssetRanges),
               }).strict(),
-              startFrame: z.number().int().nonnegative(),
-              frameCount: z.number().int().positive(),
+              startFrame: z.number().int().nonnegative().safe(),
+              frameCount: z.number().int().positive().safe(),
             }).strict().safeParse(value)
             if (!request.success || request.data.jobId !== jobId) return
+            if (
+              !Number.isSafeInteger(request.data.startFrame + request.data.frameCount)
+              || request.data.startFrame + request.data.frameCount > request.data.asset.frameCount
+              || !Number.isSafeInteger(
+                request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT,
+              )
+              || request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT > maximumNativeMappedPageBytes
+            ) return
             void pageListener(
               request.data.requestId,
               request.data.asset,

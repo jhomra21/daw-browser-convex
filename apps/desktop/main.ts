@@ -87,7 +87,11 @@ import {
   decodeNativeExternalAttachmentPlan,
   nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
-import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
+import {
+  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumPayloadBytes,
+  nativeOfflineRenderPlanSchema,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   allowsTrustedAudioCapturePermission,
   allowsTrustedMidiPermission,
@@ -128,7 +132,10 @@ const offlineMappedPageResponseSchema = z.object({
     sessionAssetId: positiveUnsigned32Schema,
     startFrame: z.number().int().nonnegative().safe(),
     frameCount: positiveUnsigned32Schema,
-    planarPcm: z.instanceof(Uint8Array),
+    planarPcm: z.instanceof(Uint8Array).refine((value) => (
+      value.byteLength > 0
+      && value.byteLength <= nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
+    )),
   }).strict().optional(),
   error: z.string().max(256).optional(),
 }).strict().refine((value) => (value.page !== undefined) !== (value.error !== undefined))
@@ -371,10 +378,15 @@ let offlineRenderJob: {
   controller: AbortController
   nextSequence: number
   mappedPageRequests: Map<string, {
+    sessionAssetId: number
+    startFrame: number
+    frameCount: number
+    channelCount: number
     resolve: (page: NativeHostMappedAssetPage) => void
     reject: (error: Error) => void
   }>
 } | undefined
+const maximumPendingOfflineMappedPageRequests = 4
 const offlinePcmAcks = createOfflinePcmAckTracker()
 const abortOfflineRenderJobs = () => {
   offlinePcmAcks.cancel(new DOMException("Native offline rendering canceled.", "AbortError"))
@@ -987,6 +999,17 @@ const registerIpc = () => {
     }
     const pending = offlineRenderJob.mappedPageRequests.get(parsed.data.requestId)
     if (!pending) return { accepted: false }
+    if (parsed.data.page && (
+      parsed.data.page.sessionAssetId !== pending.sessionAssetId
+      || parsed.data.page.startFrame !== pending.startFrame
+      || parsed.data.page.frameCount !== pending.frameCount
+      || parsed.data.page.planarPcm.byteLength
+        !== pending.frameCount * pending.channelCount * Float32Array.BYTES_PER_ELEMENT
+    )) {
+      offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
+      pending.reject(new Error("The native offline mapped page response does not match its request."))
+      return { accepted: false }
+    }
     offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
     if (parsed.data.error) pending.reject(new Error(parsed.data.error))
     else if (parsed.data.page) pending.resolve(parsed.data.page)
@@ -1026,6 +1049,10 @@ const registerIpc = () => {
       controller,
       nextSequence: 1,
       mappedPageRequests: new Map<string, {
+        sessionAssetId: number
+        startFrame: number
+        frameCount: number
+        channelCount: number
         resolve: (page: NativeHostMappedAssetPage) => void
         reject: (error: Error) => void
       }>(),
@@ -1055,7 +1082,22 @@ const registerIpc = () => {
         vstAttachments,
         signal: controller.signal,
         onMappedPage: (request) => new Promise((resolve, reject) => {
-          job.mappedPageRequests.set(request.requestId, { resolve, reject })
+          if (job.mappedPageRequests.size >= maximumPendingOfflineMappedPageRequests) {
+            reject(new Error("Too many native offline mapped page requests are pending."))
+            return
+          }
+          if (job.mappedPageRequests.has(request.requestId)) {
+            reject(new Error("The native offline mapped page request ID is duplicated."))
+            return
+          }
+          job.mappedPageRequests.set(request.requestId, {
+            sessionAssetId: request.asset.sessionAssetId,
+            startFrame: request.startFrame,
+            frameCount: request.frameCount,
+            channelCount: request.asset.channelCount,
+            resolve,
+            reject,
+          })
           if (!sendRendererMessage("daw:audio-host:offline-mapped-page-request", request)) {
             job.mappedPageRequests.delete(request.requestId)
             reject(new Error("Renderer unavailable."))

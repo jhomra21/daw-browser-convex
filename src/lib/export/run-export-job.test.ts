@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import "fake-indexeddb/auto"
 import { createDefaultDrumRackParams } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import type { NativeOfflineRenderPlan } from "@daw-browser/audio-engine/native-host-wire"
 
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
@@ -837,6 +838,79 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
   expect(outcome).toEqual({
     type: "error",
     message: "stop after native custom-range planning",
+    failureOwner: "native",
+    outputs: [],
+  })
+})
+
+test("native Main mixdown does not hydrate ordinary whole-buffer clips", async () => {
+  let loaderCalls = 0
+  let planned: NativeOfflineRenderPlan | undefined
+  const outcome = await runTimelineExport({
+    nativeRendererRequired: true,
+    getTracks: () => [{
+      id: "track-ordinary",
+      name: "Ordinary",
+      volume: 1,
+      clips: [{
+        id: "clip-ordinary",
+        name: "Ordinary clip",
+        color: "#fff",
+        startSec: 0,
+        duration: 1,
+        sourceAssetKey: "asset:ordinary",
+        sourceDurationSec: 9,
+        sourceSampleRate: 48_000,
+        sourceChannelCount: 2,
+        buffer: null,
+      }],
+    }],
+    bpm: 120,
+    projectGeneration: 1,
+    getProjectGeneration: () => 1,
+    masterVolume: 1,
+    range: { mode: "whole" },
+    formats: ["wav"],
+    render,
+    encoding,
+    projectId: "project:ordinary",
+    userId: undefined,
+    sidechainRoutes: [],
+    loadCapturedClipBuffer: async () => {
+      loaderCalls += 1
+      throw new Error("ordinary clips must not require whole-buffer hydration")
+    },
+    signal: new AbortController().signal,
+    outputTargets: {
+      resourceLimits: desktopLimits,
+      async createMixdownTarget() {
+        return {
+          openFile: async () => undefined,
+          saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
+        }
+      },
+      async createStemTarget() {
+        throw new Error("unexpected stem target")
+      },
+    },
+    renderStateSnapshot,
+    nativeOfflinePcmRenderer: async (plan) => {
+      planned = plan
+      throw new NativeOfflineRenderError("stop after ordinary mapped planning")
+    },
+  })
+
+  expect(loaderCalls).toBe(0)
+  expect(planned).toMatchObject({
+    assets: [],
+    mappedAssets: [expect.objectContaining({
+      sourceAssetKey: "asset:ordinary",
+      frameCount: 9 * 48_000,
+    })],
+  })
+  expect(outcome).toEqual({
+    type: "error",
+    message: "stop after ordinary mapped planning",
     failureOwner: "native",
     outputs: [],
   })

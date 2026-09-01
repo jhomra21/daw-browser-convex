@@ -332,6 +332,69 @@ describe("desktop file capability manager", () => {
     }
   })
 
+  test("rejects unsafe, empty, oversized, holed, and revoked output chunks", async () => {
+    const directory = await createTemporaryDirectory()
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      randomBytes: createDeterministicRandom(),
+    })
+    const expectInvalidChunk = async (offset: number, chunk: Uint8Array) => {
+      const capability = await manager.grantOutputFile(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        path.join(directory, `invalid-${Math.abs(offset)}-${chunk.byteLength}.wav`),
+      )
+      const writer = await manager.beginWrite(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        capability.token,
+      )
+      await expectCapabilityError(
+        manager.writeChunk(
+          { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+          writer.writerId,
+          offset,
+          chunk,
+        ),
+        "invalid-chunk",
+      )
+      await manager.abortWrite(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        writer.writerId,
+      )
+    }
+
+    await expectInvalidChunk(-1, new Uint8Array([1]))
+    await expectInvalidChunk(Number.MAX_SAFE_INTEGER + 1, new Uint8Array([1]))
+    await expectInvalidChunk(0, new Uint8Array(0))
+    await expectInvalidChunk(0, new Uint8Array(1024 * 1024 + 1))
+    await expectInvalidChunk(1, new Uint8Array([1]))
+
+    const revokedRequestId = "revoked-chunk"
+    const capability = await manager.grantOutputFile(
+      { ...scope, requestId: revokedRequestId },
+      path.join(directory, "revoked-chunk.wav"),
+    )
+    const writer = await manager.beginWrite(
+      { ...scope, requestId: revokedRequestId },
+      capability.token,
+    )
+    await manager.writeChunk(
+      { ...scope, requestId: revokedRequestId },
+      writer.writerId,
+      0,
+      new Uint8Array([1]),
+    )
+    await manager.revoke(capability.token)
+    await expectCapabilityError(
+      manager.writeChunk(
+        { ...scope, requestId: revokedRequestId },
+        writer.writerId,
+        1,
+        new Uint8Array([2]),
+      ),
+      "invalid-capability",
+    )
+  })
+
   test("confines directory outputs and removes partial files on abort and revoke", async () => {
     const directory = await createTemporaryDirectory()
     const nestedDirectory = path.join(directory, "nested")

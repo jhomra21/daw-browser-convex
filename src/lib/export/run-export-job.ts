@@ -797,6 +797,12 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
   let outputTarget: Awaited<ReturnType<ExportOutputTargetFactory["createMixdownTarget"]>> | undefined
   let localProjectId: string | undefined
   let nativeSpool: NativeOfflinePcmSpoolSession | undefined
+  let nativeSpoolRemoved = false
+  const removeNativeSpool = async () => {
+    if (!nativeSpool || nativeSpoolRemoved) return
+    await nativeSpool.remove()
+    nativeSpoolRemoved = true
+  }
   const saveCompletedLocalMetadata = async () => {
     if (!localProjectId) return
     await saveLocalExportMetadataBatch(localProjectId, localMetadataRows)
@@ -908,6 +914,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         input.onProgress?.({ phase: 'rendering', renderedFrames, totalRenderFrames: totalFrames })
       })
       nativeSpool = spool
+      nativeSpoolRemoved = false
       const processed = await processNativeOfflinePcmSpool({
         spool,
         sourceDurationSec: sourceBounds.endSec - sourceBounds.startSec,
@@ -1006,6 +1013,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         completedFormats += 1
       }
       await saveCompletedLocalMetadata()
+      await removeNativeSpool()
       return { type: 'success', outputs }
     } else {
       rendered = await exportMixdown.renderMixdown({
@@ -1137,8 +1145,10 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     }
   } finally {
     try {
-      await nativeSpool?.remove()
-    } catch {}
+      await removeNativeSpool()
+    } catch (cleanupError) {
+      console.error('[export] native offline PCM cleanup failed after export failure', cleanupError)
+    }
     try {
       await outputTarget?.dispose?.()
     } catch {}

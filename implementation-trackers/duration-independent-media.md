@@ -5,7 +5,7 @@
 IN PROGRESS
 
 Branch: `fix/native-asset-capacity` (name retained for PR continuity)
-Base: `fix/native-vst-automation-export`
+Base: `master`
 
 ## Product invariant
 

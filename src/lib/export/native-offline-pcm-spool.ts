@@ -153,6 +153,9 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
 
   const spoolsDirectory = async () => {
     const root = await filesystem.root()
+    // Do not sweep unknown sessions here: another renderer can own an active
+    // session. Crash recovery needs an ownership/age policy rather than a
+    // destructive startup-wide cleanup.
     return root.getDirectory(EXPORT_SPOOL_DIRECTORY, true)
   }
 

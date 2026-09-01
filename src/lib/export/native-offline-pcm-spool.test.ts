@@ -77,14 +77,17 @@ const wrapMemoryFile = (state: MemoryFileState): NativeOfflinePcmSpoolFile => ({
   },
 })
 
-const wrapMemoryDirectory = (state: MemoryDirectoryState): NativeOfflinePcmSpoolDirectory => ({
+const wrapMemoryDirectory = (
+  state: MemoryDirectoryState,
+  failNextRemove: () => boolean,
+): NativeOfflinePcmSpoolDirectory => ({
   getDirectory: async (name, create) => {
     const existing = state.directories.get(name)
-    if (existing) return wrapMemoryDirectory(existing)
+    if (existing) return wrapMemoryDirectory(existing, failNextRemove)
     if (!create) throw new DOMException('Missing directory', 'NotFoundError')
     const created = createDirectoryState()
     state.directories.set(name, created)
-    return wrapMemoryDirectory(created)
+    return wrapMemoryDirectory(created, failNextRemove)
   },
   getFile: async (name, create) => {
     const existing = state.files.get(name)
@@ -98,6 +101,7 @@ const wrapMemoryDirectory = (state: MemoryDirectoryState): NativeOfflinePcmSpool
     return wrapMemoryFile(created)
   },
   remove: async (name) => {
+    if (failNextRemove()) throw new Error('Memory directory removal failed')
     if (state.directories.delete(name)) return
     if (state.files.delete(name)) return
     throw new DOMException('Missing entry', 'NotFoundError')
@@ -106,10 +110,19 @@ const wrapMemoryDirectory = (state: MemoryDirectoryState): NativeOfflinePcmSpool
 
 const createMemoryFilesystem = () => {
   const root = createDirectoryState()
+  let removeFailures = 0
   const filesystem: NativeOfflinePcmSpoolFilesystem = {
-    root: async () => wrapMemoryDirectory(root),
+    root: async () => wrapMemoryDirectory(root, () => {
+      if (removeFailures === 0) return false
+      removeFailures -= 1
+      return true
+    }),
   }
-  return { filesystem, root }
+  return {
+    filesystem,
+    root,
+    failNextRemove: () => { removeFailures += 1 },
+  }
 }
 
 const chunk = (
@@ -272,5 +285,25 @@ describe('native offline PCM spool', () => {
     controller.abort()
     const iterator = finalized.replay({ signal: controller.signal })
     await expect(iterator.next()).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  test('retains removable state when cleanup fails and allows a later retry', async () => {
+    const memory = createMemoryFilesystem()
+    const session = await createNativeOfflinePcmSpool({ filesystem: memory.filesystem }).createSession({
+      sessionId: 'render-h',
+      sampleRate: 48_000,
+      channelCount: 2,
+      totalFrames: 1,
+    })
+    await session.append(chunk(0, [0]))
+    await session.finalize()
+
+    memory.failNextRemove()
+    await expect(session.remove()).rejects.toThrow('Memory directory removal failed')
+    const spoolDirectory = memory.root.directories.get('native-export-spools')
+    expect(spoolDirectory?.directories.has('render-h')).toBe(true)
+
+    await session.remove()
+    expect(spoolDirectory?.directories.has('render-h')).toBe(false)
   })
 })

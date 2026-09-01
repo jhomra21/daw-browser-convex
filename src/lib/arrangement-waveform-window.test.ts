@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Clip } from '@daw-browser/timeline-core/types'
 import {
+  getArrangementWaveformCanvasWindow,
   getArrangementWaveformVisibleSegments,
   selectArrangementWaveformRoute,
 } from './arrangement-waveform-window'
@@ -16,6 +17,55 @@ const clip = (patch: Partial<Clip<AudioBuffer>> = {}): Clip<AudioBuffer> => ({
   sourceSampleRate: 48_000,
   sourceChannelCount: 2,
   ...patch,
+})
+
+describe('getArrangementWaveformCanvasWindow', () => {
+  test('bounds a long deep-zoom clip canvas to the visible timeline window', () => {
+    expect(getArrangementWaveformCanvasWindow({
+      clipStartSec: 0,
+      clipDurationSec: 600,
+      cssWidthPx: 480_000,
+      pixelsPerSecond: 800,
+      visibleRange: { startSec: 120, endSec: 121.25 },
+    })).toEqual({
+      leftPx: 96_000,
+      widthPx: 1_000,
+    })
+  })
+
+  test('clips the drawing surface at clip boundaries', () => {
+    expect(getArrangementWaveformCanvasWindow({
+      clipStartSec: 10,
+      clipDurationSec: 20,
+      cssWidthPx: 16_000,
+      pixelsPerSecond: 800,
+      visibleRange: { startSec: 8, endSec: 12 },
+    })).toEqual({ leftPx: 0, widthPx: 1_600 })
+    expect(getArrangementWaveformCanvasWindow({
+      clipStartSec: 10,
+      clipDurationSec: 20,
+      cssWidthPx: 16_000,
+      pixelsPerSecond: 800,
+      visibleRange: { startSec: 29, endSec: 32 },
+    })).toEqual({ leftPx: 15_200, widthPx: 800 })
+  })
+
+  test('returns no canvas for offscreen or malformed geometry', () => {
+    expect(getArrangementWaveformCanvasWindow({
+      clipStartSec: 10,
+      clipDurationSec: 20,
+      cssWidthPx: 16_000,
+      pixelsPerSecond: 800,
+      visibleRange: { startSec: 0, endSec: 5 },
+    })).toBeNull()
+    expect(getArrangementWaveformCanvasWindow({
+      clipStartSec: 10,
+      clipDurationSec: 20,
+      cssWidthPx: 16_000,
+      pixelsPerSecond: 800,
+      visibleRange: { startSec: Number.NaN, endSec: 17 },
+    })).toBeNull()
+  })
 })
 
 describe('getArrangementWaveformVisibleSegments', () => {

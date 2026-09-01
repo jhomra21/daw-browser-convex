@@ -28,13 +28,13 @@ Short media may still use eager caches as an optimization. Eager materialization
 
 - Local project media is already copied to project-owned files (project directory or OPFS), so durable bytes are not inherently RAM-backed.
 - Local asset hashing already streams `File.stream()` rather than requiring a complete `ArrayBuffer`.
-- Audio import currently calls `file.arrayBuffer()` and decodes the complete source with Web Audio before clip creation.
-- Portable/native projection currently copies complete `AudioBuffer` channel planes into `PlanarPcm` assets.
-- Native live playback currently serializes complete planar PCM through `assetInstall`; the control frame therefore creates an accidental duration ceiling.
+- Audio import reads metadata lazily with MediaBunny and can create ordinary clips without complete-file Web Audio decoding.
+- Ordinary portable/native snapshots are metadata-only; bounded legacy instrument and prepared Stretch paths may still carry planar PCM.
+- Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
 - Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
-- Recording temp storage nevertheless imposes an explicit 4 GiB total-session ceiling.
+- Recording duration independence is not yet closed; the remaining writer, finalization, and post-recording hydration paths still require audit and runtime acceptance.
 - Recording WAV finalization already reads/writes blocks incrementally.
-- Native offline rendering already emits bounded PCM chunks, but the higher export path still materializes a monolithic in-memory render.
+- Native offline rendering consumes scheduled ordinary-source ranges through bounded mapped pages, emits bounded PCM chunks, and spools output to disk-backed streaming DSP and encoding.
 - MediaBunny is already a project dependency and provides lazy `BlobSource` reading plus incremental `AudioSampleSink` decoding.
 
 ## Architecture
@@ -114,7 +114,8 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 6 — streaming export
 
-- [ ] Consume source audio in bounded pages for native/portable export.
+- [x] Consume ordinary source audio in bounded pages for native export.
+- [ ] Consume source audio in bounded pages for portable export.
 - [x] Stream native offline PCM chunks directly into encoding/output.
 - [x] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
 - [x] Keep cancellation and partial-file cleanup deterministic.
@@ -127,8 +128,8 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 8 — acceptance
 
-- [x] Multi-minute imported source persists without complete-file decoding.
-- [x] Seek near beginning/middle/end and play through native path.
+- [ ] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
+- [ ] Seek near beginning/middle/end and play through the packaged native path.
 - [ ] Native VST processing works on the long source.
 - [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
 - [ ] Export a long range with bounded process memory.

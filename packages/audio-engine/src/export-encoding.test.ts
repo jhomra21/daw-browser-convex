@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { encodeAudioBuffer, encodeAudioChunks } from './export-encoding'
+import {
+  encodeAudioBuffer,
+  encodeAudioChunks,
+  type EncodeAudioBufferOptions,
+} from './export-encoding'
 
 const originalAudioBuffer = globalThis.AudioBuffer
 
@@ -59,9 +63,9 @@ describe('chunked export encoding', () => {
     const first = audioBuffer([0.1, -0.2, 0.3])
     const second = audioBuffer([-0.4, 0.5, -0.6])
     const combined = audioBuffer([0.1, -0.2, 0.3, -0.4, 0.5, -0.6])
-    const options = {
-      format: 'wav' as const,
-      wav: { codec: 'pcm-s16' as const, dither: 'none' as const },
+    const options: EncodeAudioBufferOptions = {
+      format: 'wav',
+      wav: { codec: 'pcm-s16', dither: 'none' },
     }
 
     const streamed = await encodeAudioChunks([first, second], options)

@@ -113,6 +113,12 @@ const validateAudioChunk = (
     || !Number.isSafeInteger(chunk.length) || chunk.length <= 0) {
     throw new Error('Export audio chunk metadata is invalid.')
   }
+  for (let channel = 0; channel < chunk.numberOfChannels; channel += 1) {
+    const channelData = chunk.getChannelData(channel)
+    if (channelData.length !== chunk.length) {
+      throw new Error('Export audio chunk channel data is invalid.')
+    }
+  }
   if (sampleRate !== undefined && chunk.sampleRate !== sampleRate) {
     throw new Error('Export audio chunk sample rate changed during encoding.')
   }

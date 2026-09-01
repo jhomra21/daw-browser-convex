@@ -54,7 +54,7 @@ import {
 } from './portable-export-worker-protocol'
 import { resolvePortableWasmManifestUrl } from './worklet-manifest'
 import { preparePortableStretchAssets } from './portable-stretch-preparation'
-export { encodeAudioBuffer, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
+export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'

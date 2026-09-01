@@ -61,7 +61,6 @@ export const createStreamingTruePeakLimiter = (options: StreamingTruePeakLimiter
   let envelope = 1
   let limited = false
   let consumed = false
-  let finished = false
 
   const sampleAt = (channel: number, frame: number) => {
     if (frame < 0 || frame >= framesSeen) return 0
@@ -189,15 +188,10 @@ export const createStreamingTruePeakLimiter = (options: StreamingTruePeakLimiter
     }
     const finalOutput = flushOutput()
     if (finalOutput) yield finalOutput
-    finished = true
   }
 
   return {
     transform,
     wasLimited: () => limited,
-    isFinished: () => finished,
-    lookaheadFrames,
-    rawCapacity,
-    peakQueueCapacity: dequeCapacity,
   }
 }

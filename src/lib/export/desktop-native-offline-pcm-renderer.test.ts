@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test'
 
 import type { NativeOfflineRenderPlan } from '@daw-browser/audio-engine/native-host-wire'
-import { nativeAudioHostMaximumInMemoryPcmBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 
 import { createDesktopNativeOfflinePcmRenderer } from '~/lib/export/desktop-native-offline-pcm-renderer'
 import type {
@@ -71,7 +70,7 @@ test('disk-backed native renderer has no 512 MiB AudioBuffer admission limit', a
       return fakeSession(state)
     },
   })
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
+  const totalFrames = 8 * 1024 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
 
   await expect(renderer(plan(totalFrames), new AbortController().signal, () => undefined))

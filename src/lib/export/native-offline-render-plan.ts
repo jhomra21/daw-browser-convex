@@ -10,6 +10,7 @@ import {
   serializeNativeGraph,
   serializeNativeInstrumentStates,
   serializeNativeScheduleWindow,
+  type NativeOfflineMappedAsset,
   type NativeHostPcmAsset,
   type NativeOfflineRenderPlan,
   type NativeVstAutomationSegment,
@@ -65,18 +66,58 @@ const planarBytes = (planes: readonly Float32Array[]) => {
 const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: true }>) => {
   const sessionAssets = mapNativeSessionAssets(snapshot.assets.map(({ asset }) => asset))
   const byAssetId = new Map(snapshot.assets.map((entry) => [entry.asset.assetId, entry]))
-  const assets: NativeHostPcmAsset[] = sessionAssets.map(({ asset, sessionAssetId }) => {
+  const assets: NativeHostPcmAsset[] = []
+  const mappedAssets: NativeOfflineMappedAsset[] = []
+  for (const { asset, sessionAssetId } of sessionAssets) {
     const entry = byAssetId.get(asset.assetId)
-    if (!entry) throw new Error(`Native export asset "${asset.assetId}" is missing PCM.`)
-    return {
+    if (!entry) throw new Error(`Native export asset "${asset.assetId}" is missing.`)
+    if (entry.pcm) {
+      assets.push({
+        sessionAssetId,
+        frameCount: asset.frameCount,
+        sampleRateHz: asset.sampleRateHz,
+        channelCount: asset.channelCount,
+        planarPcm: planarBytes(entry.pcm.planes),
+      })
+      continue
+    }
+    const sourceAssetKey = entry.sourceAssetKey
+    if (!sourceAssetKey) throw new Error(`Native export mapped asset "${asset.assetId}" is missing its source identity.`)
+    const ranges = snapshot.events
+      .filter((event) => event.assetId === asset.assetId)
+      .map((event) => ({
+        startFrame: Math.max(0, Math.floor(event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0))),
+        frameCount: Math.ceil(
+          event.sourceOffsetFrame
+          + (event.sourceOffsetFraction ?? 0)
+          + event.sourceFrameCount
+          - Math.floor(event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)),
+        ),
+      }))
+      .filter((range) => range.frameCount > 0)
+      .toSorted((left, right) => left.startFrame - right.startFrame)
+      .reduce<{ startFrame: number; frameCount: number }[]>((merged, range) => {
+        const previous = merged.at(-1)
+        if (previous && range.startFrame <= previous.startFrame + previous.frameCount) {
+          previous.frameCount = Math.max(
+            previous.frameCount,
+            range.startFrame + range.frameCount - previous.startFrame,
+          )
+        } else {
+          merged.push({ ...range })
+        }
+        return merged
+      }, [])
+    mappedAssets.push({
       sessionAssetId,
+      sourceAssetKey,
       frameCount: asset.frameCount,
       sampleRateHz: asset.sampleRateHz,
       channelCount: asset.channelCount,
-      planarPcm: planarBytes(entry.pcm.planes),
-    }
-  })
-  return { sessionAssets, assets }
+      ranges,
+    })
+  }
+  return { sessionAssets, assets, mappedAssets }
 }
 
 const transferableBuffer = (plane: Float32Array) => {
@@ -148,6 +189,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   channelCount: 1 | 2
   tailFrames: number
   projectGeneration: number
+  projectId?: string
   preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
   externalAttachments?: NativeExternalAttachmentPlan
   capturedVstStates?: readonly {
@@ -189,6 +231,17 @@ export const compileNativeOfflineRenderPlan = (input: {
     projectGeneration: input.projectGeneration,
     preparedStretchAssets: input.preparedStretchAssets,
     capabilityTarget: 'native',
+    metadataSourceAssets: input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
+      clip.midi || !clip.sourceAssetKey || clip.sourceDurationSec === undefined
+        || clip.sourceSampleRate === undefined || clip.sourceChannelCount === undefined
+        ? []
+        : [{
+          sourceAssetKey: clip.sourceAssetKey,
+          frameCount: Math.max(1, Math.round(clip.sourceDurationSec * clip.sourceSampleRate)),
+          sampleRateHz: clip.sourceSampleRate,
+          channelCount: clip.sourceChannelCount,
+        }]
+    ))),
   })
   if (!snapshot.supported) throw new Error(snapshot.reasons.join(' '))
   const schedule = compilePortableFrameSchedule({
@@ -213,7 +266,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   }
   const chunked = chunkNativePcmProjection({
     graph: snapshot.graph,
-    assets: snapshot.assets.map(({ asset, pcm }) => ({ asset, pcm })),
+    assets: snapshot.assets.flatMap(({ asset, pcm }) => pcm ? [{ asset, pcm }] : []),
     events: snapshot.events,
     firstSequence: 1,
   })
@@ -225,17 +278,49 @@ export const compileNativeOfflineRenderPlan = (input: {
   }
   const nativeSnapshot: Extract<PortableExportSnapshot, { supported: true }> = {
     ...snapshot,
-    graph: { ...snapshot.graph, assets: chunked.assets.map(({ asset }) => asset) },
-    assets: chunked.assets.map(({ asset, pcm }) => ({
-      asset,
-      pcm,
-      transferables: pcm.planes.map(transferableBuffer),
-    })),
+    graph: {
+      ...snapshot.graph,
+      assets: [
+        ...chunked.assets.map(({ asset }) => asset),
+        ...snapshot.assets.flatMap(({ asset, pcm }) => pcm ? [] : [asset]),
+      ],
+    },
+    assets: [
+      ...chunked.assets.map(({ asset, pcm }) => ({
+        asset,
+        pcm,
+        transferables: pcm.planes.map(transferableBuffer),
+      })),
+      ...snapshot.assets.flatMap((entry) => entry.pcm ? [] : [entry]),
+    ],
     events: chunked.events,
   }
-  const { sessionAssets, assets } = nativeAssets(nativeSnapshot)
+  const { sessionAssets, assets, mappedAssets } = nativeAssets(nativeSnapshot)
+  const sourceMetadata = new Map<string, {
+    sourceKind: typeof input.tracks[number]['clips'][number]['sourceKind']
+    sampleUrl: string | undefined
+  }>()
+  for (const track of input.tracks) {
+    for (const clip of track.clips) {
+      if (clip.sourceAssetKey) {
+        sourceMetadata.set(clip.sourceAssetKey, {
+          sourceKind: clip.sourceKind,
+          sampleUrl: clip.sampleUrl,
+        })
+      }
+    }
+  }
+  const hydratedMappedAssets = mappedAssets.map((asset) => {
+    const metadata = sourceMetadata.get(asset.sourceAssetKey)
+    return {
+      ...asset,
+      projectId: input.projectId,
+      sourceKind: metadata?.sourceKind,
+      sampleUrl: metadata?.sampleUrl,
+    }
+  })
   if (
-    assets.length > nativeAudioHostMaximumInstalledAssets
+    assets.length + hydratedMappedAssets.length > nativeAudioHostMaximumInstalledAssets
     || assets.some((asset) => asset.channelCount > nativeAudioHostMaximumAssetChannels
       || asset.frameCount > nativeAudioHostMaximumAssetFramesForChannels(asset.channelCount))
   ) {
@@ -364,6 +449,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     capturedVstStates: input.capturedVstStates ? input.capturedVstStates : undefined,
     instrumentStates: instrumentStates.length === 0 ? undefined : serializeNativeInstrumentStates(instrumentStates, sessionAssets),
     assets,
+    mappedAssets: hydratedMappedAssets.length > 0 ? hydratedMappedAssets : undefined,
     transport: {
       epoch: 1,
       running: true,

@@ -1,5 +1,7 @@
 import type {
   NativeOfflinePcmChunk,
+  NativeHostMappedAssetPage,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan,
 } from '@daw-browser/audio-engine/native-host-wire'
 
@@ -22,9 +24,24 @@ type DesktopNativeOfflinePcmRendererBridge = {
     jobId: string,
     plan: NativeOfflineRenderPlan,
     onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+    onMappedPage: (
+      requestId: string,
+      asset: NativeOfflineMappedAsset,
+      startFrame: number,
+      frameCount: number,
+    ) => Promise<NativeHostMappedAssetPage>,
   ): Promise<{ ok: true } | { ok: false; error: string }>
   cancel(jobId: string): Promise<{ accepted: boolean }>
 }
+
+export type NativeOfflineMappedPageProvider = (
+  request: {
+    asset: NativeOfflineMappedAsset
+    startFrame: number
+    frameCount: number
+    signal: AbortSignal
+  },
+) => Promise<NativeHostMappedAssetPage>
 
 type NativeOfflinePcmSpoolFactory = {
   createSession(input: {
@@ -44,6 +61,7 @@ export type NativeOfflinePcmRenderer = (
 export const createDesktopNativeOfflinePcmRenderer = (
   renderer: DesktopNativeOfflinePcmRendererBridge,
   spool: NativeOfflinePcmSpoolFactory = createNativeOfflinePcmSpool(),
+  provideMappedPage?: NativeOfflineMappedPageProvider,
 ): NativeOfflinePcmRenderer => async (plan, signal, onProgress) => {
   signal.throwIfAborted()
   const jobId = `offline-${crypto.randomUUID()}`
@@ -86,6 +104,9 @@ export const createDesktopNativeOfflinePcmRenderer = (
           void renderer.cancel(jobId)
           throw callbackError
         }
+      }, async (_requestId, asset, startFrame, frameCount) => {
+        if (!provideMappedPage) throw new NativeOfflineRenderError('Native offline mapped page provider is unavailable.')
+        return await provideMappedPage({ asset, startFrame, frameCount, signal })
       })
     } catch (error) {
       if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error

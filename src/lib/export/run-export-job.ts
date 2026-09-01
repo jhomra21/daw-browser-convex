@@ -36,7 +36,7 @@ import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-p
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import {
   nativeAudioHostMaximumInstalledAssets,
-  nativeAudioHostMaximumInMemoryPcmBytes,
+  nativeAudioHostMaximumStretchPreparationBytes,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { preparePortableStretchAssets, isPortableStretchClip, type PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
 
@@ -844,9 +844,15 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     const mixdownModule = import('@daw-browser/audio-engine/export-mixdown')
     const fx = cloneExportFx(input.renderStateSnapshot.fx)
     const automationEnvelopes = input.renderStateSnapshot.automationEnvelopes.map(cloneAutomationEnvelope)
+    const bufferLoadTracks = input.nativeRendererRequired
+      ? preloadTracks.map((track) => ({
+        ...track,
+        clips: track.clips.filter(isPortableStretchClip),
+      }))
+      : preloadTracks
     const [exportMixdown] = await Promise.all([
       mixdownModule,
-      ensureBuffersForRange({ ...input, tracks: preloadTracks }),
+      ensureBuffersForRange({ ...input, tracks: bufferLoadTracks }),
       loadInstrumentExportBuffers(fx, input.signal, undefined, localProjectId),
     ])
     throwIfExportAborted(input.signal)
@@ -861,7 +867,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         projectGeneration: input.projectGeneration,
         requiredSampleRateHz: input.render.sampleRate,
         maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
-        maximumPreparationBytes: nativeAudioHostMaximumInMemoryPcmBytes,
+        maximumPreparationBytes: nativeAudioHostMaximumStretchPreparationBytes,
         createBuffer: input.createBuffer ?? ((channels, frames, sampleRate) => new AudioBuffer({
           numberOfChannels: channels,
           length: frames,
@@ -890,6 +896,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         sampleRateHz: input.render.sampleRate,
         channelCount: input.render.numberOfChannels,
         tailFrames: Math.ceil(tailMaximumSec * input.render.sampleRate),
+        projectId: input.projectId,
         projectGeneration: input.projectGeneration,
         preparedStretchAssets,
         externalAttachments: input.renderStateSnapshot.nativeExternalAttachments,

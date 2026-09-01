@@ -111,12 +111,11 @@ export const nativeAudioHostScheduleProgressBytes = 80
 export const nativeAudioHostMaximumSampleRateHz = 384_000
 export const nativeAudioHostMaximumFramesPerBlock = 8_192
 /**
- * Native renderer output is currently materialized as a monolithic Web Audio
- * AudioBuffer, and post-processing/encoding may hold another copy. Keep this
- * working-set ceiling separate from the 8 GiB aggregate streaming envelope.
+ * Prepared Stretch assets remain eagerly materialized before native export.
+ * Keep their bounded working set separate from the duration-independent
+ * mapped-source path.
  */
-export const nativeAudioHostMaximumInMemoryPcmBytes = 512 * 1024 * 1024
-export const nativeAudioHostMaximumOfflineRenderBytes = 8 * 1024 * 1024 * 1024
+export const nativeAudioHostMaximumStretchPreparationBytes = 512 * 1024 * 1024
 export const nativeAudioHostMaximumCapturedVstStateBytes = 512 * 1024
 
 export const nativeOfflineRenderPcmBytes = (totalFrames: number, channelCount: number) => (
@@ -138,6 +137,27 @@ const nativeOfflinePcmAssetSchema = z.object({
     || value.planarPcm.byteLength !== byteLength
   ) {
     context.addIssue({ code: "custom", path: ["planarPcm"], message: "PCM byte length does not match its dimensions." })
+  }
+})
+
+const nativeOfflineMappedAssetSchema = z.object({
+  sessionAssetId: z.number().int().positive().max(0xffff_ffff),
+  sourceAssetKey: z.string().min(1).max(512),
+  projectId: z.string().min(1).max(256).optional(),
+  sourceKind: z.enum(["upload", "url", "recording"]).optional(),
+  sampleUrl: z.string().min(1).max(4096).optional(),
+  frameCount: z.number().int().positive().safe(),
+  sampleRateHz: z.number().int().positive().max(nativeAudioHostMaximumSampleRateHz),
+  channelCount: z.number().int().positive().max(nativeAudioHostMaximumAssetChannels),
+  ranges: z.array(z.object({
+    startFrame: z.number().int().nonnegative().safe(),
+    frameCount: z.number().int().positive().safe(),
+  }).strict()).max(4096),
+}).strict().superRefine((value, context) => {
+  for (const [index, range] of value.ranges.entries()) {
+    if (range.startFrame + range.frameCount > value.frameCount) {
+      context.addIssue({ code: "custom", path: ["ranges", index], message: "Mapped asset range exceeds the asset length." })
+    }
   }
 })
 
@@ -185,32 +205,20 @@ export const nativeOfflineRenderPlanSchema = z.object({
   externalAttachments: nativeExternalAttachmentPlanSchema.optional(),
   instrumentStates: nativeOfflineBinarySchema.optional(),
   assets: z.array(nativeOfflinePcmAssetSchema).max(nativeAudioHostMaximumInstalledAssets),
+  mappedAssets: z.array(nativeOfflineMappedAssetSchema).max(nativeAudioHostMaximumInstalledAssets).optional(),
   transport: nativeOfflineTransportSchema,
   schedule: nativeOfflineBinarySchema,
   scheduleWindows: z.array(nativeOfflineBinarySchema).min(1).optional(),
   capturedVstStates: z.array(nativeOfflineCapturedStateSchema).max(maxNativeExternalAttachments).optional(),
 }).strict().superRefine((value, context) => {
-  const pcmBytes = nativeOfflineRenderPcmBytes(value.totalFrames, value.channelCount)
-  if (!Number.isSafeInteger(pcmBytes) || pcmBytes > nativeAudioHostMaximumInMemoryPcmBytes) {
-    context.addIssue({ code: "custom", path: ["totalFrames"], message: "Offline PCM exceeds the native in-memory render limit." })
-  }
-  if (!Number.isSafeInteger(pcmBytes) || pcmBytes > nativeAudioHostMaximumOfflineRenderBytes) {
-    context.addIssue({ code: "custom", path: ["totalFrames"], message: "Offline PCM exceeds the desktop export envelope." })
-  }
   if (value.blockFrames > value.totalFrames) {
     context.addIssue({ code: "custom", path: ["blockFrames"], message: "Block size exceeds the render length." })
   }
   if (value.transport.frame > value.totalFrames) {
     context.addIssue({ code: "custom", path: ["transport", "frame"], message: "Transport frame exceeds the render length." })
   }
-  const assetBytes = value.assets.reduce((total, asset) => total + asset.planarPcm.byteLength, 0)
-  const scheduleBytes = value.schedule.byteLength
-    + (value.scheduleWindows?.reduce((total, window) => total + window.byteLength, 0) ?? 0)
-  const capturedStateBytes = value.capturedVstStates?.reduce((total, state) => total + state.bytes.byteLength, 0) ?? 0
-  const aggregateBytes = assetBytes + value.graph.byteLength + (value.instrumentStates?.byteLength ?? 0)
-    + scheduleBytes + capturedStateBytes
-  if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes > nativeAudioHostMaximumOfflineRenderBytes) {
-    context.addIssue({ code: "custom", message: "Offline render inputs exceed the desktop export envelope." })
+  if (value.assets.length + (value.mappedAssets?.length ?? 0) > nativeAudioHostMaximumInstalledAssets) {
+    context.addIssue({ code: "custom", path: ["mappedAssets"], message: "Total native asset count exceeds the installed asset limit." })
   }
   const attachmentIds = new Set(value.externalAttachments?.attachments.map((attachment) => attachment.instanceId) ?? [])
   const stateIds = new Set<string>()

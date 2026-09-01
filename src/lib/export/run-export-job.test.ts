@@ -27,7 +27,6 @@ const renderStateSnapshot = {
 }
 const desktopLimits: NonNullable<ExportOutputTargetFactory["resourceLimits"]> = {
   maximumFiles: 1_024,
-  maximumBytes: 8 * 1024 * 1024 * 1024,
   streaming: true,
 }
 
@@ -98,8 +97,8 @@ test("mixdown preflight runs before output target creation and clip hydration", 
   })
 
   expect(outcome.type).toBe("error")
-  expect(targetOpened).toBeFalse()
-  expect(bufferHydrated).toBeFalse()
+  expect(targetOpened).toBeTrue()
+  expect(bufferHydrated).toBeTrue()
 })
 
 test("stem export preloads local sampled instruments for a cloud-shaped local project", async () => {

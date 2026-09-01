@@ -32,6 +32,7 @@ import type {
   NativeOutputDevice,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
+  NativeOfflineMappedAsset,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
   NativeVst3InsertionPreflightRequest,
@@ -47,6 +48,7 @@ import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
 const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
+const offlineMappedPageRequestChannel = "daw:audio-host:offline-mapped-page-request"
 const applicationMenuCommandChannel = "daw:application-menu:command"
 const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
@@ -302,6 +304,12 @@ const desktopBridge = {
           jobId: string,
           plan: NativeOfflineRenderPlan,
           listener: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+          pageListener: (
+            requestId: string,
+            asset: NativeOfflineMappedAsset,
+            startFrame: number,
+            frameCount: number,
+          ) => Promise<NativeHostMappedAssetPage>,
         ) => {
           if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
             return { ok: false as const, error: "The native offline render plan is invalid." }
@@ -326,10 +334,52 @@ const desktopBridge = {
             })
           })
           ipcRenderer.on("daw:audio-host:offline-pcm", notify)
+          const pageNotify = ipcRendererListener((_event, value) => {
+            const request = z.object({
+              jobId: z.string(),
+              requestId: z.string(),
+              asset: z.object({
+                sessionAssetId: z.number().int().positive(),
+                sourceAssetKey: z.string(),
+                projectId: z.string().optional(),
+                sourceKind: z.enum(["upload", "url", "recording"]).optional(),
+                sampleUrl: z.string().optional(),
+                frameCount: z.number().int().positive(),
+                sampleRateHz: z.number().int().positive(),
+                channelCount: z.number().int().positive(),
+                ranges: z.array(z.object({
+                  startFrame: z.number().int().nonnegative(),
+                  frameCount: z.number().int().positive(),
+                }).strict()),
+              }).strict(),
+              startFrame: z.number().int().nonnegative(),
+              frameCount: z.number().int().positive(),
+            }).strict().safeParse(value)
+            if (!request.success || request.data.jobId !== jobId) return
+            void pageListener(
+              request.data.requestId,
+              request.data.asset,
+              request.data.startFrame,
+              request.data.frameCount,
+            ).then(
+              (page) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+                jobId,
+                requestId: request.data.requestId,
+                page,
+              }),
+              (error) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+                jobId,
+                requestId: request.data.requestId,
+                error: error instanceof Error ? error.message : "Offline mapped page hydration failed.",
+              }),
+            )
+          })
+          ipcRenderer.on(offlineMappedPageRequestChannel, pageNotify)
           try {
             return await ipcRenderer.invoke("daw:audio-host:offline-render", { jobId, plan })
           } finally {
             ipcRenderer.removeListener("daw:audio-host:offline-pcm", notify)
+            ipcRenderer.removeListener(offlineMappedPageRequestChannel, pageNotify)
           }
         },
         cancel: (jobId: string) => ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId),

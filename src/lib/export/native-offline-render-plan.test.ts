@@ -397,6 +397,40 @@ test('preserves the existing no-warp native source projection', () => {
   })
 })
 
+test('represents an unhydrated source as a bounded mapped asset', () => {
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        buffer: null,
+        sourceDurationSec: 8,
+        sourceSampleRate: 48_000,
+        sourceChannelCount: 2,
+        duration: 1,
+      } satisfies Clip<AudioBuffer | null>],
+    }],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectId: 'project-1',
+    projectGeneration: 1,
+  })
+
+  expect(plan.assets).toHaveLength(0)
+  expect(plan.mappedAssets).toEqual([expect.objectContaining({
+    sourceAssetKey: 'asset-1',
+    projectId: 'project-1',
+    frameCount: 8 * 48_000,
+    ranges: [{ startFrame: 0, frameCount: 48_000 }],
+  })])
+})
+
 test('re-sequences offline source events in chronological enqueue order across chunk windows', () => {
   const sampleRateHz = 44_100
   const stretchStartSec = 29.5

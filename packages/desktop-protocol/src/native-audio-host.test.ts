@@ -1,10 +1,8 @@
 import { expect, test } from "bun:test"
 import {
-  nativeAudioHostMaximumInMemoryPcmBytes,
   nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
-  nativeOfflineRenderPcmBytes,
   nativeOfflineRenderPlanSchema,
 } from "./native-audio-host"
 
@@ -24,24 +22,14 @@ const plan = () => ({
   schedule: new Uint8Array([1]),
 })
 
-test("accepts offline PCM at the exact native in-memory boundary", () => {
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
-    / (2 * Float32Array.BYTES_PER_ELEMENT)
+test("accepts a logical offline render beyond the former in-memory boundary", () => {
+  const totalFrames = 512 * 1024 * 1024
+    / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const result = nativeOfflineRenderPlanSchema.safeParse({
     ...plan(),
     totalFrames,
   })
   expect(result.success).toBe(true)
-  expect(nativeOfflineRenderPcmBytes(totalFrames, 2)).toBe(nativeAudioHostMaximumInMemoryPcmBytes)
-})
-
-test("rejects offline PCM one frame beyond the native in-memory boundary", () => {
-  const result = nativeOfflineRenderPlanSchema.safeParse({
-    ...plan(),
-    totalFrames: nativeAudioHostMaximumInMemoryPcmBytes
-      / (2 * Float32Array.BYTES_PER_ELEMENT) + 1,
-  })
-  expect(result.success).toBe(false)
 })
 
 

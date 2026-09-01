@@ -142,9 +142,10 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
 snapshots, bounded concurrent mapped-page hydration, bounded native written-range
 ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
-covered by focused tests. Native offline planning still consumes
-`PortableExportSnapshot` PCM through `native-pcm-chunking`; it is intentionally
-not marked complete until offline source-page consumption replaces that boundary.
+covered by focused tests. Native offline planning now emits metadata-only mapped
+ordinary-source descriptors, hydrates only their scheduled source ranges through
+bounded pages before graph publication, and retains `native-pcm-chunking` only
+for eagerly prepared Stretch/instrument PCM.
 
 ## Non-goals / real limits
 

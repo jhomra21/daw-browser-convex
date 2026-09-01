@@ -12,6 +12,7 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeOfflinePcmChunk,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
@@ -209,6 +210,12 @@ type DesktopBridge = {
         jobId: string,
         plan: NativeOfflineRenderPlan,
         onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+        onMappedPage: (
+          requestId: string,
+            asset: NativeOfflineMappedAsset,
+          startFrame: number,
+          frameCount: number,
+          ) => Promise<NativeHostMappedAssetPage>,
       ): Promise<{ ok: true } | { ok: false; error: string }>
       cancel(jobId: string): Promise<{ accepted: boolean }>
     }

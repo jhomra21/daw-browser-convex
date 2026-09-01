@@ -42,6 +42,7 @@ import type {
   NativeHostPcmAsset,
   NativeHostMappedAsset,
   NativeHostMappedAssetPage,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
   NativeHostTransport,
@@ -594,6 +595,9 @@ export type NativeOfflineWaitStage =
   | "transport"
   | "schedule window"
   | "offline start"
+  | "mapped asset creation"
+  | "mapped asset page"
+  | "mapped asset range"
   | "offline completion"
 
 export class NativeOfflineRenderTimeoutError extends Error {
@@ -630,6 +634,14 @@ type NativeOfflineStdoutPumpInput = {
   onError: (error: Error) => void
   pause: () => void
   resume: () => void
+}
+
+type NativeOfflineMappedPageRequest = {
+  jobId: string
+  requestId: string
+  asset: NativeOfflineMappedAsset
+  startFrame: number
+  frameCount: number
 }
 
 export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInput) => {
@@ -754,10 +766,12 @@ export const createNativeOfflineFrameMailbox = () => {
 
 export const renderNativeOffline = async (input: {
   hostPath: string
+  jobId?: string
   plan: NativeOfflineRenderPlan
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
   onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>
+  onMappedPage?: (request: NativeOfflineMappedPageRequest) => Promise<NativeHostMappedAssetPage>
   completionInactivityMs?: number
   schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
@@ -799,10 +813,13 @@ export const renderNativeOffline = async (input: {
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
   let stopPump = () => {}
+  let rejectMappedPage: ((error: Error) => void) | undefined
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     mailbox.fail(error)
+    rejectMappedPage?.(error)
+    rejectMappedPage = undefined
     stopPump()
     terminate()
   }
@@ -944,6 +961,59 @@ export const renderNativeOffline = async (input: {
       if (!payload) throw new Error("The native offline asset is invalid.")
       send(assetInstallType, payload)
       await waitFor(ackType, assetInstallType, "asset installation")
+    }
+    for (const asset of input.plan.mappedAssets ?? []) {
+      const createPayload = Buffer.alloc(28)
+      createPayload.writeUInt32BE(asset.sessionAssetId, 0)
+      createPayload.writeBigUInt64BE(BigInt(asset.frameCount), 4)
+      createPayload.writeUInt32BE(asset.sampleRateHz, 12)
+      createPayload.writeUInt32BE(asset.channelCount, 16)
+      createPayload.writeBigUInt64BE(0n, 20)
+      send(mappedAssetCreateType, createPayload)
+      await waitFor(ackType, mappedAssetCreateType, "mapped asset creation")
+      for (const range of asset.ranges) {
+        const pageFrames = Math.min(
+          range.frameCount,
+          Math.floor((maximumPayloadBytes - 16) / (asset.channelCount * Float32Array.BYTES_PER_ELEMENT)),
+        )
+        for (let startFrame = range.startFrame; startFrame < range.startFrame + range.frameCount; startFrame += pageFrames) {
+          const frameCount = Math.min(pageFrames, range.startFrame + range.frameCount - startFrame)
+          if (!input.onMappedPage) throw new Error("The native offline mapped page provider is unavailable.")
+          const request = {
+            jobId: input.jobId ?? "offline",
+            requestId: crypto.randomUUID(),
+            asset,
+            startFrame,
+            frameCount,
+          }
+          const pagePromise = input.onMappedPage(request)
+          const page = await new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
+            rejectMappedPage = reject
+            void pagePromise.then(resolve, reject)
+          }).finally(() => {
+            rejectMappedPage = undefined
+          })
+          if (page.sessionAssetId !== asset.sessionAssetId
+            || page.startFrame !== startFrame
+            || page.frameCount !== frameCount
+            || page.planarPcm.byteLength !== frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT) {
+            throw new Error("The native offline mapped page provider returned invalid audio.")
+          }
+          const pagePayload = Buffer.alloc(16 + page.planarPcm.byteLength)
+          pagePayload.writeUInt32BE(page.sessionAssetId, 0)
+          pagePayload.writeBigUInt64BE(BigInt(page.startFrame), 4)
+          pagePayload.writeUInt32BE(page.frameCount, 12)
+          pagePayload.set(page.planarPcm, 16)
+          send(mappedAssetWritePageType, pagePayload)
+          await waitFor(ackType, mappedAssetWritePageType, "mapped asset page")
+        }
+        const preparePayload = Buffer.alloc(20)
+        preparePayload.writeUInt32BE(asset.sessionAssetId, 0)
+        preparePayload.writeBigUInt64BE(BigInt(range.startFrame), 4)
+        preparePayload.writeBigUInt64BE(BigInt(range.frameCount), 12)
+        send(mappedAssetPrepareRangeType, preparePayload)
+        await waitFor(ackType, mappedAssetPrepareRangeType, "mapped asset range")
+      }
     }
     for (const attachment of input.vstAttachments ?? []) {
       const payload = serializeVstAttachment(attachment)

@@ -1,6 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { execFile } from "node:child_process"
-import { mkdtemp, mkdir, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import * as nodeFileSystem from "node:fs/promises"
+import { mkdtemp, mkdir, open, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import type { FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -268,6 +271,65 @@ describe("desktop file capability manager", () => {
     })
     expect(await readFile(outputPath)).toEqual(Buffer.from([1, 2, 9, 4, 5]))
     expect(await readdir(directory)).toEqual(["mix.flac"])
+  })
+
+  test("streams sequential sparse output beyond 8 GiB without allocating the hole", async () => {
+    const directory = await createTemporaryDirectory()
+    const outputPath = path.join(directory, "large.wav")
+    const chunkSize = 1024 * 1024
+    const formerLimit = 8 * 1024 * 1024 * 1024
+    const finalOffset = formerLimit + 2 * chunkSize
+    const writes: { offset: number; length: number }[] = []
+    const temporaryFileFlags = constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
+    const fileSystem: NonNullable<Parameters<typeof createNativeFileCapabilityManager>[0]["fileSystem"]> = {
+      ...nodeFileSystem,
+      open: async (
+        filePath: Parameters<typeof nodeFileSystem.open>[0],
+        flags: Parameters<typeof nodeFileSystem.open>[1],
+        mode?: Parameters<typeof nodeFileSystem.open>[2],
+      ): Promise<FileHandle> => {
+        if (flags === temporaryFileFlags) {
+          const backing = await open("/dev/null", "r+")
+          const write = async <TBuffer extends NodeJS.ArrayBufferView>(
+            buffer: TBuffer,
+            offset?: number | null,
+            length?: number | null,
+            position?: number | null,
+          ) => {
+            const bytesWritten = length ?? buffer.byteLength - (offset ?? 0)
+            if (position !== null) writes.push({ offset: position ?? 0, length: bytesWritten })
+            return { buffer, bytesWritten }
+          }
+          return new Proxy(backing, {
+            get: (target, property) => {
+              if (property === "write") return write
+              if (property === "close") return target.close.bind(target)
+              if (property === "sync") return target.sync.bind(target)
+              return undefined
+            },
+          })
+        }
+        return await nodeFileSystem.open(filePath, flags, mode)
+      },
+    }
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      fileSystem,
+      randomBytes: createDeterministicRandom(),
+    })
+    const capability = await manager.grantOutputFile(scope, outputPath)
+    const writer = await manager.beginWrite(scope, capability.token)
+    const chunk = new Uint8Array(chunkSize)
+    try {
+      for (let offset = 0; offset < finalOffset; offset += chunkSize) {
+        await manager.writeChunk(scope, writer.writerId, offset, chunk)
+      }
+      expect(writes.at(-1)).toEqual({ offset: finalOffset - chunkSize, length: chunkSize })
+      expect(writes).toHaveLength(finalOffset / chunkSize)
+      expect(await readdir(directory)).toEqual([])
+    } finally {
+      await manager.abortWrite(scope, writer.writerId)
+    }
   })
 
   test("confines directory outputs and removes partial files on abort and revoke", async () => {

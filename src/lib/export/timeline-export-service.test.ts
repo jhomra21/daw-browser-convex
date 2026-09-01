@@ -27,7 +27,6 @@ import { importLocalProject, LOCAL_PROJECT_SCHEMA_VERSION } from "~/lib/local-pr
 import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { externalProcessorSchema } from "@daw-browser/external-plugins"
-import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 
 const settings: TimelineExportInput = {
   range: { mode: "whole" },
@@ -607,7 +606,7 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
 test("native export admits oversized PCM before external state capture", async () => {
   const queue = createExportQueue(() => "native-memory-limit")
   let externalStateCaptureCalls = 0
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
+  const totalFrames = 8 * 1024 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const service = createTimelineExportService({
     queue,
@@ -625,7 +624,7 @@ test("native export admits oversized PCM before external state capture", async (
         name: "Clip",
         color: "#fff",
         startSec: 0,
-        duration: totalFrames,
+        duration: totalFrames / 96_000,
         midi: { wave: "sine", notes: [] },
       }],
     }],
@@ -646,6 +645,7 @@ test("native export admits oversized PCM before external state capture", async (
 
   await expect(service.prepareTimelineExport({
     ...settings,
+    formats: ["mp3"],
     range: { mode: "custom", startSec: 0, endSec: (totalFrames + 0.5) / 96_000 },
     render: { ...settings.render, sampleRate: 96_000 },
   })).resolves.toBeDefined()

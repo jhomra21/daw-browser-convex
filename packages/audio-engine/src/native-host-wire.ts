@@ -143,6 +143,14 @@ export type NativeHostMappedAsset = {
   contentHashPrefix?: bigint
 }
 
+export type NativeOfflineMappedAsset = NativeHostMappedAsset & {
+  sourceAssetKey: string
+  projectId?: string
+  sourceKind?: 'upload' | 'url' | 'recording'
+  sampleUrl?: string
+  ranges: readonly { startFrame: number; frameCount: number }[]
+}
+
 export type NativeHostMappedAssetPage = {
   sessionAssetId: number
   startFrame: number
@@ -161,6 +169,7 @@ export type NativeOfflineRenderPlan = {
   externalAttachments?: NativeExternalAttachmentPlan
   instrumentStates?: Uint8Array
   assets: readonly NativeHostPcmAsset[]
+  mappedAssets?: readonly NativeOfflineMappedAsset[]
   transport: NativeHostTransport
   schedule: Uint8Array
   /** Optional temporal windows. `schedule` remains the single-window compatibility form. */

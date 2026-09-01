@@ -40,6 +40,9 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
   NativeHostTransport,
@@ -54,6 +57,10 @@ const {
   graphSnapshot: graphSnapshotType,
   assetInstall: assetInstallType,
   assetRelease: assetReleaseType,
+  mappedAssetCreate: mappedAssetCreateType,
+  mappedAssetWritePage: mappedAssetWritePageType,
+  mappedAssetPrepareRange: mappedAssetPrepareRangeType,
+  mappedAssetRelease: mappedAssetReleaseType,
   transport: transportType,
   parameterEvents: parameterEventsType,
   midiEvents: midiEventsType,
@@ -520,6 +527,10 @@ type NativeHostRequestType =
   | typeof deviceConfigureType
   | typeof assetInstallType
   | typeof assetReleaseType
+  | typeof mappedAssetCreateType
+  | typeof mappedAssetWritePageType
+  | typeof mappedAssetPrepareRangeType
+  | typeof mappedAssetReleaseType
   | typeof startType
   | typeof stopType
   | typeof teardownType
@@ -584,6 +595,9 @@ export type NativeOfflineWaitStage =
   | "transport"
   | "schedule window"
   | "offline start"
+  | "mapped asset creation"
+  | "mapped asset page"
+  | "mapped asset range"
   | "offline completion"
 
 export class NativeOfflineRenderTimeoutError extends Error {
@@ -620,6 +634,14 @@ type NativeOfflineStdoutPumpInput = {
   onError: (error: Error) => void
   pause: () => void
   resume: () => void
+}
+
+type NativeOfflineMappedPageRequest = {
+  jobId: string
+  requestId: string
+  asset: NativeOfflineMappedAsset
+  startFrame: number
+  frameCount: number
 }
 
 export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInput) => {
@@ -744,10 +766,12 @@ export const createNativeOfflineFrameMailbox = () => {
 
 export const renderNativeOffline = async (input: {
   hostPath: string
+  jobId?: string
   plan: NativeOfflineRenderPlan
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
   onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>
+  onMappedPage?: (request: NativeOfflineMappedPageRequest) => Promise<NativeHostMappedAssetPage>
   completionInactivityMs?: number
   schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
@@ -789,10 +813,13 @@ export const renderNativeOffline = async (input: {
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
   let stopPump = () => {}
+  let rejectMappedPage: ((error: Error) => void) | undefined
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     mailbox.fail(error)
+    rejectMappedPage?.(error)
+    rejectMappedPage = undefined
     stopPump()
     terminate()
   }
@@ -934,6 +961,59 @@ export const renderNativeOffline = async (input: {
       if (!payload) throw new Error("The native offline asset is invalid.")
       send(assetInstallType, payload)
       await waitFor(ackType, assetInstallType, "asset installation")
+    }
+    for (const asset of input.plan.mappedAssets ?? []) {
+      const createPayload = Buffer.alloc(28)
+      createPayload.writeUInt32BE(asset.sessionAssetId, 0)
+      createPayload.writeBigUInt64BE(BigInt(asset.frameCount), 4)
+      createPayload.writeUInt32BE(asset.sampleRateHz, 12)
+      createPayload.writeUInt32BE(asset.channelCount, 16)
+      createPayload.writeBigUInt64BE(0n, 20)
+      send(mappedAssetCreateType, createPayload)
+      await waitFor(ackType, mappedAssetCreateType, "mapped asset creation")
+      for (const range of asset.ranges) {
+        const pageFrames = Math.min(
+          range.frameCount,
+          Math.floor((maximumPayloadBytes - 16) / (asset.channelCount * Float32Array.BYTES_PER_ELEMENT)),
+        )
+        for (let startFrame = range.startFrame; startFrame < range.startFrame + range.frameCount; startFrame += pageFrames) {
+          const frameCount = Math.min(pageFrames, range.startFrame + range.frameCount - startFrame)
+          if (!input.onMappedPage) throw new Error("The native offline mapped page provider is unavailable.")
+          const request = {
+            jobId: input.jobId ?? "offline",
+            requestId: crypto.randomUUID(),
+            asset,
+            startFrame,
+            frameCount,
+          }
+          const pagePromise = input.onMappedPage(request)
+          const page = await new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
+            rejectMappedPage = reject
+            void pagePromise.then(resolve, reject)
+          }).finally(() => {
+            rejectMappedPage = undefined
+          })
+          if (page.sessionAssetId !== asset.sessionAssetId
+            || page.startFrame !== startFrame
+            || page.frameCount !== frameCount
+            || page.planarPcm.byteLength !== frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT) {
+            throw new Error("The native offline mapped page provider returned invalid audio.")
+          }
+          const pagePayload = Buffer.alloc(16 + page.planarPcm.byteLength)
+          pagePayload.writeUInt32BE(page.sessionAssetId, 0)
+          pagePayload.writeBigUInt64BE(BigInt(page.startFrame), 4)
+          pagePayload.writeUInt32BE(page.frameCount, 12)
+          pagePayload.set(page.planarPcm, 16)
+          send(mappedAssetWritePageType, pagePayload)
+          await waitFor(ackType, mappedAssetWritePageType, "mapped asset page")
+        }
+        const preparePayload = Buffer.alloc(20)
+        preparePayload.writeUInt32BE(asset.sessionAssetId, 0)
+        preparePayload.writeBigUInt64BE(BigInt(range.startFrame), 4)
+        preparePayload.writeBigUInt64BE(BigInt(range.frameCount), 12)
+        send(mappedAssetPrepareRangeType, preparePayload)
+        await waitFor(ackType, mappedAssetPrepareRangeType, "mapped asset range")
+      }
     }
     for (const attachment of input.vstAttachments ?? []) {
       const payload = serializeVstAttachment(attachment)
@@ -1100,6 +1180,10 @@ export type NativeAudioHostSupervisor = {
   detachVst(instanceId: string, transactionToken?: string): Promise<void>
   executeVstEditorCommand(input: { instanceId: string; command: NativeVstEditorCommand; width?: number; height?: number; anchor?: NativeVstEditorAnchor }, transactionToken?: string): Promise<NativeVstEditorStatus>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<void>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<void>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<void>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<void>
   configureInstrumentStates(bytes: Uint8Array, transactionToken?: string): Promise<void>
@@ -2140,6 +2224,55 @@ export const createNativeAudioHostSupervisor = (
       const payload = serializeAssetInstall(input)
       if (!payload) throw new Error("The native audio host asset is invalid.")
       await request(assetInstallType, payload, transactionToken)
+    },
+    async createMappedAsset(input, transactionToken) {
+      const hash = input.contentHashPrefix ?? 0n
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.frameCount) || input.frameCount <= 0
+        || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
+        || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
+        || hash < 0n || hash > 0xffff_ffff_ffff_ffffn
+      ) throw new Error("The native mapped audio asset is invalid.")
+      const payload = Buffer.alloc(28)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.frameCount), 4)
+      payload.writeUInt32BE(input.sampleRateHz, 12)
+      payload.writeUInt32BE(input.channelCount, 16)
+      payload.writeBigUInt64BE(hash, 20)
+      await request(mappedAssetCreateType, payload, transactionToken)
+    },
+    async writeMappedAssetPage(input, transactionToken) {
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.startFrame) || input.startFrame < 0
+        || !unsigned32(input.frameCount) || input.frameCount === 0
+        || input.planarPcm.byteLength === 0
+        || input.planarPcm.byteLength > maximumPayloadBytes - 16
+        || input.planarPcm.byteLength % (input.frameCount * 4) !== 0
+      ) throw new Error("The native mapped audio page is invalid.")
+      const payload = Buffer.alloc(16 + input.planarPcm.byteLength)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.startFrame), 4)
+      payload.writeUInt32BE(input.frameCount, 12)
+      payload.set(input.planarPcm, 16)
+      await request(mappedAssetWritePageType, payload, transactionToken)
+    },
+    async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
+      if (
+        !unsigned32(sessionAssetId) || sessionAssetId === 0
+        || !Number.isSafeInteger(startFrame) || startFrame < 0
+        || !Number.isSafeInteger(frameCount) || frameCount <= 0
+      ) throw new Error("The native mapped audio range is invalid.")
+      const payload = Buffer.alloc(20)
+      payload.writeUInt32BE(sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(startFrame), 4)
+      payload.writeBigUInt64BE(BigInt(frameCount), 12)
+      await request(mappedAssetPrepareRangeType, payload, transactionToken)
+    },
+    async releaseMappedAsset(sessionAssetId, transactionToken) {
+      if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native mapped audio asset is invalid.")
+      await request(mappedAssetReleaseType, writeUnsigned32(sessionAssetId), transactionToken)
     },
     async releaseAsset(sessionAssetId, transactionToken) {
       if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native audio host asset is invalid.")

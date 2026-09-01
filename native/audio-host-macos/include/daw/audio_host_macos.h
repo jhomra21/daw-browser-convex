@@ -23,6 +23,7 @@ constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
 constexpr std::uint32_t kMaximumAssetChannels = 64;
 constexpr std::uint32_t kMaximumAssetFrames = 262'144;
 constexpr std::size_t kMaximumInstalledAssets = 64;
+constexpr std::size_t kMaximumMappedAssetWrittenRanges = 256;
 constexpr std::size_t kMaximumMeterEntries = 64;
 constexpr std::size_t kMaximumSpectrumBins = 1024;
 constexpr std::size_t kMaximumScheduleChunks = 16;
@@ -116,6 +117,10 @@ enum class ControlType : std::uint32_t {
   kOfflinePcmChunk = 54,
   kOfflineComplete = 55,
   kOfflineError = 56,
+  kMappedAssetCreate = 57,
+  kMappedAssetWritePage = 58,
+  kMappedAssetPrepareRange = 59,
+  kMappedAssetRelease = 60,
 };
 
 struct ControlFrame {
@@ -464,6 +469,21 @@ class AudioHost {
     std::uint32_t channel_count,
     std::uint64_t content_hash_prefix,
     std::span<const float> samples);
+  bool CreateMappedAsset(
+    std::uint32_t asset_id,
+    std::uint64_t frame_count,
+    std::uint32_t sample_rate_hz,
+    std::uint32_t channel_count,
+    std::uint64_t content_hash_prefix);
+  bool WriteMappedAssetPage(
+    std::uint32_t asset_id,
+    std::uint64_t start_frame,
+    std::uint32_t frame_count,
+    std::span<const float> samples);
+  bool PrepareMappedAssetRange(
+    std::uint32_t asset_id,
+    std::uint64_t start_frame,
+    std::uint64_t frame_count);
   bool ReleaseAsset(std::uint32_t asset_id);
   bool SetTransport(
     std::uint32_t epoch,

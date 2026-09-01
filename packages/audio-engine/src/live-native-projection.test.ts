@@ -91,17 +91,18 @@ const compile = (tracks: readonly Track<AudioBuffer>[]) => compileLiveNativeProj
   tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1,
 })
 
-test('projects deterministic copied PCM for supported source-only sessions', () => {
+test('projects source metadata without copying ordinary PCM', () => {
   const result = compile([track()])
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets).toEqual([expect.objectContaining({
     asset: expect.objectContaining({ assetId: 'portable-export:source' }),
-    pcm: expect.objectContaining({ planes: [new Float32Array([0, 0.25, -0.5, 1])] }),
+    pcm: undefined,
+    sourceAssetKey: 'source',
   })])
   expect(result.events).toHaveLength(1)
 })
 
-test('chunks a 12-second stereo source into payload-safe native assets', () => {
+test('keeps long ordinary sources as one metadata asset', () => {
   const frameCount = 12 * 48_000
   const longClip = {
     ...clip,
@@ -113,13 +114,11 @@ test('chunks a 12-second stereo source into payload-safe native assets', () => {
   }
   const result = compile([track({ clips: [longClip] })])
   if (!result.supported) throw new Error(result.reasons.join('\n'))
-  expect(result.assets.length).toBeGreaterThan(1)
-  expect(result.assets.every(({ asset: entry }) => (
-    entry.frameCount <= (entry.channelCount === 1 ? 262_138 : 131_069)
-  ))).toBe(true)
-  expect(result.nativePcmChunkDescriptors).toHaveLength(1)
-  expect(result.nativePcmChunkDescriptors[0]?.chunks).toHaveLength(5)
-  expect(result.events).toHaveLength(5)
+  expect(result.assets).toHaveLength(1)
+  expect(result.assets[0]?.asset.frameCount).toBe(frameCount)
+  expect(result.assets[0]?.pcm).toBeUndefined()
+  expect(result.nativePcmChunkDescriptors).toHaveLength(0)
+  expect(result.events).toHaveLength(1)
 })
 
 test('skips source-exhausted clips without rejecting the native projection', () => {

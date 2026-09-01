@@ -29,7 +29,8 @@ import {
 
 export type PortableExportAsset = {
   asset: AudioAssetRef
-  pcm: PlanarPcm
+  sourceAssetKey?: string
+  pcm?: PlanarPcm
   transferables: readonly ArrayBuffer[]
 }
 
@@ -47,7 +48,7 @@ export type PortableExportSnapshot =
   }
 
 export type PortableExportSnapshotInput = {
-  tracks: readonly Track<AudioBuffer>[]
+  tracks: readonly Track<AudioBuffer | null>[]
   bpm: number
   range: ExportRange
   sampleRateHz: number
@@ -62,7 +63,15 @@ export type PortableExportSnapshotInput = {
   allowInstruments?: boolean
   externalLatencyFrames?: ExternalNodeLatencyFrames
   capabilityTarget?: 'portable-wasm' | 'native'
+  metadataSourceAssets?: readonly {
+    sourceAssetKey: string
+    frameCount: number
+    sampleRateHz: number
+    channelCount: number
+  }[]
 }
+
+type MetadataSourceAsset = NonNullable<PortableExportSnapshotInput['metadataSourceAssets']>[number]
 
 const unsupported = (
   reasons: readonly string[],
@@ -89,10 +98,27 @@ const createAsset = (sourceAssetKey: string, buffer: AudioBuffer): PortableExpor
   }
   return {
     asset,
+    sourceAssetKey,
     pcm: { frameCount: buffer.length, planes },
     transferables: planes.map((plane) => plane.buffer),
   }
 }
+
+const createMetadataAsset = (sourceAssetKey: string, input: {
+  frameCount: number
+  sampleRateHz: number
+  channelCount: number
+}): PortableExportAsset => ({
+  asset: {
+    version: audioCoreContractVersion,
+    assetId: transientAssetId(sourceAssetKey),
+    frameCount: input.frameCount,
+    sampleRateHz: input.sampleRateHz,
+    channelCount: input.channelCount,
+  },
+  sourceAssetKey,
+  transferables: [],
+})
 
 type CollectedPortableAssets = {
   assets: readonly PortableExportAsset[]
@@ -101,9 +127,10 @@ type CollectedPortableAssets = {
 }
 
 const collectAssets = (
-  tracks: readonly Track<AudioBuffer>[],
+  tracks: readonly Track<AudioBuffer | null>[],
   fx: ExportFx | undefined,
   preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset>,
+  metadataSourceAssets: readonly MetadataSourceAsset[],
 ): CollectedPortableAssets => {
   const assets: PortableExportAsset[] = []
   const bySourceAssetKey = new Map<string, AudioAssetRef>()
@@ -111,16 +138,47 @@ const collectAssets = (
   const addAsset = (sourceAssetKey: string, buffer: AudioBuffer) => {
     const existing = bySourceAssetKey.get(sourceAssetKey)
     if (existing) {
-      if (existing.frameCount !== buffer.length
-        || existing.sampleRateHz !== buffer.sampleRate
-        || existing.channelCount !== buffer.numberOfChannels) {
+      const consistent = existing.frameCount === buffer.length
+        && existing.sampleRateHz === buffer.sampleRate
+        && existing.channelCount === buffer.numberOfChannels
+      if (!consistent) {
         reasons.push(`Source asset "${sourceAssetKey}" resolves to inconsistent decoded audio.`)
+      }
+      const existingIndex = assets.findIndex((entry) => entry.asset.assetId === existing.assetId)
+      if (consistent && existingIndex >= 0 && !assets[existingIndex]?.pcm) {
+        assets[existingIndex] = createAsset(sourceAssetKey, buffer)
       }
       return
     }
     const exportAsset = createAsset(sourceAssetKey, buffer)
+    const metadataIndex = assets.findIndex((entry) => entry.asset.assetId === exportAsset.asset.assetId)
+    if (metadataIndex >= 0) assets[metadataIndex] = exportAsset
+    else assets.push(exportAsset)
+    bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+  }
+  const addMetadataAsset = (sourceAssetKey: string, metadata: MetadataSourceAsset) => {
+    const existing = bySourceAssetKey.get(sourceAssetKey)
+    if (existing) {
+      if (existing.frameCount !== metadata.frameCount
+        || existing.sampleRateHz !== metadata.sampleRateHz
+        || existing.channelCount !== metadata.channelCount) {
+        reasons.push(`Source asset "${sourceAssetKey}" resolves to inconsistent audio metadata.`)
+      }
+      return
+    }
+    const exportAsset = createMetadataAsset(sourceAssetKey, metadata)
     assets.push(exportAsset)
     bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+  }
+  for (const metadata of metadataSourceAssets) {
+    if (!metadata.sourceAssetKey
+      || !Number.isSafeInteger(metadata.frameCount) || metadata.frameCount <= 0
+      || !Number.isSafeInteger(metadata.sampleRateHz) || metadata.sampleRateHz <= 0
+      || !Number.isSafeInteger(metadata.channelCount) || metadata.channelCount <= 0) {
+      reasons.push(`Source asset "${metadata.sourceAssetKey}" has invalid audio metadata.`)
+      continue
+    }
+    addMetadataAsset(metadata.sourceAssetKey, metadata)
   }
   for (const track of tracks) {
     for (const clip of track.clips) {
@@ -131,8 +189,8 @@ const collectAssets = (
         }
         continue
       }
-      if (clip.midi || !clip.sourceAssetKey || !clip.buffer) continue
-      addAsset(clip.sourceAssetKey, clip.buffer)
+      if (clip.midi || !clip.sourceAssetKey) continue
+      if (clip.buffer) addAsset(clip.sourceAssetKey, clip.buffer)
     }
   }
   for (const entry of Object.values(fx?.trackFx ?? {})) {
@@ -248,6 +306,7 @@ export const compilePortableExportSnapshot = (
     input.tracks,
     input.fx,
     preparedStretchAssets,
+    input.metadataSourceAssets ?? [],
   )
   reasons.push(...assetReasons)
 

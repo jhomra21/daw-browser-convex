@@ -15,10 +15,17 @@ import {
   type DesktopApplicationMenuMessage,
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
-import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
+import {
+  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumMappedAssetRanges,
+  nativeAudioHostMaximumPayloadBytes,
+  nativeOfflineRenderPlanSchema,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
@@ -30,6 +37,7 @@ import type {
   NativeOutputDevice,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
+  NativeOfflineMappedAsset,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
   NativeVst3InsertionPreflightRequest,
@@ -45,6 +53,8 @@ import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
 const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
+const offlineMappedPageRequestChannel = "daw:audio-host:offline-mapped-page-request"
+const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
 const applicationMenuCommandChannel = "daw:application-menu:command"
 const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
@@ -230,6 +240,10 @@ const desktopBridge = {
         editor: (input: NativeVstEditorCommand): Promise<NativeVstEditorReply> => invokeNativeEditor(input, input.transactionToken),
         installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:install-asset", input, transactionToken),
         releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:release-asset", sessionAssetId, transactionToken),
+        createMappedAsset: (input: NativeHostMappedAsset, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:create-mapped-asset", input, transactionToken),
+        writeMappedAssetPage: (input: NativeHostMappedAssetPage, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:write-mapped-asset-page", input, transactionToken),
+        prepareMappedAssetRange: (sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:prepare-mapped-asset-range", { sessionAssetId, startFrame, frameCount }, transactionToken),
+        releaseMappedAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:release-mapped-asset", sessionAssetId, transactionToken),
         publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:publish-graph", bytes, transactionToken),
         configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:configure-instrument-states", bytes, transactionToken),
         queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-parameter-events", bytes, transactionToken),
@@ -296,6 +310,12 @@ const desktopBridge = {
           jobId: string,
           plan: NativeOfflineRenderPlan,
           listener: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+          pageListener: (
+            requestId: string,
+            asset: NativeOfflineMappedAsset,
+            startFrame: number,
+            frameCount: number,
+          ) => Promise<NativeHostMappedAssetPage>,
         ) => {
           if (!nativeOfflineRenderPlanSchema.safeParse(plan).success) {
             return { ok: false as const, error: "The native offline render plan is invalid." }
@@ -320,10 +340,60 @@ const desktopBridge = {
             })
           })
           ipcRenderer.on("daw:audio-host:offline-pcm", notify)
+          const pageNotify = ipcRendererListener((_event, value) => {
+            const request = z.object({
+              jobId: z.string(),
+              requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+              asset: z.object({
+                sessionAssetId: z.number().int().positive().safe(),
+                sourceAssetKey: z.string().min(1),
+                projectId: z.string().optional(),
+                sourceKind: z.enum(["upload", "url", "recording"]).optional(),
+                sampleUrl: z.string().optional(),
+                frameCount: z.number().int().positive().safe(),
+                sampleRateHz: z.number().int().positive().safe(),
+                channelCount: z.number().int().positive().safe().max(64),
+                ranges: z.array(z.object({
+                  startFrame: z.number().int().nonnegative().safe(),
+                  frameCount: z.number().int().positive().safe(),
+                }).strict()).max(nativeAudioHostMaximumMappedAssetRanges),
+              }).strict(),
+              startFrame: z.number().int().nonnegative().safe(),
+              frameCount: z.number().int().positive().safe(),
+            }).strict().safeParse(value)
+            if (!request.success || request.data.jobId !== jobId) return
+            if (
+              !Number.isSafeInteger(request.data.startFrame + request.data.frameCount)
+              || request.data.startFrame + request.data.frameCount > request.data.asset.frameCount
+              || !Number.isSafeInteger(
+                request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT,
+              )
+              || request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT > maximumNativeMappedPageBytes
+            ) return
+            void pageListener(
+              request.data.requestId,
+              request.data.asset,
+              request.data.startFrame,
+              request.data.frameCount,
+            ).then(
+              (page) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+                jobId,
+                requestId: request.data.requestId,
+                page,
+              }),
+              (error) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+                jobId,
+                requestId: request.data.requestId,
+                error: error instanceof Error ? error.message : "Offline mapped page hydration failed.",
+              }),
+            )
+          })
+          ipcRenderer.on(offlineMappedPageRequestChannel, pageNotify)
           try {
             return await ipcRenderer.invoke("daw:audio-host:offline-render", { jobId, plan })
           } finally {
             ipcRenderer.removeListener("daw:audio-host:offline-pcm", notify)
+            ipcRenderer.removeListener(offlineMappedPageRequestChannel, pageNotify)
           }
         },
         cancel: (jobId: string) => ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId),

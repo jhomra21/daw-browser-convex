@@ -5,7 +5,7 @@
 IN PROGRESS
 
 Branch: `fix/native-asset-capacity` (name retained for PR continuity)
-Base: `fix/native-vst-automation-export`
+Base: `master`
 
 ## Product invariant
 
@@ -28,13 +28,13 @@ Short media may still use eager caches as an optimization. Eager materialization
 
 - Local project media is already copied to project-owned files (project directory or OPFS), so durable bytes are not inherently RAM-backed.
 - Local asset hashing already streams `File.stream()` rather than requiring a complete `ArrayBuffer`.
-- Audio import currently calls `file.arrayBuffer()` and decodes the complete source with Web Audio before clip creation.
-- Portable/native projection currently copies complete `AudioBuffer` channel planes into `PlanarPcm` assets.
-- Native live playback currently serializes complete planar PCM through `assetInstall`; the control frame therefore creates an accidental duration ceiling.
+- Audio import reads metadata lazily with MediaBunny and can create ordinary clips without complete-file Web Audio decoding.
+- Ordinary portable/native snapshots are metadata-only; bounded legacy instrument and prepared Stretch paths may still carry planar PCM.
+- Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
 - Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
-- Recording temp storage nevertheless imposes an explicit 4 GiB total-session ceiling.
+- Recording duration independence is not yet closed; the remaining writer, finalization, and post-recording hydration paths still require audit and runtime acceptance.
 - Recording WAV finalization already reads/writes blocks incrementally.
-- Native offline rendering already emits bounded PCM chunks, but the higher export path still materializes a monolithic in-memory render.
+- Native offline rendering consumes scheduled ordinary-source ranges through bounded mapped pages, emits bounded PCM chunks, and spools output to disk-backed streaming DSP and encoding.
 - MediaBunny is already a project dependency and provides lazy `BlobSource` reading plus incremental `AudioSampleSink` decoding.
 
 ## Architecture
@@ -73,14 +73,14 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 - [x] Establish duration-independent product invariant.
 - [x] Record current whole-file/whole-PCM boundaries.
-- [ ] Add regression helpers/tests that express duration independence without giant allocations.
+- [x] Add regression helpers/tests that express duration independence without giant allocations.
 
 ### Phase 1 — metadata and import admission
 
-- [ ] Add MediaBunny-backed audio metadata reader using lazy `BlobSource` input.
-- [ ] Stop requiring whole-file Web Audio decode before a local audio file can be persisted and represented as a clip.
-- [ ] Preserve optional eager `AudioBuffer` cache for short/active media only as an optimization.
-- [ ] Ensure invalid/unsupported audio still fails explicitly.
+- [x] Add MediaBunny-backed audio metadata reader using lazy `BlobSource` input.
+- [x] Stop requiring whole-file Web Audio decode before a local audio file can be persisted and represented as a clip.
+- [x] Preserve optional eager `AudioBuffer` cache for short/active media only as an optimization.
+- [x] Ensure invalid/unsupported audio still fails explicitly.
 
 ### Phase 2 — recording duration independence
 
@@ -92,32 +92,33 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 3 — decoded page source
 
 - [ ] Introduce one bounded decoded-page abstraction shared by import hydration/playback/export consumers.
-- [ ] Decode requested ranges with MediaBunny `AudioSampleSink`.
-- [ ] Close decoded samples promptly and keep a fixed memory budget.
-- [ ] Preserve sample-rate/channel metadata and deterministic frame addressing.
+- [x] Decode requested ranges with MediaBunny `AudioSampleSink`.
+- [x] Close decoded samples promptly and keep a fixed memory budget.
+- [x] Preserve sample-rate/channel metadata and deterministic frame addressing.
 
 ### Phase 4 — timeline/runtime migration
 
-- [ ] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
+- [x] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
 - [ ] Migrate clip hydration away from whole-asset decode.
 - [ ] Ensure seeking, duplicated clips, offsets, fades, and loops request the correct source ranges.
 - [ ] Generate waveform/peak data incrementally without requiring complete decoded PCM.
 
 ### Phase 5 — desktop native file-backed assets
 
-- [ ] Replace whole-PCM `assetInstall` with a duration-independent file/range boundary.
-- [ ] Main/native host owns cache paths; renderer never supplies arbitrary filesystem paths.
-- [ ] Keep IPC messages bounded and sequential.
-- [ ] Keep realtime callback free of blocking I/O/decoding.
-- [ ] Preserve asset lifetime/release/transaction semantics.
-- [ ] Remove native duration-derived `maximumAssetFrames` admission checks.
+- [x] Replace whole-PCM `assetInstall` with a duration-independent file/range boundary.
+- [x] Main/native host owns cache paths; renderer never supplies arbitrary filesystem paths.
+- [x] Keep IPC messages bounded and sequential.
+- [x] Keep realtime callback free of blocking I/O/decoding.
+- [x] Preserve asset lifetime/release/transaction semantics.
+- [x] Remove native duration-derived `maximumAssetFrames` admission checks for mapped ordinary assets; bounded legacy instrument installs remain intentionally capped.
 
 ### Phase 6 — streaming export
 
-- [ ] Consume source audio in bounded pages for native/portable export.
-- [ ] Stream native offline PCM chunks directly into encoding/output.
-- [ ] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
-- [ ] Keep cancellation and partial-file cleanup deterministic.
+- [x] Consume ordinary source audio in bounded pages for native export.
+- [ ] Consume source audio in bounded pages for portable export.
+- [x] Stream native offline PCM chunks directly into encoding/output.
+- [x] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
+- [x] Keep cancellation and partial-file cleanup deterministic.
 
 ### Phase 7 — instrument/warp compatibility
 
@@ -127,17 +128,27 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 8 — acceptance
 
-- [ ] Multi-minute imported source persists without complete-file decoding.
-- [ ] Seek near beginning/middle/end and play through native path.
+- [ ] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
+- [ ] Seek near beginning/middle/end and play through the packaged native path.
 - [ ] Native VST processing works on the long source.
 - [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
 - [ ] Export a long range with bounded process memory.
 - [ ] Corrected Valhalla automation acceptance from PR #51 still passes.
-- [ ] `bun run lint`
-- [ ] `bun run typecheck`
-- [ ] `bun run test`
-- [ ] native CTest/runtime checks on macOS
+- [x] `bun run lint`
+- [x] `bun run typecheck`
+- [x] `bun run test`
+- [x] native CTest/runtime checks on macOS
 - [ ] packaged Electron acceptance on macOS
+
+Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
+snapshots, bounded concurrent mapped-page hydration, bounded native written-range
+ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
+covered by focused tests. Native offline planning now emits metadata-only mapped
+ordinary-source descriptors, hydrates only their scheduled source ranges through
+bounded pages before graph publication, and retains `native-pcm-chunking` only
+for eagerly prepared Stretch/instrument PCM. A fresh unsigned packaged Electron
+launch also reached the local project workspace through the public `daw://app/`
+path; long-media/VST/recording/export acceptance remains open below.
 
 ## Non-goals / real limits
 

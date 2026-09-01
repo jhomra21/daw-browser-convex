@@ -306,6 +306,7 @@ const coordinatorFor = (
   fixture = bridgeFor({ failureCount }),
   onHostLoss?: () => void,
   acceptsLiveMidi = false,
+  pageManager?: Parameters<typeof createNativeScheduleCoordinator>[0]["pageManager"],
 ) => {
   fixture.setFailureCount(failureCount)
   return {
@@ -318,18 +319,22 @@ const coordinatorFor = (
       epoch: 1,
       sampleRateHz: 48_000,
       capacity: { maximumFramesPerBlock: 512 },
-      assets: snapshot.assets.map((asset, index) => ({
-        asset: {
-          version: audioCoreContractVersion,
-          assetId: `portable-export:${asset.assetId}`,
-          frameCount: asset.buffer.length,
-          sampleRateHz: asset.buffer.sampleRate,
-          channelCount: asset.buffer.numberOfChannels,
-        },
-        sessionAssetId: index + 1,
-      })),
+      assets: snapshot.assets.map((asset, index) => {
+        if (!asset.buffer) throw new Error("Expected hydrated test asset.")
+        return {
+          asset: {
+            version: audioCoreContractVersion,
+            assetId: `portable-export:${asset.assetId}`,
+            frameCount: asset.buffer.length,
+            sampleRateHz: asset.buffer.sampleRate,
+            channelCount: asset.buffer.numberOfChannels,
+          },
+          sessionAssetId: index + 1,
+        }
+      }),
       startFrame: Math.round(snapshot.transport.playheadSec * 48_000),
       onHostLoss,
+      pageManager,
     }),
   }
 }
@@ -483,6 +488,22 @@ test("retries one rejected source window without changing its ledger", async () 
   expect(view.getUint32(44, true)).toBe(0)
 })
 
+test("hydrates mapped source ranges before queueing a schedule window", async () => {
+  const order: string[] = []
+  const fixture = bridgeFor()
+  fixture.setOnAccept(() => order.push("queue"))
+  const pageManager = {
+    ensureRanges: async () => { order.push("hydrate") },
+    invalidateRanges: () => {},
+    dispose: () => {},
+  }
+  const { coordinator } = coordinatorFor(snapshotFor(sourceTrack), 0, fixture, undefined, false, pageManager)
+
+  await coordinator.prime(0)
+
+  expect(order.slice(0, 2)).toEqual(["hydrate", "queue"])
+})
+
 test("schedules a later native PCM chunk and preserves its seam", async () => {
   const frameCount = 12 * 48_000
   const track: RuntimeTrack = {
@@ -513,7 +534,7 @@ test("schedules a later native PCM chunk and preserves its seam", async () => {
     sampleRateHz: 48_000,
     capacity: { maximumFramesPerBlock: 512 },
     assets: projection.assets.map((entry, index) => ({
-      asset: { version: audioCoreContractVersion, ...entry.asset },
+      asset: entry.asset,
       sessionAssetId: index + 1,
     })),
     nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
@@ -521,11 +542,10 @@ test("schedules a later native PCM chunk and preserves its seam", async () => {
   })
   await coordinator.prime(130_000)
   const events = sourceEventsFrom(fixture.payloads)
-  expect(events.length).toBeGreaterThanOrEqual(2)
-  expect(new Set(events.map((event) => event.assetId)).size).toBeGreaterThanOrEqual(2)
-  expect(events[0]?.stopFrame).toBeLessThanOrEqual(events[1]?.startFrame ?? Number.MAX_SAFE_INTEGER)
-  expect(events[1]?.sourceOffsetFrame).toBe(0)
-  expect(events[1]?.sourceOffsetFraction).toBe(0)
+  expect(events).toHaveLength(1)
+  expect(new Set(events.map((event) => event.assetId)).size).toBe(1)
+  expect(events[0]?.sourceOffsetFrame).toBeGreaterThan(0)
+  expect(events[0]?.sourceOffsetFraction).toBe(0)
 })
 
 test("sorts source events after opposite track traversal and active volume automation", async () => {

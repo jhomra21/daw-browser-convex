@@ -76,6 +76,7 @@ import {
 import type {
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
+  NativeHostMappedAssetPage,
   NativeHostRecordingConfiguration,
   NativeHostTransport,
   NativeHostMeterBatch,
@@ -86,7 +87,11 @@ import {
   decodeNativeExternalAttachmentPlan,
   nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
-import { nativeOfflineRenderPlanSchema } from "@daw-browser/desktop-protocol/native-audio-host"
+import {
+  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumPayloadBytes,
+  nativeOfflineRenderPlanSchema,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   allowsTrustedAudioCapturePermission,
   allowsTrustedMidiPermission,
@@ -120,6 +125,20 @@ const offlineRenderRequestSchema = z.object({
   jobId: z.string().min(1).max(128),
   plan: nativeOfflineRenderPlanSchema,
 }).passthrough()
+const offlineMappedPageResponseSchema = z.object({
+  jobId: z.string().min(1).max(128),
+  requestId: requestIdSchema,
+  page: z.object({
+    sessionAssetId: positiveUnsigned32Schema,
+    startFrame: z.number().int().nonnegative().safe(),
+    frameCount: positiveUnsigned32Schema,
+    planarPcm: z.instanceof(Uint8Array).refine((value) => (
+      value.byteLength > 0
+      && value.byteLength <= nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
+    )),
+  }).strict().optional(),
+  error: z.string().max(256).optional(),
+}).strict().refine((value) => (value.page !== undefined) !== (value.error !== undefined))
 const optionalDeviceIdSchema = z.string().optional()
 const nativeSessionConfigurationSchema = z.object({
   deviceId: z.string(),
@@ -234,6 +253,19 @@ const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachm
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
 const nativeAssetEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionAssetSchema)
 const nativeAssetIdEnvelopeSchema = nativeSessionEnvelopeSchema(positiveUnsigned32Schema)
+const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
+  sessionAssetId: positiveUnsigned32Schema,
+  frameCount: z.number().int().positive().safe(),
+  sampleRateHz: positiveUnsigned32Schema,
+  channelCount: positiveUnsigned32Schema.max(64),
+  contentHashPrefix: z.bigint().nonnegative().max(0xffff_ffff_ffff_ffffn).optional(),
+}).strict())
+const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
+  sessionAssetId: positiveUnsigned32Schema,
+  startFrame: z.number().int().nonnegative().safe(),
+  frameCount: positiveUnsigned32Schema,
+  planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= 1_048_560),
+}).strict())
 const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const nativeTransportEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionTransportSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
@@ -341,7 +373,20 @@ let pluginCatalogStore: ReturnType<typeof createPluginCatalogStore> | undefined
 let audioHostPath: string | undefined
 let vst3WorkerPath: string | undefined
 let audioHostSupervisor: ReturnType<typeof createNativeAudioHostSupervisor> | undefined
-let offlineRenderJob: { jobId: string; controller: AbortController; nextSequence: number } | undefined
+let offlineRenderJob: {
+  jobId: string
+  controller: AbortController
+  nextSequence: number
+  mappedPageRequests: Map<string, {
+    sessionAssetId: number
+    startFrame: number
+    frameCount: number
+    channelCount: number
+    resolve: (page: NativeHostMappedAssetPage) => void
+    reject: (error: Error) => void
+  }>
+} | undefined
+const maximumPendingOfflineMappedPageRequests = 4
 const offlinePcmAcks = createOfflinePcmAckTracker()
 const abortOfflineRenderJobs = () => {
   offlinePcmAcks.cancel(new DOMException("Native offline rendering canceled.", "AbortError"))
@@ -946,6 +991,31 @@ const registerIpc = () => {
     }
     offlinePcmAcks.acknowledge(parsed.data)
   })
+  ipcMain.handle("daw:audio-host:offline-mapped-page-response", (event, value) => {
+    if (!audioHostAllowed(event)) return { accepted: false }
+    const parsed = offlineMappedPageResponseSchema.safeParse(value)
+    if (!parsed.success || !offlineRenderJob || parsed.data.jobId !== offlineRenderJob.jobId) {
+      return { accepted: false }
+    }
+    const pending = offlineRenderJob.mappedPageRequests.get(parsed.data.requestId)
+    if (!pending) return { accepted: false }
+    if (parsed.data.page && (
+      parsed.data.page.sessionAssetId !== pending.sessionAssetId
+      || parsed.data.page.startFrame !== pending.startFrame
+      || parsed.data.page.frameCount !== pending.frameCount
+      || parsed.data.page.planarPcm.byteLength
+        !== pending.frameCount * pending.channelCount * Float32Array.BYTES_PER_ELEMENT
+    )) {
+      offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
+      pending.reject(new Error("The native offline mapped page response does not match its request."))
+      return { accepted: false }
+    }
+    offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
+    if (parsed.data.error) pending.reject(new Error(parsed.data.error))
+    else if (parsed.data.page) pending.resolve(parsed.data.page)
+    else pending.reject(new Error("The offline mapped page response is invalid."))
+    return { accepted: true }
+  })
   const offlinePlan = (value: NativeOfflineRenderPlan): NativeOfflineRenderPlan | undefined => {
     for (const state of value.capturedVstStates ?? []) {
       if (createHash("sha256").update(state.bytes).digest("hex") !== state.sha256) return undefined
@@ -974,7 +1044,19 @@ const registerIpc = () => {
     const controller = new AbortController()
     const cancelOnDestroy = () => controller.abort()
     event.sender.once("destroyed", cancelOnDestroy)
-    const job = { jobId, controller, nextSequence: 1 }
+    const job = {
+      jobId,
+      controller,
+      nextSequence: 1,
+      mappedPageRequests: new Map<string, {
+        sessionAssetId: number
+        startFrame: number
+        frameCount: number
+        channelCount: number
+        resolve: (page: NativeHostMappedAssetPage) => void
+        reject: (error: Error) => void
+      }>(),
+    }
     offlineRenderJob = job
     try {
       let vstAttachments: Awaited<ReturnType<typeof resolveNativeVst3AttachmentPlan>> | undefined
@@ -995,9 +1077,32 @@ const registerIpc = () => {
       }
       await renderNativeOffline({
         hostPath: audioHostPath,
+        jobId,
         plan,
         vstAttachments,
         signal: controller.signal,
+        onMappedPage: (request) => new Promise((resolve, reject) => {
+          if (job.mappedPageRequests.size >= maximumPendingOfflineMappedPageRequests) {
+            reject(new Error("Too many native offline mapped page requests are pending."))
+            return
+          }
+          if (job.mappedPageRequests.has(request.requestId)) {
+            reject(new Error("The native offline mapped page request ID is duplicated."))
+            return
+          }
+          job.mappedPageRequests.set(request.requestId, {
+            sessionAssetId: request.asset.sessionAssetId,
+            startFrame: request.startFrame,
+            frameCount: request.frameCount,
+            channelCount: request.asset.channelCount,
+            resolve,
+            reject,
+          })
+          if (!sendRendererMessage("daw:audio-host:offline-mapped-page-request", request)) {
+            job.mappedPageRequests.delete(request.requestId)
+            reject(new Error("Renderer unavailable."))
+          }
+        }),
         onChunk: (chunk) => {
           if (offlineRenderJob !== job) throw new Error("The native offline render is no longer active.")
           const sequence = job.nextSequence
@@ -1014,6 +1119,10 @@ const registerIpc = () => {
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : "Native offline rendering failed." }
     } finally {
+      for (const pending of job.mappedPageRequests.values()) {
+        pending.reject(new Error("The native offline render is no longer active."))
+      }
+      job.mappedPageRequests.clear()
       offlinePcmAcks.cancel(new Error("The native offline render is no longer active."))
       event.sender.removeListener("destroyed", cancelOnDestroy)
       if (offlineRenderJob === job) offlineRenderJob = undefined
@@ -1194,6 +1303,59 @@ const registerIpc = () => {
     if (!supervisor || !envelope.success) return nativeSessionFailure()
     try {
       await supervisor.releaseAsset(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:create-mapped-asset", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeMappedAssetEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.createMappedAsset(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:write-mapped-asset-page", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeMappedAssetPageEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.writeMappedAssetPage(envelope.data.value, envelope.data.transactionToken)
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:prepare-mapped-asset-range", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeSessionEnvelopeSchema(z.object({
+      sessionAssetId: positiveUnsigned32Schema,
+      startFrame: z.number().int().nonnegative().safe(),
+      frameCount: z.number().int().positive().safe(),
+    }).strict()).safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.prepareMappedAssetRange(
+        envelope.data.value.sessionAssetId,
+        envelope.data.value.startFrame,
+        envelope.data.value.frameCount,
+        envelope.data.transactionToken,
+      )
+      return { ok: true as const }
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
+  })
+  ipcMain.handle("daw:audio-host:session:release-mapped-asset", async (event, value) => {
+    const supervisor = sessionSupervisorFor(event)
+    const envelope = nativeAssetIdEnvelopeSchema.safeParse(value)
+    if (!supervisor || !envelope.success) return nativeSessionFailure()
+    try {
+      await supervisor.releaseMappedAsset(envelope.data.value, envelope.data.transactionToken)
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)

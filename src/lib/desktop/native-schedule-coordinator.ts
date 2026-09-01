@@ -27,6 +27,7 @@ import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-c
 import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-browser/shared"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
+import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
@@ -335,6 +336,7 @@ export const createNativeScheduleCoordinator = (input: {
   assets: readonly NativeSessionAsset[]
   preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
   nativePcmChunkDescriptors?: readonly NativePcmChunkDescriptor[]
+  pageManager?: NativeTimelinePageManager
   projectGeneration?: number
   startFrame: number
   onFault?: (error: Error) => void
@@ -342,6 +344,7 @@ export const createNativeScheduleCoordinator = (input: {
   onRenderedFrame?: (frame: number) => void
 }) => {
   let disposed = false
+  const hydrationAbortController = new AbortController()
   let installed = false
   let unsubscribeProgress: (() => void) | undefined
   let unsubscribeLoss: (() => void) | undefined
@@ -379,16 +382,14 @@ export const createNativeScheduleCoordinator = (input: {
   const ownedScheduleEndFrame = acceptsLiveMidi ? Number.MAX_SAFE_INTEGER : scheduleEndFrame
   const loop = nativeLoopFramesForSnapshot(input.snapshot, input.sampleRateHz)
   const arpeggiators = new Map(Object.entries(input.snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp]))
-  const assets = new Map<string, AudioAssetRef>(input.snapshot.assets.map((asset) => [
-    asset.assetId,
-    {
-      version: 1,
-      assetId: `portable-export:${asset.assetId}`,
-      frameCount: asset.buffer.length,
-      sampleRateHz: asset.buffer.sampleRate,
-      channelCount: asset.buffer.numberOfChannels,
-    },
-  ]))
+  const assetEntries: [string, AudioAssetRef][] = []
+  for (const snapshotAsset of input.snapshot.assets) {
+    const asset = input.assets.find(({ asset: candidate }) => (
+      candidate.assetId === `portable-export:${snapshotAsset.assetId}`
+    ))?.asset
+    if (asset) assetEntries.push([snapshotAsset.assetId, asset])
+  }
+  const assets = new Map(assetEntries)
   const preparedStretchAssets = new Map(
     (input.preparedStretchAssets ?? []).map((asset) => [asset.clipId, asset]),
   )
@@ -728,6 +729,28 @@ export const createNativeScheduleCoordinator = (input: {
     window: ScheduleWindowCandidate,
     token?: string,
   ) => {
+    const hydrationRanges = window.sampleSourceEvents.flatMap((event) => {
+      const sourceAssetKey = event.assetId.startsWith("portable-export:")
+        ? event.assetId.slice("portable-export:".length)
+        : undefined
+      if (!sourceAssetKey) return []
+      const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
+      const sourceEnd = sourceStart + event.sourceFrameCount
+      const start = Math.floor(sourceStart)
+      const end = Math.ceil(
+        event.sourceOffsetFrame
+          + (event.sourceOffsetFraction ?? 0)
+          + event.sourceFrameCount,
+      )
+      // Native interpolation reads the next source frame. The end-exclusive
+      // range therefore uses ceil(sourceEnd), which includes that neighbor
+      // whenever the final source position is fractional.
+      if (sourceEnd <= sourceStart || end <= start) return []
+      return [{ sourceAssetKey, startFrame: start, endFrame: end }]
+    })
+    if (input.pageManager && hydrationRanges.length > 0) {
+      await input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+    }
     const chunkCount = Math.max(
       Math.ceil(window.instrumentEvents.length / nativeInstrumentEventBatchSize),
       Math.ceil(window.sampleSourceEvents.length / nativeInstrumentEventBatchSize),
@@ -779,9 +802,11 @@ export const createNativeScheduleCoordinator = (input: {
           break
         }
         lastError = new Error(reply.error)
-        // Yield to the Electron I/O loop so a queued native reply or realtime
-        // queue reclamation can make progress before the bounded retry.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        if (attempt === 0 && input.pageManager && hydrationRanges.length > 0
+          && /mapped|written|hydration|range/i.test(reply.error)) {
+          input.pageManager.invalidateRanges(hydrationRanges)
+          await input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+        }
       }
       if (lastError) throw lastError
     }
@@ -925,6 +950,7 @@ export const createNativeScheduleCoordinator = (input: {
   const dispose = () => {
     if (disposed) return
     disposed = true
+    hydrationAbortController.abort()
     unsubscribeListeners()
     activeNoteIds.clear()
     emittedSources.clear()

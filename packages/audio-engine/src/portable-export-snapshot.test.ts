@@ -100,7 +100,7 @@ test('extracts stable transient asset identities and exact planar PCM copies', (
     },
   })
   result.assets[0]?.transferables.forEach((buffer, index) => {
-    expect(buffer === result.assets[0]?.pcm.planes[index]?.buffer).toBe(true)
+    expect(buffer === result.assets[0]?.pcm?.planes[index]?.buffer).toBe(true)
   })
   expect(result.events.map((event) => event.assetId)).toEqual(['portable-export:source-a', 'portable-export:source-a'])
 })
@@ -116,7 +116,7 @@ test('compiles deterministic snapshots without retaining hydrated AudioBuffer da
   const sourceBuffer = source.buffer
   if (!sourceBuffer) throw new Error('Expected hydrated audio buffer.')
   sourceBuffer.getChannelData(0)[0] = 0.75
-  expect(first.assets[0]?.pcm.planes[0]?.[0]).toBe(0)
+  expect(first.assets[0]?.pcm?.planes[0]?.[0]).toBe(0)
 })
 
 test('rebases custom-range events to the Worker render origin', () => {

@@ -3,6 +3,8 @@ import type {
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
@@ -10,6 +12,7 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeOfflinePcmChunk,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
@@ -139,6 +142,10 @@ type NativeSessionBridge = {
     transactionToken?: string
   }): Promise<NativeVstEditorReply>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<NativeSessionReply>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<NativeSessionReply>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<NativeSessionReply>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
@@ -203,6 +210,12 @@ type DesktopBridge = {
         jobId: string,
         plan: NativeOfflineRenderPlan,
         onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+        onMappedPage: (
+          requestId: string,
+            asset: NativeOfflineMappedAsset,
+          startFrame: number,
+          frameCount: number,
+          ) => Promise<NativeHostMappedAssetPage>,
       ): Promise<{ ok: true } | { ok: false; error: string }>
       cancel(jobId: string): Promise<{ accepted: boolean }>
     }

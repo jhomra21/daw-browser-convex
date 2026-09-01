@@ -190,6 +190,28 @@ describe('drawWaveformSamples', () => {
     expect(context.fillCount()).toBe(1)
   })
 
+  test('applies render-only amplitude scaling without mutating samples', () => {
+    const samples = {
+      channels: [new Float32Array([1, 1])],
+      firstFrame: 0,
+      sampleRate: 2,
+      sourceStartSec: 0,
+      sourceEndSec: 1,
+    }
+    drawWaveformSamples({
+      ctx: createSampleContext().ctx,
+      samples,
+      padPx: 0,
+      topY: 0,
+      contentH: 100,
+      cssW: 100,
+      strokeStyle: 'white',
+      amplitudeScaleAtProgress: (progress) => progress,
+    })
+    expect(samples.channels[0]?.[0]).toBe(1)
+    expect(samples.channels[0]?.[1]).toBe(1)
+  })
+
   test('vertical zoom clips to the channel bounds without viewport normalization', () => {
     const context = createSampleContext()
 

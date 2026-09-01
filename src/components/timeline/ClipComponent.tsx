@@ -4,7 +4,7 @@ import {
   createMemo,
 } from "solid-js";
 
-import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
+import { drawWaveformPeaks, drawWaveformSamples } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { getArrangementWaveformCanvasWindow } from "~/lib/arrangement-waveform-window";
@@ -110,6 +110,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
     projectBpm: () => props.bpm,
+    mode: "arrangement",
     pixelsPerSecond: () => props.pixelsPerSecond,
     projectId: () => props.projectId,
     visibleRange: () => props.visibleRange,
@@ -332,7 +333,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const waveformTop = CLIP_TITLE_HEADER_H + AUDIO_WAVEFORM_PADDING_Y;
     const waveformBoxH = cssH - waveformTop - AUDIO_WAVEFORM_PADDING_Y;
     const waveformBottom = waveformTop + waveformBoxH;
-    const segments = waveform.peakSegments();
+    const clipStartSec = props.clip.startSec;
+    const segments = waveform.renderSegments();
     let channelCount = Math.max(
       1,
       props.clip.buffer?.numberOfChannels
@@ -340,8 +342,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         ?? 1,
     );
     for (const segment of segments) {
-      if (!segment.peaks || segment.peaks.channels.length === 0) continue;
-      channelCount = segment.peaks.channels.length;
+      const segmentChannelCount = segment.mode === "peaks"
+        ? segment.peaks.channels.length
+        : segment.samples.channels.length;
+      if (segmentChannelCount === 0) continue;
+      channelCount = segmentChannelCount;
       break;
     }
     const channelHeight = waveformBoxH / channelCount;
@@ -361,7 +366,33 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       );
       if (drawEndPx <= drawStartPx) continue;
 
-      if (!segment.peaks) {
+      if (segment.mode === "samples") {
+        drawWaveformSamples({
+          ctx,
+          samples: segment.samples,
+          drawStartPx: segment.drawStartPx,
+          drawWidthPx: segment.drawCols,
+          padPx: 0,
+          topY: waveformTop,
+          contentH: waveformBoxH,
+          cssW,
+          strokeStyle: contentColor,
+          pointStyle: contentColor,
+          showPoints: segment.showPoints,
+          amplitudeScaleAtProgress: hasEffectiveFade
+            ? (progress) => normalizedFadeGainAtClipTime(
+              fades,
+              duration,
+              segment.timelineStartSec
+                + (segment.timelineEndSec - segment.timelineStartSec) * progress
+                - clipStartSec,
+            )
+            : undefined,
+        });
+        continue;
+      }
+
+      if (segment.peaks.channels.length === 0) {
         for (let x = drawStartPx; x < drawEndPx; x += 6) {
           ctx.beginPath();
           ctx.moveTo(x, waveformBottom);
@@ -432,7 +463,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       : "";
     void midiSignature;
     void props.bpm;
-    void waveform.peakSegments();
+    void waveform.renderSegments();
     void props.viewportRedrawVersion;
     drawWaveform();
   });

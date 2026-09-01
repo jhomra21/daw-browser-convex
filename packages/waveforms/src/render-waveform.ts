@@ -113,9 +113,11 @@ export function drawWaveformSamples(options: WaveformSampleDrawOptions) {
     const x = drawStart + ((timestamp - samples.sourceStartSec) / durationSec) * drawWidth
     const channelTop = topY + channelIndex * channelHeight
     const centerY = channelTop + channelHeight / 2
+    const progress = (timestamp - samples.sourceStartSec) / durationSec
+    const amplitudeScale = options.amplitudeScaleAtProgress?.(Math.max(0, Math.min(1, progress))) ?? 1
     return {
       x,
-      y: sampleY(value, centerY, channelHeight / 2, verticalZoom),
+      y: sampleY(value * Math.max(0, Math.min(1, amplitudeScale)), centerY, channelHeight / 2, verticalZoom),
     }
   }
 

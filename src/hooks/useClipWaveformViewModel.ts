@@ -1,65 +1,94 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import type { DecodeAudioPageSource, DecodedAudioPage } from '@daw-browser/audio-engine/media-pages'
+import {
+  decodeAudioPages,
+  type DecodeAudioPageSource,
+  type DecodedAudioPage,
+} from '@daw-browser/audio-engine/media-pages'
+import { selectWaveformLod } from '@daw-browser/waveforms/lod'
 import { createPcmEnvelopeAccumulator } from '@daw-browser/waveforms/pcm-envelope'
+import { createPcmSampleWindowCollector } from '@daw-browser/waveforms/pcm-samples'
 import { getWaveformChannelSlice } from '@daw-browser/waveforms/select-waveform-window'
-import type { WaveformPeakChannelSlice } from '@daw-browser/waveforms/types'
+import type {
+  WaveformPeakChannelSlice,
+  WaveformSampleChannelSlice,
+} from '@daw-browser/waveforms/types'
 import { isLocalId, resolveClipSampleUrl } from '@daw-browser/shared'
-import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
+import { getAudioWaveformLayout, type AudioWaveformVisibleRange } from '~/lib/audio-waveform-layout'
 import {
   getArrangementWaveformVisibleSegments,
   selectArrangementWaveformRoute,
-  type ArrangementWaveformTimelineRange,
-  type ArrangementWaveformVisibleSegment,
 } from '~/lib/arrangement-waveform-window'
-import {
-  arrangementWaveformPcmScheduler,
-} from '~/lib/arrangement-waveform-pcm'
+import { arrangementWaveformPcmScheduler } from '~/lib/arrangement-waveform-pcm'
 import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
 import { readLocalAssetBytes } from '~/lib/local-assets'
-import {
-  resolveSamplePlaybackUrlForRuntime,
-} from '~/lib/renderer-api-url'
+import { resolveSamplePlaybackUrlForRuntime } from '~/lib/renderer-api-url'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 
+type ViewModelMode = 'arrangement' | 'sample-detail'
+
 type ClipWaveformViewModelOptions = {
+  projectId: Accessor<string | undefined>
   clip: Accessor<RuntimeClip>
   cssWidthPx: Accessor<number>
   projectBpm: Accessor<number>
-  pixelsPerSecond: Accessor<number>
-  projectId: Accessor<string | undefined>
-  visibleRange: Accessor<ArrangementWaveformTimelineRange>
+  mode: ViewModelMode
+  visibleRange: Accessor<AudioWaveformVisibleRange>
+  pixelsPerSecond?: Accessor<number>
+}
+
+type WaveformSourceSegment = {
+  drawStartPx: number
+  drawCols: number
+  timelineStartSec: number
+  timelineEndSec: number
+  sourceStartSec: number
+  sourceEndSec: number
 }
 
 type WaveformRequestView = {
-  assetKey?: string
-  buffer: AudioBuffer | null
   clip: RuntimeClip
-  sampleRate?: number
-  channelCount?: number
+  assetKey?: string
   sourceAssetKey?: string
+  buffer: AudioBuffer | null
+  sampleRate: number
+  channelCount: number
   sourceIdentity?: {
     assetKey: string
     durationSec: number
     sampleRate: number
     channelCount: number
   }
+  sampleUrl?: string
+  segments: WaveformSourceSegment[]
+  layout: ReturnType<typeof getAudioWaveformLayout>
 }
 
-export type ClipWaveformPeakSegment = {
-  drawStartPx: number
-  drawCols: number
-  peaks: WaveformPeakChannelSlice | null
+type RenderPeakSegment = WaveformSourceSegment & {
+  mode: 'peaks'
+  peaks: WaveformPeakChannelSlice
 }
 
-const validRange = (
-  range: ArrangementWaveformTimelineRange | undefined,
-): range is ArrangementWaveformTimelineRange => Boolean(
-  range
-  && Number.isFinite(range.startSec)
-  && Number.isFinite(range.endSec)
-  && range.endSec > range.startSec,
-)
+type RenderSampleSegment = WaveformSourceSegment & {
+  mode: 'samples'
+  samples: WaveformSampleChannelSlice
+  showPoints: boolean
+}
+
+export type ClipWaveformRenderSegment = RenderPeakSegment | RenderSampleSegment
+
+const frameBounds = (segment: WaveformSourceSegment, sampleRate: number) => {
+  if (!Number.isSafeInteger(sampleRate) || sampleRate <= 0
+    || !Number.isFinite(segment.sourceStartSec) || segment.sourceStartSec < 0
+    || !Number.isFinite(segment.sourceEndSec) || segment.sourceEndSec <= segment.sourceStartSec) {
+    return null
+  }
+  const startFrame = Math.floor(segment.sourceStartSec * sampleRate)
+  const endFrame = Math.max(startFrame + 1, Math.ceil(segment.sourceEndSec * sampleRate))
+  if (!Number.isSafeInteger(startFrame) || startFrame < 0
+    || !Number.isSafeInteger(endFrame) || endFrame <= startFrame) return null
+  return { startFrame, endFrame }
+}
 
 const bufferPage = (buffer: AudioBuffer): DecodedAudioPage => ({
   startFrame: 0,
@@ -69,6 +98,12 @@ const bufferPage = (buffer: AudioBuffer): DecodedAudioPage => ({
   planes: Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel)),
 })
 
+const validateDecodedPage = (page: DecodedAudioPage, view: WaveformRequestView) => {
+  if (page.sampleRate !== view.sampleRate || page.channelCount !== view.channelCount) {
+    throw new Error('Decoded waveform media metadata changed during the request.')
+  }
+}
+
 const resolvePcmSource = async (
   projectId: string | undefined,
   view: WaveformRequestView,
@@ -77,163 +112,278 @@ const resolvePcmSource = async (
     const local = await readLocalAssetBytes(projectId, view.sourceAssetKey)
     if (local.status === 'ready') return local.file
   }
-  const sampleUrl = resolveClipSampleUrl(view.clip)
-  return sampleUrl
-    ? resolveSamplePlaybackUrlForRuntime(sampleUrl) ?? null
-    : null
+  return view.sampleUrl ?? null
 }
 
-const resolveBufferEnvelope = (
-  buffer: AudioBuffer,
-  segment: ArrangementWaveformVisibleSegment,
-  channelCount: number,
-): WaveformPeakChannelSlice | null => {
-  if (buffer.numberOfChannels !== channelCount || !Number.isSafeInteger(buffer.sampleRate) || buffer.sampleRate <= 0) {
-    return null
-  }
-  const startFrame = Math.max(0, Math.floor(segment.sourceStartSec * buffer.sampleRate))
-  const endFrame = Math.min(buffer.length, Math.ceil(segment.sourceEndSec * buffer.sampleRate))
-  if (!Number.isSafeInteger(startFrame) || startFrame >= buffer.length
-    || !Number.isSafeInteger(endFrame) || endFrame <= startFrame) return null
-
+const resolvePcmEnvelope = async (
+  view: WaveformRequestView,
+  source: DecodeAudioPageSource | null,
+  segment: WaveformSourceSegment,
+  signal: AbortSignal,
+): Promise<WaveformPeakChannelSlice | null> => {
+  const bounds = frameBounds(segment, view.sampleRate)
+  if (!bounds) return null
   const accumulator = createPcmEnvelopeAccumulator({
-    startFrame,
-    endFrame,
+    startFrame: bounds.startFrame,
+    endFrame: bounds.endFrame,
     columns: segment.drawCols,
-    channelCount,
+    channelCount: view.channelCount,
   })
-  accumulator.append(bufferPage(buffer))
+
+  if (view.buffer) {
+    accumulator.append(bufferPage(view.buffer))
+  } else {
+    if (!source) return null
+    for await (const page of decodeAudioPages(source, {
+      startSec: segment.sourceStartSec,
+      endSec: segment.sourceEndSec,
+      signal,
+    })) {
+      validateDecodedPage(page, view)
+      accumulator.append(page)
+    }
+  }
   return accumulator.finish()
 }
 
-export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
-  const [peakSegments, setPeakSegments] = createSignal<ClipWaveformPeakSegment[]>([])
-  let requestId = 0
-
-  const view = createMemo<WaveformRequestView>(() => {
-    const clip = options.clip()
-    const buffer = clip.buffer ?? null
-    const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
-    const metadata = getPersistableAudioSourceMetadata({
-      buffer,
-      sourceDurationSec: clip.sourceDurationSec,
-      sourceSampleRate: clip.sourceSampleRate,
-      sourceChannelCount: clip.sourceChannelCount,
-    })
-    return {
-      assetKey,
-      buffer,
-      clip,
-      sampleRate: metadata?.sampleRate,
-      channelCount: metadata?.channelCount,
-      sourceAssetKey: clip.sourceAssetKey,
-      sourceIdentity: assetKey && metadata ? { assetKey, ...metadata } : undefined,
-    }
+const resolvePcmSamples = async (
+  view: WaveformRequestView,
+  source: DecodeAudioPageSource | null,
+  segment: WaveformSourceSegment,
+  signal: AbortSignal,
+): Promise<WaveformSampleChannelSlice | null> => {
+  const bounds = frameBounds(segment, view.sampleRate)
+  if (!bounds) return null
+  const collector = createPcmSampleWindowCollector({
+    startFrame: bounds.startFrame,
+    endFrame: bounds.endFrame,
+    sampleRate: view.sampleRate,
+    channelCount: view.channelCount,
+    sourceStartSec: segment.sourceStartSec,
+    sourceEndSec: segment.sourceEndSec,
   })
 
+  if (view.buffer) {
+    collector.append(bufferPage(view.buffer))
+  } else {
+    if (!source) return null
+    for await (const page of decodeAudioPages(source, {
+      startSec: segment.sourceStartSec,
+      endSec: segment.sourceEndSec,
+      signal,
+    })) {
+      validateDecodedPage(page, view)
+      collector.append(page)
+    }
+  }
+  return collector.finish()
+}
+
+const detailSegments = (
+  layout: ReturnType<typeof getAudioWaveformLayout>,
+  widthPx: number,
+): WaveformSourceSegment[] => (
+  layout.segments ?? (layout.drawCols > 0
+    ? [{
+      drawStartPx: layout.padPx,
+      drawCols: layout.drawCols,
+      timelineStartSec: layout.visibleTimelineStartSec
+        + layout.padPx * (layout.visibleTimelineEndSec - layout.visibleTimelineStartSec)
+          / Math.max(1, widthPx),
+      timelineEndSec: layout.visibleTimelineStartSec
+        + (layout.padPx + layout.drawCols)
+          * (layout.visibleTimelineEndSec - layout.visibleTimelineStartSec)
+          / Math.max(1, widthPx),
+      sourceStartSec: layout.sourceStartSec,
+      sourceEndSec: layout.sourceEndSec,
+    }]
+    : [])
+)
+
+const getRequestView = (options: ClipWaveformViewModelOptions): WaveformRequestView => {
+  const clip = options.clip()
+  const buffer = clip.buffer ?? null
+  const metadata = getPersistableAudioSourceMetadata({
+    buffer,
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+  })
+  const sampleRate = metadata?.sampleRate ?? 0
+  const channelCount = metadata?.channelCount ?? 0
+  const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
+  const unresolvedSampleUrl = resolveClipSampleUrl(clip)
+  const sampleUrl = unresolvedSampleUrl
+    ? resolveSamplePlaybackUrlForRuntime(unresolvedSampleUrl) ?? undefined
+    : undefined
+  const visibleRange = options.visibleRange()
+
+  if (options.mode === 'arrangement') {
+    const pixelsPerSecond = options.pixelsPerSecond?.() ?? 0
+    const visibleSegments = getArrangementWaveformVisibleSegments({
+      clip,
+      cssWidthPx: options.cssWidthPx(),
+      pixelsPerSecond,
+      projectBpm: options.projectBpm(),
+      visibleRange,
+      bufferDurationSec: buffer?.duration,
+    })
+    const layout = getAudioWaveformLayout(
+      clip,
+      clip.duration * pixelsPerSecond,
+      buffer?.duration,
+      options.projectBpm(),
+    )
+    return {
+      clip,
+      assetKey,
+      sourceAssetKey: clip.sourceAssetKey,
+      buffer,
+      sampleRate,
+      channelCount,
+      sampleUrl,
+      sourceIdentity: assetKey && metadata ? { assetKey, ...metadata } : undefined,
+      segments: visibleSegments,
+      layout,
+    }
+  }
+
+  const layout = getAudioWaveformLayout(
+    clip,
+    options.cssWidthPx(),
+    buffer?.duration,
+    options.projectBpm(),
+    visibleRange,
+  )
+  return {
+    clip,
+    assetKey,
+    sourceAssetKey: clip.sourceAssetKey,
+    buffer,
+    sampleRate,
+    channelCount,
+    sampleUrl,
+    sourceIdentity: assetKey && metadata ? { assetKey, ...metadata } : undefined,
+    segments: detailSegments(layout, options.cssWidthPx()),
+    layout,
+  }
+}
+
+export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
+  const [renderSegments, setRenderSegments] = createSignal<ClipWaveformRenderSegment[]>([])
+  const [loading, setLoading] = createSignal(false)
+  let requestId = 0
+
+  const view = createMemo(() => getRequestView(options))
+
   createEffect(() => {
-    const currentRequestId = ++requestId
     const current = view()
-    const requestedRange = options.visibleRange()
-    const hasViewportRange = validRange(requestedRange)
     const projectId = options.projectId()
+    const currentRequestId = ++requestId
     const abortController = new AbortController()
     onCleanup(() => abortController.abort())
 
-    const assetKey = current.assetKey
-    if (current.clip.midi || (!current.buffer && !assetKey) || !hasViewportRange) {
-      setPeakSegments([])
+    if (current.clip.midi || current.segments.length === 0
+      || (!current.buffer && !current.assetKey && !current.sampleUrl)
+      || current.sampleRate <= 0 || current.channelCount <= 0) {
+      setRenderSegments([])
+      setLoading(false)
       return
     }
-
-    const sampleRate = current.sampleRate
-    const channelCount = current.channelCount
-    if (!sampleRate || !Number.isSafeInteger(sampleRate) || sampleRate <= 0
-      || !channelCount || !Number.isSafeInteger(channelCount) || channelCount <= 0) {
-      setPeakSegments([])
-      return
-    }
-
-    const visibleSegments = getArrangementWaveformVisibleSegments({
-      clip: current.clip,
-      cssWidthPx: options.cssWidthPx(),
-      pixelsPerSecond: options.pixelsPerSecond(),
-      projectBpm: options.projectBpm(),
-      visibleRange: requestedRange,
-      bufferDurationSec: current.buffer?.duration,
-    })
-    if (visibleSegments.length === 0) {
-      setPeakSegments([])
-      return
-    }
-
-    setPeakSegments(visibleSegments.map((segment) => ({
-      drawStartPx: segment.drawStartPx,
-      drawCols: segment.drawCols,
-      peaks: null,
-    })))
 
     let sourcePromise: Promise<DecodeAudioPageSource | null> | undefined
     const source = () => {
       sourcePromise ??= resolvePcmSource(projectId, current)
       return sourcePromise
     }
-    const visibleCenterSec = (requestedRange.startSec + requestedRange.endSec) / 2
-    const pcmAssetKey = projectId && assetKey
-      ? `${projectId}\u0000${assetKey}`
-      : assetKey ?? ''
-
-    const resolveSegmentPeaks = async (segment: ArrangementWaveformVisibleSegment) => {
-      const route = selectArrangementWaveformRoute({
-        sampleRate,
+    setLoading(true)
+    void Promise.all(current.segments.map(async (segment): Promise<ClipWaveformRenderSegment | null> => {
+      const lod = selectWaveformLod({
+        sampleRate: current.sampleRate,
         sourceStartSec: segment.sourceStartSec,
         sourceEndSec: segment.sourceEndSec,
-        drawCols: segment.drawCols,
+        widthPx: segment.drawCols,
       })
-      if (!route) return null
+      if (!lod) return null
 
-      if (route === 'cached-peaks' && assetKey) {
-        const cached = await getWaveformChannelSlice({
-          assetKey,
+      const arrangementRoute = options.mode === 'arrangement'
+        ? selectArrangementWaveformRoute({
+          sampleRate: current.sampleRate,
+          sourceStartSec: segment.sourceStartSec,
+          sourceEndSec: segment.sourceEndSec,
+          drawCols: segment.drawCols,
+        })
+        : undefined
+
+      if ((arrangementRoute ?? lod.mode) === 'cached-peaks' && current.assetKey) {
+        const peaks = await getWaveformChannelSlice({
+          assetKey: current.assetKey,
           sourceIdentity: current.sourceIdentity,
           sampleUrl: undefined,
-          buffer: undefined,
+          buffer: options.mode === 'sample-detail' ? current.buffer : undefined,
           sourceStartSec: segment.sourceStartSec,
           sourceEndSec: segment.sourceEndSec,
           bins: segment.drawCols,
         })
-        if (cached) return cached
+        if (peaks) return { mode: 'peaks', ...segment, peaks }
       }
 
-      if (current.buffer) return resolveBufferEnvelope(current.buffer, segment, channelCount)
-
-      return await arrangementWaveformPcmScheduler.request({
-        assetKey: pcmAssetKey,
-        source,
-        sourceStartSec: segment.sourceStartSec,
-        sourceEndSec: segment.sourceEndSec,
-        columns: segment.drawCols,
-        sampleRate,
-        channelCount,
-        priority: Math.abs((segment.timelineStartSec + segment.timelineEndSec) / 2 - visibleCenterSec),
-        signal: abortController.signal,
-      })
-    }
-
-    for (let index = 0; index < visibleSegments.length; index += 1) {
-      const segment = visibleSegments[index]
-      if (!segment) continue
-      void resolveSegmentPeaks(segment)
-        .then((peaks) => {
-          if (currentRequestId !== requestId || abortController.signal.aborted) return
-          setPeakSegments((currentSegments) => currentSegments.map((currentSegment, segmentIndex) => (
-            segmentIndex === index
-              ? { drawStartPx: segment.drawStartPx, drawCols: segment.drawCols, peaks }
-              : currentSegment
-          )))
+      if (options.mode === 'arrangement'
+        && (arrangementRoute === 'cached-peaks' || arrangementRoute === 'pcm-envelope')) {
+        if (current.buffer) {
+          const peaks = await resolvePcmEnvelope(
+            current,
+            null,
+            segment,
+            abortController.signal,
+          )
+          return peaks ? { mode: 'peaks', ...segment, peaks } : null
+        }
+        const peaks = await arrangementWaveformPcmScheduler.request({
+          assetKey: `${projectId ?? ''}\u0000${current.assetKey ?? current.sampleUrl ?? ''}`,
+          source,
+          sourceStartSec: segment.sourceStartSec,
+          sourceEndSec: segment.sourceEndSec,
+          columns: segment.drawCols,
+          sampleRate: current.sampleRate,
+          channelCount: current.channelCount,
+          priority: Math.abs(
+            (segment.timelineStartSec + segment.timelineEndSec) / 2
+              - (current.layout.visibleTimelineStartSec + current.layout.visibleTimelineEndSec) / 2,
+          ),
+          signal: abortController.signal,
         })
-        .catch(() => undefined)
-    }
+        return peaks ? { mode: 'peaks', ...segment, peaks } : null
+      }
+
+      if (lod.mode === 'cached-peaks' || lod.mode === 'pcm-envelope') {
+        const peaks = await resolvePcmEnvelope(
+          current,
+          await source(),
+          segment,
+          abortController.signal,
+        )
+        return peaks ? { mode: 'peaks', ...segment, peaks } : null
+      }
+
+      const samples = await resolvePcmSamples(
+        current,
+        await source(),
+        segment,
+        abortController.signal,
+      )
+      return samples
+        ? { mode: 'samples', ...segment, samples, showPoints: lod.showPoints }
+        : null
+    })).then((next) => {
+      if (currentRequestId !== requestId || abortController.signal.aborted) return
+      setRenderSegments(next.flatMap((segment) => segment ? [segment] : []))
+    }).catch(() => {
+      if (currentRequestId !== requestId || abortController.signal.aborted) return
+      setRenderSegments([])
+    }).finally(() => {
+      if (currentRequestId === requestId && !abortController.signal.aborted) setLoading(false)
+    })
   })
 
   onCleanup(() => {
@@ -241,12 +391,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   })
 
   return {
-    layout: () => getAudioWaveformLayout(
-      view().clip,
-      view().clip.duration * options.pixelsPerSecond(),
-      view().buffer?.duration,
-      options.projectBpm(),
-    ),
-    peakSegments,
+    layout: () => view().layout,
+    renderSegments,
+    loading,
   }
 }

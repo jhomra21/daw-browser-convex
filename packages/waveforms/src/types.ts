@@ -93,4 +93,5 @@ export type WaveformSampleDrawOptions = {
   verticalZoom?: number
   showPoints?: boolean
   pointRadiusPx?: number
+  amplitudeScaleAtProgress?: (progress: number) => number
 }

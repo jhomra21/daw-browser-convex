@@ -21,7 +21,7 @@ export type ArrangementWaveformVisibleSegment = {
   sourceEndSec: number
 }
 
-export type ArrangementWaveformRoute = 'cached-peaks' | 'pcm-envelope'
+export type ArrangementWaveformRoute = 'cached-peaks' | 'pcm-envelope' | 'pcm-line'
 
 export const selectArrangementWaveformRoute = (input: {
   sampleRate: number
@@ -36,7 +36,7 @@ export const selectArrangementWaveformRoute = (input: {
     widthPx: input.drawCols,
   })
   if (!lod) return null
-  return lod.mode === 'cached-peaks' ? 'cached-peaks' : 'pcm-envelope'
+  return lod.mode
 }
 
 const validRange = (range: ArrangementWaveformTimelineRange) => (

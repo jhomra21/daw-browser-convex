@@ -33,6 +33,43 @@ describe('getArrangementWaveformCanvasWindow', () => {
     })
   })
 
+  test('keeps a one-hour clip bounded to a five-second visible canvas', () => {
+    const pixelsPerSecond = 48_000
+    const durationSec = 3_600
+    const canvas = getArrangementWaveformCanvasWindow({
+      clipStartSec: 0,
+      clipDurationSec: durationSec,
+      cssWidthPx: durationSec * pixelsPerSecond,
+      pixelsPerSecond,
+      visibleRange: { startSec: 1_800, endSec: 1_805 },
+    })
+    expect(canvas).toEqual({
+      leftPx: 86_400_000,
+      widthPx: 240_000,
+    })
+    expect(canvas?.widthPx).toBeLessThan(durationSec * pixelsPerSecond)
+
+    const segments = getArrangementWaveformVisibleSegments({
+      clip: clip({
+        startSec: 0,
+        duration: durationSec,
+        sourceDurationSec: durationSec,
+      }),
+      cssWidthPx: durationSec * pixelsPerSecond,
+      pixelsPerSecond,
+      projectBpm: 120,
+      visibleRange: { startSec: 1_800, endSec: 1_805 },
+    })
+    expect(segments).toEqual([{
+      drawStartPx: 86_400_000,
+      drawCols: 240_000,
+      timelineStartSec: 1_800,
+      timelineEndSec: 1_805,
+      sourceStartSec: 1_800,
+      sourceEndSec: 1_805,
+    }])
+  })
+
   test('clips the drawing surface at clip boundaries', () => {
     expect(getArrangementWaveformCanvasWindow({
       clipStartSec: 10,
@@ -192,6 +229,12 @@ describe('selectArrangementWaveformRoute', () => {
       sourceEndSec: 1,
       drawCols: 401,
     })).toBe('pcm-envelope')
+    expect(selectArrangementWaveformRoute({
+      sampleRate: 48_000,
+      sourceStartSec: 0,
+      sourceEndSec: 1,
+      drawCols: 48_001,
+    })).toBe('pcm-line')
   })
 
   test('fails closed for malformed route input', () => {

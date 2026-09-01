@@ -4,7 +4,7 @@ import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
 import { useAppPreferences } from "~/context/app-preferences";
 import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
-import { useSampleDetailWaveformViewModel } from "~/hooks/useSampleDetailWaveformViewModel";
+import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import {
   fitSampleDetailWaveformViewport,
@@ -61,12 +61,16 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     setViewportState({ clipId: props.clip.id, viewport: next });
   };
   const fitViewport = () => setViewport(fitSampleDetailWaveformViewport(props.clip.duration));
-  const waveform = useSampleDetailWaveformViewModel({
+  const waveform = useClipWaveformViewModel({
     projectId: () => props.projectId,
     clip: () => props.clip,
     cssWidthPx: waveformWidthPx,
     projectBpm: () => props.projectBpm,
-    viewport,
+    mode: "sample-detail",
+    visibleRange: () => ({
+      startSec: props.clip.startSec + viewport().startSec,
+      endSec: props.clip.startSec + viewport().endSec,
+    }),
   });
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);

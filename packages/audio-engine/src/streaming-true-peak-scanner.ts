@@ -85,7 +85,10 @@ export const createStreamingTruePeakScanner = (channelCount: number) => {
       if ((framesSeen & 4095) === 0) signal?.throwIfAborted()
       const ringIndex = framesSeen % TAPS_PER_PHASE
       for (let channel = 0; channel < channelCount; channel += 1) {
-        rings[channel]?.set([channels[channel]?.[localFrame] ?? 0], ringIndex)
+        const ring = rings[channel]
+        const samples = channels[channel]
+        if (!ring || !samples) throw new Error('Streaming true-peak channel is missing.')
+        ring[ringIndex] = samples[localFrame] ?? 0
       }
       framesSeen += 1
       while (nextFrameToProcess + FUTURE_FRAMES < framesSeen) {

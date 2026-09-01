@@ -7,6 +7,7 @@ import {
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
+import { getArrangementWaveformCanvasWindow } from "~/lib/arrangement-waveform-window";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
@@ -97,6 +98,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     props.isSelected,
     isGhost(),
   ));
+  const waveformCanvasWindow = createMemo(() => getArrangementWaveformCanvasWindow({
+    clipStartSec: props.clip.startSec,
+    clipDurationSec: props.clip.duration,
+    cssWidthPx: clipWidthPx(),
+    pixelsPerSecond: props.pixelsPerSecond,
+    visibleRange: props.visibleRange,
+  }));
 
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
@@ -194,10 +202,16 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
     const cssW = clipWidthPx();
     const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 1));
+    const canvasWindow = waveformCanvasWindow();
+    if (!canvasWindow) {
+      canvas.width = 1;
+      canvas.height = 1;
+      return;
+    }
 
     const dpr = window.devicePixelRatio || 1;
-    const pxW = Math.floor(cssW * dpr);
-    const pxH = Math.floor(cssH * dpr);
+    const pxW = Math.ceil(canvasWindow.widthPx * dpr);
+    const pxH = Math.ceil(cssH * dpr);
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
@@ -205,9 +219,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pxW, pxH);
+    ctx.setTransform(dpr, 0, 0, dpr, -canvasWindow.leftPx * dpr, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, cssW, cssH);
 
     const canvasColors = appPreferences.appearance.themeTokens();
     const clipSelected = canvasColors["clip-selected"];
@@ -510,7 +525,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
       <canvas
         ref={(el) => (canvasRef = el || undefined)}
-        class="absolute inset-0 size-full pointer-events-none z-10"
+        class="absolute inset-y-0 pointer-events-none z-10"
+        style={{
+          left: `${waveformCanvasWindow()?.leftPx ?? 0}px`,
+          width: `${waveformCanvasWindow()?.widthPx ?? 1}px`,
+          height: `${Math.max(1, Math.floor(LANE_HEIGHT - 1))}px`,
+          display: waveformCanvasWindow() ? "block" : "none",
+        }}
       />
       <ClipFadeOverlay
         clip={props.clip}

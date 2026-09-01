@@ -130,7 +130,6 @@ const createFakeSpool = (source: TestAudioBuffer): NativeOfflinePcmSpoolSession 
 }
 
 const collectReplay = async (source: AsyncIterable<AudioBuffer>) => {
-  const channels = [new Float32Array(0), new Float32Array(0)]
   const blocks: AudioBuffer[] = []
   for await (const block of source) blocks.push(block)
   const totalFrames = blocks.reduce((sum, block) => sum + block.length, 0)
@@ -142,7 +141,6 @@ const collectReplay = async (source: AsyncIterable<AudioBuffer>) => {
     }
     offset += block.length
   }
-  void channels
   return output
 }
 

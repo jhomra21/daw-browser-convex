@@ -126,12 +126,12 @@ export const processNativeOfflinePcmSpool = async (input: {
       const correctionDb = normalization.targetLufs - analysis.loudness.integratedLufs
       if (Math.abs(correctionDb) <= 0.2) break
       gainDb += correctionDb
-      stages.push({
-        gain: linearFromDb(correctionDb),
-        truePeakCeilingDbtp: normalization.limiting === 'true-peak'
-          ? normalization.truePeakCeilingDbtp
-          : undefined,
-      })
+      stages.push(normalization.limiting === 'true-peak'
+        ? {
+          gain: linearFromDb(correctionDb),
+          truePeakCeilingDbtp: normalization.truePeakCeilingDbtp,
+        }
+        : { gain: linearFromDb(correctionDb) })
       analyzed = await analyze(stages)
       analysis = analyzed.analysis
       limited = analyzed.limited
@@ -159,6 +159,8 @@ export const processNativeOfflinePcmSpool = async (input: {
       limited,
       ceilingConstrained,
     }),
-    replay: () => createPipeline(stages).chunks[Symbol.asyncIterator](),
+    replay: async function* () {
+      for await (const chunk of createPipeline(stages).chunks) yield chunk
+    },
   }
 }

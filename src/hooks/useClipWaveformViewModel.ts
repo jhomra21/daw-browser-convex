@@ -184,8 +184,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       : assetKey ?? ''
 
     const resolveSegmentPeaks = async (segment: ArrangementWaveformVisibleSegment) => {
-      if (current.buffer) return resolveBufferEnvelope(current.buffer, segment, channelCount)
-
       const route = selectArrangementWaveformRoute({
         sampleRate,
         sourceStartSec: segment.sourceStartSec,
@@ -199,13 +197,15 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           assetKey,
           sourceIdentity: current.sourceIdentity,
           sampleUrl: undefined,
-          buffer: current.buffer,
+          buffer: undefined,
           sourceStartSec: segment.sourceStartSec,
           sourceEndSec: segment.sourceEndSec,
           bins: segment.drawCols,
         })
         if (cached) return cached
       }
+
+      if (current.buffer) return resolveBufferEnvelope(current.buffer, segment, channelCount)
 
       return await arrangementWaveformPcmScheduler.request({
         assetKey: pcmAssetKey,

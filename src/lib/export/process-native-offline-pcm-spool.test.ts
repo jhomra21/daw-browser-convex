@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
-import {
-  NativeOfflineStreamingLimiterRequiredError,
-  processNativeOfflinePcmSpool,
-} from '~/lib/export/process-native-offline-pcm-spool'
+import { processNativeOfflinePcmSpool } from '~/lib/export/process-native-offline-pcm-spool'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
 import type {
   NativeOfflinePcmSpoolDescriptor,
@@ -246,20 +243,35 @@ describe('native offline PCM spool processing', () => {
     expect(actual.analysis.integratedLufs).toBeCloseTo(-18, 1)
   })
 
-  test('keeps true-peak limiting explicit until the streaming limiter exists', async () => {
+  test('matches whole-buffer loudness normalization with linked true-peak limiting', async () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const program = createProgram()
+    program.getChannelData(0)[7_500] = 1
     const render = renderSettings({
       normalization: {
         mode: 'loudness',
-        targetLufs: -14,
-        truePeakCeilingDbtp: -1,
+        targetLufs: -5,
+        truePeakCeilingDbtp: -6,
         limiting: 'true-peak',
       },
     })
-    await expect(processNativeOfflinePcmSpool({
-      spool: createFakeSpool(createProgram()),
+    const expected = processRenderedExport({
+      rendered: cloneBuffer(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
-    })).rejects.toBeInstanceOf(NativeOfflineStreamingLimiterRequiredError)
+    })
+    const actual = await processNativeOfflinePcmSpool({
+      spool: createFakeSpool(program),
+      sourceDurationSec: SOURCE_DURATION_SEC,
+      render,
+      signal: new AbortController().signal,
+    })
+
+    expectReportClose(actual.analysis, expected.analysis)
+    expect(actual.analysis.limited).toBe(true)
+    const replay = await collectReplay(actual.replay())
+    expect(replay.getChannelData(0)[7_500]).toBeCloseTo(expected.buffer.getChannelData(0)[7_500] ?? 0, 7)
+    expect(replay.getChannelData(1)[7_500]).toBeCloseTo(expected.buffer.getChannelData(1)[7_500] ?? 0, 7)
   })
 })

@@ -2,6 +2,7 @@ import { decodeAudioPages, type DecodeAudioPageSource } from '@daw-browser/audio
 import { readLocalAssetBytes } from '~/lib/local-assets'
 import type { NativeHostMappedAssetPage } from '@daw-browser/audio-engine/native-host-wire'
 import {
+  nativeAudioHostMaximumAssetChannels,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
@@ -83,12 +84,37 @@ export const createNativeTimelinePageManager = (input: {
   if (!Number.isSafeInteger(requestedPageFrames) || requestedPageFrames <= 0) {
     throw new Error('Native timeline page size must be a positive integer.')
   }
+  const boundedRequestedPageFrames = Math.min(requestedPageFrames, maximumDecodedPageFrames)
+  for (const source of input.sources) {
+    if (!Number.isSafeInteger(source.frameCount) || source.frameCount <= 0
+      || !Number.isSafeInteger(source.sampleRateHz) || source.sampleRateHz <= 0
+      || !Number.isSafeInteger(source.channelCount) || source.channelCount <= 0
+      || source.channelCount > nativeAudioHostMaximumAssetChannels) {
+      throw new Error(`Native audio asset "${source.sourceAssetKey}" metadata is invalid.`)
+    }
+  }
   const pageFramesForSource = (source: NativeTimelineSource) => {
     const payloadFrames = nativeAudioHostMaximumMappedAssetPageFramesForChannels(source.channelCount)
     if (payloadFrames <= 0) {
       throw new Error(`Native audio asset "${source.sourceAssetKey}" has too many channels for mapped pages.`)
     }
-    return Math.min(requestedPageFrames, payloadFrames)
+    return Math.min(boundedRequestedPageFrames, payloadFrames)
+  }
+  const invalidateSourceRange = (
+    source: NativeTimelineSource,
+    startFrame: number,
+    frameCount: number,
+  ) => {
+    const current = uploaded.get(source.sourceAssetKey)
+    if (!current) return
+    const pageFrames = pageFramesForSource(source)
+    for (const pageStart of current.keys()) {
+      const pageEnd = pageStart + pageFrames
+      if (pageEnd > startFrame && pageStart < startFrame + frameCount) {
+        current.delete(pageStart)
+      }
+    }
+    if (current.size === 0) uploaded.delete(source.sourceAssetKey)
   }
   const isUploaded = (sourceAssetKey: string, startFrame: number) => {
     const pages = uploaded.get(sourceAssetKey)
@@ -338,7 +364,26 @@ export const createNativeTimelinePageManager = (input: {
         await hydratePage(sourceAssetKey, pageStart, signal)
       })
       for (const job of prepareJobs) {
-        await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+        try {
+          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+        } catch {
+          // A bounded host range ledger may evict a page between hydration and
+          // preparation. Rehydrate once so an eviction never becomes a hole.
+          invalidateSourceRange(job.source, job.startFrame, job.frameCount)
+          const pageFrames = pageFramesForSource(job.source)
+          const firstPage = Math.floor(job.startFrame / pageFrames) * pageFrames
+          const lastPage = Math.floor(
+            (job.startFrame + job.frameCount - 1) / pageFrames,
+          ) * pageFrames
+          const retryPages = []
+          for (let pageStart = firstPage; pageStart <= lastPage; pageStart += pageFrames) {
+            retryPages.push({ sourceAssetKey: job.source.sourceAssetKey, pageStart })
+          }
+          await runWithConcurrency(retryPages, maximumDecoders, async ({ sourceAssetKey, pageStart }) => {
+            await hydratePage(sourceAssetKey, pageStart, signal)
+          })
+          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+        }
       }
     },
     invalidateRanges: (ranges) => {

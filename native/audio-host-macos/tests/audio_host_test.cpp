@@ -1080,6 +1080,26 @@ void TestMappedAssetSurvivesGraphPublication() {
   host.Stop();
 }
 
+void TestMappedAssetWrittenRangeLedgerIsBounded() {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48'000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+  const auto range_count = daw::audio_host_macos::kMaximumMappedAssetWrittenRanges + 1;
+  assert(host.CreateMappedAsset(1, range_count * 2, 48'000, 1, 0));
+  for (std::size_t index = 0; index < range_count; ++index) {
+    const std::array<float, 1> sample{static_cast<float>(index)};
+    assert(host.WriteMappedAssetPage(1, index * 2, 1, sample));
+  }
+  assert(!host.PrepareMappedAssetRange(1, 0, 1));
+  assert(host.PrepareMappedAssetRange(1, (range_count - 1) * 2, 1));
+  assert(host.ReleaseAsset(1));
+}
+
 void TestNativeVstRuntimeControlBounds() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1681,6 +1701,7 @@ int main() {
   TestNativeVstAttachmentBoundsAndLatencyContract();
   TestInstalledAssetSurvivesCallerLifetimeAndMapGrowth();
   TestMappedAssetSurvivesGraphPublication();
+  TestMappedAssetWrittenRangeLedgerIsBounded();
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();

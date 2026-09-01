@@ -140,10 +140,11 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 - [ ] packaged Electron acceptance on macOS
 
 Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
-snapshots, mapped native page hydration, and hydration-before-schedule are covered
-by focused tests. Native offline planning still consumes `PortableExportSnapshot`
-PCM through `native-pcm-chunking`; it is intentionally not marked complete until
-offline source-page consumption replaces that boundary.
+snapshots, bounded concurrent mapped-page hydration, bounded native written-range
+ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
+covered by focused tests. Native offline planning still consumes
+`PortableExportSnapshot` PCM through `native-pcm-chunking`; it is intentionally
+not marked complete until offline source-page consumption replaces that boundary.
 
 ## Non-goals / real limits
 

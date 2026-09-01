@@ -253,6 +253,33 @@ test("deduplicates concurrent range hydration and supports invalidation", async 
   manager.dispose()
 })
 
+test("rehydrates a range when host preparation reports an evicted page", async () => {
+  let writes = 0
+  let preparations = 0
+  const manager = createNativeTimelinePageManager({
+    pageFrames: 2,
+    sources: [{
+      sourceAssetKey: "asset-a",
+      sessionAssetId: 7,
+      frameCount: 5,
+      sampleRateHz: 48_000,
+      channelCount: 1,
+      buffer: new EagerAudioBuffer(),
+    }],
+    writePage: async () => { writes += 1 },
+    prepareRange: async () => {
+      preparations += 1
+      if (preparations === 1) throw new Error("mapped range was evicted")
+    },
+  })
+
+  await manager.ensureRanges([{ sourceAssetKey: "asset-a", startFrame: 1, endFrame: 3 }])
+
+  expect(writes).toBe(4)
+  expect(preparations).toBe(2)
+  manager.dispose()
+})
+
 test("copies bounded pages from an eager buffer without a source URL", async () => {
   const pages: NativeHostMappedAssetPage[] = []
   const manager = createNativeTimelinePageManager({
@@ -328,7 +355,7 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
   let started = 0
   const manager = createNativeTimelinePageManager({
     pageFrames: 5,
-    sources: [0, 1].map((index) => ({
+    sources: [0, 1, 2].map((index) => ({
       sourceAssetKey: `asset-${index}`,
       sessionAssetId: index + 1,
       frameCount: 5,
@@ -350,7 +377,11 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
     sourceAssetKey: `asset-${index}`,
     startFrame: 0,
     endFrame: 5,
-  })))
+  })).concat([{
+    sourceAssetKey: "asset-2",
+    startFrame: 0,
+    endFrame: 5,
+  }]))
   await pagesStarted
   expect(maximumActive).toBe(2)
   releasePages?.()

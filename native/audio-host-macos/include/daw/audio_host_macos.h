@@ -23,6 +23,7 @@ constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
 constexpr std::uint32_t kMaximumAssetChannels = 64;
 constexpr std::uint32_t kMaximumAssetFrames = 262'144;
 constexpr std::size_t kMaximumInstalledAssets = 64;
+constexpr std::size_t kMaximumMappedAssetWrittenRanges = 256;
 constexpr std::size_t kMaximumMeterEntries = 64;
 constexpr std::size_t kMaximumSpectrumBins = 1024;
 constexpr std::size_t kMaximumScheduleChunks = 16;

@@ -665,6 +665,29 @@ test("commits a supported native session before starting and tears it down deter
   ])
 })
 
+test("starts a mapped session from persisted ordinary metadata without an eager buffer", async () => {
+  const fixture = createBridge()
+  const track = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      buffer: null,
+      sourceDurationSec: 1 / 48_000,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 1,
+    }],
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input(track)),
+  })
+
+  await expect(controller.start(input(track).transport)).resolves.toBe("started")
+  expect(fixture.legacyInstallCount).toBe(0)
+  expect(fixture.mappedAssetCreateCount).toBe(1)
+  await controller.dispose()
+})
+
 test("forwards compile context when promoting a pending preview to play", async () => {
   const fixture = createBridge()
   const previewGate = Promise.withResolvers<void>()

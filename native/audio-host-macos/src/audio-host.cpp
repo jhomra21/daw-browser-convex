@@ -3262,7 +3262,15 @@ bool AudioHost::WriteMappedAssetPage(
     }
   }
   if (!inserted) merged.emplace_back(merged_start, merged_end);
-  ranges = std::move(merged);
+  if (merged.size() > kMaximumMappedAssetWrittenRanges) {
+    // Keep the range just written and evict older disjoint ranges. This is a
+    // bounded hint ledger, not an audio-data ledger: an evicted range must be
+    // written again before it can be prepared.
+    ranges.clear();
+    ranges.emplace_back(merged_start, merged_end);
+  } else {
+    ranges = std::move(merged);
+  }
   return true;
 }
 

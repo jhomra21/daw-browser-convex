@@ -96,7 +96,40 @@ test('clips an exact inclusive-start exclusive-end frame range', async () => {
   ])
 })
 
+test('concatenates adjacent ranges without duplicate or omitted frames', async () => {
+  const whole = await collectPages(dataUrl(wave()), { pageFrames: 2 })
+  const first = await collectPages(dataUrl(wave()), {
+    startSec: 0,
+    endSec: 2 / 48_000,
+    pageFrames: 2,
+  })
+  const second = await collectPages(dataUrl(wave()), {
+    startSec: 2 / 48_000,
+    endSec: 5 / 48_000,
+    pageFrames: 2,
+  })
+
+  expect(first.flatMap((page) => [...(page.planes[0] ?? [])]).concat(
+    second.flatMap((page) => [...(page.planes[0] ?? [])]),
+  )).toEqual(whole.flatMap((page) => [...(page.planes[0] ?? [])]))
+  expect(first.at(-1)?.startFrame).toBe(0)
+  expect(second[0]?.startFrame).toBe(2)
+  expect(second.at(-1)?.frameCount).toBe(1)
+})
+
+test('honors cancellation before media decoding starts', async () => {
+  const controller = new AbortController()
+  controller.abort()
+
+  await expect(collectPages(dataUrl(wave()), {
+    pageFrames: 2,
+    signal: controller.signal,
+  })).rejects.toBeDefined()
+})
+
 test('anchors decoded samples to the first media timestamp', () => {
+  expect(decodedSampleStartFrame(10.25, 10.25, 48_000)).toBe(0)
+  expect(decodedSampleStartFrame(10.25 + 1 / 48_000, 10.25, 48_000)).toBe(1)
   expect(decodedSampleStartFrame(12.25, 10.25, 48_000)).toBe(96_000)
   expect(decodedSampleStartFrame(-1.75, -2.0, 48_000)).toBe(12_000)
   expect(decodedSampleStartFrame(3.5, 3.5, 48_000)).toBe(0)

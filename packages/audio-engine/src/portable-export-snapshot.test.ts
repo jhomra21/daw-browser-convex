@@ -12,13 +12,17 @@ import {
   createDefaultPhaserParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
+  createDefaultSamplerParams,
   createDefaultSynthParams,
   createDefaultTremoloParams,
   createDefaultUtilityParams,
+  type SamplerParams,
+  type SamplerZone,
 } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { compilePortableExportSnapshot } from './portable-export-snapshot'
+import type { ExportFx } from './export-types'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -117,6 +121,71 @@ test('compiles deterministic snapshots without retaining hydrated AudioBuffer da
   if (!sourceBuffer) throw new Error('Expected hydrated audio buffer.')
   sourceBuffer.getChannelData(0)[0] = 0.75
   expect(first.assets[0]?.pcm?.planes[0]?.[0]).toBe(0)
+})
+
+test('localizes bounded sampled instrument regions for portable compilation', () => {
+  const sampler = createDefaultSamplerParams()
+  const sample: SamplerZone['sample'] = {
+    assetKey: 'source-a',
+    url: 'https://samples.example/source.wav',
+    sourceKind: 'url',
+    source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
+  }
+  const params: SamplerParams = {
+    ...sampler,
+    zones: [{
+      id: 'zone-1',
+      sample,
+      keyLow: 0,
+      keyHigh: 127,
+      velocityLow: 1,
+      velocityHigh: 127,
+      rootNote: 60,
+      tuneCents: 0,
+      gain: 1,
+      pan: 0,
+      roundRobinGroup: 0,
+      roundRobinIndex: 0,
+      playbackMode: 'one-shot',
+      startSec: 0.5,
+      endSec: 1,
+      crossfadeSec: 0,
+      chokeGroup: 0,
+    }],
+  }
+  const fx: ExportFx = {
+    masterFxInstances: [],
+    trackFx: {
+      'track-1': {
+        instances: [],
+        instrument: { kind: 'sampler', instanceId: 'sampler-1', params },
+        samplerBuffers: new Map([['zone-1', {
+          buffer: new TestAudioBuffer([new Float32Array(24_000)], 48_000),
+          sourceStartFrame: 24_000,
+        }]]),
+      },
+    },
+  }
+  const result = compilePortableExportSnapshot({
+    tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx,
+    allowInstruments: true,
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets).toMatchObject([{
+    asset: { frameCount: 24_000, sampleRateHz: 48_000, channelCount: 1 },
+  }])
+  expect(result.graph.nodes.find((node) => node.id === 'track-1')?.instrument).toMatchObject({
+    kind: 'sampler',
+    zones: [{ startFrame: 0, endFrame: 24_000 }],
+  })
 })
 
 test('rebases custom-range events to the Worker render origin', () => {

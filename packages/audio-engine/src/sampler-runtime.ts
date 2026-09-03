@@ -15,13 +15,24 @@ import {
 } from '@daw-browser/shared'
 import { scheduleAutomationEnvelope } from './automation'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import {
+  sampledInstrumentRegionForBuffer,
+  sampledInstrumentRegionIdentity,
+  type SampledInstrumentBuffer,
+} from './sampled-instrument-region'
 
-export type SamplerResolvedBuffers = ReadonlyMap<string, AudioBuffer>
+export type SamplerResolvedBuffers = ReadonlyMap<string, SampledInstrumentBuffer>
 export type SamplerNoteMiss = {
   trackId: string
   zoneId: string
   assetKey: string
   url: string
+}
+export type SamplerRegionUse = {
+  trackId: string
+  regionKey: string
+  voiceId: number
+  active: boolean
 }
 
 type Options = {
@@ -33,12 +44,12 @@ type Options = {
   sources: SourceRegistry
   getArpeggiator: (trackId: string) => ArpParams | undefined
   onNoteMiss: (miss: SamplerNoteMiss) => void
-  onAssetUse: (assetKey: string, active: boolean) => void
+  onAssetUse: (use: SamplerRegionUse) => void
   getAutomationEnvelopes: () => readonly AutomationEnvelope[]
 }
 
 type Config = { instanceId: string; params: SamplerParams; buffers: SamplerResolvedBuffers; roundRobin: SamplerRoundRobinState }
-type Voice = { id: number; clipId?: string; note: number; chokeGroup: number; assetKey: string; source: AudioBufferSourceNode; sources: AudioBufferSourceNode[]; nodes: AudioNode[]; gain: GainNode; removed: boolean }
+type Voice = { id: number; clipId?: string; note: number; chokeGroup: number; regionKey: string; source: AudioBufferSourceNode; sources: AudioBufferSourceNode[]; nodes: AudioNode[]; gain: GainNode; removed: boolean; stopRequested: boolean }
 const EMPTY_BUFFERS: SamplerResolvedBuffers = new Map()
 const SAMPLER_TERMINATION_FADE_SEC = 0.006
 
@@ -198,16 +209,29 @@ export function createSamplerRuntime(options: Options) {
   const remove = (trackId: string, voice: Voice) => {
     if (voice.removed) return
     voice.removed = true
+    voice.source.onended = null
     const active = voices.get(trackId)?.filter((candidate) => candidate !== voice) ?? []
     if (active.length) voices.set(trackId, active)
     else voices.delete(trackId)
     if (voice.clipId) options.sources.remove(voice.clipId, voice.source)
-    options.onAssetUse(voice.assetKey, false)
+    options.onAssetUse({ trackId, regionKey: voice.regionKey, voiceId: voice.id, active: false })
     disconnectAudioNodes(voice.nodes)
   }
   const stop = (trackId: string, voice: Voice, when?: number) => {
-    voice.source.onended = null
-    for (const source of voice.sources) stopAndDisconnectSource(source, when)
+    if (voice.removed) return
+    if (when !== undefined) {
+      if (voice.stopRequested) return
+      try {
+        for (const source of voice.sources) source.stop(when)
+        voice.stopRequested = true
+      } catch {
+        stop(trackId, voice)
+      }
+      return
+    }
+    if (!voice.stopRequested) {
+      for (const source of voice.sources) stopAndDisconnectSource(source)
+    }
     remove(trackId, voice)
   }
   const terminateMatching = (trackId: string, when: number, predicate: (voice: Voice) => boolean) => {
@@ -216,11 +240,7 @@ export function createSamplerRuntime(options: Options) {
       voice.gain.gain.cancelScheduledValues(when)
       voice.gain.gain.setValueAtTime(voice.gain.gain.value, when)
       voice.gain.gain.linearRampToValueAtTime(0, when + SAMPLER_TERMINATION_FADE_SEC)
-      try {
-        for (const source of voice.sources) source.stop(when + SAMPLER_TERMINATION_FADE_SEC)
-      } catch {
-        stop(trackId, voice)
-      }
+      stop(trackId, voice, when + SAMPLER_TERMINATION_FADE_SEC)
     }
   }
   const trigger = (trackId: string, note: number, velocity: number, when: number, durationSec: number, clipId?: string, timelineStartSec?: number, onEnded?: () => void): ((stopWhen: number) => void) | undefined => {
@@ -230,9 +250,9 @@ export function createSamplerRuntime(options: Options) {
     const selected = selectSamplerZone(config.params.zones, note, Math.round(velocity * 127), config.roundRobin)
     config.roundRobin = selected.roundRobin
     const zone = selected.zone
-    const buffer = zone ? config.buffers.get(zone.id) : undefined
+    const sampled = zone ? config.buffers.get(zone.id) : undefined
     if (!zone) return undefined
-    if (!buffer) {
+    if (!sampled) {
       options.onNoteMiss({ trackId, zoneId: zone.id, assetKey: zone.sample.assetKey, url: zone.sample.url })
       return undefined
     }
@@ -247,8 +267,20 @@ export function createSamplerRuntime(options: Options) {
     const scheduled = scheduleSamplerVoice({
       ctx,
       destination: options.ensureTrackInput(trackId),
-      buffer,
-      zone,
+      buffer: sampled.buffer,
+      zone: {
+        ...zone,
+        startSec: zone.startSec - sampled.sourceStartFrame / zone.sample.source.sampleRate,
+        endSec: zone.endSec === undefined
+          ? sampled.buffer.length / zone.sample.source.sampleRate
+          : zone.endSec - sampled.sourceStartFrame / zone.sample.source.sampleRate,
+        loopStartSec: zone.loopStartSec === undefined
+          ? undefined
+          : zone.loopStartSec - sampled.sourceStartFrame / zone.sample.source.sampleRate,
+        loopEndSec: zone.loopEndSec === undefined
+          ? undefined
+          : zone.loopEndSec - sampled.sourceStartFrame / zone.sample.source.sampleRate,
+      },
       params: config.params,
       note,
       velocity: Math.round(velocity * 127),
@@ -260,8 +292,13 @@ export function createSamplerRuntime(options: Options) {
         ? options.timelineToCtxTime
         : (timelineSec) => when + (timelineSec - timelineStartSec),
     })
-    options.onAssetUse(zone.sample.assetKey, true)
-    const voice: Voice = { ...scheduled, id: voiceId++, note, chokeGroup: zone.chokeGroup, assetKey: zone.sample.assetKey, clipId, removed: false }
+    const regionKey = sampledInstrumentRegionIdentity(
+      zone.sample,
+      sampledInstrumentRegionForBuffer(sampled),
+    )
+    const id = voiceId++
+    const voice: Voice = { ...scheduled, id, note, chokeGroup: zone.chokeGroup, regionKey, clipId, removed: false, stopRequested: false }
+    options.onAssetUse({ trackId, regionKey, voiceId: id, active: true })
     voices.set(trackId, [...(voices.get(trackId) ?? []), voice])
     scheduled.source.onended = () => {
       remove(trackId, voice)

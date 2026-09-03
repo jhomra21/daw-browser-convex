@@ -41,6 +41,10 @@ export type LiveNativeProjectionInput = {
   revision: number
   epoch: number
   firstSequence: number
+  /**
+   * Instrument regions in this FX payload are already localized by the live
+   * playback snapshot boundary.
+   */
   fx?: ExportFx
   externalLatencyFrames?: ExternalNodeLatencyFrames
   projectGeneration?: number
@@ -227,13 +231,13 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     if (entry.instrument?.kind === 'sampler') {
       for (const zone of entry.instrument.params.zones) {
         const buffer = entry.samplerBuffers?.get(zone.id)
-        if (buffer) instrumentAssets.set(zone.sample.assetKey, buffer)
+        if (buffer) instrumentAssets.set(zone.sample.assetKey, buffer.buffer)
       }
     }
     if (entry.instrument?.kind === 'drum-rack') {
       for (const pad of entry.instrument.params.pads) {
         const buffer = pad.sample ? entry.drumRackBuffers?.get(pad.id) : undefined
-        if (buffer && pad.sample) instrumentAssets.set(pad.sample.assetKey, buffer)
+        if (buffer && pad.sample) instrumentAssets.set(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (entry.instrument?.kind === 'granular' && entry.granularBuffer && entry.instrument.params.zone) {

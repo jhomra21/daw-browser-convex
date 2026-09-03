@@ -26,6 +26,10 @@ import {
   graphWithInstruments,
   instrumentConfigurations,
 } from './portable-session-compiler'
+import {
+  localizeSampledInstrumentSample,
+  localizeSampledInstrumentSeconds,
+} from './sampled-instrument-region'
 
 export type PortableExportAsset = {
   asset: AudioAssetRef
@@ -83,6 +87,64 @@ const unsupported = (
 })
 
 const transientAssetId = (sourceAssetKey: string) => `portable-export:${sourceAssetKey}`
+
+export const localizeInstrumentFx = (fx: ExportFx | undefined): ExportFx | undefined => {
+  if (!fx) return fx
+  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([trackId, entry]) => {
+    const instrument = entry.instrument
+    if (!instrument) return [trackId, entry]
+    if (instrument.kind === 'sampler') {
+      const zones = instrument.params.zones.map((zone) => {
+        const sampled = entry.samplerBuffers?.get(zone.id)
+        if (!sampled) return zone
+        return {
+          ...zone,
+          sample: localizeSampledInstrumentSample(zone.sample, sampled),
+          startSec: localizeSampledInstrumentSeconds(zone.startSec, sampled.sourceStartFrame, zone.sample.source.sampleRate),
+          endSec: zone.endSec === undefined
+            ? sampled.buffer.duration
+            : localizeSampledInstrumentSeconds(zone.endSec, sampled.sourceStartFrame, zone.sample.source.sampleRate),
+          loopStartSec: zone.loopStartSec === undefined
+            ? undefined
+            : localizeSampledInstrumentSeconds(zone.loopStartSec, sampled.sourceStartFrame, zone.sample.source.sampleRate),
+          loopEndSec: zone.loopEndSec === undefined
+            ? undefined
+            : localizeSampledInstrumentSeconds(zone.loopEndSec, sampled.sourceStartFrame, zone.sample.source.sampleRate),
+        }
+      })
+      return [trackId, { ...entry, instrument: { ...instrument, params: { ...instrument.params, zones } } }]
+    }
+    if (instrument.kind === 'drum-rack') {
+      const pads = instrument.params.pads.map((pad) => {
+        const sampled = pad.sample ? entry.drumRackBuffers?.get(pad.id) : undefined
+        if (!pad.sample || !sampled) return pad
+        return {
+          ...pad,
+          sample: localizeSampledInstrumentSample(pad.sample, sampled),
+          startSec: 0,
+          endSec: sampled.buffer.duration,
+        }
+      })
+      return [trackId, { ...entry, instrument: { ...instrument, params: { ...instrument.params, pads } } }]
+    }
+    if (instrument.kind !== 'granular') return [trackId, entry]
+    const zone = instrument.params.zone
+    const sampled = zone ? entry.granularBuffer : undefined
+    if (!zone || !sampled) return [trackId, entry]
+    return [trackId, {
+      ...entry,
+      granularBuffer: { ...sampled, assetKey: localizeSampledInstrumentSample(zone.sample, sampled).assetKey },
+      instrument: {
+        ...instrument,
+        params: {
+          ...instrument.params,
+          zone: { ...zone, sample: localizeSampledInstrumentSample(zone.sample, sampled), startSec: 0, endSec: sampled.buffer.duration },
+        },
+      },
+    }]
+  }))
+  return { ...fx, trackFx }
+}
 
 const createAsset = (sourceAssetKey: string, buffer: AudioBuffer): PortableExportAsset => {
   const planes = Array.from(
@@ -198,13 +260,13 @@ const collectAssets = (
     if (instrument?.kind === 'sampler' && entry.samplerBuffers) {
       for (const zone of instrument.params.zones) {
         const buffer = entry.samplerBuffers.get(zone.id)
-        if (buffer) addAsset(zone.sample.assetKey, buffer)
+        if (buffer) addAsset(zone.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === 'drum-rack' && entry.drumRackBuffers) {
       for (const pad of instrument.params.pads) {
         const buffer = pad.sample ? entry.drumRackBuffers.get(pad.id) : undefined
-        if (pad.sample && buffer) addAsset(pad.sample.assetKey, buffer)
+        if (pad.sample && buffer) addAsset(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === 'granular' && entry.granularBuffer && instrument.params.zone) {
@@ -255,6 +317,7 @@ export const compilePortableExportSnapshot = (
     ...unsupportedProcessorReasons(input.fx, input.allowInstruments === true, capabilityTarget),
   ]
   const diagnostics: PortableStretchDiagnostic[] = []
+  const portableFx = localizeInstrumentFx(input.fx)
   const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset>()
   const portableAssetIds = new Set<string>()
   const stretchClipIds = new Set(input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
@@ -304,7 +367,7 @@ export const compilePortableExportSnapshot = (
   if (diagnostics.length > 0) return unsupported(reasons, diagnostics)
   const { assets, bySourceAssetKey, reasons: assetReasons } = collectAssets(
     input.tracks,
-    input.fx,
+    portableFx,
     preparedStretchAssets,
     input.metadataSourceAssets ?? [],
   )
@@ -353,9 +416,9 @@ export const compilePortableExportSnapshot = (
     const instrumentCompilation = compilePortableSessionInput({
       mixer: resolveExportMixerGraph({
         tracks: [...input.tracks],
-        fx: input.fx,
+        fx: portableFx,
       }),
-      fx: input.fx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} },
+      fx: portableFx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} },
       automationEnvelopes: [],
       assetRegistry: {
         projectGeneration: 1,

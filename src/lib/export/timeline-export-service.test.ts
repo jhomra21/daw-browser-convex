@@ -17,6 +17,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 
 import { createExportQueue } from "~/lib/export/export-queue"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
+import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
 import { createExportRenderStateSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import { createTimelineExportService, type TimelineExportInput } from "~/lib/export/timeline-export-service"
 import { createCapturedClipMediaLoader } from "~/hooks/useClipBuffers"
@@ -90,6 +91,7 @@ class TestAudioBuffer implements AudioBuffer {
     return new Float32Array(this.length)
   }
 }
+const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 
 test("local export snapshot flushes pending writes and remains submission-consistent", async () => {
   const projectId = "project:export-snapshot"
@@ -472,7 +474,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
               [trackId]: {
                 ...existing,
                 instrument,
-                samplerBuffers: new Map([["zone-hydrated", buffer]]),
+                samplerBuffers: new Map([["zone-hydrated", sampled(buffer)]]),
               },
             },
           },
@@ -490,7 +492,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
   const prepared = await service.prepareTimelineExport(settings)
   const preparedBuffers = prepared.snapshot.renderStateSnapshot.fx.trackFx?.[trackId]?.samplerBuffers
   expect(hydrationCalls).toBe(1)
-  expect(preparedBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(preparedBuffers?.get("zone-hydrated")?.buffer).toBe(buffer)
   expect(nativeRenderState).toBe(prepared.snapshot.renderStateSnapshot)
 
   const submitted = service.submitPreparedTimelineExport(prepared, {
@@ -506,7 +508,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
   })
   expect((await submitted.completion).type).toBe("success")
   expect(queuedRenderState).toBe(prepared.snapshot.renderStateSnapshot)
-  expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")?.buffer).toBe(buffer)
   expect(hydrationCalls).toBe(1)
   queue.dispose()
 })

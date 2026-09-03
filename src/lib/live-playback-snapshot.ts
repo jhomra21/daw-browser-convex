@@ -5,7 +5,13 @@ import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { AutomationEnvelope, TrackInstrumentParams } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot"
 import type { AudioSourceMetadata } from "~/lib/audio-source"
+import {
+  sampledInstrumentRegion,
+  sampledInstrumentRegionIdentity,
+  validateSampledInstrumentBuffer,
+} from "@daw-browser/audio-engine/sampled-instrument-region"
 
 export type LivePlaybackTransport = {
   state: "playing" | "paused" | "stopped"
@@ -98,7 +104,7 @@ const addInstrumentAssets = (
       for (const zone of instrument.params.zones) {
         const buffer = entry.samplerBuffers?.get(zone.id)
         if (!buffer) throw new Error(`Sampler zone "${zone.id}" is missing its authoritative audio buffer.`)
-        add(zone.sample.assetKey, buffer)
+        add(zone.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === "drum-rack") {
@@ -106,7 +112,7 @@ const addInstrumentAssets = (
         if (!pad.sample) continue
         const buffer = entry.drumRackBuffers?.get(pad.id)
         if (!buffer) throw new Error(`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`)
-        add(pad.sample.assetKey, buffer)
+        add(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === "granular" && instrument.params.zone) {
@@ -117,6 +123,52 @@ const addInstrumentAssets = (
         throw new Error(`Audio asset "${instrument.params.zone.sample.assetKey}" resolves inconsistently.`)
       }
       add(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
+    }
+  }
+}
+
+const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
+  for (const entry of Object.values(fx ?? {})) {
+    const instrument = entry.instrument
+    if (instrument?.kind === "sampler") {
+      for (const zone of instrument.params.zones) {
+        const buffer = entry.samplerBuffers?.get(zone.id)
+        if (!buffer) continue
+        const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+        validateSampledInstrumentBuffer(
+          buffer,
+          zone.sample.source,
+          region,
+          sampledInstrumentRegionIdentity(zone.sample, region),
+        )
+      }
+    }
+    if (instrument?.kind === "drum-rack") {
+      for (const pad of instrument.params.pads) {
+        if (!pad.sample) continue
+        const buffer = entry.drumRackBuffers?.get(pad.id)
+        if (!buffer) continue
+        const region = sampledInstrumentRegion(pad.sample.source, pad.startSec, pad.endSec ?? pad.sample.source.durationSec)
+        validateSampledInstrumentBuffer(
+          buffer,
+          pad.sample.source,
+          region,
+          sampledInstrumentRegionIdentity(pad.sample, region),
+        )
+      }
+    }
+    if (instrument?.kind === "granular" && instrument.params.zone && entry.granularBuffer) {
+      const zone = instrument.params.zone
+      const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+      if (entry.granularBuffer.assetKey !== sampledInstrumentRegionIdentity(zone.sample, region)) {
+        throw new Error(`Audio asset "${zone.sample.assetKey}" resolves inconsistently.`)
+      }
+      validateSampledInstrumentBuffer(
+        entry.granularBuffer,
+        zone.sample.source,
+        region,
+        sampledInstrumentRegionIdentity(zone.sample, region),
+      )
     }
   }
 }
@@ -144,8 +196,8 @@ const snapshotTracks = (tracks: readonly RuntimeTrack[]): RuntimeTrack[] => trac
 type LiveTrackFxMap = NonNullable<ExportFx["trackFx"]>
 type LiveTrackFxEntry = LiveTrackFxMap[string]
 
-const cloneAudioBufferMap = (buffers: ReadonlyMap<string, AudioBuffer>): Map<string, AudioBuffer> => {
-  const clone = new Map<string, AudioBuffer>()
+const cloneAudioBufferMap = <Value,>(buffers: ReadonlyMap<string, Value>): Map<string, Value> => {
+  const clone = new Map<string, Value>()
   for (const [key, buffer] of buffers) clone.set(key, buffer)
   return clone
 }
@@ -159,6 +211,8 @@ const cloneLiveTrackFxEntry = (entry: LiveTrackFxEntry): LiveTrackFxEntry => {
     granularBuffer: granularBuffer === undefined ? undefined : {
       assetKey: granularBuffer.assetKey,
       buffer: granularBuffer.buffer,
+      sourceStartFrame: granularBuffer.sourceStartFrame,
+      sourceIdentity: granularBuffer.sourceIdentity,
     },
   }
 }
@@ -271,7 +325,15 @@ export const compileLivePlaybackSnapshot = (
   if (reasons.length > 0) return invalid(reasons)
 
   const tracks = snapshotTracks(input.tracks)
-  const fx = cloneLiveFx(input.renderState.fx)
+  try {
+    validateInstrumentBuffers(input.renderState.fx.trackFx)
+  } catch (error) {
+    return invalid([error instanceof Error ? error.message : "Instrument audio assets resolve inconsistently."])
+  }
+  const fx = localizeInstrumentFx(cloneLiveFx(input.renderState.fx)) ?? {
+    masterFxInstances: [],
+    trackFx: {},
+  }
   try {
     addInstrumentAssets(assetsById, fx.trackFx)
   } catch (error) {

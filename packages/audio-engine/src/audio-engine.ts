@@ -13,8 +13,8 @@ import type { GateMeterFrame, GateMeterListener } from './effects/static-worklet
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
-import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
-import type { SamplerNoteMiss, SamplerResolvedBuffers } from './sampler-runtime'
+import type { DrumRackRegionUse, DrumRackResolvedBuffers } from './drum-rack-runtime'
+import type { SamplerNoteMiss, SamplerRegionUse, SamplerResolvedBuffers } from './sampler-runtime'
 import type { GranularInstalledBuffer } from './granular-runtime'
 export { createSamplerBufferCache } from './sampler-core'
 import { createTransportClock } from './transport-clock'
@@ -640,9 +640,18 @@ export class AudioEngine {
 
   setSamplerRuntimeListeners(listeners: {
     onNoteMiss?: (miss: SamplerNoteMiss) => void
-    onAssetUse?: (assetKey: string, active: boolean) => void
+    onAssetUse?: (use: SamplerRegionUse) => void
+    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
   }) {
     this.instrumentRuntime.setSamplerRuntimeListeners(listeners)
+  }
+
+  addSamplerRuntimeListeners(listeners: {
+    onNoteMiss?: (miss: SamplerNoteMiss) => void
+    onAssetUse?: (use: SamplerRegionUse) => void
+    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
+  }) {
+    return this.instrumentRuntime.addSamplerRuntimeListeners(listeners)
   }
 
   previewSamplerNote(trackId: string, pitch: number, velocity = 1) {

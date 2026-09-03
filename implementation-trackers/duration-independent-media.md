@@ -122,9 +122,10 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 7 — instrument/warp compatibility
 
-- [ ] Audit sampler, drum rack, granular, and stretch preparation for whole-asset assumptions.
-- [ ] Use duration-independent source/page access where an instrument can legitimately reference long media.
-- [ ] Keep any intentionally bounded instrument-local buffers explicit and unrelated to project-asset duration.
+- [x] Audit sampler, Drum Rack, and Granular preparation for whole-asset assumptions.
+- [x] Sampled-instrument regionalization uses bounded source/page access for sampler, Drum Rack, and Granular.
+- [ ] Stretch/WSOLA bounded/page-backed preparation remains incomplete.
+- [x] Keep any intentionally bounded instrument-local buffers explicit and unrelated to project-asset duration.
 
 ### Phase 8 — acceptance
 

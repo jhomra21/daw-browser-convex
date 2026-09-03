@@ -138,6 +138,7 @@ import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
+import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -327,6 +328,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
     bootstrapIfEmpty: untrack(() => props.bootstrapIfEmpty),
   });
+  const sampledInstrumentSession = createSampledInstrumentSession({
+    projectId,
+  });
+  onCleanup(sampledInstrumentSession.dispose);
   const localProject = useLocalProjectActions({
     projectId,
     userId,
@@ -644,6 +649,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     getEffectsExportSnapshot: effectsExportSnapshot,
     getSidechainRoutes: sidechainRoutes,
     loadCapturedClipBuffer: clipBuffers.loadCapturedMedia,
+    sampledInstrumentSession,
   });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
@@ -660,6 +666,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
+    drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
     getActions: () => {
@@ -2359,6 +2366,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId: projectId(),
       userId: userId(),
       audioEngine,
+      samplerBufferSync: sampledInstrumentSession.samplerBufferSync,
+      drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
       spectrumProvider: subscribeSpectrum,
       canWriteTrackRouting: canWriteTrack,
       grantClipWrite,

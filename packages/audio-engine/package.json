@@ -21,6 +21,8 @@
     "./streaming-true-peak-limiter": "./src/streaming-true-peak-limiter.ts",
     "./streaming-true-peak-scanner": "./src/streaming-true-peak-scanner.ts",
     "./media-pages": "./src/media-pages.ts",
+    "./sampled-instrument-region": "./src/sampled-instrument-region.ts",
+    "./drum-rack-runtime": "./src/drum-rack-runtime.ts",
     "./processor-release-contract": "./src/effects/processor-release-contract.ts",
     "./reliability-characterization": "./src/reliability-characterization.ts",
     "./spectral-core": "./src/spectral-core.ts",

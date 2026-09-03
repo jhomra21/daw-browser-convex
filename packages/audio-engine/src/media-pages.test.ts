@@ -96,6 +96,21 @@ test('clips an exact inclusive-start exclusive-end frame range', async () => {
   ])
 })
 
+test('prefers exact integer frame bounds over seconds rounding', async () => {
+  const pages = await collectPages(dataUrl(wave()), {
+    startSec: 7 / 48_000,
+    endSec: 19 / 48_000,
+    startFrame: 1,
+    endFrame: 4,
+    pageFrames: 2,
+  })
+
+  expect(pageSummary(pages)).toEqual([
+    { startFrame: 1, frameCount: 2, sampleRate: 48_000, channelCount: 1 },
+    { startFrame: 3, frameCount: 1, sampleRate: 48_000, channelCount: 1 },
+  ])
+})
+
 test('concatenates adjacent ranges without duplicate or omitted frames', async () => {
   const whole = await collectPages(dataUrl(wave()), { pageFrames: 2 })
   const first = await collectPages(dataUrl(wave()), {
@@ -125,6 +140,38 @@ test('honors cancellation before media decoding starts', async () => {
     pageFrames: 2,
     signal: controller.signal,
   })).rejects.toBeDefined()
+})
+
+test('bounds a stalled remote request without weakening explicit cancellation', async () => {
+  const fetchCalls: number[] = []
+  const pages = decodeAudioPages('https://stall.example/audio.wav', {
+    remoteRequestTimeoutMs: 10,
+    remoteMaxRetries: 0,
+    fetchFn: Object.assign(async (_input: URL | RequestInfo, init?: RequestInit) => {
+      fetchCalls.push(1)
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      })
+    }, { preconnect: globalThis.fetch.preconnect }),
+  })
+
+  await expect(pages.next()).rejects.toThrow('timed out')
+  expect(fetchCalls).toEqual([1])
+})
+
+test('stops retrying a remote source after the configured finite retry count', async () => {
+  let fetchCalls = 0
+  const pages = decodeAudioPages('https://retry.example/audio.wav', {
+    remoteRequestTimeoutMs: 100,
+    remoteMaxRetries: 0,
+    fetchFn: Object.assign(async () => {
+      fetchCalls += 1
+      throw new Error('retryable failure')
+    }, { preconnect: globalThis.fetch.preconnect }),
+  })
+
+  await expect(pages.next()).rejects.toThrow('retryable failure')
+  expect(fetchCalls).toBe(1)
 })
 
 test('anchors decoded samples to the first media timestamp', () => {

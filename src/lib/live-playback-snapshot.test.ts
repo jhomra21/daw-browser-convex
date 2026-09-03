@@ -2,6 +2,13 @@ import { expect, test } from "bun:test"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "./live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
+import {
+  sampledInstrumentRegion,
+  sampledInstrumentRegionIdentity,
+  sampledInstrumentRegionForBuffer,
+  type SampledInstrumentBuffer,
+} from "@daw-browser/audio-engine/sampled-instrument-region"
+import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 1
@@ -13,7 +20,18 @@ class TestAudioBuffer implements AudioBuffer {
   readonly getChannelData = () => new Float32Array(this.length)
 }
 
+const regionalBuffer = (length: number, sampleRate = 48_000, channelCount = 1): AudioBuffer => ({
+  duration: length / sampleRate,
+  length,
+  numberOfChannels: channelCount,
+  sampleRate,
+  copyFromChannel: () => {},
+  copyToChannel: () => {},
+  getChannelData: () => new Float32Array(length),
+})
+
 const buffer = new TestAudioBuffer()
+const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 const track: RuntimeTrack = {
   id: "track-a",
   name: "Audio",
@@ -164,7 +182,7 @@ test("registers hydrated sampler assets with live portable playback", () => {
           "track-a": {
             instances: [],
             instrument: { kind: "sampler", instanceId: "sampler-a", params: { ...params, zones: [zone] } },
-            samplerBuffers: new Map([[zone.id, buffer]]),
+            samplerBuffers: new Map([[zone.id, sampled(buffer)]]),
           },
         },
       },
@@ -172,7 +190,116 @@ test("registers hydrated sampler assets with live portable playback", () => {
   })
   expect(result.supported).toBeTrue()
   if (!result.supported) return
-  expect(result.snapshot.assets).toEqual([{ assetId: "asset-sampler", buffer }])
+  expect(result.snapshot.assets).toEqual([{
+    assetId: sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
+    buffer,
+  }])
+})
+
+test("registers distinct bounded sampler regions and localizes their configuration", () => {
+  const sample = {
+    assetKey: "asset-regions",
+    url: "/regions.wav",
+    sourceKind: "upload" as const,
+    source: { durationSec: 3, sampleRate: 48_000, channelCount: 1 },
+  }
+  const firstZone = {
+    id: "first-region",
+    sample,
+    keyLow: 0,
+    keyHigh: 63,
+    velocityLow: 1,
+    velocityHigh: 127,
+    rootNote: 60,
+    tuneCents: 0,
+    gain: 1,
+    pan: 0,
+    roundRobinGroup: 0,
+    roundRobinIndex: 0,
+    playbackMode: "one-shot" as const,
+    startSec: 1,
+    endSec: 1.5,
+    crossfadeSec: 0,
+    chokeGroup: 0,
+  }
+  const secondZone = { ...firstZone, id: "second-region", keyLow: 64, keyHigh: 127, startSec: 2, endSec: 3 }
+  const firstBuffer = { buffer: regionalBuffer(24_000), sourceStartFrame: 48_000 }
+  const secondBuffer = { buffer: regionalBuffer(48_000), sourceStartFrame: 96_000 }
+  const result = compileLivePlaybackSnapshot({
+    ...input,
+    tracks: [{
+      ...track,
+      kind: "instrument",
+      clips: [{
+        ...track.clips[0],
+        midi: { wave: "sine", notes: [] },
+        sourceAssetKey: undefined,
+        buffer: undefined,
+      }],
+    }],
+    renderState: {
+      ...input.renderState,
+      fx: {
+        ...input.renderState.fx,
+        trackFx: {
+          "track-a": {
+            instances: [],
+            instrument: {
+              kind: "sampler",
+              instanceId: "sampler-regions",
+              params: { ...createDefaultSamplerParams(), zones: [firstZone, secondZone] },
+            },
+            samplerBuffers: new Map([
+              [firstZone.id, firstBuffer],
+              [secondZone.id, secondBuffer],
+            ]),
+          },
+        },
+      },
+    },
+  })
+
+  expect(result.supported).toBeTrue()
+  if (!result.supported) return
+  const firstIdentity = sampledInstrumentRegionIdentity(sample, {
+    sourceStartFrame: 48_000,
+    sourceEndFrame: 72_000,
+  })
+  const secondIdentity = sampledInstrumentRegionIdentity(sample, {
+    sourceStartFrame: 96_000,
+    sourceEndFrame: 144_000,
+  })
+  expect(firstIdentity).not.toBe(secondIdentity)
+  expect(result.snapshot.assets.map((asset) => asset.assetId)).toEqual([firstIdentity, secondIdentity])
+  const zones = result.snapshot.mixer.fx.trackFx?.["track-a"]?.instrument
+  if (!zones || zones.kind !== "sampler") return
+  expect(zones.params.zones.map((zone) => ({
+    assetKey: zone.sample.assetKey,
+    startSec: zone.startSec,
+    endSec: zone.endSec,
+  }))).toEqual([
+    { assetKey: firstIdentity, startSec: 0, endSec: 0.5 },
+    { assetKey: secondIdentity, startSec: 0, endSec: 1 },
+  ])
+
+  const native = compileLiveNativeProjection({
+    tracks: result.snapshot.tracks,
+    bpm: result.snapshot.bpm,
+    sampleRateHz: 48_000,
+    revision: result.snapshot.revision,
+    epoch: 1,
+    firstSequence: 1,
+    fx: result.snapshot.mixer.fx,
+  })
+  expect(native.supported).toBeTrue()
+  if (!native.supported) throw new Error(native.reasons.join(" "))
+  expect(native.graph.nodes.find((node) => node.id === "track-a")?.instrument).toMatchObject({
+    kind: "sampler",
+    zones: [
+      { assetId: `portable-export:${firstIdentity}`, startFrame: 0, endFrame: 24_000 },
+      { assetId: `portable-export:${secondIdentity}`, startFrame: 0, endFrame: 48_000 },
+    ],
+  })
 })
 
 test("registers hydrated drum-rack and granular assets with live portable playback", () => {
@@ -244,12 +371,15 @@ test("registers hydrated drum-rack and granular assets with live portable playba
           "drum-track": {
             instances: [],
             instrument: { kind: "drum-rack", instanceId: "drum-a", params: drumRack },
-            drumRackBuffers: new Map([[drumPad.id, buffer]]),
+            drumRackBuffers: new Map([[drumPad.id, sampled(buffer)]]),
           },
           "granular-track": {
             instances: [],
             instrument: { kind: "granular", instanceId: "granular-a", params: granularParams },
-            granularBuffer: { assetKey: sample.assetKey, buffer },
+            granularBuffer: {
+              assetKey: sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
+              ...sampled(buffer),
+            },
           },
         },
       },
@@ -257,7 +387,10 @@ test("registers hydrated drum-rack and granular assets with live portable playba
   })
   expect(result.supported).toBeTrue()
   if (!result.supported) return
-  expect(result.snapshot.assets).toEqual([{ assetId: "asset-shared", buffer }])
+  expect(result.snapshot.assets).toEqual([{
+    assetId: sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
+    buffer,
+  }])
 })
 
 test("clones hydrated instrument buffers without cloning AudioBuffer objects", () => {
@@ -313,9 +446,12 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
       sample: granularSample,
     },
   }
-  const samplerBuffers = new Map([[samplerZone.id, buffer]])
-  const drumRackBuffers = new Map([[drumPad.id, buffer]])
-  const granularBuffer = { assetKey: granularSample.assetKey, buffer }
+  const samplerBuffers = new Map([[samplerZone.id, sampled(buffer)]])
+  const drumRackBuffers = new Map([[drumPad.id, sampled(buffer)]])
+  const granularBuffer = {
+    assetKey: sampledInstrumentRegionIdentity(granularSample, sampledInstrumentRegion(granularSample.source, 0, 1)),
+    ...sampled(buffer),
+  }
   const fx = {
     masterVolume: 0.7,
     masterFxInstances: [],
@@ -363,17 +499,19 @@ test("clones hydrated instrument buffers without cloning AudioBuffer objects", (
   const granularSnapshotBuffer = snapshotFx.trackFx?.["granular-track"]?.granularBuffer
   expect(samplerSnapshotBuffers).not.toBe(samplerBuffers)
   expect(drumSnapshotBuffers).not.toBe(drumRackBuffers)
-  expect(samplerSnapshotBuffers?.get(samplerZone.id)).toBe(buffer)
-  expect(drumSnapshotBuffers?.get(drumPad.id)).toBe(buffer)
-  expect(granularSnapshotBuffer?.assetKey).toBe(granularBuffer.assetKey)
+  expect(samplerSnapshotBuffers?.get(samplerZone.id)?.buffer).toBe(buffer)
+  expect(drumSnapshotBuffers?.get(drumPad.id)?.buffer).toBe(buffer)
+  expect(granularSnapshotBuffer?.assetKey).toBe(
+    sampledInstrumentRegionIdentity(granularSample, sampledInstrumentRegionForBuffer(granularBuffer)),
+  )
   expect(granularSnapshotBuffer?.buffer).toBe(buffer)
   expect(result.snapshot.assets).toEqual([
-    { assetId: "asset-sampler", buffer },
-    { assetId: "asset-drum", buffer },
-    { assetId: "asset-granular", buffer },
+    { assetId: sampledInstrumentRegionIdentity(samplerSample, sampledInstrumentRegion(samplerSample.source, 0, 1)), buffer },
+    { assetId: sampledInstrumentRegionIdentity(drumSample, sampledInstrumentRegion(drumSample.source, 0, 1)), buffer },
+    { assetId: sampledInstrumentRegionIdentity(granularSample, sampledInstrumentRegion(granularSample.source, 0, 1)), buffer },
   ])
 
-  samplerBuffers.set("mutated", buffer)
+  samplerBuffers.set("mutated", sampled(buffer))
   drumRackBuffers.clear()
   expect(samplerSnapshotBuffers?.has("mutated")).toBeFalse()
   expect(drumSnapshotBuffers?.size).toBe(1)

@@ -14,23 +14,25 @@ type WsolaStretchConfig = {
 
 type AudioStretchResult = AudioStretchInput
 
-export type WsolaStreamOptions = WsolaStretchConfig & {
+export type WsolaSinglePassStreamOptions = WsolaStretchConfig & {
   inputFrameCount: number
   channelCount: number
   sampleRate: number
 }
 
-export type WsolaMemoryBounds = {
+export type WsolaSinglePassMemoryBounds = {
   inputRingFrameCapacity: number
   overlapFrameCapacity: number
 }
 
-export type WsolaStreamStats = WsolaMemoryBounds & {
+export type WsolaSinglePassStats = WsolaSinglePassMemoryBounds & {
   inputPeak: number
   outputPeak: number
 }
 
 type WsolaOutputWriter = (channels: Float32Array[]) => void
+
+type WsolaStreamState = 'active' | 'emitting' | 'finishing' | 'finished' | 'failed'
 
 const DEFAULT_WINDOW_FRAMES = 2048
 const DEFAULT_OVERLAP_FRAMES = 1024
@@ -77,12 +79,12 @@ const copyExact = (input: AudioStretchInput, outputFrameCount: number): AudioStr
   }),
 })
 
-export function createWsolaStream(options: WsolaStreamOptions) {
+export function createWsolaSinglePassStream(options: WsolaSinglePassStreamOptions) {
   const inputFrameCount = options.inputFrameCount
-  const outputFrameCount = Math.max(0, Math.floor(options.outputFrameCount))
   assert(Number.isSafeInteger(inputFrameCount) && inputFrameCount > 0, 'WSOLA stream input frame count must be a positive safe integer')
   assert(Number.isSafeInteger(options.channelCount) && options.channelCount > 0, 'WSOLA stream channel count must be a positive safe integer')
   assert(Number.isFinite(options.sampleRate) && options.sampleRate > 0, 'WSOLA stream sample rate must be positive')
+  const outputFrameCount = options.outputFrameCount
   assert(Number.isSafeInteger(outputFrameCount) && outputFrameCount > 0, 'WSOLA stream output frame count must be a positive safe integer')
 
   const stretchRatio = outputFrameCount / inputFrameCount
@@ -122,7 +124,8 @@ export function createWsolaStream(options: WsolaStreamOptions) {
   let framesEmitted = 0
   let nextOutputStart = synthesisHop
   let initialized = false
-  let finished = false
+  let state: WsolaStreamState = 'active'
+  let finishedStats: WsolaSinglePassStats | undefined
   let inputPeak = 0
   let outputPeak = 0
 
@@ -152,8 +155,14 @@ export function createWsolaStream(options: WsolaStreamOptions) {
         outputPeak = Math.max(outputPeak, Math.abs(channel[frame]))
       }
     }
-    write(output)
-    framesEmitted += frameCount
+    const previousState = state
+    state = 'emitting'
+    try {
+      write(output)
+      framesEmitted += frameCount
+    } finally {
+      state = previousState
+    }
   }
 
   const initialize = (write: WsolaOutputWriter) => {
@@ -277,7 +286,7 @@ export function createWsolaStream(options: WsolaStreamOptions) {
   }
 
   const push = (channels: Float32Array[], write: WsolaOutputWriter) => {
-    if (finished) throw new Error('WSOLA stream cannot accept audio after finish.')
+    if (state !== 'active') throw new Error('WSOLA stream cannot accept audio after finish.')
     if (channels.length !== options.channelCount) throw new Error('WSOLA stream channel count changed.')
     const frameCount = channels[0]?.length ?? 0
     for (const channel of channels) {
@@ -285,6 +294,7 @@ export function createWsolaStream(options: WsolaStreamOptions) {
     }
     if (framesSeen + frameCount > inputFrameCount) throw new Error('WSOLA stream received more source frames than declared.')
 
+    const channelGain = 1 / options.channelCount
     for (let localFrame = 0; localFrame < frameCount; localFrame++) {
       let mono = 0
       const ringIndex = framesSeen % inputRingFrameCapacity
@@ -295,7 +305,7 @@ export function createWsolaStream(options: WsolaStreamOptions) {
         const sample = source[localFrame] ?? 0
         ring[ringIndex] = sample
         inputPeak = Math.max(inputPeak, Math.abs(sample))
-        mono = Math.fround(mono + sample / options.channelCount)
+        mono = Math.fround(mono + sample * channelGain)
       }
       monoRing[ringIndex] = mono
       framesSeen += 1
@@ -303,24 +313,37 @@ export function createWsolaStream(options: WsolaStreamOptions) {
     }
   }
 
-  const finish = (write: WsolaOutputWriter): WsolaStreamStats => {
-    if (finished) throw new Error('WSOLA stream can only be finished once.')
-    finished = true
-    if (framesSeen !== inputFrameCount) throw new Error('WSOLA stream ended before every declared source frame was supplied.')
-    drain(write)
-    while (nextOutputStart < outputFrameCount) processNextWindow(write)
-    if (!initialized || framesEmitted !== outputFrameCount) {
-      throw new Error('WSOLA stream did not produce the declared output frame count.')
+  const finish = (write: WsolaOutputWriter): WsolaSinglePassStats => {
+    if (state === 'finished') {
+      if (!finishedStats) throw new Error('WSOLA stream finished without completion statistics.')
+      return finishedStats
     }
-    return {
-      inputPeak,
-      outputPeak,
-      inputRingFrameCapacity,
-      overlapFrameCapacity: overlapFrameCount,
+    if (state === 'emitting') throw new Error('WSOLA stream output emission is already in progress.')
+    if (state === 'finishing') throw new Error('WSOLA stream finish is already in progress.')
+    if (state === 'failed') throw new Error('WSOLA stream cannot finish after a failed completion.')
+    if (framesSeen !== inputFrameCount) throw new Error('WSOLA stream ended before every declared source frame was supplied.')
+    state = 'finishing'
+    try {
+      drain(write)
+      while (nextOutputStart < outputFrameCount) processNextWindow(write)
+      if (!initialized || framesEmitted !== outputFrameCount) {
+        throw new Error('WSOLA stream did not produce the declared output frame count.')
+      }
+      finishedStats = {
+        inputPeak,
+        outputPeak,
+        inputRingFrameCapacity,
+        overlapFrameCapacity: overlapFrameCount,
+      }
+      state = 'finished'
+      return finishedStats
+    } catch (error) {
+      state = 'failed'
+      throw error
     }
   }
 
-  const memoryBounds = (): WsolaMemoryBounds => ({
+  const memoryBounds = (): WsolaSinglePassMemoryBounds => ({
     inputRingFrameCapacity,
     overlapFrameCapacity: overlapFrameCount,
   })
@@ -368,7 +391,7 @@ export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretch
 
   const outputChannels = input.channels.map(() => new Float32Array(outputFrameCount))
   let outputOffset = 0
-  const stream = createWsolaStream({
+  const stream = createWsolaSinglePassStream({
     ...config,
     inputFrameCount,
     outputFrameCount,

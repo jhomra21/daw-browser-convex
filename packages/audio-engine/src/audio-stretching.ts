@@ -14,9 +14,28 @@ type WsolaStretchConfig = {
 
 type AudioStretchResult = AudioStretchInput
 
+export type WsolaStreamOptions = WsolaStretchConfig & {
+  inputFrameCount: number
+  channelCount: number
+  sampleRate: number
+}
+
+export type WsolaMemoryBounds = {
+  inputRingFrameCapacity: number
+  overlapFrameCapacity: number
+}
+
+export type WsolaStreamStats = WsolaMemoryBounds & {
+  inputPeak: number
+  outputPeak: number
+}
+
+type WsolaOutputWriter = (channels: Float32Array[]) => void
+
 const DEFAULT_WINDOW_FRAMES = 2048
 const DEFAULT_OVERLAP_FRAMES = 1024
 const DEFAULT_SEARCH_FRAMES = 512
+const STREAM_INPUT_CHUNK_FRAMES = 16_384
 const MIN_STRETCH_RATIO = 0.5
 const MAX_STRETCH_RATIO = 2
 const PEAK_EPSILON = 0.0001
@@ -49,17 +68,6 @@ const normalizePeak = (channels: Float32Array[], maxPeak: number) => {
   })
 }
 
-const createMonoAnalysis = (channels: Float32Array[]) => {
-  const frameCount = getInputFrameCount(channels)
-  const mono = new Float32Array(frameCount)
-  if (channels.length === 0) return mono
-  const gain = 1 / channels.length
-  for (const channel of channels) {
-    for (let index = 0; index < frameCount; index++) mono[index] += channel[index] * gain
-  }
-  return mono
-}
-
 const copyExact = (input: AudioStretchInput, outputFrameCount: number): AudioStretchResult => ({
   sampleRate: input.sampleRate,
   channels: input.channels.map((channel) => {
@@ -69,7 +77,266 @@ const copyExact = (input: AudioStretchInput, outputFrameCount: number): AudioStr
   }),
 })
 
-const stretchWithinSupportedRatio = (input: AudioStretchInput, outputFrameCount: number, config: WsolaStretchConfig): AudioStretchResult => {
+export function createWsolaStream(options: WsolaStreamOptions) {
+  const inputFrameCount = options.inputFrameCount
+  const outputFrameCount = Math.max(0, Math.floor(options.outputFrameCount))
+  assert(Number.isSafeInteger(inputFrameCount) && inputFrameCount > 0, 'WSOLA stream input frame count must be a positive safe integer')
+  assert(Number.isSafeInteger(options.channelCount) && options.channelCount > 0, 'WSOLA stream channel count must be a positive safe integer')
+  assert(Number.isFinite(options.sampleRate) && options.sampleRate > 0, 'WSOLA stream sample rate must be positive')
+  assert(Number.isSafeInteger(outputFrameCount) && outputFrameCount > 0, 'WSOLA stream output frame count must be a positive safe integer')
+
+  const stretchRatio = outputFrameCount / inputFrameCount
+  assert(
+    stretchRatio >= MIN_STRETCH_RATIO && stretchRatio <= MAX_STRETCH_RATIO,
+    'WSOLA stream only accepts a single supported stretch-ratio pass',
+  )
+
+  const windowFrameCount = Math.min(
+    inputFrameCount,
+    resolveEvenFrameCount(options.windowFrameCount, DEFAULT_WINDOW_FRAMES),
+  )
+  const overlapFrameCount = Math.min(
+    windowFrameCount - 1,
+    resolveEvenFrameCount(
+      options.overlapFrameCount,
+      Math.min(DEFAULT_OVERLAP_FRAMES, Math.floor(windowFrameCount / 2)),
+    ),
+  )
+  const synthesisHop = Math.max(1, windowFrameCount - overlapFrameCount)
+  const searchFrameCount = Math.max(0, Math.floor(options.searchFrameCount ?? DEFAULT_SEARCH_FRAMES))
+  const inputRingFrameCapacity = Math.max(
+    windowFrameCount,
+    windowFrameCount + searchFrameCount * 2,
+  )
+  const inputRings = Array.from(
+    { length: options.channelCount },
+    () => new Float32Array(inputRingFrameCapacity),
+  )
+  const monoRing = new Float32Array(inputRingFrameCapacity)
+  let pendingChannels = Array.from(
+    { length: options.channelCount },
+    () => new Float32Array(overlapFrameCount),
+  )
+  let pendingMono = new Float32Array(overlapFrameCount)
+  let framesSeen = 0
+  let framesEmitted = 0
+  let nextOutputStart = synthesisHop
+  let initialized = false
+  let finished = false
+  let inputPeak = 0
+  let outputPeak = 0
+
+  const sourceSampleAt = (channel: number, frame: number) => {
+    if (frame < 0 || frame >= inputFrameCount) return 0
+    if (frame < framesSeen - inputRingFrameCapacity) {
+      throw new Error('WSOLA stream source history was overwritten before use.')
+    }
+    if (frame >= framesSeen) throw new Error('WSOLA stream requested source audio before it was supplied.')
+    return inputRings[channel]?.[frame % inputRingFrameCapacity] ?? 0
+  }
+
+  const monoSampleAt = (frame: number) => {
+    if (frame < 0 || frame >= inputFrameCount) return 0
+    if (frame < framesSeen - inputRingFrameCapacity) {
+      throw new Error('WSOLA stream analysis history was overwritten before use.')
+    }
+    if (frame >= framesSeen) throw new Error('WSOLA stream requested analysis audio before it was supplied.')
+    return monoRing[frame % inputRingFrameCapacity] ?? 0
+  }
+
+  const emit = (channels: Float32Array[], frameCount: number, write: WsolaOutputWriter) => {
+    if (frameCount <= 0) return
+    const output = channels.map((channel) => channel.slice(0, frameCount))
+    for (const channel of output) {
+      for (let frame = 0; frame < channel.length; frame++) {
+        outputPeak = Math.max(outputPeak, Math.abs(channel[frame]))
+      }
+    }
+    write(output)
+    framesEmitted += frameCount
+  }
+
+  const initialize = (write: WsolaOutputWriter) => {
+    const frameCount = Math.min(windowFrameCount, outputFrameCount)
+    const windowChannels = Array.from(
+      { length: options.channelCount },
+      () => new Float32Array(frameCount),
+    )
+    const windowMono = new Float32Array(frameCount)
+    for (let frame = 0; frame < frameCount; frame++) {
+      for (let channel = 0; channel < options.channelCount; channel++) {
+        const target = windowChannels[channel]
+        if (!target) throw new Error('WSOLA stream output channel is missing.')
+        target[frame] = sourceSampleAt(channel, frame)
+      }
+      windowMono[frame] = monoSampleAt(frame)
+    }
+    const emitFrameCount = Math.min(synthesisHop, frameCount)
+    emit(windowChannels, emitFrameCount, write)
+    const remainingFrameCount = Math.min(overlapFrameCount, frameCount - emitFrameCount)
+    pendingChannels = windowChannels.map((channel) => {
+      const pending = new Float32Array(overlapFrameCount)
+      pending.set(channel.subarray(emitFrameCount, emitFrameCount + remainingFrameCount))
+      return pending
+    })
+    pendingMono = new Float32Array(overlapFrameCount)
+    pendingMono.set(windowMono.subarray(emitFrameCount, emitFrameCount + remainingFrameCount))
+    initialized = true
+  }
+
+  const scoreOverlap = (inputStart: number) => {
+    let correlation = 0
+    let inputEnergy = 0
+    let outputEnergy = 0
+    for (let frame = 0; frame < overlapFrameCount; frame++) {
+      const inputSample = monoSampleAt(inputStart + frame)
+      const outputSample = pendingMono[frame] ?? 0
+      correlation += inputSample * outputSample
+      inputEnergy += inputSample * inputSample
+      outputEnergy += outputSample * outputSample
+    }
+    if (inputEnergy <= 0 || outputEnergy <= 0) return 0
+    return correlation / Math.sqrt(inputEnergy * outputEnergy)
+  }
+
+  const requiredSourceEndFrame = () => {
+    const expectedInputStart = Math.round(nextOutputStart / stretchRatio)
+    const maxInputStart = Math.min(
+      inputFrameCount - overlapFrameCount,
+      expectedInputStart + searchFrameCount,
+    )
+    const outputWindowFrameCount = Math.min(windowFrameCount, outputFrameCount - nextOutputStart)
+    return Math.min(
+      inputFrameCount,
+      Math.max(0, maxInputStart) + Math.max(overlapFrameCount, outputWindowFrameCount),
+    )
+  }
+
+  const processNextWindow = (write: WsolaOutputWriter) => {
+    const expectedInputStart = Math.round(nextOutputStart / stretchRatio)
+    const minInputStart = Math.max(0, expectedInputStart - searchFrameCount)
+    const maxInputStart = Math.min(
+      inputFrameCount - overlapFrameCount,
+      expectedInputStart + searchFrameCount,
+    )
+    let bestInputStart = Math.max(0, Math.min(expectedInputStart, maxInputStart))
+    let bestScore = -Infinity
+    for (let inputStart = minInputStart; inputStart <= maxInputStart; inputStart++) {
+      const score = scoreOverlap(inputStart)
+      if (score > bestScore) {
+        bestScore = score
+        bestInputStart = inputStart
+      }
+    }
+
+    const frameCount = Math.min(windowFrameCount, outputFrameCount - nextOutputStart)
+    const windowChannels = Array.from(
+      { length: options.channelCount },
+      () => new Float32Array(frameCount),
+    )
+    const windowMono = new Float32Array(frameCount)
+    for (let frame = 0; frame < frameCount; frame++) {
+      const inputMono = monoSampleAt(bestInputStart + frame)
+      const fadeIn = frame / overlapFrameCount
+      windowMono[frame] = frame < overlapFrameCount
+        ? (pendingMono[frame] ?? 0) * (1 - fadeIn) + inputMono * fadeIn
+        : inputMono
+      for (let channel = 0; channel < options.channelCount; channel++) {
+        const target = windowChannels[channel]
+        if (!target) throw new Error('WSOLA stream output channel is missing.')
+        const inputSample = sourceSampleAt(channel, bestInputStart + frame)
+        target[frame] = frame < overlapFrameCount
+          ? (pendingChannels[channel]?.[frame] ?? 0) * (1 - fadeIn) + inputSample * fadeIn
+          : inputSample
+      }
+    }
+
+    const emitFrameCount = Math.min(synthesisHop, frameCount)
+    emit(windowChannels, emitFrameCount, write)
+    const remainingFrameCount = Math.min(overlapFrameCount, frameCount - emitFrameCount)
+    pendingChannels = windowChannels.map((channel) => {
+      const pending = new Float32Array(overlapFrameCount)
+      pending.set(channel.subarray(emitFrameCount, emitFrameCount + remainingFrameCount))
+      return pending
+    })
+    pendingMono = new Float32Array(overlapFrameCount)
+    pendingMono.set(windowMono.subarray(emitFrameCount, emitFrameCount + remainingFrameCount))
+    nextOutputStart += synthesisHop
+  }
+
+  const drain = (write: WsolaOutputWriter) => {
+    const initialFrameCount = Math.min(inputFrameCount, Math.min(windowFrameCount, outputFrameCount))
+    if (!initialized && framesSeen >= initialFrameCount) initialize(write)
+    while (
+      initialized
+      && nextOutputStart < outputFrameCount
+      && framesSeen >= requiredSourceEndFrame()
+    ) {
+      processNextWindow(write)
+    }
+  }
+
+  const push = (channels: Float32Array[], write: WsolaOutputWriter) => {
+    if (finished) throw new Error('WSOLA stream cannot accept audio after finish.')
+    if (channels.length !== options.channelCount) throw new Error('WSOLA stream channel count changed.')
+    const frameCount = channels[0]?.length ?? 0
+    for (const channel of channels) {
+      if (channel.length !== frameCount) throw new Error('WSOLA stream input channels must have matching frame counts.')
+    }
+    if (framesSeen + frameCount > inputFrameCount) throw new Error('WSOLA stream received more source frames than declared.')
+
+    for (let localFrame = 0; localFrame < frameCount; localFrame++) {
+      let mono = 0
+      const ringIndex = framesSeen % inputRingFrameCapacity
+      for (let channel = 0; channel < options.channelCount; channel++) {
+        const source = channels[channel]
+        const ring = inputRings[channel]
+        if (!source || !ring) throw new Error('WSOLA stream input channel is missing.')
+        const sample = source[localFrame] ?? 0
+        ring[ringIndex] = sample
+        inputPeak = Math.max(inputPeak, Math.abs(sample))
+        mono = Math.fround(mono + sample / options.channelCount)
+      }
+      monoRing[ringIndex] = mono
+      framesSeen += 1
+      drain(write)
+    }
+  }
+
+  const finish = (write: WsolaOutputWriter): WsolaStreamStats => {
+    if (finished) throw new Error('WSOLA stream can only be finished once.')
+    finished = true
+    if (framesSeen !== inputFrameCount) throw new Error('WSOLA stream ended before every declared source frame was supplied.')
+    drain(write)
+    while (nextOutputStart < outputFrameCount) processNextWindow(write)
+    if (!initialized || framesEmitted !== outputFrameCount) {
+      throw new Error('WSOLA stream did not produce the declared output frame count.')
+    }
+    return {
+      inputPeak,
+      outputPeak,
+      inputRingFrameCapacity,
+      overlapFrameCapacity: overlapFrameCount,
+    }
+  }
+
+  const memoryBounds = (): WsolaMemoryBounds => ({
+    inputRingFrameCapacity,
+    overlapFrameCapacity: overlapFrameCount,
+  })
+
+  return {
+    push,
+    finish,
+    memoryBounds,
+  }
+}
+
+const stretchWithinSupportedRatio = (
+  input: AudioStretchInput,
+  outputFrameCount: number,
+  config: WsolaStretchConfig,
+): AudioStretchResult => {
   const inputFrameCount = getInputFrameCount(input.channels)
   const stretchRatio = outputFrameCount / inputFrameCount
   if (stretchRatio >= MIN_STRETCH_RATIO && stretchRatio <= MAX_STRETCH_RATIO) {
@@ -81,65 +348,6 @@ const stretchWithinSupportedRatio = (input: AudioStretchInput, outputFrameCount:
   if (intermediateFrameCount === inputFrameCount || intermediateFrameCount === outputFrameCount) return copyExact(input, outputFrameCount)
   const intermediate = stretchAudioWsola(input, { ...config, outputFrameCount: intermediateFrameCount })
   return stretchWithinSupportedRatio(intermediate, outputFrameCount, config)
-}
-
-const scoreOverlap = (mono: Float32Array, outputMono: Float32Array, inputStart: number, outputStart: number, overlapFrameCount: number) => {
-  let correlation = 0
-  let inputEnergy = 0
-  let outputEnergy = 0
-  for (let index = 0; index < overlapFrameCount; index++) {
-    const inputSample = mono[inputStart + index] ?? 0
-    const outputSample = outputMono[outputStart + index] ?? 0
-    correlation += inputSample * outputSample
-    inputEnergy += inputSample * inputSample
-    outputEnergy += outputSample * outputSample
-  }
-  if (inputEnergy <= 0 || outputEnergy <= 0) return 0
-  return correlation / Math.sqrt(inputEnergy * outputEnergy)
-}
-
-const findBestInputStart = (mono: Float32Array, outputMono: Float32Array, expectedStart: number, outputStart: number, overlapFrameCount: number, searchFrameCount: number) => {
-  const minStart = Math.max(0, expectedStart - searchFrameCount)
-  const maxStart = Math.min(mono.length - overlapFrameCount, expectedStart + searchFrameCount)
-  let bestStart = Math.max(0, Math.min(expectedStart, maxStart))
-  let bestScore = -Infinity
-  for (let inputStart = minStart; inputStart <= maxStart; inputStart++) {
-    const score = scoreOverlap(mono, outputMono, inputStart, outputStart, overlapFrameCount)
-    if (score > bestScore) {
-      bestScore = score
-      bestStart = inputStart
-    }
-  }
-  return bestStart
-}
-
-const writeFrame = (input: Float32Array, output: Float32Array, inputStart: number, outputStart: number, frameCount: number) => {
-  for (let index = 0; index < frameCount; index++) {
-    const outputIndex = outputStart + index
-    if (outputIndex >= output.length) return
-    output[outputIndex] = input[inputStart + index] ?? 0
-  }
-}
-
-const overlapAddFrame = (
-  input: Float32Array,
-  output: Float32Array,
-  inputStart: number,
-  outputStart: number,
-  overlapFrameCount: number,
-  frameCount: number,
-) => {
-  for (let index = 0; index < frameCount; index++) {
-    const outputIndex = outputStart + index
-    if (outputIndex >= output.length) return
-    const inputSample = input[inputStart + index] ?? 0
-    if (index < overlapFrameCount) {
-      const fadeIn = index / overlapFrameCount
-      output[outputIndex] = output[outputIndex] * (1 - fadeIn) + inputSample * fadeIn
-    } else {
-      output[outputIndex] = inputSample
-    }
-  }
 }
 
 export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretchConfig): AudioStretchResult {
@@ -158,35 +366,35 @@ export function stretchAudioWsola(input: AudioStretchInput, config: WsolaStretch
   }
   if (Math.abs(stretchRatio - 1) <= 1 / Math.max(1, inputFrameCount)) return copyExact(input, outputFrameCount)
 
-  const windowFrameCount = Math.min(inputFrameCount, resolveEvenFrameCount(config.windowFrameCount, DEFAULT_WINDOW_FRAMES))
-  const overlapFrameCount = Math.min(
-    windowFrameCount - 1,
-    resolveEvenFrameCount(config.overlapFrameCount, Math.min(DEFAULT_OVERLAP_FRAMES, Math.floor(windowFrameCount / 2))),
-  )
-  const synthesisHop = Math.max(1, windowFrameCount - overlapFrameCount)
-  const searchFrameCount = Math.max(0, Math.floor(config.searchFrameCount ?? DEFAULT_SEARCH_FRAMES))
   const outputChannels = input.channels.map(() => new Float32Array(outputFrameCount))
-  const mono = createMonoAnalysis(input.channels)
-  const outputMono = new Float32Array(outputFrameCount)
-
-  for (let channelIndex = 0; channelIndex < input.channels.length; channelIndex++) {
-    writeFrame(input.channels[channelIndex], outputChannels[channelIndex], 0, 0, Math.min(windowFrameCount, outputFrameCount))
-  }
-  writeFrame(mono, outputMono, 0, 0, Math.min(windowFrameCount, outputFrameCount))
-
-  for (let outputStart = synthesisHop; outputStart < outputFrameCount; outputStart += synthesisHop) {
-    const expectedInputStart = Math.round(outputStart / stretchRatio)
-    const bestInputStart = findBestInputStart(mono, outputMono, expectedInputStart, outputStart, overlapFrameCount, searchFrameCount)
-    const frameCount = Math.min(windowFrameCount, outputFrameCount - outputStart)
-    for (let channelIndex = 0; channelIndex < input.channels.length; channelIndex++) {
-      overlapAddFrame(input.channels[channelIndex], outputChannels[channelIndex], bestInputStart, outputStart, overlapFrameCount, frameCount)
+  let outputOffset = 0
+  const stream = createWsolaStream({
+    ...config,
+    inputFrameCount,
+    outputFrameCount,
+    channelCount: input.channels.length,
+    sampleRate: input.sampleRate,
+  })
+  const write = (channels: Float32Array[]) => {
+    const frameCount = channels[0]?.length ?? 0
+    for (let channel = 0; channel < outputChannels.length; channel++) {
+      const output = outputChannels[channel]
+      const source = channels[channel]
+      if (!output || !source) throw new Error('WSOLA stream output channel is missing.')
+      output.set(source, outputOffset)
     }
-    overlapAddFrame(mono, outputMono, bestInputStart, outputStart, overlapFrameCount, frameCount)
+    outputOffset += frameCount
   }
 
-  const inputPeak = getPeak(input.channels)
+  for (let startFrame = 0; startFrame < inputFrameCount; startFrame += STREAM_INPUT_CHUNK_FRAMES) {
+    const endFrame = Math.min(inputFrameCount, startFrame + STREAM_INPUT_CHUNK_FRAMES)
+    stream.push(input.channels.map((channel) => channel.subarray(startFrame, endFrame)), write)
+  }
+  const stats = stream.finish(write)
   return {
     sampleRate: input.sampleRate,
-    channels: normalizePeak(outputChannels, inputPeak + PEAK_EPSILON),
+    channels: stats.outputPeak <= stats.inputPeak + PEAK_EPSILON || stats.outputPeak <= 0
+      ? outputChannels
+      : normalizePeak(outputChannels, stats.inputPeak + PEAK_EPSILON),
   }
 }

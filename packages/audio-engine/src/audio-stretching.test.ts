@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { stretchAudioWsola } from './audio-stretching'
+import { createWsolaStream, stretchAudioWsola } from './audio-stretching'
 
 const sampleRate = 44_100
 
@@ -51,6 +51,49 @@ const getMaxAdjacentDelta = (channel: Float32Array) => {
   let maxDelta = 0
   for (let index = 1; index < channel.length; index++) maxDelta = Math.max(maxDelta, Math.abs(channel[index] - channel[index - 1]))
   return maxDelta
+}
+
+const hashChannels = (channels: Float32Array[]) => {
+  let hash = 2_166_136_261
+  for (const channel of channels) {
+    const bits = new Uint32Array(channel.buffer, channel.byteOffset, channel.length)
+    for (let frame = 0; frame < bits.length; frame++) {
+      hash = Math.imul(hash ^ (bits[frame] ?? 0), 16_777_619) >>> 0
+    }
+  }
+  return hash.toString(16)
+}
+
+const renderStreamingFixture = (inputChannels: Float32Array[], outputFrameCount: number, chunkFrameCount: number) => {
+  const config = {
+    outputFrameCount,
+    windowFrameCount: 128,
+    overlapFrameCount: 64,
+    searchFrameCount: 32,
+  }
+  const stream = createWsolaStream({
+    ...config,
+    inputFrameCount: inputChannels[0]?.length ?? 0,
+    channelCount: inputChannels.length,
+    sampleRate,
+  })
+  const outputChannels = inputChannels.map(() => new Float32Array(outputFrameCount))
+  let outputOffset = 0
+  const write = (channels: Float32Array[]) => {
+    const frameCount = channels[0]?.length ?? 0
+    for (let channel = 0; channel < outputChannels.length; channel++) {
+      outputChannels[channel]?.set(channels[channel] ?? new Float32Array(), outputOffset)
+    }
+    outputOffset += frameCount
+  }
+  const inputFrameCount = inputChannels[0]?.length ?? 0
+  for (let startFrame = 0; startFrame < inputFrameCount; startFrame += chunkFrameCount) {
+    const endFrame = Math.min(inputFrameCount, startFrame + chunkFrameCount)
+    stream.push(inputChannels.map((channel) => channel.subarray(startFrame, endFrame)), write)
+  }
+  const stats = stream.finish(write)
+  expect(outputOffset).toBe(outputFrameCount)
+  return { channels: outputChannels, stats, config }
 }
 
 describe('stretchAudioWsola', () => {
@@ -127,4 +170,50 @@ describe('stretchAudioWsola', () => {
     expect(output.channels[0].every(Number.isFinite)).toBe(true)
   })
 
+  test('preserves the existing whole-array numerical result through the streaming kernel', () => {
+    const left = createLoopFixture(4096)
+    const right = new Float32Array(left.length)
+    for (let frame = 0; frame < left.length; frame++) right[frame] = left[frame] * 0.5
+
+    const output = stretchAudioWsola({ channels: [left, right], sampleRate }, {
+      outputFrameCount: Math.round(left.length * 1.5),
+    })
+
+    expect(hashChannels(output.channels)).toBe('bf64bd11')
+  })
+
+  test('produces identical output regardless of supplied source chunk boundaries', () => {
+    const left = createLoopFixture(8192)
+    const right = new Float32Array(left.length)
+    for (let frame = 0; frame < left.length; frame++) right[frame] = left[frame] * 0.5
+    const inputChannels = [left, right]
+    const outputFrameCount = Math.round(left.length * 1.5)
+    const reference = stretchAudioWsola({ channels: inputChannels, sampleRate }, {
+      outputFrameCount,
+      windowFrameCount: 128,
+      overlapFrameCount: 64,
+      searchFrameCount: 32,
+    })
+
+    for (const chunkFrameCount of [1, 31, 65, 257, 1025]) {
+      const streamed = renderStreamingFixture(inputChannels, outputFrameCount, chunkFrameCount)
+      expect(getMaxAbsDifference(streamed.channels[0], reference.channels[0])).toBe(0)
+      expect(getMaxAbsDifference(streamed.channels[1], reference.channels[1])).toBe(0)
+    }
+  })
+
+  test('keeps state allocation bounded for a one-hour logical source', () => {
+    const logicalFrameCount = 48_000 * 60 * 60
+    const stream = createWsolaStream({
+      inputFrameCount: logicalFrameCount,
+      outputFrameCount: logicalFrameCount * 2,
+      channelCount: 2,
+      sampleRate: 48_000,
+    })
+
+    expect(stream.memoryBounds()).toEqual({
+      inputRingFrameCapacity: 3072,
+      overlapFrameCapacity: 1024,
+    })
+  })
 })

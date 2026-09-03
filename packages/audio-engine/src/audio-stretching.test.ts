@@ -1,5 +1,20 @@
 import { describe, expect, test } from 'bun:test'
-import { createWsolaSinglePassStream, stretchAudioWsola } from './audio-stretching'
+import {
+  createWsolaMaterializingCompatibilityTransaction,
+  createWsolaBoundedSource,
+  createWsolaSinglePassStream,
+  getWsolaStageFrameCounts,
+  stretchAudioWsola,
+  stretchAudioWsolaWithStats,
+  type WsolaPcmTransactionFactory,
+  type WsolaStretchConfig,
+  WSOLA_MAX_CHANNEL_COUNT,
+  WSOLA_MAX_OVERLAP_FRAMES,
+  WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
+  WSOLA_MAX_SEARCH_FRAMES,
+  WSOLA_MAX_SOURCE_CHUNK_FRAMES,
+  WSOLA_MAX_WINDOW_FRAMES,
+} from './audio-stretching'
 
 const sampleRate = 44_100
 
@@ -164,6 +179,48 @@ const renderPhase7AReference = (
   return normalizeReferencePeak(outputChannels, inputPeak)
 }
 
+const renderPhase7ARecursiveReference = (
+  inputChannels: Float32Array[],
+  outputFrameCount: number,
+  windowFrameCount: number,
+  overlapFrameCount: number,
+  searchFrameCount: number,
+) => {
+  const inputFrameCount = inputChannels[0]?.length ?? 0
+  const stages = getWsolaStageFrameCounts(inputFrameCount, outputFrameCount)
+  let channels = inputChannels
+  for (let index = 1; index < stages.length; index += 1) {
+    const stageOutputFrameCount = stages[index]
+    if (stageOutputFrameCount === undefined) throw new Error('Reference stage is missing.')
+    const stageInputFrameCount = stages[index - 1]
+    if (stageInputFrameCount === undefined) throw new Error('Reference stage input is missing.')
+    if (
+      stageOutputFrameCount === stageInputFrameCount
+      || Math.abs(stageOutputFrameCount / stageInputFrameCount - 1) <= 1 / Math.max(1, stageInputFrameCount)
+    ) {
+      channels = channels.map((channel) => {
+        const output = new Float32Array(stageOutputFrameCount)
+        output.set(channel.subarray(0, Math.min(channel.length, stageOutputFrameCount)))
+        return output
+      })
+      continue
+    }
+    channels = renderPhase7AReference(
+      channels,
+      stageOutputFrameCount,
+      windowFrameCount,
+      overlapFrameCount,
+      searchFrameCount,
+    )
+  }
+  return channels
+}
+
+const renderPhase7AZeroChannelReference = (sampleRate: number) => ({
+  sampleRate,
+  channels: [],
+})
+
 const renderStreamingFixture = (inputChannels: Float32Array[], outputFrameCount: number, chunkFrameCount: number) => {
   const config = {
     outputFrameCount,
@@ -196,7 +253,81 @@ const renderStreamingFixture = (inputChannels: Float32Array[], outputFrameCount:
   return { channels: outputChannels, stats, config }
 }
 
+const createSourceFixture = (
+  channels: Float32Array[],
+  replay: (signal?: AbortSignal) => Iterable<{ channels: Float32Array[] }> = function* () {
+    yield { channels }
+  },
+  dispose = () => {},
+) => ({
+  sampleRate,
+  channelCount: channels.length,
+  frameCount: channels[0]?.length ?? 0,
+  replay,
+  dispose,
+})
+
+const createBoundedForTest = (
+  source: Parameters<typeof createWsolaBoundedSource>[0],
+  config: WsolaStretchConfig,
+) => createWsolaBoundedSource(source, {
+  ...config,
+  createTransaction: config.createTransaction ?? createWsolaMaterializingCompatibilityTransaction,
+})
+
+const createDiscardingTransactionForTest = (
+  observed?: { appendFrames: number; maxAppendFrames: number },
+): WsolaPcmTransactionFactory => (metadata) => {
+  let writtenFrames = 0
+  let committed = false
+  let disposed = false
+  return {
+    append: (chunk) => {
+      if (committed) throw new Error('Test transaction is no longer writable.')
+      const frameCount = chunk.channels[0]?.length ?? 0
+      if (chunk.channels.length !== metadata.channelCount
+        || chunk.channels.some((channel) => channel.length !== frameCount)
+        || frameCount <= 0
+        || writtenFrames + frameCount > metadata.frameCount) {
+        throw new Error('Test transaction received an invalid chunk.')
+      }
+      writtenFrames += frameCount
+      if (observed) {
+        observed.appendFrames += frameCount
+        observed.maxAppendFrames = Math.max(observed.maxAppendFrames, frameCount)
+      }
+    },
+    commit: () => {
+      if (committed || writtenFrames !== metadata.frameCount) throw new Error('Test transaction cannot commit.')
+      committed = true
+      return {
+        ...metadata,
+        replay: function* (signal?: AbortSignal) {
+          if (disposed) throw new Error('Test source has been disposed.')
+          for (let startFrame = 0; startFrame < metadata.frameCount; startFrame += 16_384) {
+            signal?.throwIfAborted()
+            const frameCount = Math.min(16_384, metadata.frameCount - startFrame)
+            yield {
+              channels: Array.from({ length: metadata.channelCount }, () => new Float32Array(frameCount)),
+            }
+          }
+        },
+        dispose: () => { disposed = true },
+      }
+    },
+    abort: () => { committed = true },
+  }
+}
+
 describe('stretchAudioWsola', () => {
+  test('preserves legacy zero-channel output at the wrapper boundary', () => {
+    const expected = renderPhase7AZeroChannelReference(sampleRate)
+    // A zero-channel input has no frame count, so a stretch ratio is not applicable.
+    for (const outputFrameCount of [0, 1, 4096]) {
+      expect(stretchAudioWsola({ channels: [], sampleRate }, { outputFrameCount })).toEqual(expected)
+    }
+  })
+
   test('produces deterministic finite output with exact requested duration', () => {
     const input = createSine(440, sampleRate)
     const config = { outputFrameCount: Math.round(input.length * 1.5) }
@@ -268,6 +399,106 @@ describe('stretchAudioWsola', () => {
 
     expect(output.channels[0].length).toBe(1)
     expect(output.channels[0].every(Number.isFinite)).toBe(true)
+  })
+
+  test('matches the legacy reference deterministically for non-finite input samples', () => {
+    for (const sample of [NaN, Infinity, -Infinity]) {
+      const input = Float32Array.of(0.25, sample, -0.5, 0.75)
+      const expected = renderPhase7AReference([input], 8, 4, 2, 0)
+      const actual = stretchAudioWsola({ channels: [input], sampleRate }, {
+        outputFrameCount: 8,
+        windowFrameCount: 4,
+        overlapFrameCount: 2,
+        searchFrameCount: 0,
+      })
+      expect(actual.channels[0]?.every((sample, frame) => Object.is(sample, expected[0]?.[frame]))).toBe(true)
+    }
+  })
+
+  test('preserves legacy NaN normalization when compression excludes the NaN frame', () => {
+    const input = Float32Array.from({ length: 16 }, (_, frame) => frame === 15 ? NaN : Math.sin(frame * 0.31))
+    const expected = renderPhase7AReference([input], 8, 4, 2, 0)
+    const actual = stretchAudioWsola({ channels: [input], sampleRate }, {
+      outputFrameCount: 8,
+      windowFrameCount: 4,
+      overlapFrameCount: 2,
+      searchFrameCount: 0,
+    })
+
+    expect(actual.channels[0]?.every((sample, frame) => Object.is(sample, expected[0]?.[frame]))).toBe(true)
+  })
+
+  test('preserves legacy Infinity normalization parity during compression', () => {
+    for (const nonFinite of [Infinity, -Infinity]) {
+      const input = Float32Array.from({ length: 16 }, (_, frame) => frame === 15 ? nonFinite : Math.sin(frame * 0.31))
+      const expected = renderPhase7AReference([input], 8, 4, 2, 0)
+      const actual = stretchAudioWsola({ channels: [input], sampleRate }, {
+        outputFrameCount: 8,
+        windowFrameCount: 4,
+        overlapFrameCount: 2,
+        searchFrameCount: 0,
+      })
+      expect(actual.channels[0]?.every((sample, frame) => Object.is(sample, expected[0]?.[frame]))).toBe(true)
+    }
+  })
+
+  test('matches legacy normalization placement across generated non-finite stage cases', () => {
+    let seed = 0x6d2b79f5
+    const nextRandom = () => {
+      seed = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      seed ^= seed + Math.imul(seed ^ (seed >>> 7), 61 | seed)
+      return ((seed ^ (seed >>> 14)) >>> 0) / 4_294_967_296
+    }
+    const assertExact = (actual: Float32Array[], expected: Float32Array[]) => {
+      expect(actual.length).toBe(expected.length)
+      for (let channel = 0; channel < expected.length; channel += 1) {
+        const actualChannel = actual[channel]
+        const expectedChannel = expected[channel]
+        if (!actualChannel || !expectedChannel) throw new Error('Generated parity channel is missing.')
+        expect(actualChannel.length).toBe(expectedChannel.length)
+        for (let frame = 0; frame < expectedChannel.length; frame += 1) {
+          expect(Object.is(actualChannel[frame], expectedChannel[frame])).toBe(true)
+        }
+      }
+    }
+
+    for (const inputFrameCount of [7, 16, 65]) {
+      const outputFrameCounts = [
+        inputFrameCount,
+        inputFrameCount + 1,
+        Math.max(1, Math.floor(inputFrameCount * 0.5)),
+        Math.max(1, Math.floor(inputFrameCount * 0.25)),
+        inputFrameCount * 2,
+        inputFrameCount * 4,
+      ]
+      for (const outputFrameCount of outputFrameCounts) {
+        for (const nonFinite of [NaN, Infinity, -Infinity]) {
+          const channels = Array.from({ length: 2 }, (_, channelIndex) => {
+            const channel = Float32Array.from({ length: inputFrameCount }, () => nextRandom() * 1.8 - 0.9)
+            const frame = channelIndex === 0 ? inputFrameCount - 1 : 0
+            channel[frame] = nonFinite
+            return channel
+          })
+          const expected = renderPhase7ARecursiveReference(channels, outputFrameCount, 4, 2, 0)
+          const actual = stretchAudioWsola({ channels, sampleRate }, {
+            outputFrameCount,
+            windowFrameCount: 4,
+            overlapFrameCount: 2,
+            searchFrameCount: 0,
+            sourceChunkFrameCount: 3,
+          })
+          const actualWithStats = stretchAudioWsolaWithStats({ channels, sampleRate }, {
+            outputFrameCount,
+            windowFrameCount: 4,
+            overlapFrameCount: 2,
+            searchFrameCount: 0,
+            sourceChunkFrameCount: 3,
+          })
+          assertExact(actual.channels, expected)
+          assertExact(actualWithStats.result.channels, expected)
+        }
+      }
+    }
   })
 
   test('preserves Phase 7A numerical output without a hash-only assertion', () => {
@@ -396,6 +627,162 @@ describe('stretchAudioWsola', () => {
     })).toThrow()
   })
 
+  test('rejects non-finite and unsafe orchestration metadata before allocation or replay', () => {
+    const replayed = { count: 0 }
+    const source = createSourceFixture([new Float32Array([0.25])], function* () {
+      replayed.count += 1
+      yield { channels: [new Float32Array([0.25])] }
+    })
+    for (const value of [NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => createBoundedForTest(source, { outputFrameCount: value })).toThrow(
+        'WSOLA output frame count',
+      )
+      expect(replayed.count).toBe(0)
+    }
+    for (const value of [NaN, Infinity, Number.MAX_SAFE_INTEGER]) {
+      expect(() => createWsolaSinglePassStream({
+        inputFrameCount: 100,
+        outputFrameCount: 100,
+        channelCount: 1,
+        sampleRate,
+        searchFrameCount: value,
+      })).toThrow()
+    }
+    expect(() => createWsolaSinglePassStream({
+      inputFrameCount: 100,
+      outputFrameCount: Number.MAX_SAFE_INTEGER,
+      channelCount: 1,
+      sampleRate,
+    })).toThrow('single supported stretch-ratio pass')
+    expect(() => createBoundedForTest({
+      sampleRate: Infinity,
+      channelCount: 1,
+      frameCount: 1,
+      replay: source.replay,
+      dispose: () => {},
+    }, { outputFrameCount: 1 })).toThrow('sample rate')
+    expect(() => createBoundedForTest({
+      sampleRate,
+      channelCount: 1,
+      frameCount: NaN,
+      replay: source.replay,
+      dispose: () => {},
+    }, { outputFrameCount: 1 })).toThrow('source frame count')
+    expect(() => {
+      const bounded = createBoundedForTest({
+        sampleRate,
+        channelCount: 1,
+        frameCount: 1,
+        replay: function* () { yield { channels: [new Float32Array()] } },
+        dispose: () => {},
+      }, { outputFrameCount: 2 })
+      try {
+        return [...bounded.source.replay()]
+      } finally {
+        bounded.source.dispose()
+      }
+    }).toThrow('positive safe frame count')
+  })
+
+  test('does not replay a source for zero output and disposes it once', () => {
+    let replayCount = 0
+    let disposeCount = 0
+    const source = createSourceFixture(
+      [new Float32Array([0.25, -0.5])],
+      () => {
+        replayCount += 1
+        throw new Error('zero-output source must not be replayed')
+      },
+      () => { disposeCount += 1 },
+    )
+    const bounded = createBoundedForTest(source, { outputFrameCount: 0 })
+    expect([...bounded.source.replay()]).toEqual([])
+    bounded.source.dispose()
+    bounded.source.dispose()
+    expect(replayCount).toBe(0)
+    expect(disposeCount).toBe(1)
+  })
+
+  test('rejects positive output for zero-channel bounded sources before transaction or replay', () => {
+    let factoryCount = 0
+    let replayCount = 0
+    let appendCount = 0
+    let commitCount = 0
+    const source = {
+      sampleRate,
+      channelCount: 0,
+      frameCount: 0,
+      replay: function* () {
+        replayCount += 1
+        yield { channels: [] }
+      },
+      dispose: () => {},
+    }
+
+    expect(() => createWsolaBoundedSource(source, {
+      outputFrameCount: 1,
+      createTransaction: () => {
+        factoryCount += 1
+        return {
+          append: () => { appendCount += 1 },
+          commit: () => {
+            commitCount += 1
+            throw new Error('zero-channel source must not commit')
+          },
+          abort: () => {},
+        }
+      },
+    })).toThrow('zero channels')
+
+    expect(factoryCount).toBe(0)
+    expect(replayCount).toBe(0)
+    expect(appendCount).toBe(0)
+    expect(commitCount).toBe(0)
+  })
+
+  test('cancels zero-input synthesis before a second chunk and cleans up', () => {
+    const logicalOutputFrameCount = 1_000_003
+    const controller = new AbortController()
+    const reason = new Error('zero-input synthesis cancelled')
+    let appendCount = 0
+    let transactionAbortCount = 0
+    let sourceDisposeCount = 0
+    const source = {
+      sampleRate,
+      channelCount: 1,
+      frameCount: 0,
+      replay: () => {
+        throw new Error('zero-input synthesis must not replay')
+      },
+      dispose: () => { sourceDisposeCount += 1 },
+    }
+
+    let caught: unknown
+    try {
+      createWsolaBoundedSource(source, {
+        outputFrameCount: logicalOutputFrameCount,
+        sourceChunkFrameCount: 1,
+        signal: controller.signal,
+        createTransaction: (metadata) => ({
+          append: (chunk) => {
+            appendCount += 1
+            expect(chunk.channels.length).toBe(metadata.channelCount)
+            controller.abort(reason)
+          },
+          commit: () => { throw new Error('cancelled synthesis must not commit') },
+          abort: () => { transactionAbortCount += 1 },
+        }),
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBe(reason)
+    expect(appendCount).toBe(1)
+    expect(transactionAbortCount).toBe(1)
+    expect(sourceDisposeCount).toBe(1)
+  })
+
   test('finish is idempotent and emits no duplicate frames', () => {
     const input = createLoopFixture(4096)
     const stream = createWsolaSinglePassStream({
@@ -479,5 +866,527 @@ describe('stretchAudioWsola', () => {
     const reference = renderPhase7AReference([input], outputFrameCount, 128, 64, 32)
     const streamed = renderStreamingFixture(input.length === 0 ? [] : [input], outputFrameCount, 16384)
     expect(getMaxAbsDifference(streamed.channels[0] ?? new Float32Array(), reference[0] ?? new Float32Array())).toBe(0)
+  })
+
+  test('uses the legacy recursive frame targets without whole-array intermediates', () => {
+    expect(getWsolaStageFrameCounts(4096, 1024)).toEqual([4096, 2048, 1024])
+    expect(getWsolaStageFrameCounts(4096, 8192)).toEqual([4096, 8192])
+    expect(getWsolaStageFrameCounts(4096, 16384)).toEqual([4096, 8192, 16384])
+    expect(getWsolaStageFrameCounts(1003, Math.round(1003 * 0.37))).toEqual([1003, 502, 371])
+  })
+
+  test('reports bounded multi-pass peaks and gains', () => {
+    const input = createLoopFixture(4096)
+    const bounded = stretchAudioWsolaWithStats({ channels: [input], sampleRate }, {
+      outputFrameCount: 16_384,
+      sourceChunkFrameCount: 17,
+    })
+
+    expect(bounded.stats.stageFrameCounts).toEqual([4096, 8192, 16384])
+    expect(bounded.stats.stageInputPeaks).toHaveLength(2)
+    expect(bounded.stats.stageRawOutputPeaks).toHaveLength(2)
+    expect(bounded.stats.stageGains).toHaveLength(2)
+    expect(bounded.stats.maxSourceChunkFrames).toBeLessThanOrEqual(17)
+    expect(bounded.stats.maxOutputChunkFrames).toBeLessThanOrEqual(2048)
+    expect(bounded.result.channels[0]?.length).toBe(16_384)
+  })
+
+  test('proves the finite convex overlap normalization guard remains inactive', () => {
+    const left = Float32Array.from({ length: 4096 }, (_, frame) => (
+      frame % 257 === 0 ? 0.9375 : Math.sin(frame * 0.173) * 0.71
+    ))
+    const right = Float32Array.from(left, (sample) => -sample * 0.375)
+    const outputFrameCount = 16_384
+    const bounded = stretchAudioWsolaWithStats({ channels: [left, right], sampleRate }, {
+      outputFrameCount,
+      windowFrameCount: 128,
+      overlapFrameCount: 64,
+      searchFrameCount: 32,
+      sourceChunkFrameCount: 17,
+    })
+    expect(bounded.stats.stageInputPeaks).toHaveLength(2)
+    expect(bounded.stats.stageRawOutputPeaks).toHaveLength(2)
+    expect(bounded.stats.stageGains).toHaveLength(2)
+    for (let stage = 0; stage < bounded.stats.stageGains.length; stage += 1) {
+      const inputPeak = bounded.stats.stageInputPeaks[stage]
+      const rawOutputPeak = bounded.stats.stageRawOutputPeaks[stage]
+      const gain = bounded.stats.stageGains[stage]
+      if (inputPeak === undefined || rawOutputPeak === undefined || gain === undefined) {
+        throw new Error('WSOLA normalization statistics are incomplete.')
+      }
+      const expectedGain = rawOutputPeak <= inputPeak + 0.0001 || rawOutputPeak <= 0
+        ? 1
+        : (inputPeak + 0.0001) / rawOutputPeak
+      expect(gain).toBe(expectedGain)
+      expect(rawOutputPeak).toBeLessThanOrEqual(inputPeak + 0.0001)
+    }
+    const inputPeak = bounded.stats.stageInputPeaks[0] ?? 0
+    expect(getPeak(bounded.result.channels[0] ?? new Float32Array())).toBeLessThanOrEqual(inputPeak + 0.0001)
+
+    // The 3837cd3 reference uses the same non-negative crossfade. Its
+    // normalization branch is therefore also provably inactive for this
+    // finite fixture; parity covers the actual output rather than faking a
+    // gain activation.
+    const expected = renderPhase7ARecursiveReference([left, right], outputFrameCount, 128, 64, 32)
+    expect(getMaxAbsDifference(bounded.result.channels[0] ?? new Float32Array(), expected[0] ?? new Float32Array())).toBe(0)
+    expect(getMaxAbsDifference(bounded.result.channels[1] ?? new Float32Array(), expected[1] ?? new Float32Array())).toBe(0)
+  })
+
+  test('accounts for Float32 rounding without activating peak normalization', () => {
+    const input = Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+    const bounded = stretchAudioWsolaWithStats({ channels: [input], sampleRate }, {
+      outputFrameCount: 12,
+      windowFrameCount: 4,
+      overlapFrameCount: 2,
+      searchFrameCount: 0,
+      sourceChunkFrameCount: 3,
+    })
+    const output = bounded.result.channels[0] ?? new Float32Array()
+    const exactCrossfade = 0.4 * 0.5 + 0.3 * 0.5
+    const float32Crossfade = Math.fround(Math.fround(0.4) * (1 - 0.5) + Math.fround(0.3) * 0.5)
+    expect(output[3]).toBe(float32Crossfade)
+    expect(output[3]).not.toBe(exactCrossfade)
+    expect(bounded.stats.stageGains[0]).toBe(1)
+    expect(bounded.stats.stageRawOutputPeaks[0]).toBeLessThanOrEqual(
+      (bounded.stats.stageInputPeaks[0] ?? 0) + 0.0001,
+    )
+  })
+
+  test('replays a bounded source and disposes it idempotently', () => {
+    const input = createLoopFixture(4096)
+    let disposed = 0
+    const source = {
+      sampleRate,
+      channelCount: 1,
+      frameCount: input.length,
+      replay: function* () {
+        for (let start = 0; start < input.length; start += 31) {
+          const end = Math.min(input.length, start + 31)
+          yield { channels: [input.subarray(start, end)] }
+        }
+      },
+      dispose: () => { disposed += 1 },
+    }
+    const bounded = createBoundedForTest(source, {
+      outputFrameCount: 1024,
+      sourceChunkFrameCount: 31,
+    })
+    let frames = 0
+    for (const chunk of bounded.source.replay()) frames += chunk.channels[0]?.length ?? 0
+    bounded.source.dispose()
+    bounded.source.dispose()
+
+    expect(frames).toBe(1024)
+    expect(disposed).toBe(1)
+  })
+
+  test('requires explicit transactional storage without retaining logical-duration output', () => {
+    const logicalOutputFrameCount = 48_000 * 60 * 60
+    const observed = { appendFrames: 0, maxAppendFrames: 0 }
+    const bounded = createWsolaBoundedSource(createSourceFixture([new Float32Array()]), {
+      outputFrameCount: logicalOutputFrameCount,
+      createTransaction: createDiscardingTransactionForTest(observed),
+    })
+
+    expect(observed.appendFrames).toBe(logicalOutputFrameCount)
+    expect(observed.maxAppendFrames).toBeLessThanOrEqual(16_384)
+    expect(bounded.stats.pipelineWorkingMemoryBytes).toBe(1 * 16_384 * Float32Array.BYTES_PER_ELEMENT)
+    bounded.source.dispose()
+  })
+
+  test('rejects an oversized producer chunk before creating subarray views', () => {
+    let appended = 0
+    let disposed = 0
+    const source = createSourceFixture(
+      [Float32Array.of(0.25, -0.5, 0.75, -1)],
+      function* () {
+        yield { channels: [Float32Array.of(0.25, -0.5, 0.75)] }
+      },
+      () => { disposed += 1 },
+    )
+    expect(() => createWsolaBoundedSource(source, {
+      outputFrameCount: 2,
+      sourceChunkFrameCount: 2,
+      createTransaction: () => ({
+        append: () => { appended += 1 },
+        commit: () => { throw new Error('oversized source must not commit') },
+        abort: () => {},
+      }),
+    })).toThrow('larger than the configured source chunk frame limit')
+    expect(appended).toBe(0)
+    expect(disposed).toBe(1)
+  })
+
+  test('disposes an owned source once while preserving a pre-abort reason', () => {
+    const cause = { code: 'pre-abort' }
+    const reason = new Error('pre-aborted WSOLA', { cause })
+    const controller = new AbortController()
+    controller.abort(reason)
+    let disposed = 0
+    const source = {
+      sampleRate,
+      channelCount: 1,
+      frameCount: 4096,
+      replay: () => {
+        throw new Error('The pre-aborted source must not be replayed.')
+      },
+      dispose: () => { disposed += 1 },
+    }
+
+    let caught: unknown
+    try {
+      createBoundedForTest(source, { outputFrameCount: 1024, signal: controller.signal })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBe(reason)
+    expect(reason.cause).toBe(cause)
+    expect(disposed).toBe(1)
+  })
+
+  test('cancels before source consumption and between multi-pass replays', () => {
+    const input = createLoopFixture(4096)
+    const controller = new AbortController()
+    controller.abort()
+    try {
+      stretchAudioWsola({ channels: [input], sampleRate }, {
+        outputFrameCount: 1024,
+        signal: controller.signal,
+      })
+      throw new Error('Expected cancellation.')
+    } catch (error) {
+      expect(error).toMatchObject({ name: 'AbortError' })
+    }
+
+    const secondController = new AbortController()
+    let consumed = 0
+    const source = {
+      sampleRate,
+      channelCount: 1,
+      frameCount: input.length,
+      replay: function* (signal?: AbortSignal) {
+        for (let start = 0; start < input.length; start += 64) {
+          signal?.throwIfAborted()
+          consumed += 1
+          if (consumed === 3) secondController.abort()
+          const end = Math.min(input.length, start + 64)
+          yield { channels: [input.subarray(start, end)] }
+        }
+      },
+      dispose: () => {},
+    }
+    try {
+      createBoundedForTest(source, {
+        outputFrameCount: 1024,
+        signal: secondController.signal,
+      })
+      throw new Error('Expected cancellation.')
+    } catch (error) {
+      expect(error).toMatchObject({ name: 'AbortError' })
+    }
+    expect(consumed).toBe(3)
+  })
+
+  test('checks abort immediately after source replay completion and cleans up', () => {
+    const reason = new Error('source completed after final yield')
+    const controller = new AbortController()
+    let transactionAbortCount = 0
+    let sourceDisposeCount = 0
+    const source = createSourceFixture(
+      [Float32Array.of(0.25, -0.5, 0.75, -1)],
+      function* () {
+        yield { channels: [Float32Array.of(0.25, -0.5, 0.75, -1)] }
+        controller.abort(reason)
+      },
+      () => { sourceDisposeCount += 1 },
+    )
+
+    let caught: unknown
+    try {
+      createWsolaBoundedSource(source, {
+        outputFrameCount: 8,
+        windowFrameCount: 4,
+        overlapFrameCount: 2,
+        searchFrameCount: 0,
+        signal: controller.signal,
+        createTransaction: (metadata) => {
+          const transaction = createDiscardingTransactionForTest()(metadata)
+          return {
+            ...transaction,
+            abort: () => {
+              transactionAbortCount += 1
+              transaction.abort()
+            },
+          }
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBe(reason)
+    expect(transactionAbortCount).toBe(1)
+    expect(sourceDisposeCount).toBe(1)
+  })
+
+  test('disposes a committed source when abort occurs during commit', () => {
+    const reason = new Error('transaction commit cancelled')
+    const controller = new AbortController()
+    let transactionAbortCount = 0
+    let committedSourceDisposeCount = 0
+    const source = createSourceFixture([Float32Array.of(0.25, -0.5, 0.75, -1)])
+
+    let caught: unknown
+    try {
+      createWsolaBoundedSource(source, {
+        outputFrameCount: 8,
+        windowFrameCount: 4,
+        overlapFrameCount: 2,
+        searchFrameCount: 0,
+        signal: controller.signal,
+        createTransaction: (metadata) => ({
+          append: () => {},
+          commit: () => {
+            controller.abort(reason)
+            return {
+              ...metadata,
+              replay: function* () {},
+              dispose: () => { committedSourceDisposeCount += 1 },
+            }
+          },
+          abort: () => { transactionAbortCount += 1 },
+        }),
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBe(reason)
+    expect(transactionAbortCount).toBe(1)
+    expect(committedSourceDisposeCount).toBe(1)
+  })
+
+  test('replays input exactly once and retains the transaction output', () => {
+    const input = createLoopFixture(4096)
+    let replayCount = 0
+    const source = createSourceFixture([input], function* () {
+      replayCount += 1
+      if (replayCount > 1) throw new Error('The source must not be replayed.')
+      yield { channels: [input] }
+    })
+    const bounded = createBoundedForTest(source, {
+      outputFrameCount: 8192,
+      windowFrameCount: 128,
+      overlapFrameCount: 64,
+      searchFrameCount: 32,
+    })
+    const first = [...bounded.source.replay()]
+    const second = [...bounded.source.replay()]
+    bounded.source.dispose()
+    expect(replayCount).toBe(1)
+    expect(first.reduce((count, chunk) => count + (chunk.channels[0]?.length ?? 0), 0)).toBe(8192)
+    expect(second.reduce((count, chunk) => count + (chunk.channels[0]?.length ?? 0), 0)).toBe(8192)
+  })
+
+  test('provides atomic transaction commit and idempotent abort', () => {
+    const transaction = createWsolaMaterializingCompatibilityTransaction({ sampleRate, channelCount: 1, frameCount: 3 })
+    transaction.append({ channels: [Float32Array.of(1, 2)] })
+    expect(() => transaction.commit()).toThrow('wrong frame count')
+    transaction.abort()
+    transaction.abort()
+    expect(() => transaction.append({ channels: [Float32Array.of(3)] })).toThrow('no longer writable')
+
+    const committed = createWsolaMaterializingCompatibilityTransaction({ sampleRate, channelCount: 1, frameCount: 3 })
+    committed.append({ channels: [Float32Array.of(1, 2, 3)] })
+    const source = committed.commit()
+    expect([...source.replay()][0]?.channels[0]).toEqual(Float32Array.of(1, 2, 3))
+    expect(() => committed.commit()).toThrow('failure or abort')
+    source.dispose()
+  })
+
+  test('passes exact and effectively one-x stages through the transaction', () => {
+    for (const outputFrameCount of [4096, 4097]) {
+      let replayCount = 0
+      const input = createLoopFixture(4096)
+      const source = createSourceFixture([input], function* () {
+        replayCount += 1
+        yield { channels: [input] }
+      })
+      const bounded = createBoundedForTest(source, { outputFrameCount })
+      const output = [...bounded.source.replay()].flatMap((chunk) => [...(chunk.channels[0] ?? [])])
+      bounded.source.dispose()
+      expect(replayCount).toBe(1)
+      expect(output.length).toBe(outputFrameCount)
+      expect(output.slice(0, input.length)).toEqual([...input])
+      if (outputFrameCount > input.length) expect(output[input.length]).toBe(0)
+    }
+  })
+
+  test('rejects configured limits before source replay', () => {
+    const replayed = { count: 0 }
+    const source = createSourceFixture([Float32Array.of(0.25)], function* () {
+      replayed.count += 1
+      yield { channels: [Float32Array.of(0.25)] }
+    })
+    const cases: Array<[string, Omit<WsolaStretchConfig, 'outputFrameCount'>]> = [
+      ['window', { windowFrameCount: WSOLA_MAX_WINDOW_FRAMES + 1 }],
+      ['overlap', { overlapFrameCount: WSOLA_MAX_OVERLAP_FRAMES + 1 }],
+      ['search', { searchFrameCount: WSOLA_MAX_SEARCH_FRAMES + 1 }],
+      ['chunk', { sourceChunkFrameCount: WSOLA_MAX_SOURCE_CHUNK_FRAMES + 1 }],
+    ]
+    for (const [name, change] of cases) {
+      expect(() => createBoundedForTest(source, { outputFrameCount: 2, ...change })).toThrow(name)
+      expect(replayed.count).toBe(0)
+    }
+    const tooManyChannels = { ...source, channelCount: WSOLA_MAX_CHANNEL_COUNT + 1 }
+    expect(() => createBoundedForTest(tooManyChannels, { outputFrameCount: 2 })).toThrow('channel')
+    expect(replayed.count).toBe(0)
+  })
+
+  test('rejects overlap work before replay and reports bounded pipeline memory', () => {
+    const replayed = { count: 0 }
+    const source = {
+      ...createSourceFixture([new Float32Array(100_000)], function* () {
+        replayed.count += 1
+        yield { channels: [new Float32Array(100_000)] }
+      }),
+      frameCount: 100_000,
+    }
+    expect(() => createBoundedForTest(source, {
+      outputFrameCount: 50_000,
+      windowFrameCount: WSOLA_MAX_WINDOW_FRAMES,
+      overlapFrameCount: WSOLA_MAX_OVERLAP_FRAMES,
+      searchFrameCount: WSOLA_MAX_SEARCH_FRAMES,
+    })).toThrow('overlap scoring')
+    expect(replayed.count).toBe(0)
+
+    const bounded = createBoundedForTest(createSourceFixture([createLoopFixture(4096)]), {
+      outputFrameCount: 8192,
+    })
+    expect(bounded.stats.pipelineWorkingMemoryBytes).toBeLessThanOrEqual(WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES)
+    bounded.source.dispose()
+  })
+
+  test('rejects oversized compatibility output before replay', () => {
+    const input = { channels: [Float32Array.of(0.25)], sampleRate }
+    expect(() => stretchAudioWsola(input, {
+      outputFrameCount: 67_108_865,
+      sourceChunkFrameCount: 1,
+    })).toThrow('256 MiB')
+  })
+
+  test('aborts failed append and preserves the primary failure', () => {
+    let commitCount = 0
+    let abortCount = 0
+    const input = createSourceFixture([Float32Array.of(0.25, -0.5, 0.75, -1)])
+    const bounded = () => createBoundedForTest(input, {
+      outputFrameCount: 8,
+      windowFrameCount: 4,
+      overlapFrameCount: 2,
+      searchFrameCount: 0,
+      createTransaction: () => ({
+        append: () => { throw new Error('append failed') },
+        commit: () => {
+          commitCount += 1
+          throw new Error('commit must not run')
+        },
+        abort: () => {
+          abortCount += 1
+          throw new Error('abort failed')
+        },
+      }),
+    })
+    expect(bounded).toThrow(AggregateError)
+    expect(commitCount).toBe(0)
+    expect(abortCount).toBe(1)
+  })
+
+  test('fails closed for source counts, stage PCM, and committed metadata', () => {
+    const underflow = createSourceFixture([Float32Array.of(1, 2, 3, 4)], function* () {
+      yield { channels: [Float32Array.of(1, 2, 3)] }
+    })
+    expect(() => createBoundedForTest(underflow, { outputFrameCount: 8 })).toThrow('wrong frame count')
+
+    const overflow = createSourceFixture([Float32Array.of(1, 2, 3, 4)], function* () {
+      yield { channels: [Float32Array.of(1, 2, 3, 4, 5)] }
+    })
+    expect(() => createBoundedForTest(overflow, { outputFrameCount: 8 })).toThrow('more source frames')
+
+    const nonFinite = createSourceFixture([Float32Array.of(1, NaN, 3, 4)])
+    expect(() => createBoundedForTest(nonFinite, { outputFrameCount: 8 })).toThrow('finite PCM')
+
+    let commitCount = 0
+    let abortCount = 0
+    const invalidMetadata = createSourceFixture([Float32Array.of(1, 2, 3, 4)])
+    expect(() => createBoundedForTest(invalidMetadata, {
+      outputFrameCount: 8,
+      createTransaction: (metadata) => ({
+        append: () => {},
+        commit: () => {
+          commitCount += 1
+          return { ...metadata, frameCount: metadata.frameCount - 1, replay: function* () {}, dispose: () => {} }
+        },
+        abort: () => { abortCount += 1 },
+      }),
+    })).toThrow('metadata')
+    expect(commitCount).toBe(1)
+    expect(abortCount).toBe(1)
+  })
+
+  test('admits huge logical duration while keeping stream memory bounded', () => {
+    const logicalFrameCount = 48_000 * 60 * 60
+    const stream = createWsolaSinglePassStream({
+      inputFrameCount: logicalFrameCount,
+      outputFrameCount: logicalFrameCount * 2,
+      channelCount: 2,
+      sampleRate: 48_000,
+    })
+    expect(stream.memoryBounds()).toEqual({ inputRingFrameCapacity: 3072, overlapFrameCapacity: 1024 })
+  })
+
+  test('cancels deterministically inside overlap scoring', () => {
+    const controller = new AbortController()
+    const input = Float32Array.from({ length: 16_384 }, (_, index) => Math.sin(index * 0.013))
+    const stream = createWsolaSinglePassStream({
+      inputFrameCount: input.length,
+      outputFrameCount: input.length * 2,
+      channelCount: 1,
+      sampleRate,
+      windowFrameCount: 2048,
+      overlapFrameCount: 1024,
+      searchFrameCount: 512,
+      signal: controller.signal,
+    })
+    const write = () => {}
+    stream.push([input.subarray(0, 4096)], write)
+    controller.abort(new Error('score cancelled'))
+    expect(() => stream.push([input.subarray(4096)], write)).toThrow('score cancelled')
+  })
+
+  test('keeps multi-pass stereo relationships invariant across awkward producer chunks', () => {
+    const left = createLoopFixture(4096)
+    const right = Float32Array.from(left, (sample) => sample * -0.25)
+    const outputFrameCount = 16_384
+    const reference = stretchAudioWsola({ channels: [left, right], sampleRate }, {
+      outputFrameCount,
+      windowFrameCount: 128,
+      overlapFrameCount: 64,
+      searchFrameCount: 32,
+      sourceChunkFrameCount: 1,
+    })
+
+    for (const sourceChunkFrameCount of [17, 257, 1025, 16_385]) {
+      const actual = stretchAudioWsola({ channels: [left, right], sampleRate }, {
+        outputFrameCount,
+        windowFrameCount: 128,
+        overlapFrameCount: 64,
+        searchFrameCount: 32,
+        sourceChunkFrameCount,
+      })
+      expect(getMaxAbsDifference(actual.channels[0] ?? new Float32Array(), reference.channels[0] ?? new Float32Array())).toBe(0)
+      expect(getMaxAbsDifference(actual.channels[1] ?? new Float32Array(), reference.channels[1] ?? new Float32Array())).toBe(0)
+      expect(getMaxAbsDifference(actual.channels[0] ?? new Float32Array(), actual.channels[1] ?? new Float32Array(), -4)).toBe(0)
+    }
   })
 })

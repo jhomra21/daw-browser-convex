@@ -1,23 +1,23 @@
-import { assert } from '@daw-browser/shared'
-import { getAudioClipTimeMap, getMarkerWarpTimelineSegments, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { stretchAudioWsola } from './audio-stretching'
+import { createWsolaBoundedSourceAsync, type WsolaPcmSource, type WsolaPcmTransaction, type WsolaPcmTransactionFactory } from './audio-stretching'
+import {
+  createAudioStretchReadPlan,
+  DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,
+  validateAudioStretchMaterialization,
+  type AudioStretchMaterializationPolicy,
+  type AudioStretchReadPlan,
+} from './audio-stretch-read-plan'
+import type { AudioPcmSourceDescriptor } from './media-pages'
+import {
+  createRemoteMediaOperation,
+  defaultRemoteMediaMaximumBytes,
+  defaultRemoteMediaMaxRetries,
+  defaultRemoteMediaOperationDeadlineMs,
+} from './media-pages'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import type { StretchedAudioRender } from './audio-stretch-cache'
 
-export type AudioStretchRuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'audioWarp' | 'buffer'>
+export type AudioStretchRuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'sourceKind' | 'sampleUrl' | 'audioWarp' | 'buffer'>
 type CreateBuffer = (channels: number, frames: number, sampleRate: number) => AudioBuffer
-
-const ANALYSIS_MARGIN_SEC = 0.08
-
-export const copyBufferWindow = (buffer: AudioBuffer, startFrame: number, frameCount: number) => {
-  const channels: Float32Array[] = []
-  for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex++) {
-    const channel = new Float32Array(frameCount)
-    buffer.copyFromChannel(channel, channelIndex, startFrame)
-    channels.push(channel)
-  }
-  return channels
-}
 
 export const writeBuffer = (
   createBuffer: CreateBuffer,
@@ -34,94 +34,173 @@ export const writeBuffer = (
   return buffer
 }
 
-const renderMappedStretch = (
-  sourceBuffer: AudioBuffer,
-  map: AudioClipTimeMap,
-  clip: AudioStretchRuntimeClip,
-  projectBpm: number,
-  createBuffer: CreateBuffer,
-) => {
-  const markerSegments = getMarkerWarpTimelineSegments({
-    clip,
-    map,
-    projectBpm,
-    timelineEndSec: map.timelineEndSec,
-  })
-  const stretchedSegments = markerSegments.flatMap((segment) => {
-    const sourceStartSec = Math.max(0, Math.min(sourceBuffer.duration, segment.sourceStartSec))
-    const sourceEndSec = Math.max(0, Math.min(sourceBuffer.duration, segment.sourceEndSec))
-    const sourceDurationSec = sourceEndSec - sourceStartSec
-    const targetFrameCount = Math.max(1, Math.round((segment.timelineEndSec - segment.timelineStartSec) * sourceBuffer.sampleRate))
-    if (sourceDurationSec <= 1 / sourceBuffer.sampleRate) return []
-    const startFrame = Math.max(0, Math.min(sourceBuffer.length - 1, Math.floor(sourceStartSec * sourceBuffer.sampleRate)))
-    const endFrame = Math.max(startFrame + 1, Math.min(sourceBuffer.length, Math.ceil(sourceEndSec * sourceBuffer.sampleRate)))
-    return [stretchAudioWsola({
-      channels: copyBufferWindow(sourceBuffer, startFrame, endFrame - startFrame),
-      sampleRate: sourceBuffer.sampleRate,
-    }, {
-      outputFrameCount: targetFrameCount,
-    }).channels]
-  })
-  const frameCount = stretchedSegments.reduce((total, segment) => total + (segment[0]?.length ?? 0), 0)
-  const channels = Array.from({ length: sourceBuffer.numberOfChannels }, (_, channelIndex) => {
-    const output = new Float32Array(frameCount)
-    let offset = 0
-    for (const segment of stretchedSegments) {
-      const source = segment[channelIndex]
-      if (!source) continue
-      output.set(source, offset)
-      offset += source.length
-    }
-    return output
-  })
+type PcmChunk = { channels: Float32Array[] }
+
+const createForwardingTransaction = (
+  metadata: { sampleRate: number; channelCount: number; frameCount: number },
+  forward: (chunk: PcmChunk) => void,
+): WsolaPcmTransaction => {
+  let writtenFrames = 0
+  let open = true
   return {
-    buffer: writeBuffer(createBuffer, channels, sourceBuffer.sampleRate),
-    timelineStartSec: map.timelineStartSec,
-    sourceStartSec: 0,
-    timelineDurationSec: frameCount / sourceBuffer.sampleRate,
+    append: (chunk) => {
+      if (!open) throw new Error('Stretch segment transaction is no longer writable.')
+      const frameCount = chunk.channels[0]?.length ?? 0
+      if (chunk.channels.length !== metadata.channelCount
+        || chunk.channels.some((channel) => channel.length !== frameCount)
+        || writtenFrames + frameCount > metadata.frameCount) {
+        throw new Error('Stretch segment transaction received invalid PCM.')
+      }
+      forward(chunk)
+      writtenFrames += frameCount
+    },
+    commit: () => {
+      if (!open || writtenFrames !== metadata.frameCount) throw new Error('Stretch segment transaction cannot commit.')
+      open = false
+      return { ...metadata, replay: function* () {}, dispose: () => {} }
+    },
+    abort: () => { open = false },
   }
 }
 
-export const renderStretchedAudio = (
-  clip: AudioStretchRuntimeClip,
-  projectBpm: number,
-  createBuffer: CreateBuffer,
-): StretchedAudioRender => {
-  const sourceBuffer = clip.buffer
-  if (!sourceBuffer) throw new Error('Cannot render Stretch warp without an audio buffer.')
-  const map = getAudioClipTimeMap({
-    clip,
-    bufferDurationSec: sourceBuffer.duration,
-    projectBpm,
-    rangeStartSec: clip.startSec,
-    rangeEndSec: clip.startSec + clip.duration,
+export const renderStretchedAudioToPcmSource = async (input: {
+  clip: AudioStretchRuntimeClip
+  source: AudioPcmSourceDescriptor
+  projectBpm: number
+  createTransaction: WsolaPcmTransactionFactory
+  signal?: AbortSignal
+}) => {
+  const plan: AudioStretchReadPlan = createAudioStretchReadPlan(input)
+  const remoteOperation = createRemoteMediaOperation(
+    defaultRemoteMediaOperationDeadlineMs,
+    defaultRemoteMediaMaximumBytes,
+    defaultRemoteMediaMaxRetries,
+  )
+  const abortRemoteOperation = () => remoteOperation.abort(input.signal?.reason)
+  input.signal?.addEventListener('abort', abortRemoteOperation, { once: true })
+  const outer = input.createTransaction({
+    sampleRate: input.source.sampleRate,
+    channelCount: input.source.channelCount,
+    frameCount: plan.frameCount,
   })
-  assert(map?.mode === 'stretch', 'Cannot render Stretch warp for a non-stretched clip.')
-  if ((clip.audioWarp?.markers?.length ?? 0) >= 2) return renderMappedStretch(sourceBuffer, map, clip, projectBpm, createBuffer)
+  let committed = false
+  try {
+    for (const item of plan.segments) {
+      input.signal?.throwIfAborted()
+      const source: WsolaPcmSource = {
+        sampleRate: input.source.sampleRate,
+        channelCount: input.source.channelCount,
+        frameCount: item.sourceEndFrame - item.sourceStartFrame,
+        replay: function* () {
+          yield* []
+          throw new Error('Page-backed Stretch sources require async traversal.')
+        },
+        replayAsync: async function* (signal) {
+          let readFrames = 0
+          for await (const page of input.source.readPages({
+            startFrame: item.sourceStartFrame,
+            endFrame: item.sourceEndFrame,
+            signal: remoteOperation.signal,
+            remoteOperation,
+          })) {
+            signal?.throwIfAborted()
+            readFrames += page.frameCount
+            yield { channels: page.planes }
+          }
+          if (readFrames !== item.sourceEndFrame - item.sourceStartFrame) {
+            throw new Error('Stretch source pages did not cover the planned segment.')
+          }
+        },
+        dispose: () => {},
+      }
+      let outputFrames = 0
+      const trimStart = item.trimStartFrame
+      const trimEnd = Math.min(item.targetFrameCount, item.trimEndFrame)
+      const result = await createWsolaBoundedSourceAsync(source, {
+        outputFrameCount: item.targetFrameCount,
+        signal: input.signal,
+        createTransaction: (metadata) => createForwardingTransaction(metadata, (chunk) => {
+          const frameCount = chunk.channels[0]?.length ?? 0
+          const keepStart = Math.max(outputFrames, trimStart)
+          const keepEnd = Math.min(outputFrames + frameCount, trimEnd)
+          if (keepEnd > keepStart) {
+            const localStart = keepStart - outputFrames
+            const keepCount = keepEnd - keepStart
+            outer.append({
+              channels: chunk.channels.map((channel) => channel.subarray(localStart, localStart + keepCount)),
+            })
+          }
+          outputFrames += frameCount
+        }),
+      })
+      result.source.dispose()
+    }
+    input.signal?.throwIfAborted()
+    const source = outer.commit()
+    committed = true
+    return {
+      source,
+      timelineStartSec: plan.map.timelineStartSec,
+      sourceStartSec: 0,
+      timelineDurationSec: plan.frameCount / input.source.sampleRate,
+    }
+  } catch (error) {
+    outer.abort()
+    throw error
+  } finally {
+    if (!committed) outer.abort()
+    input.signal?.removeEventListener('abort', abortRemoteOperation)
+    remoteOperation.dispose()
+  }
+}
 
-  const marginSec = Math.min(ANALYSIS_MARGIN_SEC, map.sourceStartSec)
-  const renderSourceStartSec = Math.max(0, map.sourceStartSec - marginSec)
-  const renderSourceEndSec = Math.min(sourceBuffer.duration, map.sourceEndSec + ANALYSIS_MARGIN_SEC)
-  const startFrame = Math.floor(renderSourceStartSec * sourceBuffer.sampleRate)
-  const sourceFrameCount = Math.max(1, Math.ceil((renderSourceEndSec - renderSourceStartSec) * sourceBuffer.sampleRate))
-  const outputFrameCount = Math.max(1, Math.round((sourceFrameCount / map.playbackRate)))
-  const stretched = stretchAudioWsola({
-    channels: copyBufferWindow(sourceBuffer, startFrame, sourceFrameCount),
-    sampleRate: sourceBuffer.sampleRate,
-  }, {
-    outputFrameCount,
+export const renderStretchedAudioFromSource = async (input: {
+  clip: AudioStretchRuntimeClip
+  source: AudioPcmSourceDescriptor
+  projectBpm: number
+  createBuffer: CreateBuffer
+  materializationPolicy?: AudioStretchMaterializationPolicy
+  signal?: AbortSignal
+}): Promise<StretchedAudioRender> => {
+  const plan = createAudioStretchReadPlan(input)
+  validateAudioStretchMaterialization(
+    plan,
+    input.source,
+    input.materializationPolicy ?? {
+      maximumBytes: DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,
+      maximumChannels: 32,
+    },
+  )
+  const channels = Array.from(
+    { length: input.source.channelCount },
+    () => new Float32Array(plan.frameCount),
+  )
+  let writtenFrames = 0
+  const rendered = await renderStretchedAudioToPcmSource({
+    ...input,
+    createTransaction: (metadata) => ({
+      append: (chunk) => {
+        const frameCount = chunk.channels[0]?.length ?? 0
+        if (writtenFrames + frameCount > metadata.frameCount) throw new Error('Rendered Stretch PCM exceeded its declared frame count.')
+        for (let channel = 0; channel < metadata.channelCount; channel += 1) {
+          channels[channel]?.set(chunk.channels[channel] ?? new Float32Array(), writtenFrames)
+        }
+        writtenFrames += frameCount
+      },
+      commit: () => ({
+        ...metadata,
+        replay: function* () {},
+        dispose: () => {},
+      }),
+      abort: () => {},
+    }),
+    signal: input.signal,
   })
-  const marginOutputFrames = Math.round((map.sourceStartSec - renderSourceStartSec) / map.playbackRate * sourceBuffer.sampleRate)
-  const timelineFrames = Math.max(1, Math.round(map.timelineDurationSec * sourceBuffer.sampleRate))
-  const trimmedChannels = stretched.channels.map((channel) => {
-    const trimmed = new Float32Array(timelineFrames)
-    trimmed.set(channel.subarray(marginOutputFrames, Math.min(channel.length, marginOutputFrames + timelineFrames)))
-    return trimmed
-  })
+  rendered.source.dispose()
   return {
-    buffer: writeBuffer(createBuffer, trimmedChannels, sourceBuffer.sampleRate),
-    timelineStartSec: map.timelineStartSec,
-    sourceStartSec: 0,
-    timelineDurationSec: timelineFrames / sourceBuffer.sampleRate,
+    buffer: writeBuffer(input.createBuffer, channels, input.source.sampleRate),
+    timelineStartSec: rendered.timelineStartSec,
+    sourceStartSec: rendered.sourceStartSec,
+    timelineDurationSec: rendered.timelineDurationSec,
   }
 }

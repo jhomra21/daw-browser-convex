@@ -43,7 +43,11 @@ import {
   type AudioCoreWasmArtifact,
   type AudioCoreWasmArtifactResult,
 } from '../../audio-core-wasm/src/index'
-import { compilePortableExportSnapshot, type PortableExportSnapshot } from './portable-export-snapshot'
+import {
+  compilePortableExportSnapshot,
+  countPortableInstalledAssets,
+  type PortableExportSnapshot,
+} from './portable-export-snapshot'
 import { PortableExportWorker } from './portable-export-worker'
 import {
   portableExportWorkerMaxAssets,
@@ -54,6 +58,8 @@ import {
 } from './portable-export-worker-protocol'
 import { resolvePortableWasmManifestUrl } from './worklet-manifest'
 import { preparePortableStretchAssets } from './portable-stretch-preparation'
+import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
 export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
@@ -77,6 +83,7 @@ export type ExportRequest = {
   cueTrackIds?: readonly string[]
   resourceObserver?: ResourceObserver
   onRenderProgress?: (completedFrames: number, totalFrames: number) => void
+  resolveAudioSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
 }
 
 export type StemMode =
@@ -128,6 +135,7 @@ type PreparedExportRender = {
   sidechainRoutes: ExternalSidechainRoute[]
   signal?: AbortSignal
   resourceObserver?: ResourceObserver
+  resolveAudioSource?: ExportRequest['resolveAudioSource']
 }
 
 type SourceIsolatedRenderOptions = {
@@ -284,6 +292,10 @@ const selectPortableMixdown = async (
       sampleRate,
     }),
     signal: req.signal,
+    maximumAssetCount: portableExportWorkerMaxAssets,
+    existingAssetCount: countPortableInstalledAssets(req.tracks, req.fx),
+    maximumPreparationBytes: 256 * 1024 * 1024,
+    resolveSource: req.resolveAudioSource,
   })
   throwIfAborted(req.signal)
   if (!preparedStretchAssets.supported) return { selected: false }
@@ -689,6 +701,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     sidechainRoutes: (req.sidechainRoutes ?? []).map((route) => ({ ...route })),
     signal,
     resourceObserver: req.resourceObserver,
+    resolveAudioSource: req.resolveAudioSource,
   }
 }
 
@@ -886,6 +899,11 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const releaseContext = observeResource(prepared.resourceObserver, 'audio-contexts', ctx)
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
+    resolveSource: prepared.resolveAudioSource,
+    materializationPolicy: {
+      maximumBytes: 256 * 1024 * 1024,
+      maximumChannels: 32,
+    },
   })
   const graph = options.graph ?? (includeMasterFx ? prepared.mixerGraph : {
     ...prepared.mixerGraph,
@@ -1086,10 +1104,10 @@ async function renderSourceIsolatedMixdownFromPrepared(
           continue
         }
 
-        if (!clip.buffer) continue
+        if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) continue
         const map = getAudioClipTimeMap({
           clip,
-          bufferDurationSec: clip.buffer.duration,
+          bufferDurationSec: clip.buffer?.duration ?? clip.sourceDurationSec ?? 0,
           projectBpm: prepared.bpm,
           rangeStartSec: prepared.range.startSec,
           rangeEndSec: prepared.range.sourceEndSec,
@@ -1102,8 +1120,10 @@ async function renderSourceIsolatedMixdownFromPrepared(
             throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
           })
           : null
+        const sourceBuffer = clip.buffer ?? stretched?.buffer
+        if (!sourceBuffer) continue
         const playback = getAudioBufferPlaybackParams({
-          sourceBuffer: clip.buffer,
+          sourceBuffer,
           map,
           stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
         })

@@ -139,6 +139,7 @@ import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type Live
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
+import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -328,6 +329,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
     bootstrapIfEmpty: untrack(() => props.bootstrapIfEmpty),
   });
+  const resolveAudioSource = createAudioPcmSourceResolver({ projectId });
   const sampledInstrumentSession = createSampledInstrumentSession({
     projectId,
   });
@@ -396,6 +398,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     tracks: renderTracks,
     onBufferChange: () => setBufferVersion((current) => current + 1),
+    resolveAudioSource,
   });
   const currentLocalProjectMode = createMemo(
     () => projects().find((project) => project.projectId === projectId())?.mode,
@@ -649,6 +652,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     getEffectsExportSnapshot: effectsExportSnapshot,
     getSidechainRoutes: sidechainRoutes,
     loadCapturedClipBuffer: clipBuffers.loadCapturedMedia,
+    resolveAudioSource,
     sampledInstrumentSession,
   });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
@@ -711,6 +715,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requiresNativeAudio,
     tracks: renderTracks,
     ensureClipBuffer: clipBuffers.preload,
+    resolveAudioSource,
     loopEnabled,
     loopStartSec,
     loopEndSec,

@@ -5,11 +5,13 @@ import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { LivePlaybackCompileContext, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 type Options = {
   audioEngine: AudioEngine
   tracks: Accessor<RuntimeTrack[]>
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+  resolveAudioSource?: AudioPcmSourceResolver
   loopEnabled?: Accessor<boolean>
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
@@ -31,13 +33,13 @@ type Options = {
   }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
-  }, nativePlayback ? { ...nativePlayback, requiresNativeAudio } : undefined, portableBrowserPlayback)
+  }, nativePlayback ? { ...nativePlayback, requiresNativeAudio, resolveAudioSource } : undefined, portableBrowserPlayback ? { ...portableBrowserPlayback, resolveAudioSource } : undefined)
 
   let scrollEl: HTMLDivElement | undefined
   let scrubbing = false
@@ -88,7 +90,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, loo
     const pendingBuffers: Promise<void>[] = []
     for (const track of initialTracks) {
       for (const clip of track.clips) {
-        if (!clip.buffer) {
+        if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
           pendingBuffers.push(ensureClipBuffer(clip.id, clip.sampleUrl))
         }
       }

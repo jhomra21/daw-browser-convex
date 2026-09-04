@@ -26,6 +26,7 @@ export type WsolaPcmSource = {
   readonly channelCount: number
   readonly frameCount: number
   replay: (signal?: AbortSignal) => Iterable<WsolaPcmChunk>
+  replayAsync?: (signal?: AbortSignal) => AsyncIterable<WsolaPcmChunk>
   dispose: () => void
 }
 
@@ -178,6 +179,20 @@ const validateTransactionMetadata = (metadata: WsolaPcmTransactionMetadata) => {
   if (metadata.frameCount > 0 && metadata.channelCount === 0) {
     throw new Error('WSOLA transactions with frames must have at least one channel.')
   }
+}
+
+const validateCommittedSource = (
+  committed: WsolaPcmSource,
+  metadata: WsolaPcmTransactionMetadata,
+) => {
+  if (
+    committed.sampleRate !== metadata.sampleRate
+    || committed.channelCount !== metadata.channelCount
+    || committed.frameCount !== metadata.frameCount
+  ) {
+    throw new Error('WSOLA transaction committed source metadata does not match the requested output.')
+  }
+  validateSourceMetadata(committed)
 }
 
 const validateChunk = (chunk: WsolaPcmChunk, channelCount: number) => {
@@ -769,6 +784,22 @@ const createExactForwarder = (
   }
 }
 
+const appendExactStageStats = (
+  stats: WsolaBoundedMemoryStats,
+  peaks: { inputPeak: number; outputPeak: number },
+  allowNonFinite: boolean | undefined,
+) => {
+  if (!allowNonFinite && (!Number.isFinite(peaks.inputPeak) || !Number.isFinite(peaks.outputPeak))) {
+    throw new Error('WSOLA bounded sources require finite PCM peaks.')
+  }
+  if (!allowNonFinite && peaks.outputPeak > peaks.inputPeak + PEAK_EPSILON) {
+    throw new Error('WSOLA stage exceeded its finite convex peak invariant.')
+  }
+  stats.stageInputPeaks.push(peaks.inputPeak)
+  stats.stageRawOutputPeaks.push(peaks.outputPeak)
+  stats.stageGains.push(1)
+}
+
 const createMaterializingTransaction = (
   metadata: WsolaPcmTransactionMetadata,
   channels: Float32Array[],
@@ -873,14 +904,7 @@ const createBoundedSource = (
       throwIfAborted(config.signal)
       committed = transaction.commit()
       throwIfAborted(config.signal)
-      if (
-        committed.sampleRate !== metadata.sampleRate
-        || committed.channelCount !== metadata.channelCount
-        || committed.frameCount !== metadata.frameCount
-      ) {
-        throw new Error('WSOLA transaction committed source metadata does not match the requested output.')
-      }
-      validateSourceMetadata(committed)
+      validateCommittedSource(committed, metadata)
       let disposed = false
       const outputSource = Object.freeze({
         ...committed,
@@ -927,15 +951,7 @@ const createBoundedSource = (
           push: exactForwarder.push,
           finish: () => {
             const peaks = exactForwarder.finish()
-            if (!config.allowNonFinite && (!Number.isFinite(peaks.inputPeak) || !Number.isFinite(peaks.outputPeak))) {
-              throw new Error('WSOLA bounded sources require finite PCM peaks.')
-            }
-            if (!config.allowNonFinite && peaks.outputPeak > peaks.inputPeak + PEAK_EPSILON) {
-              throw new Error('WSOLA stage exceeded its finite convex peak invariant.')
-            }
-            stats.stageInputPeaks.push(peaks.inputPeak)
-            stats.stageRawOutputPeaks.push(peaks.outputPeak)
-            stats.stageGains.push(1)
+            appendExactStageStats(stats, peaks, config.allowNonFinite)
           },
         }
         continue
@@ -1010,14 +1026,7 @@ const createBoundedSource = (
     throwIfAborted(config.signal)
     committed = transaction.commit()
     throwIfAborted(config.signal)
-    if (
-      committed.sampleRate !== metadata.sampleRate
-      || committed.channelCount !== metadata.channelCount
-      || committed.frameCount !== metadata.frameCount
-    ) {
-      throw new Error('WSOLA transaction committed source metadata does not match the requested output.')
-    }
-    validateSourceMetadata(committed)
+    validateCommittedSource(committed, metadata)
     const outputSource = committed
     let disposed = false
     const ownedSource = Object.freeze({
@@ -1048,6 +1057,203 @@ export const createWsolaBoundedSource = (
   sourceInput: WsolaPcmSource,
   config: WsolaBoundedSourceConfig,
 ): WsolaBoundedSourceResult => createBoundedSource(sourceInput, config)
+
+/**
+ * Async-source counterpart used by page-backed media. The WSOLA traversal and
+ * transaction rules are the same as the synchronous path; only source
+ * consumption crosses an async boundary.
+ */
+export const createWsolaBoundedSourceAsync = async (
+  sourceInput: WsolaPcmSource,
+  config: InternalStretchConfig,
+): Promise<WsolaBoundedSourceResult> => {
+  const validated = validatePipelineRequest(sourceInput, config)
+  const replayAsync = sourceInput.replayAsync
+  if (!replayAsync) return createBoundedSource(sourceInput, config)
+  const stages = validated.stageFrameCounts
+  const transaction = config.createTransaction({
+    sampleRate: sourceInput.sampleRate,
+    channelCount: sourceInput.channelCount,
+    frameCount: config.outputFrameCount,
+  })
+  let committed: WsolaPcmSource | undefined
+  let sourceFrames = 0
+  let outputFrames = 0
+  const chunkFrameCount = config.sourceChunkFrameCount ?? DEFAULT_SOURCE_CHUNK_FRAMES
+  const stats: WsolaBoundedMemoryStats = {
+    stageFrameCounts: stages,
+    stageInputPeaks: [],
+    stageRawOutputPeaks: [],
+    stageGains: [],
+    maxSourceChunkFrames: 0,
+    maxOutputChunkFrames: 0,
+    inputRingFrameCapacity: validated.inputRingFrameCapacity,
+    overlapFrameCapacity: validated.overlapFrameCapacity,
+    pipelineWorkingMemoryBytes: validated.pipelineWorkingMemoryBytes,
+  }
+  const write = (channels: Float32Array[]) => {
+    const frameCount = channels[0]?.length ?? 0
+    if (frameCount <= 0) return
+    transaction.append({ channels })
+    outputFrames += frameCount
+    stats.maxOutputChunkFrames = Math.max(stats.maxOutputChunkFrames, frameCount)
+  }
+  try {
+    throwIfAborted(config.signal)
+    if (sourceInput.frameCount === 0 || config.outputFrameCount === 0) {
+      for (let start = 0; start < config.outputFrameCount; start += chunkFrameCount) {
+        throwIfAborted(config.signal)
+        const frameCount = Math.min(chunkFrameCount, config.outputFrameCount - start)
+        transaction.append({
+          channels: Array.from({ length: sourceInput.channelCount }, () => new Float32Array(frameCount)),
+        })
+        outputFrames += frameCount
+      }
+    } else if (isEffectivelyOneX(sourceInput.frameCount, config.outputFrameCount)) {
+      const exactForwarder = createExactForwarder(
+        sourceInput.frameCount,
+        config.outputFrameCount,
+        sourceInput.channelCount,
+        write,
+        chunkFrameCount,
+      )
+      for await (const chunk of replayAsync(config.signal)) {
+        throwIfAborted(config.signal)
+        validateChunk(chunk, sourceInput.channelCount)
+        const frameCount = chunk.channels[0]?.length ?? 0
+        if (frameCount > chunkFrameCount) throw new Error('WSOLA PCM source yielded a chunk larger than the configured source chunk frame limit.')
+        sourceFrames += frameCount
+        stats.maxSourceChunkFrames = Math.max(stats.maxSourceChunkFrames, frameCount)
+        if (!config.allowNonFinite) validateFiniteChunk(chunk)
+        exactForwarder.push(chunk)
+      }
+      appendExactStageStats(stats, exactForwarder.finish(), config.allowNonFinite)
+    } else {
+      const stagesByIndex: PipelineStage[] = []
+      let finalOutputFrames = 0
+      const writeStage = (stageIndex: number, channels: Float32Array[]) => {
+        validateChunk({ channels }, sourceInput.channelCount)
+        stats.maxOutputChunkFrames = Math.max(stats.maxOutputChunkFrames, channels[0]?.length ?? 0)
+        const next = stagesByIndex[stageIndex + 1]
+        if (next) {
+          next.push({ channels })
+          return
+        }
+        if (!config.allowNonFinite) validateFiniteChunk({ channels })
+        finalOutputFrames += channels[0]?.length ?? 0
+        write(channels)
+      }
+      for (let index = 1; index < stages.length; index += 1) {
+        const inputFrames = stages[index - 1]
+        const outputFrameCount = stages[index]
+        if (inputFrames === undefined || outputFrameCount === undefined) {
+          throw new Error('WSOLA stage frame count is missing.')
+        }
+        if (isEffectivelyOneX(inputFrames, outputFrameCount)) {
+          const exactForwarder = createExactForwarder(
+            inputFrames,
+            outputFrameCount,
+            sourceInput.channelCount,
+            (channels) => writeStage(index, channels),
+            validated.chunkFrameCount,
+          )
+          stagesByIndex[index] = {
+            push: exactForwarder.push,
+            finish: () => {
+              const peaks = exactForwarder.finish()
+              appendExactStageStats(stats, peaks, config.allowNonFinite)
+            },
+          }
+          continue
+        }
+        const stream = createWsolaSinglePassStream({
+          ...config,
+          inputFrameCount: inputFrames,
+          outputFrameCount,
+          channelCount: sourceInput.channelCount,
+          sampleRate: sourceInput.sampleRate,
+        })
+        stagesByIndex[index] = {
+          push: (chunk) => stream.push(chunk.channels, (channels) => writeStage(index, channels), config.signal),
+          finish: () => {
+            const streamStats = stream.finish((channels) => writeStage(index, channels), config.signal)
+            if (!config.allowNonFinite && (!Number.isFinite(streamStats.inputPeak) || !Number.isFinite(streamStats.outputPeak))) {
+              throw new Error('WSOLA bounded sources require finite PCM peaks.')
+            }
+            if (!config.allowNonFinite && streamStats.outputPeak > streamStats.inputPeak + PEAK_EPSILON) {
+              throw new Error('WSOLA stage exceeded its finite convex peak invariant.')
+            }
+            stats.stageInputPeaks.push(streamStats.inputPeak)
+            stats.stageRawOutputPeaks.push(streamStats.outputPeak)
+            stats.stageGains.push(1)
+          },
+        }
+      }
+      const feedFirstStage = (chunk: WsolaPcmChunk) => {
+        const first = stagesByIndex[1]
+        if (!first) throw new Error('WSOLA first stage is missing.')
+        first.push(chunk)
+      }
+      for await (const chunk of replayAsync(config.signal)) {
+        throwIfAborted(config.signal)
+        validateChunk(chunk, sourceInput.channelCount)
+        const frameCount = chunk.channels[0]?.length ?? 0
+        if (frameCount > validated.chunkFrameCount) throw new Error('WSOLA PCM source yielded a chunk larger than the configured source chunk frame limit.')
+        if (!config.allowNonFinite) validateFiniteChunk(chunk)
+        sourceFrames += frameCount
+        for (const bounded of splitChunk(chunk, validated.chunkFrameCount)) {
+          stats.maxSourceChunkFrames = Math.max(stats.maxSourceChunkFrames, bounded.channels[0]?.length ?? 0)
+          feedFirstStage(bounded)
+        }
+      }
+      if (sourceFrames !== sourceInput.frameCount) {
+        throw new Error('WSOLA PCM source replay produced the wrong frame count.')
+      }
+      for (let index = 1; index < stages.length; index += 1) {
+        throwIfAborted(config.signal)
+        const stage = stagesByIndex[index]
+        if (!stage) throw new Error('WSOLA pipeline stage is missing.')
+        stage.finish()
+      }
+      if (finalOutputFrames !== config.outputFrameCount) {
+        throw new Error('WSOLA pipeline produced the wrong output frame count.')
+      }
+    }
+    if (sourceFrames !== sourceInput.frameCount && sourceInput.frameCount > 0) {
+      throw new Error('WSOLA PCM source replay produced the wrong frame count.')
+    }
+    if (outputFrames !== config.outputFrameCount) throw new Error('WSOLA pipeline produced the wrong output frame count.')
+    throwIfAborted(config.signal)
+    committed = transaction.commit()
+    throwIfAborted(config.signal)
+    validateCommittedSource(committed, {
+      sampleRate: sourceInput.sampleRate,
+      channelCount: sourceInput.channelCount,
+      frameCount: config.outputFrameCount,
+    })
+    return {
+      source: Object.freeze({
+        ...committed,
+        dispose: (() => {
+          let disposed = false
+          return () => {
+            if (disposed) return
+            disposed = true
+            disposeResources([committed?.dispose ?? (() => {}), sourceInput.dispose])
+          }
+        })(),
+      }),
+      stats,
+    }
+  } catch (error) {
+    disposeResources([
+      transaction.abort,
+      committed?.dispose ?? (() => {}),
+      sourceInput.dispose,
+    ], { error })
+    throw error
+  }
+}
 
 const validateMaterializedOutput = (channelCount: number, outputFrameCount: number) => {
   if (outputFrameCount > MAX_TYPED_ARRAY_LENGTH) {

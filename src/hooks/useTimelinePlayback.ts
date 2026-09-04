@@ -12,6 +12,7 @@ import {
 import { createSpectrumFrameDelivery } from './spectrum-frame-delivery'
 import { rejectedLiveProcessorControl } from '~/lib/live-processor-control'
 import type { DesktopBridge } from '~/types/desktop-bridge'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 type LoopOptions = {
   loopEnabled?: Accessor<boolean>
@@ -28,12 +29,14 @@ type NativePlaybackOptions = {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   reportFault?: (message: string) => void
+  resolveAudioSource?: AudioPcmSourceResolver
 }
 
 type PortableBrowserPlaybackOptions = {
   projectGeneration?: Accessor<number>
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   reportFault?: (message: string) => void
+  resolveAudioSource?: AudioPcmSourceResolver
 }
 
 export type TimelinePlaybackRebuildIntent = {
@@ -250,6 +253,7 @@ export function useTimelinePlayback(
     bridge: audioHostBridge,
     getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
+    resolveSource: nativeOptions?.resolveAudioSource,
     reportUnavailable: requiresNativeAudio,
     createBuffer: (channels, frames, sampleRate) => (
       audioEngine.getAudioContext?.()?.createBuffer(channels, frames, sampleRate)
@@ -306,6 +310,7 @@ export function useTimelinePlayback(
     })),
     getAudioContext: () => audioEngine.getAudioContext?.() ?? null,
     getProjectGeneration: portableBrowserOptions?.projectGeneration,
+    resolveSource: portableBrowserOptions?.resolveAudioSource,
     reportFault: (message) => {
       audioEngine.onTransportPause()
       setActiveBackend('idle')

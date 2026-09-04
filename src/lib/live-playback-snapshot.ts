@@ -273,6 +273,22 @@ export const compileLivePlaybackSnapshot = (
         }
         : undefined
     if (!resolvedSource) {
+      if (clip.audioWarp?.enabled === true
+        && clip.audioWarp.mode === 'stretch'
+        && clip.sourceDurationSec !== undefined
+        && clip.sourceSampleRate !== undefined
+        && clip.sourceChannelCount !== undefined) {
+        sourceMetadataById.set(assetId, {
+          source: {
+            durationSec: clip.sourceDurationSec,
+            sampleRate: clip.sourceSampleRate,
+            channelCount: clip.sourceChannelCount,
+          },
+          sourceKind: clip.sourceKind,
+          sampleUrl: clip.sampleUrl,
+        })
+        return
+      }
       reasons.push(`Audio clip "${clip.id}" is not hydrated.`)
       return
     }

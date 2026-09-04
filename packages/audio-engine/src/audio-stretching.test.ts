@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createWsolaMaterializingCompatibilityTransaction,
   createWsolaBoundedSource,
+  createWsolaBoundedSourceAsync,
   createWsolaSinglePassStream,
   getWsolaStageFrameCounts,
   stretchAudioWsola,
@@ -320,6 +321,48 @@ const createDiscardingTransactionForTest = (
 }
 
 describe('stretchAudioWsola', () => {
+  test('keeps async multi-pass output identical to synchronous bounded output', async () => {
+    const input = createLoopFixture(sampleRate * 2)
+    const outputFrameCount = Math.round(input.length * 0.1)
+    const sync = createBoundedForTest(createSourceFixture([input], function* (signal) {
+      for (let start = 0; start < input.length; start += 997) {
+        signal?.throwIfAborted()
+        const end = Math.min(input.length, start + 997)
+        yield { channels: [input.subarray(start, end)] }
+      }
+    }), { outputFrameCount })
+    const asyncResult = await createWsolaBoundedSourceAsync({
+      ...createSourceFixture([input]),
+      replayAsync: async function* (signal) {
+        for (let start = 0; start < input.length; start += 997) {
+          signal?.throwIfAborted()
+          const end = Math.min(input.length, start + 997)
+          yield { channels: [input.subarray(start, end)] }
+        }
+      },
+    }, {
+      outputFrameCount,
+      createTransaction: createWsolaMaterializingCompatibilityTransaction,
+    })
+    const syncChunks = [...sync.source.replay()]
+    const asyncChunks = [...asyncResult.source.replay()]
+    const syncChannel = syncChunks.reduce((result, chunk) => {
+      const next = new Float32Array(result.length + chunk.channels[0].length)
+      next.set(result)
+      next.set(chunk.channels[0], result.length)
+      return next
+    }, new Float32Array())
+    const asyncChannel = asyncChunks.reduce((result, chunk) => {
+      const next = new Float32Array(result.length + chunk.channels[0].length)
+      next.set(result)
+      next.set(chunk.channels[0], result.length)
+      return next
+    }, new Float32Array())
+    expect(asyncChannel).toEqual(syncChannel)
+    sync.source.dispose()
+    asyncResult.source.dispose()
+  })
+
   test('preserves legacy zero-channel output at the wrapper boundary', () => {
     const expected = renderPhase7AZeroChannelReference(sampleRate)
     // A zero-channel input has no frame count, so a stretch ratio is not applicable.

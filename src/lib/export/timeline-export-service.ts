@@ -17,6 +17,8 @@ import { preflightExportResources } from "~/lib/export/export-resource-preflight
 import { getLocalProject } from "~/lib/local-project-db"
 import type { SampledInstrumentRegionBudget, SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { SampledInstrumentSession } from "~/lib/sampled-instrument-session"
+import type { AudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
+import type { AudioStretchRuntimeClip } from "@daw-browser/audio-engine/audio-stretch-rendering"
 import {
   sampledInstrumentRegionBytes,
   sampledInstrumentRetainedBytes,
@@ -40,6 +42,7 @@ type TimelineExportDependencies = {
   getEffectsExportSnapshot: () => EffectsPanelExportSnapshot | undefined
   getSidechainRoutes: () => ExternalSidechainRoute[]
   loadCapturedClipBuffer: (reference: CapturedClipMediaReference, signal: AbortSignal) => Promise<CapturedClipBufferLoadResult>
+  resolveAudioSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
   nativeOfflinePcmRenderer?: NativeOfflinePcmRenderer
   sampledInstrumentSession?: Pick<SampledInstrumentSession, "createExportScope">
   sampledInstrumentRegionBudget?: SampledInstrumentRegionBudget
@@ -391,6 +394,16 @@ export const createTimelineExportService = (dependencies: TimelineExportDependen
       }, loadSignal)
       if (result.status !== "ready") throw new Error(`Audio media for clip "${clip.id}" is ${result.status}.`)
       detached.buffer = result.buffer
+    },
+    resolveAudioSource: async (clip: AudioStretchRuntimeClip, loadSignal?: AbortSignal) => {
+      const detached = snapshot.snapshotClips.get(clip.id)
+      if (!detached || !dependencies.resolveAudioSource) {
+        throw new Error(`Audio source for clip "${clip.id}" is unavailable.`)
+      }
+      return dependencies.resolveAudioSource({
+        ...clip,
+        buffer: detached.buffer,
+      }, loadSignal)
     },
     signal,
     onProgress,

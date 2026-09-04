@@ -27,6 +27,8 @@ import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCal
 import { createRuntimeFaultCounter, type RuntimeFaultSnapshot } from './runtime-diagnostics'
 import { createLiveWorkletBudget } from './effects/live-worklet-budget'
 import { resolveTrackMidiExpressionSchedule } from './midi-expression-scheduling'
+import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -208,6 +210,14 @@ export class AudioEngine {
   constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }, liveNoteCleanupScheduler = defaultLiveNoteCleanupScheduler) {
     this.runtimeOptions = options
     this.liveNoteCleanupScheduler = liveNoteCleanupScheduler
+  }
+
+  setAudioSourceResolver(resolver: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>) {
+    this.stretchCache.setSourceResolver(resolver)
+  }
+
+  invalidateAudioSourceCache() {
+    this.stretchCache.invalidate()
   }
 
   configureNextRuntime(options: AudioRuntimeOptions) {
@@ -1167,6 +1177,7 @@ export class AudioEngine {
     this.mixerRuntime.clear()
     this.metering.close()
     this.instrumentRuntime.clear()
+    this.stretchCache.dispose()
     this.arpeggiatorListeners.clear()
     this.automationEnvelopes = []
     this.transientMidiMappingBaselines.clear()

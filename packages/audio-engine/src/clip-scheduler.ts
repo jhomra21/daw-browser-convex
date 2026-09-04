@@ -103,10 +103,12 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
 
   const scheduleAudioClip = (clip: RuntimeClip, input: GainNode, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): DeferredStretchWindow | null => {
     const ctx = options.getAudioContext()
-    if (!ctx || !clip.buffer) return null
+    if (!ctx) return null
+    const sourceDurationSec = clip.buffer?.duration ?? clip.sourceDurationSec
+    if (sourceDurationSec === undefined) return null
     const map = getAudioClipTimeMap({
       clip,
-      bufferDurationSec: clip.buffer.duration,
+      bufferDurationSec: sourceDurationSec,
       projectBpm: options.getBpm(),
       rangeStartSec: startLimitSec ?? playheadSec,
       rangeEndSec: endLimitSec,
@@ -126,17 +128,19 @@ export function createClipScheduler(options: ClipSchedulerOptions) {
     let deferredFallbackWindow: DeferredStretchWindow | null = null
     if (map.mode === 'stretch' && !stretched) {
       const deferredWindow = { clipId: clip.id, startSec: map.timelineStartSec, endSec: map.timelineEndSec }
-      if (!canFallbackToRepitchStretch({
+      if (!clip.buffer || !canFallbackToRepitchStretch({
         playheadSec,
         timelineStartSec: map.timelineStartSec,
         timelineEndSec: map.timelineEndSec,
       })) return deferredWindow
       deferredFallbackWindow = { ...deferredWindow, replaceExistingSource: true }
     }
+    const sourceBuffer = clip.buffer ?? stretched?.buffer
+    if (!sourceBuffer) return deferredFallbackWindow
 
     const source = ctx.createBufferSource()
     const playback = getAudioBufferPlaybackParams({
-      sourceBuffer: clip.buffer,
+      sourceBuffer,
       map,
       stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
     })

@@ -188,6 +188,41 @@ type CollectedPortableAssets = {
   reasons: readonly string[]
 }
 
+export const countPortableInstalledAssets = (
+  tracks: readonly Track<AudioBuffer | null>[],
+  fx: ExportFx | undefined,
+) => {
+  const keys = new Set<string>()
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      if (clip.buffer
+        && !clip.midi
+        && clip.sourceAssetKey
+        && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
+        keys.add(clip.sourceAssetKey)
+      }
+    }
+  }
+  for (const entry of Object.values(fx?.trackFx ?? {})) {
+    if (entry.instrument?.kind === 'sampler') {
+      for (const zone of entry.instrument.params.zones) {
+        if (entry.samplerBuffers?.has(zone.id)) keys.add(zone.sample.assetKey)
+      }
+    }
+    if (entry.instrument?.kind === 'drum-rack') {
+      for (const pad of entry.instrument.params.pads) {
+        if (pad.sample && entry.drumRackBuffers?.has(pad.id)) keys.add(pad.sample.assetKey)
+      }
+    }
+    if (entry.instrument?.kind === 'granular'
+      && entry.instrument.params.zone
+      && entry.granularBuffer) {
+      keys.add(entry.instrument.params.zone.sample.assetKey)
+    }
+  }
+  return keys.size
+}
+
 const collectAssets = (
   tracks: readonly Track<AudioBuffer | null>[],
   fx: ExportFx | undefined,
@@ -232,6 +267,22 @@ const collectAssets = (
     assets.push(exportAsset)
     bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
   }
+  const stretchSourceAssetKeys = new Set(
+    tracks.flatMap((track) => track.clips.flatMap((clip) => (
+      clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' && clip.sourceAssetKey
+        ? [clip.sourceAssetKey]
+        : []
+    ))),
+  )
+  const installedSourceAssetKeys = new Set(
+    tracks.flatMap((track) => track.clips.flatMap((clip) => (
+      !clip.midi
+        && clip.sourceAssetKey
+        && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
+        ? [clip.sourceAssetKey]
+        : []
+    ))),
+  )
   for (const metadata of metadataSourceAssets) {
     if (!metadata.sourceAssetKey
       || !Number.isSafeInteger(metadata.frameCount) || metadata.frameCount <= 0
@@ -240,7 +291,10 @@ const collectAssets = (
       reasons.push(`Source asset "${metadata.sourceAssetKey}" has invalid audio metadata.`)
       continue
     }
-    addMetadataAsset(metadata.sourceAssetKey, metadata)
+    if (!stretchSourceAssetKeys.has(metadata.sourceAssetKey)
+      || installedSourceAssetKeys.has(metadata.sourceAssetKey)) {
+      addMetadataAsset(metadata.sourceAssetKey, metadata)
+    }
   }
   for (const track of tracks) {
     for (const clip of track.clips) {

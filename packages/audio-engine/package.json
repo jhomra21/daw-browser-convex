@@ -37,6 +37,8 @@
     "./portable-export-snapshot": "./src/portable-export-snapshot.ts",
     "./portable-session-compiler": "./src/portable-session-compiler.ts",
     "./portable-stretch-preparation": "./src/portable-stretch-preparation.ts",
+    "./audio-stretch-rendering": "./src/audio-stretch-rendering.ts",
+    "./audio-stretch-read-plan": "./src/audio-stretch-read-plan.ts",
     "./effects/timing": "./src/effects/timing.ts",
     "./portable-export-worker": "./src/portable-export-worker.ts",
     "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",

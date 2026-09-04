@@ -31,6 +31,7 @@ import {
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
   persistedProcessorSnapshotSchema,
+  sanitizeAudioSourceKind,
   sidechainEligibilityError,
   synthAutomationKey,
 } from "@daw-browser/shared";
@@ -38,6 +39,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
+import { findSampleRow } from "./sampleRows";
 
 const recoveryLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 const maxRecoveriesPerProject = 1000;
@@ -85,6 +87,15 @@ type MergedRecoveryTrack = Doc<"tracks"> & Pick<
   Doc<"mixerChannels">,
   "volume" | "muted" | "soloed" | "channelRole" | "outputTargetId" | "sends"
 >;
+type RecoveryClipSource = {
+  sourceAssetKey?: string;
+  sourceKind?: string;
+  sourceDurationSec?: number;
+  sourceSampleRate?: number;
+  sourceChannelCount?: number;
+  sampleUrl?: string;
+  midi?: unknown;
+};
 
 const trackStatePayload = (row: MergedRecoveryTrack): RecoveryTrackState => ({
   projectId: row.projectId,
@@ -207,6 +218,8 @@ const ownershipPayload = (row: Doc<"ownerships">) => ({
   ownerUserId: row.ownerUserId,
   role: row.role,
 });
+const canonicalSampleUrl = (projectId: string, assetKey: string) =>
+  `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(assetKey)}`;
 const assetPayload = (row: Doc<"samples">) => ({
   projectId: row.projectId,
   assetKey: row.assetKey,
@@ -916,7 +929,8 @@ const restoreTrackBundle = async (
     const trackId = resolve(clip.trackId);
     if (!trackId) throw new ControlDomainError("not-found", "Recovery clip target is unavailable.", input.actionIndex);
     const normalizedClip = clip.midi === undefined ? clip : { ...clip, midi: normalizeLegacyMidiClip(clip.midi) };
-    const id = await ctx.db.insert("clips", { ...normalizedClip, trackId });
+    const source = await authoritativeClipSourceFields(ctx, input.projectId, clip);
+    const id = await ctx.db.insert("clips", { ...normalizedClip, ...source, trackId });
     const ownership = requireCloudRecoveryOwnership(item.ownership, input.actionIndex);
     await ctx.db.insert("ownerships", {
       projectId: ownership.projectId,
@@ -974,22 +988,69 @@ const restoreTrackBundle = async (
 
 type RangeRecoveryData = Extract<RecoveryPayload, { kind: "timeline.range.delete" }>["data"];
 
-const restoredClipFields = (
+const authoritativeClipSourceFields = async (
+  ctx: RecoveryCtx,
+  projectId: string,
+  clip: RecoveryClipSource,
+) => {
+  if (clip.midi !== undefined) return {
+    sourceAssetKey: undefined,
+    sourceKind: undefined,
+    sourceDurationSec: undefined,
+    sourceSampleRate: undefined,
+    sourceChannelCount: undefined,
+    sampleUrl: undefined,
+  };
+  if (!clip.sourceAssetKey) return {
+    sourceAssetKey: undefined,
+    sourceKind: sanitizeAudioSourceKind(clip.sourceKind),
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+    sampleUrl: clip.sampleUrl,
+  };
+  const asset = await findSampleRow(ctx, { projectId, assetKey: clip.sourceAssetKey });
+  if (
+    asset
+    && sanitizeAudioSourceKind(asset.sourceKind) !== undefined
+    && asset.duration !== undefined
+    && asset.sampleRate !== undefined
+    && asset.channelCount !== undefined
+  ) {
+    return {
+      sourceAssetKey: asset.assetKey,
+      sourceKind: sanitizeAudioSourceKind(asset.sourceKind),
+      sourceDurationSec: asset.duration,
+      sourceSampleRate: asset.sampleRate,
+      sourceChannelCount: asset.channelCount,
+      sampleUrl: canonicalSampleUrl(projectId, asset.assetKey),
+    };
+  }
+  return {
+    sourceAssetKey: clip.sourceAssetKey,
+    sourceKind: sanitizeAudioSourceKind(clip.sourceKind),
+    sourceDurationSec: clip.sourceDurationSec,
+    sourceSampleRate: clip.sourceSampleRate,
+    sourceChannelCount: clip.sourceChannelCount,
+    sampleUrl: clip.sampleUrl,
+  };
+};
+
+const restoredClipFields = async (
+  ctx: RecoveryCtx,
+  projectId: string,
   clip: RangeRecoveryData["updatedClips"][number]["before"],
   trackId: Id<"tracks">,
 ) => {
   const midi = clip.midi === undefined ? undefined : normalizeLegacyMidiClip(clip.midi);
+  const source = await authoritativeClipSourceFields(ctx, projectId, clip);
   return {
     projectId: clip.projectId,
     trackId,
     historyRef: clip.historyRef,
     startSec: clip.startSec,
     duration: clip.duration,
-    sourceAssetKey: clip.sourceAssetKey,
-    sourceKind: clip.sourceKind,
-    sourceDurationSec: clip.sourceDurationSec,
-    sourceSampleRate: clip.sourceSampleRate,
-    sourceChannelCount: clip.sourceChannelCount,
+    ...source,
     leftPadSec: clip.leftPadSec,
     bufferOffsetSec: clip.bufferOffsetSec,
     audioWarp: clip.audioWarp,
@@ -997,7 +1058,6 @@ const restoredClipFields = (
     fades: clip.fades,
     color: clip.color,
     name: clip.name,
-    sampleUrl: clip.sampleUrl,
     midi,
     midiOffsetBeats: clip.midiOffsetBeats,
   };
@@ -1064,7 +1124,7 @@ const restoreTimelineRange = async (
     const id = ctx.db.normalizeId("clips", update.id);
     const track = await requireTrack(ctx, input.projectId, update.before.trackId, input.actionIndex);
     if (!id) throw new Error("Range recovery clip mapping is unavailable.");
-    await ctx.db.patch(id, restoredClipFields(update.before, track._id));
+    await ctx.db.patch(id, await restoredClipFields(ctx, input.projectId, update.before, track._id));
   }
   for (const deletion of input.data.deletedClips) {
     const track = await requireTrack(ctx, input.projectId, deletion.before.trackId, input.actionIndex);
@@ -1072,7 +1132,7 @@ const restoreTimelineRange = async (
     if (!isCloudRecoveryOwnershipV1(ownership)) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
-    const id = await ctx.db.insert("clips", restoredClipFields(deletion.before, track._id));
+    const id = await ctx.db.insert("clips", await restoredClipFields(ctx, input.projectId, deletion.before, track._id));
     await ctx.db.insert("ownerships", {
       projectId: ownership.projectId,
       ownerUserId: ownership.ownerUserId,
@@ -1140,16 +1200,13 @@ export const restoreRecovery = async (
     }
     const track = await requireTrack(ctx, input.projectId, data.clip.trackId, input.actionIndex);
     const midi = data.clip.midi === undefined ? undefined : normalizeLegacyMidiClip(data.clip.midi);
+    const source = await authoritativeClipSourceFields(ctx, input.projectId, data.clip);
     const id = await ctx.db.insert("clips", {
       projectId: data.clip.projectId,
       trackId: track._id,
       startSec: data.clip.startSec,
       duration: data.clip.duration,
-      sourceAssetKey: data.clip.sourceAssetKey,
-      sourceKind: data.clip.sourceKind,
-      sourceDurationSec: data.clip.sourceDurationSec,
-      sourceSampleRate: data.clip.sourceSampleRate,
-      sourceChannelCount: data.clip.sourceChannelCount,
+      ...source,
       leftPadSec: data.clip.leftPadSec,
       bufferOffsetSec: data.clip.bufferOffsetSec,
       audioWarp: data.clip.audioWarp,
@@ -1157,7 +1214,6 @@ export const restoreRecovery = async (
       fades: data.clip.fades,
       color: data.clip.color,
       name: data.clip.name,
-      sampleUrl: data.clip.sampleUrl,
       midi,
       midiOffsetBeats: data.clip.midiOffsetBeats,
     });

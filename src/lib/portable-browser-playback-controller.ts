@@ -12,7 +12,15 @@ import type {
   PortableAssetRegistryInput,
   PortablePreparedQualification,
 } from "@daw-browser/audio-engine/portable-session-compiler"
-import { portableWasmProtocolVersion, type PortableWasmStatusMessage } from "@daw-browser/audio-engine/portable-wasm-protocol"
+import {
+  portableWasmMaxAssets,
+  portableWasmProtocolVersion,
+  type PortableWasmStatusMessage,
+} from "@daw-browser/audio-engine/portable-wasm-protocol"
+import {
+  nativeAudioHostMaximumAssetFramesForChannels,
+  nativeAudioHostMaximumStretchPreparationBytes,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
@@ -23,6 +31,12 @@ import type {
   LiveProcessorControlRequest,
   LiveProcessorControlResult,
 } from "~/lib/live-processor-control"
+import {
+  isPortableStretchClip,
+  preparePortableStretchAssets,
+  type PortablePreparedStretchAsset,
+} from "@daw-browser/audio-engine/portable-stretch-preparation"
+import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
 
 type PortableStartResult = "started" | "unavailable"
 type PortableScheduleRange = Extract<PreparedPortableSession, { supported: true }>["scheduleRange"]
@@ -80,33 +94,96 @@ const planarPcm = (buffer: AudioBuffer): PlanarPcm => ({
   planes: Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel)),
 })
 
-const assetRegistry = (snapshot: LivePlaybackSnapshot, generation: number): PortableAssetRegistryInput => ({
-  projectGeneration: generation,
-  assets: snapshot.assets.flatMap((asset, slot) => {
-    const buffer = asset.buffer
-    if (!buffer) return []
-    return [{
-      projectAssetId: asset.assetId,
-      portableAssetId: asset.assetId,
-      projectGeneration: generation,
-      handle: { slot, generation },
-      decoded: {
-        sampleRateHz: buffer.sampleRate,
-        channelCount: buffer.numberOfChannels,
-        frameCount: buffer.length,
-      },
-    }]
+const instrumentAssetKeys = (snapshot: LivePlaybackSnapshot) => new Set(
+  Object.values(snapshot.mixer.fx.trackFx ?? {}).flatMap((entry) => {
+    if (entry.instrument?.kind === 'sampler') {
+      return entry.instrument.params.zones.map((zone) => zone.sample.assetKey)
+    }
+    if (entry.instrument?.kind === 'drum-rack') {
+      return entry.instrument.params.pads.flatMap((pad) => pad.sample ? [pad.sample.assetKey] : [])
+    }
+    if (entry.instrument?.kind === 'granular' && entry.instrument.params.zone) {
+      return [entry.instrument.params.zone.sample.assetKey]
+    }
+    return []
   }),
+)
+
+const isInstalledSnapshotAsset = (
+  snapshot: LivePlaybackSnapshot,
+  assetId: string,
+  instrumentKeys: ReadonlySet<string>,
+) => {
+  const usedByStretch = snapshot.tracks.some((track) => track.clips.some((clip) => (
+    clip.sourceAssetKey === assetId
+    && clip.audioWarp?.enabled === true
+    && clip.audioWarp.mode === 'stretch'
+  )))
+  const usedByInstalledSource = snapshot.tracks.some((track) => track.clips.some((clip) => (
+    clip.sourceAssetKey === assetId
+    && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
+  )))
+  return !usedByStretch || usedByInstalledSource || instrumentKeys.has(assetId)
+}
+
+const assetRegistry = (
+  snapshot: LivePlaybackSnapshot,
+  generation: number,
+  preparedStretchAssets: readonly PortablePreparedStretchAsset[] = [],
+): PortableAssetRegistryInput => ({
+  projectGeneration: generation,
+  assets: [
+    ...(() => {
+      const instrumentKeys = instrumentAssetKeys(snapshot)
+      return snapshot.assets.flatMap((asset) => {
+        const buffer = asset.buffer
+        if (!buffer || !isInstalledSnapshotAsset(snapshot, asset.assetId, instrumentKeys)) return []
+        return [{
+          projectAssetId: asset.assetId,
+          portableAssetId: asset.assetId,
+          projectGeneration: generation,
+          handle: { slot: 0, generation },
+          decoded: {
+            sampleRateHz: buffer.sampleRate,
+            channelCount: buffer.numberOfChannels,
+            frameCount: buffer.length,
+          },
+        }]
+      }).map((entry, slot) => ({ ...entry, handle: { ...entry.handle, slot } }))
+    })(),
+    ...preparedStretchAssets.map((prepared, slot) => ({
+      projectAssetId: prepared.projectAssetId,
+      portableAssetId: prepared.portableAssetId,
+      projectGeneration: generation,
+      handle: { slot: installedSnapshotAssetCount(snapshot) + slot, generation },
+      decoded: {
+        sampleRateHz: prepared.asset.sampleRateHz,
+        channelCount: prepared.asset.channelCount,
+        frameCount: prepared.asset.frameCount,
+      },
+    })),
+  ],
 })
+
+const installedSnapshotAssetCount = (snapshot: LivePlaybackSnapshot) => {
+  const instrumentKeys = instrumentAssetKeys(snapshot)
+  return snapshot.assets.reduce((count, asset) => {
+    if (!asset.buffer) return count
+    return count + (isInstalledSnapshotAsset(snapshot, asset.assetId, instrumentKeys) ? 1 : 0)
+  }, 0)
+}
 
 const preparedSession = (
   snapshot: LivePlaybackSnapshot,
   sampleRateHz: number,
   epoch: number,
+  projectGeneration: number,
   horizonSec: number,
   sourceFirstSequence = 1,
+  preparedStretchAssets: readonly PortablePreparedStretchAsset[] = [],
 ): PreparedPortableSession => compilePreparedPortableLiveSession(snapshot, {
-  assetRegistry: assetRegistry(snapshot, epoch),
+  assetRegistry: assetRegistry(snapshot, projectGeneration, preparedStretchAssets),
+  preparedStretchAssets: new Map(preparedStretchAssets.map((asset) => [asset.clipId, asset])),
   sampleRateHz,
   transportEpoch: epoch,
   timeOrigin: {
@@ -146,6 +223,8 @@ export const createPortableBrowserPlaybackController = (input: {
   getAudioContext: () => AudioContext | null
   scheduleHorizonSec?: number
   getProjectGeneration?: () => number
+  resolveSource?: AudioPcmSourceResolver
+  createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
   onGraphContinuity?: (message: Extract<PortableWasmStatusMessage, { type: "graph-continuity" }>) => void
   backend?: PortableBackend
@@ -154,6 +233,8 @@ export const createPortableBrowserPlaybackController = (input: {
 }) => {
   const backend = input.backend ?? new WasmAudioWorkletBackend()
   const select = input.select ?? ((project) => selectPortableWasmAudioWorkletBackend(undefined, project))
+  const safeProjectGeneration = (generation: number) =>
+    Number.isSafeInteger(generation) && generation > 0 ? generation : 1
   let active: PortableSession | undefined
   let activeProjectGeneration: number | undefined
   let activeTransport: LivePlaybackTransport | undefined
@@ -172,21 +253,28 @@ export const createPortableBrowserPlaybackController = (input: {
   let failedRefreshEndFrame: number | undefined
   let activeRevision: number | undefined
   let activeGraph: AudioCoreGraphSnapshot | undefined
+  let activePreparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
   let nextLiveProcessorSequence = 0
   let nextRecordingSessionId = 1
   let unsubscribeFault: (() => void) | undefined
+  let stretchPreparationAbortController: AbortController | undefined
 
-  const invalidateActiveSession = () => {
-    unsubscribeFault?.()
-    unsubscribeFault = undefined
-    const session = active
+  const clearActiveSessionState = () => {
     active = undefined
     activeProjectGeneration = undefined
     activeTransport = undefined
     activeScheduleRange = undefined
     activeRevision = undefined
     activeGraph = undefined
+    activePreparedStretchAssets = []
     playing = false
+  }
+
+  const invalidateActiveSession = () => {
+    unsubscribeFault?.()
+    unsubscribeFault = undefined
+    const session = active
+    clearActiveSessionState()
     session?.dispose()
   }
 
@@ -219,6 +307,8 @@ export const createPortableBrowserPlaybackController = (input: {
     pendingStart = undefined
     pendingStartMode = undefined
     refreshPromise = undefined
+    stretchPreparationAbortController?.abort()
+    stretchPreparationAbortController = undefined
     const recordingSession = recording
     if (recordingSession) failRecording(recordingSession, new Error("Portable recording stopped with playback."))
     invalidateActiveSession()
@@ -233,6 +323,7 @@ export const createPortableBrowserPlaybackController = (input: {
     requestedFrame: number
     unsubscribeFault: () => void
     sessionFault: PortableSessionFault
+    preparedStretchAssets: readonly PortablePreparedStretchAsset[]
   }
 
   const prepareRuntime = async (
@@ -256,12 +347,47 @@ export const createPortableBrowserPlaybackController = (input: {
       const compilation = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
       if (!compilation.supported || compilation.snapshot.transport.loopEnabled) return undefined
+      const preparationAbortController = new AbortController()
+      stretchPreparationAbortController = preparationAbortController
+      let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
+      try {
+        if (compilation.snapshot.tracks.some((track) => track.clips.some(isPortableStretchClip))) {
+          const preparation = await preparePortableStretchAssets({
+            tracks: compilation.snapshot.tracks,
+            projectBpm: compilation.snapshot.bpm,
+            projectGeneration: safeProjectGeneration(projectGeneration),
+            createBuffer: input.createBuffer ?? ((channels, frames, sampleRate) => new AudioBuffer({
+              numberOfChannels: channels,
+              length: frames,
+              sampleRate,
+            })),
+            resolveSource: input.resolveSource,
+            maximumAssetCount: portableWasmMaxAssets,
+            existingAssetCount: installedSnapshotAssetCount(compilation.snapshot),
+            maximumFrameCount: nativeAudioHostMaximumAssetFramesForChannels,
+            maximumPreparationBytes: nativeAudioHostMaximumStretchPreparationBytes,
+            signal: preparationAbortController.signal,
+          })
+          if (!preparation.supported) {
+            input.reportFault?.(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(" "))
+            return undefined
+          }
+          preparedStretchAssets = preparation.assets
+        }
+      } finally {
+        if (stretchPreparationAbortController === preparationAbortController) {
+          stretchPreparationAbortController = undefined
+        }
+      }
+      if (cancelled()) return undefined
       const prepared = preparedSession(
         compilation.snapshot,
         context.sampleRate,
         nextEpoch,
+        safeProjectGeneration(projectGeneration),
         input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC,
         sourceFirstSequence,
+        preparedStretchAssets,
       )
       if (!prepared.supported) return undefined
       const selection = await select(prepared.qualification)
@@ -277,20 +403,17 @@ export const createPortableBrowserPlaybackController = (input: {
         const recordingSession = recording
         if (recordingSession) failRecording(recordingSession, error)
         input.reportFault?.(error.message)
-        active = undefined
-        activeProjectGeneration = undefined
-        activeTransport = undefined
-        activeScheduleRange = undefined
-        playing = false
         unsubscribeFault = undefined
+        clearActiveSessionState()
       })
       await playbackSession.prepareGraph(prepared.graph)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
       for (const asset of prepared.graph.assets) {
         const source = compilation.snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
-        if (!source) throw new Error(`Portable audio asset "${asset.assetId}" is unavailable.`)
-        if (!source.buffer) throw new Error(`Portable playback asset "${source.assetId}" is not hydrated.`)
-        const result = await playbackSession.registerAsset(asset, planarPcm(source.buffer), nextEpoch)
+        const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
+        const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
+        if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
+        const result = await playbackSession.registerAsset(asset, pcm, nextEpoch)
         if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
         if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
       }
@@ -333,6 +456,7 @@ export const createPortableBrowserPlaybackController = (input: {
         requestedFrame,
         unsubscribeFault: unsubscribeSessionFault,
         sessionFault,
+        preparedStretchAssets,
       }
     } catch (error) {
       unsubscribeSessionFault?.()
@@ -351,6 +475,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activeScheduleRange = runtime.prepared.scheduleRange
     activeRevision = runtime.prepared.graph.revision
     activeGraph = runtime.prepared.graph
+    activePreparedStretchAssets = runtime.preparedStretchAssets
     playing = runTransport
     epoch = runtime.epoch
     positionFrame = runTransport ? runtime.requestedFrame : runtime.prepared.schedule.timeOrigin.frame
@@ -478,8 +603,10 @@ export const createPortableBrowserPlaybackController = (input: {
           compilation.snapshot,
           context.sampleRate,
           nextEpoch,
+          safeProjectGeneration(projectGeneration),
           horizonSec,
           activeSourceSequence + 1,
+          activePreparedStretchAssets,
         )
         if (
           !prepared.supported
@@ -602,13 +729,7 @@ export const createPortableBrowserPlaybackController = (input: {
       }
       previousUnsubscribeFault?.()
       unsubscribeFault = undefined
-      active = undefined
-      activeProjectGeneration = undefined
-      activeTransport = undefined
-      activeScheduleRange = undefined
-      activeRevision = undefined
-      activeGraph = undefined
-      playing = false
+      clearActiveSessionState()
       try {
         previousSession.dispose()
       } catch (error) {

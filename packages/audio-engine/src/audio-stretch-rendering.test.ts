@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { renderStretchedAudio } from './audio-stretch-rendering'
+import { renderStretchedAudioFromSource } from './audio-stretch-rendering'
+import { createAudioPcmSourceDescriptor } from './media-pages'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 class TestAudioBuffer implements AudioBuffer {
@@ -50,7 +51,7 @@ const createSourceBuffer = (frames: number, sampleRate: number) => {
 }
 
 describe('renderStretchedAudio marker warp rendering', () => {
-  test('uses canonical marker-warp timeline segments for rendered duration', () => {
+  test('uses canonical marker-warp timeline segments for rendered duration', async () => {
     const sampleRate = 1_000
     const sourceBuffer = createSourceBuffer(sampleRate * 4, sampleRate)
     const clip: Clip<AudioBuffer> = {
@@ -95,7 +96,20 @@ describe('renderStretchedAudio marker warp rendering', () => {
       (total, segment) => total + Math.max(1, Math.round((segment.timelineEndSec - segment.timelineStartSec) * sampleRate)),
       0,
     )
-    const rendered = renderStretchedAudio(clip, projectBpm, createBuffer)
+    const source = createAudioPcmSourceDescriptor({
+      identity: 'marker-source',
+      durationSec: sourceBuffer.duration,
+      frameCount: sourceBuffer.length,
+      sampleRate: sourceBuffer.sampleRate,
+      channelCount: sourceBuffer.numberOfChannels,
+      source: sourceBuffer,
+    })
+    const rendered = await renderStretchedAudioFromSource({
+      clip,
+      source,
+      projectBpm,
+      createBuffer,
+    })
 
     expect(rendered.buffer.length).toBe(expectedFrameCount)
     expect(rendered.timelineStartSec).toBe(map.timelineStartSec)

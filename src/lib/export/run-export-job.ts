@@ -42,10 +42,14 @@ import { NativeOfflineRenderError, type NativeOfflinePcmRenderer } from '~/lib/e
 import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import {
+  nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumInstalledAssets,
   nativeAudioHostMaximumStretchPreparationBytes,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { preparePortableStretchAssets, isPortableStretchClip, type PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
+import { countLiveNativeInstalledAssetKeys } from '@daw-browser/audio-engine/live-native-projection'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
@@ -98,6 +102,7 @@ type TimelineExportRequest = {
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   sidechainRoutes: ExternalSidechainRoute[]
   loadCapturedClipBuffer: (clip: RuntimeClip, signal: AbortSignal) => Promise<void>
+  resolveAudioSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
   signal: AbortSignal
   onProgress?: (progress: ExportProgress) => void
   outputTargets: ExportOutputTargetFactory
@@ -584,7 +589,7 @@ const createEncodingProgressReporter = (
   }
 }
 
-type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'loadCapturedClipBuffer' | 'signal'> & {
+type ExportTrackSnapshotInput = Pick<TimelineExportRequest, 'loadCapturedClipBuffer' | 'resolveAudioSource' | 'signal'> & {
   tracks: RuntimeTrack[]
   range: ExportRange
 }
@@ -616,7 +621,8 @@ async function ensureBuffersForRange(input: ExportTrackSnapshotInput) {
   const jobs: (() => Promise<void>)[] = []
   for (const track of input.tracks) {
     for (const clip of track.clips) {
-      if (clip.midi || !intersects(clip) || clip.buffer) continue
+      if (clip.midi || !intersects(clip) || clip.buffer
+        || input.resolveAudioSource && isPortableStretchClip(clip)) continue
       jobs.push(() => input.loadCapturedClipBuffer(clip, input.signal))
     }
   }
@@ -1019,12 +1025,15 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         projectGeneration: input.projectGeneration,
         requiredSampleRateHz: input.render.sampleRate,
         maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
+        existingAssetCount: countLiveNativeInstalledAssetKeys(nativeTracks, fx),
+        maximumFrameCount: nativeAudioHostMaximumAssetFramesForChannels,
         maximumPreparationBytes: nativeAudioHostMaximumStretchPreparationBytes,
         createBuffer: input.createBuffer ?? ((channels, frames, sampleRate) => new AudioBuffer({
           numberOfChannels: channels,
           length: frames,
           sampleRate,
         })),
+        resolveSource: input.resolveAudioSource,
         signal: input.signal,
       })
       throwIfExportAborted(input.signal)
@@ -1185,6 +1194,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         fx,
         automationEnvelopes,
         sidechainRoutes: input.sidechainRoutes,
+        resolveAudioSource: input.resolveAudioSource,
         signal: input.signal,
       })
     }
@@ -1394,6 +1404,7 @@ export async function runStemExport(input: StemExportRequest): Promise<ExportOut
       fx,
       automationEnvelopes,
       sidechainRoutes: input.sidechainRoutes,
+      resolveAudioSource: input.resolveAudioSource,
       signal: input.signal,
     })
     for (const track of stemTracks) {

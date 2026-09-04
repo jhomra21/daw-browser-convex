@@ -73,6 +73,40 @@ export const liveNativeCapabilityMatrix = {
   externalPlugins: false,
 } satisfies LiveNativeCapabilityMatrix
 
+export const countLiveNativeInstalledAssetKeys = (
+  tracks: readonly Track<AudioBuffer | null>[],
+  fx?: ExportFx,
+) => {
+  const keys = new Set<string>()
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      if (!clip.midi
+        && clip.sourceAssetKey
+        && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
+        keys.add(clip.sourceAssetKey)
+      }
+    }
+  }
+  for (const entry of Object.values(fx?.trackFx ?? {})) {
+    if (entry.instrument?.kind === 'sampler') {
+      for (const zone of entry.instrument.params.zones) {
+        if (entry.samplerBuffers?.has(zone.id)) keys.add(zone.sample.assetKey)
+      }
+    }
+    if (entry.instrument?.kind === 'drum-rack') {
+      for (const pad of entry.instrument.params.pads) {
+        if (pad.sample && entry.drumRackBuffers?.has(pad.id)) keys.add(pad.sample.assetKey)
+      }
+    }
+    if (entry.instrument?.kind === 'granular'
+      && entry.instrument.params.zone
+      && entry.granularBuffer) {
+      keys.add(entry.instrument.params.zone.sample.assetKey)
+    }
+  }
+  return keys.size
+}
+
 const nativeProcessorIsEnabled = (instance: AudioEffectRuntimeInstance) => {
   if (instance.kind === 'delay') return normalizeDelayParams(instance.params).enabled
   if (instance.kind === 'reverb') return normalizeReverbParams(instance.params).enabled
@@ -253,17 +287,24 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
   }
   const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset>()
   for (const prepared of input.preparedStretchAssets ?? []) {
-    const sourceKey = prepared.sourceAssetKey ?? prepared.portableAssetId
     preparedStretchAssets.set(prepared.clipId, prepared)
-    addAsset(sourceKey, {
-      durationSec: prepared.sourceDurationSec,
-      sampleRate: prepared.asset.sampleRateHz,
-      channelCount: prepared.asset.channelCount,
-    }, undefined, false)
+    const sourceKey = prepared.portableAssetId
+    if (sourceAssets.has(sourceKey)) continue
     sourceAssets.set(sourceKey, {
       asset: prepared.asset,
       pcm: prepared.pcm,
       sourceAssetKey: sourceKey,
+    })
+    registryAssets.push({
+      projectAssetId: sourceKey,
+      portableAssetId: prepared.portableAssetId,
+      projectGeneration: input.projectGeneration ?? 1,
+      handle: { slot: registryAssets.length, generation: 1 },
+      decoded: {
+        sampleRateHz: prepared.asset.sampleRateHz,
+        channelCount: prepared.asset.channelCount,
+        frameCount: prepared.asset.frameCount,
+      },
     })
   }
   if (reasons.length > 0) return { supported: false, reasons }

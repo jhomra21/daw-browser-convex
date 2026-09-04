@@ -830,7 +830,7 @@ test("rejects the 65th native asset after final projection", async () => {
   })
 
   expect(await controller.start(snapshotInput.transport)).toBe("unavailable")
-  expect(createBufferCalls).toBe(1)
+  expect(createBufferCalls).toBe(0)
   expect(fixture.calls).toEqual([])
   expect(faults[0]).toContain("installed audio asset capacity")
 })

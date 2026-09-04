@@ -1,9 +1,11 @@
 import {
+  countLiveNativeInstalledAssetKeys,
   compileLiveNativeProjection,
 } from "@daw-browser/audio-engine/live-native-projection"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
   nativeAudioHostMaximumAssetFrames,
+  nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumInstalledAssets,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
@@ -47,6 +49,7 @@ import type {
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { DesktopBridge } from "~/types/desktop-bridge"
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
   LiveProcessorControl,
   LiveProcessorControlRequest,
@@ -292,6 +295,7 @@ export const createNativePlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   getProjectId?: () => string
   getProjectGeneration?: () => number
+  resolveSource?: AudioPcmSourceResolver
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
   reportUnavailable?: boolean
@@ -978,9 +982,17 @@ export const createNativePlaybackController = (input: {
             projectBpm: snapshot.bpm,
             projectGeneration: safePreparedProjectGeneration(projectGeneration),
             requiredSampleRateHz: deviceReply.device.nominalSampleRateHz,
-            maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
+            maximumAssetCount: Math.max(
+              0,
+              nativeAudioHostMaximumInstalledAssets - countLiveNativeInstalledAssetKeys(
+                snapshot.tracks,
+                snapshot.mixer.fx,
+              ),
+            ),
+            maximumFrameCount: nativeAudioHostMaximumAssetFramesForChannels,
             maximumPreparationBytes: nativeStretchPreparationMaximumBytes,
             createBuffer,
+            resolveSource: input.resolveSource,
             signal: preparationAbortController.signal,
           })
           if (cancelled()) return "unavailable"

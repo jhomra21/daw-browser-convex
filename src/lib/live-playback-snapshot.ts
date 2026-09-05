@@ -2,9 +2,16 @@ import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runt
 import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
-import type { AutomationEnvelope,TrackInstrumentParams } from "@daw-browser/shared"
+import type { AutomationEnvelope, TrackInstrumentParams } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot"
+import type { AudioSourceMetadata } from "~/lib/audio-source"
+import {
+  sampledInstrumentRegion,
+  sampledInstrumentRegionIdentity,
+  validateSampledInstrumentBuffer,
+} from "@daw-browser/audio-engine/sampled-instrument-region"
 
 export type LivePlaybackTransport = {
   state: "playing" | "paused" | "stopped"
@@ -28,7 +35,10 @@ export type LivePlaybackTimeSignature = {
 
 export type LivePlaybackAsset = {
   assetId: string
-  buffer: AudioBuffer
+  buffer?: AudioBuffer | null
+  source?: AudioSourceMetadata
+  sourceKind?: "upload" | "url" | "recording"
+  sampleUrl?: string
 }
 
 export type LivePlaybackSnapshot = {
@@ -64,6 +74,17 @@ export type LivePlaybackSnapshotInput = {
   sidechainRoutes: readonly ExternalSidechainRoute[]
 }
 
+type PlaybackSourceMetadata = {
+  source: AudioSourceMetadata
+  sourceKind?: "upload" | "url" | "recording"
+  sampleUrl?: string
+}
+
+const sameAudioMetadata = (left: AudioSourceMetadata, right: AudioSourceMetadata) =>
+  Math.round(left.durationSec * left.sampleRate) === Math.round(right.durationSec * right.sampleRate)
+  && left.sampleRate === right.sampleRate
+  && left.channelCount === right.channelCount
+
 const addInstrumentAssets = (
   assetsById: Map<string, AudioBuffer>,
   fx: ExportFx["trackFx"],
@@ -83,7 +104,7 @@ const addInstrumentAssets = (
       for (const zone of instrument.params.zones) {
         const buffer = entry.samplerBuffers?.get(zone.id)
         if (!buffer) throw new Error(`Sampler zone "${zone.id}" is missing its authoritative audio buffer.`)
-        add(zone.sample.assetKey, buffer)
+        add(zone.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === "drum-rack") {
@@ -91,7 +112,7 @@ const addInstrumentAssets = (
         if (!pad.sample) continue
         const buffer = entry.drumRackBuffers?.get(pad.id)
         if (!buffer) throw new Error(`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`)
-        add(pad.sample.assetKey, buffer)
+        add(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === "granular" && instrument.params.zone) {
@@ -102,6 +123,52 @@ const addInstrumentAssets = (
         throw new Error(`Audio asset "${instrument.params.zone.sample.assetKey}" resolves inconsistently.`)
       }
       add(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
+    }
+  }
+}
+
+const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
+  for (const entry of Object.values(fx ?? {})) {
+    const instrument = entry.instrument
+    if (instrument?.kind === "sampler") {
+      for (const zone of instrument.params.zones) {
+        const buffer = entry.samplerBuffers?.get(zone.id)
+        if (!buffer) continue
+        const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+        validateSampledInstrumentBuffer(
+          buffer,
+          zone.sample.source,
+          region,
+          sampledInstrumentRegionIdentity(zone.sample, region),
+        )
+      }
+    }
+    if (instrument?.kind === "drum-rack") {
+      for (const pad of instrument.params.pads) {
+        if (!pad.sample) continue
+        const buffer = entry.drumRackBuffers?.get(pad.id)
+        if (!buffer) continue
+        const region = sampledInstrumentRegion(pad.sample.source, pad.startSec, pad.endSec ?? pad.sample.source.durationSec)
+        validateSampledInstrumentBuffer(
+          buffer,
+          pad.sample.source,
+          region,
+          sampledInstrumentRegionIdentity(pad.sample, region),
+        )
+      }
+    }
+    if (instrument?.kind === "granular" && instrument.params.zone && entry.granularBuffer) {
+      const zone = instrument.params.zone
+      const region = sampledInstrumentRegion(zone.sample.source, zone.startSec, zone.endSec ?? zone.sample.source.durationSec)
+      if (entry.granularBuffer.assetKey !== sampledInstrumentRegionIdentity(zone.sample, region)) {
+        throw new Error(`Audio asset "${zone.sample.assetKey}" resolves inconsistently.`)
+      }
+      validateSampledInstrumentBuffer(
+        entry.granularBuffer,
+        zone.sample.source,
+        region,
+        sampledInstrumentRegionIdentity(zone.sample, region),
+      )
     }
   }
 }
@@ -129,8 +196,8 @@ const snapshotTracks = (tracks: readonly RuntimeTrack[]): RuntimeTrack[] => trac
 type LiveTrackFxMap = NonNullable<ExportFx["trackFx"]>
 type LiveTrackFxEntry = LiveTrackFxMap[string]
 
-const cloneAudioBufferMap = (buffers: ReadonlyMap<string, AudioBuffer>): Map<string, AudioBuffer> => {
-  const clone = new Map<string, AudioBuffer>()
+const cloneAudioBufferMap = <Value,>(buffers: ReadonlyMap<string, Value>): Map<string, Value> => {
+  const clone = new Map<string, Value>()
   for (const [key, buffer] of buffers) clone.set(key, buffer)
   return clone
 }
@@ -142,9 +209,11 @@ const cloneLiveTrackFxEntry = (entry: LiveTrackFxEntry): LiveTrackFxEntry => {
     drumRackBuffers: drumRackBuffers === undefined ? undefined : cloneAudioBufferMap(drumRackBuffers),
     samplerBuffers: samplerBuffers === undefined ? undefined : cloneAudioBufferMap(samplerBuffers),
     granularBuffer: granularBuffer === undefined ? undefined : {
-        assetKey: granularBuffer.assetKey,
-        buffer: granularBuffer.buffer,
-      },
+      assetKey: granularBuffer.assetKey,
+      buffer: granularBuffer.buffer,
+      sourceStartFrame: granularBuffer.sourceStartFrame,
+      sourceIdentity: granularBuffer.sourceIdentity,
+    },
   }
 }
 
@@ -153,8 +222,8 @@ const cloneLiveFx = (fx: ExportFx): ExportFx => {
   return {
     ...structuredClone(serializableFx),
     trackFx: trackFx === undefined ? undefined : Object.fromEntries(
-        Object.entries(trackFx).map(([trackId, entry]) => [trackId, cloneLiveTrackFxEntry(entry)]),
-      ),
+      Object.entries(trackFx).map(([trackId, entry]) => [trackId, cloneLiveTrackFxEntry(entry)]),
+    ),
   }
 }
 
@@ -182,6 +251,71 @@ export const compileLivePlaybackSnapshot = (
   const trackIds = new Set<string>()
   const clipIds = new Set<string>()
   const assetsById = new Map<string, AudioBuffer>()
+  const sourceMetadataById = new Map<string, PlaybackSourceMetadata>()
+  const addSourceMetadata = (
+    assetId: string,
+    clip: typeof input.tracks[number]["clips"][number],
+    buffer: AudioBuffer | null | undefined,
+  ) => {
+    const resolvedSource = buffer
+      ? {
+        durationSec: buffer.duration,
+        sampleRate: buffer.sampleRate,
+        channelCount: buffer.numberOfChannels,
+      }
+      : clip.sourceDurationSec !== undefined
+        && clip.sourceSampleRate !== undefined
+        && clip.sourceChannelCount !== undefined
+        ? {
+          durationSec: clip.sourceDurationSec,
+          sampleRate: clip.sourceSampleRate,
+          channelCount: clip.sourceChannelCount,
+        }
+        : undefined
+    if (!resolvedSource) {
+      if (clip.audioWarp?.enabled === true
+        && clip.audioWarp.mode === 'stretch'
+        && clip.sourceDurationSec !== undefined
+        && clip.sourceSampleRate !== undefined
+        && clip.sourceChannelCount !== undefined) {
+        sourceMetadataById.set(assetId, {
+          source: {
+            durationSec: clip.sourceDurationSec,
+            sampleRate: clip.sourceSampleRate,
+            channelCount: clip.sourceChannelCount,
+          },
+          sourceKind: clip.sourceKind,
+          sampleUrl: clip.sampleUrl,
+        })
+        return
+      }
+      reasons.push(`Audio clip "${clip.id}" is not hydrated.`)
+      return
+    }
+    if (buffer && (
+      clip.sourceDurationSec !== undefined && Math.round(clip.sourceDurationSec * buffer.sampleRate) !== buffer.length
+      || clip.sourceSampleRate !== undefined && clip.sourceSampleRate !== buffer.sampleRate
+      || clip.sourceChannelCount !== undefined && clip.sourceChannelCount !== buffer.numberOfChannels
+    )) {
+      reasons.push(`Audio asset "${assetId}" resolves inconsistently.`)
+      return
+    }
+    const previous = sourceMetadataById.get(assetId)
+    if (previous && (
+      !sameAudioMetadata(previous.source, resolvedSource)
+      || previous.sourceKind !== undefined && clip.sourceKind !== undefined && previous.sourceKind !== clip.sourceKind
+      || previous.sampleUrl !== undefined && clip.sampleUrl !== undefined && previous.sampleUrl !== clip.sampleUrl
+    )) {
+      reasons.push(`Audio asset "${assetId}" resolves inconsistently.`)
+      return
+    }
+    const metadata: PlaybackSourceMetadata = {
+      source: previous?.source ?? resolvedSource,
+      sourceKind: previous?.sourceKind ?? clip.sourceKind,
+      sampleUrl: previous?.sampleUrl ?? clip.sampleUrl,
+    }
+    sourceMetadataById.set(assetId, metadata)
+  }
   for (const track of input.tracks) {
     if (trackIds.has(track.id)) reasons.push(`Duplicate playback track: ${track.id}`)
     trackIds.add(track.id)
@@ -193,10 +327,8 @@ export const compileLivePlaybackSnapshot = (
         reasons.push(`Audio clip "${clip.id}" has no source asset.`)
         continue
       }
-      if (!clip.buffer) {
-        reasons.push(`Audio clip "${clip.id}" is not hydrated.`)
-        continue
-      }
+      addSourceMetadata(clip.sourceAssetKey, clip, clip.buffer)
+      if (!clip.buffer) continue
       const previous = assetsById.get(clip.sourceAssetKey)
       if (previous && (
         previous.length !== clip.buffer.length
@@ -209,11 +341,29 @@ export const compileLivePlaybackSnapshot = (
   if (reasons.length > 0) return invalid(reasons)
 
   const tracks = snapshotTracks(input.tracks)
-  const fx = cloneLiveFx(input.renderState.fx)
+  try {
+    validateInstrumentBuffers(input.renderState.fx.trackFx)
+  } catch (error) {
+    return invalid([error instanceof Error ? error.message : "Instrument audio assets resolve inconsistently."])
+  }
+  const fx = localizeInstrumentFx(cloneLiveFx(input.renderState.fx)) ?? {
+    masterFxInstances: [],
+    trackFx: {},
+  }
   try {
     addInstrumentAssets(assetsById, fx.trackFx)
   } catch (error) {
     return invalid([error instanceof Error ? error.message : "Instrument audio assets resolve inconsistently."])
+  }
+  for (const [assetId, buffer] of assetsById) {
+    if (sourceMetadataById.has(assetId)) continue
+    sourceMetadataById.set(assetId, {
+      source: {
+        durationSec: buffer.duration,
+        sampleRate: buffer.sampleRate,
+        channelCount: buffer.numberOfChannels,
+      },
+    })
   }
   const sidechainRoutes = structuredClone(input.sidechainRoutes)
   return {
@@ -224,7 +374,10 @@ export const compileLivePlaybackSnapshot = (
       timeSignature: structuredClone(timeSignature),
       transport: structuredClone(input.transport),
       tracks,
-      assets: [...assetsById.entries()].map(([assetId, buffer]) => ({ assetId, buffer })),
+      assets: [...sourceMetadataById.entries()].map(([assetId, metadata]) => {
+        const buffer = assetsById.get(assetId)
+        return buffer ? { assetId, buffer } : { assetId, ...metadata }
+      }),
       mixer: {
         graph: resolveLiveMixerGraph(tracks, fx.trackFx ?? {}, {
           masterFxInstances: fx.masterFxInstances,

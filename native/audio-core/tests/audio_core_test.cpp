@@ -2298,6 +2298,54 @@ void test_stale_asset_handles() {
   daw_audio_core_destroy(core);
 }
 
+void test_mapped_asset_retains_wide_frame_ranges() {
+  daw_audio_core_handle core = create_core(8, 1, 1);
+  publish(core, 1);
+  const float sample = 0.25F;
+  const float *planes[]{&sample};
+  const std::uint64_t frame_count = static_cast<std::uint64_t>(UINT32_MAX) + 17;
+  const daw_audio_mapped_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .revision = 9,
+    .byte_length = frame_count * sizeof(float),
+    .content_hash_prefix = 0,
+    .frame_count = frame_count,
+    .sample_rate_hz = 48000,
+    .channel_count = 1,
+    .planes = planes,
+  };
+  daw_audio_asset_handle asset = 0;
+  expect(daw_audio_core_create_mapped_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+  uint32_t revision = 0;
+  expect(daw_audio_core_get_asset_revision(core, asset, &revision), DAW_AUDIO_CORE_OK);
+  assert(revision == descriptor.revision);
+
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  const daw_audio_sample_source_event event{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .epoch = 1,
+    .sequence = 1,
+    .asset = asset,
+    .start_frame = 0,
+    .stop_frame = 1,
+    .source_offset_frame = static_cast<std::uint64_t>(UINT32_MAX) + 1,
+    .source_frame_count = 1,
+    .gain = 1.0F,
+    .fade_in_start_frame = 0,
+    .fade_in_end_frame = 0,
+    .fade_out_start_frame = 1,
+    .fade_out_end_frame = 1,
+  };
+  expect(daw_audio_core_schedule_sample_source(core, &event), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_ASSET_IN_USE);
+
+  const daw_audio_transport_state next_epoch{.epoch = 2, .running = 0, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &next_epoch), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_OK);
+  daw_audio_core_destroy(core);
+}
+
 void test_sample_source_scheduling() {
   daw_audio_core_handle core = create_core(8, 2, 2);
   publish(core, 1);
@@ -3788,6 +3836,7 @@ int main() {
   test_incompatible_continuity_prepare_does_not_consume_reset_state();
   test_variable_blocks_and_capacity();
   test_stale_asset_handles();
+  test_mapped_asset_retains_wide_frame_ranges();
   test_sample_source_scheduling();
   test_sample_source_curved_fades();
   test_sample_source_partition_invariance_and_mono();

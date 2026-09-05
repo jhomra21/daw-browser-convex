@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test"
 import {
-  nativeAudioHostMaximumInMemoryPcmBytes,
   nativeAudioHostMaximumAssetFramesForChannels,
+  nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
-  nativeOfflineRenderPcmBytes,
   nativeOfflineRenderPlanSchema,
 } from "./native-audio-host"
 
@@ -23,24 +22,14 @@ const plan = () => ({
   schedule: new Uint8Array([1]),
 })
 
-test("accepts offline PCM at the exact native in-memory boundary", () => {
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
-    / (2 * Float32Array.BYTES_PER_ELEMENT)
+test("accepts a logical offline render beyond the former in-memory boundary", () => {
+  const totalFrames = 512 * 1024 * 1024
+    / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const result = nativeOfflineRenderPlanSchema.safeParse({
     ...plan(),
     totalFrames,
   })
   expect(result.success).toBe(true)
-  expect(nativeOfflineRenderPcmBytes(totalFrames, 2)).toBe(nativeAudioHostMaximumInMemoryPcmBytes)
-})
-
-test("rejects offline PCM one frame beyond the native in-memory boundary", () => {
-  const result = nativeOfflineRenderPlanSchema.safeParse({
-    ...plan(),
-    totalFrames: nativeAudioHostMaximumInMemoryPcmBytes
-      / (2 * Float32Array.BYTES_PER_ELEMENT) + 1,
-  })
-  expect(result.success).toBe(false)
 })
 
 
@@ -57,6 +46,11 @@ test("uses payload-safe mono and stereo asset frame capacities", () => {
   expect(nativeAudioHostMaximumAssetFramesForChannels(2)).toBe(131_069)
   expect(nativeAudioHostMaximumAssetFramesForChannels(1) * 4 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
   expect(nativeAudioHostMaximumAssetFramesForChannels(2) * 8 + 24).toBe(nativeAudioHostMaximumPayloadBytes)
+})
+
+test("uses the mapped-page header and channel count for page capacity", () => {
+  expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(2)).toBe(131_070)
+  expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(64)).toBe(4_095)
 })
 
 test("rejects malformed PCM asset dimensions", () => {

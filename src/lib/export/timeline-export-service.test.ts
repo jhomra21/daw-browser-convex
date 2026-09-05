@@ -17,6 +17,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 
 import { createExportQueue } from "~/lib/export/export-queue"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
+import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
 import { createExportRenderStateSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import { createTimelineExportService, type TimelineExportInput } from "~/lib/export/timeline-export-service"
 import { createCapturedClipMediaLoader } from "~/hooks/useClipBuffers"
@@ -27,7 +28,6 @@ import { importLocalProject, LOCAL_PROJECT_SCHEMA_VERSION } from "~/lib/local-pr
 import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { externalProcessorSchema } from "@daw-browser/external-plugins"
-import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 
 const settings: TimelineExportInput = {
   range: { mode: "whole" },
@@ -91,6 +91,7 @@ class TestAudioBuffer implements AudioBuffer {
     return new Float32Array(this.length)
   }
 }
+const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 
 test("local export snapshot flushes pending writes and remains submission-consistent", async () => {
   const projectId = "project:export-snapshot"
@@ -434,7 +435,9 @@ test("uses one hydrated sampled render state for native planning and queued rend
     queue,
     getProjectGeneration: () => 1,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => buffer,
+    nativeOfflinePcmRenderer: async () => {
+      throw new Error("unreachable")
+    },
     runTimelineExport: async (input) => {
       queuedRenderState = input.renderStateSnapshot
       return { type: "success", outputs: [] }
@@ -471,7 +474,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
               [trackId]: {
                 ...existing,
                 instrument,
-                samplerBuffers: new Map([["zone-hydrated", buffer]]),
+                samplerBuffers: new Map([["zone-hydrated", sampled(buffer)]]),
               },
             },
           },
@@ -489,7 +492,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
   const prepared = await service.prepareTimelineExport(settings)
   const preparedBuffers = prepared.snapshot.renderStateSnapshot.fx.trackFx?.[trackId]?.samplerBuffers
   expect(hydrationCalls).toBe(1)
-  expect(preparedBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(preparedBuffers?.get("zone-hydrated")?.buffer).toBe(buffer)
   expect(nativeRenderState).toBe(prepared.snapshot.renderStateSnapshot)
 
   const submitted = service.submitPreparedTimelineExport(prepared, {
@@ -505,7 +508,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
   })
   expect((await submitted.completion).type).toBe("success")
   expect(queuedRenderState).toBe(prepared.snapshot.renderStateSnapshot)
-  expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")).toBe(buffer)
+  expect(queuedRenderState?.fx.trackFx?.[trackId]?.samplerBuffers?.get("zone-hydrated")?.buffer).toBe(buffer)
   expect(hydrationCalls).toBe(1)
   queue.dispose()
 })
@@ -602,16 +605,16 @@ test("native desktop export rejects unavailable mixdown and unsupported stems be
   queue.dispose()
 })
 
-test("native export preflight rejects oversized PCM before external state capture", async () => {
+test("native export admits oversized PCM before external state capture", async () => {
   const queue = createExportQueue(() => "native-memory-limit")
   let externalStateCaptureCalls = 0
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
+  const totalFrames = 8 * 1024 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const service = createTimelineExportService({
     queue,
     getProjectGeneration: () => 1,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("unreachable")
     },
     getTracks: () => [{
@@ -623,7 +626,7 @@ test("native export preflight rejects oversized PCM before external state captur
         name: "Clip",
         color: "#fff",
         startSec: 0,
-        duration: totalFrames,
+        duration: totalFrames / 96_000,
         midi: { wave: "sine", notes: [] },
       }],
     }],
@@ -644,10 +647,11 @@ test("native export preflight rejects oversized PCM before external state captur
 
   await expect(service.prepareTimelineExport({
     ...settings,
+    formats: ["mp3"],
     range: { mode: "custom", startSec: 0, endSec: (totalFrames + 0.5) / 96_000 },
     render: { ...settings.render, sampleRate: 96_000 },
-  })).rejects.toThrow("512 MiB in-memory PCM")
-  expect(externalStateCaptureCalls).toBe(0)
+  })).resolves.toBeDefined()
+  expect(externalStateCaptureCalls).toBe(1)
   queue.dispose()
 })
 
@@ -723,7 +727,9 @@ test("rejects a native snapshot if generation changes while capturing attachment
   const service = createTimelineExportService({
     queue,
     nativeRendererRequired: true,
-    nativeOfflineRenderer: async () => new TestAudioBuffer(),
+    nativeOfflinePcmRenderer: async () => {
+      throw new Error("unreachable")
+    },
     getProjectGeneration: () => generation,
     getTracks: () => [],
     getBpm: () => 120,

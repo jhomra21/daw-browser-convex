@@ -1,4 +1,5 @@
 import { analyzeLoudness, type LoudnessAnalysis } from './loudness-analyzer'
+import { predictLinkedTruePeakAtFrame } from './true-peak-kernel'
 
 export type WavEncodingSettings =
   | { codec: 'pcm-s16'; dither: 'none' | 'tpdf' }
@@ -172,43 +173,18 @@ const applyGain = (buffer: MutableAudioBuffer, gain: number, signal?: AbortSigna
   }
 }
 
-const LIMITER_OVERSAMPLING = 8
-const LIMITER_TAPS_PER_PHASE = 24
 const LIMITER_LOOKAHEAD_SEC = 0.005
 const LIMITER_RELEASE_SEC = 0.08
 
-const limiterSinc = (value: number) => value === 0 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value)
-const limiterCoefficients = Array.from({ length: LIMITER_OVERSAMPLING }, (_, phase) => {
-  const coefficients = new Float64Array(LIMITER_TAPS_PER_PHASE)
-  const center = LIMITER_TAPS_PER_PHASE / 2 - 1
-  let sum = 0
-  for (let tap = 0; tap < coefficients.length; tap += 1) {
-    const distance = tap - center - phase / LIMITER_OVERSAMPLING
-    const window = 0.42
-      - 0.5 * Math.cos(2 * Math.PI * tap / (LIMITER_TAPS_PER_PHASE - 1))
-      + 0.08 * Math.cos(4 * Math.PI * tap / (LIMITER_TAPS_PER_PHASE - 1))
-    coefficients[tap] = limiterSinc(distance) * window
-    sum += coefficients[tap]
-  }
-  for (let tap = 0; tap < coefficients.length; tap += 1) coefficients[tap] /= sum
-  return coefficients
-})
-
 const predictLinkedTruePeak = (buffer: MutableAudioBuffer, frame: number) => {
-  const center = LIMITER_TAPS_PER_PHASE / 2 - 1
-  let peak = 0
-  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-    const samples = buffer.getChannelData(channel)
-    for (const coefficients of limiterCoefficients) {
-      let value = 0
-      for (let tap = 0; tap < coefficients.length; tap += 1) {
-        const sourceFrame = frame + tap - center
-        if (sourceFrame >= 0 && sourceFrame < samples.length) value += samples[sourceFrame] * coefficients[tap]
-      }
-      peak = Math.max(peak, Math.abs(value))
-    }
-  }
-  return peak
+  return predictLinkedTruePeakAtFrame({
+    channelCount: buffer.numberOfChannels,
+    frame,
+    sampleAt: (channel, sourceFrame) => {
+      const samples = buffer.getChannelData(channel)
+      return sourceFrame >= 0 && sourceFrame < samples.length ? samples[sourceFrame] ?? 0 : 0
+    },
+  })
 }
 
 export const limitTruePeakInPlace = (buffer: MutableAudioBuffer, ceilingDbtp: number, signal?: AbortSignal) => {

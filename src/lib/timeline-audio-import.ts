@@ -1,6 +1,6 @@
 import { buildLocalClip, createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import { buildClipCreatePayload, isJsonString, isLocalId, isLocalProjectAssetKey, type ClipCreateSnapshot } from '@daw-browser/shared'
-import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind } from '~/lib/audio-source'
+import { createAudioAssetKey, getAudioSourceMetadata, type AudioSourceKind, type AudioSourceMetadata } from '~/lib/audio-source'
 import { getDefaultClipColor, trackColorForClip } from '~/lib/clip-color'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
@@ -79,7 +79,8 @@ type AudioSourceClipInput = {
 
 type UploadedFileClipInput = {
   file: File
-  decoded: AudioBuffer
+  decoded?: AudioBuffer
+  source?: AudioSourceMetadata
   track: Track
   startSec: number
   autoCreatedTrack?: Track
@@ -205,7 +206,8 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
   }
 
   const createUploadedFileClip = async (input: UploadedFileClipInput): Promise<AudioImportResult> => {
-    const sourceMetadata = getAudioSourceMetadata(input.decoded)
+    const sourceMetadata = input.source ?? (input.decoded ? getAudioSourceMetadata(input.decoded) : undefined)
+    if (!sourceMetadata) return { status: 'failed', message: 'Audio metadata is required before clip creation.' }
     const projectId = context.project.projectId()
     if (!projectId) return { status: 'skipped' }
 
@@ -222,7 +224,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         const message = error instanceof LocalAssetWriteError
           ? error.message
           : 'Audio could not be saved to local project storage.'
-        const guidance = `${message} Free browser storage or choose a smaller file, then retry the import.`
+        const guidance = `${message} Free project storage or choose another storage location, then retry the import.`
         context.onLocalSaveFailed?.(guidance)
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         return { status: 'local-save-failed', message: guidance }
@@ -237,6 +239,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           startSec: input.startSec,
           fileName: input.file.name,
           decoded: input.decoded,
+          durationSec: sourceMetadata.durationSec,
           source: sourceMetadata,
           sourceAssetKey: asset.id,
           sourceKind: 'upload',
@@ -275,6 +278,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         startSec: input.startSec,
         file: input.file,
         decoded: input.decoded,
+        durationSec: sourceMetadata.durationSec,
         source: sourceMetadata,
         sourceAssetKey,
         sourceKind: 'upload',

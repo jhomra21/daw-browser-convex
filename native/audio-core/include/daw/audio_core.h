@@ -908,6 +908,20 @@ typedef struct daw_audio_asset_descriptor {
   const float *const *planes;
 } daw_audio_asset_descriptor;
 
+/* File-backed assets use the same handle/lifetime rules as legacy assets but
+ * retain their full source length in 64-bit frame arithmetic. The caller
+ * owns the mapped storage and must keep all planes readable until release. */
+typedef struct daw_audio_mapped_asset_descriptor {
+  uint32_t abi_version;
+  uint32_t revision;
+  uint64_t byte_length;
+  uint64_t content_hash_prefix;
+  uint64_t frame_count;
+  uint32_t sample_rate_hz;
+  uint32_t channel_count;
+  const float *const *planes;
+} daw_audio_mapped_asset_descriptor;
+
 typedef struct daw_audio_transport_state {
   uint32_t epoch;
   uint32_t running;
@@ -1221,6 +1235,10 @@ daw_audio_core_result daw_audio_core_wasm_recording_capture_get_diagnostics(
 daw_audio_core_result daw_audio_core_create_asset(
   daw_audio_core_handle core,
   const daw_audio_asset_descriptor *descriptor,
+  daw_audio_asset_handle *out_asset);
+daw_audio_core_result daw_audio_core_create_mapped_asset(
+  daw_audio_core_handle core,
+  const daw_audio_mapped_asset_descriptor *descriptor,
   daw_audio_asset_handle *out_asset);
 daw_audio_core_result daw_audio_core_get_asset_revision(
   daw_audio_core_handle core,

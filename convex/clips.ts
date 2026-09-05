@@ -9,7 +9,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
-import { audioWarpEqual, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
+import { audioWarpEqual, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, sanitizeAudioSourceKind, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -498,9 +498,24 @@ export const setClipSourceRow = async (
 ) => {
   const clip = await getProjectClip(ctx, input.projectId, input.clipId)
   if (!clip || clip.midi) return { changed: false }
+  const asset = await findSampleRow(ctx, {
+    projectId: input.projectId,
+    assetKey: input.assetKey,
+  })
+  if (!asset) throw new Error('Audio clips require an authoritative project asset')
+  const sourceKind = sanitizeAudioSourceKind(asset.sourceKind)
+  if (sourceKind === undefined
+    || asset.duration === undefined
+    || asset.sampleRate === undefined
+    || asset.channelCount === undefined) {
+    throw new Error('Audio assets require authoritative duration, sample rate, and channel count')
+  }
   const source = buildClipAudioSourceFields({
-    assetKey: input.assetKey, sourceKind: input.sourceKind, durationSec: input.durationSec,
-    sampleRate: input.sampleRate, channelCount: input.channelCount,
+    assetKey: asset.assetKey,
+    sourceKind,
+    durationSec: asset.duration,
+    sampleRate: asset.sampleRate,
+    channelCount: asset.channelCount,
   })
   const sourceChanged = !(
     clip.sourceAssetKey === source.sourceAssetKey && clip.sourceKind === source.sourceKind
@@ -644,25 +659,34 @@ export const createOwnedClip = async (
   if (!track) return null
 
   const sourceMetadata = normalizeAudioSourceMetadataPatch(item)
-  if (
-    clipKind === 'audio'
-    && (
-      sourceMetadata.assetKey === undefined
-      || sourceMetadata.sourceKind === undefined
-      || sourceMetadata.durationSec === undefined
-      || sourceMetadata.sampleRate === undefined
-      || sourceMetadata.channelCount === undefined
-    )
-  ) {
-    throw new Error('Audio clips require complete source metadata')
+  if (clipKind === 'audio' && sourceMetadata.assetKey === undefined) {
+    throw new Error('Audio clips require an asset key')
   }
   const asset = clipKind === 'audio' && sourceMetadata.assetKey
     ? await findSampleRow(ctx, { projectId: item.projectId, assetKey: sourceMetadata.assetKey })
     : null
-  if (clipKind === 'audio' && sourceMetadata.assetKey) {
-    if (!asset) throw new Error('Audio clips require an authoritative project asset')
+  if (clipKind === 'audio' && sourceMetadata.assetKey && !asset) {
+    throw new Error('Audio clips require an authoritative project asset')
   }
-  const clipPatch = buildClipCreatePatch(item, sourceMetadata)
+  const canonicalMetadata = asset
+    ? {
+      assetKey: asset.assetKey,
+      sourceKind: sanitizeAudioSourceKind(asset.sourceKind),
+      durationSec: asset.duration,
+      sampleRate: asset.sampleRate,
+      channelCount: asset.channelCount,
+    }
+    : sourceMetadata
+  if (clipKind === 'audio' && (
+    canonicalMetadata.sourceKind === undefined
+    ||
+    canonicalMetadata.durationSec === undefined
+    || canonicalMetadata.sampleRate === undefined
+    || canonicalMetadata.channelCount === undefined
+  )) {
+    throw new Error('Audio assets require authoritative duration, sample rate, and channel count')
+  }
+  const clipPatch = buildClipCreatePatch(item, canonicalMetadata)
   if (asset) clipPatch.sampleUrl = `/api/samples/${encodeURIComponent(item.projectId)}/${encodeURIComponent(asset.assetKey)}`
   if (clipKind === 'midi' && clipPatch.midi) {
     return (await createMidiClipRow(ctx, {

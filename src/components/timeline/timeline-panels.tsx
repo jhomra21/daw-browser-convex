@@ -18,6 +18,8 @@ import type { TimelinePlaybackRebuildIntent } from '~/hooks/useTimelinePlayback'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import type { TimelineExportService } from '~/lib/export/timeline-export-service'
+import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
+import type { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
 
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
@@ -47,6 +49,8 @@ export type TimelinePanelsProps = {
     projectId?: string
     userId?: string
     audioEngine: AudioEngine
+    samplerBufferSync: ReturnType<typeof createSamplerBufferSync>
+    drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
     spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
@@ -168,6 +172,8 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         onClose={panels().effectsPanel.onClose}
         onOpen={panels().effectsPanel.onOpen}
         audioEngine={panels().effectsPanel.audioEngine}
+        samplerBufferSync={panels().effectsPanel.samplerBufferSync}
+        drumRackBufferSync={panels().effectsPanel.drumRackBufferSync}
         spectrumProvider={panels().effectsPanel.spectrumProvider}
         projectId={panels().effectsPanel.projectId}
         userId={panels().effectsPanel.userId}

@@ -4,7 +4,7 @@ import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { automationTargetKey, createDefaultDrumRackParams, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
-import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
@@ -47,6 +47,27 @@ class TestAudioBuffer implements AudioBuffer {
   }
 }
 
+const silenceWavDataUrl = (frameCount: number, channelCount = 1) => {
+  const bytes = new Uint8Array(44 + frameCount * channelCount * 2)
+  const view = new DataView(bytes.buffer)
+  const write = (offset: number, value: string) => bytes.set(new TextEncoder().encode(value), offset)
+  write(0, "RIFF")
+  view.setUint32(4, bytes.byteLength - 8, true)
+  write(8, "WAVE")
+  write(12, "fmt ")
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channelCount, true)
+  view.setUint32(24, 48_000, true)
+  view.setUint32(28, 48_000 * channelCount * 2, true)
+  view.setUint16(32, channelCount * 2, true)
+  view.setUint16(34, 16, true)
+  write(36, "data")
+  view.setUint32(40, bytes.byteLength - 44, true)
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("")
+  return `data:audio/wav;base64,${btoa(binary)}`
+}
+
 const sourceTrack = (volume = 0.8): RuntimeTrack => ({
   id: "track",
   name: "Track",
@@ -58,6 +79,8 @@ const sourceTrack = (volume = 0.8): RuntimeTrack => ({
     startSec: 0,
     duration: 1 / 48_000,
     sourceAssetKey: "source",
+    sourceKind: "url" as const,
+    sampleUrl: silenceWavDataUrl(1),
     buffer: new TestAudioBuffer(),
   }],
 })
@@ -212,6 +235,8 @@ const createBridge = (
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
   const installedAssets: NativeHostPcmAsset[] = []
+  let legacyInstallCount = 0
+  let mappedAssetCreateCount = 0
   const transports: Array<{
     epoch: number
     frame: number
@@ -282,6 +307,8 @@ const createBridge = (
     schedulePayloads,
     graphPayloads,
     installedAssets,
+    get legacyInstallCount() { return legacyInstallCount },
+    get mappedAssetCreateCount() { return mappedAssetCreateCount },
     transports,
     spectrumNodeIds,
     spectrumSelections,
@@ -331,11 +358,28 @@ const createBridge = (
         rollbackTransaction: reply("rollback"),
         installAsset: async (asset: NativeHostPcmAsset) => {
           calls.push("install")
+          legacyInstallCount += 1
           installedAssets.push(asset)
           return failure === "install"
             ? { ok: false as const, error: failureMessage }
             : { ok: true as const }
         },
+        createMappedAsset: async (asset: NativeHostMappedAsset) => {
+          calls.push("install")
+          mappedAssetCreateCount += 1
+          installedAssets.push({
+            sessionAssetId: asset.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            planarPcm: new Uint8Array(),
+          })
+          return failure === "install"
+            ? { ok: false as const, error: failureMessage }
+            : { ok: true as const }
+        },
+        writeMappedAssetPage: async (_page: NativeHostMappedAssetPage) => ({ ok: true as const }),
+        prepareMappedAssetRange: async () => ({ ok: true as const }),
         releaseAsset: reply("release"),
         publishGraph: async (bytes: Uint8Array) => {
           calls.push("graph")
@@ -610,6 +654,8 @@ test("commits a supported native session before starting and tears it down deter
   })
 
   expect(await controller.start(input().transport)).toBe("started")
+  expect(fixture.legacyInstallCount).toBe(0)
+  expect(fixture.mappedAssetCreateCount).toBe(1)
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport"])
   expect(fixture.transports.every(({ hasCycleStart, hasCycleEnd }) => !hasCycleStart && !hasCycleEnd)).toBe(true)
   await controller.dispose()
@@ -617,6 +663,29 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+test("starts a mapped session from persisted ordinary metadata without an eager buffer", async () => {
+  const fixture = createBridge()
+  const track = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      buffer: null,
+      sourceDurationSec: 1 / 48_000,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 1,
+    }],
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input(track)),
+  })
+
+  await expect(controller.start(input(track).transport)).resolves.toBe("started")
+  expect(fixture.legacyInstallCount).toBe(0)
+  expect(fixture.mappedAssetCreateCount).toBe(1)
+  await controller.dispose()
 })
 
 test("forwards compile context when promoting a pending preview to play", async () => {
@@ -761,7 +830,7 @@ test("rejects the 65th native asset after final projection", async () => {
   })
 
   expect(await controller.start(snapshotInput.transport)).toBe("unavailable")
-  expect(createBufferCalls).toBe(1)
+  expect(createBufferCalls).toBe(0)
   expect(fixture.calls).toEqual([])
   expect(faults[0]).toContain("installed audio asset capacity")
 })
@@ -2126,6 +2195,8 @@ test("primes each advancing prepared resume with active source and automation wi
     clips: [{
       ...sourceTrack().clips[0]!,
       duration: 5,
+      sourceKind: "url" as const,
+      sampleUrl: silenceWavDataUrl(270_000, 2),
       buffer: new TestAudioBuffer([
         new Float32Array(270_000),
         new Float32Array(270_000),
@@ -2172,7 +2243,7 @@ test("primes each advancing prepared resume with active source and automation wi
   expect(new Set(sourceEvents.filter((event) => event.epoch === 1).map((event) => event.assetId)).size).toBe(1)
   expect(new Set(sourceEvents.filter((event) => event.epoch === 2).map((event) => event.assetId)).size).toBe(1)
   expect(sourceEvents.find((event) => event.epoch === 2)?.assetId)
-    .not.toBe(sourceEvents.find((event) => event.epoch === 1)?.assetId)
+    .toBe(sourceEvents.find((event) => event.epoch === 1)?.assetId)
   for (const transport of runningTransports) {
     const windows = fixture.schedulePayloads.filter((payload) => {
       const view = new DataView(payload.buffer)

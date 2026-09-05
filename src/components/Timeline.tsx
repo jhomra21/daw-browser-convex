@@ -132,10 +132,14 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
-import { createDesktopNativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer";
+import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
+import { createNativeTimelinePageManager } from "~/lib/desktop/native-timeline-page-manager";
+import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
+import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
+import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -153,8 +157,78 @@ const Timeline: Component<TimelineProps> = (props) => {
   const nativeOfflineBridge = requiresNativeAudio
     ? window.dawDesktop?.audioHost?.offlineRender
     : undefined;
-  const nativeOfflineRenderer = nativeOfflineBridge
-    ? createDesktopNativeOfflineRenderer(nativeOfflineBridge)
+  const nativeOfflinePcmRenderer = nativeOfflineBridge
+    ? createDesktopNativeOfflinePcmRenderer(nativeOfflineBridge, undefined, async ({
+      asset,
+      startFrame,
+      frameCount,
+      signal,
+    }): Promise<NativeHostMappedAssetPage> => {
+      const bytesPerSample = Float32Array.BYTES_PER_ELEMENT
+      const bytesPerFrame = asset.channelCount * bytesPerSample
+      const planarPcm = new Uint8Array(frameCount * bytesPerFrame)
+      const covered: { startFrame: number; endFrame: number }[] = []
+      const manager = createNativeTimelinePageManager({
+        projectId: asset.projectId,
+        sources: [{
+          sourceAssetKey: asset.sourceAssetKey,
+          sessionAssetId: asset.sessionAssetId,
+          frameCount: asset.frameCount,
+          sampleRateHz: asset.sampleRateHz,
+          channelCount: asset.channelCount,
+          sourceKind: asset.sourceKind,
+          sampleUrl: asset.sampleUrl,
+        }],
+        writePage: async (nextPage) => {
+          if (nextPage.sessionAssetId !== asset.sessionAssetId
+            || nextPage.startFrame < startFrame
+            || nextPage.startFrame + nextPage.frameCount > startFrame + frameCount
+            || nextPage.planarPcm.byteLength !== nextPage.frameCount * bytesPerFrame) {
+            throw new Error("Native offline mapped page hydration returned an invalid sub-page.")
+          }
+          const frameOffset = nextPage.startFrame - startFrame
+          for (let channel = 0; channel < asset.channelCount; channel += 1) {
+            planarPcm.set(
+              nextPage.planarPcm.subarray(
+                channel * nextPage.frameCount * bytesPerSample,
+                (channel + 1) * nextPage.frameCount * bytesPerSample,
+              ),
+              channel * frameCount * bytesPerSample + frameOffset * bytesPerSample,
+            )
+          }
+          covered.push({
+            startFrame: nextPage.startFrame,
+            endFrame: nextPage.startFrame + nextPage.frameCount,
+          })
+        },
+      })
+      try {
+        await manager.ensureRanges([{
+          sourceAssetKey: asset.sourceAssetKey,
+          startFrame,
+          endFrame: startFrame + frameCount,
+        }], signal)
+        const sorted = covered.toSorted((left, right) => left.startFrame - right.startFrame)
+        let coveredEnd = startFrame
+        for (const range of sorted) {
+          if (range.startFrame !== coveredEnd) {
+            throw new Error("Native offline mapped page hydration returned a source gap.")
+          }
+          coveredEnd = range.endFrame
+        }
+        if (coveredEnd !== startFrame + frameCount) {
+          throw new Error("Native offline mapped page hydration returned an incomplete page.")
+        }
+        return {
+          sessionAssetId: asset.sessionAssetId,
+          startFrame,
+          frameCount,
+          planarPcm,
+        }
+      } finally {
+        manager.dispose()
+      }
+    })
     : undefined;
   const nativeVstParameterQueue = window.dawDesktop
     ? createNativeVstParameterQueue(async (bytes) => {
@@ -255,6 +329,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
     bootstrapIfEmpty: untrack(() => props.bootstrapIfEmpty),
   });
+  const resolveAudioSource = createAudioPcmSourceResolver({ projectId });
+  const sampledInstrumentSession = createSampledInstrumentSession({
+    projectId,
+  });
+  onCleanup(sampledInstrumentSession.dispose);
   const localProject = useLocalProjectActions({
     projectId,
     userId,
@@ -319,6 +398,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     tracks: renderTracks,
     onBufferChange: () => setBufferVersion((current) => current + 1),
+    resolveAudioSource,
   });
   const currentLocalProjectMode = createMemo(
     () => projects().find((project) => project.projectId === projectId())?.mode,
@@ -486,7 +566,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const exportService = createTimelineExportService({
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
-    nativeOfflineRenderer,
+    nativeOfflinePcmRenderer,
     getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, localProject, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
       if (!capturedProjectId || !localProject) return undefined
       const processors = (await listLocalExternalProcessors(capturedProjectId))
@@ -572,6 +652,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     getEffectsExportSnapshot: effectsExportSnapshot,
     getSidechainRoutes: sidechainRoutes,
     loadCapturedClipBuffer: clipBuffers.loadCapturedMedia,
+    resolveAudioSource,
+    sampledInstrumentSession,
   });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
@@ -588,6 +670,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
+    drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
     getActions: () => {
@@ -632,6 +715,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requiresNativeAudio,
     tracks: renderTracks,
     ensureClipBuffer: clipBuffers.preload,
+    resolveAudioSource,
     loopEnabled,
     loopStartSec,
     loopEndSec,
@@ -2287,6 +2371,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId: projectId(),
       userId: userId(),
       audioEngine,
+      samplerBufferSync: sampledInstrumentSession.samplerBufferSync,
+      drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
       spectrumProvider: subscribeSpectrum,
       canWriteTrackRouting: canWriteTrack,
       grantClipWrite,

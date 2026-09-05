@@ -15,7 +15,6 @@ const capabilityLifetimeMs = 4 * 60 * 60 * 1_000
 const maximumActiveCapabilities = 16
 const maximumReadBytes = 10 * 1024 * 1024
 const maximumChunkBytes = 1024 * 1024
-const maximumOutputBytes = 8 * 1024 * 1024 * 1024
 const maximumOutputFiles = 1024
 
 const supportedAudioTypes = new Map([
@@ -81,7 +80,6 @@ type FileCapabilityErrorCode =
   | "invalid-path"
   | "invalid-scope"
   | "commit-indeterminate"
-  | "output-limit-exceeded"
   | "path-exists"
   | "unsupported-file"
 
@@ -127,8 +125,6 @@ type FileCapabilityManagerOptions = {
 type CapabilityBase = FileCapabilityScope & {
   token: string
   expiresAt: number
-  outputBytes: number
-  reservedOutputBytes: number
   outputFiles: number
   reservedWriterSlots: number
   writerIds: Set<string>
@@ -453,8 +449,6 @@ export const createFileCapabilityManager = ({
       ...scope,
       token: uniqueOpaqueId(capabilities),
       expiresAt: now() + capabilityLifetimeMs,
-      outputBytes: 0,
-      reservedOutputBytes: 0,
       outputFiles: 0,
       reservedWriterSlots: 0,
       writerIds: new Set(),
@@ -913,7 +907,7 @@ export const createFileCapabilityManager = ({
     },
 
     async writeChunk(scope: FileCapabilityScope, writerId: string, offset: number, chunk: Uint8Array) {
-      const { writer, capability } = await requireWriter(scope, writerId)
+      const { writer } = await requireWriter(scope, writerId)
       if (writer.state !== "open" || writer.poisoned) {
         throw new FileCapabilityError("invalid-capability", "The output writer is not open.")
       }
@@ -932,12 +926,6 @@ export const createFileCapabilityManager = ({
           throw new FileCapabilityError("invalid-chunk", "The output writer changed before the chunk could be written.")
         }
         const nextOffset = offset + chunk.byteLength
-        const additionalBytes = Math.max(0, nextOffset - writer.highWaterMark)
-        if (capability.outputBytes + capability.reservedOutputBytes + additionalBytes > maximumOutputBytes) {
-          writer.poisoned = true
-          throw new FileCapabilityError("output-limit-exceeded", "The aggregate output limit of 8 GiB was reached.")
-        }
-        capability.reservedOutputBytes += additionalBytes
         try {
           let written = 0
           while (written < chunk.byteLength) {
@@ -950,14 +938,11 @@ export const createFileCapabilityManager = ({
             if (result.bytesWritten <= 0) throw new Error("The output file did not accept the chunk.")
             written += result.bytesWritten
           }
-          capability.outputBytes += additionalBytes
           writer.highWaterMark = Math.max(writer.highWaterMark, nextOffset)
           return nextOffset
         } catch (error) {
           writer.poisoned = true
           throw error
-        } finally {
-          capability.reservedOutputBytes -= additionalBytes
         }
       })
       writer.operation = write.then(() => undefined, () => undefined)

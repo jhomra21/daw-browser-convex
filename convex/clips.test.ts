@@ -93,6 +93,7 @@ test("replacing an authoritative clip source clears its obsolete sample URL", as
     await ctx.db.insert("samples", {
       projectId: "project-1", assetKey: "replacement", sourceKind: "upload",
       name: "replacement.wav", mimeType: "audio/wav", sizeBytes: 1, contentSha256: "replacement", r2Key: "replacement",
+      duration: 2, sampleRate: 48_000, channelCount: 2,
       ownerUserId: owner, createdAt: 1, updatedAt: 1,
     });
     return await ctx.db.insert("clips", {

@@ -9,6 +9,8 @@ import {
   resolveSamplePlaybackUrlForRuntime,
 } from '~/lib/renderer-api-url'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
+import { createAudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -119,6 +121,7 @@ type ClipBufferOptions = {
   projectId: Accessor<string>
   tracks: Accessor<Track[]>
   onBufferChange: () => void
+  resolveAudioSource?: AudioPcmSourceResolver
 }
 
 type ClipBufferControls = ClipBuffers & {
@@ -160,6 +163,10 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     decode: (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
     resolveSampleUrl,
   })
+  const resolveAudioSource = options.resolveAudioSource ?? createAudioPcmSourceResolver({
+    projectId: options.projectId,
+  })
+  audioEngine.setAudioSourceResolver(resolveAudioSource)
   let cacheGeneration = 0
   const registeredAssetIds = new Set<string>()
 
@@ -360,6 +367,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     audioBufferCache.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
+    audioEngine.invalidateAudioSourceCache()
   }
 
   const writer: ClipBufferWriter = {

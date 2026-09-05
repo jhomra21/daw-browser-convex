@@ -404,7 +404,7 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
       case 'instrument': {
         const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
         if (params.kind === 'synth') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
-        else if (params.kind === 'drum-rack' && deps.drumRackBufferSync) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, params.params, params.instanceId)
+        else if (params.kind === 'drum-rack' && deps.drumRackBufferSync && deps.isCurrentScope?.() !== false) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, params.params, params.instanceId)
         else if (params.kind === 'drum-rack') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
         else if (params.kind === 'sampler') deps.audioEngine.setTrackSampler(targetId, params.params, undefined, params.instanceId)
         else void deps.audioEngine.setTrackGranular(targetId, params.params, undefined, params.instanceId)

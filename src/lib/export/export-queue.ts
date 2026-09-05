@@ -11,6 +11,7 @@ export type ExportQueue = {
   submit: (
     job: Pick<ExportJob, 'name'>,
     run: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void, jobId: string) => Promise<ExportOutcome>,
+    onCancel?: () => void,
   ) => { id: string; completion: Promise<ExportOutcome>; cancel: () => void }
   enqueue: (
     job: Pick<ExportJob, 'name'>,
@@ -33,6 +34,7 @@ export const createExportQueue = (
     run: (signal: AbortSignal, onProgress: (progress: ExportProgress) => void, jobId: string) => Promise<ExportOutcome>
     resolve: (outcome: ExportOutcome) => void
     canceled: boolean
+    onCancel?: () => void
   }
   const pending: PendingJob[] = []
   let draining = false
@@ -49,6 +51,7 @@ export const createExportQueue = (
         const next = pending.shift()
         if (!next) continue
         if (disposed || next.canceled) {
+          next.onCancel?.()
           next.resolve({ type: "canceled", outputs: [] })
           continue
         }
@@ -70,7 +73,7 @@ export const createExportQueue = (
       draining = false
     }
   }
-  const submit: ExportQueue['submit'] = (job, run) => {
+  const submit: ExportQueue['submit'] = (job, run, onCancel) => {
     if (disposed) {
       const id = createJobId()
       return { id, completion: Promise.resolve({ type: 'canceled', outputs: [] }), cancel: () => undefined }
@@ -80,7 +83,7 @@ export const createExportQueue = (
     const completion = new Promise<ExportOutcome>((resolve) => {
       resolveCompletion = resolve
     })
-    const entry: PendingJob = { job: queuedJob, run, resolve: resolveCompletion, canceled: false }
+    const entry: PendingJob = { job: queuedJob, run, resolve: resolveCompletion, canceled: false, onCancel }
     pending.push(entry)
     queueMicrotask(() => { void drain() })
     return { id: queuedJob.id, completion, cancel: () => {
@@ -89,6 +92,7 @@ export const createExportQueue = (
         entry.canceled = true
         const index = pending.indexOf(entry)
         if (index >= 0) pending.splice(index, 1)
+        entry.onCancel?.()
         entry.resolve({ type: "canceled", outputs: [] })
       }
     } }
@@ -105,6 +109,7 @@ export const createExportQueue = (
         if (entry) {
           entry.canceled = true
           pending.splice(pending.indexOf(entry), 1)
+          entry.onCancel?.()
           entry.resolve({ type: "canceled", outputs: [] })
         }
       }
@@ -117,7 +122,10 @@ export const createExportQueue = (
     dispose: () => {
       disposed = true
       activeController?.abort()
-      for (const entry of pending.splice(0)) entry.resolve({ type: "canceled", outputs: [] })
+      for (const entry of pending.splice(0)) {
+        entry.onCancel?.()
+        entry.resolve({ type: "canceled", outputs: [] })
+      }
     },
   }
 }

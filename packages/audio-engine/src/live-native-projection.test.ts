@@ -6,10 +6,13 @@ import {
   createDefaultReverbParams,
   createDefaultSamplerParams,
   createDefaultSynthParams,
+  type SamplerParams,
+  type SamplerZone,
   type TrackInstrumentParams,
 } from '@daw-browser/shared'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import { compileLiveNativeProjection } from './live-native-projection'
+import { localizeInstrumentFx } from './portable-export-snapshot'
 
 const defaultSamples = () => {
   const samples = new Float32Array(new ArrayBuffer(4 * Float32Array.BYTES_PER_ELEMENT))
@@ -91,17 +94,18 @@ const compile = (tracks: readonly Track<AudioBuffer>[]) => compileLiveNativeProj
   tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1,
 })
 
-test('projects deterministic copied PCM for supported source-only sessions', () => {
+test('projects source metadata without copying ordinary PCM', () => {
   const result = compile([track()])
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.assets).toEqual([expect.objectContaining({
     asset: expect.objectContaining({ assetId: 'portable-export:source' }),
-    pcm: expect.objectContaining({ planes: [new Float32Array([0, 0.25, -0.5, 1])] }),
+    pcm: undefined,
+    sourceAssetKey: 'source',
   })])
   expect(result.events).toHaveLength(1)
 })
 
-test('chunks a 12-second stereo source into payload-safe native assets', () => {
+test('keeps long ordinary sources as one metadata asset', () => {
   const frameCount = 12 * 48_000
   const longClip = {
     ...clip,
@@ -113,13 +117,11 @@ test('chunks a 12-second stereo source into payload-safe native assets', () => {
   }
   const result = compile([track({ clips: [longClip] })])
   if (!result.supported) throw new Error(result.reasons.join('\n'))
-  expect(result.assets.length).toBeGreaterThan(1)
-  expect(result.assets.every(({ asset: entry }) => (
-    entry.frameCount <= (entry.channelCount === 1 ? 262_138 : 131_069)
-  ))).toBe(true)
-  expect(result.nativePcmChunkDescriptors).toHaveLength(1)
-  expect(result.nativePcmChunkDescriptors[0]?.chunks).toHaveLength(5)
-  expect(result.events).toHaveLength(5)
+  expect(result.assets).toHaveLength(1)
+  expect(result.assets[0]?.asset.frameCount).toBe(frameCount)
+  expect(result.assets[0]?.pcm).toBeUndefined()
+  expect(result.nativePcmChunkDescriptors).toHaveLength(0)
+  expect(result.events).toHaveLength(1)
 })
 
 test('skips source-exhausted clips without rejecting the native projection', () => {
@@ -255,7 +257,7 @@ test('projects mixer state and routing topology into the native graph', () => {
 })
 
 test('projects a synth instrument node for native MIDI playback', () => {
-  const midiClip = {
+  const midiClip: Clip<AudioBuffer> = {
     ...clip,
     id: 'midi',
     sourceAssetKey: undefined,
@@ -285,6 +287,76 @@ test('projects a synth instrument node for native MIDI playback', () => {
     instrument: { kind: 'synth', outputLayout: 'stereo' },
   })
   expect(result.events).toHaveLength(0)
+})
+
+test('localizes bounded sampler regions for native MIDI playback', () => {
+  const midiClip = {
+    ...clip,
+    id: 'sampled-midi',
+    sourceAssetKey: undefined,
+    buffer: undefined,
+    midi: { wave: 'sawtooth', notes: [{ pitch: 60, beat: 0, length: 1, velocity: 0.75 }] },
+  }
+  const sample: SamplerZone['sample'] = {
+    assetKey: 'source-a',
+    url: 'https://samples.example/source.wav',
+    sourceKind: 'url',
+    source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
+  }
+  const params: SamplerParams = {
+    ...createDefaultSamplerParams(),
+    zones: [{
+      id: 'zone-1',
+      sample,
+      keyLow: 0,
+      keyHigh: 127,
+      velocityLow: 1,
+      velocityHigh: 127,
+      rootNote: 60,
+      tuneCents: 0,
+      gain: 1,
+      pan: 0,
+      roundRobinGroup: 0,
+      roundRobinIndex: 0,
+      playbackMode: 'one-shot',
+      startSec: 0.5,
+      endSec: 1,
+      crossfadeSec: 0,
+      chokeGroup: 0,
+    }],
+  }
+  const result = compileLiveNativeProjection({
+    tracks: [track({ kind: 'instrument', clips: [midiClip] })],
+    fx: localizeInstrumentFx({
+      masterFxInstances: [],
+      trackFx: {
+        track: {
+          instances: [],
+          instrument: { kind: 'sampler', instanceId: 'sampler-1', params },
+          samplerBuffers: new Map([['zone-1', {
+            buffer: new TestAudioBuffer([new Float32Array(24_000)]),
+            sourceStartFrame: 24_000,
+          }]]),
+        },
+      },
+    })!,
+    bpm: 120,
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets[0]?.asset).toMatchObject({
+    frameCount: 24_000,
+    sampleRateHz: 48_000,
+    channelCount: 1,
+  })
+  expect(result.graph.nodes.find((node) => node.id === 'track')?.instrument).toMatchObject({
+    kind: 'sampler',
+    zones: [{ startFrame: 0, endFrame: 24_000 }],
+  })
 })
 
 test('projects legacy synth state for native MIDI playback', () => {

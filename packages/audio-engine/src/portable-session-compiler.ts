@@ -787,8 +787,13 @@ export const compilePreparedPortableSession = (
   }
   const compilation = compilePortableSessionInput(input)
   if (compilation.unsupportedInstruments.length > 0) return unsupported(compilation.unsupportedInstruments)
+  const preparedAssetIds = new Set(
+    input.preparedStretchAssets
+      ? [...input.preparedStretchAssets.values()].map((asset) => asset.portableAssetId)
+      : [],
+  )
   const assets = [
-    ...assetRefs(compilation.portableAssets),
+    ...assetRefs(compilation.portableAssets).filter((asset) => !preparedAssetIds.has(asset.assetId)),
     ...(input.preparedStretchAssets
       ? [...input.preparedStretchAssets.values()].map((asset) => asset.asset)
       : []),

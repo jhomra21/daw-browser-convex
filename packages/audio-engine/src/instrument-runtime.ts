@@ -1,6 +1,6 @@
-import { createDrumRackRuntime, type DrumRackResolvedBuffers } from './drum-rack-runtime'
+import { createDrumRackRuntime, type DrumRackRegionUse, type DrumRackResolvedBuffers } from './drum-rack-runtime'
 import { createSynthRuntime } from './synth-runtime'
-import { createSamplerRuntime, type SamplerNoteMiss, type SamplerResolvedBuffers } from './sampler-runtime'
+import { createSamplerRuntime, type SamplerNoteMiss, type SamplerRegionUse, type SamplerResolvedBuffers } from './sampler-runtime'
 import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
 import type { SourceRegistry } from './source-registry'
 import { parseGranularAutomationKey, type ArpParams, type AutomationEnvelope, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
@@ -26,9 +26,19 @@ export type SetTrackInstrumentInput =
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
 
+export type InstrumentRuntimeListeners = {
+  onNoteMiss?: (miss: SamplerNoteMiss) => void
+  onAssetUse?: (use: SamplerRegionUse) => void
+  onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
+}
+
 export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
-  let samplerNoteMissListener: ((miss: SamplerNoteMiss) => void) | undefined
-  let samplerAssetUseListener: ((assetKey: string, active: boolean) => void) | undefined
+  let primaryListeners: InstrumentRuntimeListeners = {}
+  const additionalListeners = new Set<InstrumentRuntimeListeners>()
+  const notifyListeners = (notify: (listeners: InstrumentRuntimeListeners) => void) => {
+    notify(primaryListeners)
+    for (const listeners of additionalListeners) notify(listeners)
+  }
   const activeKinds = new Map<string, TrackInstrumentParams['kind']>()
   const arpeggiators = new Map<string, ArpParams>()
   const synthRuntime = createSynthRuntime({
@@ -36,13 +46,23 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     getArpeggiator: (trackId) => arpeggiators.get(trackId),
     getAutomationEnvelopes: options.getAutomationEnvelopes,
   })
-  const drumRackRuntime = createDrumRackRuntime({ ...options, getArpeggiator: (trackId) => arpeggiators.get(trackId) })
+  const drumRackRuntime = createDrumRackRuntime({
+    ...options,
+    getArpeggiator: (trackId) => arpeggiators.get(trackId),
+    onAssetUse: (use) => {
+      notifyListeners((listeners) => listeners.onDrumRackAssetUse?.(use))
+    },
+  })
   const samplerRuntime = createSamplerRuntime({
     ...options,
     getArpeggiator: (trackId) => arpeggiators.get(trackId),
     getAutomationEnvelopes: options.getAutomationEnvelopes ?? (() => []),
-    onNoteMiss: (miss) => samplerNoteMissListener?.(miss),
-    onAssetUse: (assetKey, active) => samplerAssetUseListener?.(assetKey, active),
+    onNoteMiss: (miss) => {
+      notifyListeners((listeners) => listeners.onNoteMiss?.(miss))
+    },
+    onAssetUse: (use) => {
+      notifyListeners((listeners) => listeners.onAssetUse?.(use))
+    },
   })
   const granularRuntimes = new Map<string, Awaited<ReturnType<typeof createGranularRuntime>>>()
   const granularInstanceIds = new Map<string, string>()
@@ -260,10 +280,14 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     },
     setSamplerRuntimeListeners: (listeners: {
       onNoteMiss?: (miss: SamplerNoteMiss) => void
-      onAssetUse?: (assetKey: string, active: boolean) => void
+      onAssetUse?: (use: SamplerRegionUse) => void
+      onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
     }) => {
-      samplerNoteMissListener = listeners.onNoteMiss
-      samplerAssetUseListener = listeners.onAssetUse
+      primaryListeners = listeners
+    },
+    addSamplerRuntimeListeners: (listeners: InstrumentRuntimeListeners) => {
+      additionalListeners.add(listeners)
+      return () => additionalListeners.delete(listeners)
     },
     stopClip: (clipId: string) => {
       synthRuntime.stopClip(clipId)

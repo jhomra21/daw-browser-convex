@@ -135,6 +135,29 @@ export type NativeHostPcmAsset = {
   contentHashPrefix?: Uint8Array
 }
 
+export type NativeHostMappedAsset = {
+  sessionAssetId: number
+  frameCount: number
+  sampleRateHz: number
+  channelCount: number
+  contentHashPrefix?: bigint
+}
+
+export type NativeOfflineMappedAsset = NativeHostMappedAsset & {
+  sourceAssetKey: string
+  projectId?: string
+  sourceKind?: 'upload' | 'url' | 'recording'
+  sampleUrl?: string
+  ranges: readonly { startFrame: number; frameCount: number }[]
+}
+
+export type NativeHostMappedAssetPage = {
+  sessionAssetId: number
+  startFrame: number
+  frameCount: number
+  planarPcm: Uint8Array
+}
+
 export type NativeOfflineRenderPlan = {
   /** Versioned, path-free snapshot for the separate device-independent renderer. */
   version: 1
@@ -146,6 +169,7 @@ export type NativeOfflineRenderPlan = {
   externalAttachments?: NativeExternalAttachmentPlan
   instrumentStates?: Uint8Array
   assets: readonly NativeHostPcmAsset[]
+  mappedAssets?: readonly NativeOfflineMappedAsset[]
   transport: NativeHostTransport
   schedule: Uint8Array
   /** Optional temporal windows. `schedule` remains the single-window compatibility form. */

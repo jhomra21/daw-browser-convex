@@ -43,7 +43,11 @@ import {
   type AudioCoreWasmArtifact,
   type AudioCoreWasmArtifactResult,
 } from '../../audio-core-wasm/src/index'
-import { compilePortableExportSnapshot, type PortableExportSnapshot } from './portable-export-snapshot'
+import {
+  compilePortableExportSnapshot,
+  countPortableInstalledAssets,
+  type PortableExportSnapshot,
+} from './portable-export-snapshot'
 import { PortableExportWorker } from './portable-export-worker'
 import {
   portableExportWorkerMaxAssets,
@@ -54,7 +58,10 @@ import {
 } from './portable-export-worker-protocol'
 import { resolvePortableWasmManifestUrl } from './worklet-manifest'
 import { preparePortableStretchAssets } from './portable-stretch-preparation'
-export { encodeAudioBuffer, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
+import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
+import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
+export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
 export type { ExportRange } from './export-range'
@@ -76,6 +83,7 @@ export type ExportRequest = {
   cueTrackIds?: readonly string[]
   resourceObserver?: ResourceObserver
   onRenderProgress?: (completedFrames: number, totalFrames: number) => void
+  resolveAudioSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
 }
 
 export type StemMode =
@@ -127,6 +135,7 @@ type PreparedExportRender = {
   sidechainRoutes: ExternalSidechainRoute[]
   signal?: AbortSignal
   resourceObserver?: ResourceObserver
+  resolveAudioSource?: ExportRequest['resolveAudioSource']
 }
 
 type SourceIsolatedRenderOptions = {
@@ -283,6 +292,10 @@ const selectPortableMixdown = async (
       sampleRate,
     }),
     signal: req.signal,
+    maximumAssetCount: portableExportWorkerMaxAssets,
+    existingAssetCount: countPortableInstalledAssets(req.tracks, req.fx),
+    maximumPreparationBytes: 256 * 1024 * 1024,
+    resolveSource: req.resolveAudioSource,
   })
   throwIfAborted(req.signal)
   if (!preparedStretchAssets.supported) return { selected: false }
@@ -486,8 +499,17 @@ function renderOfflineDrumRackEvents(input: {
   for (const event of input.events) {
     const pad = input.padsByNote.get(event.pitch)
     if (!pad) continue
-    const buffer = input.buffers.get(pad.id)
-    if (!buffer) continue
+    const resolved = input.buffers.get(pad.id)
+    if (!resolved) continue
+    const sampled = resolved
+    const sampleRate = pad.sample?.source.sampleRate ?? sampled.buffer.sampleRate
+    const localPad = {
+      ...pad,
+      startSec: localizeSampledInstrumentSeconds(pad.startSec, sampled.sourceStartFrame, sampleRate),
+      endSec: pad.endSec === undefined
+        ? sampled.buffer.length / sampled.buffer.sampleRate
+        : localizeSampledInstrumentSeconds(pad.endSec, sampled.sourceStartFrame, sampleRate),
+    }
     const when = Math.max(0, event.startSec - input.rangeStartSec)
     if (pad.chokeGroup > 0) {
       const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup)
@@ -506,8 +528,8 @@ function renderOfflineDrumRackEvents(input: {
       const scheduled = scheduleDrumRackHit({
         ctx: input.ctx,
         destination: input.destination,
-        buffer,
-        pad,
+        buffer: sampled.buffer,
+        pad: localPad,
         when,
         velocity: event.velocity ?? 1,
       })
@@ -535,13 +557,27 @@ function renderOfflineSamplerEvents(input: {
     const selected = selectSamplerZone(input.instrument.params.zones, event.pitch, Math.round((event.velocity ?? 1) * 127), roundRobin)
     roundRobin = selected.roundRobin
     if (!selected.zone) continue
-    const buffer = input.buffers.get(selected.zone.id)
-    if (!buffer) throw new Error(`Sampler export is missing buffer for zone "${selected.zone.id}".`)
+    const resolved = input.buffers.get(selected.zone.id)
+    if (!resolved) throw new Error(`Sampler export is missing buffer for zone "${selected.zone.id}".`)
+    const sampled = resolved
+    const zone = {
+      ...selected.zone,
+      startSec: localizeSampledInstrumentSeconds(selected.zone.startSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
+      endSec: selected.zone.endSec === undefined
+        ? sampled.buffer.length / sampled.buffer.sampleRate
+        : localizeSampledInstrumentSeconds(selected.zone.endSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
+      loopStartSec: selected.zone.loopStartSec === undefined
+        ? undefined
+        : localizeSampledInstrumentSeconds(selected.zone.loopStartSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
+      loopEndSec: selected.zone.loopEndSec === undefined
+        ? undefined
+        : localizeSampledInstrumentSeconds(selected.zone.loopEndSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
+    }
     scheduleSamplerVoice({
       ctx: input.ctx,
       destination: input.destination,
-      buffer,
-      zone: selected.zone,
+      buffer: sampled.buffer,
+      zone,
       params: input.instrument.params,
       note: event.pitch,
       velocity: Math.round((event.velocity ?? 1) * 127),
@@ -665,6 +701,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     sidechainRoutes: (req.sidechainRoutes ?? []).map((route) => ({ ...route })),
     signal,
     resourceObserver: req.resourceObserver,
+    resolveAudioSource: req.resolveAudioSource,
   }
 }
 
@@ -862,6 +899,11 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const releaseContext = observeResource(prepared.resourceObserver, 'audio-contexts', ctx)
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
+    resolveSource: prepared.resolveAudioSource,
+    materializationPolicy: {
+      maximumBytes: 256 * 1024 * 1024,
+      maximumChannels: 32,
+    },
   })
   const graph = options.graph ?? (includeMasterFx ? prepared.mixerGraph : {
     ...prepared.mixerGraph,
@@ -1062,10 +1104,10 @@ async function renderSourceIsolatedMixdownFromPrepared(
           continue
         }
 
-        if (!clip.buffer) continue
+        if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) continue
         const map = getAudioClipTimeMap({
           clip,
-          bufferDurationSec: clip.buffer.duration,
+          bufferDurationSec: clip.buffer?.duration ?? clip.sourceDurationSec ?? 0,
           projectBpm: prepared.bpm,
           rangeStartSec: prepared.range.startSec,
           rangeEndSec: prepared.range.sourceEndSec,
@@ -1078,8 +1120,10 @@ async function renderSourceIsolatedMixdownFromPrepared(
             throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
           })
           : null
+        const sourceBuffer = clip.buffer ?? stretched?.buffer
+        if (!sourceBuffer) continue
         const playback = getAudioBufferPlaybackParams({
-          sourceBuffer: clip.buffer,
+          sourceBuffer,
           map,
           stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
         })

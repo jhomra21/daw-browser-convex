@@ -3,6 +3,7 @@ import {
   compilePreparedPortableSession,
   type PortableAssetRegistryInput,
 } from '@daw-browser/audio-engine/portable-session-compiler'
+import type { PortablePreparedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-preparation"
 import type { LivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import {
   compilePortableFrameSchedule,
@@ -37,6 +38,7 @@ type PortableLiveSessionAdapterInput = Omit<
   'revision' | 'bpm' | 'tracks' | 'automationEnvelopes' | 'arpeggiators'
 > & {
   assetRegistry: PortableAssetRegistryInput
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset>
   sourceFirstSequence: number
 }
 
@@ -53,6 +55,7 @@ export const compilePreparedPortableLiveSession = (
   automationEnvelopes: snapshot.mixer.automationEnvelopes,
   tracks: snapshot.tracks,
   assetRegistry: input.assetRegistry,
+  preparedStretchAssets: input.preparedStretchAssets,
   revision: snapshot.revision,
   sampleRateHz: input.sampleRateHz,
   bpm: snapshot.bpm,

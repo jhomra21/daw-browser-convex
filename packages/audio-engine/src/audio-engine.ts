@@ -13,8 +13,8 @@ import type { GateMeterFrame, GateMeterListener } from './effects/static-worklet
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
-import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
-import type { SamplerNoteMiss, SamplerResolvedBuffers } from './sampler-runtime'
+import type { DrumRackRegionUse, DrumRackResolvedBuffers } from './drum-rack-runtime'
+import type { SamplerNoteMiss, SamplerRegionUse, SamplerResolvedBuffers } from './sampler-runtime'
 import type { GranularInstalledBuffer } from './granular-runtime'
 export { createSamplerBufferCache } from './sampler-core'
 import { createTransportClock } from './transport-clock'
@@ -27,6 +27,8 @@ import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCal
 import { createRuntimeFaultCounter, type RuntimeFaultSnapshot } from './runtime-diagnostics'
 import { createLiveWorkletBudget } from './effects/live-worklet-budget'
 import { resolveTrackMidiExpressionSchedule } from './midi-expression-scheduling'
+import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 
 type RuntimeClip = Clip<AudioBuffer>
 type RuntimeTrack = Track<AudioBuffer>
@@ -208,6 +210,14 @@ export class AudioEngine {
   constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }, liveNoteCleanupScheduler = defaultLiveNoteCleanupScheduler) {
     this.runtimeOptions = options
     this.liveNoteCleanupScheduler = liveNoteCleanupScheduler
+  }
+
+  setAudioSourceResolver(resolver: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>) {
+    this.stretchCache.setSourceResolver(resolver)
+  }
+
+  invalidateAudioSourceCache() {
+    this.stretchCache.invalidate()
   }
 
   configureNextRuntime(options: AudioRuntimeOptions) {
@@ -640,9 +650,18 @@ export class AudioEngine {
 
   setSamplerRuntimeListeners(listeners: {
     onNoteMiss?: (miss: SamplerNoteMiss) => void
-    onAssetUse?: (assetKey: string, active: boolean) => void
+    onAssetUse?: (use: SamplerRegionUse) => void
+    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
   }) {
     this.instrumentRuntime.setSamplerRuntimeListeners(listeners)
+  }
+
+  addSamplerRuntimeListeners(listeners: {
+    onNoteMiss?: (miss: SamplerNoteMiss) => void
+    onAssetUse?: (use: SamplerRegionUse) => void
+    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
+  }) {
+    return this.instrumentRuntime.addSamplerRuntimeListeners(listeners)
   }
 
   previewSamplerNote(trackId: string, pitch: number, velocity = 1) {
@@ -1158,6 +1177,7 @@ export class AudioEngine {
     this.mixerRuntime.clear()
     this.metering.close()
     this.instrumentRuntime.clear()
+    this.stretchCache.dispose()
     this.arpeggiatorListeners.clear()
     this.automationEnvelopes = []
     this.transientMidiMappingBaselines.clear()

@@ -11,7 +11,14 @@ import {
 } from './audio-stretch-cache'
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
+import {
+  createAudioPcmSourceDescriptor,
+  defaultDecodedAudioPageFrames,
+  type AudioPcmSourceDescriptor,
+} from './media-pages'
+import { createAudioStretchReadPlan, type AudioStretchReadPlan } from './audio-stretch-read-plan'
 import type { PortableAssetRegistryEntry } from './portable-session-compiler'
+import { WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES } from './audio-stretching'
 
 export type PortableStretchDiagnosticCode =
   | 'stretch-realtime-unsupported'
@@ -90,10 +97,12 @@ type PreparePortableStretchInput = {
   renderStretch: (
     clip: AudioStretchRuntimeClip,
     projectBpm: number,
+    signal?: AbortSignal,
   ) => Promise<StretchedAudioRender>
 }
 
-const positiveSafeInteger = (value: number) => Number.isSafeInteger(value) && value > 0
+const positiveSafeInteger = (value: number | undefined): value is number =>
+  value !== undefined && Number.isSafeInteger(value) && value > 0
 
 export const isPortableStretchClip = (clip: Clip<AudioBuffer>) =>
   clip.midi === undefined
@@ -106,38 +115,73 @@ const diagnostic = (
   message: string,
 ): PortableStretchDiagnostic => ({ code, clipId, message })
 
-const stretchFrameCapacityDiagnostic = (
-  clip: AudioStretchRuntimeClip,
-  maximumFrameCount: number,
-  requiredSampleRateHz: number | undefined,
-): PortableStretchDiagnostic | undefined => {
+const sourceForBuffer = (clip: AudioStretchRuntimeClip): AudioPcmSourceDescriptor | undefined => {
   if (!clip.buffer) return undefined
-  const sampleRateHz = requiredSampleRateHz ?? clip.buffer.sampleRate
-  const estimatedFrameCount = Math.ceil(clip.duration * sampleRateHz)
-  if (!Number.isFinite(estimatedFrameCount) || estimatedFrameCount > maximumFrameCount) {
-    return diagnostic(
-      clip.id,
-      'stretch-frame-capacity-exceeded',
-      `${clip.id}: Stretch preparation would exceed the native frame capacity of ${maximumFrameCount} frames at ${sampleRateHz} Hz.`,
-    )
-  }
-  return undefined
+  return createAudioPcmSourceDescriptor({
+    identity: clip.sourceAssetKey ? `buffer:${clip.sourceAssetKey}` : `buffer:${clip.id}`,
+    durationSec: clip.buffer.duration,
+    frameCount: clip.buffer.length,
+    sampleRate: clip.buffer.sampleRate,
+    channelCount: clip.buffer.numberOfChannels,
+    source: clip.buffer,
+  })
 }
 
-const estimatePreparationBytes = (
-  clip: AudioStretchRuntimeClip,
+const normalizedFrameCount = (frameCount: number, sourceSampleRateHz: number, requiredSampleRateHz: number | undefined) =>
+  requiredSampleRateHz === undefined
+    ? frameCount
+    : Math.max(1, Math.round(frameCount * requiredSampleRateHz / sourceSampleRateHz))
+
+const multiplyBytes = (frameCount: number, channelCount: number): number | undefined => {
+  const elements = frameCount * channelCount
+  const bytes = elements * Float32Array.BYTES_PER_ELEMENT
+  return Number.isSafeInteger(elements)
+    && Number.isSafeInteger(bytes)
+    && bytes >= 0
+    ? bytes
+    : undefined
+}
+
+type PreparationMemoryEstimate = {
+  retainedBytes: number
+  transientBytes: number
+}
+
+const preparationMemory = (
+  plan: AudioStretchReadPlan,
+  source: AudioPcmSourceDescriptor,
   requiredSampleRateHz: number | undefined,
-): number | undefined => {
-  const buffer = clip.buffer
-  if (!buffer) return undefined
-  const sourceFrameCount = Math.ceil(clip.duration * buffer.sampleRate)
-  const finalFrameCount = Math.ceil(clip.duration * (requiredSampleRateHz ?? buffer.sampleRate))
-  const preparedFrameCount = requiredSampleRateHz !== undefined
-    && requiredSampleRateHz !== buffer.sampleRate
-    ? sourceFrameCount + finalFrameCount
-    : sourceFrameCount
-  const bytes = preparedFrameCount * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT
-  return Number.isFinite(bytes) && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined
+  eagerSource: AudioBuffer | null | undefined,
+): PreparationMemoryEstimate | undefined => {
+  const finalFrameCount = normalizedFrameCount(plan.frameCount, source.sampleRate, requiredSampleRateHz)
+  const sourceBytes = eagerSource
+    ? multiplyBytes(eagerSource.length, eagerSource.numberOfChannels)
+    : 0
+  const sourcePageBytes = eagerSource
+    ? sourceBytes
+    : multiplyBytes(defaultDecodedAudioPageFrames, source.channelCount)
+  const renderedBytes = multiplyBytes(plan.frameCount, source.channelCount)
+  const finalBytes = multiplyBytes(finalFrameCount, source.channelCount)
+  if (
+    sourceBytes === undefined
+    || sourcePageBytes === undefined
+    || renderedBytes === undefined
+    || finalBytes === undefined
+  ) return undefined
+  const resampling = requiredSampleRateHz !== undefined && requiredSampleRateHz !== source.sampleRate
+  const retainedBytes = finalBytes
+  const sourceResidentBytes = eagerSource ? sourceBytes : sourcePageBytes
+  const currentAssetBytes = sourceResidentBytes
+    + renderedBytes
+    + (resampling ? renderedBytes : 0)
+  const workspaceBytes = sourceResidentBytes + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES
+  const transientBytes = Math.max(workspaceBytes, currentAssetBytes)
+  return Number.isSafeInteger(retainedBytes)
+    && Number.isSafeInteger(transientBytes)
+    && retainedBytes >= 0
+    && transientBytes >= 0
+    ? { retainedBytes, transientBytes }
+    : undefined
 }
 
 const preparedPcmByteLength = (prepared: PortablePreparedStretchAsset): number => (
@@ -378,17 +422,7 @@ export const preparePortableStretchAsset = async (
         )],
       }
     }
-    if (!input.clip.buffer) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          input.clip.id,
-          'stretch-render-failed',
-          `${input.clip.id}: Stretch preparation requires decoded source audio.`,
-        )],
-      }
-    }
-    const render = await input.renderStretch(input.clip, input.projectBpm)
+    const render = await input.renderStretch(input.clip, input.projectBpm, input.signal)
     input.signal?.throwIfAborted()
     const invalid = validateRender(input.clip, render)
     if (invalid) return { supported: false, diagnostics: [invalid] }
@@ -413,7 +447,7 @@ export const preparePortableStretchAsset = async (
       asset: {
         clipId: input.clip.id,
         sourceAssetKey: input.clip.sourceAssetKey,
-        sourceDurationSec: input.clip.buffer.duration,
+        sourceDurationSec: input.clip.sourceDurationSec ?? input.clip.buffer?.duration ?? 0,
         projectGeneration: input.projectGeneration,
         projectAssetId: assetId,
         portableAssetId: assetId,
@@ -446,13 +480,22 @@ export const preparePortableStretchAssets = async (input: {
   projectBpm: number
   projectGeneration: number
   requiredSampleRateHz?: number
-  maximumFrameCount?: number
+  maximumFrameCount?: number | ((channelCount: number) => number)
   maximumAssetCount?: number
+  /**
+   * Already-installed assets counted by the target capacity. Stretch assets
+   * are checked against the remaining capacity, while callers that omit this
+   * value retain the standalone preparation limit.
+   */
+  existingAssetCount?: number
   maximumPreparationBytes?: number
   createBuffer: (channels: number, frames: number, sampleRate: number) => AudioBuffer
+  resolveSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
   signal?: AbortSignal
 }): Promise<PortableStretchAssetPreparation> => {
-  if (input.maximumFrameCount !== undefined && !positiveSafeInteger(input.maximumFrameCount)) {
+  if (input.maximumFrameCount !== undefined
+    && !(input.maximumFrameCount instanceof Function)
+    && !positiveSafeInteger(input.maximumFrameCount)) {
     return {
       supported: false,
       diagnostics: [diagnostic(
@@ -462,13 +505,25 @@ export const preparePortableStretchAssets = async (input: {
       )],
     }
   }
-  if (input.maximumAssetCount !== undefined && !positiveSafeInteger(input.maximumAssetCount)) {
+  if (input.maximumAssetCount !== undefined
+    && (!Number.isSafeInteger(input.maximumAssetCount) || input.maximumAssetCount < 0)) {
     return {
       supported: false,
       diagnostics: [diagnostic(
         'portable-stretch',
         'stretch-invalid-asset-count',
         'portable Stretch maximumAssetCount must be a positive safe integer.',
+      )],
+    }
+  }
+  if (input.existingAssetCount !== undefined
+    && (!Number.isSafeInteger(input.existingAssetCount) || input.existingAssetCount < 0)) {
+    return {
+      supported: false,
+      diagnostics: [diagnostic(
+        'portable-stretch',
+        'stretch-invalid-asset-count',
+        'portable Stretch existingAssetCount must be a nonnegative safe integer.',
       )],
     }
   }
@@ -485,144 +540,275 @@ export const preparePortableStretchAssets = async (input: {
   const eligibleClips = input.tracks.flatMap((track) => (
     track.clips.filter(isPortableStretchClip)
   ))
-  if (input.maximumAssetCount !== undefined && eligibleClips.length > input.maximumAssetCount) {
+  const availableAssetCount = input.maximumAssetCount === undefined
+    ? undefined
+    : input.maximumAssetCount - (input.existingAssetCount ?? 0)
+  if (availableAssetCount !== undefined && (
+    availableAssetCount < 0 || eligibleClips.length > availableAssetCount
+  )) {
     return {
       supported: false,
       diagnostics: [diagnostic(
         'portable-stretch',
         'stretch-asset-count-exceeded',
-        `portable Stretch preparation requires ${eligibleClips.length} assets, exceeding the maximum of ${input.maximumAssetCount}.`,
+        `portable Stretch preparation would exceed the installed audio asset capacity of ${input.maximumAssetCount} assets.`,
       )],
     }
   }
-  let estimatedBytes = 0
+  const sources = new Map<string, AudioPcmSourceDescriptor>()
+  const plans = new Map<string, AudioStretchReadPlan>()
+  let estimatedRetainedBytes = 0
   for (const clip of eligibleClips) {
-    if (clip.buffer
-      && (!positiveSafeInteger(clip.buffer.numberOfChannels) || clip.buffer.numberOfChannels > 2)) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          clip.id,
-          'stretch-invalid-channel-count',
-          `${clip.id}: Stretch source audio must be mono or stereo.`,
-        )],
+    try {
+      input.signal?.throwIfAborted()
+      const source = clip.buffer
+        ? sourceForBuffer(clip)
+        : input.resolveSource
+          ? await input.resolveSource(clip, input.signal)
+          : undefined
+      if (!source) {
+        return {
+          supported: false,
+          diagnostics: [diagnostic(
+            clip.id,
+            'stretch-render-failed',
+            `${clip.id}: Stretch preparation requires a decoded source resolver.`,
+          )],
+        }
       }
-    }
-    if (input.maximumPreparationBytes === undefined) continue
-    if (!clip.buffer) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          clip.id,
-          'stretch-render-failed',
-          `${clip.id}: Stretch preparation requires decoded source audio.`,
-        )],
+      if (!positiveSafeInteger(source.channelCount) || source.channelCount > 2) {
+        return {
+          supported: false,
+          diagnostics: [diagnostic(
+            clip.id,
+            'stretch-invalid-channel-count',
+            `${clip.id}: Stretch source audio must be mono or stereo.`,
+          )],
+        }
       }
-    }
-    const bytes = estimatePreparationBytes(clip, input.requiredSampleRateHz)
-    if (bytes === undefined || estimatedBytes > Number.MAX_SAFE_INTEGER - bytes) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          clip.id,
-          'stretch-preparation-bytes-exceeded',
-          `${clip.id}: Stretch preparation memory estimate is unsafe or non-finite.`,
-        )],
+      const plan = createAudioStretchReadPlan({ clip, source, projectBpm: input.projectBpm })
+      sources.set(clip.id, source)
+      plans.set(clip.id, plan)
+      if (input.maximumPreparationBytes !== undefined) {
+        const estimate = preparationMemory(plan, source, input.requiredSampleRateHz, clip.buffer)
+        if (
+          estimate === undefined
+          || estimatedRetainedBytes > Number.MAX_SAFE_INTEGER - estimate.retainedBytes
+        ) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-preparation-bytes-exceeded',
+              `${clip.id}: Stretch preparation memory estimate is unsafe or non-finite.`,
+            )],
+          }
+        }
+        const nextRetainedBytes = estimatedRetainedBytes + estimate.retainedBytes
+        if (
+          nextRetainedBytes > Number.MAX_SAFE_INTEGER - estimate.transientBytes
+          || nextRetainedBytes + estimate.transientBytes > input.maximumPreparationBytes
+        ) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-preparation-bytes-exceeded',
+              `${clip.id}: Stretch preparation would exceed the memory budget of ${input.maximumPreparationBytes} bytes.`,
+            )],
+          }
+        }
+        estimatedRetainedBytes = nextRetainedBytes
       }
-    }
-    estimatedBytes += bytes
-    if (estimatedBytes > input.maximumPreparationBytes) {
+    } catch (error) {
+      const aborted = (error instanceof DOMException || error instanceof Error) && error.name === 'AbortError'
       return {
         supported: false,
         diagnostics: [diagnostic(
           clip.id,
-          'stretch-preparation-bytes-exceeded',
-          `${clip.id}: Stretch preparation would exceed the memory budget of ${input.maximumPreparationBytes} bytes.`,
+          aborted ? 'stretch-render-cancelled' : 'stretch-render-failed',
+          aborted
+            ? `${clip.id}: portable Stretch preparation was cancelled.`
+            : `${clip.id}: portable Stretch preparation failed: ${error instanceof Error ? error.message : String(error)}`,
         )],
       }
     }
   }
-  const cache = createAudioStretchCache({ createBuffer: input.createBuffer })
+  const cache = createAudioStretchCache({
+    createBuffer: input.createBuffer,
+    resolveSource: input.resolveSource,
+    materializationPolicy: {
+      maximumBytes: input.maximumPreparationBytes ?? 256 * 1024 * 1024,
+      maximumChannels: 32,
+    },
+  })
   const assets: PortablePreparedStretchAsset[] = []
-  let actualPreparationBytes = 0
-  for (const clip of eligibleClips) {
-    if (input.maximumFrameCount !== undefined) {
-      const capacityDiagnostic = stretchFrameCapacityDiagnostic(
+  let actualRetainedBytes = 0
+  try {
+    for (const clip of eligibleClips) {
+      const source = sources.get(clip.id)
+      const maximumFrameCount = input.maximumFrameCount === undefined
+        ? undefined
+        : input.maximumFrameCount instanceof Function
+          ? input.maximumFrameCount(source?.channelCount ?? 0)
+          : input.maximumFrameCount
+      if (input.maximumFrameCount !== undefined) {
+        if (maximumFrameCount === undefined || !positiveSafeInteger(maximumFrameCount)) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-invalid-frame-capacity',
+              `${clip.id}: portable Stretch maximumFrameCount is invalid for its source channel count.`,
+            )],
+          }
+        }
+        const plan = plans.get(clip.id)
+        if (!plan || !source) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-render-failed',
+              `${clip.id}: Stretch preparation source metadata is unavailable.`,
+            )],
+          }
+        }
+        const requiredFrameCount = normalizedFrameCount(
+          plan.frameCount,
+          source.sampleRate,
+          input.requiredSampleRateHz,
+        )
+        if (!Number.isSafeInteger(requiredFrameCount) || requiredFrameCount > maximumFrameCount) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-frame-capacity-exceeded',
+              `${clip.id}: prepared Stretch audio exceeds the native frame capacity of ${maximumFrameCount} frames.`,
+            )],
+          }
+        }
+      }
+      const prepared = await preparePortableStretchAsset({
         clip,
-        input.maximumFrameCount,
-        input.requiredSampleRateHz,
-      )
-      if (capacityDiagnostic) return { supported: false, diagnostics: [capacityDiagnostic] }
-    }
-    const prepared = await preparePortableStretchAsset({
-      clip,
-      projectBpm: input.projectBpm,
-      projectGeneration: input.projectGeneration,
-      signal: input.signal,
-      renderStretch: cache.renderNow,
-    })
-    if (!prepared.supported) return prepared
-    if (input.maximumFrameCount !== undefined
-      && (input.requiredSampleRateHz === undefined
-        || prepared.asset.asset.sampleRateHz === input.requiredSampleRateHz)
-      && prepared.asset.asset.frameCount > input.maximumFrameCount) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          clip.id,
-          'stretch-frame-capacity-exceeded',
-          `${clip.id}: prepared Stretch audio exceeds the native frame capacity of ${input.maximumFrameCount} frames.`,
-        )],
-      }
-    }
-    let finalAsset = prepared.asset
-    if (input.requiredSampleRateHz !== undefined
-      && prepared.asset.asset.sampleRateHz !== input.requiredSampleRateHz) {
-      if (input.signal?.aborted) {
+        projectBpm: input.projectBpm,
+        projectGeneration: input.projectGeneration,
+        signal: input.signal,
+        renderStretch: (runtimeClip, projectBpm, signal) => cache.renderNow(
+          runtimeClip,
+          projectBpm,
+          signal,
+          sources.get(runtimeClip.id),
+        ),
+      })
+      if (!prepared.supported) return prepared
+      if (maximumFrameCount !== undefined
+        && (input.requiredSampleRateHz === undefined
+          || prepared.asset.asset.sampleRateHz === input.requiredSampleRateHz)
+        && prepared.asset.asset.frameCount > maximumFrameCount) {
         return {
           supported: false,
           diagnostics: [diagnostic(
             clip.id,
-            'stretch-render-cancelled',
-            `${clip.id}: portable Stretch preparation was cancelled.`,
+            'stretch-frame-capacity-exceeded',
+            `${clip.id}: prepared Stretch audio exceeds the native frame capacity of ${maximumFrameCount} frames.`,
           )],
         }
       }
-      finalAsset = normalizePreparedStretchAsset(
-        prepared.asset,
-        input.requiredSampleRateHz,
-      )
-    }
-    if (input.maximumFrameCount !== undefined
-      && finalAsset.asset.frameCount > input.maximumFrameCount) {
-      return {
-        supported: false,
-        diagnostics: [diagnostic(
-          clip.id,
-          'stretch-frame-capacity-exceeded',
-          `${clip.id}: prepared Stretch audio exceeds the native frame capacity of ${input.maximumFrameCount} frames.`,
-        )],
+      let finalAsset = prepared.asset
+      if (input.requiredSampleRateHz !== undefined
+        && prepared.asset.asset.sampleRateHz !== input.requiredSampleRateHz) {
+        if (input.signal?.aborted) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-render-cancelled',
+              `${clip.id}: portable Stretch preparation was cancelled.`,
+            )],
+          }
+        }
+        finalAsset = normalizePreparedStretchAsset(
+          prepared.asset,
+          input.requiredSampleRateHz,
+        )
       }
-    }
-    if (input.maximumPreparationBytes !== undefined) {
-      const bytes = preparedPcmByteLength(finalAsset)
-      if (!Number.isSafeInteger(bytes)
-        || actualPreparationBytes > Number.MAX_SAFE_INTEGER - bytes
-        || actualPreparationBytes + bytes > input.maximumPreparationBytes) {
+      const finalMaximumFrameCount = input.maximumFrameCount === undefined
+        ? undefined
+        : input.maximumFrameCount instanceof Function
+          ? input.maximumFrameCount(finalAsset.asset.channelCount)
+          : input.maximumFrameCount
+      if (input.maximumFrameCount !== undefined
+        && (finalMaximumFrameCount === undefined || !positiveSafeInteger(finalMaximumFrameCount))) {
         return {
           supported: false,
           diagnostics: [diagnostic(
             clip.id,
-            'stretch-preparation-bytes-exceeded',
-            `${clip.id}: prepared Stretch PCM would exceed the memory budget of ${input.maximumPreparationBytes} bytes.`,
+            'stretch-invalid-frame-capacity',
+            `${clip.id}: portable Stretch maximumFrameCount is invalid for its source channel count.`,
           )],
         }
       }
-      actualPreparationBytes += bytes
+      if (finalMaximumFrameCount !== undefined && finalAsset.asset.frameCount > finalMaximumFrameCount) {
+        return {
+          supported: false,
+          diagnostics: [diagnostic(
+            clip.id,
+            'stretch-frame-capacity-exceeded',
+            `${clip.id}: prepared Stretch audio exceeds the native frame capacity of ${finalMaximumFrameCount} frames.`,
+          )],
+        }
+      }
+      if (input.maximumPreparationBytes !== undefined) {
+        const renderedBytes = multiplyBytes(
+          prepared.asset.asset.frameCount,
+          prepared.asset.asset.channelCount,
+        )
+        const finalBytes = preparedPcmByteLength(finalAsset)
+        const resampling = finalAsset !== prepared.asset
+        const sourceBytes = clip.buffer
+          ? multiplyBytes(clip.buffer.length, clip.buffer.numberOfChannels)
+          : multiplyBytes(defaultDecodedAudioPageFrames, prepared.asset.asset.channelCount)
+        const retainedBytes = finalBytes
+        const currentAssetBytes = sourceBytes !== undefined
+          && renderedBytes !== undefined
+          && finalBytes !== undefined
+          ? sourceBytes
+            + renderedBytes
+            + (resampling ? renderedBytes : 0)
+          : undefined
+        const transientBytes = currentAssetBytes === undefined || sourceBytes === undefined
+          ? undefined
+          : Math.max(
+            sourceBytes + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
+            currentAssetBytes,
+          )
+        if (
+          retainedBytes === undefined
+          || transientBytes === undefined
+          || !Number.isSafeInteger(retainedBytes)
+          || !Number.isSafeInteger(transientBytes)
+          || actualRetainedBytes > Number.MAX_SAFE_INTEGER - transientBytes
+          || actualRetainedBytes + transientBytes > input.maximumPreparationBytes
+        ) {
+          return {
+            supported: false,
+            diagnostics: [diagnostic(
+              clip.id,
+              'stretch-preparation-bytes-exceeded',
+              `${clip.id}: prepared Stretch PCM would exceed the memory budget of ${input.maximumPreparationBytes} bytes.`,
+            )],
+          }
+        }
+        actualRetainedBytes += retainedBytes
+      }
+      assets.push(finalAsset)
     }
-    assets.push(finalAsset)
+    return { supported: true, assets }
+  } finally {
+    cache.dispose()
   }
-  return { supported: true, assets }
 }
 
 export const registerPortableStretchAsset = async (input: {

@@ -1,4 +1,10 @@
-import { createWsolaBoundedSourceAsync, type WsolaPcmSource, type WsolaPcmTransaction, type WsolaPcmTransactionFactory } from './audio-stretching'
+import {
+  createWsolaBoundedSourceAsync,
+  createWsolaBoundedSourceAsyncTransaction,
+  type WsolaPcmSource,
+  type WsolaPcmTransaction,
+  type WsolaPcmTransactionFactory,
+} from './audio-stretching'
 import {
   createAudioStretchReadPlan,
   DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,
@@ -15,6 +21,15 @@ import {
 } from './media-pages'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import type { StretchedAudioRender } from './audio-stretch-cache'
+import {
+  createPreparedStretchArtifact,
+  createPreparedStretchArtifactBinding,
+  type PreparedStretchArtifactBinding,
+} from './prepared-stretch-artifact'
+import type {
+  PreparedStretchArtifactManifest,
+  PreparedStretchArtifactRepository,
+} from './prepared-stretch-store'
 
 export type AudioStretchRuntimeClip = Pick<Clip<AudioBuffer>, 'id' | 'duration' | 'startSec' | 'leftPadSec' | 'bufferOffsetSec' | 'sourceAssetKey' | 'sourceDurationSec' | 'sourceSampleRate' | 'sourceChannelCount' | 'sourceKind' | 'sampleUrl' | 'audioWarp' | 'buffer'>
 type CreateBuffer = (channels: number, frames: number, sampleRate: number) => AudioBuffer
@@ -202,5 +217,144 @@ export const renderStretchedAudioFromSource = async (input: {
     timelineStartSec: rendered.timelineStartSec,
     sourceStartSec: rendered.sourceStartSec,
     timelineDurationSec: rendered.timelineDurationSec,
+  }
+}
+
+export const renderStretchedAudioToArtifact = async (input: {
+  clip: AudioStretchRuntimeClip
+  source: AudioPcmSourceDescriptor
+  projectBpm: number
+  repository: PreparedStretchArtifactRepository
+  signal?: AbortSignal
+  windowFrameCount?: number
+  overlapFrameCount?: number
+  searchFrameCount?: number
+}): Promise<{
+  binding: PreparedStretchArtifactBinding
+  manifest: PreparedStretchArtifactManifest
+}> => {
+  const plan = createAudioStretchReadPlan(input)
+  const remoteOperation = createRemoteMediaOperation(
+    defaultRemoteMediaOperationDeadlineMs,
+    defaultRemoteMediaMaximumBytes,
+    defaultRemoteMediaMaxRetries,
+  )
+  const abortRemoteOperation = () => remoteOperation.abort(input.signal?.reason)
+  input.signal?.addEventListener('abort', abortRemoteOperation, { once: true })
+  const artifact = createPreparedStretchArtifact({
+    source: input.source,
+    plan,
+    persistable: input.source.persistable,
+    windowFrameCount: input.windowFrameCount ?? 2_048,
+    overlapFrameCount: input.overlapFrameCount ?? 1_024,
+    searchFrameCount: input.searchFrameCount ?? 512,
+  })
+  let existing: PreparedStretchArtifactManifest | null
+  try {
+    existing = await input.repository.find(artifact.artifactId)
+  } catch (error) {
+    input.signal?.removeEventListener('abort', abortRemoteOperation)
+    remoteOperation.dispose()
+    throw error
+  }
+  if (existing) {
+    input.signal?.removeEventListener('abort', abortRemoteOperation)
+    remoteOperation.dispose()
+    return {
+      binding: createPreparedStretchArtifactBinding({
+        clipId: input.clip.id,
+        artifact,
+        timelineStartSec: plan.map.timelineStartSec,
+        timelineDurationSec: plan.frameCount / input.source.sampleRate,
+      }),
+      manifest: existing,
+    }
+  }
+  let write: Awaited<ReturnType<PreparedStretchArtifactRepository['begin']>>
+  try {
+    write = await input.repository.begin(artifact)
+  } catch (error) {
+    input.signal?.removeEventListener('abort', abortRemoteOperation)
+    remoteOperation.dispose()
+    throw error
+  }
+  try {
+    for (const item of plan.segments) {
+      input.signal?.throwIfAborted()
+      const source: WsolaPcmSource = {
+        sampleRate: input.source.sampleRate,
+        channelCount: input.source.channelCount,
+        frameCount: item.sourceEndFrame - item.sourceStartFrame,
+        replay: function* () {
+          yield* []
+          throw new Error('Page-backed Stretch sources require async traversal.')
+        },
+        replayAsync: async function* (signal) {
+          let readFrames = 0
+          for await (const page of input.source.readPages({
+            startFrame: item.sourceStartFrame,
+            endFrame: item.sourceEndFrame,
+            signal: remoteOperation.signal,
+            remoteOperation,
+          })) {
+            signal?.throwIfAborted()
+            readFrames += page.frameCount
+            yield { channels: page.planes }
+          }
+          if (readFrames !== item.sourceEndFrame - item.sourceStartFrame) {
+            throw new Error('Stretch source pages did not cover the planned segment.')
+          }
+        },
+        dispose: () => {},
+      }
+      let outputFrames = 0
+      const trimStart = item.trimStartFrame
+      const trimEnd = Math.min(item.targetFrameCount, item.trimEndFrame)
+      const result = await createWsolaBoundedSourceAsyncTransaction(source, {
+        outputFrameCount: item.targetFrameCount,
+        signal: input.signal,
+        createAsyncTransaction: (metadata) => {
+          let open = true
+          return {
+            append: async (chunk) => {
+              if (!open) throw new Error('Stretch segment transaction is no longer writable.')
+              const frameCount = chunk.channels[0]?.length ?? 0
+              const keepStart = Math.max(outputFrames, trimStart)
+              const keepEnd = Math.min(outputFrames + frameCount, trimEnd)
+              if (keepEnd > keepStart) {
+                const localStart = keepStart - outputFrames
+                const keepCount = keepEnd - keepStart
+                const planes = chunk.channels.map((channel) => channel.slice(localStart, localStart + keepCount))
+                await write.append(planes, input.signal)
+              }
+              outputFrames += frameCount
+            },
+            commit: async () => {
+              open = false
+              return { ...metadata, replay: function* () {}, dispose: () => {} }
+            },
+            abort: async () => { open = false },
+          }
+        },
+      })
+      result.source.dispose()
+    }
+    input.signal?.throwIfAborted()
+    const manifest = await write.commit()
+    return {
+      binding: createPreparedStretchArtifactBinding({
+        clipId: input.clip.id,
+        artifact,
+        timelineStartSec: plan.map.timelineStartSec,
+        timelineDurationSec: plan.frameCount / input.source.sampleRate,
+      }),
+      manifest,
+    }
+  } catch (error) {
+    await write.abort().catch(() => {})
+    throw error
+  } finally {
+    input.signal?.removeEventListener('abort', abortRemoteOperation)
+    remoteOperation.dispose()
   }
 }

@@ -1,6 +1,8 @@
 import {
   createAudioPcmSourceDescriptor,
+  getAudioBufferSessionIdentity,
   inspectAudioSourceMetadata,
+  sha256File,
   type AudioPcmSourceDescriptor,
 } from '@daw-browser/audio-engine/media-pages'
 import { isLocalProjectAssetKey, resolveClipSampleUrl } from '@daw-browser/shared'
@@ -9,6 +11,10 @@ import { resolveSamplePlaybackUrlForRuntime } from '~/lib/renderer-api-url'
 import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 
 type RuntimeClip = AudioStretchRuntimeClip
+
+const canonicalContentHash = (value: string | undefined) => (
+  value !== undefined && /^[0-9a-f]{64}$/u.test(value)
+)
 
 export type AudioPcmSourceResolver = (
   clip: RuntimeClip,
@@ -66,7 +72,7 @@ const descriptorFromBuffer = (clip: RuntimeClip) => {
     throw new Error(`Clip "${clip.id}" buffer duration does not match its persisted source metadata.`)
   }
   return createAudioPcmSourceDescriptor({
-    identity: clip.sourceAssetKey ? `buffer:${clip.sourceAssetKey}` : `buffer:${clip.id}`,
+    identity: getAudioBufferSessionIdentity(clip.buffer),
     durationSec: clip.buffer.duration,
     frameCount: clip.buffer.length,
     sampleRate: clip.buffer.sampleRate,
@@ -111,9 +117,6 @@ export const createAudioPcmSourceResolver = (input: {
       if (result.status === 'missing') throw new Error(`Local audio asset "${localId}" is missing.`)
       if (result.status === 'permission-denied') throw new Error(`Permission to read local audio asset "${localId}" was denied.`)
       if (!row) throw new Error(`Local audio asset "${localId}" has no metadata row.`)
-      const identity = row?.contentHash
-        ? `${clip.sourceAssetKey}:${row.contentHash}`
-        : `${clip.sourceAssetKey}:${localId}:${result.file.size}:${result.file.lastModified}`
       if (row.durationSec === undefined
         || row.sampleRate === undefined
         || row.channelCount === undefined) {
@@ -122,9 +125,18 @@ export const createAudioPcmSourceResolver = (input: {
       const metadata = persistedMetadata(clip, row)
       const encoded = await inspectAudioSourceMetadata(result.file, { signal })
       assertEncodedMetadataMatchesPersisted(metadata, encoded, localId)
+      const claimedHash = row.contentHash
+      const actualHash = canonicalContentHash(claimedHash)
+        ? await sha256File(result.file, signal)
+        : undefined
+      const verified = actualHash !== undefined && actualHash === claimedHash
       return createAudioPcmSourceDescriptor({
-        identity,
-        persistable: row.contentHash !== undefined,
+        identity: verified
+          ? `${clip.sourceAssetKey}:${actualHash}`
+          : `${clip.sourceAssetKey}:session:${crypto.randomUUID()}`,
+        contentHash: verified ? actualHash : undefined,
+        contentHashVerified: verified,
+        persistable: verified,
         ...metadata,
         source: result.file,
       })

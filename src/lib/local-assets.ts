@@ -7,9 +7,9 @@ import {
   saveProjectDirectoryHandle,
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
+import { sha256File } from '@daw-browser/audio-engine/media-pages'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 
@@ -104,12 +104,6 @@ const writeFile = async (
     }
     throw new LocalAssetWriteError('write-failed', 'Audio could not be saved to local project storage.')
   }
-}
-
-const sha256File = async (file: File): Promise<string> => {
-  const hash = sha256.create()
-  for await (const chunk of file.stream()) hash.update(chunk)
-  return hash.digest().reduce((hex, byte) => `${hex}${byte.toString(16).padStart(2, '0')}`, '')
 }
 
 const removeFileIfPresent = async (

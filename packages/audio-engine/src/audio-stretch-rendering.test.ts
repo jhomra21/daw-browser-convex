@@ -1,6 +1,9 @@
+import 'fake-indexeddb/auto'
 import { describe, expect, test } from 'bun:test'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { renderStretchedAudioFromSource } from './audio-stretch-rendering'
+import { renderStretchedAudioFromSource, renderStretchedAudioToArtifact } from './audio-stretch-rendering'
+import { createPreparedStretchArtifactRepository } from './prepared-stretch-store'
+import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
 import { createAudioPcmSourceDescriptor } from './media-pages'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
@@ -114,5 +117,71 @@ describe('renderStretchedAudio marker warp rendering', () => {
     expect(rendered.buffer.length).toBe(expectedFrameCount)
     expect(rendered.timelineStartSec).toBe(map.timelineStartSec)
     expect(rendered.timelineDurationSec).toBe(expectedFrameCount / sampleRate)
+  })
+
+  test('renders directly into a committed prepared artifact without an AudioBuffer', async () => {
+    const sampleRate = 100
+    const sourceBuffer = createSourceBuffer(sampleRate, sampleRate)
+    const clip: Clip<AudioBuffer> = {
+      id: 'clip-artifact',
+      name: 'Artifact',
+      color: '#fff',
+      startSec: 0,
+      duration: 1,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+      buffer: sourceBuffer,
+    }
+    const source = createAudioPcmSourceDescriptor({
+      identity: 'artifact-source',
+      contentHash: 'b'.repeat(64),
+      persistable: true,
+      durationSec: sourceBuffer.duration,
+      frameCount: sourceBuffer.length,
+      sampleRate,
+      channelCount: 1,
+      source: sourceBuffer,
+    })
+    const result = await renderStretchedAudioToArtifact({
+      clip,
+      source,
+      projectBpm: 120,
+      repository: createPreparedStretchArtifactRepository({ lockManager: preparedStretchTestLockManager }),
+    })
+    expect(result.binding.artifactId).toMatch(/^stretch:v1:[0-9a-f]{64}$/)
+    expect(result.manifest.frameCount).toBeGreaterThan(0)
+  })
+
+  test('keeps session-only artifact output readable through the supplied repository', async () => {
+    const sampleRate = 100
+    const sourceBuffer = createSourceBuffer(sampleRate, sampleRate)
+    const clip: Clip<AudioBuffer> = {
+      id: 'clip-session-artifact',
+      name: 'Session artifact',
+      color: '#fff',
+      startSec: 0,
+      duration: 1,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+      buffer: sourceBuffer,
+    }
+    const source = createAudioPcmSourceDescriptor({
+      identity: 'unverified-session-source',
+      persistable: false,
+      durationSec: sourceBuffer.duration,
+      frameCount: sourceBuffer.length,
+      sampleRate,
+      channelCount: 1,
+      source: sourceBuffer,
+    })
+    const repository = createPreparedStretchArtifactRepository({ sessionId: 'session-artifact-test', lockManager: preparedStretchTestLockManager })
+    const result = await renderStretchedAudioToArtifact({
+      clip,
+      source,
+      projectBpm: 120,
+      repository,
+    })
+    const pages = []
+    for await (const page of repository.read(result.binding.artifactId)) pages.push(page)
+    expect(pages.reduce((total, page) => total + page.frameCount, 0)).toBe(result.manifest.frameCount)
+    await repository.dispose?.()
   })
 })

@@ -39,6 +39,11 @@
     "./portable-stretch-preparation": "./src/portable-stretch-preparation.ts",
     "./audio-stretch-rendering": "./src/audio-stretch-rendering.ts",
     "./audio-stretch-read-plan": "./src/audio-stretch-read-plan.ts",
+    "./audio-stretching": "./src/audio-stretching.ts",
+    "./audio-stretch-cache": "./src/audio-stretch-cache.ts",
+    "./audio-stretch-store": "./src/audio-stretch-store.ts",
+    "./prepared-stretch-artifact": "./src/prepared-stretch-artifact.ts",
+    "./prepared-stretch-store": "./src/prepared-stretch-store.ts",
     "./effects/timing": "./src/effects/timing.ts",
     "./portable-export-worker": "./src/portable-export-worker.ts",
     "./portable-export-worker-protocol": "./src/portable-export-worker-protocol.ts",
@@ -50,6 +55,7 @@
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {
+    "@noble/hashes": "^2.0.1",
     "@daw-browser/audio-core-contract": "workspace:*",
     "@daw-browser/audio-core-wasm": "workspace:*",
     "@daw-browser/desktop-protocol": "workspace:*",

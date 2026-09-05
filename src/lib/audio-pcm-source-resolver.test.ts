@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test'
 
 import { createAudioPcmSourceResolver } from './audio-pcm-source-resolver'
 import { createLocalProject, openLocalProjectDb } from './local-project-db'
+import { sha256File } from '@daw-browser/audio-engine/media-pages'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)
@@ -99,7 +100,75 @@ test('resolves a local asset from its local File without deriving a cloud URL', 
   const result = await resolver(clip({ sourceAssetKey: 'asset:local' }))
 
   expect(calls).toEqual([])
-  expect(result.identity).toBe('asset:local:content-hash')
+  expect(result.identity).toMatch(/^asset:local:session:[0-9a-f-]{36}$/u)
+  expect(result.persistable).toBe(false)
+})
+
+test('admits a local content hash only after verifying the resolved File bytes', async () => {
+  const project = await createLocalProject(`Verified resolver ${crypto.randomUUID()}`)
+  const file = new File([wave()], 'sample.wav', { type: 'audio/wav' })
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'asset:verified',
+    name: file.name,
+    mimeType: file.type,
+    sizeBytes: file.size,
+    storagePath: 'sample.wav',
+    contentHash: await sha256File(file),
+    durationSec: 5 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async () => ({ status: 'ready', file }),
+  })
+
+  const result = await resolver(clip({ sourceAssetKey: 'asset:verified' }))
+
+  expect(result.contentHashVerified).toBe(true)
+  expect(result.persistable).toBe(true)
+  expect(result.contentHash).toMatch(/^[0-9a-f]{64}$/u)
+  expect(result.identity).toBe(`asset:verified:${result.contentHash}`)
+})
+
+test('does not alias different files that carry the same forged canonical hash', async () => {
+  const project = await createLocalProject(`Forged resolver ${crypto.randomUUID()}`)
+  const firstBytes = wave()
+  const secondBytes = wave()
+  secondBytes[44] = 7
+  const db = await openLocalProjectDb(project.id)
+  for (const id of ['asset:forged-a', 'asset:forged-b']) {
+    await db.put('assets', {
+      id,
+      name: `${id}.wav`,
+      mimeType: 'audio/wav',
+      sizeBytes: firstBytes.byteLength,
+      storagePath: `${id}.wav`,
+      contentHash: 'a'.repeat(64),
+      durationSec: 5 / 48_000,
+      sampleRate: 48_000,
+      channelCount: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async (_projectId, assetId) => ({
+      status: 'ready',
+      file: new File([assetId.endsWith('a') ? firstBytes : secondBytes], `${assetId}.wav`, { type: 'audio/wav' }),
+    }),
+  })
+
+  const first = await resolver(clip({ sourceAssetKey: 'asset:forged-a' }))
+  const second = await resolver(clip({ sourceAssetKey: 'asset:forged-b' }))
+
+  expect(first.persistable).toBe(false)
+  expect(second.persistable).toBe(false)
+  expect(first.identity).not.toBe(second.identity)
 })
 
 test('preserves the explicit URL for legacy URL-backed clips', async () => {

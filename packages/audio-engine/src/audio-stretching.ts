@@ -13,6 +13,7 @@ export type WsolaStretchConfig = {
   signal?: AbortSignal
   sourceChunkFrameCount?: number
   createTransaction?: WsolaPcmTransactionFactory
+  createAsyncTransaction?: WsolaAsyncPcmTransactionFactory
 }
 
 export type AudioStretchResult = AudioStretchInput
@@ -48,6 +49,14 @@ export type WsolaPcmTransaction = {
 }
 
 export type WsolaPcmTransactionFactory = (metadata: WsolaPcmTransactionMetadata) => WsolaPcmTransaction
+export type WsolaAsyncPcmTransaction = {
+  append: (chunk: WsolaPcmChunk) => Promise<void>
+  commit: () => Promise<WsolaPcmSource>
+  abort: () => Promise<void>
+}
+export type WsolaAsyncPcmTransactionFactory = (
+  metadata: WsolaPcmTransactionMetadata,
+) => WsolaAsyncPcmTransaction
 
 export type WsolaBoundedMemoryStats = {
   stageFrameCounts: number[]
@@ -97,12 +106,16 @@ const WSOLA_MAX_SCORE_SAMPLES_PER_OUTPUT_WINDOW = 4_194_304
 export const WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES = 64 * 1024 * 1024
 export const WSOLA_MAX_MATERIALIZED_OUTPUT_BYTES = 256 * 1024 * 1024
 
-export type WsolaBoundedSourceConfig = Omit<WsolaStretchConfig, 'createTransaction'> & {
+export type WsolaBoundedSourceConfig = Omit<WsolaStretchConfig, 'createTransaction' | 'createAsyncTransaction'> & {
   createTransaction: WsolaPcmTransactionFactory
+}
+export type WsolaAsyncBoundedSourceConfig = Omit<WsolaStretchConfig, 'createTransaction' | 'createAsyncTransaction'> & {
+  createAsyncTransaction: WsolaAsyncPcmTransactionFactory
 }
 type InternalStretchConfig = WsolaBoundedSourceConfig & { allowNonFinite?: boolean }
 
 type WsolaOutputWriter = (channels: Float32Array[]) => void
+type WsolaAsyncOutputWriter = (channels: Float32Array[]) => Promise<void>
 type WsolaStreamState = 'active' | 'emitting' | 'finishing' | 'finished' | 'failed'
 const DEFAULT_WINDOW_FRAMES = 2048
 const DEFAULT_OVERLAP_FRAMES = 1024
@@ -624,9 +637,179 @@ export function createWsolaSinglePassStream(options: WsolaSinglePassStreamOption
     }
   }
 
+  let asyncFinishDrain: (() => Promise<void>) | undefined
   return {
     push,
     finish,
+    pushAsync: async (
+      channels: Float32Array[],
+      write: WsolaAsyncOutputWriter,
+      signal = options.signal,
+    ) => {
+      if (state !== 'active') throw new Error('WSOLA stream cannot accept audio after finish.')
+      throwIfAborted(signal)
+      if (channels.length !== options.channelCount) throw new Error('WSOLA stream channel count changed.')
+      const frameCount = channels[0]?.length ?? 0
+      for (const channel of channels) {
+        if (channel.length !== frameCount) throw new Error('WSOLA stream input channels must have matching frame counts.')
+      }
+      if (framesSeen + frameCount > inputFrameCount) throw new Error('WSOLA stream received more source frames than declared.')
+      const channelGain = 1 / options.channelCount
+      const emitAsync = async (output: Float32Array[], count: number) => {
+        if (count <= 0) return
+        throwIfAborted(signal)
+        const copied = output.map((channel) => channel.slice(0, count))
+        for (const channel of copied) {
+          for (let frame = 0; frame < channel.length; frame += 1) {
+            outputPeak = Math.max(outputPeak, Math.abs(channel[frame] ?? 0))
+          }
+        }
+        const previousState = state
+        state = 'emitting'
+        try {
+          await write(copied)
+          framesEmitted += count
+        } finally {
+          state = previousState
+        }
+      }
+      const initializeAsync = async () => {
+        const count = Math.min(windowFrameCount, outputFrameCount)
+        const windowChannels = Array.from({ length: options.channelCount }, () => new Float32Array(count))
+        const windowMono = new Float32Array(count)
+        for (let frame = 0; frame < count; frame += 1) {
+          if ((frame & 4095) === 0) throwIfAborted(signal)
+          for (let channel = 0; channel < options.channelCount; channel += 1) {
+            const target = windowChannels[channel]
+            if (!target) throw new Error('WSOLA stream output channel is missing.')
+            target[frame] = sourceSampleAt(channel, frame)
+          }
+          windowMono[frame] = monoSampleAt(frame)
+        }
+        const emitted = Math.min(synthesisHop, count)
+        await emitAsync(windowChannels, emitted)
+        const remaining = Math.min(overlapFrameCount, count - emitted)
+        pendingChannels = windowChannels.map((channel) => {
+          const pending = new Float32Array(overlapFrameCount)
+          pending.set(channel.subarray(emitted, emitted + remaining))
+          return pending
+        })
+        pendingMono = new Float32Array(overlapFrameCount)
+        pendingMono.set(windowMono.subarray(emitted, emitted + remaining))
+        initialized = true
+      }
+      const processNextAsync = async () => {
+        throwIfAborted(signal)
+        const ratio = outputFrameCount / inputFrameCount
+        const expectedInputStart = Math.round(nextOutputStart / ratio)
+        const minInputStart = Math.max(0, expectedInputStart - searchFrameCount)
+        const maxInputStart = Math.min(inputFrameCount - overlapFrameCount, expectedInputStart + searchFrameCount)
+        let bestInputStart = Math.max(0, Math.min(expectedInputStart, maxInputStart))
+        let bestScore = -Infinity
+        for (let inputStart = minInputStart; inputStart <= maxInputStart; inputStart += 1) {
+          const score = scoreOverlap(inputStart, signal)
+          if (score > bestScore) {
+            bestScore = score
+            bestInputStart = inputStart
+          }
+        }
+        const count = Math.min(windowFrameCount, outputFrameCount - nextOutputStart)
+        const windowChannels = Array.from({ length: options.channelCount }, () => new Float32Array(count))
+        const windowMono = new Float32Array(count)
+        for (let frame = 0; frame < count; frame += 1) {
+          if ((frame & 4095) === 0) throwIfAborted(signal)
+          const inputMono = monoSampleAt(bestInputStart + frame)
+          const fadeIn = overlapFrameCount > 0 ? frame / overlapFrameCount : 1
+          windowMono[frame] = frame < overlapFrameCount
+            ? (pendingMono[frame] ?? 0) * (1 - fadeIn) + inputMono * fadeIn
+            : inputMono
+          for (let channel = 0; channel < options.channelCount; channel += 1) {
+            const target = windowChannels[channel]
+            if (!target) throw new Error('WSOLA stream output channel is missing.')
+            const inputSample = sourceSampleAt(channel, bestInputStart + frame)
+            target[frame] = frame < overlapFrameCount
+              ? (pendingChannels[channel]?.[frame] ?? 0) * (1 - fadeIn) + inputSample * fadeIn
+              : inputSample
+          }
+        }
+        await emitAsync(windowChannels, Math.min(synthesisHop, count))
+        const remaining = Math.min(overlapFrameCount, count - Math.min(synthesisHop, count))
+        const emitted = Math.min(synthesisHop, count)
+        pendingChannels = windowChannels.map((channel) => {
+          const pending = new Float32Array(overlapFrameCount)
+          pending.set(channel.subarray(emitted, emitted + remaining))
+          return pending
+        })
+        pendingMono = new Float32Array(overlapFrameCount)
+        pendingMono.set(windowMono.subarray(emitted, emitted + remaining))
+        nextOutputStart += synthesisHop
+      }
+      const drainAsync = async () => {
+        const initial = Math.min(inputFrameCount, Math.min(windowFrameCount, outputFrameCount))
+        if (!initialized && framesSeen >= initial) await initializeAsync()
+        while (initialized && nextOutputStart < outputFrameCount && framesSeen >= requiredSourceEndFrame()) {
+          await processNextAsync()
+        }
+      }
+      asyncFinishDrain = async () => {
+        while (nextOutputStart < outputFrameCount) await processNextAsync()
+      }
+      try {
+        for (let localFrame = 0; localFrame < frameCount; localFrame += 1) {
+          if ((localFrame & 4095) === 0) throwIfAborted(signal)
+          let mono = 0
+          const ringIndex = framesSeen % inputRingFrameCapacity
+          for (let channel = 0; channel < options.channelCount; channel += 1) {
+            const source = channels[channel]
+            const ring = inputRings[channel]
+            if (!source || !ring) throw new Error('WSOLA stream input channel is missing.')
+            const sample = source[localFrame] ?? 0
+            ring[ringIndex] = sample
+            inputPeak = Math.max(inputPeak, Math.abs(sample))
+            mono = Math.fround(mono + sample * channelGain)
+          }
+          monoRing[ringIndex] = mono
+          framesSeen += 1
+          await drainAsync()
+        }
+      } catch (error) {
+        state = 'failed'
+        throw error
+      }
+    },
+    finishAsync: async (
+      write: WsolaAsyncOutputWriter,
+      signal = options.signal,
+    ): Promise<WsolaSinglePassStats> => {
+      if (state === 'finished') {
+        if (!finishedStats) throw new Error('WSOLA stream finished without completion statistics.')
+        return finishedStats
+      }
+      if (state === 'emitting') throw new Error('WSOLA stream output emission is already in progress.')
+      if (state === 'finishing') throw new Error('WSOLA stream finish is already in progress.')
+      if (state === 'failed') throw new Error('WSOLA stream cannot finish after a failed completion.')
+      throwIfAborted(signal)
+      if (framesSeen !== inputFrameCount) throw new Error('WSOLA stream ended before every declared source frame was supplied.')
+      state = 'finishing'
+      try {
+        if (!asyncFinishDrain) throw new Error('WSOLA async stream support is unavailable.')
+        await asyncFinishDrain()
+        if (!initialized || framesEmitted !== outputFrameCount) {
+          throw new Error('WSOLA stream did not produce the declared output frame count.')
+        }
+        finishedStats = {
+          inputPeak,
+          outputPeak,
+          inputRingFrameCapacity,
+          overlapFrameCapacity: overlapFrameCount,
+        }
+        state = 'finished'
+        return finishedStats
+      } catch (error) {
+        state = 'failed'
+        throw error
+      }
+    },
     memoryBounds: (): WsolaSinglePassMemoryBounds => ({
       inputRingFrameCapacity,
       overlapFrameCapacity: effective.overlapFrameCapacity,
@@ -1251,6 +1434,207 @@ export const createWsolaBoundedSourceAsync = async (
       committed?.dispose ?? (() => {}),
       sourceInput.dispose,
     ], { error })
+    throw error
+  }
+}
+
+/**
+ * Async transactional counterpart for prepared output. Every producer call is
+ * awaited before the next stage or source page is consumed.
+ */
+export const createWsolaBoundedSourceAsyncTransaction = async (
+  sourceInput: WsolaPcmSource,
+  config: WsolaAsyncBoundedSourceConfig & { allowNonFinite?: boolean },
+): Promise<WsolaBoundedSourceResult> => {
+  validateSourceMetadata(sourceInput)
+  validateStretchConfig(config)
+  const replayAsync = sourceInput.replayAsync
+  if (!replayAsync) throw new Error('Async WSOLA transactions require an async source replay.')
+  const validated = validatePipelineRequest(sourceInput, {
+    ...config,
+    createTransaction: createWsolaMaterializingCompatibilityTransaction,
+  })
+  const stages = validated.stageFrameCounts
+  const transaction = config.createAsyncTransaction({
+    sampleRate: sourceInput.sampleRate,
+    channelCount: sourceInput.channelCount,
+    frameCount: config.outputFrameCount,
+  })
+  const stats: WsolaBoundedMemoryStats = {
+    stageFrameCounts: stages,
+    stageInputPeaks: [],
+    stageRawOutputPeaks: [],
+    stageGains: [],
+    maxSourceChunkFrames: 0,
+    maxOutputChunkFrames: 0,
+    inputRingFrameCapacity: validated.inputRingFrameCapacity,
+    overlapFrameCapacity: validated.overlapFrameCapacity,
+    pipelineWorkingMemoryBytes: validated.pipelineWorkingMemoryBytes,
+  }
+  let committed: WsolaPcmSource | undefined
+  const stagesByIndex: Array<{
+    push: (chunk: WsolaPcmChunk) => Promise<void>
+    finish: () => Promise<void>
+  }> = []
+  let outputFrames = 0
+  const writeStage = async (stageIndex: number, channels: Float32Array[]) => {
+    validateChunk({ channels }, sourceInput.channelCount)
+    if (!config.allowNonFinite) validateFiniteChunk({ channels })
+    const frameCount = channels[0]?.length ?? 0
+    stats.maxOutputChunkFrames = Math.max(stats.maxOutputChunkFrames, frameCount)
+    const next = stagesByIndex[stageIndex + 1]
+    if (next) {
+      await next.push({ channels })
+      return
+    }
+    await transaction.append({ channels })
+    outputFrames += frameCount
+  }
+  try {
+    throwIfAborted(config.signal)
+    if (sourceInput.frameCount === 0 || config.outputFrameCount === 0) {
+      for (let start = 0; start < config.outputFrameCount; start += validated.chunkFrameCount) {
+        throwIfAborted(config.signal)
+        const frameCount = Math.min(validated.chunkFrameCount, config.outputFrameCount - start)
+        await transaction.append({
+          channels: Array.from({ length: sourceInput.channelCount }, () => new Float32Array(frameCount)),
+        })
+        outputFrames += frameCount
+      }
+    } else {
+      for (let index = 1; index < stages.length; index += 1) {
+        const inputFrameCount = stages[index - 1]
+        const outputFrameCount = stages[index]
+        if (inputFrameCount === undefined || outputFrameCount === undefined) {
+          throw new Error('WSOLA stage frame count is missing.')
+        }
+        if (isEffectivelyOneX(inputFrameCount, outputFrameCount)) {
+          let inputFrames = 0
+          let writtenFrames = 0
+          let inputPeak = 0
+          let outputPeak = 0
+          let finished = false
+          stagesByIndex[index] = {
+            push: async (chunk) => {
+              if (finished) throw new Error('WSOLA exact stage is no longer writable.')
+              validateChunk(chunk, sourceInput.channelCount)
+              const frameCount = chunk.channels[0]?.length ?? 0
+              if (inputFrames + frameCount > inputFrameCount) throw new Error('WSOLA exact stage received too many frames.')
+              if (!config.allowNonFinite) validateFiniteChunk(chunk)
+              inputFrames += frameCount
+              inputPeak = Math.max(inputPeak, ...chunk.channels.map((channel) => {
+                let peak = 0
+                for (const sample of channel) peak = Math.max(peak, Math.abs(sample))
+                return peak
+              }))
+              const count = Math.min(frameCount, outputFrameCount - writtenFrames)
+              if (count > 0) {
+                for (const channel of chunk.channels) {
+                  for (let frame = 0; frame < count; frame += 1) {
+                    outputPeak = Math.max(outputPeak, Math.abs(channel[frame] ?? 0))
+                  }
+                }
+                await writeStage(index, chunk.channels.map((channel) => channel.subarray(0, count)))
+                writtenFrames += count
+              }
+            },
+            finish: async () => {
+              if (finished) return
+              finished = true
+              if (inputFrames !== inputFrameCount) throw new Error('WSOLA exact stage ended with the wrong input frame count.')
+              while (writtenFrames < outputFrameCount) {
+                const count = Math.min(validated.chunkFrameCount, outputFrameCount - writtenFrames)
+                await writeStage(index, Array.from({ length: sourceInput.channelCount }, () => new Float32Array(count)))
+                writtenFrames += count
+              }
+              stats.stageInputPeaks.push(inputPeak)
+              stats.stageRawOutputPeaks.push(outputPeak)
+              stats.stageGains.push(1)
+            },
+          }
+          continue
+        }
+        const stream = createWsolaSinglePassStream({
+          ...config,
+          inputFrameCount,
+          outputFrameCount,
+          channelCount: sourceInput.channelCount,
+          sampleRate: sourceInput.sampleRate,
+        })
+        stagesByIndex[index] = {
+          push: (chunk) => stream.pushAsync(chunk.channels, (channels) => writeStage(index, channels), config.signal),
+          finish: async () => {
+            const streamStats = await stream.finishAsync((channels) => writeStage(index, channels), config.signal)
+            if (!config.allowNonFinite && (!Number.isFinite(streamStats.inputPeak) || !Number.isFinite(streamStats.outputPeak))) {
+              throw new Error('WSOLA bounded sources require finite PCM peaks.')
+            }
+            stats.stageInputPeaks.push(streamStats.inputPeak)
+            stats.stageRawOutputPeaks.push(streamStats.outputPeak)
+            stats.stageGains.push(1)
+          },
+        }
+      }
+      let sourceFrames = 0
+      const first = stagesByIndex[1]
+      if (!first) throw new Error('WSOLA first stage is missing.')
+      for await (const chunk of replayAsync(config.signal)) {
+        throwIfAborted(config.signal)
+        validateChunk(chunk, sourceInput.channelCount)
+        const frameCount = chunk.channels[0]?.length ?? 0
+        if (frameCount > validated.chunkFrameCount) throw new Error('WSOLA PCM source yielded a chunk larger than the configured source chunk frame limit.')
+        if (!config.allowNonFinite) validateFiniteChunk(chunk)
+        sourceFrames += frameCount
+        stats.maxSourceChunkFrames = Math.max(stats.maxSourceChunkFrames, frameCount)
+        for (const bounded of splitChunk(chunk, validated.chunkFrameCount)) await first.push(bounded)
+      }
+      if (sourceFrames !== sourceInput.frameCount) throw new Error('WSOLA PCM source replay produced the wrong frame count.')
+      for (let index = 1; index < stages.length; index += 1) {
+        throwIfAborted(config.signal)
+        const stage = stagesByIndex[index]
+        if (!stage) throw new Error('WSOLA pipeline stage is missing.')
+        await stage.finish()
+      }
+    }
+    if (outputFrames !== config.outputFrameCount) throw new Error('WSOLA pipeline produced the wrong output frame count.')
+    throwIfAborted(config.signal)
+    committed = await transaction.commit()
+    validateCommittedSource(committed, {
+      sampleRate: sourceInput.sampleRate,
+      channelCount: sourceInput.channelCount,
+      frameCount: config.outputFrameCount,
+    })
+    let disposed = false
+    return {
+      source: Object.freeze({
+        ...committed,
+        dispose: () => {
+          if (disposed) return
+          disposed = true
+          disposeResources([committed?.dispose ?? (() => {}), sourceInput.dispose])
+        },
+      }),
+      stats,
+    }
+  } catch (error) {
+    const cleanupErrors: unknown[] = []
+    try {
+      await transaction.abort()
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError)
+    }
+    if (committed) {
+      try {
+        committed.dispose()
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError)
+      }
+    }
+    try {
+      sourceInput.dispose()
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError)
+    }
+    throwWithCleanup({ error }, cleanupErrors)
     throw error
   }
 }

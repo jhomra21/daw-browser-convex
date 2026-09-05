@@ -1,6 +1,10 @@
+import 'fake-indexeddb/auto'
 import { describe, expect, test } from 'bun:test'
 import { audioStretchCacheTestInternals, createAudioStretchCache } from './audio-stretch-cache'
 import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
+import { createPreparedStretchArtifactSessionRepository } from './prepared-stretch-store'
+import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
 
 const createTestBuffer = (values: number[]) => ({
   duration: values.length / 10,
@@ -270,4 +274,84 @@ describe('audio stretch source resolution cancellation', () => {
     expect(resolverSignal?.aborted).toBe(false)
     cache.dispose()
   })
+})
+
+test('shares artifact preparation data but creates a binding for each requesting clip', async () => {
+  let beginCalls = 0
+  const createRepository = () => {
+    const baseRepository = createPreparedStretchArtifactSessionRepository({ lockManager: preparedStretchTestLockManager })
+    return {
+      ...baseRepository,
+      begin: async (descriptor: Parameters<typeof baseRepository.begin>[0]) => {
+        beginCalls += 1
+        return baseRepository.begin(descriptor)
+      },
+    }
+  }
+  const source: AudioPcmSourceDescriptor = {
+    identity: 'verified-source',
+    contentHash: 'a'.repeat(64),
+    contentHashVerified: true,
+    persistable: true,
+    durationSec: 1,
+    frameCount: 100,
+    sampleRate: 100,
+    channelCount: 1,
+    readPages: async function* () {
+      yield {
+        startFrame: 0,
+        frameCount: 100,
+        sampleRate: 100,
+        channelCount: 1,
+        planes: [new Float32Array(100)],
+      }
+    },
+  }
+  const cache = createAudioStretchCache({
+    createBuffer: createRenderBuffer,
+    artifactRepository: createRepository(),
+    resolveSource: async () => source,
+  })
+  const baseClip: AudioStretchRuntimeClip = {
+    id: 'base',
+    startSec: 0,
+    duration: 1,
+    sourceAssetKey: 'asset',
+    sourceDurationSec: 1,
+    sourceSampleRate: 100,
+    sourceChannelCount: 1,
+    audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+  }
+  const left = {
+    ...baseClip,
+    id: 'left',
+    startSec: 0,
+  }
+  const right = {
+    ...baseClip,
+    id: 'right',
+    startSec: 2,
+  }
+
+  const [leftResult, rightResult] = await Promise.all([
+    cache.renderArtifactNow(left, 120),
+    cache.renderArtifactNow(right, 120),
+  ])
+
+  expect(beginCalls).toBe(1)
+  expect(leftResult.binding.clipId).toBe('left')
+  expect(rightResult.binding.clipId).toBe('right')
+  expect(leftResult.binding.artifactId).toBe(rightResult.binding.artifactId)
+  expect(leftResult.binding.timelineStartSec).not.toBe(rightResult.binding.timelineStartSec)
+  cache.dispose()
+
+  const otherCache = createAudioStretchCache({
+    createBuffer: createRenderBuffer,
+    artifactRepository: createRepository(),
+    resolveSource: async () => source,
+  })
+  const otherResult = await otherCache.renderArtifactNow(left, 120)
+  expect(otherResult.binding.artifactId).toBe(leftResult.binding.artifactId)
+  expect(beginCalls).toBe(2)
+  otherCache.dispose()
 })

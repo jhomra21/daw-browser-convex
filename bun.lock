@@ -105,6 +105,7 @@
         "@daw-browser/plugin-host-protocol": "workspace:*",
         "@daw-browser/shared": "workspace:*",
         "@daw-browser/timeline-core": "workspace:*",
+        "@noble/hashes": "^2.0.1",
         "mediabunny": "1.55.1",
       },
     },

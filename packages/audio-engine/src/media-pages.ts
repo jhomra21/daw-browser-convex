@@ -1,6 +1,8 @@
+import { sha256 } from '@noble/hashes/sha2.js'
 import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, UrlSource } from 'mediabunny'
 
 const sourceCacheBytes = 8 * 1024 * 1024
+const audioBufferSessionIds = new WeakMap<object, string>()
 export const defaultDecodedAudioPageFrames = 16_384
 /** Per-range deadline for remote requests, including stalled headers or bodies. */
 export const defaultRemoteMediaRequestTimeoutMs = 120_000
@@ -10,6 +12,14 @@ export const defaultRemoteMediaOperationDeadlineMs = 120_000
 export const defaultRemoteMediaMaximumBytes = 512 * 1024 * 1024
 /** Finite retry count keeps a reachable but failing remote source bounded. */
 export const defaultRemoteMediaMaxRetries = 3
+
+export const getAudioBufferSessionIdentity = (buffer: AudioBuffer) => {
+  const existing = audioBufferSessionIds.get(buffer)
+  if (existing) return existing
+  const identity = `buffer-session:${crypto.randomUUID()}`
+  audioBufferSessionIds.set(buffer, identity)
+  return identity
+}
 
 export type DecodedAudioPage = {
   startFrame: number
@@ -23,6 +33,8 @@ export type DecodeAudioPageSource = Blob | string | URL | Request
 
 export type AudioPcmSourceDescriptor = {
   readonly identity: string
+  readonly contentHash?: string
+  readonly contentHashVerified?: boolean
   readonly persistable?: boolean
   readonly durationSec: number
   readonly frameCount: number
@@ -36,6 +48,21 @@ export type AudioPcmSourceDescriptor = {
     signal?: AbortSignal
     remoteOperation?: RemoteMediaOperation
   }) => AsyncGenerator<DecodedAudioPage>
+}
+
+const hex = (bytes: Uint8Array) => Array.from(
+  bytes,
+  (byte) => byte.toString(16).padStart(2, '0'),
+).join('')
+
+export const sha256File = async (file: File, signal?: AbortSignal): Promise<string> => {
+  const hash = sha256.create()
+  for await (const chunk of file.stream()) {
+    signal?.throwIfAborted()
+    hash.update(chunk)
+  }
+  signal?.throwIfAborted()
+  return hex(hash.digest())
 }
 
 export type DecodeAudioPagesOptions = {
@@ -135,6 +162,8 @@ const validatePage = (
 
 const createAudioBufferDescriptor = (input: {
   identity: string
+  contentHash?: string
+  contentHashVerified?: boolean
   persistable?: boolean
   buffer: AudioBuffer
 }): AudioPcmSourceDescriptor => {
@@ -147,7 +176,9 @@ const createAudioBufferDescriptor = (input: {
   validateDescriptorMetadata(metadata)
   return {
     identity: input.identity,
-    persistable: input.persistable !== false,
+    contentHash: input.contentHash,
+    contentHashVerified: input.contentHashVerified === true,
+    persistable: input.persistable === true && input.contentHashVerified === true,
     ...metadata,
     readPages: async function* (options = {}) {
       const pageFrames = defaultDecodedAudioPageFrames
@@ -180,6 +211,8 @@ const isAudioBufferSource = (
 
 export const createAudioPcmSourceDescriptor = (input: {
   identity: string
+  contentHash?: string
+  contentHashVerified?: boolean
   persistable?: boolean
   durationSec: number
   frameCount: number
@@ -198,6 +231,8 @@ export const createAudioPcmSourceDescriptor = (input: {
     ) throw new Error('Audio source buffer metadata does not match its descriptor.')
     return createAudioBufferDescriptor({
       identity: input.identity,
+      contentHash: input.contentHash,
+      contentHashVerified: input.contentHashVerified,
       persistable: input.persistable,
       buffer: input.source,
     })
@@ -207,9 +242,12 @@ export const createAudioPcmSourceDescriptor = (input: {
   if (!validPageFrames(pageFrames) || pageFrames > defaultDecodedAudioPageFrames) {
     throw new Error(`Audio source page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
   }
+  const contentHashVerified = source instanceof Blob && input.contentHashVerified === true
   return {
     identity: input.identity,
-    persistable: input.persistable === true,
+    contentHash: contentHashVerified ? input.contentHash : undefined,
+    contentHashVerified,
+    persistable: input.persistable === true && contentHashVerified,
     durationSec: input.durationSec,
     frameCount: input.frameCount,
     sampleRate: input.sampleRate,

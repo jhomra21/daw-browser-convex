@@ -1,7 +1,25 @@
-import { renderStretchedAudioFromSource, writeBuffer, type AudioStretchRuntimeClip } from './audio-stretch-rendering'
-import { createAudioPcmSourceDescriptor, type AudioPcmSourceDescriptor } from './media-pages'
-import { DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES, type AudioStretchMaterializationPolicy } from './audio-stretch-read-plan'
+import {
+  renderStretchedAudioFromSource,
+  renderStretchedAudioToArtifact,
+  writeBuffer,
+  type AudioStretchRuntimeClip,
+} from './audio-stretch-rendering'
+import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity, type AudioPcmSourceDescriptor } from './media-pages'
+import {
+  createAudioStretchReadPlan,
+  DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,
+  type AudioStretchMaterializationPolicy,
+} from './audio-stretch-read-plan'
 import { evictStoredRenders, getStoredRenderByteSize, readStoredRender, selectStoredRenderEvictionKeys, touchStoredRender, writeStoredRender } from './audio-stretch-store'
+import {
+  createPreparedStretchArtifact,
+  type PreparedStretchArtifactBinding,
+} from './prepared-stretch-artifact'
+import {
+  createPreparedStretchArtifactRepository,
+  type PreparedStretchArtifactManifest,
+  type PreparedStretchArtifactRepository,
+} from './prepared-stretch-store'
 
 export type AudioStretchRenderStatus = 'idle' | 'rendering' | 'ready' | 'failed'
 
@@ -43,6 +61,13 @@ type SharedSourceOperation = {
   completed: boolean
 }
 
+type SharedArtifactOperation = {
+  controller: AbortController
+  promise: Promise<{ manifest: PreparedStretchArtifactManifest }>
+  waiterCount: number
+  completed: boolean
+}
+
 type AudioStretchCacheOptions = {
   createBuffer: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   resolveSource?: (clip: RuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
@@ -51,6 +76,7 @@ type AudioStretchCacheOptions = {
   maxActive?: number
   persist?: boolean
   persistMaxBytes?: number
+  artifactRepository?: PreparedStretchArtifactRepository
 }
 
 type AudioBufferIdentity = Pick<AudioBuffer, 'duration' | 'sampleRate' | 'numberOfChannels' | 'length' | 'getChannelData'>
@@ -168,9 +194,20 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   const persistMaxBytes = Math.max(0, options.persistMaxBytes ?? DEFAULT_PERSIST_MAX_BYTES)
   const listeners = new Set<AudioStretchRenderStateListener>()
   const persist = options.persist === true
+  const artifactRepository = options.artifactRepository ?? createPreparedStretchArtifactRepository()
+  const ownsArtifactRepository = options.artifactRepository === undefined
   let sourceResolver = options.resolveSource
   let lifecycleGeneration = 0
   const renderOperations = new Map<string, SharedRenderOperation>()
+  const artifactOperations = new Map<string, SharedArtifactOperation>()
+  const repositoryIdentities = new WeakMap<object, string>()
+  const repositoryIdentity = (repository: PreparedStretchArtifactRepository) => {
+    const existing = repositoryIdentities.get(repository)
+    if (existing) return existing
+    const identity = crypto.randomUUID()
+    repositoryIdentities.set(repository, identity)
+    return identity
+  }
   let activeRenderCount = 0
   const queuedRenders: Array<{
     run: () => void
@@ -261,6 +298,10 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   const abortSourceResolutions = () => {
     for (const { controller } of resolvedSources.values()) controller.abort()
     resolvedSources.clear()
+  }
+  const abortArtifactOperations = () => {
+    for (const { controller } of artifactOperations.values()) controller.abort()
+    artifactOperations.clear()
   }
 
   const touch = (key: string, entry: StretchCacheEntry) => {
@@ -463,7 +504,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   ): Promise<{ render: StretchedAudioRender; persistable: boolean }> => {
     const source = clip.buffer
       ? createAudioPcmSourceDescriptor({
-        identity: clip.sourceAssetKey ? `buffer:${clip.sourceAssetKey}` : `buffer:${clip.id}`,
+        identity: getAudioBufferSessionIdentity(clip.buffer),
         persistable: false,
         durationSec: clip.buffer.duration,
         frameCount: clip.buffer.length,
@@ -662,6 +703,98 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     return awaitRender(operation, signal).catch((error) => { throw toError(error) })
   }
 
+  const renderArtifactNow = async (
+    clip: RuntimeClip,
+    projectBpm: number,
+    signal?: AbortSignal,
+    resolvedSource?: AudioPcmSourceDescriptor,
+  ) => {
+    const source = clip.buffer
+      ? createAudioPcmSourceDescriptor({
+        identity: getAudioBufferSessionIdentity(clip.buffer),
+        persistable: false,
+        durationSec: clip.buffer.duration,
+        frameCount: clip.buffer.length,
+        sampleRate: clip.buffer.sampleRate,
+        channelCount: clip.buffer.numberOfChannels,
+        source: clip.buffer,
+      })
+      : resolvedSource ?? await resolveSource(clip, signal)
+    const plan = createAudioStretchReadPlan({ clip, source, projectBpm })
+    const repository = artifactRepository
+    const descriptor = createPreparedStretchArtifact({
+      source,
+      plan,
+      persistable: source.persistable,
+      windowFrameCount: 2_048,
+      overlapFrameCount: 1_024,
+      searchFrameCount: 512,
+    })
+    const operationKey = `${repositoryIdentity(repository)}:${descriptor.artifactId}`
+    let operation = artifactOperations.get(operationKey)
+    if (!operation) {
+      const controller = new AbortController()
+      const pending = renderStretchedAudioToArtifact({
+        clip,
+        source,
+        projectBpm,
+        repository,
+        signal: controller.signal,
+      }).then((result) => ({ manifest: result.manifest }))
+      const created: SharedArtifactOperation = {
+        controller,
+        promise: pending,
+        waiterCount: 0,
+        completed: false,
+      }
+      operation = created
+      artifactOperations.set(operationKey, created)
+      void pending.then(
+        () => { created.completed = true },
+        () => { created.completed = true },
+      )
+      void pending.finally(() => {
+        if (artifactOperations.get(operationKey) === operation) artifactOperations.delete(operationKey)
+      }).catch(() => {})
+    }
+    const shared = operation
+    const cancellation = new DOMException('Stretch artifact render was cancelled.', 'AbortError')
+    shared.waiterCount += 1
+    return new Promise<{ binding: PreparedStretchArtifactBinding; manifest: PreparedStretchArtifactManifest }>((resolve, reject) => {
+      let settled = false
+      const release = () => {
+        if (settled) return
+        settled = true
+        signal?.removeEventListener('abort', abort)
+        shared.waiterCount -= 1
+        if (shared.waiterCount === 0 && !shared.completed) shared.controller.abort()
+      }
+      const finish = (callback: () => void) => {
+        release()
+        callback()
+      }
+      const abort = () => finish(() => reject(cancellation))
+      if (signal?.aborted) {
+        abort()
+        return
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      shared.promise.then(
+        (value) => finish(() => resolve({
+          binding: {
+            clipId: clip.id,
+            artifactId: descriptor.artifactId,
+            timelineStartSec: plan.map.timelineStartSec,
+            timelineDurationSec: plan.frameCount / source.sampleRate,
+            sourceStartSec: 0,
+          },
+          manifest: value.manifest,
+        })),
+        (error) => finish(() => reject(error)),
+      )
+    })
+  }
+
   const getState = (clip: RuntimeClip, projectBpm: number): AudioStretchRenderState => {
     const sourceBuffer = clip.buffer
     if (clip.audioWarp?.enabled !== true || clip.audioWarp.mode !== 'stretch') return { status: 'idle' }
@@ -685,6 +818,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       sourceResolver = next
       lifecycleGeneration += 1
       for (const { controller } of renderOperations.values()) controller.abort()
+      abortArtifactOperations()
       renderOperations.clear()
       cancelQueuedRenders()
       abortSourceResolutions()
@@ -697,6 +831,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     invalidate: () => {
       lifecycleGeneration += 1
       for (const { controller } of renderOperations.values()) controller.abort()
+      abortArtifactOperations()
       renderOperations.clear()
       cancelQueuedRenders()
       abortSourceResolutions()
@@ -709,6 +844,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     dispose: () => {
       lifecycleGeneration += 1
       for (const { controller } of renderOperations.values()) controller.abort()
+      abortArtifactOperations()
       renderOperations.clear()
       cancelQueuedRenders()
       abortSourceResolutions()
@@ -717,10 +853,12 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       pendingSourceKeys.clear()
       resolvedSources.clear()
       listeners.clear()
+      if (ownsArtifactRepository) void artifactRepository.dispose?.().catch(() => {})
     },
     ensure,
     getReady,
     renderNow,
+    renderArtifactNow,
     getState,
     subscribe: (listener: AudioStretchRenderStateListener) => {
       listeners.add(listener)

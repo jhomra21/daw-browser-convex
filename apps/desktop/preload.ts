@@ -353,6 +353,7 @@ const desktopBridge = {
                 frameCount: z.number().int().positive().safe(),
                 sampleRateHz: z.number().int().positive().safe(),
                 channelCount: z.number().int().positive().safe().max(64),
+                preparedStretchArtifactId: z.string().min(1).max(512).optional(),
                 ranges: z.array(z.object({
                   startFrame: z.number().int().nonnegative().safe(),
                   frameCount: z.number().int().positive().safe(),

@@ -68,8 +68,8 @@ type SharedArtifactOperation = {
   completed: boolean
 }
 
-type AudioStretchCacheOptions = {
-  createBuffer: (channels: number, frames: number, sampleRate: number) => AudioBuffer
+export type AudioStretchCacheOptions = {
+  createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   resolveSource?: (clip: RuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
   materializationPolicy?: AudioStretchMaterializationPolicy
   maxEntries?: number
@@ -86,6 +86,12 @@ const QUALITY_WARNING_MAX = 1.33
 const DEFAULT_PERSIST_MAX_BYTES = 256 * 1024 * 1024
 
 const toError = <Value>(error: Value) => error instanceof Error ? error : new Error(String(error))
+const requireCreateBuffer = (
+  createBuffer: AudioStretchCacheOptions['createBuffer'],
+) => {
+  if (!createBuffer) throw new Error('Stretch PCM materialization requires an AudioBuffer factory.')
+  return createBuffer
+}
 
 const hashNumber = (hash: number, value: number) => {
   const scaled = Math.round(value * 1_000_000)
@@ -209,6 +215,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     return identity
   }
   let activeRenderCount = 0
+  let disposePromise: Promise<void> | undefined
   const queuedRenders: Array<{
     run: () => void
     reject: (error: Error) => void
@@ -296,12 +303,22 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
   }
 
   const abortSourceResolutions = () => {
-    for (const { controller } of resolvedSources.values()) controller.abort()
+    const operations = [...resolvedSources.values()]
     resolvedSources.clear()
+    for (const { controller } of operations) controller.abort()
+    return operations.map((operation) => operation.promise)
   }
   const abortArtifactOperations = () => {
-    for (const { controller } of artifactOperations.values()) controller.abort()
+    const operations = [...artifactOperations.values()]
     artifactOperations.clear()
+    for (const { controller } of operations) controller.abort()
+    return operations.map((operation) => operation.promise)
+  }
+  const abortRenderOperations = () => {
+    const operations = [...renderOperations.values()]
+    renderOperations.clear()
+    for (const { controller } of operations) controller.abort()
+    return operations.map((operation) => operation.promise)
   }
 
   const touch = (key: string, entry: StretchCacheEntry) => {
@@ -327,7 +344,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     const stored = await readStoredRender(key)
     if (!stored) return null
     void touchStoredRender(stored).catch(() => {})
-    const buffer = writeBuffer(options.createBuffer, stored.channels, stored.sampleRate)
+    const buffer = writeBuffer(requireCreateBuffer(options.createBuffer), stored.channels, stored.sampleRate)
     return {
       render: {
         buffer,
@@ -518,7 +535,7 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
         clip,
         source,
         projectBpm,
-        createBuffer: options.createBuffer,
+        createBuffer: requireCreateBuffer(options.createBuffer),
         materializationPolicy: options.materializationPolicy ?? {
           maximumBytes: DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,
           maximumChannels: 32,
@@ -817,9 +834,8 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     setSourceResolver: (next: AudioStretchCacheOptions['resolveSource']) => {
       sourceResolver = next
       lifecycleGeneration += 1
-      for (const { controller } of renderOperations.values()) controller.abort()
+      abortRenderOperations()
       abortArtifactOperations()
-      renderOperations.clear()
       cancelQueuedRenders()
       abortSourceResolutions()
       entries.clear()
@@ -830,9 +846,8 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     },
     invalidate: () => {
       lifecycleGeneration += 1
-      for (const { controller } of renderOperations.values()) controller.abort()
+      abortRenderOperations()
       abortArtifactOperations()
-      renderOperations.clear()
       cancelQueuedRenders()
       abortSourceResolutions()
       entries.clear()
@@ -841,19 +856,27 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
       resolvedSources.clear()
       notify()
     },
-    dispose: () => {
+    dispose: async () => {
+      if (disposePromise) return disposePromise
       lifecycleGeneration += 1
-      for (const { controller } of renderOperations.values()) controller.abort()
-      abortArtifactOperations()
-      renderOperations.clear()
+      const operationPromises = [
+        ...abortRenderOperations(),
+        ...abortArtifactOperations(),
+        ...abortSourceResolutions(),
+      ]
       cancelQueuedRenders()
-      abortSourceResolutions()
-      entries.clear()
-      sourceEntryKeys.clear()
-      pendingSourceKeys.clear()
-      resolvedSources.clear()
-      listeners.clear()
-      if (ownsArtifactRepository) void artifactRepository.dispose?.().catch(() => {})
+      disposePromise = (async () => {
+        await Promise.allSettled(operationPromises)
+        renderOperations.clear()
+        artifactOperations.clear()
+        resolvedSources.clear()
+        entries.clear()
+        sourceEntryKeys.clear()
+        pendingSourceKeys.clear()
+        listeners.clear()
+        if (ownsArtifactRepository) await artifactRepository.dispose?.().catch(() => {})
+      })()
+      return disposePromise
     },
     ensure,
     getReady,
@@ -866,3 +889,5 @@ export function createAudioStretchCache(options: AudioStretchCacheOptions) {
     },
   }
 }
+
+export type AudioStretchCache = ReturnType<typeof createAudioStretchCache>

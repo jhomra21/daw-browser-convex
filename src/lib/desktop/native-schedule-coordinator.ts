@@ -23,11 +23,15 @@ import {
   type NativePcmChunkDescriptor,
 } from "@daw-browser/audio-engine/native-pcm-chunking"
 import type { PortablePreparedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-preparation"
+import type { PreparedStretchProjectionMetadata } from "@daw-browser/audio-engine/prepared-stretch-artifact"
 import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-browser/shared"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
+import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
+
+type NativeSchedulePageManager = Pick<NativeTimelinePageManager, 'ensureRanges' | 'invalidateRanges'>
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
@@ -334,9 +338,10 @@ export const createNativeScheduleCoordinator = (input: {
   sampleRateHz: number
   capacity: NativeScheduleCapacity
   assets: readonly NativeSessionAsset[]
-  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  assetSourceKeys?: ReadonlyMap<string, string>
+  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | PreparedStretchProjectionMetadata)[]
   nativePcmChunkDescriptors?: readonly NativePcmChunkDescriptor[]
-  pageManager?: NativeTimelinePageManager
+  pageManager?: NativeSchedulePageManager
   projectGeneration?: number
   startFrame: number
   onFault?: (error: Error) => void
@@ -560,6 +565,7 @@ export const createNativeScheduleCoordinator = (input: {
           preparedStretchAssets,
           projectGeneration: input.projectGeneration,
           warpContext: "offline",
+          assetRatePolicy: "asset-rate",
         })
       if (!projection.supported) throw new Error(projection.reasons.join(" "))
       const nativeEvents = chunkNativeSourceEvents(
@@ -729,24 +735,21 @@ export const createNativeScheduleCoordinator = (input: {
     window: ScheduleWindowCandidate,
     token?: string,
   ) => {
+    const frameCountByAssetId = new Map(
+      input.assets.map(({ asset }) => [asset.assetId, asset.frameCount]),
+    )
     const hydrationRanges = window.sampleSourceEvents.flatMap((event) => {
-      const sourceAssetKey = event.assetId.startsWith("portable-export:")
-        ? event.assetId.slice("portable-export:".length)
-        : undefined
-      if (!sourceAssetKey) return []
+      const sourceAssetKey = input.assetSourceKeys?.get(event.assetId)
+      const totalFrames = frameCountByAssetId.get(event.assetId)
+      if (!sourceAssetKey || totalFrames === undefined) return []
       const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
-      const sourceEnd = sourceStart + event.sourceFrameCount
-      const start = Math.floor(sourceStart)
-      const end = Math.ceil(
-        event.sourceOffsetFrame
-          + (event.sourceOffsetFraction ?? 0)
-          + event.sourceFrameCount,
-      )
-      // Native interpolation reads the next source frame. The end-exclusive
-      // range therefore uses ceil(sourceEnd), which includes that neighbor
-      // whenever the final source position is fractional.
-      if (sourceEnd <= sourceStart || end <= start) return []
-      return [{ sourceAssetKey, startFrame: start, endFrame: end }]
+      const coverage = nativeMappedSourceCoverage(sourceStart, event.sourceFrameCount, totalFrames)
+      if (!coverage || coverage.frameCount === 0) return []
+      return [{
+        sourceAssetKey,
+        startFrame: coverage.startFrame,
+        endFrame: coverage.startFrame + coverage.frameCount,
+      }]
     })
     if (input.pageManager && hydrationRanges.length > 0) {
       await input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)

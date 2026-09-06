@@ -16,12 +16,15 @@ import type { ExportFx } from './export-types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
+import type { NativePreparedStretchAsset } from './native-stretch-preparation'
+import { validatePreparedStretchProjectionMetadata } from './prepared-stretch-artifact'
 import type { NativePcmChunkDescriptor, NativeProjectedSourceEvent } from './native-pcm-chunking'
 
 export type LiveNativePcmAsset = {
   asset: AudioAssetRef
   pcm?: PlanarPcm
   sourceAssetKey: string
+  preparedStretchArtifactId?: string
 }
 
 export type LiveNativeProjection =
@@ -48,7 +51,7 @@ export type LiveNativeProjectionInput = {
   fx?: ExportFx
   externalLatencyFrames?: ExternalNodeLatencyFrames
   projectGeneration?: number
-  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
 }
 
 export type LiveNativeCapabilityMatrix = {
@@ -285,19 +288,36 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
       channelCount: buffer.numberOfChannels,
     }, buffer, true)
   }
-  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset>()
+  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>()
   for (const prepared of input.preparedStretchAssets ?? []) {
+    const invalid = validatePreparedStretchProjectionMetadata(prepared)
+    if (invalid) {
+      reasons.push(invalid)
+      continue
+    }
     preparedStretchAssets.set(prepared.clipId, prepared)
-    const sourceKey = prepared.portableAssetId
-    if (sourceAssets.has(sourceKey)) continue
+    const isNativeArtifact = 'manifest' in prepared
+    const sourceKey = isNativeArtifact
+      ? prepared.preparedStretchArtifactId ?? prepared.asset.assetId
+      : prepared.portableAssetId
+    const existing = sourceAssets.get(sourceKey)
+    if (existing) {
+      if (existing.asset.frameCount !== prepared.asset.frameCount
+        || existing.asset.sampleRateHz !== prepared.asset.sampleRateHz
+        || existing.asset.channelCount !== prepared.asset.channelCount) {
+        reasons.push(`Prepared Stretch artifact "${sourceKey}" resolves inconsistently.`)
+      }
+      continue
+    }
     sourceAssets.set(sourceKey, {
       asset: prepared.asset,
-      pcm: prepared.pcm,
+      pcm: isNativeArtifact ? undefined : prepared.pcm,
       sourceAssetKey: sourceKey,
+      preparedStretchArtifactId: prepared.preparedStretchArtifactId ?? prepared.asset.assetId,
     })
     registryAssets.push({
       projectAssetId: sourceKey,
-      portableAssetId: prepared.portableAssetId,
+      portableAssetId: prepared.asset.assetId,
       projectGeneration: input.projectGeneration ?? 1,
       handle: { slot: registryAssets.length, generation: 1 },
       decoded: {
@@ -347,6 +367,7 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     preparedStretchAssets,
     projectGeneration: input.projectGeneration,
     warpContext: 'offline',
+    assetRatePolicy: 'asset-rate',
   })
   if (!clipProjection.supported) return clipProjection
   return {

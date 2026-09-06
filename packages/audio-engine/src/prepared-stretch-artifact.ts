@@ -1,5 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import type { AudioStretchReadPlan, AudioStretchReadPlanSegment } from './audio-stretch-read-plan'
+import type { AudioAssetRef } from '../../audio-core-contract/src/index'
 
 export const PREPARED_STRETCH_ARTIFACT_VERSION = 'v1'
 export const PREPARED_STRETCH_RENDERER_VERSION = 'audio-stretch-renderer:v1'
@@ -45,11 +46,54 @@ export type PreparedStretchArtifactBinding = {
   sourceStartSec: number
 }
 
+/**
+ * Placement and output metadata shared by portable PCM and native mapped
+ * Stretch projections. The native projection deliberately carries no PCM.
+ */
+export type PreparedStretchProjectionMetadata = {
+  clipId: string
+  preparedStretchArtifactId?: string
+  sourceAssetKey?: string
+  sourceDurationSec: number
+  projectGeneration: number
+  asset: AudioAssetRef
+  timelineStartSec: number
+  timelineDurationSec: number
+  sourceStartSec: number
+}
+
 const hex = (bytes: Uint8Array) => Array.from(
   bytes,
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
 const isCanonicalContentHash = (value: string | undefined) => value !== undefined && /^[0-9a-f]{64}$/u.test(value)
+
+export const validatePreparedStretchProjectionMetadata = (
+  prepared: PreparedStretchProjectionMetadata,
+): string | undefined => {
+  if (!prepared.clipId
+    || (prepared.preparedStretchArtifactId !== undefined
+      && prepared.asset.assetId !== prepared.preparedStretchArtifactId)
+    || !Number.isSafeInteger(prepared.projectGeneration)
+    || prepared.projectGeneration <= 0
+    || !Number.isFinite(prepared.sourceDurationSec)
+    || prepared.sourceDurationSec <= 0
+    || !Number.isSafeInteger(prepared.asset.frameCount)
+    || prepared.asset.frameCount <= 0
+    || !Number.isSafeInteger(prepared.asset.sampleRateHz)
+    || prepared.asset.sampleRateHz <= 0
+    || !Number.isSafeInteger(prepared.asset.channelCount)
+    || prepared.asset.channelCount <= 0
+    || !Number.isFinite(prepared.timelineStartSec)
+    || !Number.isFinite(prepared.timelineDurationSec)
+    || prepared.timelineDurationSec <= 0
+    || Math.abs(prepared.timelineDurationSec - prepared.asset.frameCount / prepared.asset.sampleRateHz)
+      > 0.5 / prepared.asset.sampleRateHz
+    || prepared.sourceStartSec !== 0) {
+    return `${prepared.clipId}: prepared Stretch projection metadata is invalid.`
+  }
+  return undefined
+}
 
 const digest = (descriptor: PreparedStretchArtifactDescriptor) => hex(
   sha256(new TextEncoder().encode(JSON.stringify({

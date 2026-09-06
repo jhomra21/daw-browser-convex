@@ -22,6 +22,10 @@ import {
   type PortableStretchDiagnostic,
 } from './portable-stretch-preparation'
 import {
+  validatePreparedStretchProjectionMetadata,
+} from './prepared-stretch-artifact'
+import type { NativePreparedStretchAsset } from './native-stretch-preparation'
+import {
   compilePortableSessionInput,
   graphWithInstruments,
   instrumentConfigurations,
@@ -34,6 +38,7 @@ import {
 export type PortableExportAsset = {
   asset: AudioAssetRef
   sourceAssetKey?: string
+  preparedStretchArtifactId?: string
   pcm?: PlanarPcm
   transferables: readonly ArrayBuffer[]
 }
@@ -63,7 +68,7 @@ export type PortableExportSnapshotInput = {
   sidechainRoutes?: readonly ExternalSidechainRoute[]
   hasExternalPlugins?: boolean
   projectGeneration?: number
-  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
   allowInstruments?: boolean
   externalLatencyFrames?: ExternalNodeLatencyFrames
   capabilityTarget?: 'portable-wasm' | 'native'
@@ -226,8 +231,10 @@ export const countPortableInstalledAssets = (
 const collectAssets = (
   tracks: readonly Track<AudioBuffer | null>[],
   fx: ExportFx | undefined,
-  preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset>,
+  preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>,
   metadataSourceAssets: readonly MetadataSourceAsset[],
+  retainOrdinaryPcm: boolean,
+  nativePreparedAssets: boolean,
 ): CollectedPortableAssets => {
   const assets: PortableExportAsset[] = []
   const bySourceAssetKey = new Map<string, AudioAssetRef>()
@@ -301,12 +308,47 @@ const collectAssets = (
       if (clip.audioWarp?.enabled === true) {
         if (clip.audioWarp.mode === 'stretch') {
           const preparedStretch = preparedStretchAssets.get(clip.id)
-          if (preparedStretch) assets.push(preparedStretch)
+          if (preparedStretch && nativePreparedAssets) {
+            const sourceAssetKey = 'manifest' in preparedStretch
+              ? preparedStretch.preparedStretchArtifactId
+              : preparedStretch.sourceAssetKey
+            if ('manifest' in preparedStretch) {
+              const existing = assets.find((entry) => entry.asset.assetId === preparedStretch.asset.assetId)
+              if (existing) {
+                if (existing.asset.frameCount !== preparedStretch.asset.frameCount
+                  || existing.asset.sampleRateHz !== preparedStretch.asset.sampleRateHz
+                  || existing.asset.channelCount !== preparedStretch.asset.channelCount) {
+                  reasons.push(`Prepared Stretch artifact "${preparedStretch.asset.assetId}" resolves to conflicting metadata.`)
+                }
+                continue
+              }
+              assets.push({
+                asset: preparedStretch.asset,
+                sourceAssetKey,
+                preparedStretchArtifactId: preparedStretch.preparedStretchArtifactId,
+                pcm: undefined,
+                transferables: [],
+              })
+            } else {
+              assets.push({
+                asset: preparedStretch.asset,
+                sourceAssetKey,
+                pcm: preparedStretch.pcm,
+                transferables: preparedStretch.transferables,
+              })
+            }
+          } else if (preparedStretch) {
+            if ('portableAssetId' in preparedStretch) {
+              assets.push(preparedStretch)
+            } else {
+              reasons.push(`Prepared Stretch artifact "${preparedStretch.preparedStretchArtifactId}" is native-only.`)
+            }
+          }
         }
         continue
       }
       if (clip.midi || !clip.sourceAssetKey) continue
-      if (clip.buffer) addAsset(clip.sourceAssetKey, clip.buffer)
+      if (retainOrdinaryPcm && clip.buffer) addAsset(clip.sourceAssetKey, clip.buffer)
     }
   }
   for (const entry of Object.values(fx?.trackFx ?? {})) {
@@ -372,13 +414,21 @@ export const compilePortableExportSnapshot = (
   ]
   const diagnostics: PortableStretchDiagnostic[] = []
   const portableFx = localizeInstrumentFx(input.fx)
-  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset>()
+  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>()
   const portableAssetIds = new Set<string>()
   const stretchClipIds = new Set(input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
     clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' ? [clip.id] : []
   ))))
   for (const prepared of input.preparedStretchAssets ?? []) {
-    const invalid = validatePortablePreparedStretchAsset(prepared)
+    const invalid = 'manifest' in prepared
+      ? validatePreparedStretchProjectionMetadata(prepared)
+        ? {
+          code: 'stretch-metadata-mismatch' as const,
+          clipId: prepared.clipId,
+          message: validatePreparedStretchProjectionMetadata(prepared) ?? '',
+        }
+        : undefined
+      : validatePortablePreparedStretchAsset(prepared)
     if (invalid) {
       reasons.push(invalid.message)
       diagnostics.push(invalid)
@@ -394,7 +444,11 @@ export const compilePortableExportSnapshot = (
       })
       continue
     }
-    if (preparedStretchAssets.has(prepared.clipId) || portableAssetIds.has(prepared.portableAssetId)) {
+    const preparedIdentity = 'portableAssetId' in prepared
+      ? prepared.portableAssetId
+      : prepared.asset.assetId
+    if (preparedStretchAssets.has(prepared.clipId)
+      || (capabilityTarget !== 'native' && portableAssetIds.has(preparedIdentity))) {
       const message = `${prepared.clipId}: pre-rendered Stretch asset identity is ambiguous.`
       reasons.push(message)
       diagnostics.push({
@@ -416,7 +470,7 @@ export const compilePortableExportSnapshot = (
       continue
     }
     preparedStretchAssets.set(prepared.clipId, prepared)
-    portableAssetIds.add(prepared.portableAssetId)
+    portableAssetIds.add(preparedIdentity)
   }
   if (diagnostics.length > 0) return unsupported(reasons, diagnostics)
   const { assets, bySourceAssetKey, reasons: assetReasons } = collectAssets(
@@ -424,6 +478,8 @@ export const compilePortableExportSnapshot = (
     portableFx,
     preparedStretchAssets,
     input.metadataSourceAssets ?? [],
+    true,
+    capabilityTarget === 'native',
   )
   reasons.push(...assetReasons)
 
@@ -434,6 +490,7 @@ export const compilePortableExportSnapshot = (
     preparedStretchAssets,
     projectGeneration: input.projectGeneration,
     warpContext: 'offline',
+    assetRatePolicy: capabilityTarget === 'native' ? 'asset-rate' : 'match-session',
     bpm: input.bpm,
     sampleRateHz: input.sampleRateHz,
     rangeStartSec: range.startSec,

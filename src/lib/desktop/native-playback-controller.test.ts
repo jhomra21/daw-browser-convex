@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import "fake-indexeddb/auto"
 
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
@@ -8,6 +9,22 @@ import { nativeGraphNodeId, type NativeHostMappedAsset, type NativeHostMappedAss
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
+
+if (!globalThis.navigator?.locks) {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      ...globalThis.navigator,
+      locks: {
+        request: async <Value>(
+          name: string,
+          _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
+          callback: (lock: { name: string } | null) => Promise<Value>,
+        ) => callback({ name }),
+      },
+    },
+  })
+}
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration: number
@@ -769,11 +786,44 @@ test("prepares enabled Stretch clips before publishing the native graph", async 
   expect(fixture.calls).toContain("graph")
   expect(fixture.installedAssets).toHaveLength(1)
   expect(fixture.installedAssets[0]).toMatchObject({
-    frameCount: Math.round(stretchBuffer.length * 48_000 / 44_100),
-    sampleRateHz: 48_000,
+    frameCount: stretchBuffer.length,
+    sampleRateHz: stretchBuffer.sampleRate,
     channelCount: 2,
   })
+  expect(fixture.installedAssets[0]?.planarPcm.byteLength).toBe(0)
   await controller.dispose()
+})
+
+test("fails closed before opening a native transaction when bounded storage is unavailable", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const previousIndexedDb = globalThis.indexedDB
+  const previousNavigator = globalThis.navigator
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: undefined })
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { ...previousNavigator, locks: undefined },
+  })
+  try {
+    const controller = createNativePlaybackController({
+      bridge: fixture.bridge,
+      createBuffer: () => new TestAudioBuffer(),
+      reportFault: (message) => faults.push(message),
+      reportUnavailable: true,
+      compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+        ...inputWithRawAssetsAndStretch(0),
+        transport,
+      }),
+    })
+
+    expect(await controller.start(input().transport)).toBe("unavailable")
+    expect(fixture.calls).not.toContain("begin")
+    expect(faults[0]).toContain("requires IndexedDB and cross-realm Web Locks")
+    await controller.destroy()
+  } finally {
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: previousIndexedDb })
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNavigator })
+  }
 })
 
 test("does not begin a native transaction when Stretch preparation fails", async () => {
@@ -784,6 +834,11 @@ test("does not begin a native transaction when Stretch preparation fails", async
     clips: [{
       ...sourceTrack().clips[0]!,
       audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+      buffer: new TestAudioBuffer([
+        new Float32Array(48_000),
+        new Float32Array(48_000),
+        new Float32Array(48_000),
+      ]),
     }],
   }
   const compiled = compileLivePlaybackSnapshot(input(stretchTrack))
@@ -807,7 +862,7 @@ test("does not begin a native transaction when Stretch preparation fails", async
 
   expect(await controller.start(compiled.snapshot.transport)).toBe("blocked")
   expect(fixture.calls).toEqual([])
-  expect(faults[0]).toContain("portable Stretch preparation failed")
+  expect(faults[0]).toContain("only mono and stereo assets are supported")
 })
 
 test("rejects the 65th native asset after final projection", async () => {
@@ -855,7 +910,7 @@ test("accepts an expanded session at the 64-asset native boundary", async () => 
   await controller.dispose()
 })
 
-test("reports optional native unavailability when packaged playback has no fallback", async () => {
+test("uses native prepared Stretch playback without an output buffer factory", async () => {
   const fixture = createBridge()
   const faults: string[] = []
   const stretchTrack: RuntimeTrack = {
@@ -878,9 +933,9 @@ test("reports optional native unavailability when packaged playback has no fallb
     compileSnapshot: async () => compiled,
   })
 
-  expect(await controller.start(compiled.snapshot.transport)).toBe("unavailable")
-  expect(fixture.calls).toEqual([])
-  expect(faults).toEqual(["clip: portable Stretch preparation failed: buffer creation unavailable"])
+  expect(await controller.start(compiled.snapshot.transport)).toBe("started")
+  expect(fixture.calls).toContain("install")
+  expect(faults).toEqual([])
 })
 
 test("rebuilds a fresh paused native session with a new transport epoch", async () => {
@@ -2422,6 +2477,22 @@ test("project generation changes release retained native assets before rebuildin
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(2)
   expect(controller.isActive()).toBeFalse()
   expect(controller.canProcessLiveMidi()).toBeTrue()
+})
+
+test("destroys a native controller idempotently", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...input(),
+      transport,
+    }),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  await Promise.all([controller.destroy(), controller.destroy(), controller.destroy()])
+  expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(1)
+  expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(1)
 })
 
 test("starts sessions with non-unity track gain without opening a legacy fallback", async () => {

@@ -9,13 +9,22 @@ import {
   type PortablePreparedStretchAsset,
   type PortableStretchDiagnostic,
 } from './portable-stretch-preparation'
+import {
+  validatePreparedStretchProjectionMetadata,
+  type PreparedStretchProjectionMetadata,
+} from './prepared-stretch-artifact'
+
+const isPortablePreparedStretchAsset = (
+  value: PortablePreparedStretchAsset | PreparedStretchProjectionMetadata,
+): value is PortablePreparedStretchAsset => 'portableAssetId' in value
 
 export type PortableClipProject = {
   tracks: readonly Track[]
   assets: ReadonlyMap<string, AudioAssetRef>
-  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset>
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PreparedStretchProjectionMetadata>
   projectGeneration?: number
   warpContext?: 'realtime' | 'offline'
+  assetRatePolicy?: 'match-session' | 'asset-rate'
   bpm: number
   sampleRateHz: number
   rangeStartSec: number
@@ -102,7 +111,12 @@ const projectClip = (
     return { reason: `${clip.id}: no decoded source asset is available.` }
   }
   if (preparedStretch) {
-    const invalid = validatePortablePreparedStretchAsset(preparedStretch)
+    const invalid = isPortablePreparedStretchAsset(preparedStretch)
+      ? validatePortablePreparedStretchAsset(preparedStretch)
+      : (() => {
+        const message = validatePreparedStretchProjectionMetadata(preparedStretch)
+        return message ? stretchDiagnostic(clip.id, 'stretch-metadata-mismatch', message) : undefined
+      })()
     if (invalid) return { reason: invalid.message, diagnostic: invalid }
   }
   if (preparedStretch
@@ -114,7 +128,9 @@ const projectClip = (
       diagnostic: stretchDiagnostic(clip.id, 'stretch-asset-stale-generation', message),
     }
   }
-  if (preparedStretch && preparedStretch.asset.sampleRateHz !== input.sampleRateHz) {
+  if (preparedStretch
+    && (input.assetRatePolicy ?? 'match-session') === 'match-session'
+    && preparedStretch.asset.sampleRateHz !== input.sampleRateHz) {
     const message = `${clip.id}: pre-rendered Stretch audio must match the portable session sample rate.`
     return {
       reason: message,

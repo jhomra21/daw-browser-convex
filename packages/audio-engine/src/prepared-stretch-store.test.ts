@@ -142,7 +142,7 @@ const createDelayedWriteReleaseLockManager = (throwOnRelease = false) => {
   const lockManager: PreparedStretchArtifactLockManager = {
     request: async <Value>(
       name: string,
-      options: { ifAvailable?: boolean },
+      options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
       callback: (lock: { name: string } | null) => Promise<Value>,
     ) => {
       const result = await preparedStretchTestLockManager.request(name, options, callback)
@@ -428,6 +428,132 @@ test.serial('does not evict a leased generation on quota retry', async () => {
   await repository.dispose?.()
 })
 
+test('pins an exact generation until its idempotent lease release', async () => {
+  const repository = createPreparedStretchArtifactRepository({
+    sessionId: `lease-generation-${crypto.randomUUID()}`,
+    lockManager: preparedStretchTestLockManager,
+  })
+  const published = await repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-pin` })
+  await published.append([Float32Array.of(1, 2, 3, 4, 5)])
+  const manifest = await published.commit()
+  const lease = await repository.acquireLease(manifest)
+  expect(lease.artifactId).toBe(manifest.artifactId)
+  expect(lease.writeId).toBe(manifest.writeId)
+
+  const replacement = await repository.begin({ ...artifact, artifactId: manifest.artifactId })
+  await replacement.append([Float32Array.of(6, 7, 8, 9, 10)])
+  await expect(replacement.commit()).rejects.toThrow('pinned by an active lease')
+
+  await lease.release()
+  await lease.release()
+  await repository.dispose?.()
+})
+
+test('reads a retained generation while its shared lease remains held', async () => {
+  const repository = createPreparedStretchArtifactRepository({
+    sessionId: `lease-read-${crypto.randomUUID()}`,
+    lockManager: preparedStretchTestLockManager,
+  })
+  const write = await repository.begin({ ...artifact, artifactId: `${artifact.artifactId}-lease-read` })
+  await write.append([Float32Array.of(1, 2, 3, 4, 5)])
+  const manifest = await write.commit()
+  const lease = await repository.acquireLease(manifest)
+  const pages = []
+  for await (const page of repository.read(manifest.artifactId)) pages.push(page)
+  expect(pages.flatMap((page) => [...(page.planes[0] ?? [])])).toEqual([1, 2, 3, 4, 5])
+  await lease.release()
+  await repository.dispose?.()
+})
+
+test('allows shared readers but blocks replacement until every reader releases', async () => {
+  const repository = createPreparedStretchArtifactRepository({
+    sessionId: `shared-readers-${crypto.randomUUID()}`,
+    lockManager: preparedStretchTestLockManager,
+  })
+  const artifactId = `${artifact.artifactId}-shared-readers`
+  const write = await repository.begin({ ...artifact, artifactId })
+  await write.append([Float32Array.of(1, 2, 3, 4, 5)])
+  const manifest = await write.commit()
+  const first = repository.read(artifactId)
+  const second = repository.read(artifactId)
+  expect((await first.next()).done).toBe(false)
+  expect((await second.next()).done).toBe(false)
+
+  const blockedReplacement = await repository.begin({ ...artifact, artifactId })
+  await blockedReplacement.append([Float32Array.of(6, 7, 8, 9, 10)])
+  await expect(blockedReplacement.commit()).rejects.toThrow('pinned by an active lease')
+
+  await first.return?.(undefined)
+  await second.return?.(undefined)
+  const replacement = await repository.begin({ ...artifact, artifactId })
+  await replacement.append([Float32Array.of(6, 7, 8, 9, 10)])
+  const replacementManifest = await replacement.commit()
+  expect(replacementManifest.writeId).toBe(manifest.writeId)
+  await repository.dispose?.()
+})
+
+test('persists a finite lease recovery deadline and reclaims a failed release', async () => {
+  let timestamp = 1_000
+  const repository = createPreparedStretchArtifactRepository({
+    sessionId: `lease-release-failure-${crypto.randomUUID()}`,
+    now: () => timestamp,
+    lockManager: preparedStretchTestLockManager,
+  })
+  const artifactId = `${artifact.artifactId}-lease-release-failure`
+  const write = await repository.begin({ ...artifact, artifactId })
+  await write.append([Float32Array.of(1, 2, 3, 4, 5)])
+  const manifest = await write.commit()
+  const lease = await repository.acquireLease(manifest)
+  const originalDelete = IDBObjectStore.prototype.delete
+  let deleteFailures = 1
+  IDBObjectStore.prototype.delete = function (key) {
+    if (this.name === 'leases' && deleteFailures > 0) {
+      deleteFailures -= 1
+      throw new Error('Injected lease deletion failure.')
+    }
+    return originalDelete.call(this, key)
+  }
+  try {
+    await lease.release()
+  } finally {
+    IDBObjectStore.prototype.delete = originalDelete
+  }
+
+  timestamp += 30_001
+  const replacement = await repository.begin({ ...artifact, artifactId })
+  await replacement.append([Float32Array.of(6, 7, 8, 9, 10)])
+  const replacementManifest = await replacement.commit()
+  expect(replacementManifest.writeId).toBe(manifest.writeId)
+  await lease.release()
+  await repository.dispose?.()
+})
+
+test('does not reclaim a live shared owner after its persisted deadline', async () => {
+  let timestamp = 1_000
+  const repository = createPreparedStretchArtifactRepository({
+    sessionId: `live-lease-${crypto.randomUUID()}`,
+    now: () => timestamp,
+    lockManager: preparedStretchTestLockManager,
+  })
+  const artifactId = `${artifact.artifactId}-live-lease`
+  const write = await repository.begin({ ...artifact, artifactId })
+  await write.append([Float32Array.of(1, 2, 3, 4, 5)])
+  const manifest = await write.commit()
+  const lease = await repository.acquireLease(manifest)
+  timestamp += 30_001
+
+  const replacement = await repository.begin({ ...artifact, artifactId })
+  await replacement.append([Float32Array.of(6, 7, 8, 9, 10)])
+  await expect(replacement.commit()).rejects.toThrow('pinned by an active lease')
+
+  await lease.release()
+  const reclaimed = await repository.begin({ ...artifact, artifactId })
+  await reclaimed.append([Float32Array.of(6, 7, 8, 9, 10)])
+  await expect(reclaimed.commit()).resolves.toMatchObject({ artifactId })
+  expect((await repository.find(artifactId))?.writeId).toBe(manifest.writeId)
+  await repository.dispose?.()
+})
+
 test('packs every source append into fixed pages and preserves the tail range', async () => {
   const repository = createPreparedStretchArtifactRepository({
     sessionId: `packing-${crypto.randomUUID()}`,
@@ -690,7 +816,7 @@ test.serial('continues eviction past the first 64 locked candidates', async () =
   const lockManager: PreparedStretchArtifactLockManager = {
     request: <Value>(
       name: string,
-      options: { ifAvailable?: boolean },
+      options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
       callback: (lock: { name: string } | null) => Promise<Value>,
     ) => {
       if (options.ifAvailable === true && blocked.has(name)) return callback(null)

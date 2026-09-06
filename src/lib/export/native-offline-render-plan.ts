@@ -5,6 +5,7 @@ import {
   type PortableExportSnapshot,
 } from '@daw-browser/audio-engine/portable-export-snapshot'
 import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
+import type { NativePreparedStretchAsset } from '@daw-browser/audio-engine/native-stretch-preparation'
 import {
   mapNativeSessionAssets,
   serializeNativeGraph,
@@ -37,6 +38,7 @@ import {
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { projectNativeVstAutomationSegments } from '~/lib/native-vst-automation'
 import { chunkNativePcmProjection } from '@daw-browser/audio-engine/native-pcm-chunking'
+import { nativeMappedSourceCoverage } from '~/lib/native-source-coverage'
 
 export const nativeExternalLatencyFrames = (
   attachments: NativeExternalAttachmentPlan | undefined,
@@ -62,6 +64,14 @@ const planarBytes = (planes: readonly Float32Array[]) => {
     offset += plane.byteLength
   }
   return output
+}
+
+const mappedSourceCoverage = (sourceStart: number, sourceFrameCount: number, frameCount: number) => {
+  const coverage = nativeMappedSourceCoverage(sourceStart, sourceFrameCount, frameCount)
+  if (!coverage) {
+    throw new Error('Native export mapped source exceeds its source bounds.')
+  }
+  return coverage
 }
 
 const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: true }>) => {
@@ -100,19 +110,13 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
           throw new Error(`Native export mapped source "${asset.assetId}" has invalid interpolation bounds.`)
         }
         const sourceStart = event.sourceOffsetFrame + sourceOffsetFraction
-        const sourceEnd = sourceStart + event.sourceFrameCount
         if (
           !Number.isFinite(sourceStart)
-          || !Number.isFinite(sourceEnd)
           || sourceStart < 0
-          || sourceEnd <= sourceStart
-          || sourceEnd > asset.frameCount
         ) {
           throw new Error(`Native export mapped source "${asset.assetId}" exceeds its source bounds.`)
         }
-        const startFrame = Math.floor(sourceStart)
-        const endFrame = Math.ceil(sourceEnd)
-        return { startFrame, frameCount: endFrame - startFrame }
+        return mappedSourceCoverage(sourceStart, event.sourceFrameCount, asset.frameCount)
       })
       .filter((range) => range.frameCount > 0)
       .toSorted((left, right) => left.startFrame - right.startFrame)
@@ -138,6 +142,7 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
       sampleRateHz: asset.sampleRateHz,
       channelCount: asset.channelCount,
       ranges,
+      preparedStretchArtifactId: entry.preparedStretchArtifactId,
     })
   }
   return { sessionAssets, assets, mappedAssets }
@@ -213,7 +218,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   tailFrames: number
   projectGeneration: number
   projectId?: string
-  preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
   externalAttachments?: NativeExternalAttachmentPlan
   capturedVstStates?: readonly {
     instanceId: string

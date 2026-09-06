@@ -287,6 +287,8 @@ export function useTimelinePlayback(
   const disposeNativeAfterCapture = async () => {
     let captureError: unknown
     let disposeError: unknown
+    const pendingStart = nativePlayback.cancelPendingStart()
+    await pendingStart.catch(() => undefined)
     try {
       await capturePreparedNativeVstStates()
     } catch (error) {
@@ -1198,21 +1200,21 @@ export function useTimelinePlayback(
       tracks,
     })
   }
-  const disposePreparedBackends = async () => {
+  const disposePreparedBackends = async (options?: { invalidateProjectArtifacts?: boolean }) => {
     if (preparedBackendDisposePromise) return preparedBackendDisposePromise
     preparedBackendDisposeHasPendingNativeStart = nativePlayback.getPendingStart() !== undefined
     const dispose = (async () => {
+      const pendingStart = nativePlayback.cancelPendingStart()
       let captureError: unknown
       try {
         await capturePreparedNativeVstStates()
       } catch (error) {
         captureError = error
       } finally {
-        const pendingStart = nativePlayback.cancelPendingStart()
         const disposal = requiresNativeAudio
-          ? [nativePlayback.dispose(), pendingStart]
-          : [nativePlayback.dispose(), Promise.resolve(disposePortableBrowserPlayback()), pendingStart]
-        await Promise.allSettled(disposal)
+          ? [nativePlayback.dispose(options)]
+          : [nativePlayback.dispose(options), Promise.resolve(disposePortableBrowserPlayback())]
+        await Promise.allSettled([...disposal, pendingStart])
       }
       if (!untrack(isPlaying)) setActiveBackend('idle')
       if (captureError !== undefined) throw captureError
@@ -1768,10 +1770,10 @@ export function useTimelinePlayback(
       && clip.mediaStatus !== "permission-denied"
     )),
   )
-  const disposeNativePreview = () => {
+  const disposeNativePreview = (options?: { invalidateProjectArtifacts?: boolean }) => {
     nativeLifecycleToken += 1
     const request = pendingNativeDispose
-      .then(() => disposePreparedBackends())
+      .then(() => disposePreparedBackends(options))
     pendingNativeDispose = request.catch(() => undefined)
     return request
   }
@@ -1797,8 +1799,7 @@ export function useTimelinePlayback(
     setIsPlaying(false)
     cancelRaf()
     nativePreviewRequested = false
-    void disposeNativePreview()
-    if (!requiresNativeAudio) disposePortableBrowserPlayback()
+    void disposeNativePreview({ invalidateProjectArtifacts: projectChanged }).catch(() => undefined)
     setActiveBackend('idle')
   })
 
@@ -1850,6 +1851,7 @@ export function useTimelinePlayback(
 
   onCleanup(() => {
     mounted = false
+    nativeLifecycleToken += 1
     invalidatePlayAttempt()
     recoveryToken += 1
     if (recoveryAttempt) recoveryAttempt.cancelled = true
@@ -1861,7 +1863,9 @@ export function useTimelinePlayback(
     unsubscribeStretchRenderState()
     removeAudioLifecycle?.()
     cancelRaf()
-    void disposeNativePreview()
+    const destroy = pendingNativeDispose.then(() => nativePlayback.destroy())
+    pendingNativeDispose = destroy.catch(() => undefined)
+    void destroy.catch(() => undefined)
     if (!requiresNativeAudio) disposePortableBrowserPlayback()
     setActiveBackend('idle')
   })

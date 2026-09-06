@@ -8,6 +8,11 @@ import {
   nativeAudioHostMaximumPayloadBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
+import type {
+  PreparedStretchArtifactManifest,
+  PreparedStretchArtifactPage,
+  PreparedStretchArtifactRepository,
+} from "@daw-browser/audio-engine/prepared-stretch-store"
 
 class EagerAudioBuffer implements AudioBuffer {
   readonly duration = 5 / 48_000
@@ -343,6 +348,86 @@ test("detaches one canceled caller from shared page hydration", async () => {
   await expect(second).resolves.toBeUndefined()
   expect(writes).toBe(1)
   manager.dispose()
+})
+
+test("awaits an in-flight artifact read during disposal and closes its generator", async () => {
+  const readStarted = Promise.withResolvers<void>()
+  const releaseRead = Promise.withResolvers<void>()
+  let generatorClosed = false
+  const manifest: PreparedStretchArtifactManifest = {
+    artifactId: "artifact-a",
+    writeId: "write-a",
+    descriptor: {
+      artifactId: "artifact-a",
+      rendererVersion: "renderer",
+      algorithmVersion: "algorithm",
+      wsola: { windowFrameCount: 4, overlapFrameCount: 2, searchFrameCount: 1 },
+      source: { contentIdentity: "source-a", frameCount: 4, sampleRate: 48_000, channelCount: 1 },
+      segments: [],
+      output: { sampleRate: 48_000, channelCount: 1, frameCount: 4 },
+      persistable: false,
+    },
+    pageFrames: 4,
+    frameCount: 4,
+    byteSize: 16,
+    committedAt: 1,
+    lastAccessedAt: 1,
+  }
+  const read = async function* (
+    _artifactId: string,
+    _startFrame?: number,
+    _endFrame?: number,
+  ): AsyncGenerator<PreparedStretchArtifactPage> {
+    readStarted.resolve()
+    try {
+      await releaseRead.promise
+      yield {
+        key: "page-a",
+        artifactId: "artifact-a",
+        writeId: "write-a",
+        pageIndex: 0,
+        startFrame: 0,
+        frameCount: 4,
+        sampleRate: 48_000,
+        channelCount: 1,
+        planes: [new Float32Array([0, 1, 2, 3])],
+        byteSize: 16,
+        published: true,
+      }
+    } finally {
+      generatorClosed = true
+    }
+  }
+  const repository = {
+    find: async () => manifest,
+    acquireLease: async () => ({ artifactId: manifest.artifactId, writeId: manifest.writeId, release: async () => {} }),
+    begin: async () => { throw new Error("not used") },
+    read,
+    cleanupSession: async () => {},
+  } satisfies PreparedStretchArtifactRepository
+  const manager = createNativeTimelinePageManager({
+    sources: [{
+      sourceAssetKey: "source-a",
+      sessionAssetId: 1,
+      frameCount: 4,
+      sampleRateHz: 48_000,
+      channelCount: 1,
+      preparedStretchArtifactId: "artifact-a",
+      artifactRepository: repository,
+    }],
+    writePage: async () => {},
+  })
+  const readPage = manager.readPage("source-a", 0, 4)
+  await readStarted.promise
+  const disposing = manager.dispose()
+  let disposed = false
+  void disposing.then(() => { disposed = true })
+  await Promise.resolve()
+  expect(disposed).toBeFalse()
+  releaseRead.resolve()
+  await expect(readPage).rejects.toThrow()
+  await disposing
+  expect(generatorClosed).toBeTrue()
 })
 
 test("hydrates at most two pages concurrently and uses both slots", async () => {

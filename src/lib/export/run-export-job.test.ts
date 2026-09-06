@@ -3,6 +3,22 @@ import "fake-indexeddb/auto"
 import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import type { NativeOfflineRenderPlan } from "@daw-browser/audio-engine/native-host-wire"
+
+if (!globalThis.navigator?.locks) {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      ...globalThis.navigator,
+      locks: {
+        request: async <Value>(
+          name: string,
+          _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
+          callback: (lock: { name: string } | null) => Promise<Value>,
+        ) => callback({ name }),
+      },
+    },
+  })
+}
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
 import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity } from "@daw-browser/audio-engine/sampled-instrument-region"
 
@@ -920,12 +936,12 @@ test("shared sampler and granular export consumers charge one physical region at
   expect(budget.totalBytes()).toBe(0)
 })
 
-test("native export prepares Stretch after hydration and normalizes its PCM", async () => {
+test("native export prepares Stretch after hydration as a mapped artifact", async () => {
   const originalAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
   let preparedAsset: {
     sampleRateHz: number
     frameCount: number
-    planarPcm: Uint8Array
+    preparedStretchArtifactId: string | undefined
   } | undefined
   const source = new TestDecodedAudioBuffer()
   try {
@@ -974,12 +990,12 @@ test("native export prepares Stretch after hydration and normalizes its PCM", as
       renderStateSnapshot,
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
       nativeOfflinePcmRenderer: async (plan) => {
-        const asset = plan.assets[0]
+        const asset = plan.mappedAssets?.[0]
         if (asset) {
           preparedAsset = {
             sampleRateHz: asset.sampleRateHz,
             frameCount: asset.frameCount,
-            planarPcm: asset.planarPcm,
+            preparedStretchArtifactId: asset.preparedStretchArtifactId,
           }
         }
         throw new NativeOfflineRenderError("stop after native Stretch planning")
@@ -992,9 +1008,9 @@ test("native export prepares Stretch after hydration and normalizes its PCM", as
       failureOwner: "native",
       outputs: [],
     })
-    expect(preparedAsset?.sampleRateHz).toBe(render.sampleRate)
-    expect(preparedAsset?.frameCount).toBe(render.sampleRate)
-    expect(preparedAsset?.planarPcm.byteLength).toBe(render.sampleRate * 2 * Float32Array.BYTES_PER_ELEMENT)
+    expect(preparedAsset?.sampleRateHz).toBe(source.sampleRate)
+    expect(preparedAsset?.frameCount).toBe(source.length)
+    expect(preparedAsset?.preparedStretchArtifactId).toBeTruthy()
   } finally {
     if (originalAudioBuffer) Object.defineProperty(globalThis, "AudioBuffer", originalAudioBuffer)
     else Reflect.deleteProperty(globalThis, "AudioBuffer")
@@ -1062,7 +1078,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
   expect(opened).toBe(false)
   expect(outcome).toMatchObject({
     type: "error",
-    message: "clip-stretch-diagnostic: Stretch source audio must be mono or stereo.",
+    message: "clip-stretch-diagnostic: only mono and stereo assets are supported.",
   })
 })
 
@@ -1216,21 +1232,24 @@ test("native export rejects a stale project generation after Stretch preparation
   let generation = 7
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
-    getTracks: () => [{
-      id: "track-stretch-stale",
-      name: "Stretch",
-      volume: 1,
-      clips: [{
-        id: "clip-stretch-stale",
-        name: "Stretch clip",
-        color: "#fff",
-        startSec: 0,
-        duration: 1,
-        sourceAssetKey: "asset:stretch",
-        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
-        buffer: source,
-      }],
-    }],
+    getTracks: () => {
+      generation = 8
+      return [{
+        id: "track-stretch-stale",
+        name: "Stretch",
+        volume: 1,
+        clips: [{
+          id: "clip-stretch-stale",
+          name: "Stretch clip",
+          color: "#fff",
+          startSec: 0,
+          duration: 1,
+          sourceAssetKey: "asset:stretch",
+          audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+          buffer: source,
+        }],
+      }]
+    },
     bpm: 120,
     projectGeneration: 7,
     getProjectGeneration: () => generation,
@@ -1254,10 +1273,7 @@ test("native export rejects a stale project generation after Stretch preparation
       },
     },
     renderStateSnapshot,
-    createBuffer: (channels, frames, sampleRate) => {
-      generation = 8
-      return new TestDecodedAudioBuffer(frames, sampleRate, channels)
-    },
+    createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
     nativeOfflinePcmRenderer: async () => {
       throw new Error("native renderer should not run")
     },

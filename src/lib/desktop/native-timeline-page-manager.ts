@@ -6,6 +6,7 @@ import {
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
+import type { PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
 
 export type NativeTimelineSource = {
   sourceAssetKey: string
@@ -16,6 +17,8 @@ export type NativeTimelineSource = {
   buffer?: AudioBuffer | null
   sourceKind?: 'upload' | 'url' | 'recording'
   sampleUrl?: string | URL | Request
+  preparedStretchArtifactId?: string
+  artifactRepository?: PreparedStretchArtifactRepository
 }
 
 export type NativeTimelinePageManager = {
@@ -23,10 +26,16 @@ export type NativeTimelinePageManager = {
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
     signal?: AbortSignal,
   ) => Promise<void>
+  readPage: (
+    sourceAssetKey: string,
+    startFrame: number,
+    frameCount: number,
+    signal?: AbortSignal,
+  ) => Promise<NativeHostMappedAssetPage>
   invalidateRanges: (
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
   ) => void
-  dispose: () => void
+  dispose: () => Promise<void>
 }
 
 type PageWriter = (page: NativeHostMappedAssetPage, signal?: AbortSignal) => Promise<void>
@@ -75,9 +84,11 @@ export const createNativeTimelinePageManager = (input: {
   const sources = new Map(input.sources.map((source) => [source.sourceAssetKey, source]))
   const active = new Set<string>()
   const inFlight = new Map<string, Promise<void>>()
+  const readInFlight = new Map<string, Promise<NativeHostMappedAssetPage>>()
   const uploaded = new Map<string, Map<number, number>>()
   const slotWaiters: Array<() => void> = []
   const abortController = new AbortController()
+  let disposePromise: Promise<void> | undefined
   const readLocalAsset = input.readLocalAsset ?? readLocalAssetBytes
   let accessSequence = 0
   const requestedPageFrames = input.pageFrames ?? maximumDecodedPageFrames
@@ -174,14 +185,14 @@ export const createNativeTimelinePageManager = (input: {
   const combinedSignal = (signal?: AbortSignal) => signal
     ? AbortSignal.any([abortController.signal, signal])
     : abortController.signal
-  const awaitWithSignal = async (promise: Promise<void>, signal?: AbortSignal) => {
+  const awaitWithSignal = async <Value>(promise: Promise<Value>, signal?: AbortSignal): Promise<Value> => {
     if (!signal) return await promise
     signal.throwIfAborted()
     let onAbort: (() => void) | undefined
     try {
       return await Promise.race([
         promise,
-        new Promise<void>((_, reject) => {
+        new Promise<never>((_, reject) => {
           onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
           signal.addEventListener('abort', onAbort, { once: true })
         }),
@@ -199,6 +210,64 @@ export const createNativeTimelinePageManager = (input: {
     }
     if (!source.sampleUrl) throw new Error(`Native audio asset "${source.sourceAssetKey}" has no source URL.`)
     return source.sampleUrl
+  }
+
+  const readArtifactPage = async (
+    source: NativeTimelineSource,
+    startFrame: number,
+    frameCount: number,
+    signal?: AbortSignal,
+  ): Promise<NativeHostMappedAssetPage> => {
+    const repository = source.artifactRepository
+    const artifactId = source.preparedStretchArtifactId
+    if (!repository || !artifactId) {
+      throw new Error(`Native Stretch artifact "${source.sourceAssetKey}" is not registered.`)
+    }
+    const manifest = await repository.find(artifactId)
+    if (!manifest
+      || manifest.artifactId !== artifactId
+      || manifest.frameCount !== source.frameCount
+      || manifest.descriptor.output.sampleRate !== source.sampleRateHz
+      || manifest.descriptor.output.channelCount !== source.channelCount) {
+      throw new Error(`Native Stretch artifact "${artifactId}" metadata is stale or conflicting.`)
+    }
+    const planes = Array.from(
+      { length: source.channelCount },
+      () => new Float32Array(frameCount),
+    )
+    let expected = startFrame
+    for await (const page of repository.read(artifactId, startFrame, startFrame + frameCount)) {
+      signal?.throwIfAborted()
+      if (page.startFrame !== expected
+        || page.sampleRate !== source.sampleRateHz
+        || page.channelCount !== source.channelCount
+        || page.frameCount <= 0
+        || page.planes.length !== source.channelCount
+        || page.planes.some((plane) => plane.length !== page.frameCount)) {
+        throw new Error(`Native Stretch artifact "${artifactId}" has a noncontiguous page.`)
+      }
+      for (let channel = 0; channel < source.channelCount; channel += 1) {
+        const plane = page.planes[channel]
+        const target = planes[channel]
+        if (!plane || !target) {
+          throw new Error(`Native Stretch artifact "${artifactId}" has incomplete channels.`)
+        }
+        target.set(plane, expected - startFrame)
+      }
+      expected += page.frameCount
+    }
+    if (expected !== startFrame + frameCount) {
+      throw new Error(`Native Stretch artifact "${artifactId}" has a coverage gap.`)
+    }
+    const bytesPerPlane = frameCount * Float32Array.BYTES_PER_ELEMENT
+    const planarPcm = new Uint8Array(source.channelCount * bytesPerPlane)
+    planes.forEach((plane, channel) => {
+      planarPcm.set(
+        new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength),
+        channel * bytesPerPlane,
+      )
+    })
+    return { sessionAssetId: source.sessionAssetId, startFrame, frameCount, planarPcm }
   }
 
   const hydratePage = async (
@@ -225,6 +294,17 @@ export const createNativeTimelinePageManager = (input: {
         await acquireSlot(operationSignal)
         slotAcquired = true
         active.add(key)
+        if (source.preparedStretchArtifactId) {
+          const page = await readArtifactPage(
+            source,
+            startFrame,
+            endFrame - startFrame,
+            operationSignal,
+          )
+          await input.writePage(page, operationSignal)
+          markUploaded(sourceAssetKey, startFrame)
+          return
+        }
         const pagePlanes = Array.from(
           { length: source.channelCount },
           () => new Float32Array(endFrame - startFrame),
@@ -315,6 +395,77 @@ export const createNativeTimelinePageManager = (input: {
     await awaitWithSignal(operation, signal)
   }
 
+  const readPage = async (
+    sourceAssetKey: string,
+    startFrame: number,
+    frameCount: number,
+    signal?: AbortSignal,
+  ): Promise<NativeHostMappedAssetPage> => {
+    const source = sources.get(sourceAssetKey)
+    if (!source) throw new Error(`Native audio asset "${sourceAssetKey}" is not registered.`)
+    const pageFrames = pageFramesForSource(source)
+    if (!Number.isSafeInteger(startFrame) || startFrame < 0
+      || !Number.isSafeInteger(frameCount) || frameCount <= 0
+      || startFrame + frameCount > source.frameCount
+      || frameCount > pageFrames) {
+      throw new Error(`Native audio asset "${sourceAssetKey}" page is invalid.`)
+    }
+    const key = `read:${pageKey(sourceAssetKey, startFrame)}:${frameCount}`
+    const existing = readInFlight.get(key)
+    if (existing) return await awaitWithSignal(existing, signal)
+    const operation = (async (): Promise<NativeHostMappedAssetPage> => {
+      const operationSignal = combinedSignal()
+      if (source.preparedStretchArtifactId) {
+        return readArtifactPage(source, startFrame, frameCount, operationSignal)
+      }
+      const bytesPerPlane = frameCount * Float32Array.BYTES_PER_ELEMENT
+      const planes = Array.from({ length: source.channelCount }, () => new Float32Array(frameCount))
+      const decoderSource = source.buffer
+        ? undefined
+        : await sourceFor(source)
+      if (source.buffer) {
+        if (source.buffer.sampleRate !== source.sampleRateHz
+          || source.buffer.numberOfChannels !== source.channelCount
+          || source.buffer.length < startFrame + frameCount) {
+          throw new Error(`Native audio asset "${sourceAssetKey}" eager metadata is inconsistent.`)
+        }
+        for (let channel = 0; channel < source.channelCount; channel += 1) {
+          planes[channel]?.set(source.buffer.getChannelData(channel).subarray(startFrame, startFrame + frameCount))
+        }
+      } else if (decoderSource) {
+        let expected = startFrame
+        for await (const page of decodeAudioPages(decoderSource, {
+          startFrame,
+          endFrame: startFrame + frameCount,
+          pageFrames,
+          signal: operationSignal,
+        })) {
+          operationSignal.throwIfAborted()
+          if (page.startFrame !== expected
+            || page.sampleRate !== source.sampleRateHz
+            || page.channelCount !== source.channelCount
+            || page.planes.some((plane) => plane.length !== page.frameCount)) {
+            throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage is invalid.`)
+          }
+          page.planes.forEach((plane, channel) => planes[channel]?.set(plane, expected - startFrame))
+          expected += page.frameCount
+        }
+        if (expected !== startFrame + frameCount) throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage has a gap.`)
+      }
+      const planarPcm = new Uint8Array(frameCount * source.channelCount * Float32Array.BYTES_PER_ELEMENT)
+      planes.forEach((plane, channel) => {
+        planarPcm.set(new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength), channel * bytesPerPlane)
+      })
+      return { sessionAssetId: source.sessionAssetId, startFrame, frameCount, planarPcm }
+    })()
+    readInFlight.set(key, operation)
+    const clearOperation = () => {
+      if (readInFlight.get(key) === operation) readInFlight.delete(key)
+    }
+    void operation.then(clearOperation, clearOperation)
+    return await awaitWithSignal(operation, signal)
+  }
+
   return {
     ensureRanges: async (ranges, signal) => {
       signal?.throwIfAborted()
@@ -399,10 +550,17 @@ export const createNativeTimelinePageManager = (input: {
         }
       }
     },
-    dispose: () => {
+    readPage,
+    dispose: async () => {
+      if (disposePromise) return disposePromise
       abortController.abort()
-      inFlight.clear()
-      uploaded.clear()
+      disposePromise = (async () => {
+        await Promise.allSettled([...inFlight.values(), ...readInFlight.values()])
+        inFlight.clear()
+        readInFlight.clear()
+        uploaded.clear()
+      })()
+      return disposePromise
     },
   }
 }

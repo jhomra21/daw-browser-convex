@@ -27,6 +27,7 @@ import {
   nativeAudioHostControlTypes,
   nativeAudioHostProtocolVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
 
 const hostScript = `
 const u32 = (value) => {
@@ -499,6 +500,52 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
       },
     })
     expect(chunks).toEqual([0, 1, 2, 3, 4])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("cancels mapped-page rendering without leaving a provider rejection unhandled", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-mapped-cancel-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nexec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const controller = new AbortController()
+    const providerCalled = Promise.withResolvers<void>()
+    const render = renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        mappedAssets: [{
+          sessionAssetId: 1,
+          sourceAssetKey: "source-a",
+          frameCount: 1,
+          sampleRateHz: 48_000,
+          channelCount: 1,
+          ranges: [{ startFrame: 0, frameCount: 1 }],
+        }],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: controller.signal,
+      onChunk: () => undefined,
+      onMappedPage: async () => {
+        providerCalled.resolve()
+        return new Promise<NativeHostMappedAssetPage>(() => {})
+      },
+    })
+    await providerCalled.promise
+    controller.abort()
+    await expect(render).rejects.toMatchObject({ name: "AbortError" })
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

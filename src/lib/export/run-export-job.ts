@@ -41,16 +41,27 @@ import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-rend
 import { NativeOfflineRenderError, type NativeOfflinePcmRenderer } from '~/lib/export/desktop-native-offline-pcm-renderer'
 import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
+import { isPortableStretchClip } from '@daw-browser/audio-engine/portable-stretch-preparation'
 import {
-  nativeAudioHostMaximumAssetFramesForChannels,
-  nativeAudioHostMaximumInstalledAssets,
-  nativeAudioHostMaximumStretchPreparationBytes,
-} from '@daw-browser/desktop-protocol/native-audio-host'
-import { preparePortableStretchAssets, isPortableStretchClip, type PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
-import { countLiveNativeInstalledAssetKeys } from '@daw-browser/audio-engine/live-native-projection'
+  prepareNativeStretchArtifacts,
+  type NativePreparedStretchAsset,
+} from '@daw-browser/audio-engine/native-stretch-preparation'
+import { createAudioStretchCache } from '@daw-browser/audio-engine/audio-stretch-cache'
+import {
+  createPreparedStretchArtifactRepository,
+  type PreparedStretchArtifactRepository,
+} from '@daw-browser/audio-engine/prepared-stretch-store'
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
+import {
+  createNativeTimelinePageManager,
+  type NativeTimelinePageManager,
+} from '~/lib/desktop/native-timeline-page-manager'
+import type {
+  NativeHostMappedAssetPage,
+  NativeOfflineMappedAsset,
+} from '@daw-browser/audio-engine/native-host-wire'
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 type RoomEffectParams = RoomEffectRow['params']
@@ -950,10 +961,24 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
   let localProjectId: string | undefined
   let nativeSpool: NativeOfflinePcmSpoolSession | undefined
   let nativeSpoolRemoved = false
+  let nativeStretchRepository: PreparedStretchArtifactRepository | undefined
+  let nativeStretchCache: ReturnType<typeof createAudioStretchCache> | undefined
+  let nativeTimelinePageManager: NativeTimelinePageManager | undefined
+  let nativeStretchLeaseDispose: (() => Promise<void>) | undefined
   const removeNativeSpool = async () => {
     if (!nativeSpool || nativeSpoolRemoved) return
     await nativeSpool.remove()
     nativeSpoolRemoved = true
+  }
+  const disposeNativeStretchResources = async () => {
+    await nativeTimelinePageManager?.dispose()
+    nativeTimelinePageManager = undefined
+    await nativeStretchLeaseDispose?.()
+    nativeStretchLeaseDispose = undefined
+    await nativeStretchCache?.dispose()
+    nativeStretchCache = undefined
+    await nativeStretchRepository?.dispose?.()
+    nativeStretchRepository = undefined
   }
   const saveCompletedLocalMetadata = async () => {
     if (!localProjectId) return
@@ -1014,26 +1039,25 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       ),
     ])
     throwIfExportAborted(input.signal)
-    let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
+    let preparedStretchAssets: readonly NativePreparedStretchAsset[] = []
     const nativeTracks = input.nativeRendererRequired
       ? filterTracksToExportRange(preloadTracks, input.range)
       : preloadTracks
     if (input.nativeRendererRequired && nativeTracks.some((track) => track.clips.some(isPortableStretchClip))) {
-      const preparation = await preparePortableStretchAssets({
+      if (!globalThis.indexedDB || !globalThis.navigator?.locks) {
+        throw new Error("Native Stretch export requires IndexedDB and cross-realm Web Locks for bounded artifact storage.")
+      }
+      nativeStretchRepository = createPreparedStretchArtifactRepository()
+      nativeStretchCache = createAudioStretchCache({
+        resolveSource: input.resolveAudioSource,
+        artifactRepository: nativeStretchRepository,
+      })
+      const preparation = await prepareNativeStretchArtifacts({
         tracks: nativeTracks,
         projectBpm: input.bpm,
         projectGeneration: input.projectGeneration,
-        requiredSampleRateHz: input.render.sampleRate,
-        maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
-        existingAssetCount: countLiveNativeInstalledAssetKeys(nativeTracks, fx),
-        maximumFrameCount: nativeAudioHostMaximumAssetFramesForChannels,
-        maximumPreparationBytes: nativeAudioHostMaximumStretchPreparationBytes,
-        createBuffer: input.createBuffer ?? ((channels, frames, sampleRate) => new AudioBuffer({
-          numberOfChannels: channels,
-          length: frames,
-          sampleRate,
-        })),
-        resolveSource: input.resolveAudioSource,
+        cache: nativeStretchCache,
+        repository: nativeStretchRepository,
         signal: input.signal,
       })
       throwIfExportAborted(input.signal)
@@ -1041,6 +1065,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         throw new Error(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(' '))
       }
       preparedStretchAssets = preparation.assets
+      nativeStretchLeaseDispose = preparation.dispose
     }
     if (input.getProjectGeneration && input.getProjectGeneration() !== input.projectGeneration) {
       throw new Error('Project changed while preparing export.')
@@ -1078,9 +1103,58 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     if (nativePlan) {
       const nativeRenderer = input.nativeOfflinePcmRenderer
       if (!nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
+      if (nativePlan.mappedAssets && nativePlan.mappedAssets.length > 0) {
+        const sourceByKey = new Map<string, NativeOfflineMappedAsset>()
+        for (const asset of nativePlan.mappedAssets) {
+          const previous = sourceByKey.get(asset.sourceAssetKey)
+          if (previous && (
+            previous.frameCount !== asset.frameCount
+            || previous.sampleRateHz !== asset.sampleRateHz
+            || previous.channelCount !== asset.channelCount
+            || previous.preparedStretchArtifactId !== asset.preparedStretchArtifactId
+          )) {
+            throw new Error(`Native export mapped source "${asset.sourceAssetKey}" resolves inconsistently.`)
+          }
+          sourceByKey.set(asset.sourceAssetKey, asset)
+        }
+        nativeTimelinePageManager = createNativeTimelinePageManager({
+          projectId: input.projectId,
+          sources: [...sourceByKey.values()].map((asset) => ({
+            sourceAssetKey: asset.sourceAssetKey,
+            sessionAssetId: asset.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            sourceKind: asset.sourceKind,
+            sampleUrl: asset.sampleUrl,
+            preparedStretchArtifactId: asset.preparedStretchArtifactId,
+            artifactRepository: nativeStretchRepository,
+          })),
+          writePage: async () => undefined,
+        })
+      }
+      const provideMappedPage = nativeTimelinePageManager
+        ? async (request: {
+          asset: NativeOfflineMappedAsset
+          startFrame: number
+          frameCount: number
+          signal: AbortSignal
+        }): Promise<NativeHostMappedAssetPage> => {
+          const page = await nativeTimelinePageManager?.readPage(
+            request.asset.sourceAssetKey,
+            request.startFrame,
+            request.frameCount,
+            request.signal,
+          )
+          if (!page || page.sessionAssetId !== request.asset.sessionAssetId) {
+            throw new NativeOfflineRenderError('Native offline mapped page identity is invalid.')
+          }
+          return page
+        }
+        : undefined
       const spool = await nativeRenderer(nativePlan, input.signal, (renderedFrames, totalFrames) => {
         input.onProgress?.({ phase: 'rendering', renderedFrames, totalRenderFrames: totalFrames })
-      })
+      }, provideMappedPage)
       nativeSpool = spool
       nativeSpoolRemoved = false
       const processed = await processNativeOfflinePcmSpool({
@@ -1321,6 +1395,11 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
     try {
       await outputTarget?.dispose?.()
     } catch {}
+    try {
+      await disposeNativeStretchResources()
+    } catch (cleanupError) {
+      console.error('[export] native Stretch cleanup failed after export', cleanupError)
+    }
     input.sampledInstrumentRegionScope?.release()
   }
 }

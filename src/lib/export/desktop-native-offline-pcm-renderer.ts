@@ -56,13 +56,14 @@ export type NativeOfflinePcmRenderer = (
   plan: NativeOfflineRenderPlan,
   signal: AbortSignal,
   onProgress: (renderedFrames: number, totalFrames: number) => void,
+  provideMappedPage?: NativeOfflineMappedPageProvider,
 ) => Promise<NativeOfflinePcmSpoolSession>
 
 export const createDesktopNativeOfflinePcmRenderer = (
   renderer: DesktopNativeOfflinePcmRendererBridge,
   spool: NativeOfflinePcmSpoolFactory = createNativeOfflinePcmSpool(),
-  provideMappedPage?: NativeOfflineMappedPageProvider,
-): NativeOfflinePcmRenderer => async (plan, signal, onProgress) => {
+  provideMappedPageDefault?: NativeOfflineMappedPageProvider,
+): NativeOfflinePcmRenderer => async (plan, signal, onProgress, provideMappedPageOverride) => {
   signal.throwIfAborted()
   const jobId = `offline-${crypto.randomUUID()}`
   const session = await spool.createSession({
@@ -105,6 +106,7 @@ export const createDesktopNativeOfflinePcmRenderer = (
           throw callbackError
         }
       }, async (_requestId, asset, startFrame, frameCount) => {
+        const provideMappedPage = provideMappedPageOverride ?? provideMappedPageDefault
         if (!provideMappedPage) throw new NativeOfflineRenderError('Native offline mapped page provider is unavailable.')
         return await provideMappedPage({ asset, startFrame, frameCount, signal })
       })

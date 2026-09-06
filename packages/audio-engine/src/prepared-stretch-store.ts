@@ -33,10 +33,21 @@ export type PreparedStretchArtifactFindOptions = {
   tier?: 'persistent' | 'session'
 }
 
+export type PreparedStretchArtifactLease = {
+  artifactId: string
+  writeId: string
+  release: () => Promise<void>
+}
+
+export type PreparedStretchArtifactLockMode = 'shared' | 'exclusive'
+
 export type PreparedStretchArtifactLockManager = {
   request: <Value>(
     name: string,
-    options: { ifAvailable?: boolean },
+    options: {
+      ifAvailable?: boolean
+      mode?: PreparedStretchArtifactLockMode
+    },
     callback: (lock: { name: string } | null) => Promise<Value>,
   ) => Promise<Value>
 }
@@ -47,6 +58,9 @@ export type PreparedStretchArtifactRepository = {
     artifactId: string,
     options?: PreparedStretchArtifactFindOptions,
   ) => Promise<PreparedStretchArtifactManifest | null>
+  acquireLease: (
+    manifest: PreparedStretchArtifactManifest,
+  ) => Promise<PreparedStretchArtifactLease>
   begin: (descriptor: PreparedStretchArtifact) => Promise<PreparedStretchArtifactWriteTransaction>
   read: (artifactId: string, startFrame?: number, endFrame?: number) => AsyncGenerator<PreparedStretchArtifactPage>
   cleanupSession: (sessionId: string) => Promise<void>
@@ -308,67 +322,104 @@ const queueGarbage = (tx: IDBTransaction, row: Pick<WriteRow, 'artifactId' | 'wr
 const reclaimGarbageBatch = async (
   db: IDBDatabase,
   limit: number,
+  lockManager: PreparedStretchArtifactLockManager,
+  ownedWriteIds: ReadonlySet<string> = new Set(),
 ): Promise<ReclaimGarbageBatchResult> => {
-  let released = 0
-  let processed = 0
-  let garbageExhausted = false
-  let incomplete = false
-  await transaction(db, ['garbage', 'pages', 'writes'], 'readwrite', async (tx) => {
-    const rows: GarbageRow[] = []
+  const rows = await transaction<GarbageRow[]>(db, ['garbage'], 'readonly', async (tx) => {
+    const result: GarbageRow[] = []
     await new Promise<void>((resolve, reject) => {
       const cursorRequest = tx.objectStore('garbage').openCursor()
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result
-        if (!cursor || rows.length >= limit) {
-          garbageExhausted = !cursor
+        if (!cursor || result.length >= limit) {
           resolve()
           return
         }
-        rows.push(cursor.value)
+        result.push(cursor.value)
         cursor.continue()
       }
       cursorRequest.onerror = () => reject(cursorRequest.error ?? new Error('Prepared Stretch garbage lookup failed.'))
     })
-    for (const row of rows) {
-      const deleted = await deletePages(tx, row.writeId, limit)
-      processed += 1
-      released += deleted.bytes
-      if (deleted.exhausted) {
-        tx.objectStore('garbage').delete(row.key)
-        tx.objectStore('writes').delete(row.writeId)
-      } else incomplete = true
-    }
-    return undefined
+    return result
   })
+  let released = 0
+  let processed = 0
+  let incomplete = false
+  for (const row of rows) {
+    const reclaim = () => transaction(db, ['garbage', 'pages', 'writes'], 'readwrite', async (tx) => {
+      const current = await request<GarbageRow | undefined>(tx.objectStore('garbage').get(row.key))
+      if (!current || current.writeId !== row.writeId) {
+        return { releasedBytes: 0, complete: true, processed: false }
+      }
+      const deleted = await deletePages(tx, current.writeId, limit)
+      if (deleted.exhausted) {
+        tx.objectStore('garbage').delete(current.key)
+        tx.objectStore('writes').delete(current.writeId)
+      }
+      return {
+        releasedBytes: deleted.bytes,
+        complete: deleted.exhausted,
+        processed: true,
+      }
+    })
+    const result = ownedWriteIds.has(row.writeId)
+      ? await reclaim()
+      : await lockManager.request(
+        writeLockName(row.writeId),
+        { ifAvailable: true, mode: 'exclusive' },
+        async (lock) => lock ? reclaim() : { releasedBytes: 0, complete: false, processed: false },
+      )
+    released += result.releasedBytes
+    if (result.processed) processed += 1
+    if (result.processed && !result.complete) incomplete = true
+  }
+  const remaining = await scanBatch<GarbageRow>(db, 'garbage', 1)
   return {
     releasedBytes: released,
     processed,
-    exhausted: garbageExhausted && !incomplete,
+    exhausted: remaining.rows.length === 0 && remaining.exhausted && !incomplete,
   }
 }
 
-const sweepLeases = async (db: IDBDatabase, now: number) => {
-  await transaction(db, ['leases'], 'readwrite', async (tx) => {
-    let removed = 0
+const sweepLeases = async (
+  db: IDBDatabase,
+  now: number,
+  lockManager: PreparedStretchArtifactLockManager,
+) => {
+  const expired = await transaction<LeaseRow[]>(db, ['leases'], 'readonly', async (tx) => {
+    const rows: LeaseRow[] = []
     await new Promise<void>((resolve, reject) => {
       const cursorRequest = tx.objectStore('leases').openCursor()
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result
-        if (!cursor || removed >= MAX_SWEEP_BATCH) {
+        if (!cursor || rows.length >= MAX_SWEEP_BATCH) {
           resolve()
           return
         }
         const lease: LeaseRow = cursor.value
-        if (lease.expiresAt <= now) {
-          cursor.delete()
-          removed += 1
-        }
+        if (lease.expiresAt <= now) rows.push(lease)
         cursor.continue()
       }
       cursorRequest.onerror = () => reject(cursorRequest.error ?? new Error('Prepared Stretch lease sweep failed.'))
     })
-    return undefined
+    return rows
   })
+  for (const lease of expired) {
+    await lockManager.request(
+      writeLockName(lease.writeId),
+      { ifAvailable: true, mode: 'exclusive' },
+      async (lock) => {
+        if (!lock) return
+        await transaction(db, ['leases'], 'readwrite', async (tx) => {
+          const current = await request<LeaseRow | undefined>(tx.objectStore('leases').get(lease.key))
+          if (current && current.writeId === lease.writeId && current.expiresAt <= now) {
+            tx.objectStore('leases').delete(lease.key)
+          }
+          return undefined
+        })
+      },
+    )
+  }
 }
 
 const hasActiveLease = async (tx: IDBTransaction, writeId: string, now: number) => {
@@ -429,7 +480,7 @@ const claimWrite = async (
   now: number,
   lockManager: PreparedStretchArtifactLockManager,
   predicate: (current: WriteRow) => boolean,
-) => lockManager.request(writeLockName(row.writeId), { ifAvailable: true }, async (lock) => {
+) => lockManager.request(writeLockName(row.writeId), { ifAvailable: true, mode: 'exclusive' }, async (lock) => {
   if (!lock) return false
   return transaction(db, ['writes', 'garbage'], 'readwrite', async (tx) => {
     const current = await request<WriteRow | undefined>(tx.objectStore('writes').get(row.writeId))
@@ -471,10 +522,10 @@ const claimManifest = async (
   now: number,
   lockManager: PreparedStretchArtifactLockManager,
   predicate: (current: StoredManifest) => boolean,
-) => lockManager.request(writeLockName(candidate.manifest.writeId), { ifAvailable: true }, async (lock) => {
-  if (!lock) return false
-  return lockManager.request(artifactLockName(candidate.key), {}, async (artifactLock) => {
-    if (!artifactLock) return false
+) => lockManager.request(artifactLockName(candidate.key), { ifAvailable: true, mode: 'exclusive' }, async (artifactLock) => {
+  if (!artifactLock) return false
+  return lockManager.request(writeLockName(candidate.manifest.writeId), { ifAvailable: true, mode: 'exclusive' }, async (lock) => {
+    if (!lock) return false
     return transaction(db, ['manifests', 'leases', 'garbage'], 'readwrite', async (tx) => {
       const manifests = tx.objectStore('manifests')
       const current = await request<StoredManifest | undefined>(manifests.get(candidate.key))
@@ -495,7 +546,7 @@ const evictForQuota = async (
 ) => {
   let released = 0
   await sweepExpiredWrites(db, now, lockManager)
-  await sweepLeases(db, now)
+  await sweepLeases(db, now, lockManager)
   let after: IDBValidKey | undefined
   let exhausted = false
   while (!exhausted && released < requiredBytes) {
@@ -513,7 +564,7 @@ const evictForQuota = async (
       const claimed = await claimManifest(db, candidate, now, lockManager, () => true)
       if (!claimed) continue
       while (released < requiredBytes) {
-        const batch = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH)
+        const batch = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH, lockManager)
         released += batch.releasedBytes
         if (batch.exhausted || batch.processed === 0) break
       }
@@ -528,7 +579,11 @@ const defaultLockManager = (): PreparedStretchArtifactLockManager => {
   return { request: (name, options, callback) => locks.request(name, options, callback) }
 }
 
-const holdLock = async (lockManager: PreparedStretchArtifactLockManager, name: string) => {
+const holdLock = async (
+  lockManager: PreparedStretchArtifactLockManager,
+  name: string,
+  mode: PreparedStretchArtifactLockMode = 'exclusive',
+) => {
   let readyResolve: () => void = () => undefined
   let readyReject: (error: Error) => void = () => undefined
   let releaseResolve: () => void = () => undefined
@@ -538,7 +593,7 @@ const holdLock = async (lockManager: PreparedStretchArtifactLockManager, name: s
   })
   const released = new Promise<void>((resolve) => { releaseResolve = resolve })
   let releasedAlready = false
-  const held = lockManager.request(name, {}, async (lock) => {
+  const held = lockManager.request(name, { mode }, async (lock) => {
     if (!lock) throw new Error('Prepared Stretch artifact ownership was not acquired.')
     readyResolve()
     await released
@@ -553,6 +608,65 @@ const holdLock = async (lockManager: PreparedStretchArtifactLockManager, name: s
     releasedAlready = true
     releaseResolve()
     await held
+  }
+}
+
+const tryHoldExclusiveLock = async (
+  lockManager: PreparedStretchArtifactLockManager,
+  name: string,
+) => {
+  let readyResolve: () => void = () => undefined
+  let readyReject: (error: Error) => void = () => undefined
+  let releaseResolve: () => void = () => undefined
+  const ready = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve
+    readyReject = reject
+  })
+  const released = new Promise<void>((resolve) => { releaseResolve = resolve })
+  let acquired = false
+  let releasedAlready = false
+  const held = lockManager.request(name, { ifAvailable: true, mode: 'exclusive' }, async (lock) => {
+    if (!lock) {
+      readyResolve()
+      return undefined
+    }
+    acquired = true
+    readyResolve()
+    await released
+    return undefined
+  }).catch((error) => {
+    readyReject(error instanceof Error ? error : new Error(String(error)))
+    throw error
+  })
+  await ready
+  await Promise.resolve()
+  if (!acquired) {
+    await held
+    return undefined
+  }
+  return async () => {
+    if (releasedAlready) return
+    releasedAlready = true
+    releaseResolve()
+    await held
+  }
+}
+
+const withHeldExclusiveWriteLocks = async <Value>(
+  lockManager: PreparedStretchArtifactLockManager,
+  writeIds: readonly string[],
+  run: () => Promise<Value>,
+) => {
+  const releases: (() => Promise<void>)[] = []
+  try {
+    for (const writeId of writeIds) {
+      const release = await tryHoldExclusiveLock(lockManager, writeLockName(writeId))
+      if (!release) throw new Error('Prepared Stretch artifact generation is pinned by an active lease.')
+      releases.push(release)
+    }
+    return await run()
+  } finally {
+    for (const release of releases.toReversed()) await release().catch(() => {})
   }
 }
 
@@ -579,6 +693,17 @@ const storedManifest = (
   tier,
   sessionId: tier === 'session' ? sessionId : undefined,
 })
+
+const sameManifestGeneration = (
+  left: PreparedStretchArtifactManifest,
+  right: PreparedStretchArtifactManifest,
+) => left.artifactId === right.artifactId
+  && left.writeId === right.writeId
+  && preparedStretchArtifactCanonicalJson(left.descriptor) === preparedStretchArtifactCanonicalJson(right.descriptor)
+  && left.pageFrames === right.pageFrames
+  && left.frameCount === right.frameCount
+  && left.byteSize === right.byteSize
+  && left.committedAt === right.committedAt
 
 const queueWriter = <Value>(writer: Writer, run: () => Promise<Value>) => {
   const next = writer.tail.then(run)
@@ -627,7 +752,7 @@ const createPersistentRepository = (input: {
     const lockManager = getLockManager()
     const db = await openDb()
     try {
-      return await lockManager.request(artifactLockName(candidate.key), {}, async (lock) => {
+      return await lockManager.request(artifactLockName(candidate.key), { mode: 'exclusive' }, async (lock) => {
         if (!lock) return null
         return transaction<PreparedStretchArtifactManifest | null>(db, ['manifests'], 'readwrite', async (tx) => {
           const store = tx.objectStore('manifests')
@@ -647,7 +772,7 @@ const createPersistentRepository = (input: {
     const db = await openDb()
     try {
       await sweepExpiredWrites(db, now(), getLockManager())
-      await sweepLeases(db, now())
+      await sweepLeases(db, now(), getLockManager())
     } finally {
       db.close()
     }
@@ -663,6 +788,93 @@ const createPersistentRepository = (input: {
     }
     if (options.tier !== 'session') return findInTier(artifactId, 'persistent')
     return null
+  }
+
+  const acquireLease = async (manifest: PreparedStretchArtifactManifest): Promise<PreparedStretchArtifactLease> => {
+    ensureRepositoryOpen()
+    const candidate = await (async () => {
+      const tiers: readonly ArtifactTier[] = input.forceSession === true
+        ? ['session']
+        : ['session', 'persistent']
+      for (const tier of tiers) {
+        const found = await lookup(manifest.artifactId, tier)
+        if (found && sameManifestGeneration(found.manifest, manifest)) return found
+      }
+      return null
+    })()
+    if (!candidate || !sameManifestGeneration(candidate.manifest, manifest)) {
+      throw new Error(`Prepared Stretch artifact "${manifest.artifactId}" generation is stale or missing.`)
+    }
+    const lockManager = getLockManager()
+    const leaseId = crypto.randomUUID()
+    const leaseKey = `${manifest.writeId}:${leaseId}`
+    const releaseLock = await holdLock(lockManager, writeLockName(manifest.writeId), 'shared')
+    try {
+      const db = await openDb()
+      try {
+        await transaction(db, ['manifests', 'leases'], 'readwrite', async (tx) => {
+          const row = await request<StoredManifest | undefined>(
+            tx.objectStore('manifests').get(candidate.key),
+          )
+          const current = row ? manifestFromStored(row) : undefined
+          if (!current || !sameManifestGeneration(current, manifest)) {
+            throw new Error(`Prepared Stretch artifact "${manifest.artifactId}" generation is stale or missing.`)
+          }
+          tx.objectStore('manifests').put({ ...row, lastAccessedAt: now() })
+          tx.objectStore('leases').put({
+            key: leaseKey,
+            artifactId: current.artifactId,
+            writeId: current.writeId,
+            leaseId,
+            expiresAt: now() + LEASE_MS,
+          } satisfies LeaseRow)
+          return undefined
+        })
+      } finally {
+        db.close()
+      }
+    } catch (error) {
+      await releaseLock().catch(() => {})
+      throw error
+    }
+    let releasePromise: Promise<void> | undefined
+    let leaseDeleted = false
+    let lockReleased = false
+    const releaseLockOnce = async () => {
+      if (lockReleased) return
+      lockReleased = true
+      await releaseLock().catch(() => {})
+    }
+    const release = () => {
+      if (leaseDeleted) return releaseLockOnce()
+      if (releasePromise) return releasePromise
+      releasePromise = (async () => {
+        let db: IDBDatabase | undefined
+        try {
+          db = await openDb()
+          await transaction(db, ['leases'], 'readwrite', async (tx) => {
+            tx.objectStore('leases').delete(leaseKey)
+            return undefined
+          })
+          leaseDeleted = true
+        } catch {
+          // The finite recovery deadline keeps a failed deletion reclaimable.
+        } finally {
+          db?.close()
+          await releaseLockOnce()
+        }
+      })()
+      const current = releasePromise
+      void current.finally(() => {
+        if (releasePromise === current) releasePromise = undefined
+      })
+      return current
+    }
+    return {
+      artifactId: manifest.artifactId,
+      writeId: manifest.writeId,
+      release,
+    }
   }
 
   const begin = async (descriptor: PreparedStretchArtifact) => {
@@ -738,7 +950,7 @@ const createPersistentRepository = (input: {
           }).catch(() => {})
           let progress: ReclaimGarbageBatchResult
           do {
-            progress = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH).catch(() => ({
+            progress = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH, lockManager, new Set([writeId])).catch(() => ({
               releasedBytes: 0,
               processed: 0,
               exhausted: true,
@@ -890,56 +1102,70 @@ const createPersistentRepository = (input: {
             throw new Error('Prepared Stretch artifact commit metadata or coverage is invalid.')
           }
           const key = storageKeyFor(tier, sessionId, descriptor.artifactId)
-          const manifest = await lockManager.request(artifactLockName(key), {}, async (lock) => {
+          const manifest = await lockManager.request(artifactLockName(key), { mode: 'exclusive' }, async (lock) => {
             if (!lock) throw new Error('Prepared Stretch artifact publication ownership was not acquired.')
-            try {
-              return await transaction<PreparedStretchArtifactManifest>(db, ['manifests', 'writes', 'garbage'], 'readwrite', async (tx) => {
-                writer.publicationTransaction = tx
-                active()
-                const writesStore = tx.objectStore('writes')
-                const current = await request<WriteRow | undefined>(writesStore.get(writeId))
-                if (!current || current.status !== 'active'
-                  || current.acceptedFrames !== descriptor.output.frameCount
-                  || current.flushedFrames !== descriptor.output.frameCount
-                  || preparedStretchArtifactCanonicalJson(current.descriptor) !== preparedStretchArtifactCanonicalJson(descriptor)) {
-                  throw new Error('Prepared Stretch artifact commit metadata or coverage is invalid.')
-                }
-                const manifests = tx.objectStore('manifests')
-                const existingKeys = tier === 'persistent' ? [key, descriptor.artifactId] : [key]
-                for (const existingKey of existingKeys) {
-                  const existing = await request<StoredManifest | undefined>(manifests.get(existingKey))
-                  if (!existing) continue
-                  const existingManifest = manifestFromStored(existing)
-                  if (preparedStretchArtifactCanonicalJson(existingManifest.descriptor) !== preparedStretchArtifactCanonicalJson(descriptor)) {
-                    throw new Error('Prepared Stretch artifact identity collides with different metadata.')
+            const existingWriteIds = await transaction<string[]>(db, ['manifests'], 'readonly', async (tx) => {
+              const writeIds = new Set<string>()
+              const existingKeys = tier === 'persistent' ? [key, descriptor.artifactId] : [key]
+              for (const existingKey of existingKeys) {
+                const existing = await request<StoredManifest | undefined>(tx.objectStore('manifests').get(existingKey))
+                if (existing) writeIds.add(existing.writeId)
+              }
+              return [...writeIds]
+            })
+            return withHeldExclusiveWriteLocks(lockManager, existingWriteIds, async () => {
+              try {
+                return await transaction<PreparedStretchArtifactManifest>(db, ['manifests', 'writes', 'leases', 'garbage'], 'readwrite', async (tx) => {
+                  writer.publicationTransaction = tx
+                  active()
+                  const writesStore = tx.objectStore('writes')
+                  const current = await request<WriteRow | undefined>(writesStore.get(writeId))
+                  if (!current || current.status !== 'active'
+                    || current.acceptedFrames !== descriptor.output.frameCount
+                    || current.flushedFrames !== descriptor.output.frameCount
+                    || preparedStretchArtifactCanonicalJson(current.descriptor) !== preparedStretchArtifactCanonicalJson(descriptor)) {
+                    throw new Error('Prepared Stretch artifact commit metadata or coverage is invalid.')
+                  }
+                  const manifests = tx.objectStore('manifests')
+                  const existingKeys = tier === 'persistent' ? [key, descriptor.artifactId] : [key]
+                  for (const existingKey of existingKeys) {
+                    const existing = await request<StoredManifest | undefined>(manifests.get(existingKey))
+                    if (!existing) continue
+                    const existingManifest = manifestFromStored(existing)
+                    if (preparedStretchArtifactCanonicalJson(existingManifest.descriptor) !== preparedStretchArtifactCanonicalJson(descriptor)) {
+                      throw new Error('Prepared Stretch artifact identity collides with different metadata.')
+                    }
+                    if (await hasActiveLease(tx, existing.writeId, now())) {
+                      throw new Error('Prepared Stretch artifact generation is pinned by an active lease.')
+                    }
+                    active()
+                    writesStore.put({ ...current, status: 'deleting', lastActivityAt: now() })
+                    queueGarbage(tx, current, now())
+                    return existingManifest
+                  }
+                  const published: PreparedStretchArtifactManifest = {
+                    artifactId: descriptor.artifactId,
+                    writeId,
+                    descriptor,
+                    pageFrames,
+                    frameCount: descriptor.output.frameCount,
+                    byteSize: current.byteSize,
+                    committedAt: now(),
+                    lastAccessedAt: now(),
                   }
                   active()
-                  writesStore.put({ ...current, status: 'deleting', lastActivityAt: now() })
-                  queueGarbage(tx, current, now())
-                  return existingManifest
-                }
-                const published: PreparedStretchArtifactManifest = {
-                  artifactId: descriptor.artifactId,
-                  writeId,
-                  descriptor,
-                  pageFrames,
-                  frameCount: descriptor.output.frameCount,
-                  byteSize: current.byteSize,
-                  committedAt: now(),
-                  lastAccessedAt: now(),
-                }
-                active()
-                manifests.put(storedManifest(published, key, tier, sessionId))
-                writesStore.delete(writeId)
-                return published
-              })
-            } finally {
-              writer.publicationTransaction = undefined
-            }
+                  manifests.put(storedManifest(published, key, tier, sessionId))
+                  writesStore.delete(writeId)
+                  return published
+                })
+              } finally {
+                writer.publicationTransaction = undefined
+              }
+            })
           })
           writer.committed = true
           writer.open = false
-          await reclaimGarbageBatch(db, MAX_SWEEP_BATCH).catch(() => {})
+          await reclaimGarbageBatch(db, MAX_SWEEP_BATCH, lockManager, new Set([writeId])).catch(() => {})
           await writer.releaseLock()
           db.close()
           writers.delete(writeId)
@@ -963,12 +1189,13 @@ const createPersistentRepository = (input: {
       if (candidate) break
     }
     if (!candidate) return
-    const release = await holdLock(lockManager, writeLockName(candidate.manifest.writeId))
-    const db = await openDb()
+    const release = await holdLock(lockManager, writeLockName(candidate.manifest.writeId), 'shared')
+    let db: IDBDatabase | undefined
     const leaseId = crypto.randomUUID()
     const leaseKey = `${candidate.manifest.writeId}:${leaseId}`
     let manifest: PreparedStretchArtifactManifest | null = null
     try {
+      db = await openDb()
       manifest = await transaction<PreparedStretchArtifactManifest | null>(db, ['manifests', 'leases'], 'readwrite', async (tx) => {
         const row = await request<StoredManifest | undefined>(tx.objectStore('manifests').get(candidate?.key ?? ''))
         if (!row || row.writeId !== candidate?.manifest.writeId) return null
@@ -1026,11 +1253,13 @@ const createPersistentRepository = (input: {
       }
       if (expected !== range.end) throw new Error('Prepared Stretch artifact pages do not cover the requested range.')
     } finally {
-      await transaction(db, ['leases'], 'readwrite', async (tx) => {
-        tx.objectStore('leases').delete(leaseKey)
-        return undefined
-      }).catch(() => {})
-      db.close()
+      if (db) {
+        await transaction(db, ['leases'], 'readwrite', async (tx) => {
+          tx.objectStore('leases').delete(leaseKey)
+          return undefined
+        }).catch(() => {})
+        db.close()
+      }
       await release().catch(() => {})
     }
   }
@@ -1083,7 +1312,7 @@ const createPersistentRepository = (input: {
       }
       let progress: ReclaimGarbageBatchResult
       do {
-        progress = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH)
+        progress = await reclaimGarbageBatch(db, MAX_SWEEP_BATCH, lockManager)
       } while (!progress.exhausted && progress.processed > 0)
     } finally {
       db.close()
@@ -1101,6 +1330,7 @@ const createPersistentRepository = (input: {
   return {
     persistent: input.forceSession !== true,
     find,
+    acquireLease,
     begin,
     read,
     cleanupSession,

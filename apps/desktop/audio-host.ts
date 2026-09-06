@@ -771,7 +771,10 @@ export const renderNativeOffline = async (input: {
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
   onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>
-  onMappedPage?: (request: NativeOfflineMappedPageRequest) => Promise<NativeHostMappedAssetPage>
+  onMappedPage?: (
+    request: NativeOfflineMappedPageRequest,
+    signal: AbortSignal,
+  ) => Promise<NativeHostMappedAssetPage>
   completionInactivityMs?: number
   schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
@@ -813,13 +816,13 @@ export const renderNativeOffline = async (input: {
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
   let stopPump = () => {}
-  let rejectMappedPage: ((error: Error) => void) | undefined
+  const pendingMappedPagePromises = new Set<Promise<NativeHostMappedAssetPage>>()
+  const pendingMappedPageRejectors = new Map<Promise<NativeHostMappedAssetPage>, (error: Error) => void>()
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     mailbox.fail(error)
-    rejectMappedPage?.(error)
-    rejectMappedPage = undefined
+    for (const reject of pendingMappedPageRejectors.values()) reject(error)
     stopPump()
     terminate()
   }
@@ -986,12 +989,18 @@ export const renderNativeOffline = async (input: {
             startFrame,
             frameCount,
           }
-          const pagePromise = input.onMappedPage(request)
-          const page = await new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
-            rejectMappedPage = reject
+          const pagePromise = Promise.resolve().then(() => input.onMappedPage?.(request, input.signal)
+            ?? Promise.reject(new Error("The native offline mapped page provider is unavailable.")))
+          let rejectPage: ((error: Error) => void) | undefined
+          const pendingPage = new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
+            rejectPage = reject
             void pagePromise.then(resolve, reject)
-          }).finally(() => {
-            rejectMappedPage = undefined
+          })
+          pendingMappedPagePromises.add(pendingPage)
+          pendingMappedPageRejectors.set(pendingPage, (error) => rejectPage?.(error))
+          const page = await pendingPage.finally(() => {
+            pendingMappedPagePromises.delete(pendingPage)
+            pendingMappedPageRejectors.delete(pendingPage)
           })
           if (page.sessionAssetId !== asset.sessionAssetId
             || page.startFrame !== startFrame
@@ -1043,6 +1052,10 @@ export const renderNativeOffline = async (input: {
     finished = true
     mailbox.close()
     input.signal.removeEventListener("abort", abort)
+    for (const reject of pendingMappedPageRejectors.values()) {
+      reject(new Error("The native offline mapped page callback was canceled."))
+    }
+    await Promise.allSettled(pendingMappedPagePromises)
     stopPump()
     child.stdout.removeListener("data", pump.push)
     child.removeListener("error", onError)

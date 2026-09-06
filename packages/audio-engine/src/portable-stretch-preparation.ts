@@ -9,6 +9,10 @@ import {
   createAudioStretchCache,
   type StretchedAudioRender,
 } from './audio-stretch-cache'
+import {
+  validatePreparedStretchProjectionMetadata,
+  type PreparedStretchProjectionMetadata,
+} from './prepared-stretch-artifact'
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import {
@@ -48,19 +52,11 @@ export type PortableStretchDiagnostic = {
   message: string
 }
 
-export type PortablePreparedStretchAsset = {
-  clipId: string
-  sourceAssetKey?: string
-  sourceDurationSec: number
-  projectGeneration: number
+export type PortablePreparedStretchAsset = PreparedStretchProjectionMetadata & {
   projectAssetId: string
   portableAssetId: string
-  asset: AudioAssetRef
   pcm: PlanarPcm
   transferables: readonly ArrayBuffer[]
-  timelineStartSec: number
-  timelineDurationSec: number
-  sourceStartSec: number
 }
 
 export type PortableStretchPreparation =
@@ -191,6 +187,10 @@ const preparedPcmByteLength = (prepared: PortablePreparedStretchAsset): number =
 export const validatePortablePreparedStretchAsset = (
   prepared: PortablePreparedStretchAsset,
 ): PortableStretchDiagnostic | undefined => {
+  const projectionError = validatePreparedStretchProjectionMetadata(prepared)
+  if (projectionError) {
+    return diagnostic(prepared.clipId, 'stretch-metadata-mismatch', projectionError)
+  }
   if (!positiveSafeInteger(prepared.asset.sampleRateHz)) {
     return diagnostic(
       prepared.clipId,
@@ -236,6 +236,10 @@ export const validatePortablePreparedStretchAsset = (
   }
   return undefined
 }
+
+export const validatePortablePreparedStretchPcm = (
+  prepared: PortablePreparedStretchAsset,
+): PortableStretchDiagnostic | undefined => validatePortablePreparedStretchAsset(prepared)
 
 const fingerprintPcm = (
   planes: readonly Float32Array[],
@@ -348,6 +352,7 @@ const normalizePreparedStretchAsset = (
   }
   return {
     ...prepared,
+    preparedStretchArtifactId: assetId,
     projectAssetId: assetId,
     portableAssetId: assetId,
     asset,
@@ -446,6 +451,7 @@ export const preparePortableStretchAsset = async (
       supported: true,
       asset: {
         clipId: input.clip.id,
+        preparedStretchArtifactId: assetId,
         sourceAssetKey: input.clip.sourceAssetKey,
         sourceDurationSec: input.clip.sourceDurationSec ?? input.clip.buffer?.duration ?? 0,
         projectGeneration: input.projectGeneration,
@@ -807,7 +813,7 @@ export const preparePortableStretchAssets = async (input: {
     }
     return { supported: true, assets }
   } finally {
-    cache.dispose()
+    await cache.dispose()
   }
 }
 

@@ -141,6 +141,7 @@ export type NativeHostMappedAsset = {
   sampleRateHz: number
   channelCount: number
   contentHashPrefix?: bigint
+  preparedStretchArtifactId?: string
 }
 
 export type NativeOfflineMappedAsset = NativeHostMappedAsset & {

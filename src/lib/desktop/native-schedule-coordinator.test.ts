@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import "fake-indexeddb/auto"
 import { audioCoreContractVersion } from "@daw-browser/audio-core-contract"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
@@ -332,6 +333,10 @@ const coordinatorFor = (
           sessionAssetId: index + 1,
         }
       }),
+      assetSourceKeys: new Map(snapshot.assets.map((asset) => [
+        `portable-export:${asset.assetId}`,
+        asset.assetId,
+      ])),
       startFrame: Math.round(snapshot.transport.playheadSec * 48_000),
       onHostLoss,
       pageManager,

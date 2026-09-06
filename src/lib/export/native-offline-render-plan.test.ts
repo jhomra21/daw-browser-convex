@@ -3,6 +3,8 @@ import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-prot
 import { externalAutomationParameterId, type AutomationEnvelope } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
+import type { NativePreparedStretchAsset } from '@daw-browser/audio-engine/native-stretch-preparation'
+import type { PreparedStretchArtifactManifest } from '@daw-browser/audio-engine/prepared-stretch-store'
 import { compilePortableExportSnapshot } from '@daw-browser/audio-engine/portable-export-snapshot'
 
 import { compileNativeOfflineRenderPlan } from '~/lib/export/native-offline-render-plan'
@@ -116,6 +118,7 @@ const preparedStretchAsset = (
   frameCount = 4,
   sampleRateHz = 48_000,
   timelineStartSec = 0,
+  sourceStartSec = 0,
 ): PortablePreparedStretchAsset => {
   const planes = frameCount === 4
     ? [
@@ -145,7 +148,54 @@ const preparedStretchAsset = (
     transferables: planes.map((plane) => plane.buffer),
     timelineStartSec,
     timelineDurationSec: frameCount / sampleRateHz,
-    sourceStartSec: 0,
+    sourceStartSec,
+  }
+}
+
+const nativePreparedStretchAsset = (
+  clipId: string,
+  projectGeneration: number,
+  artifactId: string,
+  timelineStartSec = 0,
+): NativePreparedStretchAsset => {
+  const prepared = preparedStretchAsset(
+    clipId,
+    projectGeneration,
+    4,
+    48_000,
+    timelineStartSec,
+  )
+  const asset = { ...prepared.asset, assetId: artifactId }
+  const manifest: PreparedStretchArtifactManifest = {
+    artifactId,
+    writeId: `write-${artifactId}`,
+    descriptor: {
+      artifactId,
+      rendererVersion: 'renderer',
+      algorithmVersion: 'algorithm',
+      wsola: { windowFrameCount: 4, overlapFrameCount: 2, searchFrameCount: 1 },
+      source: { contentIdentity: 'source-a', frameCount: 4, sampleRate: 48_000, channelCount: 2 },
+      segments: [],
+      output: { sampleRate: 48_000, channelCount: 2, frameCount: 4 },
+      persistable: false,
+    },
+    pageFrames: 4,
+    frameCount: 4,
+    byteSize: 4 * 2 * Float32Array.BYTES_PER_ELEMENT,
+    committedAt: 1,
+    lastAccessedAt: 1,
+  }
+  return {
+    clipId,
+    sourceAssetKey: prepared.sourceAssetKey,
+    sourceDurationSec: prepared.sourceDurationSec,
+    projectGeneration,
+    asset,
+    preparedStretchArtifactId: artifactId,
+    timelineStartSec: prepared.timelineStartSec,
+    timelineDurationSec: prepared.timelineDurationSec,
+    sourceStartSec: prepared.sourceStartSec,
+    manifest,
   }
 }
 
@@ -233,7 +283,7 @@ test('compiles a native plan that remains directly structured-cloneable', () => 
     automationEnvelopes: [],
     sidechainRoutes: [],
     bpm: 120,
-    range: { mode: 'whole' },
+    range: { mode: 'custom', startSec: 0.5 / 48_000, endSec: 3.5 / 48_000 },
     sampleRateHz: 48_000,
     channelCount: 2,
     tailFrames: 0,
@@ -313,6 +363,64 @@ test('accepts prepared Stretch PCM with custom range timing', () => {
     sourceOffsetFrame: 0,
     sourceFrameCount: 4,
   })
+})
+
+test('accepts a fractional mapped endpoint that still samples the final source frame', () => {
+  const warpedTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+    } satisfies Clip<AudioBuffer>],
+  }
+  expect(() => compileNativeOfflineRenderPlan({
+    tracks: [warpedTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0.5 / 48_000, endSec: 3.5 / 48_000 },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [preparedStretchAsset('clip-1', 7)],
+  })).not.toThrow()
+})
+
+test('deduplicates repeated native Stretch artifact placements while retaining both events', () => {
+  const source = track.clips[0]
+  if (!source) throw new Error('Expected a source clip.')
+  const first: Clip<AudioBuffer> = {
+    ...source,
+    audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+  }
+  const second: Clip<AudioBuffer> = {
+    ...first,
+    id: 'clip-2',
+    startSec: 4 / 48_000,
+    audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [{ ...track, clips: [first, second] }],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 7,
+    preparedStretchAssets: [
+      nativePreparedStretchAsset('clip-1', 7, 'artifact-shared', 0),
+      nativePreparedStretchAsset('clip-2', 7, 'artifact-shared', 4 / 48_000),
+    ],
+  })
+
+  expect(plan.mappedAssets).toHaveLength(1)
+  expect(sourceEventsFromSchedule(plan.schedule)).toHaveLength(2)
+  expect(sourceEventsFromSchedule(plan.schedule).map((event) => event.assetSessionId)).toEqual([1, 1])
 })
 
 test('rebases prepared Stretch source timing and offsets for a custom range', () => {
@@ -427,7 +535,7 @@ test('represents an unhydrated source as a bounded mapped asset', () => {
     sourceAssetKey: 'asset-1',
     projectId: 'project-1',
     frameCount: 8 * 48_000,
-    ranges: [{ startFrame: 0, frameCount: 48_000 }],
+    ranges: [{ startFrame: 0, frameCount: 48_001 }],
   })])
 })
 

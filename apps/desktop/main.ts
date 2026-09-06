@@ -259,6 +259,7 @@ const nativeMappedAssetEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   sampleRateHz: positiveUnsigned32Schema,
   channelCount: positiveUnsigned32Schema.max(64),
   contentHashPrefix: z.bigint().nonnegative().max(0xffff_ffff_ffff_ffffn).optional(),
+  preparedStretchArtifactId: z.string().min(1).max(512).optional(),
 }).strict())
 const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object({
   sessionAssetId: positiveUnsigned32Schema,
@@ -384,6 +385,7 @@ let offlineRenderJob: {
     channelCount: number
     resolve: (page: NativeHostMappedAssetPage) => void
     reject: (error: Error) => void
+    cleanup: () => void
   }>
 } | undefined
 const maximumPendingOfflineMappedPageRequests = 4
@@ -1007,10 +1009,12 @@ const registerIpc = () => {
         !== pending.frameCount * pending.channelCount * Float32Array.BYTES_PER_ELEMENT
     )) {
       offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
+      pending.cleanup()
       pending.reject(new Error("The native offline mapped page response does not match its request."))
       return { accepted: false }
     }
     offlineRenderJob.mappedPageRequests.delete(parsed.data.requestId)
+    pending.cleanup()
     if (parsed.data.error) pending.reject(new Error(parsed.data.error))
     else if (parsed.data.page) pending.resolve(parsed.data.page)
     else pending.reject(new Error("The offline mapped page response is invalid."))
@@ -1055,6 +1059,7 @@ const registerIpc = () => {
         channelCount: number
         resolve: (page: NativeHostMappedAssetPage) => void
         reject: (error: Error) => void
+        cleanup: () => void
       }>(),
     }
     offlineRenderJob = job
@@ -1081,7 +1086,7 @@ const registerIpc = () => {
         plan,
         vstAttachments,
         signal: controller.signal,
-        onMappedPage: (request) => new Promise((resolve, reject) => {
+        onMappedPage: (request, signal) => new Promise((resolve, reject) => {
           if (job.mappedPageRequests.size >= maximumPendingOfflineMappedPageRequests) {
             reject(new Error("Too many native offline mapped page requests are pending."))
             return
@@ -1090,6 +1095,12 @@ const registerIpc = () => {
             reject(new Error("The native offline mapped page request ID is duplicated."))
             return
           }
+          const cleanup = () => signal.removeEventListener("abort", abort)
+          const abort = () => {
+            if (job.mappedPageRequests.get(request.requestId)?.cleanup !== cleanup) return
+            job.mappedPageRequests.delete(request.requestId)
+            reject(new DOMException("Native offline mapped page request canceled.", "AbortError"))
+          }
           job.mappedPageRequests.set(request.requestId, {
             sessionAssetId: request.asset.sessionAssetId,
             startFrame: request.startFrame,
@@ -1097,9 +1108,12 @@ const registerIpc = () => {
             channelCount: request.asset.channelCount,
             resolve,
             reject,
+            cleanup,
           })
+          signal.addEventListener("abort", abort, { once: true })
           if (!sendRendererMessage("daw:audio-host:offline-mapped-page-request", request)) {
             job.mappedPageRequests.delete(request.requestId)
+            cleanup()
             reject(new Error("Renderer unavailable."))
           }
         }),
@@ -1120,6 +1134,7 @@ const registerIpc = () => {
       return { ok: false as const, error: error instanceof Error ? error.message : "Native offline rendering failed." }
     } finally {
       for (const pending of job.mappedPageRequests.values()) {
+        pending.cleanup()
         pending.reject(new Error("The native offline render is no longer active."))
       }
       job.mappedPageRequests.clear()

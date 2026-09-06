@@ -154,6 +154,7 @@ const nativeOfflineMappedAssetSchema = z.object({
     startFrame: z.number().int().nonnegative().safe(),
     frameCount: z.number().int().positive().safe(),
   }).strict()).max(nativeAudioHostMaximumMappedAssetRanges),
+  preparedStretchArtifactId: z.string().min(1).max(512).optional(),
 }).strict().superRefine((value, context) => {
   for (const [index, range] of value.ranges.entries()) {
     if (range.startFrame + range.frameCount > value.frameCount) {

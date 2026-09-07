@@ -51,6 +51,9 @@ const portableResponseFor = (
   if (message.type === 'schedule-sources') {
     return { version: portableWasmProtocolVersion, type: 'sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
   }
+  if (message.type === 'replace-sources') {
+    return { version: portableWasmProtocolVersion, type: 'sources-replaced', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'replaced' }
+  }
   if (message.type === 'register-asset') {
     return { version: portableWasmProtocolVersion, type: 'asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
   }

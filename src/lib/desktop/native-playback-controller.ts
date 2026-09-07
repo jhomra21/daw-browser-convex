@@ -38,6 +38,7 @@ import type {
   NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
+import { portableWasmProtocolVersion } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type {
   LivePlaybackCompileContext,
@@ -1639,7 +1640,7 @@ export const createNativePlaybackController = (input: {
           block.planarPcm.byteLength / Float32Array.BYTES_PER_ELEMENT,
         )
         writer.write({
-          version: 1,
+          version: portableWasmProtocolVersion,
           type: "recording-capture-block",
           generation,
           sessionId: Number(numericSessionId),

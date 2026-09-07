@@ -155,7 +155,7 @@ const createSession = (
             ? 'cancelled'
             : null
       if (action) queueMicrotask(() => recordingStatus?.({
-        version: 1,
+        version: 2,
         type: 'recording-capture-applied',
         generation: recordingGeneration,
         sessionId: recordingSessionId,
@@ -180,7 +180,7 @@ const createSession = (
       for (const listener of allFaultListeners) listener(error)
     },
     emitPosition: (frame: number, sequence = 1, running = true) => transportPosition?.({
-      version: 1,
+      version: 2,
       type: "transport-position",
       sessionId: 1,
       epoch: 1,

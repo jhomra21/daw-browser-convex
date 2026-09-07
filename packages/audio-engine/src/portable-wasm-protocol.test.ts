@@ -184,7 +184,7 @@ test('accepts only versioned bounded portable worklet control messages', () => {
 
 test('accepts exact planar PCM only for versioned portable asset registration', () => {
   const asset = {
-    version: portableWasmProtocolVersion,
+    version: audioCoreContractVersion,
     assetId: 'asset:one',
     frameCount: 2,
     sampleRateHz: 48_000,
@@ -270,6 +270,59 @@ test('requires ordered source-targeted schedules in one transport epoch', () => 
     revision: 1,
     epoch: 2,
     events: [{ ...event, sourceNodeId: '' }],
+  })).toBeNull()
+})
+
+test('accepts atomic mixed ordinary and prepared source replacements in sequence order', () => {
+  const ordinary = {
+    version: audioCoreContractVersion,
+    epoch: 2,
+    sequence: 1,
+    sourceNodeId: 'track-1',
+    assetId: 'asset:one',
+    startFrame: 0,
+    stopFrame: 128,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 128,
+    gain: 1,
+    fadeInStartFrame: 0,
+    fadeInEndFrame: 0,
+    fadeOutStartFrame: 128,
+    fadeOutEndFrame: 128,
+  }
+  const prepared = {
+    version: audioCoreContractVersion,
+    epoch: 2,
+    sequence: 2,
+    sourceNodeId: 'track-2',
+    preparationId: 4,
+    startFrame: 128,
+    stopFrame: 256,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 128,
+    gain: 1,
+    fadeInStartFrame: 128,
+    fadeInEndFrame: 128,
+    fadeOutStartFrame: 256,
+    fadeOutEndFrame: 256,
+  }
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'replace-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 2,
+    ordinary: [ordinary],
+    prepared: [prepared],
+  })).toMatchObject({ type: 'replace-sources', ordinary: [ordinary], prepared: [prepared] })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'replace-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 2,
+    ordinary: [ordinary],
+    prepared: [{ ...prepared, sequence: 1 }],
   })).toBeNull()
 })
 

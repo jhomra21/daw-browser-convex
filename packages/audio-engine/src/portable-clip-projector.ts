@@ -13,15 +13,16 @@ import {
   validatePreparedStretchProjectionMetadata,
   type PreparedStretchProjectionMetadata,
 } from './prepared-stretch-artifact'
+import type { PortablePagedStretchAsset } from './portable-stretch-paging'
 
 const isPortablePreparedStretchAsset = (
-  value: PortablePreparedStretchAsset | PreparedStretchProjectionMetadata,
-): value is PortablePreparedStretchAsset => 'portableAssetId' in value
+  value: PortablePreparedStretchAsset | PortablePagedStretchAsset | PreparedStretchProjectionMetadata,
+): value is PortablePreparedStretchAsset => 'pcm' in value
 
 export type PortableClipProject = {
   tracks: readonly Track[]
   assets: ReadonlyMap<string, AudioAssetRef>
-  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PreparedStretchProjectionMetadata>
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PortablePagedStretchAsset | PreparedStretchProjectionMetadata>
   projectGeneration?: number
   warpContext?: 'realtime' | 'offline'
   assetRatePolicy?: 'match-session' | 'asset-rate'

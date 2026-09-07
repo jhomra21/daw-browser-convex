@@ -502,7 +502,8 @@ struct Core {
   uint64_t paged_access_sequence = 0;
   daw_audio_transport_state transport{};
   uint64_t last_event_sequence = 0;
-  std::array<SampleSource, kMaximumSampleSources> sample_sources{};
+  std::array<std::array<SampleSource, kMaximumSampleSources>, 2> sample_source_tables{};
+  std::array<SampleSource, kMaximumSampleSources> *active_sample_sources = &sample_source_tables[0];
   std::array<GraphRevision, 2> graph_slots{};
   GraphRevision *prepared_graph = &graph_slots[0];
   GraphRevision *published_graph = &graph_slots[1];
@@ -742,7 +743,7 @@ daw_audio_paged_preparation_handle make_paged_preparation_handle(uint32_t index,
 }
 
 bool paged_asset_is_referenced(const Core &core, daw_audio_asset_handle asset) {
-  for (const SampleSource &source : core.sample_sources) {
+  for (const SampleSource &source : *core.active_sample_sources) {
     if (source.active && source.asset == asset) return true;
   }
   if (core.paged_preparations != nullptr) {
@@ -3393,7 +3394,7 @@ bool valid_sample_source_event(const daw_audio_sample_source_event &event) {
 }
 
 void clear_sample_sources(Core &core) {
-  for (SampleSource &source : core.sample_sources) source.active = false;
+  for (SampleSource &source : *core.active_sample_sources) source.active = false;
 }
 
 bool asset_is_active(const Core &core, daw_audio_asset_handle asset) {
@@ -3499,8 +3500,8 @@ void prepare_active_source_ranges(Core &core, const GraphRevision *graph) {
       GraphRevision::Range &range = core.active_source_ranges[node_index];
       range.start = count;
       if (graph->nodes[node_index].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) continue;
-      for (uint32_t source_index = 0; source_index < core.sample_sources.size(); ++source_index) {
-        const SampleSource &source = core.sample_sources[source_index];
+      for (uint32_t source_index = 0; source_index < core.active_sample_sources->size(); ++source_index) {
+        const SampleSource &source = (*core.active_sample_sources)[source_index];
         if (source.active && source.source_node_id == graph->nodes[node_index].id) {
           core.active_source_indices[count++] = static_cast<uint16_t>(source_index);
           ++range.count;
@@ -3509,8 +3510,8 @@ void prepare_active_source_ranges(Core &core, const GraphRevision *graph) {
     }
   }
   core.root_source_range.start = count;
-  for (uint32_t source_index = 0; source_index < core.sample_sources.size(); ++source_index) {
-    const SampleSource &source = core.sample_sources[source_index];
+  for (uint32_t source_index = 0; source_index < core.active_sample_sources->size(); ++source_index) {
+    const SampleSource &source = (*core.active_sample_sources)[source_index];
     if (source.active && source.source_node_id == 0) {
       core.active_source_indices[count++] = static_cast<uint16_t>(source_index);
       ++core.root_source_range.count;
@@ -3527,7 +3528,7 @@ void render_sample_source_range(
   if (core.transport.running == 0) return;
   const uint32_t end = static_cast<uint32_t>(range.start) + range.count;
   for (uint32_t position = range.start; position < end; ++position) {
-    SampleSource &source = core.sample_sources[core.active_source_indices[position]];
+    SampleSource &source = (*core.active_sample_sources)[core.active_source_indices[position]];
     if (!source.active) continue;
     if (transport_frame >= source.stop_frame) {
       source.active = false;
@@ -4950,6 +4951,13 @@ bool wasm_read_u64(const uint8_t *bytes, uint32_t byte_count, uint32_t *offset, 
   uint32_t high = 0;
   if (!wasm_read_u32(bytes, byte_count, offset, &low) || !wasm_read_u32(bytes, byte_count, offset, &high)) return false;
   *out = static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32u);
+  return true;
+}
+
+bool wasm_read_i64(const uint8_t *bytes, uint32_t byte_count, uint32_t *offset, int64_t *out) {
+  uint64_t value = 0;
+  if (!wasm_read_u64(bytes, byte_count, offset, &value)) return false;
+  __builtin_memcpy(out, &value, sizeof(value));
   return true;
 }
 
@@ -6465,7 +6473,7 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   SampleSource *target = nullptr;
-  for (SampleSource &source : core->sample_sources) {
+  for (SampleSource &source : *core->active_sample_sources) {
     if (!source.active) {
       target = &source;
       break;
@@ -6492,6 +6500,119 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     .active = true,
   };
   core->last_event_sequence = event->sequence;
+  return DAW_AUDIO_CORE_OK;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
+  daw_audio_core_handle core_handle,
+  uint32_t revision,
+  uint32_t epoch,
+  const daw_audio_sample_source_replacement_event *events,
+  uint32_t event_count) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr || revision == 0 || epoch == 0
+    || revision != core->published_revision || epoch != core->transport.epoch
+    || event_count > kMaximumSampleSources || (event_count != 0 && events == nullptr)) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  auto *staged = core->active_sample_sources == &core->sample_source_tables[0]
+    ? &core->sample_source_tables[1]
+    : &core->sample_source_tables[0];
+  for (SampleSource &source : *staged) source.active = false;
+  uint64_t previous_sequence = 0;
+  for (uint32_t index = 0; index < event_count; ++index) {
+    const daw_audio_sample_source_replacement_event &event = events[index];
+    if (event.abi_version != DAW_AUDIO_CORE_ABI_VERSION
+      || event.epoch != epoch || event.sequence == 0 || event.sequence <= previous_sequence
+      || event.kind > 1) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    if (event.kind == 0) {
+      const daw_audio_sample_source_event ordinary{
+        .abi_version = event.abi_version,
+        .epoch = event.epoch,
+        .sequence = event.sequence,
+        .source_node_id = event.source_node_id,
+        .asset = event.asset,
+        .start_frame = event.start_frame,
+        .stop_frame = event.stop_frame,
+        .source_offset_frame = event.source_offset_frame,
+        .source_frame_count = event.source_frame_count,
+        .gain = event.gain,
+        .fade_in_start_frame = event.fade_in_start_frame,
+        .fade_in_end_frame = event.fade_in_end_frame,
+        .fade_out_start_frame = event.fade_out_start_frame,
+        .fade_out_end_frame = event.fade_out_end_frame,
+        .source_offset_fraction = event.source_offset_fraction,
+        .fade_in_curve = event.fade_in_curve,
+        .fade_in_curve_position = event.fade_in_curve_position,
+        .fade_out_curve = event.fade_out_curve,
+        .fade_out_curve_position = event.fade_out_curve_position,
+      };
+      if (!valid_sample_source_event(ordinary)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      AssetSlot *asset = find_asset(core, ordinary.asset);
+      if (asset == nullptr
+        || ordinary.source_offset_frame >= asset->frame_count
+        || ordinary.source_frame_count > asset->frame_count - ordinary.source_offset_frame) {
+        return DAW_AUDIO_CORE_INVALID_HANDLE;
+      }
+    } else {
+      PagedPreparation *preparation = find_paged_preparation(*core, event.preparation);
+      if (preparation == nullptr
+        || event.stop_frame <= event.start_frame
+        || event.source_frame_count == 0
+        || !std::isfinite(event.gain)
+        || !std::isfinite(event.source_offset_fraction)
+        || event.source_offset_fraction < 0.0F || event.source_offset_fraction >= 1.0F
+        || event.source_offset_frame < preparation->source_offset_frame
+        || event.source_offset_frame > preparation->source_offset_frame + preparation->source_frame_count
+        || event.source_frame_count > preparation->source_offset_frame + preparation->source_frame_count
+          - event.source_offset_frame
+        || event.fade_in_start_frame > event.fade_in_end_frame
+        || event.fade_out_start_frame > event.fade_out_end_frame
+        || !std::isfinite(event.fade_in_curve) || event.fade_in_curve < -1.0F || event.fade_in_curve > 1.0F
+        || !std::isfinite(event.fade_in_curve_position)
+        || event.fade_in_curve_position < 0.0F || event.fade_in_curve_position > 1.0F
+        || !std::isfinite(event.fade_out_curve) || event.fade_out_curve < -1.0F || event.fade_out_curve > 1.0F
+        || !std::isfinite(event.fade_out_curve_position)
+        || event.fade_out_curve_position < 0.0F || event.fade_out_curve_position > 1.0F) {
+        return preparation == nullptr ? DAW_AUDIO_CORE_INVALID_HANDLE : DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      }
+    }
+    if ((*core->published_graph).revision == core->published_revision) {
+      const int32_t node_index = graph_node_index((*core->published_graph), event.source_node_id);
+      if (node_index < 0
+        || (*core->published_graph).nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) {
+        return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+      }
+    } else if (event.source_node_id != 0) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    PagedPreparation *preparation = event.kind == 1
+      ? find_paged_preparation(*core, event.preparation) : nullptr;
+    (*staged)[index] = {
+      .source_node_id = event.source_node_id,
+      .asset = event.kind == 0 ? event.asset : preparation->asset,
+      .start_frame = event.start_frame,
+      .stop_frame = event.stop_frame,
+      .source_offset_frame = event.source_offset_frame,
+      .source_offset_fraction = event.source_offset_fraction,
+      .source_frame_count = event.source_frame_count,
+      .gain = event.gain,
+      .fade_in_start_frame = event.fade_in_start_frame,
+      .fade_in_end_frame = event.fade_in_end_frame,
+      .fade_out_start_frame = event.fade_out_start_frame,
+      .fade_out_end_frame = event.fade_out_end_frame,
+      .fade_in_curve = event.fade_in_curve,
+      .fade_in_curve_position = event.fade_in_curve_position,
+      .fade_out_curve = event.fade_out_curve,
+      .fade_out_curve_position = event.fade_out_curve_position,
+      .paged_preparation = preparation,
+      .paged = event.kind == 1,
+      .active = true,
+    };
+    previous_sequence = event.sequence;
+  }
+  core->active_sample_sources = staged;
+  core->last_event_sequence = event_count == 0 ? 0 : previous_sequence;
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -6687,7 +6808,7 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_prepared_sample_source(
       != DAW_AUDIO_GRAPH_NODE_SOURCE) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   } else if (event->source_node_id != 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   SampleSource *target = nullptr;
-  for (SampleSource &source : core->sample_sources) {
+  for (SampleSource &source : *core->active_sample_sources) {
     if (!source.active) {
       target = &source;
       break;
@@ -6717,7 +6838,7 @@ extern "C" daw_audio_core_result daw_audio_core_release_paged_preparation(
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   PagedPreparation *preparation = find_paged_preparation(*core, handle);
   if (preparation == nullptr) return DAW_AUDIO_CORE_INVALID_HANDLE;
-  for (const SampleSource &source : core->sample_sources) {
+  for (const SampleSource &source : *core->active_sample_sources) {
     if (source.active && source.paged_preparation == preparation) return DAW_AUDIO_CORE_ASSET_IN_USE;
   }
   for (uint32_t index = 0; index < preparation->page_count; ++index) {
@@ -7142,6 +7263,69 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_sourc
     .fade_out_curve_position = fade_out_curve_position,
   };
   return daw_audio_core_schedule_sample_source(to_handle(wasm_graph_core), &event);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_replace_sample_sources(
+  uint32_t revision,
+  uint32_t epoch,
+  const uint8_t *event_bytes,
+  uint32_t event_byte_count) {
+  if (!wasm_graph_initialized || wasm_graph_core == nullptr
+    || revision == 0 || epoch == 0 || event_bytes == nullptr || event_byte_count < 4) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  uint32_t offset = 0;
+  uint32_t event_count = 0;
+  if (!wasm_read_u32(event_bytes, event_byte_count, &offset, &event_count)
+    || event_count > kMaximumSampleSources
+    || event_count > UINT32_MAX / 120u
+    || event_byte_count - offset != event_count * 120u) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  std::array<daw_audio_sample_source_replacement_event, kMaximumSampleSources> events{};
+  for (uint32_t index = 0; index < event_count; ++index) {
+    auto &event = events[index];
+    if (!wasm_read_u32(event_bytes, event_byte_count, &offset, &event.kind)
+      || !wasm_read_u32(event_bytes, event_byte_count, &offset, &event.reserved)
+      || !wasm_read_u64(event_bytes, event_byte_count, &offset, &event.sequence)
+      || !wasm_read_u64(event_bytes, event_byte_count, &offset, &event.source_node_id)
+      || !wasm_read_u64(event_bytes, event_byte_count, &offset,
+        event.kind == 0 ? &event.asset : &event.preparation)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.start_frame)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.stop_frame)
+      || !wasm_read_u64(event_bytes, event_byte_count, &offset, &event.source_offset_frame)
+      || !wasm_read_u64(event_bytes, event_byte_count, &offset, &event.source_frame_count)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.gain)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.fade_in_start_frame)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.fade_in_end_frame)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.fade_out_start_frame)
+      || !wasm_read_i64(event_bytes, event_byte_count, &offset, &event.fade_out_end_frame)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.source_offset_fraction)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.fade_in_curve)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.fade_in_curve_position)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.fade_out_curve)
+      || !wasm_read_f32(event_bytes, event_byte_count, &offset, &event.fade_out_curve_position)) {
+      return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    }
+    event.abi_version = DAW_AUDIO_CORE_ABI_VERSION;
+    event.epoch = epoch;
+  }
+  return daw_audio_core_replace_sample_sources(
+    to_handle(wasm_graph_core), revision, epoch, events.data(), event_count);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_wasm_graph_reset_sample_sources(
+  uint32_t revision,
+  uint32_t epoch) {
+  if (!wasm_graph_initialized || wasm_graph_core == nullptr
+    || revision == 0 || epoch == 0
+    || wasm_graph_core->published_revision != revision
+    || wasm_graph_core->transport.epoch != epoch) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  clear_sample_sources(*wasm_graph_core);
+  wasm_graph_core->last_event_sequence = 0;
+  return DAW_AUDIO_CORE_OK;
 }
 
 extern "C" daw_audio_core_result daw_audio_core_wasm_graph_register_pcm_asset(

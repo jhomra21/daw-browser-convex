@@ -1,4 +1,4 @@
-const PROTOCOL_VERSION = 1
+const PROTOCOL_VERSION = 2
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
 const ABI_VERSION = 3
@@ -18,11 +18,27 @@ const continuityResultForCoreResult = (result) => result === 3 || result === 14 
 const PROCESSOR_EVENT_BYTES = 20
 const MAX_PROCESSOR_OVERRIDE_TARGETS = 256
 const MAX_PROCESSOR_EVENT_ACKS = 32
+const PAGED_PAGE_FRAMES = 16384
+const PAGED_MAX_CHANNELS = 2
+const CORE_OK = 0
+const CORE_CAPACITY = 3
+const CORE_NO_DATA = 12
+const CORE_ASSET_IN_USE = 7
 
 const isCallable = (value) => value instanceof Function
 const isRecord = (value) => value !== null && Object(value) === value && !isCallable(value)
 const isString = (value) => Object(value) !== value && String(value) === value
 const isBoolean = (value) => value === true || value === false
+const isSafeInteger = (value) => Number.isSafeInteger(value)
+const unsignedI64 = (value) => isSafeInteger(value) && value >= 0 ? BigInt(value) : null
+const signedI64 = (value) => isSafeInteger(value) ? BigInt(value) : null
+const handleFromValue = (value) => {
+  const slot = Number(value & 0xffffffffn) - 1
+  const generation = Number(value >> 32n)
+  return isSafeInteger(slot) && slot >= 0 && isSafeInteger(generation) && generation > 0
+    ? { slot, generation, value }
+    : null
+}
 
 const writeProcessorId = (view, offset, id) => view.setBigUint64(offset, BigInt(id), true)
 
@@ -115,6 +131,9 @@ export class DawPortableAudioCoreHost {
     this.faultCount = 0
     this.assetGeneration = 0
     this.assets = new Map()
+    this.pagedAssets = new Map()
+    this.pagedPreparations = new Map()
+    this.nextPreparationId = 1
     this.assetRegister = null
     this.assetRelease = null
     this.malloc = null
@@ -174,6 +193,8 @@ export class DawPortableAudioCoreHost {
     this.samplerConfigure = null
     this.granularConfigure = null
     this.sourceSchedule = null
+    this.sourceReplace = null
+    this.sourceReset = null
     this.recordingCaptureInitialize = null
     this.recordingCaptureProcess = null
     this.recordingCaptureProcessMonitor = null
@@ -199,6 +220,13 @@ export class DawPortableAudioCoreHost {
     this.recordingCaptureStopFrame = 0
     this.recordingInputBusCount = 0
     this.initialization = null
+    this.pagedPageFrames = PAGED_PAGE_FRAMES
+    this.pagedSlotCount = 0
+    this.pagedStageAllocation = 0
+    this.pagedStagePointers = null
+    this.pagedStagePlanes = null
+    this.pagedHandleOffset = 0
+    this.pagedMissingPageOffset = 0
   }
 
   handleMessage(message) {
@@ -507,6 +535,14 @@ export class DawPortableAudioCoreHost {
       this.scheduleSources(message)
       return
     }
+    if (message.type === 'replace-sources') {
+      this.replaceSources(message)
+      return
+    }
+    if (message.type === 'reset-sources') {
+      this.resetSources(message)
+      return
+    }
     if (message.type === 'register-asset') {
       this.registerAsset(message)
       return
@@ -515,6 +551,12 @@ export class DawPortableAudioCoreHost {
       this.releaseAsset(message)
       return
     }
+    if (message.type === 'register-paged-asset') return this.registerPagedAsset(message)
+    if (message.type === 'write-asset-page') return this.writeAssetPage(message)
+    if (message.type === 'prepare-asset-range') return this.prepareAssetRange(message)
+    if (message.type === 'schedule-prepared-sources') return this.schedulePreparedSources(message)
+    if (message.type === 'release-asset-preparation') return this.releaseAssetPreparation(message)
+    if (message.type === 'trim-asset-pages') return this.trimAssetPages(message)
     if (message.type === 'retire-assets' && Number.isInteger(message.generation) && message.generation >= this.assetGeneration) {
       this.releaseAllAssets()
       this.assetGeneration = message.generation + 1
@@ -554,8 +596,18 @@ export class DawPortableAudioCoreHost {
         exports.daw_audio_core_wasm_graph_process_planar,
         exports.daw_audio_core_wasm_graph_set_transport,
         exports.daw_audio_core_wasm_graph_schedule_sample_source,
+        exports.daw_audio_core_wasm_graph_replace_sample_sources,
         exports.daw_audio_core_wasm_graph_register_pcm_asset,
         exports.daw_audio_core_wasm_graph_release_asset,
+        exports.daw_audio_core_wasm_graph_create_paged_asset,
+        exports.daw_audio_core_wasm_graph_write_paged_asset_page,
+        exports.daw_audio_core_wasm_graph_prepare_paged_asset,
+        exports.daw_audio_core_wasm_graph_schedule_prepared_sample_source,
+        exports.daw_audio_core_wasm_graph_release_paged_preparation,
+        exports.daw_audio_core_wasm_graph_trim_paged_asset,
+        exports.daw_audio_core_wasm_graph_paged_sub_abi_version,
+        exports.daw_audio_core_wasm_graph_paged_page_frames,
+        exports.daw_audio_core_wasm_graph_paged_slot_count,
         exports.daw_audio_core_wasm_graph_configure_synth,
         exports.daw_audio_core_wasm_graph_configure_sampler,
         exports.daw_audio_core_wasm_graph_configure_granular,
@@ -588,8 +640,26 @@ export class DawPortableAudioCoreHost {
         ? exports.daw_audio_core_wasm_graph_cancel : null
       this.graphSetTransport = exports.daw_audio_core_wasm_graph_set_transport
       this.sourceSchedule = exports.daw_audio_core_wasm_graph_schedule_sample_source
+      this.sourceReplace = exports.daw_audio_core_wasm_graph_replace_sample_sources
+      this.sourceReset = isCallable(exports.daw_audio_core_wasm_graph_reset_sample_sources)
+        ? exports.daw_audio_core_wasm_graph_reset_sample_sources : null
       this.assetRegister = exports.daw_audio_core_wasm_graph_register_pcm_asset
       this.assetRelease = exports.daw_audio_core_wasm_graph_release_asset
+      this.pagedAssetRelease = this.assetRelease
+      this.pagedAssetCreate = exports.daw_audio_core_wasm_graph_create_paged_asset
+      this.pagedAssetWrite = exports.daw_audio_core_wasm_graph_write_paged_asset_page
+      this.pagedAssetPrepare = exports.daw_audio_core_wasm_graph_prepare_paged_asset
+      this.pagedSourceSchedule = exports.daw_audio_core_wasm_graph_schedule_prepared_sample_source
+      this.pagedPreparationRelease = exports.daw_audio_core_wasm_graph_release_paged_preparation
+      this.pagedAssetTrim = exports.daw_audio_core_wasm_graph_trim_paged_asset
+      this.pagedSubAbiVersion = exports.daw_audio_core_wasm_graph_paged_sub_abi_version()
+      this.pagedPageFrames = exports.daw_audio_core_wasm_graph_paged_page_frames()
+      this.pagedSlotCount = exports.daw_audio_core_wasm_graph_paged_slot_count()
+      if (this.pagedSubAbiVersion !== 1 || this.pagedPageFrames < 1
+        || this.pagedSlotCount < 1) {
+        this.fault('initialization-failed')
+        return false
+      }
       this.synthConfigure = exports.daw_audio_core_wasm_graph_configure_synth
       this.samplerConfigure = exports.daw_audio_core_wasm_graph_configure_sampler
       this.granularConfigure = exports.daw_audio_core_wasm_graph_configure_granular
@@ -603,6 +673,23 @@ export class DawPortableAudioCoreHost {
       this.malloc = exports.malloc
       this.free = exports.free
       this.memory = exports.memory
+      const pagedPlaneBytes = this.pagedPageFrames * Float32Array.BYTES_PER_ELEMENT
+      this.pagedStageAllocation = this.malloc(
+        PAGED_MAX_CHANNELS * Uint32Array.BYTES_PER_ELEMENT + PAGED_MAX_CHANNELS * pagedPlaneBytes,
+      )
+      this.pagedHandleOffset = this.malloc(16)
+      if (!this.pagedStageAllocation || !this.pagedHandleOffset) {
+        this.fault('initialization-failed')
+        return false
+      }
+      this.pagedMissingPageOffset = this.pagedHandleOffset + 8
+      this.pagedStagePointers = new Uint32Array(this.memory.buffer, this.pagedStageAllocation, PAGED_MAX_CHANNELS)
+      const pagedPlaneStart = this.pagedStageAllocation + PAGED_MAX_CHANNELS * Uint32Array.BYTES_PER_ELEMENT
+      this.pagedStagePlanes = Array.from({ length: PAGED_MAX_CHANNELS }, (_, channel) => {
+        const plane = new Float32Array(this.memory.buffer, pagedPlaneStart + channel * pagedPlaneBytes, this.pagedPageFrames)
+        this.pagedStagePointers[channel] = plane.byteOffset
+        return plane
+      })
       this.eventCapacityBytes = 4 + MAX_PROCESSOR_EVENTS * PROCESSOR_EVENT_BYTES
       this.eventOffset = this.malloc(this.eventCapacityBytes)
       if (!this.eventOffset) return this.fault('capacity-exceeded')
@@ -664,7 +751,15 @@ export class DawPortableAudioCoreHost {
       this.scheduleInstrumentEventView = new DataView(exports.memory.buffer, this.scheduleInstrumentEventOffset, 4 + 256 * 48)
       this.writeState()
       this.ready = true
-      this.postMessage({ version: PROTOCOL_VERSION, type: 'ready', revision: this.revision })
+      this.postMessage({
+        version: PROTOCOL_VERSION,
+        type: 'ready',
+        revision: this.revision,
+        pagedAbi: this.pagedSubAbiVersion,
+        pagedPageFrames: this.pagedPageFrames,
+        pagedSlotCount: this.pagedSlotCount,
+        pagedMaxChannels: PAGED_MAX_CHANNELS,
+      })
       return true
     }, () => {
       this.fault('initialization-failed')
@@ -1253,6 +1348,322 @@ export class DawPortableAudioCoreHost {
     return result
   }
 
+  pagedAssetRegistrationResult(message, result, handle) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'paged-asset-registered',
+      requestId: message.requestId,
+      generation: message.generation,
+      assetId: isString(message.asset?.assetId) ? message.asset.assetId : '',
+      result,
+      handle: result === 'registered' && handle ? { slot: handle.slot, generation: handle.generation } : undefined,
+    })
+  }
+
+  registerPagedAsset(message) {
+    if (!this.ready || !this.pagedAssetCreate || !this.memory
+      || !Number.isInteger(message.requestId) || !Number.isInteger(message.generation)
+      || !message.asset) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
+    if (message.generation < this.assetGeneration) return this.pagedAssetRegistrationResult(message, 'stale-generation')
+    if (message.generation > this.assetGeneration) {
+      this.releaseAllAssets()
+      this.assetGeneration = message.generation
+    }
+    const asset = message.asset
+    if (!Number.isInteger(asset.frameCount) || asset.frameCount < 1
+      || !Number.isInteger(asset.sampleRateHz) || asset.sampleRateHz < 1
+      || !Number.isInteger(asset.channelCount) || asset.channelCount < 1
+      || asset.channelCount > PAGED_MAX_CHANNELS || !isString(asset.assetId) || asset.assetId.length === 0) {
+      return this.pagedAssetRegistrationResult(message, 'invalid-asset')
+    }
+    const existing = this.pagedAssets.get(asset.assetId)
+    if (existing) {
+      existing.retainCount += 1
+      return this.pagedAssetRegistrationResult(message, 'registered', existing.handle)
+    }
+    const frameCount = unsignedI64(asset.frameCount)
+    if (frameCount === null) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
+    const result = this.pagedAssetCreate(frameCount, asset.sampleRateHz, asset.channelCount, this.pagedHandleOffset)
+    if (result !== CORE_OK) return this.pagedAssetRegistrationResult(message, result === CORE_CAPACITY ? 'capacity-exceeded' : 'invalid-asset')
+    const handleValue = new DataView(this.memory.buffer, this.pagedHandleOffset, 8).getBigUint64(0, true)
+    const handle = handleFromValue(handleValue)
+    if (handle === null) return this.pagedAssetRegistrationResult(message, 'invalid-asset')
+    this.pagedAssets.set(asset.assetId, { asset, handle, retainCount: 1 })
+    return this.pagedAssetRegistrationResult(message, 'registered', handle)
+  }
+
+  pageWriteResult(message, result) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'asset-page-written',
+      requestId: message.requestId,
+      generation: message.generation,
+      assetId: isString(message.assetId) ? message.assetId : '',
+      pageIndex: message.pageIndex,
+      result,
+    })
+  }
+
+  writeAssetPage(message) {
+    const asset = this.pagedAssets.get(message.assetId)
+    if (!this.ready || !asset || message.generation !== this.assetGeneration
+      || !Number.isSafeInteger(message.pageIndex) || message.pageIndex < 0
+      || !Number.isSafeInteger(message.validFrames) || message.validFrames < 1
+      || message.validFrames > this.pagedPageFrames
+      || !Array.isArray(message.planes) || message.planes.length !== asset.asset.channelCount
+      || !message.planes.every((plane) => plane instanceof Float32Array && plane.length === message.validFrames)) {
+      return this.pageWriteResult(message, message.generation !== this.assetGeneration ? 'stale-generation' : 'invalid-page')
+    }
+    const pageIndex = unsignedI64(message.pageIndex)
+    if (pageIndex === null) return this.pageWriteResult(message, 'invalid-page')
+    const pageOffset = message.pageIndex * this.pagedPageFrames
+    if (!isSafeInteger(pageOffset)) return this.pageWriteResult(message, 'invalid-page')
+    const expectedFrames = Math.min(this.pagedPageFrames, asset.asset.frameCount - pageOffset)
+    if (message.validFrames !== expectedFrames) return this.pageWriteResult(message, 'invalid-page')
+    for (let channel = 0; channel < asset.asset.channelCount; channel += 1) {
+      this.pagedStagePlanes[channel].set(message.planes[channel])
+    }
+    const result = this.pagedAssetWrite(
+      asset.handle.value,
+      pageIndex,
+      message.validFrames,
+      asset.asset.channelCount,
+      this.pagedStageAllocation,
+    )
+    return this.pageWriteResult(message,
+      result === CORE_OK ? 'written' : result === CORE_CAPACITY ? 'capacity-exceeded' : result === CORE_ASSET_IN_USE ? 'asset-in-use' : 'invalid-page')
+  }
+
+  rangePreparationResult(message, result, preparationId, firstMissingPage) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'asset-range-prepared',
+      requestId: message.requestId,
+      generation: message.generation,
+      assetId: isString(message.assetId) ? message.assetId : '',
+      result,
+      preparationId,
+      firstMissingPage,
+    })
+  }
+
+  prepareAssetRange(message) {
+    const asset = this.pagedAssets.get(message.assetId)
+    if (!this.ready || !asset || message.generation !== this.assetGeneration) {
+      return this.rangePreparationResult(message, message.generation !== this.assetGeneration ? 'stale-generation' : 'invalid-range')
+    }
+    const sourceOffsetFrame = unsignedI64(message.sourceOffsetFrame)
+    const sourceFrameCount = unsignedI64(message.sourceFrameCount)
+    if (sourceOffsetFrame === null || sourceFrameCount === null) {
+      return this.rangePreparationResult(message, 'invalid-range')
+    }
+    const preparationId = this.nextPreparationId
+    this.nextPreparationId += 1
+    const result = this.pagedAssetPrepare(
+      asset.handle.value,
+      sourceOffsetFrame,
+      sourceFrameCount,
+      message.interpolationGuardFrames,
+      this.pagedHandleOffset,
+      this.pagedMissingPageOffset,
+    )
+    if (result === CORE_OK) {
+      const handleValue = new DataView(this.memory.buffer, this.pagedHandleOffset, 8).getBigUint64(0, true)
+      if (handleFromValue(handleValue) === null) return this.rangePreparationResult(message, 'invalid-range')
+      this.pagedPreparations.set(preparationId, { handle: handleValue, assetId: message.assetId })
+      return this.rangePreparationResult(message, 'prepared', preparationId)
+    }
+    if (result === CORE_NO_DATA) {
+      const firstMissingPageValue = new DataView(this.memory.buffer, this.pagedMissingPageOffset, 8).getBigUint64(0, true)
+      const firstMissingPage = Number(firstMissingPageValue)
+      if (!isSafeInteger(firstMissingPage)) return this.rangePreparationResult(message, 'invalid-range')
+      return this.rangePreparationResult(message, 'missing-page', undefined, firstMissingPage)
+    }
+    return this.rangePreparationResult(message, result === CORE_CAPACITY ? 'capacity-exceeded' : 'invalid-range')
+  }
+
+  preparedSourcesResult(message, result) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'prepared-sources-scheduled',
+      requestId: message.requestId,
+      revision: message.revision,
+      epoch: message.epoch,
+      result,
+    })
+  }
+
+  schedulePreparedSources(message) {
+    if (!this.ready || !this.pagedSourceSchedule || message.revision !== this.revision
+      || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) {
+      return this.preparedSourcesResult(message, 'rejected')
+    }
+    let previousSequence = 0
+    for (const event of message.events) {
+      const preparation = this.pagedPreparations.get(event.preparationId)
+      if (!preparation || event.epoch !== message.epoch || event.sequence <= previousSequence) {
+        return this.preparedSourcesResult(message, 'rejected')
+      }
+      const sequence = unsignedI64(event.sequence)
+      const startFrame = signedI64(event.startFrame)
+      const stopFrame = signedI64(event.stopFrame)
+      const sourceOffsetFrame = unsignedI64(event.sourceOffsetFrame)
+      const sourceFrameCount = unsignedI64(event.sourceFrameCount)
+      const fadeInStartFrame = signedI64(event.fadeInStartFrame)
+      const fadeInEndFrame = signedI64(event.fadeInEndFrame)
+      const fadeOutStartFrame = signedI64(event.fadeOutStartFrame)
+      const fadeOutEndFrame = signedI64(event.fadeOutEndFrame)
+      if ([sequence, startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount,
+        fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame]
+        .some((value) => value === null)) {
+        return this.preparedSourcesResult(message, 'rejected')
+      }
+      const result = this.pagedSourceSchedule(
+        event.epoch,
+        sequence,
+        stableId(event.sourceNodeId),
+        preparation.handle,
+        startFrame,
+        stopFrame,
+        sourceOffsetFrame,
+        sourceFrameCount,
+        event.sourceOffsetFraction || 0,
+        event.gain,
+        fadeInStartFrame,
+        fadeInEndFrame,
+        fadeOutStartFrame,
+        fadeOutEndFrame,
+        event.fadeInCurve || 0,
+        event.fadeInCurvePosition ?? 0.5,
+        event.fadeOutCurve || 0,
+        event.fadeOutCurvePosition ?? 0.5,
+      )
+      if (result !== CORE_OK) return this.preparedSourcesResult(message, 'rejected')
+      previousSequence = event.sequence
+    }
+    return this.preparedSourcesResult(message, 'scheduled')
+  }
+
+  sourcesReplacedResult(message, result) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'sources-replaced',
+      requestId: message.requestId,
+      revision: message.revision,
+      epoch: message.epoch,
+      result,
+    })
+  }
+
+  replaceSources(message) {
+    const all = [
+      ...(Array.isArray(message.ordinary) ? message.ordinary.map((event) => ({ kind: 0, event })) : []),
+      ...(Array.isArray(message.prepared) ? message.prepared.map((event) => ({ kind: 1, event })) : []),
+    ].sort((left, right) => left.event.sequence - right.event.sequence)
+    if (!this.ready || !this.sourceReplace || message.revision !== this.revision
+      || message.epoch !== this.transportEpoch || all.length > 256) {
+      return this.sourcesReplacedResult(message, 'rejected')
+    }
+    const handles = []
+    let previousSequence = 0
+    for (const entry of all) {
+      const event = entry.event
+      const preparation = entry.kind === 1 ? this.pagedPreparations.get(event.preparationId) : null
+      if (!event || event.version !== 1 || event.epoch !== message.epoch
+        || !Number.isSafeInteger(event.sequence) || event.sequence <= previousSequence
+        || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0
+        || entry.kind === 0 && (!isString(event.assetId) || !this.assets.has(event.assetId))
+        || entry.kind === 1 && !preparation
+        || !Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.stopFrame) || event.stopFrame <= event.startFrame
+        || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0
+        || !Number.isSafeInteger(event.sourceFrameCount) || event.sourceFrameCount < 1 || !Number.isFinite(event.gain)
+        || !Number.isSafeInteger(event.fadeInStartFrame) || !Number.isSafeInteger(event.fadeInEndFrame) || event.fadeInEndFrame < event.fadeInStartFrame
+        || !Number.isSafeInteger(event.fadeOutStartFrame) || !Number.isSafeInteger(event.fadeOutEndFrame) || event.fadeOutEndFrame < event.fadeOutStartFrame
+        || event.sourceOffsetFraction !== undefined && (!Number.isFinite(event.sourceOffsetFraction) || event.sourceOffsetFraction < 0 || event.sourceOffsetFraction >= 1)
+        || event.fadeInCurve !== undefined && (!Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1)
+        || event.fadeInCurvePosition !== undefined && (!Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
+        || event.fadeOutCurve !== undefined && (!Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
+        || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
+        return this.sourcesReplacedResult(message, 'rejected')
+      }
+      const asset = entry.kind === 0 ? this.assets.get(event.assetId) : null
+      handles.push({ entry, handle: entry.kind === 0 ? asset.handle.value : preparation.handle })
+      previousSequence = event.sequence
+    }
+    const bytes = new ArrayBuffer(4 + all.length * 120)
+    const view = new DataView(bytes)
+    view.setUint32(0, all.length, true)
+    let offset = 4
+    for (const { entry, handle } of handles) {
+      const event = entry.event
+      view.setUint32(offset, entry.kind, true)
+      view.setUint32(offset + 4, 0, true)
+      view.setBigUint64(offset + 8, BigInt(event.sequence), true)
+      view.setBigUint64(offset + 16, stableId(event.sourceNodeId), true)
+      view.setBigUint64(offset + 24, handle, true)
+      view.setBigInt64(offset + 32, BigInt(event.startFrame), true)
+      view.setBigInt64(offset + 40, BigInt(event.stopFrame), true)
+      view.setBigUint64(offset + 48, BigInt(event.sourceOffsetFrame), true)
+      view.setBigUint64(offset + 56, BigInt(event.sourceFrameCount), true)
+      view.setFloat32(offset + 64, event.gain, true)
+      view.setBigInt64(offset + 68, BigInt(event.fadeInStartFrame), true)
+      view.setBigInt64(offset + 76, BigInt(event.fadeInEndFrame), true)
+      view.setBigInt64(offset + 84, BigInt(event.fadeOutStartFrame), true)
+      view.setBigInt64(offset + 92, BigInt(event.fadeOutEndFrame), true)
+      view.setFloat32(offset + 100, event.sourceOffsetFraction || 0, true)
+      view.setFloat32(offset + 104, event.fadeInCurve || 0, true)
+      view.setFloat32(offset + 108, event.fadeInCurvePosition ?? 0.5, true)
+      view.setFloat32(offset + 112, event.fadeOutCurve || 0, true)
+      view.setFloat32(offset + 116, event.fadeOutCurvePosition ?? 0.5, true)
+      offset += 120
+    }
+    const allocation = this.malloc(bytes.byteLength)
+    if (!allocation) return this.sourcesReplacedResult(message, 'rejected')
+    new Uint8Array(this.memory.buffer, allocation, bytes.byteLength).set(new Uint8Array(bytes))
+    const result = this.sourceReplace(message.revision, message.epoch, allocation, bytes.byteLength)
+    this.free(allocation)
+    return this.sourcesReplacedResult(message, result === CORE_OK ? 'replaced' : 'rejected')
+  }
+
+  releaseAssetPreparation(message) {
+    const preparation = this.pagedPreparations.get(message.preparationId)
+    const result = preparation && message.generation === this.assetGeneration
+      ? this.pagedPreparationRelease(preparation.handle)
+      : -1
+    const mapped = result === CORE_OK ? 'released' : result === CORE_ASSET_IN_USE ? 'asset-in-use' : 'stale-preparation'
+    if (result === CORE_OK) this.pagedPreparations.delete(message.preparationId)
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'asset-preparation-released',
+      requestId: message.requestId,
+      generation: message.generation,
+      preparationId: message.preparationId,
+      result: mapped,
+    })
+  }
+
+  trimAssetPages(message) {
+    const asset = this.pagedAssets.get(message.assetId)
+    const result = asset && message.generation === this.assetGeneration
+      ? (() => {
+        const firstPage = unsignedI64(message.firstPage)
+        return firstPage === null
+          ? -1
+          : this.pagedAssetTrim(asset.handle.value, firstPage, message.pageCount)
+      })()
+      : -1
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'asset-pages-trimmed',
+      requestId: message.requestId,
+      generation: message.generation,
+      assetId: isString(message.assetId) ? message.assetId : '',
+      firstPage: message.firstPage,
+      pageCount: message.pageCount,
+      result: result === CORE_OK ? 'trimmed' : result === CORE_ASSET_IN_USE ? 'asset-in-use' : 'stale-generation',
+    })
+  }
+
   registerAsset(message) {
     if (!this.ready || !this.memory || !this.assetRegister || !this.free || !Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || !message.asset || !Array.isArray(message.planes)) return this.assetRegistrationResult(message, 'invalid-pcm')
     if (message.generation < this.assetGeneration) return this.assetRegistrationResult(message, 'stale-generation')
@@ -1285,10 +1696,10 @@ export class DawPortableAudioCoreHost {
       return this.assetRegistrationResult(message, result === 3 ? 'capacity-exceeded' : 'invalid-pcm')
     }
     const handleValue = new DataView(this.memory.buffer, outHandle, 8).getBigUint64(0, true)
-    const handle = {
-      slot: Number(handleValue & 0xffffffffn) - 1,
-      generation: Number(handleValue >> 32n),
-      value: handleValue,
+    const handle = handleFromValue(handleValue)
+    if (handle === null) {
+      this.free(allocation)
+      return this.assetRegistrationResult(message, 'invalid-pcm')
     }
     this.assets.set(asset.assetId, {
       handle,
@@ -1305,6 +1716,18 @@ export class DawPortableAudioCoreHost {
   releaseAsset(message) {
     if (!Number.isInteger(message.requestId) || !Number.isInteger(message.generation) || !isString(message.assetId)) return this.assetReleaseResult(message, 'stale-generation')
     if (message.generation !== this.assetGeneration) return this.assetReleaseResult(message, 'stale-generation')
+    const paged = this.pagedAssets.get(message.assetId)
+    if (paged) {
+      paged.retainCount -= 1
+      if (paged.retainCount > 0) return this.assetReleaseResult(message, 'released')
+      const result = this.pagedAssetRelease(paged.handle.value)
+      if (result === CORE_ASSET_IN_USE) {
+        paged.retainCount = 1
+        return this.assetReleaseResult(message, 'asset-in-use')
+      }
+      this.pagedAssets.delete(message.assetId)
+      return this.assetReleaseResult(message, result === CORE_OK ? 'released' : 'stale-generation')
+    }
     const existing = this.assets.get(message.assetId)
     if (!existing) return this.assetReleaseResult(message, 'stale-generation')
     existing.retainCount -= 1
@@ -1313,6 +1736,12 @@ export class DawPortableAudioCoreHost {
   }
 
   releaseAllAssets() {
+    for (const preparation of this.pagedPreparations.values()) this.pagedPreparationRelease(preparation.handle)
+    this.pagedPreparations.clear()
+    for (const [assetId, asset] of this.pagedAssets) {
+      this.pagedAssetRelease(asset.handle.value)
+      this.pagedAssets.delete(assetId)
+    }
     for (const [assetId, asset] of this.assets) this.releaseStoredAsset(assetId, asset)
   }
 
@@ -1365,15 +1794,46 @@ export class DawPortableAudioCoreHost {
         return this.sourceScheduleResult(message, 'rejected')
       }
       const handle = this.assets.get(event.assetId).handle.value
-      const result = this.sourceSchedule(message.epoch, BigInt(event.sequence), stableId(event.sourceNodeId), handle,
-        BigInt(event.startFrame), BigInt(event.stopFrame), BigInt(event.sourceOffsetFrame), BigInt(event.sourceFrameCount), event.gain,
-        BigInt(event.fadeInStartFrame), BigInt(event.fadeInEndFrame), BigInt(event.fadeOutStartFrame), BigInt(event.fadeOutEndFrame),
+      const sequence = unsignedI64(event.sequence)
+      const startFrame = signedI64(event.startFrame)
+      const stopFrame = signedI64(event.stopFrame)
+      const sourceOffsetFrame = unsignedI64(event.sourceOffsetFrame)
+      const sourceFrameCount = unsignedI64(event.sourceFrameCount)
+      const fadeInStartFrame = signedI64(event.fadeInStartFrame)
+      const fadeInEndFrame = signedI64(event.fadeInEndFrame)
+      const fadeOutStartFrame = signedI64(event.fadeOutStartFrame)
+      const fadeOutEndFrame = signedI64(event.fadeOutEndFrame)
+      if ([sequence, startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount,
+        fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame]
+        .some((value) => value === null)) return this.sourceScheduleResult(message, 'rejected')
+      const result = this.sourceSchedule(message.epoch, sequence, stableId(event.sourceNodeId), handle,
+        startFrame, stopFrame, sourceOffsetFrame, sourceFrameCount, event.gain,
+        fadeInStartFrame, fadeInEndFrame, fadeOutStartFrame, fadeOutEndFrame,
         event.sourceOffsetFraction || 0, event.fadeInCurve || 0, event.fadeInCurvePosition ?? 0.5,
         event.fadeOutCurve || 0, event.fadeOutCurvePosition ?? 0.5)
       if (result !== 0) return this.sourceScheduleResult(message, 'rejected')
       previousSequence = event.sequence
     }
     this.sourceScheduleResult(message, 'scheduled')
+  }
+
+  resetSources(message) {
+    const result = this.ready && this.sourceReset
+      && Number.isInteger(message.requestId)
+      && Number.isInteger(message.revision)
+      && message.revision === this.revision
+      && Number.isInteger(message.epoch)
+      && message.epoch === this.transportEpoch
+      ? this.sourceReset(message.revision, message.epoch)
+      : 1
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'sources-reset',
+      requestId: message.requestId,
+      revision: message.revision,
+      epoch: message.epoch,
+      result: result === 0 ? 'reset' : 'rejected',
+    })
   }
 
   sourceScheduleResult(message, result) {

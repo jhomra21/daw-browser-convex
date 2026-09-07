@@ -28,7 +28,7 @@ test('bridges portable planar blocks into the bounded recording writer protocol'
   handleMessage({ type: 'ready', generation: 3, sessionId: 'take-1' })
   await writer.ready
   writer.write({
-    version: 1,
+    version: 2,
     type: 'recording-capture-block',
     generation: 3,
     sessionId: 9,
@@ -74,7 +74,7 @@ test('fails instead of growing beyond the fixed portable writer queue', async ()
   handleMessage({ type: 'ready', generation: 4, sessionId: 'take-2' })
   await writer.ready
   const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
-    version: 1,
+    version: 2,
     type: 'recording-capture-block',
     generation: 4,
     sessionId: 10,

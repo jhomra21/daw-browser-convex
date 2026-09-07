@@ -994,6 +994,31 @@ typedef struct daw_audio_paged_sample_source_event {
   float fade_out_curve_position;
 } daw_audio_paged_sample_source_event;
 
+typedef struct daw_audio_sample_source_replacement_event {
+  uint32_t abi_version;
+  uint32_t kind;
+  uint32_t epoch;
+  uint32_t reserved;
+  uint64_t sequence;
+  uint64_t source_node_id;
+  daw_audio_asset_handle asset;
+  daw_audio_paged_preparation_handle preparation;
+  int64_t start_frame;
+  int64_t stop_frame;
+  uint64_t source_offset_frame;
+  uint64_t source_frame_count;
+  float gain;
+  int64_t fade_in_start_frame;
+  int64_t fade_in_end_frame;
+  int64_t fade_out_start_frame;
+  int64_t fade_out_end_frame;
+  float source_offset_fraction;
+  float fade_in_curve;
+  float fade_in_curve_position;
+  float fade_out_curve;
+  float fade_out_curve_position;
+} daw_audio_sample_source_replacement_event;
+
 typedef struct daw_audio_transport_state {
   uint32_t epoch;
   uint32_t running;
@@ -1120,6 +1145,12 @@ daw_audio_core_result daw_audio_core_configure_granular(
 daw_audio_core_result daw_audio_core_schedule_sample_source(
   daw_audio_core_handle core,
   const daw_audio_sample_source_event *event);
+daw_audio_core_result daw_audio_core_replace_sample_sources(
+  daw_audio_core_handle core,
+  uint32_t revision,
+  uint32_t epoch,
+  const daw_audio_sample_source_replacement_event *events,
+  uint32_t event_count);
 daw_audio_core_result daw_audio_core_configure_paged_assets(
   daw_audio_core_handle core,
   const daw_audio_paged_asset_config *config);
@@ -1287,6 +1318,14 @@ daw_audio_core_result daw_audio_core_wasm_graph_schedule_sample_source(
   float fade_in_curve_position,
   float fade_out_curve,
   float fade_out_curve_position);
+daw_audio_core_result daw_audio_core_wasm_graph_replace_sample_sources(
+  uint32_t revision,
+  uint32_t epoch,
+  const uint8_t *event_bytes,
+  uint32_t event_byte_count);
+daw_audio_core_result daw_audio_core_wasm_graph_reset_sample_sources(
+  uint32_t revision,
+  uint32_t epoch);
 daw_audio_core_result daw_audio_core_wasm_graph_register_pcm_asset(
   uint32_t frame_count,
   uint32_t sample_rate_hz,

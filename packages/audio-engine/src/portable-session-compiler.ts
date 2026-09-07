@@ -27,6 +27,7 @@ import {
   portableWasmMaxGraphEdges,
   portableWasmMaxGraphNodes,
   portableWasmMaxPendingEvents,
+  portableWasmProtocolVersion,
   parsePortableWasmControlMessage,
 } from './portable-wasm-protocol'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
@@ -44,6 +45,7 @@ import {
   type PortableProjectedSourceEvent,
 } from './portable-clip-projector'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
+import type { PortablePagedStretchAsset } from './portable-stretch-paging'
 import { resolveGraphProcessor } from './mixer/resolve-graph-processor'
 
 export type PortableSynthConfiguration = {
@@ -476,7 +478,8 @@ export type PreparedPortableSessionInput = PortableSessionCompilerInput & {
   sidechainRoutes: readonly ExternalSidechainRoute[]
   schedule: PortableFrameSchedule
   assetRegistry: PortableAssetRegistryInput
-  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset>
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PortablePagedStretchAsset>
+  sourceRangeStartSec?: number
   sourceRangeEndSec: number
   sourceFirstSequence: number
 }
@@ -684,7 +687,7 @@ const prepareSources = (
     projectGeneration: input.assetRegistry.projectGeneration,
     bpm: input.bpm,
     sampleRateHz: input.sampleRateHz,
-    rangeStartSec: input.schedule.timeOrigin.timelineSec,
+    rangeStartSec: input.sourceRangeStartSec ?? input.schedule.timeOrigin.timelineSec,
     rangeEndSec: input.sourceRangeEndSec,
     epoch: input.schedule.transportEpoch,
     firstSequence: input.sourceFirstSequence,
@@ -792,12 +795,13 @@ export const compilePreparedPortableSession = (
       ? [...input.preparedStretchAssets.values()].map((asset) => asset.portableAssetId)
       : [],
   )
-  const assets = [
+  const assetCandidates = [
     ...assetRefs(compilation.portableAssets).filter((asset) => !preparedAssetIds.has(asset.assetId)),
     ...(input.preparedStretchAssets
       ? [...input.preparedStretchAssets.values()].map((asset) => asset.asset)
       : []),
   ]
+  const assets = [...new Map(assetCandidates.map((asset) => [asset.assetId, asset])).values()]
   let graph: AudioCoreGraphSnapshot
   try {
     graph = createPortableGraphSnapshot({
@@ -821,7 +825,7 @@ export const compilePreparedPortableSession = (
   const reasons = capabilityReasons(graph, input.schedule)
   if (reasons.length > 0) return unsupported(reasons)
   if (parsePortableWasmControlMessage({
-    version: 1,
+    version: portableWasmProtocolVersion,
     type: 'prepare-graph',
     requestId: 1,
     snapshot: graph,

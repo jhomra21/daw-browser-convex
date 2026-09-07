@@ -14,6 +14,7 @@ export type AudioAssetRegistration =
 export type AudioAssetRelease =
   | { status: 'released' }
   | { status: 'stale-generation' }
+  | { status: 'asset-in-use' }
 
 export type AudioAssetRegistrationInput = {
   asset: AudioAssetRef

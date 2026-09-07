@@ -2346,6 +2346,423 @@ void test_mapped_asset_retains_wide_frame_ranges() {
   daw_audio_core_destroy(core);
 }
 
+void test_wasm_planar_preserves_requested_eager_channels() {
+  expect(daw_audio_core_wasm_graph_initialize_planar(48000, 4, 1, 3, 2), DAW_AUDIO_CORE_OK);
+  std::array<uint8_t, 128> graph{};
+  const auto write_u32 = [&graph](std::size_t offset, uint32_t value) {
+    graph[offset] = static_cast<uint8_t>(value);
+    graph[offset + 1] = static_cast<uint8_t>(value >> 8u);
+    graph[offset + 2] = static_cast<uint8_t>(value >> 16u);
+    graph[offset + 3] = static_cast<uint8_t>(value >> 24u);
+  };
+  const auto write_u64 = [&write_u32](std::size_t offset, uint64_t value) {
+    write_u32(offset, static_cast<uint32_t>(value));
+    write_u32(offset + 4, static_cast<uint32_t>(value >> 32u));
+  };
+  write_u32(0, 1);
+  write_u32(4, 1);
+  write_u32(8, 2);
+  write_u32(12, 1);
+  write_u32(16, 0);
+  write_u64(24, 1);
+  write_u32(32, DAW_AUDIO_GRAPH_NODE_SOURCE);
+  write_u32(36, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  write_u32(40, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  write_u32(44, 0);
+  write_u64(52, 2);
+  write_u32(60, 6);
+  write_u32(64, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  write_u32(68, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+  write_u32(72, 0);
+  write_u64(80, 3);
+  write_u64(88, 1);
+  write_u64(96, 2);
+  write_u64(104, 0);
+  write_u32(112, 0x3f800000);
+  write_u32(116, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
+
+  expect(daw_audio_core_wasm_graph_prepare(graph.data(), graph.size()), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_wasm_graph_publish(1), DAW_AUDIO_CORE_OK);
+
+  const std::array<float, 1> eager_left{0.25F};
+  const std::array<float, 1> eager_right{-0.5F};
+  const std::array<float, 1> eager_third{3.0F};
+  const float *eager_planes[]{eager_left.data(), eager_right.data(), eager_third.data()};
+  daw_audio_asset_handle asset = 0;
+  expect(daw_audio_core_wasm_graph_register_pcm_asset(
+    1, 48000, 3, eager_planes, &asset), DAW_AUDIO_CORE_OK);
+
+  daw_audio_asset_handle rejected_paged_asset = 0;
+  expect(daw_audio_core_wasm_graph_create_paged_asset(
+    1, 48000, 3, &rejected_paged_asset), DAW_AUDIO_CORE_INVALID_ARGUMENT);
+
+  expect(daw_audio_core_wasm_graph_set_transport(1, 1, 0), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_wasm_graph_schedule_sample_source(
+    1, 1, 1, asset, 0, 1, 0, 1, 1.0F, 0, 0, 1, 1, 0.0F, 0.0F, 0.5F, 0.0F, 0.5F), DAW_AUDIO_CORE_OK);
+  const std::array<float, 1> input_left{};
+  const std::array<float, 1> input_right{};
+  const std::array<float, 1> input_third{};
+  const float *inputs[]{input_left.data(), input_right.data(), input_third.data()};
+  std::array<float, 1> output_left{};
+  std::array<float, 1> output_right{};
+  std::array<float, 1> output_third{};
+  float *outputs[]{output_left.data(), output_right.data(), output_third.data()};
+  expect(daw_audio_core_wasm_graph_process_planar(
+    1, 1, 3, inputs, outputs, 1, nullptr, 0, nullptr, 0, nullptr, 0), DAW_AUDIO_CORE_OK);
+  assert(output_left[0] == 0.25F && output_right[0] == -0.5F && output_third[0] == -0.5F);
+  expect(daw_audio_core_wasm_graph_set_transport(2, 0, 0), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_wasm_graph_release_asset(asset), DAW_AUDIO_CORE_OK);
+}
+
+void test_paged_asset_pool_preparation_and_rendering() {
+  daw_audio_core_handle core = create_core(8, 2, 4);
+  const daw_audio_paged_asset_config config{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .page_frames = 4,
+    .slot_count = 3,
+    .max_channels = 2,
+  };
+  expect(daw_audio_core_configure_paged_assets(core, &config), DAW_AUDIO_CORE_OK);
+  const daw_audio_paged_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .revision = 1,
+    .byte_length = 10u * 2u * sizeof(float),
+    .content_hash_prefix = 0,
+    .frame_count = 10,
+    .sample_rate_hz = 48000,
+    .channel_count = 2,
+  };
+  daw_audio_asset_handle asset = 0;
+  expect(daw_audio_core_create_paged_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+  const std::array<float, 4> page_left{1.0F, 2.0F, 3.0F, 4.0F};
+  const std::array<float, 4> page_right{-1.0F, -2.0F, -3.0F, -4.0F};
+  const float *page_planes[]{page_left.data(), page_right.data()};
+  const daw_audio_paged_asset_page_write page_write{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .asset = asset,
+    .page_index = 0,
+    .valid_frames = 4,
+    .channel_count = 2,
+    .planes = page_planes,
+  };
+  expect(daw_audio_core_write_paged_asset_page(core, &page_write), DAW_AUDIO_CORE_OK);
+  const daw_audio_paged_asset_prepare_request missing_request{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .asset = asset,
+    .source_offset_frame = 0,
+    .source_frame_count = 8,
+    .interpolation_guard_frames = 1,
+  };
+  daw_audio_paged_preparation_handle preparation = 0;
+  uint64_t first_missing_page = 0;
+  expect(daw_audio_core_prepare_paged_asset(
+    core, &missing_request, &preparation, &first_missing_page), DAW_AUDIO_CORE_NO_DATA);
+  assert(preparation == 0 && first_missing_page == 1);
+
+  const std::array<float, 4> page_two_left{5.0F, 6.0F, 7.0F, 8.0F};
+  const std::array<float, 4> page_two_right{-5.0F, -6.0F, -7.0F, -8.0F};
+  const float *page_two_planes[]{page_two_left.data(), page_two_right.data()};
+  const daw_audio_paged_asset_page_write page_two_write{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .asset = asset,
+    .page_index = 1,
+    .valid_frames = 4,
+    .channel_count = 2,
+    .planes = page_two_planes,
+  };
+  expect(daw_audio_core_write_paged_asset_page(core, &page_two_write), DAW_AUDIO_CORE_OK);
+  const std::array<float, 2> tail_left{9.0F, 10.0F};
+  const std::array<float, 2> tail_right{-9.0F, -10.0F};
+  const float *tail_planes[]{tail_left.data(), tail_right.data()};
+  const daw_audio_paged_asset_page_write tail_write{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .asset = asset,
+    .page_index = 2,
+    .valid_frames = 2,
+    .channel_count = 2,
+    .planes = tail_planes,
+  };
+  expect(daw_audio_core_write_paged_asset_page(core, &tail_write), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_prepare_paged_asset(
+    core, &missing_request, &preparation, &first_missing_page), DAW_AUDIO_CORE_OK);
+  assert(preparation != 0);
+  assert(daw_audio_core_write_paged_asset_page(core, &page_write) == DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_trim_paged_asset(core, asset, 1, 1), DAW_AUDIO_CORE_ASSET_IN_USE);
+
+  publish(core, 1);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  const daw_audio_paged_sample_source_event event{
+    .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+    .epoch = 1,
+    .sequence = 1,
+    .source_node_id = 0,
+    .preparation = preparation,
+    .start_frame = 0,
+    .stop_frame = 3,
+    .source_offset_frame = 3,
+    .source_frame_count = 3,
+    .source_offset_fraction = 0.0F,
+    .gain = 1.0F,
+    .fade_in_start_frame = 0,
+    .fade_in_end_frame = 0,
+    .fade_out_start_frame = 3,
+    .fade_out_end_frame = 3,
+  };
+  expect(daw_audio_core_schedule_prepared_sample_source(core, &event), DAW_AUDIO_CORE_OK);
+  std::array<float, 3> left{};
+  std::array<float, 3> right{};
+  float *outputs[]{left.data(), right.data()};
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .frame_count = 3,
+    .channel_count = 2,
+    .input_bus_count = 0,
+    .inputs = nullptr,
+    .outputs = outputs,
+  };
+  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  assert(left[0] == 4.0F && left[1] == 5.0F && left[2] == 6.0F);
+  assert(right[0] == -4.0F && right[1] == -5.0F && right[2] == -6.0F);
+  expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_ASSET_IN_USE);
+  const daw_audio_core_process_block end_block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+    .frame_count = 1,
+    .channel_count = 2,
+    .input_bus_count = 0,
+    .inputs = nullptr,
+    .outputs = outputs,
+  };
+  expect(daw_audio_core_process(core, &end_block), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_INVALID_HANDLE);
+  expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_OK);
+  daw_audio_core_destroy(core);
+}
+
+void test_paged_asset_wide_indices_capacity_and_eof_guards() {
+  {
+    daw_audio_core_handle core = create_core(8, 2, 1);
+    const daw_audio_paged_asset_config config{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .page_frames = 4,
+      .slot_count = 2,
+      .max_channels = 2,
+    };
+    expect(daw_audio_core_configure_paged_assets(core, &config), DAW_AUDIO_CORE_OK);
+    const std::uint64_t final_page = std::uint64_t{1} << 32;
+    const std::uint64_t final_frame = final_page * config.page_frames;
+    const daw_audio_paged_asset_descriptor descriptor{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .revision = 1,
+      .byte_length = (final_frame + 1) * sizeof(float),
+      .content_hash_prefix = 0,
+      .frame_count = final_frame + 1,
+      .sample_rate_hz = 48000,
+      .channel_count = 1,
+    };
+    daw_audio_asset_handle asset = 0;
+    expect(daw_audio_core_create_paged_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+    const std::array<float, 1> final_sample{7.0F};
+    const float *planes[]{final_sample.data()};
+    const daw_audio_paged_asset_page_write write{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .page_index = final_page,
+      .valid_frames = 1,
+      .channel_count = 1,
+      .planes = planes,
+    };
+    expect(daw_audio_core_write_paged_asset_page(core, &write), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .source_offset_frame = final_frame,
+      .source_frame_count = 1,
+      .interpolation_guard_frames = 1,
+    };
+    daw_audio_paged_preparation_handle preparation = 0;
+    std::uint64_t first_missing_page = 0;
+    expect(daw_audio_core_prepare_paged_asset(
+      core, &request, &preparation, &first_missing_page), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_OK);
+    daw_audio_core_destroy(core);
+  }
+
+  {
+    daw_audio_core_handle core = create_core(8, 2, 1);
+    const daw_audio_paged_asset_config config{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .page_frames = 4,
+      .slot_count = 2,
+      .max_channels = 2,
+    };
+    expect(daw_audio_core_configure_paged_assets(core, &config), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_descriptor descriptor{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .revision = 1,
+      .byte_length = 12u * sizeof(float),
+      .content_hash_prefix = 0,
+      .frame_count = 12,
+      .sample_rate_hz = 48000,
+      .channel_count = 1,
+    };
+    daw_audio_asset_handle asset = 0;
+    expect(daw_audio_core_create_paged_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+    const std::array<float, 4> first_page{1.0F, 2.0F, 3.0F, 4.0F};
+    const std::array<float, 4> second_page{5.0F, 6.0F, 7.0F, 8.0F};
+    const float *first_planes[]{first_page.data()};
+    const float *second_planes[]{second_page.data()};
+    const daw_audio_paged_asset_page_write first_write{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .page_index = 0,
+      .valid_frames = 4,
+      .channel_count = 1,
+      .planes = first_planes,
+    };
+    const daw_audio_paged_asset_page_write second_write{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .page_index = 1,
+      .valid_frames = 4,
+      .channel_count = 1,
+      .planes = second_planes,
+    };
+    expect(daw_audio_core_write_paged_asset_page(core, &first_write), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_write_paged_asset_page(core, &second_write), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .source_offset_frame = 0,
+      .source_frame_count = 9,
+      .interpolation_guard_frames = 0,
+    };
+    daw_audio_paged_preparation_handle preparation = 0;
+    std::uint64_t first_missing_page = 0;
+    expect(daw_audio_core_prepare_paged_asset(
+      core, &request, &preparation, &first_missing_page), DAW_AUDIO_CORE_CAPACITY_EXCEEDED);
+    assert(preparation == 0 && first_missing_page == 0);
+    const std::array<float, 4> replacement{9.0F, 10.0F, 11.0F, 12.0F};
+    const float *replacement_planes[]{replacement.data()};
+    const daw_audio_paged_asset_page_write replacement_write{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .page_index = 0,
+      .valid_frames = 4,
+      .channel_count = 1,
+      .planes = replacement_planes,
+    };
+    expect(daw_audio_core_write_paged_asset_page(core, &replacement_write), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_descriptor too_many_channels{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .revision = 1,
+      .byte_length = 12u * 3u * sizeof(float),
+      .content_hash_prefix = 0,
+      .frame_count = 12,
+      .sample_rate_hz = 48000,
+      .channel_count = 3,
+    };
+    daw_audio_asset_handle rejected_asset = 0;
+    expect(daw_audio_core_create_paged_asset(core, &too_many_channels, &rejected_asset),
+      DAW_AUDIO_CORE_INVALID_ARGUMENT);
+    expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_OK);
+    daw_audio_core_destroy(core);
+  }
+
+  {
+    daw_audio_core_handle core = create_core(8, 2, 1);
+    const daw_audio_paged_asset_config config{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .page_frames = 4,
+      .slot_count = 1,
+      .max_channels = 1,
+    };
+    expect(daw_audio_core_configure_paged_assets(core, &config), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_descriptor descriptor{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .revision = 1,
+      .byte_length = 4u * sizeof(float),
+      .content_hash_prefix = 0,
+      .frame_count = 4,
+      .sample_rate_hz = 48000,
+      .channel_count = 1,
+    };
+    daw_audio_asset_handle asset = 0;
+    expect(daw_audio_core_create_paged_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+    const std::array<float, 4> samples{1.0F, 2.0F, 3.0F, 4.0F};
+    const float *planes[]{samples.data()};
+    const daw_audio_paged_asset_page_write write{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .page_index = 0,
+      .valid_frames = 4,
+      .channel_count = 1,
+      .planes = planes,
+    };
+    expect(daw_audio_core_write_paged_asset_page(core, &write), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_asset_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .asset = asset,
+      .source_offset_frame = 0,
+      .source_frame_count = 4,
+      .interpolation_guard_frames = 1,
+    };
+    daw_audio_paged_preparation_handle preparation = 0;
+    std::uint64_t first_missing_page = 0;
+    expect(daw_audio_core_prepare_paged_asset(
+      core, &request, &preparation, &first_missing_page), DAW_AUDIO_CORE_OK);
+
+    publish(core, 1);
+    const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+    expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+    const daw_audio_paged_sample_source_event event{
+      .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
+      .epoch = 1,
+      .sequence = 1,
+      .source_node_id = 0,
+      .preparation = preparation,
+      .start_frame = 0,
+      .stop_frame = 4,
+      .source_offset_frame = 0,
+      .source_frame_count = 4,
+      .source_offset_fraction = 0.5F,
+      .gain = 1.0F,
+      .fade_in_start_frame = 0,
+      .fade_in_end_frame = 0,
+      .fade_out_start_frame = 4,
+      .fade_out_end_frame = 4,
+    };
+    expect(daw_audio_core_schedule_prepared_sample_source(core, &event), DAW_AUDIO_CORE_OK);
+    std::array<float, 4> output{};
+    float *outputs[]{output.data(), output.data()};
+    const daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+      .frame_count = 4,
+      .channel_count = 1,
+      .input_bus_count = 0,
+      .inputs = nullptr,
+      .outputs = outputs,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    assert(output[0] == 1.5F && output[1] == 2.5F && output[2] == 3.5F && output[3] == 4.0F);
+    expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_ASSET_IN_USE);
+    const daw_audio_core_process_block end_block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION,
+      .frame_count = 1,
+      .channel_count = 1,
+      .input_bus_count = 0,
+      .inputs = nullptr,
+      .outputs = outputs,
+    };
+    expect(daw_audio_core_process(core, &end_block), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_release_paged_preparation(core, preparation), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_release_asset(core, asset), DAW_AUDIO_CORE_OK);
+    daw_audio_core_destroy(core);
+  }
+}
+
 void test_sample_source_scheduling() {
   daw_audio_core_handle core = create_core(8, 2, 2);
   publish(core, 1);
@@ -3837,6 +4254,9 @@ int main() {
   test_variable_blocks_and_capacity();
   test_stale_asset_handles();
   test_mapped_asset_retains_wide_frame_ranges();
+  test_wasm_planar_preserves_requested_eager_channels();
+  test_paged_asset_pool_preparation_and_rendering();
+  test_paged_asset_wide_indices_capacity_and_eof_guards();
   test_sample_source_scheduling();
   test_sample_source_curved_fades();
   test_sample_source_partition_invariance_and_mono();

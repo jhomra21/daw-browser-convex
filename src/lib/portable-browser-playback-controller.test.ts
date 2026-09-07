@@ -4,7 +4,11 @@ import { resolveLiveMixerGraph } from '@daw-browser/audio-engine/live-mixer-runt
 import type { PortableFrameSchedule } from '@daw-browser/audio-engine/portable-frame-scheduling'
 import type { PortableWasmControlMessage, PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
 import { audioCoreContractVersion } from '@daw-browser/audio-core-contract'
-import { audioCoreWasmAbiVersion, audioCoreWasmArtifactVersion } from '@daw-browser/audio-core-wasm'
+import {
+  audioCoreWasmAbiVersion,
+  audioCoreWasmArtifactVersion,
+  audioCoreWasmPagedAbiVersion,
+} from '@daw-browser/audio-core-wasm'
 import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { LivePlaybackTransport } from '~/lib/live-playback-snapshot'
@@ -81,6 +85,7 @@ const selected: PortableWasmBackendSelection = {
       manifest: {
         version: audioCoreWasmArtifactVersion,
         abiVersion: audioCoreWasmAbiVersion,
+        pagedAbi: audioCoreWasmPagedAbiVersion,
         contractVersion: audioCoreContractVersion,
         contractHash: 'test',
         fixedMemory: true,

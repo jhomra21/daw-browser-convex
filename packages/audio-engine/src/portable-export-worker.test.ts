@@ -5,6 +5,7 @@ import { audioCoreContractVersion } from '../../audio-core-contract/src'
 import {
   audioCoreWasmAbiVersion,
   audioCoreWasmArtifactVersion,
+  audioCoreWasmPagedAbiVersion,
   type AudioCoreWasmArtifact,
 } from '../../audio-core-wasm/src'
 import {
@@ -108,6 +109,7 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
     manifest: {
       version: audioCoreWasmArtifactVersion,
       abiVersion: audioCoreWasmAbiVersion,
+      pagedAbi: audioCoreWasmPagedAbiVersion,
       contractVersion: audioCoreContractVersion,
       contractHash: 'fixture',
       fixedMemory: true,

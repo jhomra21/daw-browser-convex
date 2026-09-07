@@ -7,6 +7,16 @@ extern "C" {
 #endif
 
 #define DAW_AUDIO_CORE_ABI_VERSION 3u
+#define DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION 1u
+#define DAW_AUDIO_CORE_WASM_PAGED_PAGE_FRAMES 16384u
+/* 128 stereo pages use 16 MiB of Float32 storage. This intentionally leaves
+ * the existing fixed-256 MiB Wasm artifact's 16 MiB eager-allocation headroom
+ * intact; a 256-slot pool would consume 32 MiB. */
+#define DAW_AUDIO_CORE_WASM_PAGED_PAGE_SLOTS 128u
+#define DAW_AUDIO_CORE_WASM_PAGED_MAX_CHANNELS 2u
+#define DAW_AUDIO_CORE_MAX_PAGED_PAGE_SLOTS 256u
+#define DAW_AUDIO_CORE_MAX_PAGED_PREPARATIONS 64u
+#define DAW_AUDIO_CORE_MAX_PAGED_PREPARATION_PAGES DAW_AUDIO_CORE_MAX_PAGED_PAGE_SLOTS
 #define DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE 32u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES 256u
 #define DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS 24u
@@ -39,6 +49,7 @@ typedef uint64_t daw_audio_core_handle;
 typedef uint64_t daw_audio_asset_handle;
 typedef uint64_t daw_audio_event_handle;
 typedef uint64_t daw_audio_diagnostic_handle;
+typedef uint64_t daw_audio_paged_preparation_handle;
 
 typedef enum daw_audio_core_result {
   DAW_AUDIO_CORE_OK = 0,
@@ -922,6 +933,67 @@ typedef struct daw_audio_mapped_asset_descriptor {
   const float *const *planes;
 } daw_audio_mapped_asset_descriptor;
 
+/* Paged assets retain logical duration independently from resident storage.
+ * The page pool is global to a core and is configured once on its control
+ * thread. Published resident page contents are immutable until an unpinned
+ * slot is replaced by another control-thread write. */
+typedef struct daw_audio_paged_asset_config {
+  uint32_t abi_version;
+  uint32_t page_frames;
+  uint32_t slot_count;
+  uint32_t max_channels;
+} daw_audio_paged_asset_config;
+
+typedef struct daw_audio_paged_asset_descriptor {
+  uint32_t abi_version;
+  uint32_t revision;
+  uint64_t byte_length;
+  uint64_t content_hash_prefix;
+  uint64_t frame_count;
+  uint32_t sample_rate_hz;
+  uint32_t channel_count;
+} daw_audio_paged_asset_descriptor;
+
+typedef struct daw_audio_paged_asset_page_write {
+  uint32_t abi_version;
+  daw_audio_asset_handle asset;
+  uint64_t page_index;
+  uint32_t valid_frames;
+  uint32_t channel_count;
+  const float *const *planes;
+} daw_audio_paged_asset_page_write;
+
+typedef struct daw_audio_paged_asset_prepare_request {
+  uint32_t abi_version;
+  daw_audio_asset_handle asset;
+  uint64_t source_offset_frame;
+  uint64_t source_frame_count;
+  uint32_t interpolation_guard_frames;
+  uint32_t reserved;
+} daw_audio_paged_asset_prepare_request;
+
+typedef struct daw_audio_paged_sample_source_event {
+  uint32_t abi_version;
+  uint32_t epoch;
+  uint64_t sequence;
+  uint64_t source_node_id;
+  daw_audio_paged_preparation_handle preparation;
+  int64_t start_frame;
+  int64_t stop_frame;
+  uint64_t source_offset_frame;
+  uint64_t source_frame_count;
+  float source_offset_fraction;
+  float gain;
+  int64_t fade_in_start_frame;
+  int64_t fade_in_end_frame;
+  int64_t fade_out_start_frame;
+  int64_t fade_out_end_frame;
+  float fade_in_curve;
+  float fade_in_curve_position;
+  float fade_out_curve;
+  float fade_out_curve_position;
+} daw_audio_paged_sample_source_event;
+
 typedef struct daw_audio_transport_state {
   uint32_t epoch;
   uint32_t running;
@@ -1048,6 +1120,33 @@ daw_audio_core_result daw_audio_core_configure_granular(
 daw_audio_core_result daw_audio_core_schedule_sample_source(
   daw_audio_core_handle core,
   const daw_audio_sample_source_event *event);
+daw_audio_core_result daw_audio_core_configure_paged_assets(
+  daw_audio_core_handle core,
+  const daw_audio_paged_asset_config *config);
+daw_audio_core_result daw_audio_core_create_paged_asset(
+  daw_audio_core_handle core,
+  const daw_audio_paged_asset_descriptor *descriptor,
+  daw_audio_asset_handle *out_asset);
+daw_audio_core_result daw_audio_core_write_paged_asset_page(
+  daw_audio_core_handle core,
+  const daw_audio_paged_asset_page_write *write);
+daw_audio_core_result daw_audio_core_prepare_paged_asset(
+  daw_audio_core_handle core,
+  const daw_audio_paged_asset_prepare_request *request,
+  daw_audio_paged_preparation_handle *out_preparation,
+  uint64_t *out_first_missing_page);
+daw_audio_core_result daw_audio_core_schedule_prepared_sample_source(
+  daw_audio_core_handle core,
+  const daw_audio_paged_sample_source_event *event);
+daw_audio_core_result daw_audio_core_release_paged_preparation(
+  daw_audio_core_handle core,
+  daw_audio_paged_preparation_handle preparation);
+daw_audio_core_result daw_audio_core_trim_paged_asset(
+  daw_audio_core_handle core,
+  daw_audio_asset_handle asset,
+  uint64_t first_page,
+  uint32_t page_count);
+uint32_t daw_audio_core_get_paged_sub_abi_version(void);
 
 /* Bounded recording capture C ABI. pcm_block is channel-major and each
  * provided plane must contain frame_count samples. The caller retains input
@@ -1206,6 +1305,52 @@ daw_audio_core_result daw_audio_core_wasm_graph_configure_sampler(
 daw_audio_core_result daw_audio_core_wasm_graph_configure_granular(
   uint64_t node_id,
   const daw_audio_granular_state *state);
+daw_audio_core_result daw_audio_core_wasm_graph_create_paged_asset(
+  uint64_t frame_count,
+  uint32_t sample_rate_hz,
+  uint32_t channel_count,
+  daw_audio_asset_handle *out_asset);
+daw_audio_core_result daw_audio_core_wasm_graph_write_paged_asset_page(
+  daw_audio_asset_handle asset,
+  uint64_t page_index,
+  uint32_t valid_frames,
+  uint32_t channel_count,
+  const float *const *planes);
+daw_audio_core_result daw_audio_core_wasm_graph_prepare_paged_asset(
+  daw_audio_asset_handle asset,
+  uint64_t source_offset_frame,
+  uint64_t source_frame_count,
+  uint32_t interpolation_guard_frames,
+  daw_audio_paged_preparation_handle *out_preparation,
+  uint64_t *out_first_missing_page);
+daw_audio_core_result daw_audio_core_wasm_graph_schedule_prepared_sample_source(
+  uint32_t epoch,
+  uint64_t sequence,
+  uint64_t source_node_id,
+  daw_audio_paged_preparation_handle preparation,
+  int64_t start_frame,
+  int64_t stop_frame,
+  uint64_t source_offset_frame,
+  uint64_t source_frame_count,
+  float source_offset_fraction,
+  float gain,
+  int64_t fade_in_start_frame,
+  int64_t fade_in_end_frame,
+  int64_t fade_out_start_frame,
+  int64_t fade_out_end_frame,
+  float fade_in_curve,
+  float fade_in_curve_position,
+  float fade_out_curve,
+  float fade_out_curve_position);
+daw_audio_core_result daw_audio_core_wasm_graph_release_paged_preparation(
+  daw_audio_paged_preparation_handle preparation);
+daw_audio_core_result daw_audio_core_wasm_graph_trim_paged_asset(
+  daw_audio_asset_handle asset,
+  uint64_t first_page,
+  uint32_t page_count);
+uint32_t daw_audio_core_wasm_graph_paged_sub_abi_version(void);
+uint32_t daw_audio_core_wasm_graph_paged_page_frames(void);
+uint32_t daw_audio_core_wasm_graph_paged_slot_count(void);
 
 /* The Wasm bridge owns one fixed capture tap. Calling initialize starts a new
  * generation; captured blocks are copied into caller-provided planar output

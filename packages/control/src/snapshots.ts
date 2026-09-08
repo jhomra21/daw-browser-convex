@@ -107,6 +107,9 @@ export const assetSnapshotSchemaV1 = z.object({
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }).strict()
+export const assetSnapshotSchemaV2 = assetSnapshotSchemaV1.extend({
+  sizeBytes: z.number().int().positive().safe(),
+}).strict()
 export const assetUploadResultSchemaV1 = z.object({
   asset: assetSnapshotSchemaV1,
   idempotencyReplay: z.boolean(),
@@ -185,6 +188,7 @@ const snapshotClipSchemaV2 = snapshotClipSchemaV1.extend({
 export const projectSnapshotSchemaV2 = projectSnapshotSchemaV1.extend({
   version: z.literal(CONTROL_API_VERSION_V2),
   clips: z.array(snapshotClipSchemaV2),
+  assets: z.array(assetSnapshotSchemaV2).max(controlLimitsV1.maxAssetsPerSnapshot),
 }).strict()
 
 export const canonicalProjectSnapshotSchema = projectSnapshotSchemaV2
@@ -220,6 +224,7 @@ export const projectCanonicalProjectSnapshotV2 = (
 export type ProjectSnapshotV1 = z.infer<typeof projectSnapshotSchemaV1>
 export type ProjectSnapshotV2 = z.infer<typeof projectSnapshotSchemaV2>
 export type AssetSnapshotV1 = z.infer<typeof assetSnapshotSchemaV1>
+export type AssetSnapshotV2 = z.infer<typeof assetSnapshotSchemaV2>
 export type AssetFolderV1 = z.infer<typeof assetFolderSchemaV1>
 export type AssetUploadResultV1 = z.infer<typeof assetUploadResultSchemaV1>
 export type CanonicalProjectSnapshot = ProjectSnapshotV2

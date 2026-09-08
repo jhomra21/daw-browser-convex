@@ -12,6 +12,7 @@ import { registerMaintenanceRoutes } from './routes/maintenance'
 import { registerPublicSampleRoutes, registerSampleRoutes } from './routes/samples'
 import { registerShareInviteRoutes } from './routes/share-invites'
 import { registerTimelineOperationRoutes } from './routes/timeline-operations'
+import { registerResumableUploadRoutes } from './routes/resumable-uploads'
 
 const app = new Hono<ApiBindings>()
 
@@ -152,5 +153,6 @@ registerCloudBackupRoutes(app)
 registerExportRoutes(app)
 registerMaintenanceRoutes(app)
 registerTimelineOperationRoutes(app)
+registerResumableUploadRoutes(app)
 
 export default app

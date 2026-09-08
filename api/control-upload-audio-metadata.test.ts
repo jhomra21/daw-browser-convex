@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test'
+import { z } from 'zod'
 import { Input, InputTrack } from 'mediabunny'
-import { AudioUploadValidationError, inspectControlUploadAudioMetadata } from './control-upload-audio-metadata'
+import {
+  AudioUploadValidationError,
+  inspectControlUploadAudioMetadata,
+  inspectControlUploadR2Metadata,
+} from './control-upload-audio-metadata'
 
 const wavFile = (sampleRate = 44_100, channelCount = 2) => {
   const frames = 441
@@ -137,4 +142,37 @@ test('rejects unsupported decoded metadata', async () => {
     file: wavFile(44_100, 65),
     declaredMimeType: 'audio/wav',
   })).rejects.toThrow('channel count')
+})
+
+test('inspects R2 metadata through bounded ranged reads', async () => {
+  const file = wavFile()
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const ranges: Array<{ offset: number; length: number }> = []
+  const inspected = await inspectControlUploadR2Metadata({
+    size: bytes.byteLength,
+    key: 'asset/object',
+    bucket: {
+      get: async (_key, options) => {
+        const range = z.object({
+          offset: z.number().optional(),
+          length: z.number().optional(),
+        }).safeParse(options?.range)
+        if (!range.success) {
+          throw new Error('Expected a bounded range.')
+        }
+        const offset = range.data.offset ?? 0
+        const length = range.data.length ?? bytes.byteLength - offset
+        ranges.push({ offset, length })
+        return {
+          arrayBuffer: async () => bytes.slice(offset, offset + length),
+        }
+      },
+    },
+    declaredMimeType: 'audio/wav',
+  }).catch((error) => {
+    throw new Error(error instanceof Error ? error.message : 'metadata failure')
+  })
+  expect(inspected).toMatchObject({ sampleRate: 44_100, channelCount: 2 })
+  expect(ranges.length).toBeGreaterThan(0)
+  expect(ranges.every((range) => range.length <= 8 * 1024 * 1024)).toBeTrue()
 })

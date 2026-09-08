@@ -26,6 +26,7 @@ export {
   localControlCapabilitiesV2,
 } from './versions'
 export type { ControlCapabilitiesV1, ControlCapabilitiesV2, CanonicalControlCapabilities, ControlCapabilities } from './versions'
+export { resumableUploadLimitsV1, resumableUploadMaximumBytes } from './resumable-upload-limits'
 
 export {
   approvalTokenSchemaV1,
@@ -112,6 +113,7 @@ export type {
 export {
   assetFolderSchemaV1,
   assetSnapshotSchemaV1,
+  assetSnapshotSchemaV2,
   assetUploadResultSchemaV1,
   assetFolderResultSchemaV1,
   projectSnapshotSchemaV1,
@@ -127,6 +129,7 @@ export type {
   CanonicalProjectSnapshot,
   ProjectSnapshot,
   AssetSnapshotV1,
+  AssetSnapshotV2,
   AssetFolderV1,
   AssetUploadResultV1,
 } from './snapshots'
@@ -158,6 +161,9 @@ export {
   recoveryPayloadSchemaV1,
   recoveryPayloadSchemaV2,
   recoveryCapturedPayloadSchemaV2,
+  cloudRecoveryAssetSchemaV2,
+  localRecoveryAssetSchemaV2,
+  recoveryAssetSchemaV2,
   isCloudRecoveryOwnershipV1,
   isCloudRecoveryAssetV1,
   normalizeRecoveryPayloadV1,
@@ -175,6 +181,8 @@ export type {
   CloudRecoveryOwnershipV1,
   RecoveryOwnershipV1,
   CloudRecoveryAssetV1,
+  CloudRecoveryAssetV2,
+  RecoveryAssetV2,
   RecoveryAssetV1,
   RecoveryPayloadV1,
   RecoveryPayloadV2,

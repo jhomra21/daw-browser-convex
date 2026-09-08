@@ -198,7 +198,7 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Multipart upload requires `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The bounded multipart protocol limits the request body to the 10 MiB asset limit plus fixed multipart framing allowance, and limits the actual uploaded file to 10 MiB. The Worker checks the safe-integer request length, actual file size, MIME type, extension, digest, and audio metadata before the Convex and R2 upload is finalized. This protocol/security limit does not provide duration-independent large-media support; shared-cloud large recording promotion remains an architectural gap for a future direct or resumable R2 upload flow.
+Small multipart uploads require `Content-Length`, `Idempotency-Key`, and `x-content-sha256` and remain capped at 10 MiB. Larger audio uses the authorized `/api/resumable-uploads` protocol. Its server-owned session and part records enforce fixed 8 MiB R2 geometry, leases, quotas, expiry, and idempotent status/resume behavior. This part size is below Cloudflare's 100 MiB minimum account request limit; with 10,000 parts, the derived resumable object ceiling is 80,000 MiB (approximately 83.9 GB). The Worker verifies the completed object's digest and bounded MediaBunny metadata before finalization. Expired multipart sessions are reconciled by the maintenance worker and completed object cleanup uses the existing R2 retry queue.
 
 An action may refer to a persisted asset ID returned by project state. It must not invent an R2 object key.
 

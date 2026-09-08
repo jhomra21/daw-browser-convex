@@ -154,7 +154,7 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
         declaredMimeType: file.type,
       })
       const idempotencyKey = await browserIdempotencyKey(clientAssetKey)
-      const begun = await access.convex.mutation(convexApi.assets.beginUpload, {
+      const begun = await access.convex.mutation(convexApi.resumableAssetUploads.beginUpload, {
         projectId, idempotencyKey, contentSha256, name: file.name, mimeType: file.type, sizeBytes: file.size,
         durationSec: metadata.durationSec, sampleRate: metadata.sampleRate, channelCount: metadata.channelCount,
       })
@@ -169,17 +169,17 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
             })
           }
         } catch (error) {
-          await access.convex.mutation(convexApi.assets.failUpload, { projectId, idempotencyKey, contentSha256 })
+          await access.convex.mutation(convexApi.resumableAssetUploads.failUpload, { projectId, idempotencyKey, contentSha256 })
           throw error
         }
       }
       let result
       try {
-        result = await access.convex.mutation(convexApi.assets.finalizeUpload, {
+        result = await access.convex.mutation(convexApi.resumableAssetUploads.finalizeUpload, {
           projectId, idempotencyKey, contentSha256,
         })
       } catch (error) {
-        await access.convex.mutation(convexApi.assets.failUpload, { projectId, idempotencyKey, contentSha256 })
+        await access.convex.mutation(convexApi.resumableAssetUploads.failUpload, { projectId, idempotencyKey, contentSha256 })
         throw error
       }
       return c.json({

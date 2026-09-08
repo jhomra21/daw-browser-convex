@@ -179,6 +179,12 @@ export async function requireAuthenticatedIdentity(ctx: AuthenticatedCtx) {
   };
 }
 
+export async function requireWorkerIdentity(ctx: AuthenticatedCtx) {
+  const identity = await requireAuthenticatedIdentity(ctx);
+  if (!identity.dawWorker) throw new Error("Worker access required.");
+  return identity;
+}
+
 export async function hasProjectAdminCapability(
   ctx: ProjectAccessCtx,
   projectId: string,

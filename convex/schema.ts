@@ -120,12 +120,73 @@ export default defineSchema({
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
     attempts: v.number(),
+    transport: v.optional(v.union(v.literal("multipart"), v.literal("resumable"))),
+    sessionId: v.optional(v.string()),
+    multipartUploadId: v.optional(v.string()),
   })
     .index("by_project_actor_idempotency", ["projectId", "actorUserId", "idempotencyKey"])
     .index("by_project_status_updatedAt", ["projectId", "status", "updatedAt"])
     .index("by_status_updatedAt", ["status", "updatedAt"])
     .index("by_asset", ["projectId", "assetKey"])
+    .index("by_session", ["sessionId"])
     .index("by_project_folder_status", ["projectId", "folderId", "status"]),
+
+  assetUploadSessions: defineTable({
+    sessionId: v.string(),
+    projectId: v.string(),
+    actorUserId: v.string(),
+    idempotencyKey: v.string(),
+    contentSha256: v.string(),
+    assetKey: v.string(),
+    r2Key: v.string(),
+    multipartUploadId: v.string(),
+    name: v.string(),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    partSizeBytes: v.number(),
+    partCount: v.number(),
+    acceptedBytes: v.number(),
+    status: v.union(
+      v.literal("uploading"), v.literal("completing"), v.literal("completed"),
+      v.literal("verifying"), v.literal("finalizing"),
+      v.literal("aborted"), v.literal("failed"),
+    ),
+    completionToken: v.optional(v.string()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    expiresAt: v.number(),
+    verificationOffsetBytes: v.optional(v.number()),
+    verificationState: v.optional(v.object({
+      words: v.array(v.number()),
+      totalBytes: v.number(),
+      tail: v.array(v.number()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_project_actor_idempotency", ["projectId", "actorUserId", "idempotencyKey"])
+    .index("by_session", ["sessionId"])
+    .index("by_project_asset", ["projectId", "assetKey"])
+    .index("by_project_status", ["projectId", "status"])
+    .index("by_status_expiresAt", ["status", "expiresAt"]),
+
+  assetUploadParts: defineTable({
+    projectId: v.string(),
+    assetKey: v.string(),
+    multipartUploadId: v.string(),
+    partNumber: v.number(),
+    etag: v.string(),
+    sizeBytes: v.number(),
+    sessionId: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("claimed"), v.literal("accepted"))),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    attempts: v.optional(v.number()),
+    nextAttemptAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_upload_part", ["projectId", "assetKey", "multipartUploadId", "partNumber"])
+    .index("by_upload", ["projectId", "assetKey", "multipartUploadId"]),
 
   projects: defineTable({
     projectId: v.string(),
@@ -191,7 +252,11 @@ export default defineSchema({
   r2DeleteQueue: defineTable({
     projectId: v.string(),
     r2Key: v.string(),
-    kind: v.union(v.literal("backup-asset"), v.literal("sample"), v.literal("export"), v.literal("project-prefix")),
+    kind: v.union(
+      v.literal("backup-asset"), v.literal("sample"), v.literal("export"),
+      v.literal("multipart-abort"), v.literal("project-prefix"),
+    ),
+    multipartUploadId: v.optional(v.string()),
     attempts: v.number(),
     nextAttemptAt: v.number(),
     status: v.union(v.literal("pending"), v.literal("claimed"), v.literal("deleted")),
@@ -203,6 +268,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_key", ["r2Key"])
+    .index("by_multipart", ["projectId", "r2Key", "multipartUploadId"])
     .index("by_status_due", ["status", "nextAttemptAt"])
     .index("by_status_claimedAt", ["status", "claimedAt"])
     .index("by_room", ["projectId"])

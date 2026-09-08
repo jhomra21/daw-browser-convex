@@ -10,6 +10,7 @@
 
 import type * as assetFolders from "../assetFolders.js";
 import type * as assets from "../assets.js";
+import type * as resumableAssetUploads from "../resumableAssetUploads.js";
 import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as authIdentity from "../authIdentity.js";
 import type * as automation from "../automation.js";
@@ -56,6 +57,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   assetFolders: typeof assetFolders;
   assets: typeof assets;
+  resumableAssetUploads: typeof resumableAssetUploads;
   audioWarpValidator: typeof audioWarpValidator;
   authIdentity: typeof authIdentity;
   automation: typeof automation;

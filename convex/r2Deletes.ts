@@ -32,6 +32,7 @@ export const enqueueR2DeleteRows = async (
     storageNamespace: string;
     keys: string[];
     kind: R2DeleteKind;
+    multipartUploadId?: string;
     notBefore?: number;
   },
 ) => {
@@ -40,15 +41,25 @@ export const enqueueR2DeleteRows = async (
   if (uniqueKeys.some((key) => !isValidR2DeleteKey(input.projectId, input.storageNamespace, input.kind, key))) {
     throw new Error("Invalid R2 delete key.");
   }
+  if (input.kind === "multipart-abort" && !input.multipartUploadId) {
+    throw new Error("Multipart abort rows require an upload ID.");
+  }
   for (const r2Key of uniqueKeys) {
-    const existing = await ctx.db
-      .query("r2DeleteQueue")
-      .withIndex("by_key", (q) => q.eq("r2Key", r2Key))
-      .first();
+    const existing = input.kind === "multipart-abort"
+      ? await ctx.db.query("r2DeleteQueue")
+        .withIndex("by_multipart", (q) => q
+          .eq("projectId", input.projectId)
+          .eq("r2Key", r2Key)
+          .eq("multipartUploadId", input.multipartUploadId ?? ""))
+        .first()
+      : await ctx.db.query("r2DeleteQueue")
+        .withIndex("by_key", (q) => q.eq("r2Key", r2Key))
+        .first();
     if (existing) {
       await ctx.db.patch(existing._id, {
         projectId: input.projectId,
         kind: input.kind,
+        multipartUploadId: input.multipartUploadId,
         status: "pending",
         nextAttemptAt: Math.max(existing.nextAttemptAt, input.notBefore ?? now),
         claimedAt: undefined,
@@ -62,6 +73,7 @@ export const enqueueR2DeleteRows = async (
       projectId: input.projectId,
       r2Key,
       kind: input.kind,
+      multipartUploadId: input.multipartUploadId,
       attempts: 0,
       nextAttemptAt: input.notBefore ?? now,
       status: "pending",
@@ -70,6 +82,28 @@ export const enqueueR2DeleteRows = async (
     });
   }
 };
+
+export const enqueueMultipartAbortRows = async (
+  ctx: Pick<MutationCtx, "db">,
+  input: {
+    projectId: string;
+    storageNamespace: string;
+    uploads: Array<{ r2Key: string; multipartUploadId: string }>;
+    notBefore?: number;
+  },
+) => {
+  for (const upload of input.uploads) {
+    if (!upload.multipartUploadId) continue;
+    await enqueueR2DeleteRows(ctx, {
+      projectId: input.projectId,
+      storageNamespace: input.storageNamespace,
+      keys: [upload.r2Key],
+      kind: "multipart-abort",
+      notBefore: input.notBefore,
+      multipartUploadId: upload.multipartUploadId,
+    })
+  }
+}
 
 export const hasR2DeleteRow = async (
   ctx: Pick<MutationCtx, "db">,

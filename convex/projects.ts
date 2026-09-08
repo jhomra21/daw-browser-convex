@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { projectR2DeletePrefixes } from "@daw-browser/shared";
 import { listAccessibleProjects, requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
-import { enqueueR2DeleteRows } from "./r2Deletes";
+import { enqueueMultipartAbortRows, enqueueR2DeleteRows } from "./r2Deletes";
 import { advanceProjectRevision, ensureOwnedProjectRow, getProjectRow, requireProjectRow } from "./projectRows";
 
 type RowOperationResult<State extends object> =
@@ -48,6 +48,10 @@ async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("assetUploadReceipts").withIndex("by_project_status_updatedAt", (q) => q.eq("projectId", projectId))
       .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("assetUploadSessions").withIndex("by_project_status", (q) => q.eq("projectId", projectId))
+      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
+    ctx.db.query("assetUploadParts").withIndex("by_upload", (q) => q.eq("projectId", projectId))
+      .collect().then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("exports").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
     ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", projectId)).collect()
@@ -83,6 +87,23 @@ async function deleteRoomDataRows(ctx: MutationCtx, projectId: string) {
     ctx.db.query("clipDeletionRecoveryReceipts").withIndex("by_project_createdAt", (q) => q.eq("projectId", projectId)).collect()
       .then((rows) => Promise.all(rows.map((row) => ctx.db.delete(row._id)))),
   ]);
+}
+
+async function retainProjectMultipartAborts(ctx: MutationCtx, projectId: string, storageNamespace: string) {
+  const sessions = (await ctx.db.query("assetUploadSessions")
+    .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
+    .collect()).filter((session) => session.status === "uploading"
+      || session.status === "completing"
+      || session.status === "verifying"
+      || session.status === "finalizing");
+  await enqueueMultipartAbortRows(ctx, {
+    projectId,
+    storageNamespace,
+    uploads: sessions.map((session) => ({
+      r2Key: session.r2Key,
+      multipartUploadId: session.multipartUploadId,
+    })),
+  });
 }
 
 async function deleteRoomAuthRows(ctx: MutationCtx, projectId: string) {
@@ -246,6 +267,7 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
     if (ownerProject.deletionPendingAt === undefined) {
       throw new Error("Project deletion is not pending.");
     }
+    await retainProjectMultipartAborts(ctx, projectId, ownerProject.storageNamespace);
     await deleteRoomRows(ctx, projectId);
     await enqueueR2DeleteRows(ctx, {
       projectId, storageNamespace: ownerProject.storageNamespace,

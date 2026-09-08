@@ -416,7 +416,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
         r2Key: z.string(),
         assetKey: z.string(),
         status: z.string(),
-      }).passthrough().parse(await gateway.mutation(convexApi.assets.beginUpload, Object.assign({
+      }).passthrough().parse(await gateway.mutation(convexApi.resumableAssetUploads.beginUpload, Object.assign({
         projectId, idempotencyKey, contentSha256: upload.contentSha256, name: upload.name, mimeType: upload.file.type,
         sizeBytes: upload.file.size, durationSec: metadata.durationSec, sampleRate: metadata.sampleRate,
         channelCount: metadata.channelCount,
@@ -428,12 +428,12 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
             customMetadata: { contentSha256: upload.contentSha256 },
           });
         } catch {
-          await gateway.mutation(convexApi.assets.failUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
+          await gateway.mutation(convexApi.resumableAssetUploads.failUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
           throw controlError("internal", "Asset object upload failed.");
         }
       }
       try {
-        const result = await gateway.mutation(convexApi.assets.finalizeUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
+        const result = await gateway.mutation(convexApi.resumableAssetUploads.finalizeUpload, { projectId, idempotencyKey, contentSha256: upload.contentSha256 });
         return context.json(assetUploadResultSchemaV1.parse(result), 201, noStore);
       } catch {
         throw controlError("internal", "Asset finalization failed.");

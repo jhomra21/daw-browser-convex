@@ -115,7 +115,7 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 6 — streaming export
 
 - [x] Consume ordinary source audio in bounded pages for native export.
-- [ ] Consume source audio in bounded pages for portable export.
+- [x] Consume source audio in bounded pages for portable export.
 - [x] Stream native offline PCM chunks directly into encoding/output.
 - [x] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
 - [x] Keep cancellation and partial-file cleanup deterministic.
@@ -124,7 +124,7 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 - [x] Audit sampler, Drum Rack, and Granular preparation for whole-asset assumptions.
 - [x] Sampled-instrument regionalization uses bounded source/page access for sampler, Drum Rack, and Granular.
-- [ ] Stretch/WSOLA bounded/page-backed preparation remains incomplete.
+- [x] Stretch/WSOLA uses bounded stateful processing with page/range-backed source reads and prepared ownership across native and portable playback/export.
 - [x] Keep any intentionally bounded instrument-local buffers explicit and unrelated to project-asset duration.
 
 ### Phase 8 — acceptance

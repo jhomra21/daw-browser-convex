@@ -32,8 +32,10 @@ Short media may still use eager caches as an optimization. Eager materialization
 - Ordinary portable/native snapshots are metadata-only; bounded legacy instrument and prepared Stretch paths may still carry planar PCM.
 - Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
 - Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
-- Recording duration independence is not yet closed; the remaining writer, finalization, and post-recording hydration paths still require audit and runtime acceptance.
-- Recording WAV finalization already reads/writes blocks incrementally.
+- Recording capture, temporary storage, RF64 finalization, and post-recording playback are bounded and page-backed. Practical runtime soak remains open.
+- Shared-project audio promotion still uses a security-bounded 10 MiB multipart endpoint. Duration-independent shared promotion requires a separate authorized direct/resumable object-upload boundary.
+- Native recording block sequence identifiers remain 32-bit. Widening them requires a versioned native protocol/ABI change before a theoretically continuous multi-month take can cross the rollover boundary.
+- Recording WAV finalization reads/writes blocks incrementally and selects RF64 before the RIFF 4 GiB container boundary.
 - Native offline rendering consumes scheduled ordinary-source ranges through bounded mapped pages, emits bounded PCM chunks, and spools output to disk-backed streaming DSP and encoding.
 - MediaBunny is already a project dependency and provides lazy `BlobSource` reading plus incremental `AudioSampleSink` decoding.
 
@@ -84,14 +86,16 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 2 — recording duration independence
 
-- [ ] Remove the default 4 GiB recording-session cap.
-- [ ] Keep explicit injectable limits only for bounded unit-test/failure simulation.
-- [ ] Ensure native and portable recording writers remain bounded by queued block count, not total captured duration.
-- [ ] Avoid complete-file decode after recording finalization.
+- [x] Remove the default 4 GiB recording-session cap; large PCM takes select RF64 without allocating the logical take.
+- [x] Keep explicit injectable storage limits only for bounded unit-test/failure simulation.
+- [x] Ensure native and portable recording writers remain bounded by queued block count, not total captured duration.
+- [x] Avoid complete-file decode after recording finalization; ordinary playback resolves the durable source through bounded pages.
+- [ ] Replace security-bounded multipart shared-project promotion with authorized direct/resumable object upload.
+- [ ] Version the native recording protocol/ABI to remove the 32-bit block-sequence rollover boundary.
 
 ### Phase 3 — decoded page source
 
-- [ ] Introduce one bounded decoded-page abstraction shared by import hydration/playback/export consumers.
+- [x] Use one bounded `AudioPcmSourceDescriptor` page abstraction across ordinary native/portable playback, export, Stretch, and waveform consumers.
 - [x] Decode requested ranges with MediaBunny `AudioSampleSink`.
 - [x] Close decoded samples promptly and keep a fixed memory budget.
 - [x] Preserve sample-rate/channel metadata and deterministic frame addressing.
@@ -99,9 +103,10 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 4 — timeline/runtime migration
 
 - [x] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
-- [ ] Migrate clip hydration away from whole-asset decode.
-- [ ] Ensure seeking, duplicated clips, offsets, fades, and loops request the correct source ranges.
-- [ ] Generate waveform/peak data incrementally without requiring complete decoded PCM.
+- [x] Migrate ordinary native and non-loop portable clip hydration away from whole-asset decode; eager hydration remains only at the legacy Web Audio compatibility boundary.
+- [x] Ensure seeking, duplicated clips, offsets, trims, fades, fractional boundaries, and sample-rate conversion request bounded source ranges.
+- [ ] Add paged portable loop scheduling; loop-enabled portable sessions intentionally fall back to legacy eager playback.
+- [x] Generate and persist waveform/peak data incrementally from bounded decoded pages without complete decoded PCM or duration-linear manifests.
 
 ### Phase 5 — desktop native file-backed assets
 

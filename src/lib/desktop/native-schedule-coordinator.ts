@@ -30,6 +30,11 @@ import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
+import {
+  arrangementFrameForLoop,
+  loopFramesForTransport,
+  type LoopFrames,
+} from "@daw-browser/audio-engine/loop-frame-schedule"
 
 type NativeSchedulePageManager = Pick<NativeTimelinePageManager, 'ensureRanges' | 'invalidateRanges'>
 
@@ -186,31 +191,17 @@ type ScheduleLedgers = {
   emittedSources: Map<string, number>
 }
 
-export type NativeLoopFrames = {
-  startFrame: number
-  endFrame: number
-  lengthFrames: number
-}
+export type NativeLoopFrames = LoopFrames
 
 export const nativeLoopFramesForSnapshot = (
   snapshot: LivePlaybackSnapshot,
   sampleRateHz: number,
-): NativeLoopFrames | undefined => {
-  if (!snapshot.transport.loopEnabled) return undefined
-  const startFrame = Math.round(snapshot.transport.loopStartSec * sampleRateHz)
-  const endFrame = Math.round(snapshot.transport.loopEndSec * sampleRateHz)
-  if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame)
-    || startFrame < 0 || endFrame <= startFrame) return undefined
-  return { startFrame, endFrame, lengthFrames: endFrame - startFrame }
-}
+): NativeLoopFrames | undefined => loopFramesForTransport(snapshot.transport, sampleRateHz)
 
 export const arrangementFrameForNativeFrame = (
   frame: number,
   loop: NativeLoopFrames | undefined,
-) => {
-  if (!loop || frame < loop.endFrame) return frame
-  return loop.startFrame + ((frame - loop.startFrame) % loop.lengthFrames + loop.lengthFrames) % loop.lengthFrames
-}
+) => arrangementFrameForLoop(frame, loop)
 
 type NativeScheduleSlice = {
   nativeStartFrame: number

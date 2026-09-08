@@ -47,6 +47,7 @@ import {
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import type { PortablePagedStretchAsset } from './portable-stretch-paging'
 import { resolveGraphProcessor } from './mixer/resolve-graph-processor'
+import type { LoopTransport } from './loop-frame-schedule'
 
 export type PortableSynthConfiguration = {
   nodeId: string
@@ -482,6 +483,7 @@ export type PreparedPortableSessionInput = PortableSessionCompilerInput & {
   sourceRangeStartSec?: number
   sourceRangeEndSec: number
   sourceFirstSequence: number
+  loop?: LoopTransport
 }
 
 type PortableInstrumentConfiguration = Exclude<PreparedPortableSession, { supported: false }>['instruments'][number]
@@ -693,6 +695,7 @@ const prepareSources = (
     firstSequence: input.sourceFirstSequence,
     includeStableIdentity: true,
     allowInstruments: true,
+    loop: input.loop,
   })
   if (!projection.supported) return { reasons: [...projection.reasons] }
   const frameRange = sourceFrameRange(input.schedule, input.sourceRangeEndSec)

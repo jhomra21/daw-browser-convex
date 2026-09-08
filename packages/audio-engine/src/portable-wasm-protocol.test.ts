@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage } from './portable-wasm-protocol'
+import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage, type PortableWasmStatusMessage } from './portable-wasm-protocol'
 import { audioCoreContractVersion, audioCoreMaxGraphProcessors, audioCoreMaxProcessorParameterTargets, audioCoreMaxProcessorsPerNode, encodeAudioCoreProcessorStateEnvelope, encodeEqProcessorState, encodeSaturatorProcessorState, encodeUtilityProcessorState, type UtilityProcessorState } from '../../audio-core-contract/src/index'
 
 const utilityState: UtilityProcessorState = {
@@ -62,6 +62,42 @@ test('accepts only monotonic-shaped portable transport positions', () => {
   })).toBeNull()
 })
 
+test('accepts safe recording uint64 boundaries and rejects overflow', () => {
+  const safe = Number.MAX_SAFE_INTEGER
+  const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-block',
+    generation: 1,
+    sessionId: safe,
+    sequence: safe,
+    frameCount: 1,
+    channelCount: 1,
+    planes: [new Float32Array(1)],
+    rms: 0,
+    peak: 0,
+  }
+  expect(readPortableWasmRecordingStatusMessage(block)).toEqual(block)
+  expect(readPortableWasmRecordingStatusMessage({
+    ...block,
+    sequence: safe + 1,
+  })).toBeNull()
+  expect(readPortableWasmRecordingStatusMessage({
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-diagnostics',
+    generation: 1,
+    sessionId: safe,
+    capturedFrames: safe,
+    droppedFrames: safe,
+    droppedBlocks: 0,
+    availableBlocks: 1,
+    queuedBlocks: 0,
+    rms: 0,
+    peak: 0,
+    fatal: false,
+    active: false,
+  })).not.toBeNull()
+})
+
 test('preserves portable capacity continuity results', () => {
   expect(readPortableWasmGraphContinuityMessage({
     version: portableWasmProtocolVersion,
@@ -121,6 +157,25 @@ test('validates bounded portable recording capture controls', () => {
     action: 'configured',
     frame: 48,
   })).toMatchObject({ action: 'configured', frame: 48 })
+})
+
+test('keeps recording uint64 identifiers exact within the JavaScript safe-number boundary', () => {
+  const sequence = Number.MAX_SAFE_INTEGER
+  const block = {
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-block',
+    generation: 3,
+    sessionId: sequence,
+    sequence,
+    frameCount: 1,
+    channelCount: 1,
+    planes: [Float32Array.of(0)],
+    rms: 0,
+    peak: 0,
+  }
+  expect(readPortableWasmRecordingStatusMessage(block)).toMatchObject({ sessionId: sequence, sequence })
+  expect(readPortableWasmRecordingStatusMessage({ ...block, sequence: sequence + 1 })).toBeNull()
+  expect(readPortableWasmRecordingStatusMessage({ ...block, sessionId: sequence + 1 })).toBeNull()
 })
 
 test('accepts only versioned schedules with explicit ramp endpoints and restore values', () => {

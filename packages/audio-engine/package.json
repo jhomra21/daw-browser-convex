@@ -11,6 +11,7 @@
     "./audio-scheduling": "./src/audio-scheduling.ts",
     "./midi-expression-scheduling": "./src/midi-expression-scheduling.ts",
     "./portable-frame-scheduling": "./src/portable-frame-scheduling.ts",
+    "./loop-frame-schedule": "./src/loop-frame-schedule.ts",
     "./export-audio-support": "./src/export-audio-support.ts",
     "./export-fidelity": "./src/export-fidelity.ts",
     "./export-range": "./src/export-range.ts",

@@ -233,6 +233,23 @@ test("serializes native instrument events with absolute transport frames", () =>
   }])).toThrow()
 })
 
+test("preserves recording-scale sequence identities above the uint32 range on native wire", () => {
+  const sequence = 0x1_0000_0001
+  const bytes = serializeNativeInstrumentEvents(3, [{
+    nodeId: "track",
+    noteId: 4,
+    sequence,
+    frameOffset: 0,
+    type: "note-on",
+    channel: 0,
+    note: 60,
+    value: 0.75,
+  }])
+  const view = new DataView(bytes.buffer)
+  expect(view.getBigUint64(20, true)).toBe(BigInt(sequence))
+})
+
+
 test("serializes native synth state with its bounded ABI payload", () => {
   const bytes = serializeNativeInstrumentStates([{
     nodeId: "instrument",

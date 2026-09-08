@@ -258,12 +258,12 @@ bool WriteRecordingStatus(const daw::audio_host_macos::RecordingStatus& status) 
 
 bool WriteRecordingBlock(const daw::audio_host_macos::RecordingBlock& block) {
   const std::size_t sample_bytes = block.samples.size() * sizeof(float);
-  if (sample_bytes > daw::audio_host_macos::kMaximumControlPayloadBytes - 32) return false;
+  if (sample_bytes > daw::audio_host_macos::kMaximumControlPayloadBytes - 36) return false;
   std::vector<std::uint8_t> payload;
-  payload.reserve(32 + sample_bytes);
+  payload.reserve(36 + sample_bytes);
   WriteU32(payload, block.generation);
   WriteU64(payload, block.session_id);
-  WriteU32(payload, block.sequence);
+  WriteU64(payload, block.sequence);
   WriteU32(payload, block.frame_count);
   WriteU32(payload, block.channel_count);
   WriteFloat(payload, block.rms);

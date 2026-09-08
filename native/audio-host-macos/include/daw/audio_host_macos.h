@@ -16,7 +16,7 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 17;
+constexpr std::uint32_t kControlProtocolVersion = 18;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -368,7 +368,7 @@ struct RecordingConfig {
 struct RecordingBlock {
   std::uint32_t generation = 0;
   std::uint64_t session_id = 0;
-  std::uint32_t sequence = 0;
+  std::uint64_t sequence = 0;
   std::uint32_t frame_count = 0;
   std::uint32_t channel_count = 0;
   float rms = 0.0F;

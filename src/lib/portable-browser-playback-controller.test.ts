@@ -874,11 +874,11 @@ test('rebuilds instead of promoting a portable preview when loop semantics chang
   }
 
   await expect(controller.ensurePrepared(previewTransport)).resolves.toBe('started')
-  await expect(controller.start(loopTransport)).resolves.toBe('unavailable')
+  await expect(controller.start(loopTransport)).resolves.toBe('started')
 
   expect(compileCalls).toEqual([previewTransport, loopTransport])
   expect(calls.filter((call) => call === 'dispose')).toHaveLength(1)
-  expect(controller.isPrepared()).toBeFalse()
+  expect(controller.isPrepared()).toBeTrue()
 })
 
 test('shares one rebuild for concurrent incompatible portable starts', async () => {

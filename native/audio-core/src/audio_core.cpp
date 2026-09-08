@@ -5112,7 +5112,7 @@ struct RecordingCaptureBlock {
   std::array<std::array<float, DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES>,
     DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS> planes{};
   std::atomic<RecordingBlockOwner> owner{RecordingBlockOwner::available};
-  uint32_t sequence = 0;
+  uint64_t sequence = 0;
   uint32_t frame_count = 0;
   int64_t start_frame = 0;
 };
@@ -5122,7 +5122,7 @@ struct RecordingCapture {
   std::array<RecordingCaptureBlock, DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS> blocks{};
   uint32_t current = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
   uint32_t pending = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
-  uint32_t next_sequence = 0;
+  uint64_t next_sequence = 0;
   std::atomic<uint64_t> captured_frames{0};
   std::atomic<uint64_t> dropped_frames{0};
   std::atomic<uint32_t> dropped_blocks{0};
@@ -5324,7 +5324,7 @@ extern "C" daw_audio_core_result daw_audio_recording_capture_dequeue(
   RecordingCapture *capture = to_capture(capture_handle);
   if (capture == nullptr || out_block == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   uint32_t selected = DAW_AUDIO_RECORDING_CAPTURE_POOL_BLOCKS;
-  uint32_t sequence = UINT32_MAX;
+  uint64_t sequence = UINT64_MAX;
   for (uint32_t index = 0; index < capture->blocks.size(); ++index) {
     const RecordingCaptureBlock &block = capture->blocks[index];
     if (block.owner.load(std::memory_order_acquire) == RecordingBlockOwner::queued && block.sequence < sequence) {

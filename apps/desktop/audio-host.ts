@@ -1519,24 +1519,26 @@ export const createNativeAudioHostSupervisor = (
   const safeUnsigned64 = (value: bigint) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined
   const decodeRecordingBlock = (frame: Buffer): NativeHostRecordingBlock | undefined => {
     const payload = frame.subarray(headerBytes)
-    if (payload.byteLength < 32) return undefined
-    const channelCount = payload.readUInt32BE(20)
-    const frameCount = payload.readUInt32BE(16)
+    if (payload.byteLength < 36) return undefined
+    const channelCount = payload.readUInt32BE(24)
+    const frameCount = payload.readUInt32BE(20)
     const expectedBytes = frameCount * channelCount * Float32Array.BYTES_PER_ELEMENT
     if (
       (channelCount !== 1 && channelCount !== 2)
       || frameCount === 0 || frameCount > 2_048
-      || expectedBytes !== payload.byteLength - 32
+      || expectedBytes !== payload.byteLength - 36
     ) return undefined
+    const sequence = payload.readBigUInt64BE(12)
+    if (sequence > BigInt(Number.MAX_SAFE_INTEGER)) return undefined
     return {
       generation: payload.readUInt32BE(0),
       sessionId: payload.readBigUInt64BE(4),
-      sequence: payload.readUInt32BE(12),
+      sequence: Number(sequence),
       frameCount,
       channelCount,
-      rms: payload.readFloatBE(24),
-      peak: payload.readFloatBE(28),
-      planarPcm: Uint8Array.from(payload.subarray(32)),
+      rms: payload.readFloatBE(28),
+      peak: payload.readFloatBE(32),
+      planarPcm: Uint8Array.from(payload.subarray(36)),
     }
   }
   const decodeRecordingStatus = (frame: Buffer): NativeHostRecordingStatus | undefined => {

@@ -9,9 +9,9 @@ if (!artifactPath || !manifestPath) {
 }
 
 const manifestSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   artifactKind: z.literal('production'),
-  abiVersion: z.literal(3),
+  abiVersion: z.literal(4),
   pagedAbi: z.literal(1),
   buildType: z.literal('Release'),
   lto: z.literal(true),

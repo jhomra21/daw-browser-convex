@@ -1,4 +1,4 @@
-export type R2DeleteKind = "backup-asset" | "sample" | "export" | "project-prefix";
+export type R2DeleteKind = "backup-asset" | "sample" | "export" | "multipart-abort" | "project-prefix";
 
 const isSafeR2PathSegment = (value: string) => (
   value.length > 0

@@ -11,6 +11,7 @@ import {
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import { createAudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import { uploadAudioFile } from '~/lib/resumable-audio-uploader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -130,13 +131,6 @@ type ClipBufferControls = ClipBuffers & {
   loadCapturedMedia: (reference: CapturedClipMediaReference, signal?: AbortSignal) => Promise<CapturedClipBufferLoadResult>
 }
 
-type UploadedAssetPayload = { url?: unknown; assetKey?: unknown }
-
-const isUploadedAssetPayload = (cause: unknown): cause is UploadedAssetPayload => (
-  typeof cause === 'object' && cause !== null
-)
-
-const isString = (cause: unknown): cause is string => typeof cause === 'string'
 
 export const createAudioAssetRef = (assetId: string, buffer: AudioBuffer): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -186,19 +180,13 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
 
   const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec) => {
     try {
-      const fd = new FormData()
-      fd.append('projectId', room)
-      fd.append('assetKey', assetKey)
-      fd.append('file', file, file.name)
-      if (durationSec !== undefined && Number.isFinite(durationSec)) {
-        fd.append('duration', String(durationSec))
-      }
-      const res = await fetch(`/api/samples?projectId=${encodeURIComponent(room)}`, { method: 'POST', body: fd })
-      if (!res.ok) return null
-      const data = await res.json().catch(() => null)
-      return isUploadedAssetPayload(data) && isString(data.url) && isString(data.assetKey)
-        ? { assetKey: data.assetKey, url: data.url }
-        : null
+      return await uploadAudioFile({
+        projectId: room,
+        idempotencyKey: `browser-${assetKey}`,
+        assetKey,
+        file,
+        durationSec,
+      })
     } catch {
       return null
     }

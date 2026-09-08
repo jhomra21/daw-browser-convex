@@ -33,8 +33,8 @@ Short media may still use eager caches as an optimization. Eager materialization
 - Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
 - Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
 - Recording capture, temporary storage, RF64 finalization, and post-recording playback are bounded and page-backed. Practical runtime soak remains open.
-- Shared-project audio promotion still uses a security-bounded 10 MiB multipart endpoint. Duration-independent shared promotion requires a separate authorized direct/resumable object-upload boundary.
-- Native recording block sequence identifiers remain 32-bit. Widening them requires a versioned native protocol/ABI change before a theoretically continuous multi-month take can cross the rollover boundary.
+- Shared-project audio promotion preserves the security-bounded 10 MiB multipart endpoint for small assets and now has an authorized resumable R2 multipart boundary for larger assets.
+- Native recording block sequence identifiers are versioned uint64 fields across the audio-core ABI and native host protocol.
 - Recording WAV finalization reads/writes blocks incrementally and selects RF64 before the RIFF 4 GiB container boundary.
 - Native offline rendering consumes scheduled ordinary-source ranges through bounded mapped pages, emits bounded PCM chunks, and spools output to disk-backed streaming DSP and encoding.
 - MediaBunny is already a project dependency and provides lazy `BlobSource` reading plus incremental `AudioSampleSink` decoding.
@@ -90,8 +90,8 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 - [x] Keep explicit injectable storage limits only for bounded unit-test/failure simulation.
 - [x] Ensure native and portable recording writers remain bounded by queued block count, not total captured duration.
 - [x] Avoid complete-file decode after recording finalization; ordinary playback resolves the durable source through bounded pages.
-- [ ] Replace security-bounded multipart shared-project promotion with authorized direct/resumable object upload.
-- [ ] Version the native recording protocol/ABI to remove the 32-bit block-sequence rollover boundary.
+- [x] Replace security-bounded multipart shared-project promotion with authorized resumable object upload while preserving the existing 10 MiB endpoint; resumable verification is range-bounded and continues SHA-256 state across claims.
+- [x] Version the native recording protocol/ABI to remove the 32-bit block-sequence rollover boundary.
 
 ### Phase 3 — decoded page source
 
@@ -105,7 +105,7 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 - [x] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
 - [x] Migrate ordinary native and non-loop portable clip hydration away from whole-asset decode; eager hydration remains only at the legacy Web Audio compatibility boundary.
 - [x] Ensure seeking, duplicated clips, offsets, trims, fades, fractional boundaries, and sample-rate conversion request bounded source ranges.
-- [ ] Add paged portable loop scheduling; loop-enabled portable sessions intentionally fall back to legacy eager playback.
+- [x] Add paged portable loop scheduling without duration-sized allocation.
 - [x] Generate and persist waveform/peak data incrementally from bounded decoded pages without complete decoded PCM or duration-linear manifests.
 
 ### Phase 5 — desktop native file-backed assets

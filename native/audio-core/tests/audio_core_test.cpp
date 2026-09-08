@@ -18,6 +18,10 @@ static_assert(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS == 24u);
 static_assert(sizeof(daw_audio_synth_state) == daw::audio_core_wire::kSynthStateBytes);
 static_assert(sizeof(daw_audio_sampler_state) == daw::audio_core_wire::kSamplerStateBytes);
 static_assert(sizeof(daw_audio_sample_zone) == daw::audio_core_wire::kSampleZoneBytes);
+static_assert(offsetof(daw_audio_recording_capture_block, sequence) == 16u);
+static_assert(offsetof(daw_audio_recording_capture_block, rms) == 56u);
+static_assert(offsetof(daw_audio_recording_capture_block, peak) == 60u);
+static_assert(sizeof(daw_audio_recording_capture_block) == 64u);
 
 namespace {
 

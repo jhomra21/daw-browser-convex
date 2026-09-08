@@ -10,6 +10,7 @@ import {
   compilePortableFrameSchedule,
   type PortableFrameScheduleAdapterInput,
 } from '~/lib/portable-frame-schedule'
+import type { LoopTransport } from '@daw-browser/audio-engine/loop-frame-schedule'
 
 /**
  * App boundary only: the engine receives portable data and never imports the
@@ -32,6 +33,7 @@ export const compilePortableLiveFrameSchedule = (
   tracks: snapshot.tracks,
   automationEnvelopes: snapshot.mixer.automationEnvelopes,
   arpeggiators: new Map(Object.entries(snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp])),
+  loop: snapshot.transport,
 })
 
 type PortableLiveSessionAdapterInput = Omit<
@@ -42,6 +44,7 @@ type PortableLiveSessionAdapterInput = Omit<
   preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PortablePagedStretchAsset>
   sourceFirstSequence: number
   sourceRangeStartSec?: number
+  loop?: LoopTransport
 }
 
 /**
@@ -64,6 +67,7 @@ export const compilePreparedPortableLiveSession = (
   sidechainRoutes: snapshot.mixer.sidechainRoutes,
   sourceRangeEndSec: input.rangeEndSec,
   sourceRangeStartSec: input.sourceRangeStartSec,
+  loop: input.loop,
   schedule: compilePortableLiveFrameSchedule(snapshot, input),
   sourceFirstSequence: input.sourceFirstSequence,
 })

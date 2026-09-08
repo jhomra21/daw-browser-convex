@@ -1,7 +1,7 @@
 const PROTOCOL_VERSION = 2
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
-const ABI_VERSION = 3
+const ABI_VERSION = 4
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
 const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
@@ -32,6 +32,7 @@ const isBoolean = (value) => value === true || value === false
 const isSafeInteger = (value) => Number.isSafeInteger(value)
 const unsignedI64 = (value) => isSafeInteger(value) && value >= 0 ? BigInt(value) : null
 const signedI64 = (value) => isSafeInteger(value) ? BigInt(value) : null
+const safeNumberFromUint64 = (value) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null
 const handleFromValue = (value) => {
   const slot = Number(value & 0xffffffffn) - 1
   const generation = Number(value >> 32n)
@@ -710,7 +711,7 @@ export class DawPortableAudioCoreHost {
       this.outputPointers[0] = this.leftOutput.byteOffset
       this.outputPointers[1] = this.rightOutput.byteOffset
       const captureScratch = exports.malloc(
-        56 + 48 + 64
+        56 + 64 + 64
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
         + CHANNEL_COUNT * 2048 * Float32Array.BYTES_PER_ELEMENT
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
@@ -722,7 +723,7 @@ export class DawPortableAudioCoreHost {
       }
       this.recordingCaptureConfigOffset = captureScratch
       this.recordingCaptureBlockOffset = captureScratch + 56
-      this.recordingCaptureDiagnosticsOffset = this.recordingCaptureBlockOffset + 48
+      this.recordingCaptureDiagnosticsOffset = this.recordingCaptureBlockOffset + 64
       this.recordingCaptureDiagnosticsView = new DataView(exports.memory.buffer, this.recordingCaptureDiagnosticsOffset, 64)
       this.recordingCaptureOutputPointerOffset = this.recordingCaptureDiagnosticsOffset + 64
       const capturePlanes = this.recordingCaptureOutputPointerOffset + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
@@ -1897,10 +1898,13 @@ export class DawPortableAudioCoreHost {
   drainRecordingCapture() {
     if (!this.ready || !this.memory || !this.recordingCaptureDequeue || !this.recordingCaptureDiagnostics
       || !this.recordingCaptureOutputPlanes) return this.fault('initialization-failed')
-    const metadata = new DataView(this.memory.buffer, this.recordingCaptureBlockOffset, 48)
+    const metadata = new DataView(this.memory.buffer, this.recordingCaptureBlockOffset, 64)
     if (this.recordingCaptureDequeue(this.recordingCaptureOutputPointerOffset, this.recordingCaptureBlockOffset) === 0) {
-      const channelCount = metadata.getUint32(28, true)
-      const frameCount = metadata.getUint32(24, true)
+      const channelCount = metadata.getUint32(32, true)
+      const frameCount = metadata.getUint32(28, true)
+      const sessionId = safeNumberFromUint64(metadata.getBigUint64(8, true))
+      const sequence = safeNumberFromUint64(metadata.getBigUint64(16, true))
+      if (sessionId === null || sequence === null) return this.fault('core-error')
       const planes = []
       for (let channel = 0; channel < channelCount; channel += 1) {
         planes.push(this.recordingCaptureOutputPlanes[channel].slice(0, frameCount))
@@ -1909,13 +1913,13 @@ export class DawPortableAudioCoreHost {
         version: PROTOCOL_VERSION,
         type: 'recording-capture-block',
         generation: metadata.getUint32(0, true),
-        sessionId: Number(metadata.getBigUint64(8, true)),
-        sequence: metadata.getUint32(16, true),
+        sessionId,
+        sequence,
         frameCount,
         channelCount,
         planes,
-        rms: metadata.getFloat32(40, true),
-        peak: metadata.getFloat32(44, true),
+        rms: metadata.getFloat32(44, true),
+        peak: metadata.getFloat32(48, true),
       })
     }
     this.recordingCaptureNotificationPending = false
@@ -1938,13 +1942,17 @@ export class DawPortableAudioCoreHost {
       || this.recordingCaptureDiagnostics(this.recordingCaptureDiagnosticsOffset) !== 0) return this.fault('core-error')
     const diagnostics = this.recordingCaptureDiagnosticsView
     if (!diagnostics) return this.fault('initialization-failed')
+    const sessionId = safeNumberFromUint64(diagnostics.getBigUint64(8, true))
+    const capturedFrames = safeNumberFromUint64(diagnostics.getBigUint64(16, true))
+    const droppedFrames = safeNumberFromUint64(diagnostics.getBigUint64(24, true))
+    if (sessionId === null || capturedFrames === null || droppedFrames === null) return this.fault('core-error')
     this.postMessage({
       version: PROTOCOL_VERSION,
       type: 'recording-capture-diagnostics',
       generation: diagnostics.getUint32(0, true),
-      sessionId: Number(diagnostics.getBigUint64(8, true)),
-      capturedFrames: Number(diagnostics.getBigUint64(16, true)),
-      droppedFrames: Number(diagnostics.getBigUint64(24, true)),
+      sessionId,
+      capturedFrames,
+      droppedFrames,
       droppedBlocks: diagnostics.getUint32(32, true),
       availableBlocks: diagnostics.getUint32(36, true),
       queuedBlocks: diagnostics.getUint32(40, true),

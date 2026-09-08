@@ -108,7 +108,7 @@ const recordingBlock = () => {
   samples.writeFloatLE(0.25, 0)
   samples.writeFloatLE(-0.5, 4)
   return frame(32, Buffer.concat([
-    u32(1), u64(1), u32(0), u32(2), u32(1), f32(0.4), f32(0.5), samples,
+    u32(1), u64(1), u64(0), u32(2), u32(1), f32(0.4), f32(0.5), samples,
   ]))
 }
 const recordingStatus = () => frame(33, Buffer.concat([
@@ -264,7 +264,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x11,
+        0x00, 0x00, 0x00, 0x12,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),

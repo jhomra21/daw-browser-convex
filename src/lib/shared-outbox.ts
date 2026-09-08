@@ -27,6 +27,7 @@ import { loadHistory, saveHistory } from '~/lib/timeline-storage'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
 import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import { z } from 'zod'
+import { ResumableAudioUploadHttpError, uploadAudioFile } from './resumable-audio-uploader'
 
 type SharedOutboxStatus = 'pending' | 'failed' | 'dead-letter'
 type SharedOutboxKind = SharedTimelineOperationKind | 'clips.createUploadedAudio'
@@ -590,23 +591,21 @@ const readUploadedAudioClipPayload = (
   }
 }
 
-const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => {
-  const form = new FormData()
-  form.append('projectId', payload.projectId)
-  form.append('assetKey', payload.assetKey)
-  form.append('file', payload.file, payload.file.name)
-  if (payload.duration !== undefined && Number.isFinite(payload.duration)) {
-    form.append('duration', String(payload.duration))
+const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload, idempotencyKey: string) => {
+  try {
+    return await uploadAudioFile({
+      projectId: payload.projectId,
+      idempotencyKey,
+      assetKey: payload.assetKey,
+      file: payload.file,
+      durationSec: payload.duration,
+    })
+  } catch (error) {
+    if (error instanceof ResumableAudioUploadHttpError) {
+      throw new SharedTimelineOperationHttpError(error.status, error.message)
+    }
+    throw new SharedTimelineOperationHttpError(500, error instanceof Error ? error.message : undefined)
   }
-  const response = await fetch(`/api/samples?projectId=${encodeURIComponent(payload.projectId)}`, { method: 'POST', body: form })
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new SharedTimelineOperationHttpError(response.status, detail || undefined)
-  }
-  const data = await response.json().catch(() => null)
-  const upload = z.object({ url: z.string(), assetKey: z.string() }).safeParse(data)
-  if (!upload.success) throw new Error('Shared audio upload failed.')
-  return upload.data
 }
 
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
@@ -694,7 +693,7 @@ const publishEntry = async (entry: SharedOutboxEntry) => {
   if (entry.kind === 'clips.createUploadedAudio') {
     const payload = readUploadedAudioClipPayload(entry.payload)
     if (!payload) throw new Error('Invalid queued shared audio clip.')
-    const upload = await uploadSharedAudioClipAsset(payload)
+    const upload = await uploadSharedAudioClipAsset(payload, `outbox-${entry.id}`)
     return await publishSharedTimelineOperation(entry.projectId, {
       kind: 'clips.create',
       payload: { ...payload.clipPayload, sampleUrl: upload.url, assetKey: upload.assetKey },

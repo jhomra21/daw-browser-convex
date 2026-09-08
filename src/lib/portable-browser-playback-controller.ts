@@ -270,10 +270,14 @@ const preparedSession = (
     timelineSec: snapshot.transport.playheadSec,
     frame: Math.round(snapshot.transport.playheadSec * sampleRateHz),
   },
-  rangeEndSec: snapshot.transport.playheadSec + horizonSec,
+  rangeEndSec: Math.min(
+    snapshot.transport.playheadSec + horizonSec,
+    Number.MAX_SAFE_INTEGER / sampleRateHz,
+  ),
   sourceRangeStartSec,
   clipSpanningNoteOn: true,
   sourceFirstSequence,
+  loop: snapshot.transport,
 })
 
 type PortablePagedPreparation = {
@@ -1008,7 +1012,7 @@ export const createPortableBrowserPlaybackController = (input: {
     try {
       const compilation = await input.compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
-      if (!compilation.supported || compilation.snapshot.transport.loopEnabled) return undefined
+      if (!compilation.supported) return undefined
       if (compilation.snapshot.tracks.some((track) => track.clips.some((clip) => (
         clip.audioWarp?.enabled === true && clip.audioWarp.mode === "stretch"
       )))) {
@@ -1248,8 +1252,6 @@ export const createPortableBrowserPlaybackController = (input: {
     const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
     const requestedScheduleEndFrame = requestedFrame
       + Math.round(horizonSec * context.sampleRate)
-    // Portable schedules currently have no loop-reset semantics, so an
-    // enabled loop must never promote an existing schedule.
     const compatibleWithActiveSchedule = activeTransport !== undefined
       && activeScheduleRange !== undefined
       && !activeTransport.loopEnabled
@@ -1301,7 +1303,7 @@ export const createPortableBrowserPlaybackController = (input: {
   const refreshSchedule = (): Promise<PortableStartResult> => {
     if (!playing || !active || refreshPromise) return refreshPromise ?? Promise.resolve<PortableStartResult>("started")
     const context = input.getAudioContext()
-    if (!context || activeTransport?.loopEnabled) return Promise.resolve("started")
+    if (!context) return Promise.resolve("started")
     const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
     const leadSec = Math.min(5, Math.max(0.05, horizonSec * 0.25))
     const currentFrame = positionFrame

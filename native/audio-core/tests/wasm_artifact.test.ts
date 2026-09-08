@@ -543,9 +543,9 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   const exports = instance.instance.exports
 
   expect(manifest).toMatchObject({
-    version: 3,
+    version: 4,
     artifactKind: 'production',
-    abiVersion: 3,
+    abiVersion: 4,
     pagedAbi: 1,
     buildType: 'Release',
     lto: true,
@@ -649,16 +649,16 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_get_diagnostics)) {
     throw new Error('The recording capture Wasm bridge exports are unavailable.')
   }
-  const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 48 + 64)
+  const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 56 + 60)
   if (allocation === 0) throw new Error('Could not allocate recording capture fixture.')
   try {
     const config = allocation
     const pointers = config + 56
     const input = pointers + 8
     const block = input + 3 * Float32Array.BYTES_PER_ELEMENT
-    const diagnostics = block + 48
+    const diagnostics = block + 56
     const view = new DataView(exports.memory.buffer)
-    view.setUint32(config, 3, true)
+    view.setUint32(config, 4, true)
     view.setUint32(config + 4, 3, true)
     view.setBigUint64(config + 8, 11n, true)
     view.setUint32(config + 16, 1, true)
@@ -675,7 +675,9 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     expect(exports.daw_audio_core_wasm_recording_capture_process(pointers, 1, 3, 0n)).toBe(0)
     expect(exports.daw_audio_core_wasm_recording_capture_finalize(3n)).toBe(0)
     expect(exports.daw_audio_core_wasm_recording_capture_dequeue(pointers, block)).toBe(0)
-    expect(view.getUint32(block + 24, true)).toBe(2)
+    expect(view.getUint32(block + 28, true)).toBe(2)
+    expect(view.getFloat32(block + 44, true)).toBeCloseTo(Math.sqrt((1 ** 2 + 1.5 ** 2) / 2), 5)
+    expect(view.getFloat32(block + 48, true)).toBeCloseTo(1.5, 5)
     expect(view.getFloat32(input, true)).toBeCloseTo(-1, 6)
     expect(view.getFloat32(input + 4, true)).toBeCloseTo(-1.5, 6)
     expect(exports.daw_audio_core_wasm_recording_capture_get_diagnostics(diagnostics)).toBe(0)

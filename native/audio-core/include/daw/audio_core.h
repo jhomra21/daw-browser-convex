@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#define DAW_AUDIO_CORE_ABI_VERSION 3u
+#define DAW_AUDIO_CORE_ABI_VERSION 4u
 #define DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION 1u
 #define DAW_AUDIO_CORE_WASM_PAGED_PAGE_FRAMES 16384u
 /* 128 stereo pages use 16 MiB of Float32 storage. This intentionally leaves
@@ -104,7 +104,7 @@ typedef struct daw_audio_recording_capture_config {
 typedef struct daw_audio_recording_capture_block {
   uint32_t generation;
   uint64_t session_id;
-  uint32_t sequence;
+  uint64_t sequence;
   uint32_t block_id;
   uint32_t frame_count;
   uint32_t channel_count;

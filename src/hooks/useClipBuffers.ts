@@ -193,7 +193,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
       if (durationSec !== undefined && Number.isFinite(durationSec)) {
         fd.append('duration', String(durationSec))
       }
-      const res = await fetch('/api/samples', { method: 'POST', body: fd })
+      const res = await fetch(`/api/samples?projectId=${encodeURIComponent(room)}`, { method: 'POST', body: fd })
       if (!res.ok) return null
       const data = await res.json().catch(() => null)
       return isUploadedAssetPayload(data) && isString(data.url) && isString(data.assetKey)

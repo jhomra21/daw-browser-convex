@@ -6,6 +6,7 @@ import SampleClipPanel from "~/components/timeline/SampleClipPanel";
 import SampleDetailWaveform from "~/components/timeline/SampleDetailWaveform";
 import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
+import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 
 type SampleDetailPanelProps = {
   clip: Clip<AudioBuffer>;
@@ -13,6 +14,7 @@ type SampleDetailPanelProps = {
   audioEngine: AudioEngine;
   bpmDetection: BpmDetectionService;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
+  resolveAudioSource: AudioPcmSourceResolver;
   canWriteClip: (clipId: string) => boolean;
   onWarpChange: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
   onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void;
@@ -62,7 +64,7 @@ const SampleDetailPanel: Component<SampleDetailPanelProps> = (props) => {
         <SampleDetailWaveform
           clip={props.clip}
           projectBpm={props.projectBpm}
-          ensureClipBuffer={props.ensureClipBuffer}
+          resolveAudioSource={props.resolveAudioSource}
           canWrite={canWrite()}
           onMarkerDragStateChange={props.onMarkerDragStateChange}
           onWarpChange={(audioWarp) => props.onWarpChange(props.clip, audioWarp)}

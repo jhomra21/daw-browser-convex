@@ -1,9 +1,9 @@
+import type { AudioPcmSourceDescriptor, DecodedAudioPage } from '@daw-browser/audio-engine/media-pages'
 import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSourceIdentity } from './types'
 import { resamplePeakPairs } from './resample-peak-pairs'
 
-const PEAK_LEVELS_PER_SECOND = [400, 100, 25] as const
-const HIGH_RES_PEAKS_PER_SECOND = PEAK_LEVELS_PER_SECOND[0]
-const MAX_CHUNK_DURATION_SEC = 2
+export const PEAK_LEVELS_PER_SECOND = [400, 100, 25]
+export const MAX_CHUNK_DURATION_SEC = 2
 export const SILENCE_BYTE = 128
 
 function clampSample(value: number) {
@@ -18,132 +18,150 @@ export function decodePeakByte(value: number) {
   return value / 127.5 - 1
 }
 
-function createChunkRecord(
+export function getPeakChunkRecord(
   assetKey: string,
-  peaksPerSecond: number,
-  chunkStartSec: number,
-  chunkEndSec: number,
-  peakCount: number,
+  level: PeakLevelRecord,
+  record: Pick<PeakAssetRecord, 'durationSec' | 'sourceIdentity'>,
+  chunkIndex: number,
 ): PeakChunkRecord {
-  const safeStart = Number(chunkStartSec.toFixed(6))
+  const safeStart = Number((chunkIndex * level.chunkDurationSec).toFixed(6))
+  const safeEnd = Number(Math.min(record.durationSec, safeStart + level.chunkDurationSec).toFixed(6))
+  const sourceToken = record.sourceIdentity?.identity
+    ? `:${encodeURIComponent(record.sourceIdentity.identity)}`
+    : ''
   return {
-    chunkKey: `${assetKey}:${peaksPerSecond}:${safeStart}`,
+    chunkKey: `${assetKey}:${level.peaksPerSecond}${sourceToken}:${chunkIndex}`,
+    chunkIndex,
     startSec: safeStart,
-    endSec: Number(chunkEndSec.toFixed(6)),
-    peakCount,
+    endSec: safeEnd,
+    peakCount: getPeakCount(safeStart, safeEnd, level.peaksPerSecond),
   }
 }
 
-function getPeakCount(chunkStartSec: number, chunkEndSec: number, peaksPerSecond: number) {
+export function getPeakCount(chunkStartSec: number, chunkEndSec: number, peaksPerSecond: number) {
   return Math.max(1, Math.ceil((chunkEndSec - chunkStartSec) * peaksPerSecond))
 }
 
-function extractChunkPeaks(
-  buffer: AudioBuffer,
-  assetKey: string,
-  chunkStartSec: number,
-  chunkEndSec: number,
-  peaksPerSecond: number,
+function updatePeakPairs(
+  minimums: Float32Array,
+  maximums: Float32Array,
+  page: DecodedAudioPage,
+  chunkStartFrame: number,
+  chunkEndFrame: number,
 ) {
-  const sampleRate = buffer.sampleRate
-  const startFrame = Math.max(0, Math.floor(chunkStartSec * sampleRate))
-  const endFrame = Math.max(startFrame, Math.min(buffer.length, Math.ceil(chunkEndSec * sampleRate)))
-  const frameCount = Math.max(0, endFrame - startFrame)
-  const peakCount = getPeakCount(chunkStartSec, chunkEndSec, peaksPerSecond)
-  const data = new Uint8Array(peakCount * 2)
-  data.fill(SILENCE_BYTE)
-  if (frameCount === 0) {
-    return {
-      meta: createChunkRecord(assetKey, peaksPerSecond, chunkStartSec, chunkEndSec, peakCount),
-      data,
-    }
-  }
-
-  const ratio = frameCount / peakCount
-  const channels = Math.max(1, buffer.numberOfChannels)
-  const channelData: Float32Array[] = []
-  for (let channel = 0; channel < channels; channel++) {
-    channelData.push(buffer.getChannelData(channel))
-  }
-
-  for (let index = 0; index < peakCount; index++) {
-    const binStart = startFrame + Math.floor(index * ratio)
-    const binEnd = Math.max(binStart + 1, Math.min(endFrame, startFrame + Math.ceil((index + 1) * ratio)))
-    let min = 1
-    let max = -1
-    for (let frame = binStart; frame < binEnd; frame++) {
+  const peakCount = minimums.length
+  const ratio = (chunkEndFrame - chunkStartFrame) / peakCount
+  const pageEndFrame = page.startFrame + page.frameCount
+  const firstPeak = Math.max(0, Math.floor((page.startFrame - chunkStartFrame) / ratio))
+  const lastPeak = Math.min(peakCount, Math.ceil((pageEndFrame - chunkStartFrame) / ratio))
+  const channels = page.planes.length
+  for (let index = firstPeak; index < lastPeak; index++) {
+    const binStart = chunkStartFrame + Math.floor(index * ratio)
+    const binEnd = Math.max(binStart + 1, Math.min(chunkEndFrame, chunkStartFrame + Math.ceil((index + 1) * ratio)))
+    const start = Math.max(binStart, page.startFrame)
+    const end = Math.min(binEnd, pageEndFrame)
+    if (end <= start) continue
+    let min = minimums[index]
+    let max = maximums[index]
+    for (let frame = start; frame < end; frame++) {
+      const pageFrame = frame - page.startFrame
       for (let channel = 0; channel < channels; channel++) {
-        const value = channelData[channel][frame]
+        const value = page.planes[channel][pageFrame]
         if (value < min) min = value
         if (value > max) max = value
       }
     }
-    data[index * 2] = quantizeSample(min)
-    data[index * 2 + 1] = quantizeSample(max)
+    minimums[index] = min
+    maximums[index] = max
   }
+}
 
-  return {
-    meta: createChunkRecord(assetKey, peaksPerSecond, chunkStartSec, chunkEndSec, peakCount),
-    data,
+async function extractChunkPeaks(
+  source: AudioPcmSourceDescriptor,
+  chunk: PeakChunkRecord,
+  signal?: AbortSignal,
+) {
+  const startFrame = Math.max(0, Math.floor(chunk.startSec * source.sampleRate))
+  const endFrame = Math.max(startFrame, Math.min(source.frameCount, Math.ceil(chunk.endSec * source.sampleRate)))
+  const data = new Uint8Array(chunk.peakCount * 2)
+  const minimums = new Float32Array(chunk.peakCount)
+  const maximums = new Float32Array(chunk.peakCount)
+  minimums.fill(1)
+  maximums.fill(-1)
+  if (endFrame > startFrame) {
+    for await (const page of source.readPages({ startFrame, endFrame, signal })) {
+      signal?.throwIfAborted()
+      updatePeakPairs(minimums, maximums, page, startFrame, endFrame)
+    }
   }
+  for (let index = 0; index < chunk.peakCount; index++) {
+    data[index * 2] = quantizeSample(minimums[index])
+    data[index * 2 + 1] = quantizeSample(maximums[index])
+  }
+  return data
 }
 
 function resampleChunkPeaks(
   source: Uint8Array,
   assetKey: string,
-  chunkStartSec: number,
-  chunkEndSec: number,
-  peaksPerSecond: number,
+  level: PeakLevelRecord,
+  record: Pick<PeakAssetRecord, 'durationSec' | 'sourceIdentity'>,
+  chunkIndex: number,
 ) {
-  const peakCount = getPeakCount(chunkStartSec, chunkEndSec, peaksPerSecond)
+  const chunk = getPeakChunkRecord(assetKey, level, record, chunkIndex)
   return {
-    meta: createChunkRecord(assetKey, peaksPerSecond, chunkStartSec, chunkEndSec, peakCount),
-    data: resamplePeakPairs(source, peakCount),
+    meta: chunk,
+    data: resamplePeakPairs(source, chunk.peakCount),
   }
 }
 
-export function extractPeakAsset(buffer: AudioBuffer, assetKey: string, sourceIdentity?: WaveformSourceIdentity) {
-  const durationSec = Math.max(0, buffer.duration)
-  const levelChunks = new Map<number, Array<{ meta: PeakChunkRecord; data: Uint8Array }>>()
-  const highResChunks: Array<{ meta: PeakChunkRecord; data: Uint8Array }> = []
-  const highResPps = HIGH_RES_PEAKS_PER_SECOND
+export type ExtractedPeakChunk = {
+  chunks: Array<{ meta: PeakChunkRecord; data: Uint8Array }>
+}
 
-  for (let chunkStartSec = 0; chunkStartSec < durationSec || (durationSec === 0 && chunkStartSec === 0); chunkStartSec += MAX_CHUNK_DURATION_SEC) {
-    const chunkEndSec = durationSec === 0
-      ? MAX_CHUNK_DURATION_SEC
-      : Math.min(durationSec, chunkStartSec + MAX_CHUNK_DURATION_SEC)
-    highResChunks.push(extractChunkPeaks(buffer, assetKey, chunkStartSec, chunkEndSec, highResPps))
-    if (durationSec === 0) break
-  }
-  levelChunks.set(highResPps, highResChunks)
-
-  for (const peaksPerSecond of PEAK_LEVELS_PER_SECOND.slice(1)) {
-    levelChunks.set(
-      peaksPerSecond,
-      highResChunks.map((chunk) => resampleChunkPeaks(chunk.data, assetKey, chunk.meta.startSec, chunk.meta.endSec, peaksPerSecond)),
-    )
-  }
-
-  const levels: PeakLevelRecord[] = PEAK_LEVELS_PER_SECOND.map((peaksPerSecond) => {
-    const chunks = levelChunks.get(peaksPerSecond) ?? []
-    return {
-      peaksPerSecond,
-      chunkDurationSec: MAX_CHUNK_DURATION_SEC,
-      chunks: chunks.map((chunk) => chunk.meta),
-    }
-  })
-
+export function createPeakAssetRecord(
+  source: Pick<AudioPcmSourceDescriptor, 'durationSec' | 'sampleRate' | 'channelCount'>,
+  assetKey: string,
+  sourceIdentity?: WaveformSourceIdentity,
+): PeakAssetRecord {
+  const durationSec = Math.max(0, source.durationSec)
+  const chunkCount = Math.max(1, Math.ceil(durationSec / MAX_CHUNK_DURATION_SEC))
+  const levels: PeakLevelRecord[] = PEAK_LEVELS_PER_SECOND.map((peaksPerSecond) => ({
+    peaksPerSecond,
+    chunkDurationSec: MAX_CHUNK_DURATION_SEC,
+    chunkCount,
+  }))
   const record: PeakAssetRecord = {
     assetKey,
     durationSec,
-    sampleRate: buffer.sampleRate,
-    channelCount: buffer.numberOfChannels,
+    sampleRate: source.sampleRate,
+    channelCount: source.channelCount,
     sourceIdentity,
     levels,
   }
+  return record
+}
 
-  return {
-    record,
-    chunks: levels.flatMap((level) => levelChunks.get(level.peaksPerSecond) ?? []),
+export async function extractPeakAsset(
+  source: AudioPcmSourceDescriptor,
+  assetKey: string,
+  options: {
+    signal?: AbortSignal
+    onChunk: (chunk: ExtractedPeakChunk) => Promise<void>
+  },
+  sourceIdentity?: WaveformSourceIdentity,
+) {
+  const record = createPeakAssetRecord(source, assetKey, sourceIdentity)
+  const highLevel = record.levels[0]
+  for (let chunkIndex = 0; chunkIndex < highLevel.chunkCount; chunkIndex++) {
+    options.signal?.throwIfAborted()
+    const highMeta = getPeakChunkRecord(assetKey, highLevel, record, chunkIndex)
+    const highData = await extractChunkPeaks(source, highMeta, options.signal)
+    options.signal?.throwIfAborted()
+    const chunks = record.levels.map((level, levelIndex) => levelIndex === 0
+      ? { meta: highMeta, data: highData }
+      : resampleChunkPeaks(highData, assetKey, level, record, chunkIndex))
+    await options.onChunk({ chunks })
   }
+  return record
 }

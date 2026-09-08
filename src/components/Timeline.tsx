@@ -2421,6 +2421,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,
       ensureClipBuffer: clipBuffers.preload,
+      resolveAudioSource,
       canWriteClip,
       onChange: sampleDetail.changeWarp,
       onGainChange: sampleDetail.changeGain,
@@ -2570,6 +2571,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           },
         }}
         ensureClipBuffer={clipBuffers.preload}
+        resolveAudioSource={resolveAudioSource}
         replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
         trackLookup={trackLookup()}

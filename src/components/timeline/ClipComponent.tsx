@@ -12,6 +12,7 @@ import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
+import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 import {
   normalizeClipFades,
   normalizedFadeGainAtClipTime,
@@ -48,7 +49,7 @@ type ClipComponentProps = {
   onRetryMedia: (clipId: string) => void;
   onReplaceMedia: (trackId: Track["id"], clipId: string) => void;
   onRemoveMissingMedia: (trackId: Track["id"], clipId: string) => void;
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
+  resolveAudioSource: AudioPcmSourceResolver;
   bpm: number;
   pixelsPerSecond: number;
   viewportRedrawVersion: number;
@@ -101,9 +102,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => clipWidthPx(),
     projectBpm: () => props.bpm,
-    ensureClipBuffer: async (clipId, sampleUrl) => {
-      await props.ensureClipBuffer?.(clipId, sampleUrl);
-    },
+    resolveAudioSource: () => props.resolveAudioSource,
   });
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
   const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);

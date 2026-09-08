@@ -1,7 +1,7 @@
-import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSourceIdentity } from './types'
+import type { PeakAssetRecord, PeakLevelRecord, WaveformSourceIdentity } from './types'
 
 const DB_NAME = 'audio-peaks-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const META_STORE = 'asset-meta'
 const CHUNK_STORE = 'asset-chunks'
 
@@ -13,14 +13,11 @@ type RecordFields = {
   sampleRate?: unknown
   channelCount?: unknown
   sourceIdentity?: unknown
+  identity?: unknown
   levels?: unknown
-  chunkKey?: unknown
-  startSec?: unknown
-  endSec?: unknown
-  peakCount?: unknown
   peaksPerSecond?: unknown
   chunkDurationSec?: unknown
-  chunks?: unknown
+  chunkCount?: unknown
 }
 
 const isRecord = <Value>(value: Value): value is Value & RecordFields => (
@@ -33,25 +30,17 @@ const isNumber = <Value>(value: Value): value is Value & number => typeof value 
 const isWaveformSourceIdentity = <Value>(value: Value): value is Value & WaveformSourceIdentity => (
   isRecord(value)
   && isString(value.assetKey)
+  && (value.identity === undefined || isString(value.identity))
   && (value.durationSec === undefined || isNumber(value.durationSec))
   && (value.sampleRate === undefined || isNumber(value.sampleRate))
   && (value.channelCount === undefined || isNumber(value.channelCount))
-)
-
-const isPeakChunkRecord = <Value>(value: Value): value is Value & PeakChunkRecord => (
-  isRecord(value)
-  && isString(value.chunkKey)
-  && isNumber(value.startSec)
-  && isNumber(value.endSec)
-  && isNumber(value.peakCount)
 )
 
 const isPeakLevelRecord = <Value>(value: Value): value is Value & PeakLevelRecord => (
   isRecord(value)
   && isNumber(value.peaksPerSecond)
   && isNumber(value.chunkDurationSec)
-  && Array.isArray(value.chunks)
-  && value.chunks.every(isPeakChunkRecord)
+  && isNumber(value.chunkCount)
 )
 
 const isPeakAssetRecord = <Value>(value: Value): value is Value & PeakAssetRecord => (
@@ -85,8 +74,13 @@ async function getDb() {
     dbPromise = new Promise((resolve) => {
       try {
         const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION)
-        request.onupgradeneeded = () => {
+        request.onupgradeneeded = (event) => {
           const db = request.result
+          const oldVersion = event.oldVersion
+          if (request.transaction && oldVersion < 2) {
+            if (db.objectStoreNames.contains(META_STORE)) db.deleteObjectStore(META_STORE)
+            if (db.objectStoreNames.contains(CHUNK_STORE)) db.deleteObjectStore(CHUNK_STORE)
+          }
           if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE)
           if (!db.objectStoreNames.contains(CHUNK_STORE)) db.createObjectStore(CHUNK_STORE)
         }

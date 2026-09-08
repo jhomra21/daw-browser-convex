@@ -212,7 +212,6 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   if (input.canProject?.() === false) {
     void primeClipSourceAsset({
       sourceAssetKey: upload.assetKey,
-      sampleUrl: upload.url,
       buffer: input.decoded,
     })
     return { clipId, clip }
@@ -229,7 +228,6 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
   input.onClipCreated?.(localClip)
   void primeClipSourceAsset({
     sourceAssetKey: input.sourceAssetKey,
-    sampleUrl: upload.url,
     buffer: input.decoded,
   })
 

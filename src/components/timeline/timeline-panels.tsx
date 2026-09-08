@@ -20,6 +20,7 @@ import type { ExportQueue } from '~/lib/export/export-queue'
 import type { TimelineExportService } from '~/lib/export/timeline-export-service'
 import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import type { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
@@ -91,6 +92,7 @@ export type TimelinePanelsProps = {
     audioEngine: AudioEngine
     bpmDetection: BpmDetectionService
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
+    resolveAudioSource: AudioPcmSourceResolver
     canWriteClip: (clipId: string) => boolean
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
     onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
@@ -213,6 +215,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
             audioEngine={panels().sampleDetailPanel.audioEngine}
             bpmDetection={panels().sampleDetailPanel.bpmDetection}
             ensureClipBuffer={panels().sampleDetailPanel.ensureClipBuffer}
+            resolveAudioSource={panels().sampleDetailPanel.resolveAudioSource}
             canWriteClip={panels().sampleDetailPanel.canWriteClip}
             onWarpChange={panels().sampleDetailPanel.onChange}
             onGainChange={panels().sampleDetailPanel.onGainChange}

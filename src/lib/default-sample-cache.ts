@@ -1,6 +1,7 @@
 import type { AudioSourceMetadata } from '~/lib/audio-source'
 import { loadPeakAssetRecord } from '@daw-browser/waveforms/peak-db'
 import { primeClipSourceAsset } from '~/lib/clip-source-client'
+import { createAudioPcmSourceDescriptor, inspectAudioSourceMetadata } from '@daw-browser/audio-engine/media-pages'
 
 type DefaultSampleCacheInput = {
   assetKey: string
@@ -35,9 +36,19 @@ export async function ensureDefaultSampleMetadata(input: DefaultSampleCacheInput
     const cached = await loadCachedDefaultSampleMetadata(input.assetKey)
     if (cached) return cached
 
+    const metadata = await inspectAudioSourceMetadata(input.url)
+    if (metadata.durationSec === undefined) return null
+    const source = createAudioPcmSourceDescriptor({
+      identity: `default-sample:${input.assetKey}`,
+      durationSec: metadata.durationSec,
+      frameCount: Math.round(metadata.durationSec * metadata.sampleRate),
+      sampleRate: metadata.sampleRate,
+      channelCount: metadata.channelCount,
+      source: input.url,
+    })
     const primed = await primeClipSourceAsset({
       sourceAssetKey: input.assetKey,
-      sampleUrl: input.url,
+      source,
     })
     if (!primed) return null
 

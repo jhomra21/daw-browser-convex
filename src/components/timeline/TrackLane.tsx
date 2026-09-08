@@ -9,6 +9,7 @@ import { createAutomationTarget, type AutomationEnvelope, type AutomationParamet
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 type TrackLaneProps = {
   track: Track
@@ -25,7 +26,7 @@ type TrackLaneProps = {
   onRetryMedia: (clipId: string) => void
   onReplaceMedia: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia: (trackId: Track['id'], clipId: string) => void
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+  resolveAudioSource: AudioPcmSourceResolver
   onAddMidiClip?: (trackId: Track['id']) => void
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
@@ -159,7 +160,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               onRetryMedia={props.onRetryMedia}
               onReplaceMedia={props.onReplaceMedia}
               onRemoveMissingMedia={props.onRemoveMissingMedia}
-              ensureClipBuffer={props.ensureClipBuffer}
+              resolveAudioSource={props.resolveAudioSource}
               bpm={props.bpm}
               pixelsPerSecond={props.pixelsPerSecond}
               viewportRedrawVersion={props.viewportRedrawVersion}

@@ -263,6 +263,64 @@ test('uses pre-rendered Stretch PCM as the only portable source asset', () => {
   ])
 })
 
+test('keeps raw and prepared assets distinct when clips share a source key', () => {
+  const raw = clip({ id: 'clip-raw', startSec: 0 })
+  const stretch = clip({
+    id: 'clip-stretch',
+    startSec: 0.5,
+    duration: 4 / 48_000,
+    audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
+  })
+  const preparedPlanes = [
+    floats([0.5, 0.25, 0, -0.25]),
+    floats([-0.5, -0.25, 0, 0.25]),
+  ]
+  const prepared: PortablePreparedStretchAsset = {
+    clipId: stretch.id,
+    sourceAssetKey: stretch.sourceAssetKey,
+    sourceDurationSec: 4 / 48_000,
+    projectGeneration: 7,
+    projectAssetId: 'portable-stretch:7:clip-stretch',
+    portableAssetId: 'portable-stretch:7:clip-stretch',
+    asset: {
+      version: audioCoreContractVersion,
+      assetId: 'portable-stretch:7:clip-stretch',
+      frameCount: 4,
+      sampleRateHz: 48_000,
+      channelCount: 2,
+    },
+    pcm: {
+      frameCount: 4,
+      planes: preparedPlanes,
+    },
+    transferables: preparedPlanes.map((plane) => plane.buffer),
+    timelineStartSec: stretch.startSec,
+    timelineDurationSec: 4 / 48_000,
+    sourceStartSec: 0,
+  }
+  const result = compilePortableExportSnapshot({
+    tracks: [track([raw, stretch])],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    projectGeneration: 7,
+    preparedStretchAssets: [prepared],
+  })
+
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets.map((entry) => entry.asset.assetId)).toEqual([
+    'portable-export:source-a',
+    'portable-stretch:7:clip-stretch',
+  ])
+  expect(result.events.map((event) => event.assetId)).toEqual([
+    'portable-export:source-a',
+    'portable-stretch:7:clip-stretch',
+  ])
+})
+
 test('returns typed diagnostics when offline Stretch assets are absent or stale', () => {
   const source = clip({
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },

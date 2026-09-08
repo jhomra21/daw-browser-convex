@@ -53,6 +53,7 @@ interface FileSystemDirectoryHandle extends FileSystemHandle {
   getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle>
   getFileHandle(name: string, options?: FileSystemGetFileOptions): Promise<FileSystemFileHandle>
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>
 }
 
 interface StorageManager {

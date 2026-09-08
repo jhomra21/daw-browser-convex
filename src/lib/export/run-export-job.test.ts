@@ -1,8 +1,10 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
 import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import type { NativeOfflineRenderPlan } from "@daw-browser/audio-engine/native-host-wire"
+import * as exportMixdown from "@daw-browser/audio-engine/export-mixdown"
+import type { StreamTargetChunk } from "mediabunny"
 
 if (!globalThis.navigator?.locks) {
   Object.defineProperty(globalThis, "navigator", {
@@ -30,6 +32,7 @@ import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targe
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-region-budget"
+import * as nativeOfflinePcmSpool from "~/lib/export/native-offline-pcm-spool"
 
 const render: ExportRenderSettings = {
   sampleRate: 44_100,
@@ -100,7 +103,7 @@ const aliasLocalProject = async (source: Awaited<ReturnType<typeof createLocalPr
   db.close()
 }
 
-test("mixdown preflight runs before output target creation and clip hydration", async () => {
+test("unsupported portable mixdown does not hydrate whole-buffer clips", async () => {
   let targetOpened = false
   let bufferHydrated = false
   const outcome = await runTimelineExport({
@@ -140,7 +143,7 @@ test("mixdown preflight runs before output target creation and clip hydration", 
 
   expect(outcome.type).toBe("error")
   expect(targetOpened).toBeTrue()
-  expect(bufferHydrated).toBeTrue()
+  expect(bufferHydrated).toBeFalse()
 })
 
 test("stem export preloads local sampled instruments for a cloud-shaped local project", async () => {
@@ -484,6 +487,168 @@ class TestOfflineAudioContext {
     return new TestDecodedAudioBuffer()
   }
 }
+
+const createStemSpoolProbe = (events: string[]) => {
+  let removed = 0
+  const source = new TestDecodedAudioBuffer(4, 44_100, 2)
+  const session: nativeOfflinePcmSpool.NativeOfflinePcmSpoolSession = {
+    append: async () => {
+      events.push("append")
+    },
+    finalize: async () => ({
+      sessionId: "stem-probe",
+      sampleRate: 44_100,
+      channelCount: 2,
+      totalFrames: 4,
+      byteLength: 32,
+      samplePeak: 0,
+    }),
+    replay: async function* () {
+      events.push("replay")
+      yield source
+    },
+    remove: async () => {
+      removed += 1
+      events.push("remove")
+    },
+    abort: async () => undefined,
+  }
+  return { session, removed: () => removed }
+}
+
+const runStemSpoolProbe = async (input: {
+  events: string[]
+  controller: AbortController
+  failEncoding?: boolean
+  cancelEncoding?: boolean
+}) => {
+  const probe = createStemSpoolProbe(input.events)
+  const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
+    createSession: async () => probe.session,
+  }))
+  const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (_request, onChunk) => {
+    await onChunk(0, 0, {
+      frameCount: 4,
+      planes: [new Float32Array(4), new Float32Array(4)],
+    })
+    return {
+      frameCount: 4,
+      sampleRate: 44_100,
+      numberOfChannels: 2,
+      cleanup: async () => undefined,
+    }
+  })
+  let encodes = 0
+  const encode = spyOn(exportMixdown, "encodeAudioChunks").mockImplementation(async (chunks) => {
+    for await (const _chunk of chunks) input.events.push(`encode-${encodes}`)
+    encodes += 1
+    if (input.cancelEncoding) {
+      input.controller.abort()
+      input.controller.signal.throwIfAborted()
+    }
+    if (input.failEncoding) throw new Error("encoder failed")
+    return {
+      blob: undefined,
+      format: "wav",
+      durationSec: 4 / 44_100,
+      sampleRate: 44_100,
+      sizeBytes: 8,
+    }
+  })
+  try {
+    const outcome = await runStemExport({
+      getTracks: () => [{
+        id: "track-spool",
+        name: "Spool",
+        volume: 1,
+        clips: [{
+          id: "clip-spool",
+          name: "Spool clip",
+          color: "#fff",
+          startSec: 0,
+          duration: 4 / 44_100,
+          sourceAssetKey: "asset:spool",
+          sourceDurationSec: 4 / 44_100,
+          sourceSampleRate: 44_100,
+          sourceChannelCount: 2,
+        }],
+      }],
+      bpm: 120,
+      projectGeneration: 1,
+      masterVolume: 1,
+      range: { mode: "whole" },
+      formats: ["wav", "flac"],
+      render,
+      encoding,
+      projectId: undefined,
+      userId: undefined,
+      sidechainRoutes: [],
+      loadCapturedClipBuffer: async () => undefined,
+      resolveAudioSource: async () => {
+        throw new Error("mock portable renderer must not resolve source pages")
+      },
+      signal: input.controller.signal,
+      outputTargets: {
+        resourceLimits: desktopLimits,
+        async createMixdownTarget() {
+          throw new Error("unexpected mixdown target")
+        },
+        async createStemTarget() {
+          return {
+            openFile: async (name) => ({
+              name,
+              target: {
+                mode: "stream",
+                writable: new WritableStream<StreamTargetChunk>(),
+              },
+              commit: async () => ({ byteLength: 8 }),
+              abort: async () => {
+                input.events.push("abort")
+              },
+            }),
+          }
+        },
+      },
+      renderStateSnapshot,
+      stemSelection: "all-tracks",
+      stemMode: "dry-source",
+    })
+    return { outcome, removed: probe.removed() }
+  } finally {
+    encode.mockRestore()
+    renderPortable.mockRestore()
+    createSpool.mockRestore()
+  }
+}
+
+test("multi-format stems replay their lazy spool before removing it after every format", async () => {
+  const events: string[] = []
+  const result = await runStemSpoolProbe({ events, controller: new AbortController() })
+
+  expect(result.outcome.type).toBe("success")
+  expect(events.filter((event) => event === "replay")).toHaveLength(3)
+  expect(events.filter((event) => event.startsWith("encode-"))).toEqual(["encode-0", "encode-1"])
+  expect(events.at(-1)).toBe("remove")
+  expect(result.removed).toBe(1)
+})
+
+test("stem encoder failure and cancellation each remove their lazy spool once", async () => {
+  const modes: readonly ("failure" | "cancel")[] = ["failure", "cancel"]
+  for (const mode of modes) {
+    const events: string[] = []
+    const result = await runStemSpoolProbe({
+      events,
+      controller: new AbortController(),
+      failEncoding: mode === "failure",
+      cancelEncoding: mode === "cancel",
+    })
+
+    expect(result.outcome.type).toBe(mode === "cancel" ? "canceled" : "error")
+    expect(events.filter((event) => event === "remove")).toHaveLength(1)
+    expect(events.filter((event) => event === "abort")).toHaveLength(1)
+    expect(result.removed).toBe(1)
+  }
+})
 
 test("instrument export preload reads local-asset bytes with the project context", async () => {
   const originalStorage = Object.getOwnPropertyDescriptor(navigator, "storage")

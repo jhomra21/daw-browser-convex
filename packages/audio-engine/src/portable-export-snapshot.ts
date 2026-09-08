@@ -16,6 +16,7 @@ import { projectPortableClipEvents } from './portable-clip-projector'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import type { ResolvedMixerGraph } from './mixer/types'
 import {
   validatePortablePreparedStretchAsset,
   type PortablePreparedStretchAsset,
@@ -25,6 +26,7 @@ import {
   validatePreparedStretchProjectionMetadata,
 } from './prepared-stretch-artifact'
 import type { NativePreparedStretchAsset } from './native-stretch-preparation'
+import type { PortablePagedStretchAsset } from './portable-stretch-paging'
 import {
   compilePortableSessionInput,
   graphWithInstruments,
@@ -39,6 +41,7 @@ export type PortableExportAsset = {
   asset: AudioAssetRef
   sourceAssetKey?: string
   preparedStretchArtifactId?: string
+  pageFrames?: number
   pcm?: PlanarPcm
   transferables: readonly ArrayBuffer[]
 }
@@ -68,7 +71,7 @@ export type PortableExportSnapshotInput = {
   sidechainRoutes?: readonly ExternalSidechainRoute[]
   hasExternalPlugins?: boolean
   projectGeneration?: number
-  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
+  preparedStretchAssets?: readonly (PortablePreparedStretchAsset | PortablePagedStretchAsset | NativePreparedStretchAsset)[]
   allowInstruments?: boolean
   externalLatencyFrames?: ExternalNodeLatencyFrames
   capabilityTarget?: 'portable-wasm' | 'native'
@@ -78,6 +81,8 @@ export type PortableExportSnapshotInput = {
     sampleRateHz: number
     channelCount: number
   }[]
+  retainOrdinaryPcm?: boolean
+  mixerGraph?: ResolvedMixerGraph
 }
 
 type MetadataSourceAsset = NonNullable<PortableExportSnapshotInput['metadataSourceAssets']>[number]
@@ -189,58 +194,25 @@ const createMetadataAsset = (sourceAssetKey: string, input: {
 
 type CollectedPortableAssets = {
   assets: readonly PortableExportAsset[]
-  bySourceAssetKey: ReadonlyMap<string, AudioAssetRef>
+  rawAssetsBySourceAssetKey: ReadonlyMap<string, AudioAssetRef>
+  preparedAssetsByClipId: ReadonlyMap<string, AudioAssetRef>
   reasons: readonly string[]
-}
-
-export const countPortableInstalledAssets = (
-  tracks: readonly Track<AudioBuffer | null>[],
-  fx: ExportFx | undefined,
-) => {
-  const keys = new Set<string>()
-  for (const track of tracks) {
-    for (const clip of track.clips) {
-      if (clip.buffer
-        && !clip.midi
-        && clip.sourceAssetKey
-        && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
-        keys.add(clip.sourceAssetKey)
-      }
-    }
-  }
-  for (const entry of Object.values(fx?.trackFx ?? {})) {
-    if (entry.instrument?.kind === 'sampler') {
-      for (const zone of entry.instrument.params.zones) {
-        if (entry.samplerBuffers?.has(zone.id)) keys.add(zone.sample.assetKey)
-      }
-    }
-    if (entry.instrument?.kind === 'drum-rack') {
-      for (const pad of entry.instrument.params.pads) {
-        if (pad.sample && entry.drumRackBuffers?.has(pad.id)) keys.add(pad.sample.assetKey)
-      }
-    }
-    if (entry.instrument?.kind === 'granular'
-      && entry.instrument.params.zone
-      && entry.granularBuffer) {
-      keys.add(entry.instrument.params.zone.sample.assetKey)
-    }
-  }
-  return keys.size
 }
 
 const collectAssets = (
   tracks: readonly Track<AudioBuffer | null>[],
   fx: ExportFx | undefined,
-  preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>,
+  preparedStretchAssets: ReadonlyMap<string, PortablePreparedStretchAsset | PortablePagedStretchAsset | NativePreparedStretchAsset>,
   metadataSourceAssets: readonly MetadataSourceAsset[],
   retainOrdinaryPcm: boolean,
   nativePreparedAssets: boolean,
 ): CollectedPortableAssets => {
   const assets: PortableExportAsset[] = []
-  const bySourceAssetKey = new Map<string, AudioAssetRef>()
+  const rawAssetsBySourceAssetKey = new Map<string, AudioAssetRef>()
+  const preparedAssetsByClipId = new Map<string, AudioAssetRef>()
   const reasons: string[] = []
   const addAsset = (sourceAssetKey: string, buffer: AudioBuffer) => {
-    const existing = bySourceAssetKey.get(sourceAssetKey)
+    const existing = rawAssetsBySourceAssetKey.get(sourceAssetKey)
     if (existing) {
       const consistent = existing.frameCount === buffer.length
         && existing.sampleRateHz === buffer.sampleRate
@@ -258,10 +230,10 @@ const collectAssets = (
     const metadataIndex = assets.findIndex((entry) => entry.asset.assetId === exportAsset.asset.assetId)
     if (metadataIndex >= 0) assets[metadataIndex] = exportAsset
     else assets.push(exportAsset)
-    bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+    rawAssetsBySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
   }
   const addMetadataAsset = (sourceAssetKey: string, metadata: MetadataSourceAsset) => {
-    const existing = bySourceAssetKey.get(sourceAssetKey)
+    const existing = rawAssetsBySourceAssetKey.get(sourceAssetKey)
     if (existing) {
       if (existing.frameCount !== metadata.frameCount
         || existing.sampleRateHz !== metadata.sampleRateHz
@@ -272,7 +244,20 @@ const collectAssets = (
     }
     const exportAsset = createMetadataAsset(sourceAssetKey, metadata)
     assets.push(exportAsset)
-    bySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+    rawAssetsBySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
+  }
+  const addPreparedAsset = (clipId: string, prepared: PortableExportAsset) => {
+    const existing = assets.find((entry) => entry.asset.assetId === prepared.asset.assetId)
+    if (existing) {
+      if (existing.asset.frameCount !== prepared.asset.frameCount
+        || existing.asset.sampleRateHz !== prepared.asset.sampleRateHz
+        || existing.asset.channelCount !== prepared.asset.channelCount) {
+        reasons.push(`Prepared asset "${prepared.asset.assetId}" resolves to conflicting metadata.`)
+      }
+    } else {
+      assets.push(prepared)
+    }
+    preparedAssetsByClipId.set(clipId, prepared.asset)
   }
   const stretchSourceAssetKeys = new Set(
     tracks.flatMap((track) => track.clips.flatMap((clip) => (
@@ -309,37 +294,33 @@ const collectAssets = (
         if (clip.audioWarp.mode === 'stretch') {
           const preparedStretch = preparedStretchAssets.get(clip.id)
           if (preparedStretch && nativePreparedAssets) {
-            const sourceAssetKey = 'manifest' in preparedStretch
-              ? preparedStretch.preparedStretchArtifactId
-              : preparedStretch.sourceAssetKey
             if ('manifest' in preparedStretch) {
-              const existing = assets.find((entry) => entry.asset.assetId === preparedStretch.asset.assetId)
-              if (existing) {
-                if (existing.asset.frameCount !== preparedStretch.asset.frameCount
-                  || existing.asset.sampleRateHz !== preparedStretch.asset.sampleRateHz
-                  || existing.asset.channelCount !== preparedStretch.asset.channelCount) {
-                  reasons.push(`Prepared Stretch artifact "${preparedStretch.asset.assetId}" resolves to conflicting metadata.`)
-                }
-                continue
-              }
-              assets.push({
+              addPreparedAsset(clip.id, {
                 asset: preparedStretch.asset,
-                sourceAssetKey,
+                sourceAssetKey: preparedStretch.sourceAssetKey,
                 preparedStretchArtifactId: preparedStretch.preparedStretchArtifactId,
                 pcm: undefined,
                 transferables: [],
               })
             } else {
-              assets.push({
+              addPreparedAsset(clip.id, {
                 asset: preparedStretch.asset,
-                sourceAssetKey,
+                sourceAssetKey: preparedStretch.sourceAssetKey,
                 pcm: preparedStretch.pcm,
                 transferables: preparedStretch.transferables,
               })
             }
           } else if (preparedStretch) {
-            if ('portableAssetId' in preparedStretch) {
-              assets.push(preparedStretch)
+            if ('portableAssetId' in preparedStretch && 'manifest' in preparedStretch) {
+              addPreparedAsset(clip.id, {
+                asset: preparedStretch.asset,
+                sourceAssetKey: preparedStretch.sourceAssetKey,
+                preparedStretchArtifactId: preparedStretch.preparedStretchArtifactId,
+                pageFrames: preparedStretch.manifest.pageFrames,
+                transferables: [],
+              })
+            } else if ('portableAssetId' in preparedStretch) {
+              addPreparedAsset(clip.id, preparedStretch)
             } else {
               reasons.push(`Prepared Stretch artifact "${preparedStretch.preparedStretchArtifactId}" is native-only.`)
             }
@@ -369,7 +350,7 @@ const collectAssets = (
       addAsset(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
     }
   }
-  return { assets, bySourceAssetKey, reasons }
+  return { assets, rawAssetsBySourceAssetKey, preparedAssetsByClipId, reasons }
 }
 
 const unsupportedProcessorReasons = (
@@ -414,7 +395,7 @@ export const compilePortableExportSnapshot = (
   ]
   const diagnostics: PortableStretchDiagnostic[] = []
   const portableFx = localizeInstrumentFx(input.fx)
-  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>()
+  const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset | PortablePagedStretchAsset | NativePreparedStretchAsset>()
   const portableAssetIds = new Set<string>()
   const stretchClipIds = new Set(input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
     clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' ? [clip.id] : []
@@ -473,12 +454,12 @@ export const compilePortableExportSnapshot = (
     portableAssetIds.add(preparedIdentity)
   }
   if (diagnostics.length > 0) return unsupported(reasons, diagnostics)
-  const { assets, bySourceAssetKey, reasons: assetReasons } = collectAssets(
+  const { assets, rawAssetsBySourceAssetKey, preparedAssetsByClipId, reasons: assetReasons } = collectAssets(
     input.tracks,
     portableFx,
     preparedStretchAssets,
     input.metadataSourceAssets ?? [],
-    true,
+    input.retainOrdinaryPcm !== false,
     capabilityTarget === 'native',
   )
   reasons.push(...assetReasons)
@@ -486,8 +467,13 @@ export const compilePortableExportSnapshot = (
   const range = getExportRangeBounds(input.tracks, input.range)
   const clips = projectPortableClipEvents({
     tracks: input.tracks,
-    assets: bySourceAssetKey,
-    preparedStretchAssets,
+    assets: rawAssetsBySourceAssetKey,
+    preparedStretchAssets: new Map(
+      [...preparedStretchAssets].map(([clipId, prepared]) => [
+        clipId,
+        { ...prepared, asset: preparedAssetsByClipId.get(clipId) ?? prepared.asset },
+      ]),
+    ),
     projectGeneration: input.projectGeneration,
     warpContext: 'offline',
     assetRatePolicy: capabilityTarget === 'native' ? 'asset-rate' : 'match-session',
@@ -525,7 +511,7 @@ export const compilePortableExportSnapshot = (
 
   try {
     const instrumentCompilation = compilePortableSessionInput({
-      mixer: resolveExportMixerGraph({
+      mixer: input.mixerGraph ?? resolveExportMixerGraph({
         tracks: [...input.tracks],
         fx: portableFx,
       }),
@@ -533,7 +519,7 @@ export const compilePortableExportSnapshot = (
       automationEnvelopes: [],
       assetRegistry: {
         projectGeneration: 1,
-        assets: [...bySourceAssetKey.entries()].flatMap(([projectAssetId, asset], slot) => {
+        assets: [...rawAssetsBySourceAssetKey.entries()].flatMap(([projectAssetId, asset], slot) => {
           const exportAsset = assets.find((entry) => entry.asset.assetId === asset.assetId)
           return exportAsset ? [{
             projectAssetId,
@@ -553,7 +539,7 @@ export const compilePortableExportSnapshot = (
       return unsupported([...reasons, ...instrumentCompilation.unsupportedInstruments], diagnostics)
     }
     const baseGraph = createPortableGraphSnapshot({
-      graph: resolveExportMixerGraph({
+      graph: input.mixerGraph ?? resolveExportMixerGraph({
         tracks: [...input.tracks],
         fx: input.fx,
       }),

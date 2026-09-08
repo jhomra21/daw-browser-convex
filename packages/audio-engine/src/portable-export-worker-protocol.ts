@@ -1,14 +1,14 @@
 import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
 import type { PortableExportAsset } from './portable-export-snapshot'
 
-export const portableExportWorkerProtocolVersion = 1
+export const portableExportWorkerProtocolVersion = 2
 export const portableExportWorkerMaxFramesPerBlock = 8_192
-export const portableExportWorkerMaxChunks = 4_096
-export const portableExportWorkerMaxFrames = portableExportWorkerMaxFramesPerBlock * portableExportWorkerMaxChunks
 export const portableExportWorkerMaxAssets = 64
 export const portableExportWorkerMaxEvents = 256
 export const portableExportWorkerMaxGraphNodes = 64
 export const portableExportWorkerMaxGraphEdges = 256
+export const portableExportWorkerMaxResidentPages = 128
+export const portableExportWorkerPageFrames = 16_384
 
 export type PortableExportWorkerSnapshot = {
   graph: AudioCoreGraphSnapshot
@@ -29,12 +29,30 @@ export type PortableExportWorkerRequest =
     wasmBytes: ArrayBuffer
     snapshot: PortableExportWorkerSnapshot
   }
+  | {
+    version: typeof portableExportWorkerProtocolVersion
+    type: 'page-response'
+    jobId: number
+    requestId: number
+    assetId: string
+    startFrame: number
+    frameCount: number
+    planes?: readonly Float32Array[]
+    error?: string
+  }
+  | {
+    version: typeof portableExportWorkerProtocolVersion
+    type: 'chunk-consumed'
+    jobId: number
+    index: number
+  }
   | { version: typeof portableExportWorkerProtocolVersion; type: 'cancel'; jobId: number }
   | { version: typeof portableExportWorkerProtocolVersion; type: 'dispose' }
 
 export type PortableExportWorkerResponse =
   | { version: typeof portableExportWorkerProtocolVersion; type: 'progress'; jobId: number; completedFrames: number; totalFrames: number }
-  | { version: typeof portableExportWorkerProtocolVersion; type: 'chunk'; jobId: number; index: number; frameCount: number; pcm: PlanarPcm }
+  | { version: typeof portableExportWorkerProtocolVersion; type: 'page-request'; jobId: number; requestId: number; assetId: string; startFrame: number; frameCount: number }
+  | { version: typeof portableExportWorkerProtocolVersion; type: 'chunk'; jobId: number; index: number; startFrame: number; frameCount: number; pcm: PlanarPcm }
   | { version: typeof portableExportWorkerProtocolVersion; type: 'complete'; jobId: number; frameCount: number; chunkCount: number }
   | { version: typeof portableExportWorkerProtocolVersion; type: 'cancelled'; jobId: number }
   | { version: typeof portableExportWorkerProtocolVersion; type: 'disposed' }

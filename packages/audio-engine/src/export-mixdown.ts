@@ -38,6 +38,7 @@ import { scanTruePeak } from './true-peak-scanner'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { ExportFx } from './export-types'
+import type { PlanarPcm } from '../../audio-core-contract/src/index'
 import {
   loadAudioCoreWasmArtifact,
   type AudioCoreWasmArtifact,
@@ -45,19 +46,19 @@ import {
 } from '../../audio-core-wasm/src/index'
 import {
   compilePortableExportSnapshot,
-  countPortableInstalledAssets,
   type PortableExportSnapshot,
 } from './portable-export-snapshot'
 import { PortableExportWorker } from './portable-export-worker'
 import {
   portableExportWorkerMaxAssets,
   portableExportWorkerMaxEvents,
-  portableExportWorkerMaxFrames,
   portableExportWorkerMaxGraphEdges,
   portableExportWorkerMaxGraphNodes,
 } from './portable-export-worker-protocol'
 import { resolvePortableWasmManifestUrl } from './worklet-manifest'
-import { preparePortableStretchAssets } from './portable-stretch-preparation'
+import { preparePortablePagedStretchAssets } from './portable-stretch-paging'
+import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from './media-pages'
+import type { PreparedStretchArtifactRepository } from './prepared-stretch-store'
 import type { AudioPcmSourceDescriptor } from './media-pages'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
@@ -84,6 +85,10 @@ export type ExportRequest = {
   resourceObserver?: ResourceObserver
   onRenderProgress?: (completedFrames: number, totalFrames: number) => void
   resolveAudioSource?: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>
+  preparedStretchRepository?: PreparedStretchArtifactRepository
+  projectGeneration?: number
+  mixerGraph?: ResolvedMixerGraph
+  trackIds?: ReadonlySet<string>
 }
 
 export type StemMode =
@@ -155,6 +160,8 @@ type PortableMixdownSelection =
     selected: true
     artifact: AudioCoreWasmArtifact
     snapshot: Extract<PortableExportSnapshot, { supported: true }>
+    readPage: (input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal }) => Promise<readonly Float32Array[]>
+    cleanup: () => Promise<void>
   }
   | { selected: false }
 
@@ -278,29 +285,55 @@ const selectPortableMixdown = async (
   const artifact = await loadArtifact(resolvePortableWasmManifestUrl())
   if (!artifact.available) return { selected: false }
   throwIfAborted(req.signal)
-  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
-  if (frameCount > portableExportWorkerMaxFrames) return { selected: false }
-  const projectGeneration = 1
-  const preparedStretchAssets = await preparePortableStretchAssets({
-    tracks: req.tracks,
+  const projectGeneration = req.projectGeneration ?? 1
+  if (!req.preparedStretchRepository) return { selected: false }
+  const tracks = req.trackIds
+    ? req.tracks.filter((track) => req.trackIds?.has(track.id))
+    : req.tracks
+  const preparedStretchAssets = await preparePortablePagedStretchAssets({
+    tracks,
     projectBpm: req.bpm,
     projectGeneration,
-    requiredSampleRateHz: prepared.sampleRate,
-    createBuffer: (channels, frames, sampleRate) => new AudioBuffer({
-      numberOfChannels: channels,
-      length: frames,
-      sampleRate,
-    }),
+    repository: req.preparedStretchRepository,
     signal: req.signal,
-    maximumAssetCount: portableExportWorkerMaxAssets,
-    existingAssetCount: countPortableInstalledAssets(req.tracks, req.fx),
-    maximumPreparationBytes: 256 * 1024 * 1024,
     resolveSource: req.resolveAudioSource,
   })
-  throwIfAborted(req.signal)
   if (!preparedStretchAssets.supported) return { selected: false }
-  const snapshot = compilePortableExportSnapshot({
-    tracks: req.tracks,
+  let leasesReleased = false
+  const releasePreparedLeases = async () => {
+    if (leasesReleased) return
+    leasesReleased = true
+    const leases = new Set(preparedStretchAssets.assets.map((asset) => asset.lease))
+    await Promise.all([...leases].map((lease) => lease.release()))
+  }
+  try {
+    throwIfAborted(req.signal)
+    const descriptors = new Map<string, AudioPcmSourceDescriptor>()
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (clip.midi || !clip.sourceAssetKey || clip.audioWarp?.enabled === true) continue
+        const descriptor = req.resolveAudioSource
+          ? await req.resolveAudioSource(clip, req.signal)
+          : clip.buffer
+            ? createAudioPcmSourceDescriptor({
+              identity: getAudioBufferSessionIdentity(clip.buffer),
+              durationSec: clip.buffer.duration,
+              frameCount: clip.buffer.length,
+              sampleRate: clip.buffer.sampleRate,
+              channelCount: clip.buffer.numberOfChannels,
+              source: clip.buffer,
+            })
+            : undefined
+        if (!descriptor) {
+          await releasePreparedLeases()
+          return { selected: false }
+        }
+        descriptors.set(clip.sourceAssetKey, descriptor)
+      }
+    }
+    throwIfAborted(req.signal)
+    const snapshot = compilePortableExportSnapshot({
+    tracks,
     bpm: req.bpm,
     range: portableSnapshotRange(prepared.range),
     sampleRateHz: prepared.sampleRate,
@@ -311,15 +344,57 @@ const selectPortableMixdown = async (
     hasExternalPlugins: false,
     projectGeneration,
     preparedStretchAssets: preparedStretchAssets.assets,
+    mixerGraph: prepared.mixerGraph,
+    retainOrdinaryPcm: false,
+    metadataSourceAssets: [...descriptors].map(([sourceAssetKey, descriptor]) => ({
+      sourceAssetKey,
+      frameCount: descriptor.frameCount,
+      sampleRateHz: descriptor.sampleRate,
+      channelCount: descriptor.channelCount,
+    })),
   })
-  if (!snapshot.supported
-    || snapshot.assets.length > portableExportWorkerMaxAssets
-    || snapshot.events.length > portableExportWorkerMaxEvents
-    || snapshot.graph.nodes.length > portableExportWorkerMaxGraphNodes
-    || snapshot.graph.edges.length > portableExportWorkerMaxGraphEdges) {
-    return { selected: false }
+    if (!snapshot.supported
+      || snapshot.assets.length > portableExportWorkerMaxAssets
+      || snapshot.events.length > portableExportWorkerMaxEvents
+      || snapshot.graph.nodes.length > portableExportWorkerMaxGraphNodes
+      || snapshot.graph.edges.length > portableExportWorkerMaxGraphEdges) {
+      await releasePreparedLeases()
+      return { selected: false }
+    }
+    const pagedAssets = new Map(
+      preparedStretchAssets.assets.map((asset) => [asset.asset.assetId, asset]),
+    )
+    const repository = req.preparedStretchRepository
+    if (!repository) {
+      await releasePreparedLeases()
+      return { selected: false }
+    }
+    const readPage = async (input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal }) => {
+      const preparedAsset = pagedAssets.get(input.assetId)
+      const descriptor = descriptors.get(input.assetId.replace('portable-export:', ''))
+      if (preparedAsset) {
+        for await (const page of repository.read(preparedAsset.artifactId, input.startFrame, input.startFrame + input.frameCount)) {
+          if (page.startFrame === input.startFrame && page.frameCount === input.frameCount) return page.planes
+        }
+        throw new Error(`Prepared Stretch page "${input.assetId}" was not found.`)
+      }
+      if (!descriptor) throw new Error(`Portable export source "${input.assetId}" is unavailable.`)
+      for await (const page of descriptor.readPages({ startFrame: input.startFrame, endFrame: input.startFrame + input.frameCount, signal: input.signal })) {
+        if (page.startFrame === input.startFrame && page.frameCount === input.frameCount) return page.planes
+      }
+      throw new Error(`Portable export source page "${input.assetId}" was not found.`)
+    }
+    let cleanupStarted = false
+    const cleanup = async () => {
+      if (cleanupStarted) return
+      cleanupStarted = true
+      await releasePreparedLeases()
+    }
+    return { selected: true, artifact: artifact.artifact, snapshot, readPage, cleanup }
+  } catch (error) {
+    await releasePreparedLeases()
+    throw error
   }
-  return { selected: true, artifact: artifact.artifact, snapshot }
 }
 
 export const createPortableOutputBuffer = (
@@ -373,21 +448,96 @@ const renderPortableMixdown = async (
       generation: 1,
       signal: req.signal,
       onProgress: req.onRenderProgress,
-      onChunk: (index, pcm) => {
+      onChunk: (index, _startFrame, pcm) => {
         if (chunks.has(index)) {
           hasDuplicateChunk = true
           return
         }
         chunks.set(index, { frameCount: pcm.frameCount, planes: pcm.planes })
       },
+      readPage: selection.readPage,
     })
     throwIfAborted(req.signal)
     if (hasDuplicateChunk) throw new Error('Portable export Worker returned duplicate PCM output.')
     return createPortableOutputBuffer(chunks, frameCount, prepared.sampleRate, prepared.numberOfChannels)
   } finally {
     req.signal?.removeEventListener('abort', cancel)
-    worker.dispose()
-    releaseWorker()
+    try {
+      await selection.cleanup()
+    } finally {
+      worker.dispose()
+      releaseWorker()
+    }
+  }
+}
+
+export const renderPortableMixdownChunks = async (
+  req: ExportRequest,
+  onChunk: (index: number, startFrame: number, pcm: PlanarPcm) => Promise<void> | void,
+): Promise<{ frameCount: number; sampleRate: number; numberOfChannels: number; cleanup: () => Promise<void> } | undefined> => {
+  const prepared = prepareExportRender(req)
+  const portable = await selectPortableMixdown(req, prepared)
+  if (!portable.selected) return undefined
+  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
+  const worker = new PortableExportWorker(undefined, undefined, portable.artifact)
+  const releaseWorker = observeResource(prepared.resourceObserver, 'workers', worker)
+  const cancel = () => worker.cancel()
+  let workerDisposed = false
+  let cleanupStarted = false
+  req.signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    await worker.render({
+      snapshot: portable.snapshot,
+      sampleRateHz: prepared.sampleRate,
+      frameCount,
+      generation: req.projectGeneration ?? 1,
+      signal: req.signal,
+      onProgress: req.onRenderProgress,
+      onChunk: (index, startFrame, pcm) => {
+        if (prepared.numberOfChannels === 2) {
+          return onChunk(index, startFrame, pcm)
+        }
+        const left = pcm.planes[0]
+        const right = pcm.planes[1]
+        if (!left || !right || pcm.planes.length !== 2) {
+          throw new Error('Portable export Worker returned invalid stereo PCM output.')
+        }
+        const mono = new Float32Array(pcm.frameCount)
+        for (let frame = 0; frame < pcm.frameCount; frame += 1) {
+          mono[frame] = convertStereoToMonoSample(left[frame] ?? 0, right[frame] ?? 0)
+        }
+        return onChunk(index, startFrame, { frameCount: pcm.frameCount, planes: [mono] })
+      },
+      readPage: portable.readPage,
+    })
+    return {
+      frameCount,
+      sampleRate: prepared.sampleRate,
+      numberOfChannels: prepared.numberOfChannels,
+      cleanup: async () => {
+        if (cleanupStarted) return
+        cleanupStarted = true
+        try {
+          await portable.cleanup()
+        } finally {
+          if (!workerDisposed) {
+            workerDisposed = true
+            worker.dispose()
+            releaseWorker()
+          }
+        }
+      },
+    }
+  } catch (error) {
+    try {
+      await portable.cleanup()
+    } finally {
+      worker.dispose()
+      releaseWorker()
+    }
+    throw error
+  } finally {
+    req.signal?.removeEventListener('abort', cancel)
   }
 }
 
@@ -695,7 +845,7 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     sampleRate,
     numberOfChannels,
     trackById: createTrackById(tracks),
-    mixerGraph: resolveExportMixerGraph({ tracks, fx }),
+    mixerGraph: req.mixerGraph ?? resolveExportMixerGraph({ tracks, fx }),
     exportTrackFx: snapshotTrackFx(fx?.trackFx),
     automationEnvelopes: snapshotAutomation(req.automationEnvelopes ?? []),
     sidechainRoutes: (req.sidechainRoutes ?? []).map((route) => ({ ...route })),

@@ -12,6 +12,8 @@ import {
   type PortableExportWorkerSnapshot,
 } from './portable-export-worker-protocol'
 
+type PortableWorkerFailure = Error | DOMException | string
+
 export type PortableExportWorkerRenderRequest = {
   snapshot: PortableExportWorkerSnapshot
   sampleRateHz: number
@@ -20,7 +22,13 @@ export type PortableExportWorkerRenderRequest = {
   maxFramesPerBlock?: number
   signal?: AbortSignal
   onProgress?: (completedFrames: number, totalFrames: number) => void
-  onChunk: (index: number, pcm: PlanarPcm) => void
+  onChunk: (index: number, startFrame: number, pcm: PlanarPcm) => Promise<void> | void
+  readPage?: (input: {
+    assetId: string
+    startFrame: number
+    frameCount: number
+    signal?: AbortSignal
+  }) => Promise<readonly Float32Array[]>
 }
 
 export type PortableExportWorkerLike = {
@@ -31,7 +39,7 @@ export type PortableExportWorkerLike = {
 }
 
 const createPortableExportWorkerLike = (): PortableExportWorkerLike => {
-  const worker = new Worker(resolveWorkletModuleUrl('audio-workers/daw-portable-export-worker-v1.js'), { type: 'module' })
+  const worker = new Worker(resolveWorkletModuleUrl('audio-workers/daw-portable-export-worker-v2.js'), { type: 'module' })
   return {
     get onmessage() {
       return worker.onmessage
@@ -61,6 +69,9 @@ export class PortableExportWorker {
     | {
       jobId: number
       request: PortableExportWorkerRenderRequest
+      nextChunkIndex: number
+      nextChunkStartFrame: number
+      pagePending: boolean
       resolve: () => void
       reject: (error: Error) => void
     }
@@ -79,8 +90,75 @@ export class PortableExportWorker {
   private onMessage(value: PortableExportWorkerResponse) {
     if (value.version !== portableExportWorkerProtocolVersion || value.type === 'disposed' || !this.active) return
     if (value.jobId !== this.active.jobId) return
+    if (value.type === 'page-request') {
+      const active = this.active
+      if (active.pagePending || !active.request.readPage) {
+        this.worker.postMessage({
+          version: portableExportWorkerProtocolVersion,
+          type: 'page-response',
+          jobId: value.jobId,
+          requestId: value.requestId,
+          assetId: value.assetId,
+          startFrame: value.startFrame,
+          frameCount: value.frameCount,
+          error: active.request.readPage ? 'Only one page request may be outstanding.' : 'No page provider was supplied.',
+        }, [])
+        return
+      }
+      active.pagePending = true
+      void active.request.readPage({
+        assetId: value.assetId,
+        startFrame: value.startFrame,
+        frameCount: value.frameCount,
+        signal: active.request.signal,
+      }).then((planes) => {
+        if (this.active !== active) return
+        const transfer = planes.map((plane) => plane.buffer)
+        this.worker.postMessage({
+          version: portableExportWorkerProtocolVersion,
+          type: 'page-response',
+          jobId: value.jobId,
+          requestId: value.requestId,
+          assetId: value.assetId,
+          startFrame: value.startFrame,
+          frameCount: value.frameCount,
+          planes,
+        }, transfer)
+      }).catch((error: PortableWorkerFailure) => {
+        if (this.active !== active) return
+        this.worker.postMessage({
+          version: portableExportWorkerProtocolVersion,
+          type: 'page-response',
+          jobId: value.jobId,
+          requestId: value.requestId,
+          assetId: value.assetId,
+          startFrame: value.startFrame,
+          frameCount: value.frameCount,
+          error: error instanceof Error ? error.message : String(error),
+        }, [])
+      }).finally(() => {
+        if (this.active === active) active.pagePending = false
+      })
+      return
+    }
     if (value.type === 'chunk') {
-      this.active.request.onChunk(value.index, value.pcm)
+      if (value.index !== this.active.nextChunkIndex
+        || value.startFrame !== this.active.nextChunkStartFrame
+        || value.frameCount !== value.pcm.frameCount) {
+        this.fail(new Error('Portable export Worker returned a nonsequential chunk.'))
+        return
+      }
+      this.active.nextChunkIndex += 1
+      this.active.nextChunkStartFrame += value.frameCount
+      Promise.resolve(this.active.request.onChunk(value.index, value.startFrame, value.pcm)).then(() => {
+        if (!this.active || this.active.jobId !== value.jobId) return
+        this.worker.postMessage({
+          version: portableExportWorkerProtocolVersion,
+          type: 'chunk-consumed',
+          jobId: value.jobId,
+          index: value.index,
+        }, [])
+      }).catch((error: PortableWorkerFailure) => this.fail(error instanceof Error ? error : new Error(String(error))))
       return
     }
     if (value.type === 'progress') {
@@ -103,7 +181,14 @@ export class PortableExportWorker {
   private fail(error: Error) {
     const active = this.active
     this.active = undefined
-    active?.reject(error)
+    if (!active) return
+    this.worker.postMessage({
+      version: portableExportWorkerProtocolVersion,
+      type: 'cancel',
+      jobId: active.jobId,
+    }, [])
+    active.reject(error)
+    this.worker.terminate()
   }
 
   async render(request: PortableExportWorkerRenderRequest): Promise<void> {
@@ -134,7 +219,15 @@ export class PortableExportWorker {
       ...request.snapshot.assets.flatMap((entry) => entry.transferables),
     ]
     return new Promise<void>((resolve, reject) => {
-      this.active = { jobId, request, resolve, reject }
+      this.active = {
+        jobId,
+        request,
+        nextChunkIndex: 0,
+        nextChunkStartFrame: 0,
+        pagePending: false,
+        resolve,
+        reject,
+      }
       this.worker.postMessage(message, transfer)
     })
   }

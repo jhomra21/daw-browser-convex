@@ -60,6 +60,33 @@ test("asset receipts replay deterministically and finalize exactly once", async 
     .withIndex("by_room", (query) => query.eq("projectId", projectId)).unique()))?.revision).toBe(1);
 });
 
+test("rejects asset sizes above the canonical multipart file limit", async () => {
+  const t = await setup();
+  const sizeBytes = 10 * 1024 * 1024 + 1;
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "large-asset-key",
+    contentSha256: digest,
+    name: "Large.wav",
+    mimeType: "audio/wav",
+    sizeBytes,
+    ...audioMetadata,
+  })).rejects.toThrow("10 MiB");
+});
+
+test("rejects non-safe asset sizes in the canonical mutation", async () => {
+  const t = await setup();
+  await expect(t.withIdentity(controlIdentity).mutation(api.assets.beginUpload, {
+    projectId,
+    idempotencyKey: "unsafe-size-key",
+    contentSha256: digest,
+    name: "Unsafe.wav",
+    mimeType: "audio/wav",
+    sizeBytes: Number.MAX_SAFE_INTEGER + 1,
+    ...audioMetadata,
+  })).rejects.toThrow("Asset size is invalid");
+});
+
 test("receipt replay rejects trusted metadata drift", async () => {
   const t = await setup();
   await begin(t);

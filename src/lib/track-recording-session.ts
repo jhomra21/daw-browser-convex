@@ -1,17 +1,10 @@
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { assertDefined, type JsonValue } from '@daw-browser/shared'
+import type { JsonValue } from '@daw-browser/shared'
 import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations-api'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { supportsPlanarFloat32WavEncoding } from '@daw-browser/audio-engine/recording-encode-wav'
+import { isRecordingTempStorageSupported } from '~/lib/recording/recording-temp-storage'
 import { z } from 'zod'
-
-const RECORDING_MIME_TYPES = [
-  'audio/webm;codecs=opus',
-  'audio/webm',
-  'audio/ogg;codecs=opus',
-  'audio/ogg',
-  'audio/mp4',
-]
 
 const RECORDING_LOCK_KEEPALIVE_MS = 30_000
 
@@ -25,12 +18,6 @@ const readLockResult = (value: JsonValue) => {
   return result.success ? result.data : undefined
 }
 
-type StopPromise = {
-  promise: Promise<void>
-  resolve: () => void
-  reject: (cause?: unknown) => void
-}
-
 export type RecordingContext = {
   projectId: string
   userId: string | undefined
@@ -40,73 +27,13 @@ export type RecordingContext = {
   createdTrack: Track | null
   startSec: number
   stream: MediaStream | null
-  recorder: MediaRecorder | null
-  chunks: BlobPart[]
-  mimeType: string
   lockedByUserId: string
   engineCaptureActive: boolean
   portableCaptureActive: boolean
   nativeCaptureActive: boolean
   engineCaptureSessionId: string
-  savedAudioSource: 'worklet-pcm-f32' | 'media-recorder-compressed'
   sampleRate: number
   recordingOffsetFrames: number
-  onDataAvailable: (event: BlobEvent) => void
-  onStop: () => void
-  stopPromise: Promise<void>
-  rejectStopPromise: (cause?: unknown) => void
-}
-
-export function createStopPromise(): StopPromise {
-  let settled = false
-  let resolvePromise: (() => void) | undefined
-  let rejectPromise: ((cause?: unknown) => void) | undefined
-  const promise = new Promise<void>((resolve, reject) => {
-    resolvePromise = () => {
-      if (settled) return
-      settled = true
-      resolve()
-    }
-    rejectPromise = (cause?: unknown) => {
-      if (settled) return
-      settled = true
-      reject(cause)
-    }
-  })
-  const resolve = assertDefined(resolvePromise, 'Stop promise resolver was not initialized')
-  const reject = assertDefined(rejectPromise, 'Stop promise rejecter was not initialized')
-  return {
-    promise,
-    resolve,
-    reject,
-  }
-}
-
-type RecordingSupport = {
-  supported: boolean
-  mimeType: string
-}
-
-export function getRecordingSupport(): RecordingSupport {
-  if (!('window' in globalThis)) {
-    return { supported: false, mimeType: '' }
-  }
-  if (!('navigator' in globalThis) || !globalThis.navigator.mediaDevices?.getUserMedia) {
-    return { supported: false, mimeType: '' }
-  }
-  const mediaRecorderCtor = window.MediaRecorder
-  if (!mediaRecorderCtor) {
-    return { supported: false, mimeType: '' }
-  }
-  const isTypeSupported = 'isTypeSupported' in mediaRecorderCtor
-    ? mediaRecorderCtor.isTypeSupported.bind(mediaRecorderCtor)
-    : null
-  for (const mime of RECORDING_MIME_TYPES) {
-    if (!isTypeSupported || isTypeSupported(mime)) {
-      return { supported: true, mimeType: mime }
-    }
-  }
-  return { supported: true, mimeType: '' }
 }
 
 export function getProductionRecordingSupport(): boolean {
@@ -114,8 +41,7 @@ export function getProductionRecordingSupport(): boolean {
     && 'AudioWorkletNode' in globalThis
     && 'Worker' in globalThis
     && 'navigator' in globalThis
-    && globalThis.navigator.storage !== undefined
-    && 'getDirectory' in globalThis.navigator.storage
+    && isRecordingTempStorageSupported()
     && supportsPlanarFloat32WavEncoding()
 }
 
@@ -219,14 +145,6 @@ export async function cleanupRecordingSession(options: {
   const ctx = options.activeCtx
   options.clearLockHeartbeat()
 
-  try {
-    ctx.recorder?.removeEventListener('dataavailable', ctx.onDataAvailable)
-    ctx.recorder?.removeEventListener('stop', ctx.onStop)
-  } catch {}
-
-  try {
-    if (ctx.recorder && ctx.recorder.state !== 'inactive') ctx.recorder.stop()
-  } catch {}
   try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
 
   await options.releaseTrackLock(ctx.trackId, ctx.lockedByUserId, ctx.isLocalProject)

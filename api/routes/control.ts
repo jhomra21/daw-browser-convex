@@ -36,6 +36,7 @@ import {
   AudioUploadValidationError,
   inspectControlUploadAudioMetadata,
 } from "../control-upload-audio-metadata"
+import { hashFile } from "../hash-file"
 
 type ConvexGateway = ControlGateway
 type CloudControlInvoker = ControlInvoker<"cloud">
@@ -48,6 +49,7 @@ type ControlRouteDependencies = {
   ) => Promise<ControlBearer | null>;
   createGateway?: (context: ApiContext, bearer: ControlBearer) => Promise<ConvexGateway>;
   inspectAudioMetadata?: typeof inspectControlUploadAudioMetadata;
+  hashFile?: typeof hashFile;
 }
 
 type AuthResult = (
@@ -63,7 +65,6 @@ type ParsedWriteRequest = (
 
 const noStore = controlNoStore
 const assetUploadHeader = "x-content-sha256"
-const maxAssetUploadBytes = 10 * 1024 * 1024
 const supportedAssetMimeTypes = new Set([
   "audio/mpeg", "audio/wav", "audio/x-wav", "audio/flac",
   "audio/ogg", "audio/mp4", "audio/aac", "audio/webm",
@@ -158,16 +159,19 @@ const createControlInvoker = async (
   })
 }
 
-const assetDigest = async (file: File) => {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-const readAssetUpload = async (context: ApiContext) => {
+const readAssetUpload = async (
+  context: ApiContext,
+  hashUploadedFile: typeof hashFile,
+) => {
   const contentLength = context.req.header("content-length");
   if (!contentLength) throw controlError("invalid-request", "Content-Length is required for multipart asset uploads.");
-  if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxAssetUploadBytes + 16 * 1024)) {
-    throw controlError("limit-exceeded", "Asset upload exceeds the 10 MiB limit.");
+  if (!/^\d+$/.test(contentLength)) throw controlError("invalid-request", "Content-Length is invalid.");
+  const contentLengthBytes = Number(contentLength);
+  if (!Number.isSafeInteger(contentLengthBytes) || contentLengthBytes < 1) {
+    throw controlError("invalid-request", "Content-Length is invalid.");
+  }
+  if (contentLengthBytes > controlLimitsV1.maxAssetUploadRequestBytes) {
+    throw controlError("limit-exceeded", "Asset upload exceeds the 10 MiB multipart limit.");
   }
   const form = await context.req.formData();
   const file = form.get("file");
@@ -177,13 +181,16 @@ const readAssetUpload = async (context: ApiContext) => {
   if (!(file instanceof File) || !declaredDigest || !/^[0-9a-f]{64}$/.test(declaredDigest)) {
     throw controlError("invalid-request", "A file and lowercase SHA-256 digest header are required.");
   }
-  if (file.size < 1 || file.size > maxAssetUploadBytes) throw controlError("limit-exceeded", "Asset upload exceeds the 10 MiB limit.");
+  if (file.size < 1) throw controlError("invalid-request", "Uploaded asset is empty.");
+  if (file.size > controlLimitsV1.maxAssetUploadBytes) {
+    throw controlError("limit-exceeded", "Asset upload exceeds the 10 MiB file limit.");
+  }
   if (!supportedAssetMimeTypes.has(file.type)) throw controlError("validation", "Unsupported audio MIME type.");
   const extensions = supportedAssetExtensions.get(file.type);
   if (!extensions?.some((extension) => file.name.toLowerCase().endsWith(extension))) {
     throw controlError("validation", "Asset file extension does not match its audio MIME type.");
   }
-  const contentSha256 = await assetDigest(file);
+  const contentSha256 = await hashUploadedFile(file);
   if (contentSha256 !== declaredDigest) throw controlError("validation", "Asset digest does not match uploaded bytes.");
   return Object.assign({ file, contentSha256, name }, folderId ? { folderId } : undefined);
 }
@@ -192,6 +199,7 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
   const resolveBearer = dependencies.resolveBearer ?? resolveControlBearer
   const createGateway = dependencies.createGateway ?? controlGateway
   const inspectAudioMetadata = dependencies.inspectAudioMetadata ?? inspectControlUploadAudioMetadata
+  const hashUploadedFile = dependencies.hashFile ?? hashFile
 
   const authenticate = async (context: ApiContext, scope: ControlOAuthScope): Promise<AuthResult> => {
     const bearer = await resolveBearer(context.req.raw, context.env, scope)
@@ -386,7 +394,12 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
     }
     try {
       const projectId = parseControlSnapshotQueryV1({ projectId: context.req.param("projectId") }).projectId;
-      const upload = await readAssetUpload(context);
+      const gateway = await createGateway(context, authorized);
+      const role = await gateway.query(convexApi.projectAccess.roleForUser, { projectId });
+      if (role !== "owner" && role !== "editor") {
+        throw controlError("forbidden", "Project write access is required.");
+      }
+      const upload = await readAssetUpload(context, hashUploadedFile);
       let metadata;
       try {
         metadata = await inspectAudioMetadata({
@@ -399,7 +412,6 @@ export function registerControlRoutes(app: App, dependencies: ControlRouteDepend
         }
         throw error;
       }
-      const gateway = await createGateway(context, authorized);
       const begun = z.object({
         r2Key: z.string(),
         assetKey: z.string(),

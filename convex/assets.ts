@@ -1,13 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import { canonicalJson, controlErrorSchemaV1 } from "@daw-browser/control";
+import { canonicalJson, controlErrorSchemaV1, controlLimitsV1 } from "@daw-browser/control";
 import { advanceProjectRevision, requireProjectRow } from "./projectRows";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
 import { findSampleRow, insertSampleRow, moveSampleFolderRow } from "./sampleRows";
 
 const maxNameLength = 120;
-const maxUploadBytes = 10 * 1024 * 1024;
 const maxSampleRate = 384_000;
 const maxChannelCount = 64;
 const digestPattern = /^[0-9a-f]{64}$/;
@@ -168,8 +167,11 @@ export const beginUpload = mutation({
     const contentSha256 = validDigest(input.contentSha256);
     const name = validName(input.name);
     const mimeType = validMimeType(input.mimeType);
-    if (!Number.isInteger(input.sizeBytes) || input.sizeBytes < 1 || input.sizeBytes > maxUploadBytes) {
-      fail("limit-exceeded", "Asset upload exceeds the 10 MiB limit.");
+    if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 1) {
+      fail("invalid-request", "Asset size is invalid.");
+    }
+    if (input.sizeBytes > controlLimitsV1.maxAssetUploadBytes) {
+      fail("limit-exceeded", "Asset upload exceeds the 10 MiB file limit.");
     }
     validAudioMetadata(input);
     const project = await requireProjectRow(ctx, input.projectId);

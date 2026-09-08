@@ -42,10 +42,13 @@ const flushLifecycle = async () => {
   for (let index = 0; index < 5; index += 1) await Promise.resolve()
 }
 
-test("keeps the Web Audio PCM recorder as the portable compatibility fallback", async () => {
+test("keeps bounded PCM recording as the only browser recording path", async () => {
   const source = await readFile(new URL("./useTrackRecording.ts", import.meta.url), "utf8")
   expect(source).toContain("if (!requiresNativeAudio && !engineCaptureActive && productionSupported) try")
   expect(source).not.toContain("productionSupported && !portableRequested")
+  expect(source).not.toContain("new MediaRecorder")
+  expect(source).not.toContain("new Blob(ctx.chunks")
+  expect(source).not.toContain("file.arrayBuffer()")
 })
 
 const createHarness = (
@@ -53,6 +56,7 @@ const createHarness = (
   nativeEnabled = true,
   requiresNativeAudio = false,
   nativeStartFails = false,
+  locksAvailable = true,
 ) => {
   const previousWindow = globalThis.window
   const previousNavigator = globalThis.navigator
@@ -113,6 +117,31 @@ const createHarness = (
     },
     isActive: () => true,
   }
+  const recordingLocks = {
+    request: async (
+      _name: string,
+      _options: { mode: "exclusive"; ifAvailable?: boolean },
+      callback: (lock: { name: string; mode: "exclusive" }) => Promise<void>,
+    ): Promise<void> => {
+      await callback({ name: "recording-test", mode: "exclusive" })
+    },
+  }
+  const navigatorValue = {
+    platform: "test",
+    userAgent: "test",
+    userAgentData: undefined,
+    mediaDevices: {
+      getSupportedConstraints: () => ({}),
+      getUserMedia: async () => {
+        calls.push("get-user-media")
+        return stream
+      },
+    },
+    storage: {
+      getDirectory: async () => emptyStorageDirectory,
+    },
+    locks: locksAvailable ? recordingLocks : undefined,
+  }
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
@@ -132,21 +161,7 @@ const createHarness = (
   })
   Object.defineProperty(globalThis, "navigator", {
     configurable: true,
-    value: {
-      platform: "test",
-      userAgent: "test",
-      userAgentData: undefined,
-      mediaDevices: {
-        getSupportedConstraints: () => ({}),
-        getUserMedia: async () => {
-          calls.push("get-user-media")
-          return stream
-        },
-      },
-      storage: {
-        getDirectory: async () => emptyStorageDirectory,
-      },
-    },
+    value: navigatorValue,
   })
   const selection = {
     selectedTrackId: () => "",
@@ -287,6 +302,22 @@ test("desktop native-only recording never falls back to browser capture", async 
     await expect(harness.recording.startRecording(track.id)).resolves.toMatchObject({ ok: false })
     expect(harness.calls).toContain("native-start")
     expect(harness.calls).toContain("transport-stop")
+    expect(harness.calls).not.toContain("portable-start")
+    expect(harness.calls).not.toContain("get-user-media")
+    dispose()
+  })
+  harness.restore()
+})
+
+test("reports unsupported recording before starting any capture without Web Locks", async () => {
+  const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, false)
+  await createRoot(async (dispose) => {
+    await flushLifecycle()
+    await expect(harness.recording.startRecording(track.id)).resolves.toEqual({
+      ok: false,
+      reason: "Recording storage unsupported",
+    })
+    expect(harness.calls).not.toContain("native-start")
     expect(harness.calls).not.toContain("portable-start")
     expect(harness.calls).not.toContain("get-user-media")
     dispose()

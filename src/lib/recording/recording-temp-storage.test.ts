@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test"
 import {
   createRecordingTempStorage,
   decodePlanarPcmBlocks,
+  isRecordingTempStorageSupported,
   RecordingTempStorageError,
   type RecordingStorageDirectory,
   type RecordingStorageDirectoryEntry,
   type RecordingStorageFile,
   type RecordingStorageFilesystem,
+  type RecordingStorageLockManager,
   type RecordingStorageWritable
 } from "./recording-temp-storage"
 
@@ -102,10 +104,51 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
     return node.kind === "directory" ? node : null
   }
 
-  return { filesystem, root, readBytes, directoryAt }
+  const activeLocks = new Set<string>()
+  const lockManager: RecordingStorageLockManager = {
+    request: async (name, options, callback) => {
+      if (options.ifAvailable && activeLocks.has(name)) return callback(undefined)
+      activeLocks.add(name)
+      try {
+        return await callback({ name, mode: "exclusive" })
+      } finally {
+        activeLocks.delete(name)
+      }
+    }
+  }
+
+  return { filesystem, root, readBytes, directoryAt, lockManager }
 }
 
 describe("recording temp storage", () => {
+  test("fails browser-backed storage without Web Locks but permits injected lockless filesystems", async () => {
+    const previousNavigator = globalThis.navigator
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { storage: { getDirectory: async () => undefined }, locks: undefined },
+    })
+    try {
+      expect(isRecordingTempStorageSupported()).toBeFalse()
+      await expect(createRecordingTempStorage().createSession({
+        sessionId: "unsupported",
+        sampleRate: 48_000,
+        channelCount: 1,
+      })).rejects.toMatchObject({
+        failure: "unsupported",
+        message: "Web Locks are required for recording session storage.",
+      })
+
+      const memory = createMemoryFilesystem()
+      expect(await createRecordingTempStorage({ filesystem: memory.filesystem }).createSession({
+        sessionId: "injected",
+        sampleRate: 48_000,
+        channelCount: 1,
+      })).toBeDefined()
+    } finally {
+      Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNavigator })
+    }
+  })
+
   test("serializes planar blocks in append order and reports bounded descriptors", async () => {
     const memory = createMemoryFilesystem()
     const storage = createRecordingTempStorage({ filesystem: memory.filesystem, maxBytes: 32, now: () => 100 })
@@ -296,5 +339,49 @@ describe("recording temp storage", () => {
     expect(memory.directoryAt(["recording-sessions"])?.children.has("stale-missing")).toBeFalse()
     expect(memory.directoryAt(["recording-sessions"])?.children.has("fresh-missing")).toBeTrue()
     await freshMissing.abort()
+  })
+
+  test("skips stale cleanup for a session owned by another storage instance", async () => {
+    const memory = createMemoryFilesystem()
+    const oldNow = 0
+    const firstStorage = createRecordingTempStorage({
+      filesystem: memory.filesystem,
+      lockManager: memory.lockManager,
+      now: () => oldNow,
+    })
+    const secondStorage = createRecordingTempStorage({
+      filesystem: memory.filesystem,
+      lockManager: memory.lockManager,
+      now: () => 24 * 60 * 60 * 1000 + 1,
+    })
+    const session = await firstStorage.createSession({
+      sessionId: "active-stale",
+      sampleRate: 48000,
+      channelCount: 1,
+    })
+
+    expect(await secondStorage.cleanupStale()).toBe(0)
+    expect(await secondStorage.open("active-stale")).not.toBeNull()
+    await session.abort()
+  })
+
+  test("uses the finalized timestamp for stale recovery after a long take", async () => {
+    const memory = createMemoryFilesystem()
+    let now = 0
+    const storage = createRecordingTempStorage({
+      filesystem: memory.filesystem,
+      lockManager: memory.lockManager,
+      now: () => now,
+    })
+    const session = await storage.createSession({
+      sessionId: "long-take",
+      sampleRate: 48000,
+      channelCount: 1,
+    })
+    now = 24 * 60 * 60 * 1000 + 1
+    await session.finalize()
+
+    expect(await storage.cleanupStale()).toBe(0)
+    expect(await storage.open("long-take")).not.toBeNull()
   })
 })

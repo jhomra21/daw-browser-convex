@@ -18,6 +18,41 @@ export type WavOutputSink = {
   abort: () => Promise<void>
 }
 
+const PCM_BYTES_PER_SAMPLE = Float32Array.BYTES_PER_ELEMENT
+const RIFF_MAX_CONTAINER_BYTES = 2 ** 32
+const RIFF_HEADER_BYTES = 44
+
+export type WavContainerKind = 'riff' | 'rf64'
+
+const validateLogicalPcmSize = (input: {
+  channelCount: number
+  capturedFrames: number
+}): bigint => {
+  if (
+    !Number.isSafeInteger(input.channelCount)
+    || input.channelCount < 1
+    || !Number.isSafeInteger(input.capturedFrames)
+    || input.capturedFrames < 1
+  ) throw new Error('Recording PCM size arithmetic is invalid.')
+  return BigInt(input.capturedFrames) * BigInt(input.channelCount) * BigInt(PCM_BYTES_PER_SAMPLE)
+}
+
+export const getWavContainerKind = (input: {
+  channelCount: number
+  capturedFrames: number
+}): WavContainerKind => (
+  validateLogicalPcmSize(input) + BigInt(RIFF_HEADER_BYTES) >= BigInt(RIFF_MAX_CONTAINER_BYTES)
+    ? 'rf64'
+    : 'riff'
+)
+
+export const createWavOutputFormat = (input: {
+  channelCount: number
+  capturedFrames: number
+}): WavOutputFormat => (
+  new WavOutputFormat({ large: getWavContainerKind(input) === 'rf64' })
+)
+
 export const supportsPlanarFloat32WavEncoding = (): boolean =>
   new WavOutputFormat().getSupportedAudioCodecs().includes('pcm-f32')
 
@@ -29,8 +64,9 @@ export const encodePlanarFloat32Wav = async (input: {
   sink: WavOutputSink
 }): Promise<{ capturedFrames: number }> => {
   if (input.capturedFrames === 0) throw new Error('Recording contained no audio frames.')
+  const format = createWavOutputFormat(input)
   const output = new Output({
-    format: new WavOutputFormat(),
+    format,
     target: new StreamTarget(new WritableStream<StreamTargetChunk>(input.sink)),
   })
   const source = new AudioSampleSource({
@@ -46,7 +82,13 @@ export const encodePlanarFloat32Wav = async (input: {
         || block.channels.length !== input.channelCount
         || block.channels.some((channel) => channel.length !== block.frameCount)
       ) throw new Error('Recording PCM block is invalid.')
-      const data = new Uint8Array(block.frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT)
+      const sampleBytes = block.frameCount * input.channelCount * PCM_BYTES_PER_SAMPLE
+      if (!Number.isSafeInteger(sampleBytes)) throw new Error('Recording PCM block size arithmetic is invalid.')
+      const nextEncodedFrames = encodedFrames + block.frameCount
+      if (!Number.isSafeInteger(nextEncodedFrames) || nextEncodedFrames > input.capturedFrames) {
+        throw new Error('Recording PCM frame count changed.')
+      }
+      const data = new Uint8Array(sampleBytes)
       let offset = 0
       for (const channel of block.channels) {
         data.set(new Uint8Array(channel.buffer, channel.byteOffset, channel.byteLength), offset)
@@ -64,8 +106,7 @@ export const encodePlanarFloat32Wav = async (input: {
       } finally {
         sample.close()
       }
-      encodedFrames += block.frameCount
-      if (encodedFrames > input.capturedFrames) throw new Error('Recording PCM frame count changed.')
+      encodedFrames = nextEncodedFrames
     }
     if (encodedFrames !== input.capturedFrames) throw new Error('Recording PCM frame count changed.')
     await output.finalize()

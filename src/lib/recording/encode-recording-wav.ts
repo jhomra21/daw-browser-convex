@@ -36,6 +36,16 @@ export const encodeRecordingWav = async (
   descriptor: RecordingPcmDescriptor,
   now: () => number = Date.now,
 ): Promise<EncodedRecordingWav> => {
+  if (
+    !Number.isSafeInteger(descriptor.sampleRate)
+    || descriptor.sampleRate < 1
+    || !Number.isSafeInteger(descriptor.channelCount)
+    || descriptor.channelCount < 1
+    || !Number.isSafeInteger(descriptor.capturedFrames)
+    || descriptor.capturedFrames < 0
+    || !Number.isSafeInteger(descriptor.byteLength)
+    || descriptor.byteLength < 0
+  ) throw new Error('Recording PCM descriptor is invalid.')
   if (descriptor.capturedFrames === 0) {
     await removeRecordingTempSession(descriptor.sessionId).catch(() => undefined)
     throw new Error('Recording contained no audio frames.')

@@ -483,12 +483,16 @@ test('dead-letters uploaded audio clip creates with null results before completi
   })
 
   const originalFetch = globalThis.fetch
+  const uploadUrls: string[] = []
   globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => (
-      String(input) === '/api/samples'
-        ? new Response(JSON.stringify({ url: 'https://example.test/clip.wav', assetKey: 'asset-1' }), { status: 200 })
-        : new Response(JSON.stringify(null), { status: 200 })
-    ),
+    async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/samples?projectId=')) {
+        uploadUrls.push(url)
+        return new Response(JSON.stringify({ url: 'https://example.test/clip.wav', assetKey: 'asset-1' }), { status: 200 })
+      }
+      return new Response(JSON.stringify(null), { status: 200 })
+    },
     { preconnect: originalFetch.preconnect },
   )
   try {
@@ -502,6 +506,7 @@ test('dead-letters uploaded audio clip creates with null results before completi
     attempts: 1,
     lastError: 'Permanent failure: Clip creation was rejected.',
   })
+  expect(uploadUrls).toEqual([`/api/samples?projectId=${encodeURIComponent(projectId)}`])
   expect(await db.get('syncState', `shared-outbox-completion:${projectId}:${userId}:${operationId}`)).toBeUndefined()
 })
 

@@ -598,7 +598,7 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload) => 
   if (payload.duration !== undefined && Number.isFinite(payload.duration)) {
     form.append('duration', String(payload.duration))
   }
-  const response = await fetch('/api/samples', { method: 'POST', body: form })
+  const response = await fetch(`/api/samples?projectId=${encodeURIComponent(payload.projectId)}`, { method: 'POST', body: form })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     throw new SharedTimelineOperationHttpError(response.status, detail || undefined)

@@ -198,7 +198,7 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Multipart upload requires `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The Worker checks file size, MIME type, extension, digest, and audio metadata before the Convex and R2 upload is finalized.
+Multipart upload requires `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The bounded multipart protocol limits the request body to the 10 MiB asset limit plus fixed multipart framing allowance, and limits the actual uploaded file to 10 MiB. The Worker checks the safe-integer request length, actual file size, MIME type, extension, digest, and audio metadata before the Convex and R2 upload is finalized. This protocol/security limit does not provide duration-independent large-media support; shared-cloud large recording promotion remains an architectural gap for a future direct or resumable R2 upload flow.
 
 An action may refer to a persisted asset ID returned by project state. It must not invent an R2 object key.
 

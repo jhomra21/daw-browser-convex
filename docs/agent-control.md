@@ -250,7 +250,7 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Upload is multipart and capped at 10 MiB. It requires project write access, `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The Worker checks the digest, MIME type, extension, and audio metadata from the uploaded bytes before finalizing the Convex and R2 records.
+Upload is multipart and requires project write access, `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The bounded multipart protocol accepts a request body up to the 10 MiB asset limit plus fixed multipart framing allowance, and the uploaded file itself must be non-empty and no larger than 10 MiB. The Worker checks the digest, MIME type, extension, and audio metadata from the uploaded bytes before finalizing the Convex and R2 records. This is a transport/security limit, not duration-independent large-media support; shared-cloud large recording promotion still requires an explicit direct or resumable R2 upload architecture.
 
 A project action may refer to an asset ID returned by project state. It must not invent an R2 key.
 

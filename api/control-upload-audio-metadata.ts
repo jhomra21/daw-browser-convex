@@ -12,7 +12,6 @@ import {
   WEBM,
 } from 'mediabunny'
 
-const maxAssetUploadBytes = 10 * 1024 * 1024
 const maxSampleRate = 384_000
 const maxChannelCount = 64
 
@@ -64,14 +63,12 @@ export const inspectControlUploadAudioMetadata = async (input: {
   file: File
   declaredMimeType: string
 }): Promise<TrustedAudioMetadata> => {
-  if (input.file.size < 1 || input.file.size > maxAssetUploadBytes) {
-    fail('Asset upload exceeds the 10 MiB limit.')
-  }
+  if (input.file.size < 1) fail('Asset upload is empty.')
   const expectedFormat = expectedFormats.get(input.declaredMimeType)
   if (!expectedFormat) fail('Unsupported audio MIME type.')
 
   const mediaInput = new Input({
-    source: new BlobSource(input.file, { maxCacheSize: maxAssetUploadBytes }),
+    source: new BlobSource(input.file),
     formats: ALL_FORMATS,
   })
   try {

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Hono } from "hono";
 import { z } from "zod";
+import { controlLimitsV1 } from "@daw-browser/control";
 import type { ApiBindings } from "../app-types";
 import { AudioUploadValidationError } from "../control-upload-audio-metadata";
 import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
@@ -33,9 +34,21 @@ const request = (assetKey: string, contents = "audio") => {
   form.append("projectId", "project-1");
   form.append("assetKey", assetKey);
   form.append("file", file(contents));
-  return new Request("https://control.example/api/samples", {
+  return new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": "1000" },
+    body: form,
+  });
+};
+
+const requestWithFile = (assetKey: string, upload: File) => {
+  const form = new FormData();
+  form.append("projectId", "project-1");
+  form.append("assetKey", assetKey);
+  form.append("file", upload);
+  return new Request("https://control.example/api/samples?projectId=project-1", {
+    method: "POST",
+    headers: { "Content-Length": String(upload.size) },
     body: form,
   });
 };
@@ -68,7 +81,6 @@ test("browser uploads derive a stable server idempotency key and return the auth
     }),
     putObject: async () => { puts += 1; },
   });
-
   const first = await application.request(request("client-stable-asset-key"));
   const second = await application.request(request("client-stable-asset-key"));
   expect(first.status).toBe(201);
@@ -85,11 +97,16 @@ test("browser uploads derive a stable server idempotency key and return the auth
 
 test("browser uploads require the stable client asset key", async () => {
   const application = new Hono<ApiBindings>();
-  registerSampleRoutes(application);
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => ({
+      user: { id: "user-1" },
+      convex: { query: async () => null, mutation: async () => ({}) },
+    }),
+  });
   const form = new FormData();
   form.append("projectId", "project-1");
   form.append("file", file());
-  const response = await application.request(new Request("https://control.example/api/samples", {
+  const response = await application.request(new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": "1000" },
     body: form,
@@ -153,6 +170,109 @@ test("keeps unexpected sample backend failures as internal errors", async () => 
 
   const response = await application.request(request("backend-failure"));
   expect(response.status).toBe(500);
+});
+
+test("rejects oversized sample requests before multipart parsing or hashing", async () => {
+  const application = new Hono<ApiBindings>();
+  let hashed = false;
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => {
+      throw new Error("authorization should not run after request rejection");
+    },
+    hashFile: async () => {
+      hashed = true;
+      return "a".repeat(64);
+    },
+  });
+
+  const response = await application.request(new Request("https://control.example/api/samples?projectId=project-1", {
+    method: "POST",
+    headers: { "Content-Length": String(controlLimitsV1.maxAssetUploadRequestBytes + 1) },
+    body: "not multipart",
+  }));
+  expect(response.status).toBe(413);
+  expect(hashed).toBeFalse();
+  const unsafeLength = await application.request(new Request("https://control.example/api/samples?projectId=project-1", {
+    method: "POST",
+    headers: { "Content-Length": String(Number.MAX_SAFE_INTEGER + 1) },
+    body: "not multipart",
+  }));
+  expect(unsafeLength.status).toBe(400);
+});
+
+test("rejects oversized sample files after authorization and before hashing", async () => {
+  const application = new Hono<ApiBindings>();
+  let hashed = false;
+  const large = new File([new Uint8Array(controlLimitsV1.maxAssetUploadBytes + 1)], "large.wav", { type: "audio/wav" });
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => ({
+      user: { id: "user-1" },
+      convex: { query: async () => null, mutation: async () => ({}) },
+    }),
+    hashFile: async () => {
+      hashed = true;
+      return "a".repeat(64);
+    },
+  });
+  const response = await application.request(requestWithFile("large", large));
+  expect(response.status).toBe(413);
+  expect(hashed).toBeFalse();
+});
+
+test("checks project authorization before hashing or inspecting the upload", async () => {
+  const application = new Hono<ApiBindings>();
+  let hashed = false;
+  let inspected = false;
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => null,
+    hashFile: async () => {
+      hashed = true;
+      return "a".repeat(64);
+    },
+    inspectAudioMetadata: async () => {
+      inspected = true;
+      throw new Error("should not inspect");
+    },
+  });
+
+  const response = await application.request(request("unauthorized"));
+  expect(response.status).toBe(403);
+  expect(hashed).toBeFalse();
+  expect(inspected).toBeFalse();
+});
+
+test("returns an internal error and records failed upload when R2 fails", async () => {
+  const application = new Hono<ApiBindings>();
+  let mutationCalls = 0;
+  registerSampleRoutes(application, {
+    requireProjectRoleContext: async () => ({
+      user: { id: "user-1" },
+      convex: {
+        query: async () => null,
+        mutation: async () => {
+          mutationCalls += 1;
+          return mutationCalls === 1
+            ? { status: "pending", assetKey: "asset", r2Key: "asset" }
+            : {};
+        },
+      },
+    }),
+    putObject: async () => {
+      throw new Error("r2 failure");
+    },
+    inspectAudioMetadata: async () => ({
+      durationSec: 1,
+      sampleRate: 48_000,
+      channelCount: 1,
+      detectedFormat: "WAVE",
+      detectedMimeType: "audio/wav",
+      detectedCodec: "pcm-s16",
+    }),
+  });
+
+  const response = await application.request(request("r2-failure"));
+  expect(response.status).toBe(500);
+  expect(mutationCalls).toBe(2);
 });
 
 test("default sample catalog CORS only permits trusted Electron origins", async () => {

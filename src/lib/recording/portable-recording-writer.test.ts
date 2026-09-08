@@ -93,6 +93,67 @@ test('fails instead of growing beyond the fixed portable writer queue', async ()
   writer.terminate()
 })
 
+test('reuses the fixed resident block pool across a long logical sequence', async () => {
+  const posted: WriterInboundMessage[] = []
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
+  const writer = createPortableRecordingWriter({
+    generation: 7,
+    sessionId: 'take-long',
+    sampleRate: 48_000,
+    channelCount: 1,
+    worker: {
+      postMessage: (message) => posted.push(message),
+      setMessageHandler: (handler) => {
+        handleMessage = handler
+      },
+      terminate: () => undefined,
+    },
+  })
+  handleMessage({ type: 'ready', generation: 7, sessionId: 'take-long' })
+  await writer.ready
+
+  const residentBuffers = new Set<ArrayBuffer>()
+  const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
+    version: 2,
+    type: 'recording-capture-block',
+    generation: 7,
+    sessionId: 11,
+    sequence: 0,
+    frameCount: 1,
+    channelCount: 1,
+    planes: [Float32Array.of(0)],
+    rms: 0,
+    peak: 0,
+  }
+  const outstanding: Extract<WriterInboundMessage, { type: 'block' }>[] = []
+  for (let sequence = 0; sequence < RECORDER_MAX_QUEUED_BLOCKS; sequence += 1) {
+    writer.write({ ...block, sequence })
+    const message = posted.at(-1)
+    if (!message || message.type !== 'block') throw new Error('Expected a writer block.')
+    residentBuffers.add(message.buffer)
+    outstanding.push(message)
+  }
+  for (let sequence = RECORDER_MAX_QUEUED_BLOCKS; sequence < 128; sequence += 1) {
+    const returned = outstanding.shift()
+    if (!returned) throw new Error('Expected an outstanding writer block.')
+    handleMessage({
+      type: 'return',
+      generation: 7,
+      sessionId: 'take-long',
+      blockId: returned.blockId,
+      buffer: returned.buffer,
+    })
+    writer.write({ ...block, sequence })
+    const message = posted.at(-1)
+    if (!message || message.type !== 'block') throw new Error('Expected a writer block.')
+    residentBuffers.add(message.buffer)
+    outstanding.push(message)
+  }
+
+  expect(residentBuffers.size).toBe(RECORDER_MAX_QUEUED_BLOCKS)
+  writer.terminate()
+})
+
 test('terminates when the portable writer never becomes ready', async () => {
   let terminations = 0
   const writer = createPortableRecordingWriter({

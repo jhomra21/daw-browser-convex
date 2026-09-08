@@ -26,6 +26,10 @@ import {
   type PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { NativePcmChunkDescriptor } from "@daw-browser/audio-engine/native-pcm-chunking"
+import {
+  createAudioPcmSourceDescriptor,
+  type AudioPcmSourceDescriptor,
+} from "@daw-browser/audio-engine/media-pages"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostDeviceConfiguration,
@@ -366,6 +370,7 @@ export const createNativePlaybackController = (input: {
   let latestSpectrumSequence = 0n
   let latestScheduleProgress: NativeScheduleProgress | undefined
   let stretchPreparationAbortController: AbortController | undefined
+  let startAbortController: AbortController | undefined
   let preparedStretchRepository: PreparedStretchArtifactRepository | undefined
   let stretchCache: ReturnType<typeof createAudioStretchCache> | undefined
   let installedAssetSourceKeys = new Map<string, string>()
@@ -673,6 +678,8 @@ export const createNativePlaybackController = (input: {
     }
     stretchPreparationAbortController?.abort()
     stretchPreparationAbortController = undefined
+    startAbortController?.abort()
+    startAbortController = undefined
     const hadSession = prepared
       || nativeSessionStarted
       || active
@@ -923,6 +930,8 @@ export const createNativePlaybackController = (input: {
       await releaseStretch?.()
       await bridge.session.teardown().catch(() => undefined)
     }
+    const startAbortControllerForAttempt = new AbortController()
+    startAbortController = startAbortControllerForAttempt
     let transactionOpen = false
     let transactionToken: string | undefined
     let attemptedStretchLeaseDispose: (() => Promise<void>) | undefined
@@ -1107,9 +1116,9 @@ export const createNativePlaybackController = (input: {
       }, transactionToken))
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
       if (bridge.session.createMappedAsset && bridge.session.writeMappedAssetPage && bridge.session.prepareMappedAssetRange) {
-        const ordinarySources = projection.assets
+        const ordinaryAssets = projection.assets
           .filter(({ pcm }) => !pcm)
-          .map(({ asset, sourceAssetKey }) => {
+        const ordinarySources = (await Promise.all(ordinaryAssets.map(async ({ asset, sourceAssetKey }) => {
             const prepared = preparedStretchAssets.find((candidate) => (
               candidate.preparedStretchArtifactId === sourceAssetKey
             ))
@@ -1125,22 +1134,35 @@ export const createNativePlaybackController = (input: {
               }
             }
             const snapshotAsset = snapshot.assets.find((candidate) => candidate.assetId === sourceAssetKey)
+            if (!snapshotAsset) throw new Error(`Native audio asset "${sourceAssetKey}" is absent from the playback snapshot.`)
+            const clip = snapshot.tracks
+              .flatMap((track) => track.clips)
+              .find((candidate) => candidate.sourceAssetKey === sourceAssetKey)
+            const descriptor: AudioPcmSourceDescriptor | undefined = snapshotAsset.buffer
+              ? createAudioPcmSourceDescriptor({
+                identity: `buffer:${sourceAssetKey}`,
+                durationSec: snapshotAsset.buffer.duration,
+                frameCount: snapshotAsset.buffer.length,
+                sampleRate: snapshotAsset.buffer.sampleRate,
+                channelCount: snapshotAsset.buffer.numberOfChannels,
+                source: snapshotAsset.buffer,
+              })
+              : clip && input.resolveSource
+                ? await input.resolveSource(clip, startAbortControllerForAttempt.signal)
+                : undefined
+            if (!descriptor) {
+              throw new Error(`Native audio asset "${sourceAssetKey}" has no resolvable PCM source descriptor.`)
+            }
             return {
               sourceAssetKey,
               sessionAssetId: assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)?.sessionAssetId ?? 0,
-              frameCount: snapshotAsset?.source?.durationSec !== undefined
-                ? Math.max(1, Math.round(snapshotAsset.source.durationSec * snapshotAsset.source.sampleRate))
-                : asset.frameCount,
-              sampleRateHz: snapshotAsset?.source?.sampleRate ?? asset.sampleRateHz,
-              channelCount: snapshotAsset?.source?.channelCount ?? asset.channelCount,
-              buffer: snapshotAsset?.buffer,
-              sourceKind: snapshotAsset?.sourceKind,
-              sampleUrl: snapshotAsset?.sampleUrl,
+              frameCount: descriptor.frameCount,
+              sampleRateHz: descriptor.sampleRate,
+              channelCount: descriptor.channelCount,
+              descriptor,
             }
-          })
-          .filter((source) => source.sessionAssetId > 0)
+          }))).filter((source) => source.sessionAssetId > 0)
         nativeTimelinePageManager = createNativeTimelinePageManager({
-          projectId: preparedProjectIdForAttempt,
           sources: ordinarySources,
           writePage: async (page, signal) => {
             signal?.throwIfAborted()
@@ -1311,6 +1333,9 @@ export const createNativePlaybackController = (input: {
       }
       return result
     } finally {
+      if (startAbortController === startAbortControllerForAttempt) {
+        startAbortController = undefined
+      }
       await attemptedStretchLeaseDispose?.()
     }
   }

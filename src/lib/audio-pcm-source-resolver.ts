@@ -126,13 +126,17 @@ export const createAudioPcmSourceResolver = (input: {
       const encoded = await inspectAudioSourceMetadata(result.file, { signal })
       assertEncodedMetadataMatchesPersisted(metadata, encoded, localId)
       const claimedHash = row.contentHash
-      const actualHash = canonicalContentHash(claimedHash)
+      const requiresVerifiedIdentity = clip.audioWarp?.enabled === true
+        && clip.audioWarp.mode === 'stretch'
+      const actualHash = requiresVerifiedIdentity && canonicalContentHash(claimedHash)
         ? await sha256File(result.file, signal)
         : undefined
       const verified = actualHash !== undefined && actualHash === claimedHash
       return createAudioPcmSourceDescriptor({
         identity: verified
           ? `${clip.sourceAssetKey}:${actualHash}`
+          : canonicalContentHash(claimedHash)
+            ? `${clip.sourceAssetKey}:${claimedHash}`
           : `${clip.sourceAssetKey}:session:${crypto.randomUUID()}`,
         contentHash: verified ? actualHash : undefined,
         contentHashVerified: verified,

@@ -1,5 +1,4 @@
-import { decodeAudioPages, type DecodeAudioPageSource } from '@daw-browser/audio-engine/media-pages'
-import { readLocalAssetBytes } from '~/lib/local-assets'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import type { NativeHostMappedAssetPage } from '@daw-browser/audio-engine/native-host-wire'
 import {
   nativeAudioHostMaximumAssetChannels,
@@ -14,9 +13,7 @@ export type NativeTimelineSource = {
   frameCount: number
   sampleRateHz: number
   channelCount: number
-  buffer?: AudioBuffer | null
-  sourceKind?: 'upload' | 'url' | 'recording'
-  sampleUrl?: string | URL | Request
+  descriptor?: AudioPcmSourceDescriptor
   preparedStretchArtifactId?: string
   artifactRepository?: PreparedStretchArtifactRepository
 }
@@ -45,8 +42,6 @@ type RangePreparer = (
   frameCount: number,
   signal?: AbortSignal,
 ) => Promise<void>
-type SourceReader = (projectId: string, assetId: string) => Promise<Awaited<ReturnType<typeof readLocalAssetBytes>>>
-
 const maximumDecoders = 2
 const maximumDecodedPageFrames = 16_384
 export const nativeTimelineMaximumUploadedPages = 128
@@ -74,11 +69,9 @@ const mergeRanges = (
 }
 
 export const createNativeTimelinePageManager = (input: {
-  projectId?: string
   sources: readonly NativeTimelineSource[]
   writePage: PageWriter
   prepareRange?: RangePreparer
-  readLocalAsset?: SourceReader
   pageFrames?: number
 }): NativeTimelinePageManager => {
   const sources = new Map(input.sources.map((source) => [source.sourceAssetKey, source]))
@@ -89,7 +82,6 @@ export const createNativeTimelinePageManager = (input: {
   const slotWaiters: Array<() => void> = []
   const abortController = new AbortController()
   let disposePromise: Promise<void> | undefined
-  const readLocalAsset = input.readLocalAsset ?? readLocalAssetBytes
   let accessSequence = 0
   const requestedPageFrames = input.pageFrames ?? maximumDecodedPageFrames
   if (!Number.isSafeInteger(requestedPageFrames) || requestedPageFrames <= 0) {
@@ -202,16 +194,6 @@ export const createNativeTimelinePageManager = (input: {
     }
   }
 
-  const sourceFor = async (source: NativeTimelineSource): Promise<DecodeAudioPageSource> => {
-    if (source.sourceKind !== 'url' && input.projectId) {
-      const local = await readLocalAsset(input.projectId, source.sourceAssetKey)
-      if (local.status === 'ready') return local.file
-      throw new Error(`Native audio asset "${source.sourceAssetKey}" is not available locally.`)
-    }
-    if (!source.sampleUrl) throw new Error(`Native audio asset "${source.sourceAssetKey}" has no source URL.`)
-    return source.sampleUrl
-  }
-
   const readArtifactPage = async (
     source: NativeTimelineSource,
     startFrame: number,
@@ -310,52 +292,37 @@ export const createNativeTimelinePageManager = (input: {
           () => new Float32Array(endFrame - startFrame),
         )
         const written: { startFrame: number; endFrame: number }[] = []
-        if (source.buffer) {
-          if (source.buffer.sampleRate !== source.sampleRateHz
-            || source.buffer.numberOfChannels !== source.channelCount
-            || source.buffer.length < endFrame) {
-            throw new Error(`Native audio asset "${sourceAssetKey}" eager metadata is inconsistent.`)
+        const descriptor = source.descriptor
+        if (!descriptor
+          || descriptor.frameCount !== source.frameCount
+          || descriptor.sampleRate !== source.sampleRateHz
+          || descriptor.channelCount !== source.channelCount) {
+          throw new Error(`Native audio asset "${sourceAssetKey}" descriptor metadata is inconsistent.`)
+        }
+        for await (const page of descriptor.readPages({
+          startFrame,
+          endFrame,
+          signal: operationSignal,
+        })) {
+          operationSignal.throwIfAborted()
+          if (page.sampleRate !== source.sampleRateHz || page.channelCount !== source.channelCount) {
+            throw new Error(`Native audio asset "${sourceAssetKey}" metadata changed while decoding.`)
           }
+          const overlapStart = Math.max(startFrame, page.startFrame)
+          const overlapEnd = Math.min(endFrame, page.startFrame + page.frameCount)
+          if (overlapEnd <= overlapStart) continue
+          const pageOffset = overlapStart - page.startFrame
+          const outputOffset = overlapStart - startFrame
+          const frameCount = overlapEnd - overlapStart
           for (let channel = 0; channel < source.channelCount; channel += 1) {
-            const sourcePlane = source.buffer.getChannelData(channel)
+            const sourcePlane = page.planes[channel]
             const destinationPlane = pagePlanes[channel]
-            if (!destinationPlane) {
+            if (!sourcePlane || !destinationPlane) {
               throw new Error(`Native audio asset "${sourceAssetKey}" has an incomplete channel layout.`)
             }
-            destinationPlane.set(sourcePlane.subarray(startFrame, endFrame))
+            destinationPlane.set(sourcePlane.subarray(pageOffset, pageOffset + frameCount), outputOffset)
           }
-          written.push({ startFrame, endFrame })
-        } else {
-          const decoderSource = await sourceFor(source)
-          for await (const page of decodeAudioPages(decoderSource, {
-            startSec: startFrame / source.sampleRateHz,
-            endSec: endFrame / source.sampleRateHz,
-            pageFrames,
-            signal: operationSignal,
-          })) {
-            operationSignal.throwIfAborted()
-            if (page.sampleRate !== source.sampleRateHz || page.channelCount !== source.channelCount) {
-              throw new Error(`Native audio asset "${sourceAssetKey}" metadata changed while decoding.`)
-            }
-            const overlapStart = Math.max(startFrame, page.startFrame)
-            const overlapEnd = Math.min(endFrame, page.startFrame + page.frameCount)
-            if (overlapEnd <= overlapStart) continue
-            const pageOffset = overlapStart - page.startFrame
-            const outputOffset = overlapStart - startFrame
-            const frameCount = overlapEnd - overlapStart
-            for (let channel = 0; channel < source.channelCount; channel += 1) {
-              const sourcePlane = page.planes[channel]
-              const destinationPlane = pagePlanes[channel]
-              if (!sourcePlane || !destinationPlane) {
-                throw new Error(`Native audio asset "${sourceAssetKey}" has an incomplete channel layout.`)
-              }
-              destinationPlane.set(
-                sourcePlane.subarray(pageOffset, pageOffset + frameCount),
-                outputOffset,
-              )
-            }
-            written.push({ startFrame: overlapStart, endFrame: overlapEnd })
-          }
+          written.push({ startFrame: overlapStart, endFrame: overlapEnd })
         }
         const covered = mergeRanges(written)
         if (covered.length !== 1
@@ -420,38 +387,30 @@ export const createNativeTimelinePageManager = (input: {
       }
       const bytesPerPlane = frameCount * Float32Array.BYTES_PER_ELEMENT
       const planes = Array.from({ length: source.channelCount }, () => new Float32Array(frameCount))
-      const decoderSource = source.buffer
-        ? undefined
-        : await sourceFor(source)
-      if (source.buffer) {
-        if (source.buffer.sampleRate !== source.sampleRateHz
-          || source.buffer.numberOfChannels !== source.channelCount
-          || source.buffer.length < startFrame + frameCount) {
-          throw new Error(`Native audio asset "${sourceAssetKey}" eager metadata is inconsistent.`)
-        }
-        for (let channel = 0; channel < source.channelCount; channel += 1) {
-          planes[channel]?.set(source.buffer.getChannelData(channel).subarray(startFrame, startFrame + frameCount))
-        }
-      } else if (decoderSource) {
-        let expected = startFrame
-        for await (const page of decodeAudioPages(decoderSource, {
+      const descriptor = source.descriptor
+      if (!descriptor
+        || descriptor.frameCount !== source.frameCount
+        || descriptor.sampleRate !== source.sampleRateHz
+        || descriptor.channelCount !== source.channelCount) {
+        throw new Error(`Native audio asset "${sourceAssetKey}" descriptor metadata is inconsistent.`)
+      }
+      let expected = startFrame
+      for await (const page of descriptor.readPages({
           startFrame,
           endFrame: startFrame + frameCount,
-          pageFrames,
           signal: operationSignal,
         })) {
-          operationSignal.throwIfAborted()
-          if (page.startFrame !== expected
-            || page.sampleRate !== source.sampleRateHz
-            || page.channelCount !== source.channelCount
-            || page.planes.some((plane) => plane.length !== page.frameCount)) {
-            throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage is invalid.`)
-          }
-          page.planes.forEach((plane, channel) => planes[channel]?.set(plane, expected - startFrame))
-          expected += page.frameCount
+        operationSignal.throwIfAborted()
+        if (page.startFrame !== expected
+          || page.sampleRate !== source.sampleRateHz
+          || page.channelCount !== source.channelCount
+          || page.planes.some((plane) => plane.length !== page.frameCount)) {
+          throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage is invalid.`)
         }
-        if (expected !== startFrame + frameCount) throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage has a gap.`)
+        page.planes.forEach((plane, channel) => planes[channel]?.set(plane, expected - startFrame))
+        expected += page.frameCount
       }
+      if (expected !== startFrame + frameCount) throw new Error(`Native audio asset "${sourceAssetKey}" decoded coverage has a gap.`)
       const planarPcm = new Uint8Array(frameCount * source.channelCount * Float32Array.BYTES_PER_ELEMENT)
       planes.forEach((plane, channel) => {
         planarPcm.set(new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength), channel * bytesPerPlane)

@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test'
 import { createAudioPcmSourceResolver } from './audio-pcm-source-resolver'
 import { createLocalProject, openLocalProjectDb } from './local-project-db'
 import { sha256File } from '@daw-browser/audio-engine/media-pages'
+import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)
@@ -38,18 +39,18 @@ const clip = (input: {
   id?: string
   sourceAssetKey?: string
   sampleUrl?: string
-}) => ({
+  stretch?: boolean
+}): AudioStretchRuntimeClip => ({
   id: input.id ?? 'clip-1',
-  name: 'Audio',
   startSec: 0,
   duration: 1,
-  color: '#fff',
   sourceAssetKey: input.sourceAssetKey,
   sampleUrl: input.sampleUrl,
   sourceDurationSec: 5 / 48_000,
   sourceSampleRate: 48_000,
   sourceChannelCount: 1,
   buffer: undefined,
+  audioWarp: input.stretch ? { enabled: true, mode: 'stretch', sourceBpm: 120 } : undefined,
 })
 
 test('resolves a metadata-only cloud asset through its canonical project URL', async () => {
@@ -126,7 +127,7 @@ test('admits a local content hash only after verifying the resolved File bytes',
     readLocalAsset: async () => ({ status: 'ready', file }),
   })
 
-  const result = await resolver(clip({ sourceAssetKey: 'asset:verified' }))
+  const result = await resolver(clip({ sourceAssetKey: 'asset:verified', stretch: true }))
 
   expect(result.contentHashVerified).toBe(true)
   expect(result.persistable).toBe(true)

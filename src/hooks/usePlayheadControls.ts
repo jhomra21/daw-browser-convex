@@ -39,6 +39,17 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, res
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
+    hydrateLegacyAudio: async () => {
+      const pendingBuffers: Promise<void>[] = []
+      for (const track of tracks()) {
+        for (const clip of track.clips) {
+          if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
+            pendingBuffers.push(ensureClipBuffer(clip.id, clip.sampleUrl))
+          }
+        }
+      }
+      await Promise.all(pendingBuffers)
+    },
   }, nativePlayback ? { ...nativePlayback, requiresNativeAudio, resolveAudioSource } : undefined, portableBrowserPlayback ? { ...portableBrowserPlayback, resolveAudioSource } : undefined)
 
   let scrollEl: HTMLDivElement | undefined
@@ -86,20 +97,7 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, res
 
   const requestPlay = async () => {
     if (preflightPlayback && !await preflightPlayback()) return
-    const initialTracks = tracks()
-    const pendingBuffers: Promise<void>[] = []
-    for (const track of initialTracks) {
-      for (const clip of track.clips) {
-        if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
-          pendingBuffers.push(ensureClipBuffer(clip.id, clip.sampleUrl))
-        }
-      }
-    }
-    if (pendingBuffers.length) {
-      await Promise.all(pendingBuffers)
-    }
-    const readyTracks = tracks()
-    await playback.handlePlay(readyTracks)
+    await playback.handlePlay(tracks())
   }
 
   onCleanup(() => {

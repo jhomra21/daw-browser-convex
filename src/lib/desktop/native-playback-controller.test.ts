@@ -4,6 +4,7 @@ import "fake-indexeddb/auto"
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
+import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import { automationTargetKey, createDefaultDrumRackParams, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
@@ -697,6 +698,14 @@ test("starts a mapped session from persisted ordinary metadata without an eager 
   const controller = createNativePlaybackController({
     bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input(track)),
+    resolveSource: async () => createAudioPcmSourceDescriptor({
+      identity: "test:ordinary-source",
+      durationSec: 1 / 48_000,
+      frameCount: 1,
+      sampleRate: 48_000,
+      channelCount: 1,
+      source: new TestAudioBuffer([new Float32Array(1)]),
+    }),
   })
 
   await expect(controller.start(input(track).transport)).resolves.toBe("started")

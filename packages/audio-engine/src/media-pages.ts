@@ -495,7 +495,9 @@ export async function* decodeAudioPages(
   options: DecodeAudioPagesOptions = {},
 ): AsyncGenerator<DecodedAudioPage> {
   const pageFrames = options.pageFrames ?? defaultDecodedAudioPageFrames
-  if (!validPageFrames(pageFrames)) throw new Error('Decoded audio page size is invalid.')
+  if (!validPageFrames(pageFrames) || pageFrames > defaultDecodedAudioPageFrames) {
+    throw new Error(`Decoded audio page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
+  }
   if (options.startSec !== undefined && !Number.isFinite(options.startSec)) {
     throw new Error('Decoded audio start time is invalid.')
   }

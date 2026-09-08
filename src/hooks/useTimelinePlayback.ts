@@ -19,6 +19,7 @@ type LoopOptions = {
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
   getTracks?: Accessor<Track[]>
+  hydrateLegacyAudio?: () => Promise<void>
 }
 
 type NativePlaybackOptions = {
@@ -845,6 +846,13 @@ export function useTimelinePlayback(
         audioEngine.stopAllSources()
         return
       }
+      await loopOptions?.hydrateLegacyAudio?.()
+      if (!isCurrentPlayAttempt(token)) {
+        await disposePreparedBackends()
+        audioEngine.stopAllSources()
+        return
+      }
+      const readyTracks = loopOptions?.getTracks?.() ?? tracks
       backendOwnerToken += 1
       setActiveBackend('legacy')
       setIsPlaying(true)
@@ -855,10 +863,10 @@ export function useTimelinePlayback(
       audioEngine.onTransportStart(playheadSec())
       audioEngine.onTransportSeek(playheadSec(), SCHED_AHEAD_SEC)
       scheduledUntilSec = getScheduleHorizonEnd(playheadSec(), isActive ? end : undefined)
-      scheduleAndTrackDeferred(tracks, playheadSec(), { endLimitSec: scheduledUntilSec })
+      scheduleAndTrackDeferred(readyTracks, playheadSec(), { endLimitSec: scheduledUntilSec })
       audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
         horizonSec: scheduledUntilSec - playheadSec(),
-        tracks,
+        tracks: readyTracks,
       })
       setRafId(requestAnimationFrame(tick))
       playAttemptPhase = { token, backend: 'fallback', state: 'active' }

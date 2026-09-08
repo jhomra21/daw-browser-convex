@@ -2,7 +2,6 @@ import { expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
 import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
-import type { NativeOfflineRenderPlan } from "@daw-browser/audio-engine/native-host-wire"
 import * as exportMixdown from "@daw-browser/audio-engine/export-mixdown"
 import type { StreamTargetChunk } from "mediabunny"
 
@@ -1319,9 +1318,8 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
   })
 })
 
-test("native Main mixdown does not hydrate ordinary whole-buffer clips", async () => {
+test("native Main mixdown reports metadata-only ordinary clips without a resolver", async () => {
   let loaderCalls = 0
-  let planned: NativeOfflineRenderPlan | undefined
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
     getTracks: () => [{
@@ -1370,24 +1368,15 @@ test("native Main mixdown does not hydrate ordinary whole-buffer clips", async (
       },
     },
     renderStateSnapshot,
-    nativeOfflinePcmRenderer: async (plan) => {
-      planned = plan
-      throw new NativeOfflineRenderError("stop after ordinary mapped planning")
+    nativeOfflinePcmRenderer: async () => {
+      throw new NativeOfflineRenderError("native renderer should not run")
     },
   })
 
   expect(loaderCalls).toBe(0)
-  expect(planned).toMatchObject({
-    assets: [],
-    mappedAssets: [expect.objectContaining({
-      sourceAssetKey: "asset:ordinary",
-      frameCount: 9 * 48_000,
-    })],
-  })
   expect(outcome).toEqual({
     type: "error",
-    message: "stop after ordinary mapped planning",
-    failureOwner: "native",
+    message: "Native export metadata-only mapped audio requires a PCM source resolver.",
     outputs: [],
   })
 })

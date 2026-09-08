@@ -2,7 +2,13 @@ import { expect, test } from 'bun:test'
 import { createDefaultSynthParams } from '@daw-browser/shared'
 import { resolveLiveMixerGraph } from '@daw-browser/audio-engine/live-mixer-runtime'
 import type { PortableFrameSchedule } from '@daw-browser/audio-engine/portable-frame-scheduling'
-import type { PortableWasmControlMessage, PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
+import {
+  portableWasmPagedMaxChannels,
+  portableWasmPagedPageFrames,
+  portableWasmPagedSlotCount,
+  type PortableWasmControlMessage,
+  type PortableWasmStatusMessage,
+} from '@daw-browser/audio-engine/portable-wasm-protocol'
 import { audioCoreContractVersion } from '@daw-browser/audio-core-contract'
 import {
   audioCoreWasmAbiVersion,
@@ -10,6 +16,7 @@ import {
   audioCoreWasmPagedAbiVersion,
 } from '@daw-browser/audio-core-wasm'
 import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
+import { portableWasmPagedPreparationCount } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
@@ -73,7 +80,148 @@ const compilation = () => {
   }
 }
 
+const pagedAssetFrameCount = portableWasmPagedPageFrames * 96
+const pagedAssetIds = ['asset-a', 'asset-b'] as const
+const pagedTracks: RuntimeTrack[] = pagedAssetIds.map((assetId, index) => ({
+  id: `audio-${index}`,
+  kind: 'audio',
+  name: `Audio ${index}`,
+  volume: 1,
+  clips: [{
+    id: `clip-${index}`,
+    name: `Clip ${index}`,
+    color: '#fff',
+    startSec: 0,
+    duration: 30,
+    sourceAssetKey: assetId,
+  }],
+}))
+
+const pagedCompilation = (transport: LivePlaybackTransport = compilation().snapshot.transport) => {
+  const mixer = resolveLiveMixerGraph(pagedTracks, {})
+  return {
+    supported: true as const,
+    snapshot: {
+      ...compilation().snapshot,
+      transport,
+      tracks: pagedTracks,
+      assets: pagedAssetIds.map((assetId) => ({
+        assetId,
+        source: {
+          durationSec: pagedAssetFrameCount / 48_000,
+          sampleRate: 48_000,
+          channelCount: 1,
+        },
+      })),
+      mixer: {
+        ...compilation().snapshot.mixer,
+        graph: mixer,
+        fx: {
+          ...compilation().snapshot.mixer.fx,
+          trackFx: {},
+        },
+      },
+    },
+  }
+}
+
+const manyPagedCompilation = (
+  sourceCount: number,
+  transport: LivePlaybackTransport = compilation().snapshot.transport,
+) => {
+  const assetId = 'asset-many'
+  const tracks: RuntimeTrack[] = Array.from({ length: sourceCount }, (_, index) => ({
+    id: `many-audio-${index}`,
+    kind: 'audio',
+    name: `Many audio ${index}`,
+    volume: 1,
+    clips: [{
+      id: `many-clip-${index}`,
+      name: `Many clip ${index}`,
+      color: '#fff',
+      startSec: 0,
+      duration: 31,
+      sourceAssetKey: assetId,
+    }],
+  }))
+  const mixer = resolveLiveMixerGraph(tracks, {})
+  const base = compilation()
+  return {
+    supported: true as const,
+    snapshot: {
+      ...base.snapshot,
+      transport,
+      tracks,
+      assets: [{
+        assetId,
+        source: {
+          durationSec: 128 * portableWasmPagedPageFrames / 48_000,
+          sampleRate: 48_000,
+          channelCount: 1,
+        },
+      }],
+      mixer: {
+        ...base.snapshot.mixer,
+        graph: mixer,
+        fx: {
+          ...base.snapshot.mixer.fx,
+          trackFx: {},
+        },
+      },
+    },
+  }
+}
+
+const pagedDescriptor = (
+  assetId: string,
+  readCalls: string[],
+  frameCount = pagedAssetFrameCount,
+) => ({
+  identity: `descriptor:${assetId}`,
+  durationSec: frameCount / 48_000,
+  frameCount,
+  sampleRate: 48_000,
+  channelCount: 1,
+  readPages: async function* (options: { startFrame?: number; endFrame?: number } = {}) {
+    const startFrame = options.startFrame ?? 0
+    const endFrame = options.endFrame ?? frameCount
+    readCalls.push(`${assetId}:${startFrame}:${endFrame}`)
+    for (let frame = startFrame; frame < endFrame; frame += portableWasmPagedPageFrames) {
+      const frameCount = Math.min(portableWasmPagedPageFrames, endFrame - frame)
+      yield {
+        startFrame: frame,
+        frameCount,
+        sampleRate: 48_000,
+        channelCount: 1,
+        planes: [new Float32Array(frameCount)],
+      }
+    }
+  },
+})
+
 const context: AudioContext = Object.assign(Object.create(null), { sampleRate: 48_000 })
+
+const createRecordingFixture = (calls: string[]) => {
+  const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
+    readyState: 'live',
+    getSettings: () => ({ channelCount: 1 }),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    stop: (): void => { calls.push('track-stop') },
+  })
+  const stream: MediaStream = Object.assign(Object.create(null), {
+    getTracks: () => [mediaTrack],
+    getAudioTracks: () => [mediaTrack],
+  })
+  const source: MediaStreamAudioSourceNode = Object.assign(Object.create(null), {
+    disconnect: (): void => { calls.push('source-disconnect') },
+  })
+  const recordingContext: AudioContext = Object.assign(Object.create(context), {
+    sampleRate: 48_000,
+    createMediaStreamSource: () => source,
+  })
+  return { stream, recordingContext }
+}
 
 const selected: PortableWasmBackendSelection = {
   selected: true,
@@ -102,6 +250,7 @@ const createSession = (
   calls: string[],
   install: (schedule: PortableFrameSchedule) => Promise<void>,
   setTransport: (running: boolean, frame: number) => Promise<void> = async () => undefined,
+  paged = false,
 ) => {
   const record = (call: string) => calls.push(call)
   const faults = new Set<(error: Error) => void>()
@@ -111,8 +260,20 @@ const createSession = (
   let recordingGeneration = 0
   let recordingSessionId = 0
   const transports: Array<{ running: boolean; frame: number }> = []
+  const writtenPages = new Set<string>()
+  const preparations = new Set<number>()
+  let nextPreparationId = 1
   return {
     transports,
+    writtenPages,
+    preparations,
+    pagedCapabilities: paged ? {
+      pagedAbi: audioCoreWasmPagedAbiVersion,
+      pageFrames: portableWasmPagedPageFrames,
+      slotCount: portableWasmPagedSlotCount,
+      maxChannels: portableWasmPagedMaxChannels,
+      preparationCount: portableWasmPagedPreparationCount,
+    } : undefined,
     connectInput: () => {
       record('connect-input')
       return () => record('disconnect-input')
@@ -171,6 +332,34 @@ const createSession = (
       await install(schedule)
     },
     scheduleSources: async () => { record('schedule-sources') },
+    registerPagedAsset: async () => ({ status: 'registered' as const, handle: { slot: 0, generation: 1 } }),
+    writeAssetPage: async (assetId: string, _generation: number, pageIndex: number) => {
+      writtenPages.add(`${assetId}:${pageIndex}`)
+      return { status: 'written' as const }
+    },
+    prepareAssetRange: async (
+      assetId: string,
+      _generation: number,
+      sourceOffsetFrame: number,
+      sourceFrameCount: number,
+    ) => {
+      const firstPage = Math.floor(sourceOffsetFrame / portableWasmPagedPageFrames)
+      const lastPage = Math.floor((sourceOffsetFrame + sourceFrameCount - 1) / portableWasmPagedPageFrames)
+      const missingPage = Array.from(
+        { length: lastPage - firstPage + 1 },
+        (_, index) => firstPage + index,
+      ).find((page) => !writtenPages.has(`${assetId}:${page}`))
+      if (missingPage !== undefined) return { status: 'missing-page' as const, firstMissingPage: missingPage }
+      const preparationId = nextPreparationId
+      nextPreparationId += 1
+      preparations.add(preparationId)
+      return { status: 'prepared' as const, preparationId }
+    },
+    schedulePreparedSources: async () => { record('schedule-prepared-sources') },
+    releaseAssetPreparation: async (preparationId: number) => {
+      preparations.delete(preparationId)
+      return 'released' as const
+    },
     setTransport: async (_epoch: number, running: boolean, frame: number) => {
       record(running ? 'start-transport' : 'stop-transport')
       transports.push({ running, frame })
@@ -988,6 +1177,178 @@ test('stops portable playback when its active worklet faults', async () => {
 
   expect(controller.isActive()).toBe(false)
   expect(faults).toEqual(['AudioWorklet processor fault.'])
+})
+
+test('fits metadata-only ordinary startup pages and refreshes from the bounded horizon', async () => {
+  const calls: string[] = []
+  const readCalls: string[] = []
+  const sessions = [
+    createSession(calls, async () => undefined, undefined, true),
+    createSession(calls, async () => undefined, undefined, true),
+  ]
+  let sessionIndex = 0
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => pagedCompilation(transport),
+    getAudioContext: () => context,
+    scheduleHorizonSec: 30,
+    resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', readCalls),
+    backend: {
+      createPlaybackSession: async () => {
+        const session = sessions[sessionIndex]
+        sessionIndex += 1
+        if (!session) throw new Error('Unexpected extra portable session.')
+        return session
+      },
+    },
+    select: async () => selected,
+  })
+
+  await expect(controller.start(pagedCompilation().snapshot.transport)).resolves.toBe('started')
+  const initialSession = sessions[0]
+  if (!initialSession) throw new Error('Initial session is missing.')
+  expect(initialSession.writtenPages.size).toBe(portableWasmPagedSlotCount)
+  expect(initialSession.preparations.size).toBeLessThanOrEqual(64)
+  expect(readCalls).toHaveLength(initialSession.writtenPages.size)
+  expect(pagedCompilation().snapshot.assets.every((asset) => !('buffer' in asset))).toBeTrue()
+
+  initialSession.emitPosition(20 * context.sampleRate)
+  await expect(controller.refreshSchedule()).resolves.toBe('started')
+  expect(sessionIndex).toBe(2)
+  expect(sessions[1]?.writtenPages.size).toBeGreaterThan(0)
+  expect(controller.isActive()).toBeTrue()
+  controller.dispose()
+})
+
+test('reports unavailable before graph publication when the minimum paged window cannot fit', async () => {
+  const calls: string[] = []
+  const readCalls: string[] = []
+  const overfullTrack: RuntimeTrack = {
+    id: 'overfull-audio',
+    kind: 'audio',
+    name: 'Overfull audio',
+    volume: 1,
+    clips: Array.from({ length: 129 }, (_, index) => ({
+      id: `overfull-clip-${index}`,
+      name: `Overfull clip ${index}`,
+      color: '#fff',
+      startSec: 0,
+      duration: portableWasmPagedPageFrames / context.sampleRate,
+      sourceAssetKey: 'asset-overfull',
+      bufferOffsetSec: index * portableWasmPagedPageFrames / context.sampleRate,
+    })),
+  }
+  const base = pagedCompilation()
+  const overfull = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      tracks: [overfullTrack],
+      assets: [{
+        assetId: 'asset-overfull',
+        source: {
+          durationSec: portableWasmPagedPageFrames * 160 / context.sampleRate,
+          sampleRate: context.sampleRate,
+          channelCount: 1,
+        },
+      }],
+      mixer: {
+        ...base.snapshot.mixer,
+        graph: resolveLiveMixerGraph([overfullTrack], {}),
+      },
+    },
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async () => overfull,
+    getAudioContext: () => context,
+    scheduleHorizonSec: 30,
+    resolveSource: async () => pagedDescriptor(
+      'asset-overfull',
+      readCalls,
+      portableWasmPagedPageFrames * 160,
+    ),
+    backend: {
+      createPlaybackSession: async () => createSession(calls, async () => undefined, undefined, true),
+    },
+    select: async () => selected,
+    reportFault: (message) => calls.push(`fault:${message}`),
+  })
+
+  await expect(controller.start(overfull.snapshot.transport)).resolves.toBe('unavailable')
+  expect(calls).toContain('fault:Portable paged playback requires 130 resident pages, but only 128 are available.')
+  expect(calls).not.toContain('prepare-graph')
+  expect(readCalls).toHaveLength(0)
+  controller.dispose()
+})
+
+test('preflights recording refresh preparation capacity at the exact boundary', async () => {
+  for (const sourceCount of [33, 32]) {
+    const calls: string[] = []
+    const faults: string[] = []
+    const session = createSession(calls, async () => undefined, undefined, true)
+    const { stream, recordingContext } = createRecordingFixture(calls)
+    const controller = createPortableBrowserPlaybackController({
+      compileSnapshot: async (transport) => manyPagedCompilation(sourceCount, transport),
+      getAudioContext: () => recordingContext,
+      scheduleHorizonSec: 30,
+      resolveSource: async () => pagedDescriptor(
+        'asset-many',
+        [],
+        128 * portableWasmPagedPageFrames,
+      ),
+      backend: { createPlaybackSession: async () => session },
+      select: async () => selected,
+      reportFault: (message) => faults.push(message),
+      createRecordingWriter: () => ({
+        ready: Promise.resolve(),
+        write: () => undefined,
+        finalize: async () => ({ capturedFrames: 0 }),
+        abort: async () => undefined,
+        terminate: () => undefined,
+      }),
+    })
+
+    const started = await controller.start(manyPagedCompilation(sourceCount).snapshot.transport)
+    expect(started, faults.join('\n')).toBe('started')
+    const startTransportCount = session.transports.filter((transport) => transport.running).length
+    if (sourceCount === 33) {
+      await expect(controller.startRecording({
+        appSessionId: `over-capacity-${sourceCount}`,
+        stream,
+        layout: 'mono',
+        inputChannel: 0,
+        gain: 1,
+        polarity: 1,
+        monitoring: false,
+        punchStartFrame: 0,
+      })).rejects.toThrow('Portable recording is unavailable')
+      expect(controller.isRecording()).toBeFalse()
+      expect(controller.isActive()).toBeTrue()
+      expect(session.transports.filter((transport) => transport.running)).toHaveLength(startTransportCount)
+      expect(session.transports.filter((transport) => !transport.running)).toHaveLength(1)
+      expect(faults).toEqual([])
+    } else {
+      const recordingStart = controller.startRecording({
+        appSessionId: `at-capacity-${sourceCount}`,
+        stream,
+        layout: 'mono',
+        inputChannel: 0,
+        gain: 1,
+        polarity: 1,
+        monitoring: false,
+        punchStartFrame: 0,
+      })
+      await expect(recordingStart).resolves.toMatchObject({ sampleRate: 48_000, channelCount: 1 })
+      expect(controller.isRecording()).toBeTrue()
+      session.emitPosition(26 * context.sampleRate)
+      await expect(controller.refreshSchedule()).resolves.toBe('started')
+      expect(controller.isActive()).toBeTrue()
+      expect(controller.isRecording()).toBeTrue()
+      expect(session.transports.filter((transport) => !transport.running)).toHaveLength(1)
+      await controller.cancelRecording()
+      expect(controller.isRecording()).toBeFalse()
+    }
+    controller.dispose()
+  }
 })
 
 test('starts and finalizes portable recording through acknowledged bounded adapters', async () => {

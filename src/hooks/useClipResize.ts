@@ -198,7 +198,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       } else {
         const windowDuration = resizeFixedRight - resizeFixedLeft
         const fallbackBufferDur = Math.max(0, windowDuration - resizeOrigPad)
-        const bufferDur = clip.buffer?.duration ?? fallbackBufferDur
+        const bufferDur = clip.buffer?.duration ?? clip.sourceDurationSec ?? fallbackBufferDur
         const timing = calculateAudioLeftResizeTiming({
           baselineClip: resizeBaselineAudioClip ?? clip,
           fixedRightSec: resizeFixedRight,

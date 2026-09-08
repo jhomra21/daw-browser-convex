@@ -41,7 +41,10 @@ export type PortableWasmPagedCapabilities = {
   pageFrames: number
   slotCount: number
   maxChannels: number
+  preparationCount: number
 }
+
+export const portableWasmPagedPreparationCount = 64
 
 export type PortableProjectSupport = {
   processorKinds: readonly string[]
@@ -386,6 +389,7 @@ export class PortableWasmPlaybackSession {
       pageFrames: portableWasmPagedPageFrames,
       slotCount: portableWasmPagedSlotCount,
       maxChannels: portableWasmPagedMaxChannels,
+      preparationCount: portableWasmPagedPreparationCount,
     },
   ) {
     node.port.onmessage = (event) => this.onMessage(event.data)
@@ -778,6 +782,7 @@ export class WasmAudioWorkletBackend {
                 pageFrames: event.data.pagedPageFrames,
                 slotCount: event.data.pagedSlotCount,
                 maxChannels: event.data.pagedMaxChannels,
+                preparationCount: portableWasmPagedPreparationCount,
               })
             }
             resolve()
@@ -818,6 +823,7 @@ export class WasmAudioWorkletBackend {
         pageFrames: portableWasmPagedPageFrames,
         slotCount: portableWasmPagedSlotCount,
         maxChannels: portableWasmPagedMaxChannels,
+        preparationCount: portableWasmPagedPreparationCount,
       },
     )
   }

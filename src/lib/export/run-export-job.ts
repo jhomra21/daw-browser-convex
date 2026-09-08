@@ -51,7 +51,11 @@ import {
   createPreparedStretchArtifactRepository,
   type PreparedStretchArtifactRepository,
 } from '@daw-browser/audio-engine/prepared-stretch-store'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import {
+  createAudioPcmSourceDescriptor,
+  getAudioBufferSessionIdentity,
+  type AudioPcmSourceDescriptor,
+} from '@daw-browser/audio-engine/media-pages'
 import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
 import {
@@ -1179,19 +1183,46 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           }
           sourceByKey.set(asset.sourceAssetKey, asset)
         }
-        nativeTimelinePageManager = createNativeTimelinePageManager({
-          projectId: input.projectId,
-          sources: [...sourceByKey.values()].map((asset) => ({
+        const nativeSources = await Promise.all([...sourceByKey.values()].map(async (asset) => ({
             sourceAssetKey: asset.sourceAssetKey,
             sessionAssetId: asset.sessionAssetId,
             frameCount: asset.frameCount,
             sampleRateHz: asset.sampleRateHz,
             channelCount: asset.channelCount,
-            sourceKind: asset.sourceKind,
-            sampleUrl: asset.sampleUrl,
             preparedStretchArtifactId: asset.preparedStretchArtifactId,
             artifactRepository: nativeStretchRepository,
-          })),
+            descriptor: asset.preparedStretchArtifactId
+              ? undefined
+              : await (async () => {
+                const clip = preloadTracks.flatMap((track) => track.clips)
+                  .find((candidate) => candidate.sourceAssetKey === asset.sourceAssetKey)
+                if (!clip) {
+                  throw new Error(`Native export source "${asset.sourceAssetKey}" is not present in the timeline.`)
+                }
+                if (input.resolveAudioSource) {
+                  return input.resolveAudioSource(clip, input.signal)
+                }
+                if (clip.buffer) {
+                  return createAudioPcmSourceDescriptor({
+                    identity: getAudioBufferSessionIdentity(clip.buffer),
+                    durationSec: clip.buffer.duration,
+                    frameCount: clip.buffer.length,
+                    sampleRate: clip.buffer.sampleRate,
+                    channelCount: clip.buffer.numberOfChannels,
+                    source: clip.buffer,
+                  })
+                }
+                return undefined
+              })(),
+        })))
+        if (nativeSources.some((source) => (
+          source.preparedStretchArtifactId === undefined
+          && source.descriptor === undefined
+        ))) {
+          throw new Error('Native export metadata-only mapped audio requires a PCM source resolver.')
+        }
+        nativeTimelinePageManager = createNativeTimelinePageManager({
+          sources: nativeSources,
           writePage: async () => undefined,
         })
       }

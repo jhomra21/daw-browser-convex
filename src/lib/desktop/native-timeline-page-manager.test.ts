@@ -8,6 +8,7 @@ import {
   nativeAudioHostMaximumPayloadBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
+import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import type {
   PreparedStretchArtifactManifest,
   PreparedStretchArtifactPage,
@@ -106,6 +107,24 @@ const dataUrl = "data:audio/wav;base64," + btoa(String.fromCharCode(
   0xb8, 0x0b, 0xa0, 0x0f, 0x88, 0x13
 ))
 
+const descriptorForUrl = createAudioPcmSourceDescriptor({
+  identity: "url-source",
+  durationSec: 5 / 48_000,
+  frameCount: 5,
+  sampleRate: 48_000,
+  channelCount: 1,
+  source: dataUrl,
+})
+
+const descriptorForBuffer = (buffer: AudioBuffer) => createAudioPcmSourceDescriptor({
+  identity: "buffer-source",
+  durationSec: buffer.duration,
+  frameCount: buffer.length,
+  sampleRate: buffer.sampleRate,
+  channelCount: buffer.numberOfChannels,
+  source: buffer,
+})
+
 test("hydrates only the requested bounded source range", async () => {
   const pages: Array<{ startFrame: number; frameCount: number; bytes: number }> = []
   const prepared: Array<{ startFrame: number; frameCount: number }> = []
@@ -117,8 +136,7 @@ test("hydrates only the requested bounded source range", async () => {
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "url",
-      sampleUrl: dataUrl,
+      descriptor: descriptorForUrl,
     }],
     writePage: async (page) => {
       pages.push({
@@ -143,32 +161,22 @@ test("hydrates only the requested bounded source range", async () => {
   manager.dispose()
 })
 
-test("resolves persisted upload identity through the local project asset", async () => {
-  let readProject = ""
-  let readAsset = ""
+test("uses a pre-resolved descriptor for persisted upload media", async () => {
   let writes = 0
   const manager = createNativeTimelinePageManager({
-    projectId: "project-a",
     sources: [{
       sourceAssetKey: "asset-a",
       sessionAssetId: 7,
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "upload",
+      descriptor: descriptorForUrl,
     }],
-    readLocalAsset: async (projectId, assetId) => {
-      readProject = projectId
-      readAsset = assetId
-      return { status: "ready", file: new File([Uint8Array.from(atob(dataUrl.split(",")[1] ?? ""), (char) => char.charCodeAt(0))], "asset.wav") }
-    },
     writePage: async () => { writes += 1 },
   })
 
   await manager.ensureRanges([{ sourceAssetKey: "asset-a", startFrame: 0, endFrame: 5 }])
 
-  expect(readProject).toBe("project-a")
-  expect(readAsset).toBe("asset-a")
   expect(writes).toBe(1)
   manager.dispose()
 })
@@ -183,8 +191,7 @@ test("keeps page identity integer-aligned across overlapping ranges", async () =
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "url",
-      sampleUrl: dataUrl,
+      descriptor: descriptorForUrl,
     }],
     writePage: async (page) => { pages.push(page.startFrame) },
   })
@@ -208,8 +215,7 @@ test("cancels a range request before decoding begins", async () => {
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "url",
-      sampleUrl: dataUrl,
+      descriptor: descriptorForUrl,
     }],
     writePage: async () => {
       await Promise.resolve()
@@ -240,8 +246,7 @@ test("deduplicates concurrent range hydration and supports invalidation", async 
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "url",
-      sampleUrl: dataUrl,
+      descriptor: descriptorForUrl,
     }],
     writePage: async () => {
       writes += 1
@@ -269,7 +274,7 @@ test("rehydrates a range when host preparation reports an evicted page", async (
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      buffer: new EagerAudioBuffer(),
+      descriptor: descriptorForBuffer(new EagerAudioBuffer()),
     }],
     writePage: async () => { writes += 1 },
     prepareRange: async () => {
@@ -295,7 +300,7 @@ test("copies bounded pages from an eager buffer without a source URL", async () 
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      buffer: new EagerAudioBuffer(),
+      descriptor: descriptorForBuffer(new EagerAudioBuffer()),
     }],
     writePage: async (page) => { pages.push(page) },
   })
@@ -327,8 +332,7 @@ test("detaches one canceled caller from shared page hydration", async () => {
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      sourceKind: "url",
-      sampleUrl: dataUrl,
+      descriptor: descriptorForUrl,
     }],
     writePage: async () => {
       writes += 1
@@ -446,7 +450,7 @@ test("hydrates at most two pages concurrently and uses both slots", async () => 
       frameCount: 5,
       sampleRateHz: 48_000,
       channelCount: 1,
-      buffer: new EagerAudioBuffer(),
+      descriptor: descriptorForBuffer(new EagerAudioBuffer()),
     })),
     writePage: async () => {
       active += 1
@@ -486,7 +490,7 @@ test("bounds uploaded-page bookkeeping independently of source duration", async 
       frameCount,
       sampleRateHz: 48_000,
       channelCount: 1,
-      buffer: new LongEagerAudioBuffer(frameCount),
+      descriptor: descriptorForBuffer(new LongEagerAudioBuffer(frameCount)),
     }],
     writePage: async () => { writes += 1 },
   })
@@ -512,7 +516,7 @@ test("keeps wide-channel mapped pages within the protocol payload limit", async 
       frameCount: 4_096,
       sampleRateHz: 48_000,
       channelCount: 64,
-      buffer: new WideEagerAudioBuffer(),
+      descriptor: descriptorForBuffer(new WideEagerAudioBuffer()),
     }],
     writePage: async (page) => { pages.push(page) },
   })

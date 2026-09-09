@@ -316,6 +316,7 @@ export const createNativePlaybackController = (input: {
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
+  let pendingStartCompileContext: LivePlaybackCompileContext | undefined
   let lifecycleGeneration = 0
   let nativeSessionGeneration = 0
   let transportEpoch = 1
@@ -675,6 +676,7 @@ export const createNativePlaybackController = (input: {
     if (!preservePendingStart) {
       pendingStart = undefined
       pendingStartMode = undefined
+      pendingStartCompileContext = undefined
     }
     stretchPreparationAbortController?.abort()
     stretchPreparationAbortController = undefined
@@ -1355,10 +1357,12 @@ export const createNativePlaybackController = (input: {
         : result)
       pendingStart = request
       pendingStartMode = "play"
+      pendingStartCompileContext = compileContext
       void request.finally(() => {
         if (pendingStart === request) {
           pendingStart = undefined
           pendingStartMode = undefined
+          pendingStartCompileContext = undefined
         }
       })
       return request
@@ -1385,22 +1389,21 @@ export const createNativePlaybackController = (input: {
     })()
     pendingStart = request
     pendingStartMode = "play"
+    pendingStartCompileContext = compileContext
     void request.finally(() => {
       if (pendingStart === request) {
         pendingStart = undefined
         pendingStartMode = undefined
+        pendingStartCompileContext = undefined
       }
     })
     return request
   }
 
-  const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (destroyed) return Promise.resolve("unavailable")
-    if (!input.bridge) return Promise.resolve("unavailable")
-    if (livePreviewActive) return Promise.resolve("started")
-    if (pendingStart) {
-      return pendingStart
-    }
+  const createLivePreviewStart = (
+    playheadSec: number,
+    compileContext?: LivePlaybackCompileContext,
+  ): Promise<NativeStartResult> => {
     const generation = lifecycleGeneration
     const projectGeneration = resolveProjectGeneration()
     const request = (async () => {
@@ -1430,13 +1433,45 @@ export const createNativePlaybackController = (input: {
     })()
     pendingStart = request
     pendingStartMode = "preview"
+    pendingStartCompileContext = compileContext
     void request.finally(() => {
       if (pendingStart === request) {
         pendingStart = undefined
         pendingStartMode = undefined
+        pendingStartCompileContext = undefined
       }
     })
     return request
+  }
+
+  const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
+    if (destroyed) return Promise.resolve("unavailable")
+    if (!input.bridge) return Promise.resolve("unavailable")
+    if (livePreviewActive) return Promise.resolve("started")
+    if (pendingStart) {
+      if (
+        !compileContext
+        || pendingStartMode !== "preview"
+        || pendingStartCompileContext === compileContext
+      ) return pendingStart
+      const supersededPreview = pendingStart
+      invalidateNativeOwnership()
+      const request = supersededPreview
+        .catch(() => "unavailable" as const)
+        .then(() => createLivePreviewStart(playheadSec, compileContext))
+      pendingStart = request
+      pendingStartMode = "preview"
+      pendingStartCompileContext = compileContext
+      void request.finally(() => {
+        if (pendingStart === request) {
+          pendingStart = undefined
+          pendingStartMode = undefined
+          pendingStartCompileContext = undefined
+        }
+      })
+      return request
+    }
+    return createLivePreviewStart(playheadSec, compileContext)
   }
 
   let preparedTransportTransition = Promise.resolve()

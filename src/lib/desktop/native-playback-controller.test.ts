@@ -4,11 +4,12 @@ import "fake-indexeddb/auto"
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
+import { createAudioPcmSourceDescriptor, type AudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import { automationTargetKey, createDefaultDrumRackParams, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
 import { nativeGraphNodeId, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import { externalProcessorSchema, type ExternalProcessor } from "@daw-browser/external-plugins"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 
 if (!globalThis.navigator?.locks) {
@@ -101,6 +102,37 @@ const sourceTrack = (volume = 0.8): RuntimeTrack => ({
     sampleUrl: silenceWavDataUrl(1),
     buffer: new TestAudioBuffer(),
   }],
+})
+
+const longSourceTrack = (): RuntimeTrack => ({
+  ...sourceTrack(),
+  clips: [{
+    ...sourceTrack().clips[0]!,
+    buffer: null,
+    duration: 7_200,
+    sourceDurationSec: 7_200,
+    sourceSampleRate: 48_000,
+    sourceChannelCount: 2,
+  }],
+})
+
+const longSourceDescriptor = (): AudioPcmSourceDescriptor => ({
+  identity: "test:long-source",
+  durationSec: 7_200,
+  frameCount: 7_200 * 48_000,
+  sampleRate: 48_000,
+  channelCount: 2,
+  readPages: async function* ({ startFrame = 0, endFrame = 7_200 * 48_000, signal } = {}) {
+    signal?.throwIfAborted()
+    const frameCount = endFrame - startFrame
+    yield {
+      startFrame,
+      frameCount,
+      sampleRate: 48_000,
+      channelCount: 2,
+      planes: [new Float32Array(frameCount), new Float32Array(frameCount)],
+    }
+  },
 })
 
 const input = (track = sourceTrack()): LivePlaybackSnapshotInput => ({
@@ -233,6 +265,48 @@ const nativeAttachmentPlan: NativeExternalAttachmentPlan = {
     parameterOverrides: { "7": 0.4 },
   }],
 }
+
+const insertedExternalProcessor = (): ExternalProcessor => externalProcessorSchema.parse({
+  instanceId: "11111111-1111-4111-8111-111111111111",
+  targetId: "track",
+  index: 0,
+  manifest: {
+    identity: {
+      format: "vst3",
+      classId: "example",
+      vendor: "Example",
+      name: "Example",
+      version: "1",
+      architecture: "arm64",
+      binaryFingerprint: "b".repeat(64),
+    },
+    role: "effect",
+    audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+    audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: false,
+    supportsEditor: false,
+    supportsState: false,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  launchReference: {
+    version: 1,
+    classId: "example",
+    vendorId: "Example",
+    architecture: "arm64",
+    bundleFingerprint: "a".repeat(64),
+    binaryFingerprint: "b".repeat(64),
+    scannerCatalogVersion: 2,
+  },
+  health: { state: "ready", updatedAt: 1 },
+  updatedAt: 1,
+})
 
 type BridgeReply = { ok: true } | { ok: false; error: string }
 type BridgeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
@@ -761,6 +835,75 @@ test("forwards compile context when promoting a pending preview to play", async 
   await expect(preview).resolves.toBe("started")
   await expect(play).resolves.toBe("started")
   expect(contexts).toEqual([undefined, compileContext])
+})
+
+test("supersedes an in-flight contextless preview for an inserted native processor", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  const contexts: Array<LivePlaybackCompileContext | undefined> = []
+  let compilation = 0
+  const inserted = insertedExternalProcessor()
+  const compileContext = {
+    externalProcessor: {
+      projectId: "project",
+      processor: inserted,
+    },
+  } satisfies LivePlaybackCompileContext
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectId: () => "project",
+    resolveSource: async () => longSourceDescriptor(),
+    compileSnapshot: async (transport, context) => {
+      contexts.push(context)
+      compilation += 1
+      if (compilation === 1) await previewGate.promise
+      const result = compileLivePlaybackSnapshot({
+        ...input(longSourceTrack()),
+        transport,
+      })
+      if (!result.supported) return result
+      return context?.externalProcessor
+        ? {
+          supported: true as const,
+          snapshot: {
+            ...result.snapshot,
+            nativeExternalAttachmentPlan: nativeAttachmentPlan,
+            requiresNativePlayback: true,
+          },
+        }
+        : result
+    },
+  })
+
+  const stalePreview = controller.ensureLivePreview(0)
+  await Bun.sleep(0)
+  const insertedPreview = controller.ensureLivePreview(0, compileContext)
+  previewGate.resolve()
+
+  await expect(stalePreview).resolves.toBe("unavailable")
+  await expect(insertedPreview).resolves.toBe("started")
+  expect(contexts).toEqual([undefined, compileContext])
+  expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(1)
+  await controller.dispose()
+})
+
+test("deduplicates identical contextless preview requests", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => {
+      await previewGate.promise
+      return compileLivePlaybackSnapshot({ ...input(), transport })
+    },
+  })
+
+  const first = controller.ensureLivePreview(0)
+  const second = controller.ensureLivePreview(0)
+  expect(second).toBe(first)
+  previewGate.resolve()
+  await expect(Promise.all([first, second])).resolves.toEqual(["started", "started"])
+  await controller.dispose()
 })
 
 test("prepares enabled Stretch clips before publishing the native graph", async () => {

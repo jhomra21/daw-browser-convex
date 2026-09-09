@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { Input, InputTrack } from 'mediabunny'
 import {
   AudioUploadValidationError,
+  createControlUploadR2MetadataReader,
   inspectControlUploadAudioMetadata,
   inspectControlUploadR2Metadata,
 } from './control-upload-audio-metadata'
@@ -142,6 +143,48 @@ test('rejects unsupported decoded metadata', async () => {
     file: wavFile(44_100, 65),
     declaredMimeType: 'audio/wav',
   })).rejects.toThrow('channel count')
+})
+
+test('stops R2 metadata reads at the cumulative request budget', async () => {
+  let requests = 0
+  const read = createControlUploadR2MetadataReader({
+    key: 'asset/object',
+    bucket: {
+      get: async () => {
+        requests += 1
+        return { arrayBuffer: async () => new Uint8Array([1]).buffer }
+      },
+    },
+  })
+  for (let index = 0; index < 32; index += 1) {
+    await read(index, index + 1)
+  }
+  await expect(read(32, 33)).rejects.toThrow('exceeded the R2 read budget')
+  expect(requests).toBe(32)
+})
+
+test('stops R2 metadata reads at the cumulative byte budget', async () => {
+  let requests = 0
+  const read = createControlUploadR2MetadataReader({
+    key: 'asset/object',
+    bucket: {
+      get: async (_key, options) => {
+        requests += 1
+        const range = z.object({
+          offset: z.number().optional(),
+          length: z.number().optional(),
+        }).parse(options?.range)
+        return { arrayBuffer: async () => new ArrayBuffer(range.length ?? 0) }
+      },
+    },
+  })
+  const maxIndividualReadBytes = 8 * 1024 * 1024
+  for (let index = 0; index < 4; index += 1) {
+    await read(index * maxIndividualReadBytes, (index + 1) * maxIndividualReadBytes)
+  }
+  await expect(read(4 * maxIndividualReadBytes, (4 * maxIndividualReadBytes) + 1))
+    .rejects.toThrow('exceeded the R2 read budget')
+  expect(requests).toBe(4)
 })
 
 test('inspects R2 metadata through bounded ranged reads', async () => {

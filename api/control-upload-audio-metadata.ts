@@ -15,6 +15,8 @@ import {
 const maxSampleRate = 384_000
 const maxChannelCount = 64
 const maxMetadataReadBytes = 8 * 1024 * 1024
+const maxMetadataReadRequests = 32
+const maxMetadataReadTotalBytes = 32 * 1024 * 1024
 
 const expectedFormats = new Map([
   ['audio/mpeg', MP3],
@@ -145,6 +147,39 @@ export const inspectControlUploadAudioMetadata = async (input: {
   })
 )
 
+export const createControlUploadR2MetadataReader = (input: {
+  bucket: Pick<R2Bucket, 'get'>
+  key: string
+}) => {
+  let readRequests = 0
+  let readBytes = 0
+  return async (start: number, end: number) => {
+    const length = end - start
+    if (
+      !Number.isSafeInteger(start)
+      || !Number.isSafeInteger(end)
+      || start < 0
+      || length <= 0
+    ) {
+      fail('Audio metadata inspection range is invalid.')
+    }
+    if (length > maxMetadataReadBytes) fail('Audio metadata inspection range is too large.')
+    if (
+      readRequests >= maxMetadataReadRequests
+      || readBytes > maxMetadataReadTotalBytes - length
+    ) {
+      fail('Audio metadata inspection exceeded the R2 read budget.')
+    }
+    readRequests += 1
+    readBytes += length
+    const object = await input.bucket.get(input.key, { range: { offset: start, length } })
+    if (!object) throw new Error('Uploaded audio object is temporarily unavailable.')
+    const bytes = new Uint8Array(await object.arrayBuffer())
+    if (bytes.byteLength !== length) throw new Error('R2 returned an incomplete metadata range.')
+    return bytes
+  }
+}
+
 export const inspectControlUploadR2Metadata = async (input: {
   bucket: Pick<R2Bucket, 'get'>
   key: string
@@ -154,14 +189,7 @@ export const inspectControlUploadR2Metadata = async (input: {
   inspectControlUploadAudioSource({
     source: new CustomSource({
       getSize: () => input.size,
-      read: async (start, end) => {
-        if (end - start > maxMetadataReadBytes) fail('Audio metadata inspection range is too large.')
-        const object = await input.bucket.get(input.key, { range: { offset: start, length: end - start } })
-        if (!object) throw new Error('Uploaded audio object is temporarily unavailable.')
-        const bytes = new Uint8Array(await object.arrayBuffer())
-        if (bytes.byteLength !== end - start) throw new Error('R2 returned an incomplete metadata range.')
-        return bytes
-      },
+      read: createControlUploadR2MetadataReader(input),
       maxCacheSize: 2 * 1024 * 1024,
       prefetchProfile: 'none',
     }),

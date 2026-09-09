@@ -3,6 +3,7 @@ import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
+import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
   maxVst3WorkerEventsPerBlock,
   maxVst3WorkerFrames,
@@ -977,6 +978,7 @@ export const renderNativeOffline = async (input: {
       for (const range of asset.ranges) {
         const pageFrames = Math.min(
           range.frameCount,
+          defaultDecodedAudioPageFrames,
           Math.floor((maximumPayloadBytes - 16) / (asset.channelCount * Float32Array.BYTES_PER_ELEMENT)),
         )
         for (let startFrame = range.startFrame; startFrame < range.startFrame + range.frameCount; startFrame += pageFrames) {

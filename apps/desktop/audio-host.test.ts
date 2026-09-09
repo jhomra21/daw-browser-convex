@@ -4,6 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
+import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import { portableGraphContractHash, processorContractHash } from "@daw-browser/audio-core-contract/generated"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
@@ -231,6 +232,8 @@ process.stdin.on("data", (chunk) => {
         else process.stdout.write(frame(55, u64(10)))
       }
       sendChunk()
+    } else if (type === 53 && process.env.MODE === "offline-mapped-pages") {
+      process.stdout.write(Buffer.concat([ack(type), frame(55, u64(0))]))
     } else if (type === 53 && process.env.MODE === "offline-stalled") {
       process.stdout.write(ack(type))
     } else if (type === 26) {
@@ -546,6 +549,65 @@ test("cancels mapped-page rendering without leaving a provider rejection unhandl
     await providerCalled.promise
     controller.abort()
     await expect(render).rejects.toMatchObject({ name: "AbortError" })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("keeps mapped offline page requests within the bounded provider page size", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-mapped-pages-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-mapped-pages exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const totalFrames = 6 * 60 * 48_000
+    const pageFrames = defaultDecodedAudioPageFrames
+    const pages: Array<{ startFrame: number; frameCount: number }> = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        mappedAssets: [{
+          sessionAssetId: 1,
+          sourceAssetKey: "asset:local-6-minute",
+          frameCount: totalFrames,
+          sampleRateHz: 48_000,
+          channelCount: 1,
+          ranges: [{ startFrame: 0, frameCount: totalFrames }],
+        }],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+      onMappedPage: async (request) => {
+        if (request.frameCount > pageFrames) {
+          throw new Error('Native audio asset "asset:local-6-minute" page is invalid.')
+        }
+        pages.push({ startFrame: request.startFrame, frameCount: request.frameCount })
+        return {
+          sessionAssetId: request.asset.sessionAssetId,
+          startFrame: request.startFrame,
+          frameCount: request.frameCount,
+          planarPcm: new Uint8Array(request.frameCount * request.asset.channelCount * Float32Array.BYTES_PER_ELEMENT),
+        }
+      },
+    })
+    expect(pages).toHaveLength(Math.ceil(totalFrames / pageFrames))
+    expect(pages[0]).toEqual({ startFrame: 0, frameCount: pageFrames })
+    expect(pages.at(-1)).toEqual({
+      startFrame: totalFrames - (totalFrames % pageFrames),
+      frameCount: totalFrames % pageFrames || pageFrames,
+    })
+    expect(pages.reduce((total, page) => total + page.frameCount, 0)).toBe(totalFrames)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

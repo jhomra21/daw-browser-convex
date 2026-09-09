@@ -98,6 +98,7 @@ import {
 } from "~/lib/external-plugin-ui";
 import {
   deleteLocalExternalProcessor,
+  getLocalExternalProcessor,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
   readLocalExternalProcessorState,
@@ -444,9 +445,27 @@ const Timeline: Component<TimelineProps> = (props) => {
       renderState: hydratedRenderState,
       sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     });
-    if (!result.supported || !isLocalId("project", projectId())) return result;
-    const processors = (await listLocalExternalProcessors(projectId()))
+    const compiledProjectId = projectId();
+    if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
+    const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
       .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
+    const processorsById = new Map<string, ExternalProcessor>();
+    for (const processor of liveProcessors) {
+      processorsById.set(processor.instanceId, processor);
+    }
+    const externalProcessorSeed = context?.externalProcessor;
+    if (externalProcessorSeed?.projectId === compiledProjectId) {
+      const persistedProcessor = await getLocalExternalProcessor(
+        compiledProjectId,
+        externalProcessorSeed.processor.instanceId,
+      );
+      if (persistedProcessor && !persistedProcessor.bypassed && persistedProcessor.health.state !== "degraded") {
+        processorsById.set(persistedProcessor.instanceId, persistedProcessor);
+      } else {
+        processorsById.delete(externalProcessorSeed.processor.instanceId);
+      }
+    }
+    const processors = [...processorsById.values()];
     if (processors.length === 0) return result;
     const attachmentPlan = compileNativeExternalAttachmentPlan({
       target: "native",
@@ -473,7 +492,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
         if (!processor?.manifest.supportsState) return undefined
         const state = processor
-          ? await readLocalExternalProcessorState(projectId(), processor)
+          ? await readLocalExternalProcessorState(compiledProjectId, processor)
           : undefined
         return state ? { instanceId: attachment.instanceId, ...state } : undefined
       }))
@@ -1966,6 +1985,13 @@ const Timeline: Component<TimelineProps> = (props) => {
       openEffectsForTarget(processor.targetId);
       const intent = playbackIntent ?? captureStructuralPlaybackIntent();
       const insertedProjectId = intent.projectId ?? projectId();
+      const insertionIntent: TimelinePlaybackRebuildIntent = {
+        ...intent,
+        externalProcessor: {
+          projectId: insertedProjectId,
+          processor,
+        },
+      };
       const request: ExternalProcessorEditorRequest = {
         instanceId: processor.instanceId,
         projectId: intent.projectId ?? projectId(),
@@ -1983,7 +2009,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         nativePlaybackEnabled,
       });
       try {
-        await rebuildPlaybackBackend(renderTracks(), intent);
+        await rebuildPlaybackBackend(renderTracks(), insertionIntent);
         if (processor.manifest.supportsState) {
           const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
           if (!capture?.ok) {
@@ -2011,8 +2037,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         try {
           await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);
           await rebuildPlaybackBackend(renderTracks(), {
-            ...intent,
-            resumePlayback: intent.resumePlayback,
+            ...insertionIntent,
+            resumePlayback: insertionIntent.resumePlayback,
             projectId: insertedProjectId,
             projectGeneration: intent.projectGeneration,
           });

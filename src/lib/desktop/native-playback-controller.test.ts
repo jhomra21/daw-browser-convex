@@ -683,6 +683,22 @@ test("commits a supported native session before starting and tears it down deter
   ])
 })
 
+test("reports the bounded native start stage and sanitized failure", async () => {
+  const fixture = createBridge("begin", false, false, "native failure /Users/secret/plugin.vst3")
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    reportFault: (message) => faults.push(message),
+    reportUnavailable: true,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(faults).toEqual([
+    "Native playback failed during begin-transaction: native failure <path>",
+  ])
+})
+
 test("starts a mapped session from persisted ordinary metadata without an eager buffer", async () => {
   const fixture = createBridge()
   const track = {

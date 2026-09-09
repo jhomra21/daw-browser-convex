@@ -1,4 +1,5 @@
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
+import type { ExternalProcessor } from "@daw-browser/external-plugins"
 import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
@@ -25,6 +26,10 @@ export type LivePlaybackCompileContext = {
   instrumentOverride?: {
     targetId: string
     instrument: TrackInstrumentParams
+  }
+  externalProcessor?: {
+    projectId: string
+    processor: ExternalProcessor
   }
 }
 

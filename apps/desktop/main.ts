@@ -1275,7 +1275,7 @@ const registerIpc = () => {
   const nativeSessionFailure = (error?: NativeAudioHostCommandError) => ({
     ok: false as const,
     error: error
-      ? `The native audio session rejected request ${error.requestType}.`
+      ? `The native audio session rejected ${error.requestName} request ${error.requestType}.`
       : "The native audio session is unavailable.",
   })
   const sessionSupervisorFor = (event: Electron.IpcMainInvokeEvent) => (
@@ -1583,18 +1583,24 @@ const registerIpc = () => {
       || !envelope.success
     ) return nativeSessionFailure()
     const sessionValue = envelope.data.value
-    const result = await coordinateNativeVst3Attachments({
-      serializedPlan: sessionValue.serializedPlan,
-      sampleRateHz: sessionValue.sampleRateHz,
-      workerPath,
-      catalogStore: pluginCatalogStore,
-      audioHost: supervisor,
-      transactionToken: envelope.data.transactionToken,
-      capturedVstStates: new Map(
-        (sessionValue.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
-      ),
-      requiredVstStateInstanceIds: new Set(sessionValue.requiredVstStateInstanceIds ?? []),
-    })
+    let result: Awaited<ReturnType<typeof coordinateNativeVst3Attachments>>
+    try {
+      result = await coordinateNativeVst3Attachments({
+        serializedPlan: sessionValue.serializedPlan,
+        sampleRateHz: sessionValue.sampleRateHz,
+        workerPath,
+        catalogStore: pluginCatalogStore,
+        audioHost: supervisor,
+        transactionToken: envelope.data.transactionToken,
+        capturedVstStates: new Map(
+          (sessionValue.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
+        ),
+        requiredVstStateInstanceIds: new Set(sessionValue.requiredVstStateInstanceIds ?? []),
+      })
+    } catch (error) {
+      activeEditorProjectBindings.rollback(envelope.data.transactionToken)
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
+    }
     if (!result.ok) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
       return { ok: false as const, error: result.message }
@@ -1643,8 +1649,8 @@ const registerIpc = () => {
     try {
       await supervisor.setSpectrumNode(envelope.data.value)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:set-transport", async (event, value) => {
@@ -1655,8 +1661,8 @@ const registerIpc = () => {
     try {
       await supervisor.setTransport(transport, envelope.data.transactionToken)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:configure-recording", async (event, value) => {
@@ -1667,8 +1673,8 @@ const registerIpc = () => {
     try {
       await supervisor.configureRecording(configuration)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:stop-recording", async (event, value) => {
@@ -1678,8 +1684,8 @@ const registerIpc = () => {
     try {
       await supervisor.stopRecording(endFrame.data)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   const registerNativeSessionControl = (
@@ -1691,8 +1697,8 @@ const registerIpc = () => {
     try {
       await operation(supervisor)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:begin-transaction", async (event, value) => {
@@ -1714,8 +1720,8 @@ const registerIpc = () => {
       activeEditorProjectBindings.stageEmpty(transactionToken)
       activeRendererTransactions.set(transactionToken, { generation: requestGeneration, senderId })
       return { ok: true as const, transactionToken }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:commit-transaction", async (event, value) => {
@@ -1734,10 +1740,10 @@ const registerIpc = () => {
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
       return { ok: true as const }
-    } catch {
+    } catch (error) {
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
-      return nativeSessionFailure()
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:audio-host:session:rollback-transaction", async (event, value) => {
@@ -1754,8 +1760,8 @@ const registerIpc = () => {
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
       return { ok: true as const }
-    } catch {
-      return nativeSessionFailure()
+    } catch (error) {
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     } finally {
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
@@ -1772,9 +1778,9 @@ const registerIpc = () => {
       await supervisor.teardown()
       activeEditorProjectBindings.clear()
       return { ok: true as const }
-    } catch {
+    } catch (error) {
       activeEditorProjectBindings.clear()
-      return nativeSessionFailure()
+      return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)
     }
   })
   ipcMain.handle("daw:plugin-catalog:read", async (event) => {

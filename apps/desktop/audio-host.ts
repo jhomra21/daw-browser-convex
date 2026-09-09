@@ -563,10 +563,18 @@ type NativeHostRequestType =
   | typeof vstDetachType
   | typeof vstEditorType
   | typeof diagnosticStartType
+  | typeof diagnosticsType
   | typeof scheduleWindowType
   | typeof vstScheduleAutomationEnableType
   | typeof instrumentStatesType
   | typeof spectrumSelectionType
+
+const nativeAudioHostRequestNames = new Map<number, string>(
+  Object.entries(nativeAudioHostControlTypes).map(([name, type]) => [type, name]),
+)
+
+export const nativeAudioHostRequestName = (type: number) =>
+  nativeAudioHostRequestNames.get(type) ?? "unknown"
 
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
@@ -577,12 +585,14 @@ const nativeVstInstanceId = (value: string): boolean => (
 
 export class NativeAudioHostCommandError extends Error {
   readonly requestType: number
+  readonly requestName: string
   readonly recoverable = true
 
   constructor(requestType: number, message = `The native audio host rejected control request ${requestType}.`) {
     super(message)
     this.name = "NativeAudioHostCommandError"
     this.requestType = requestType
+    this.requestName = nativeAudioHostRequestName(requestType)
   }
 }
 
@@ -1160,6 +1170,7 @@ type PendingControl = {
   resolve: () => void
   reject: (error: Error) => void
   deadline: ReturnType<typeof setTimeout>
+  requestType: NativeHostRequestType
   expectedAckType?: NativeHostRequestType
   diagnosticsResolve?: (value: NativeHostDiagnostics) => void
   devicesResolve?: (value: NativeOutputDevice | null) => void
@@ -1821,12 +1832,25 @@ export const createNativeAudioHostSupervisor = (
         resolve: () => undefined,
         reject: next.reject,
         deadline,
+        requestType: next.type,
         stateResolve: next.stateResolve,
         stateInstanceId: next.stateInstanceId,
       }
       : next.editorResolve
-      ? { resolve: () => undefined, reject: next.reject, deadline, editorResolve: next.editorResolve }
-      : { resolve: next.resolve, reject: next.reject, deadline, expectedAckType: next.type }
+      ? {
+        resolve: () => undefined,
+        reject: next.reject,
+        deadline,
+        requestType: next.type,
+        editorResolve: next.editorResolve,
+      }
+      : {
+        resolve: next.resolve,
+        reject: next.reject,
+        deadline,
+        requestType: next.type,
+        expectedAckType: next.type,
+      }
     current.stdin.write(frame)
   }
   const ownerForToken = (token: string | undefined) => (
@@ -1926,7 +1950,13 @@ export const createNativeAudioHostSupervisor = (
     if (!frame) throw new Error("The native audio host protocol is unavailable.")
     return new Promise<NativeGraphRevisionStatus>((resolve, reject) => {
       const deadline = setTimeout(() => lost("The native audio host graph revision request timed out.", current), 2_000)
-      pending = { deadline, reject, resolve: () => undefined, graphRevisionResolve: resolve }
+      pending = {
+        deadline,
+        reject,
+        resolve: () => undefined,
+        requestType: type,
+        graphRevisionResolve: resolve,
+      }
       current.stdin.write(frame)
     })
   }
@@ -1959,9 +1989,23 @@ export const createNativeAudioHostSupervisor = (
         child = spawned
         spawned.once("error", () => lost("The native audio host could not start.", spawned))
         spawned.once("close", (code, signal) => {
-          console.error("[native-vst3] native audio host closed", { code, signal })
+          const requestType = pending?.requestType
+          const pendingRequest = requestType === undefined
+            ? undefined
+            : `${nativeAudioHostRequestName(requestType)} request ${requestType}`
+          console.error("[native-vst3] native audio host closed", {
+            code,
+            signal,
+            pendingRequestType: requestType,
+            pendingRequestName: requestType === undefined ? undefined : nativeAudioHostRequestName(requestType),
+          })
           if (teardownPromise && child === spawned) return
-          lost("The native audio host stopped.", spawned)
+          lost(
+            pendingRequest
+              ? `The native audio host stopped during ${pendingRequest}.`
+              : "The native audio host stopped.",
+            spawned,
+          )
         })
         spawned.stderr.on("data", (chunk: Buffer) => {
           console.error("[native-vst3] native audio host stderr", chunk.toString("utf8").trim())
@@ -2376,7 +2420,13 @@ export const createNativeAudioHostSupervisor = (
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeOutputDevice | null>((resolve, reject) => {
         const deadline = setTimeout(() => lost("The native audio host device request timed out."), 2_000)
-        pending = { deadline, reject, resolve: () => undefined, devicesResolve: resolve }
+        pending = {
+          deadline,
+          reject,
+          resolve: () => undefined,
+          requestType: deviceListType,
+          devicesResolve: resolve,
+        }
         current.stdin.write(frame)
       })
     },
@@ -2392,7 +2442,13 @@ export const createNativeAudioHostSupervisor = (
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeInputDevice | null>((resolve, reject) => {
         const deadline = setTimeout(() => lost("The native audio host input device request timed out."), 2_000)
-        pending = { deadline, reject, resolve: () => undefined, inputDeviceResolve: resolve }
+        pending = {
+          deadline,
+          reject,
+          resolve: () => undefined,
+          requestType: recordingDeviceQueryType,
+          inputDeviceResolve: resolve,
+        }
         current.stdin.write(frame)
       })
     },
@@ -2418,6 +2474,7 @@ export const createNativeAudioHostSupervisor = (
           deadline,
           reject,
           resolve: () => undefined,
+          requestType: diagnosticsType,
           diagnosticsResolve: resolve,
         }
         current.stdin.write(frame)

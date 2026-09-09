@@ -38,6 +38,17 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(main).toContain('catalogViewForRenderer')
 })
 
+test("preserves bounded native request diagnostics through session IPC", async () => {
+  const [main, audioHost] = await Promise.all([
+    readFile(mainPath, "utf8"),
+    readFile(new URL("./audio-host.ts", import.meta.url), "utf8"),
+  ])
+
+  expect(audioHost).toContain("requestName")
+  expect(main).toContain("error.requestName")
+  expect(main).toContain("NativeAudioHostCommandError ? error : undefined")
+})
+
 test("keeps spectrum selection on the native session envelope contract", async () => {
   const [main, preload] = await Promise.all([
     readFile(mainPath, "utf8"),

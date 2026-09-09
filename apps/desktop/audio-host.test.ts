@@ -247,6 +247,8 @@ process.stdin.on("data", (chunk) => {
       setTimeout(() => process.stdout.write(ack(type)), 30)
     } else if (type === 22 && process.env.MODE === "rollback-rejected") {
       process.stdout.write(ack(type, 0))
+    } else if (type === 3 && process.env.MODE === "close-on-configure") {
+      process.exit(0)
     } else if (type === 10 && vstPlaybackFlag(payload) !== 0) {
       process.exit(2)
     } else {
@@ -950,7 +952,7 @@ test("cleans the offline completion watchdog on abort", async () => {
 })
 
 const fixtureSupervisor = async (
-  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed",
+  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed" | "close-on-configure",
   onSpawn?: () => void,
   supervisorOptions?: NativeAudioHostSupervisorOptions,
   onChild?: (child: ChildProcessWithoutNullStreams) => void,
@@ -1366,13 +1368,18 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     await fixture.supervisor.start()
-    await expect(fixture.supervisor.configure({
+    const rejection = fixture.supervisor.configure({
       deviceId: "coreaudio:fixture",
       sampleRateHz: 48_000,
       maxFramesPerBlock: 512,
       channelCount: 2,
       revision: 1,
-    })).rejects.toBeInstanceOf(NativeAudioHostCommandError)
+    })
+    await expect(rejection).rejects.toBeInstanceOf(NativeAudioHostCommandError)
+    await expect(rejection).rejects.toMatchObject({
+      requestType: nativeAudioHostControlTypes.deviceConfigure,
+      requestName: "deviceConfigure",
+    })
     expect(fixture.supervisor.status().running).toBeTrue()
     expect(losses).toEqual([])
     await expect(fixture.supervisor.configure({
@@ -1516,6 +1523,28 @@ test("notifies subscribers when the native host is lost", async () => {
     })
     await fixture.supervisor.start()
     await expect(lost).resolves.toBe("The native audio host stopped.")
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("names the pending request when the native host closes", async () => {
+  const fixture = await fixtureSupervisor("close-on-configure")
+  try {
+    const lost = new Promise<string>((resolve) => {
+      fixture.supervisor.onLoss((error) => resolve(error.message))
+    })
+    await fixture.supervisor.start()
+    const configure = fixture.supervisor.configure({
+      deviceId: "coreaudio:fixture",
+      sampleRateHz: 48_000,
+      maxFramesPerBlock: 512,
+      channelCount: 2,
+      revision: 1,
+    })
+    await expect(configure).rejects.toThrow("native audio host stopped during deviceConfigure request 3")
+    await expect(lost).resolves.toBe("The native audio host stopped during deviceConfigure request 3.")
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

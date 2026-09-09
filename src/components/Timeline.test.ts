@@ -82,6 +82,21 @@ test("keeps graph revisions stable during compilation and bumps them at structur
   expect(source).not.toContain("revision: ++nativePlaybackRevision,");
 });
 
+test("hands an inserted processor to the bound rebuild compiler and verifies current persistence", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const playbackSource = await readFile(new URL("../hooks/useTimelinePlayback.ts", import.meta.url), "utf8");
+  expect(source).toContain("getLocalExternalProcessor(");
+  expect(source).toContain("externalProcessor: {");
+  expect(source).toContain("projectId: insertedProjectId,");
+  expect(source).toContain("processor,");
+  expect(source).toContain("await rebuildPlaybackBackend(renderTracks(), insertionIntent);");
+  expect(source).toContain("await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);");
+  expect(source).toContain("processorsById.delete(externalProcessorSeed.processor.instanceId);");
+  expect(playbackSource).toContain("externalProcessor?: LivePlaybackCompileContext[\"externalProcessor\"]");
+  expect(playbackSource).toContain("externalProcessor: options.externalProcessor,");
+  expect(playbackSource).toContain("const compileContext = requestedIntent?.instrumentOverride !== undefined");
+});
+
 test("opens an inserted VST editor only after the matching playback rebuild", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
   const start = source.indexOf("onExternalPluginInserted: async");
@@ -95,14 +110,14 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
   expect(handler).toContain("requestToken: ++externalProcessorEditorRequestToken");
   expect(handler).toContain("ready: false");
   expect(handler.indexOf("setPendingExternalProcessorEditorRequest(request)"))
-    .toBeLessThan(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), intent)"));
+    .toBeLessThan(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"));
   expect(handler).toContain("pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken");
   expect(handler).toContain("currentRequest?.requestToken === request.requestToken");
   expect(handler).toContain("setPendingExternalProcessorEditorRequest();");
   expect(handler).toContain("currentRequest.projectId === projectId()");
   expect(handler).toContain("currentRequest.projectGeneration === mountedProjectGeneration()");
   expect(handler).toContain("{ ...currentRequest, ready: true }");
-  expect(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), intent)"))
+  expect(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"))
     .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
 
   const exposureStart = source.indexOf("autoOpenExternalProcessorId:");

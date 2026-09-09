@@ -3256,6 +3256,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
 test('keeps optional paused structural rebuilds idle when native preview becomes unavailable', async () => {
   const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
   expect(source).toContain('reportUnavailable: requiresNativeAudio')
+  expect(source).toContain(': "The prepared native playback graph could not be rebuilt.")')
 
   const previousWindow = globalThis.window
   let failBegin = false
@@ -3305,7 +3306,9 @@ test('keeps optional paused structural rebuilds idle when native preview becomes
           playheadSec: 0,
           owner: 'native',
           projectId: 'project',
-        })).rejects.toThrow('prepared native playback graph could not be rebuilt')
+        })).rejects.toThrow(
+          'The prepared native playback graph could not be rebuilt: Native playback failed during begin-transaction: The native audio session is unavailable.',
+        )
 
         expect(faults).toEqual([])
         expect(playback.isPlaying()).toBeFalse()

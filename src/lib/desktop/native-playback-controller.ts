@@ -1329,7 +1329,9 @@ export const createNativePlaybackController = (input: {
         error: sanitizeNativeVst3DiagnosticError(diagnosticError),
       })
       if (!wasCancelled && !connectionLoss) {
-        reportFault(error instanceof Error ? error.message : "Native playback could not start.")
+        reportFault(
+          `Native playback failed during ${startStage}: ${sanitizeNativeVst3DiagnosticError(diagnosticError)}`,
+        )
       }
       return result
     } finally {

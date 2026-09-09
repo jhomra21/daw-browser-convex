@@ -134,11 +134,11 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 
 ### Phase 8 — acceptance
 
-- [ ] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
+- [x] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
 - [ ] Seek near beginning/middle/end and play through the packaged native path.
 - [ ] Native VST processing works on the long source.
 - [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
-- [ ] Export a long range with bounded process memory.
+- [x] Export a long range with bounded process memory.
 - [ ] Corrected Valhalla automation acceptance from PR #51 still passes.
 - [x] `bun run lint`
 - [x] `bun run typecheck`
@@ -153,8 +153,12 @@ covered by focused tests. Native offline planning now emits metadata-only mapped
 ordinary-source descriptors, hydrates only their scheduled source ranges through
 bounded pages before graph publication, and retains `native-pcm-chunking` only
 for eagerly prepared Stretch/instrument PCM. A fresh unsigned packaged Electron
-launch also reached the local project workspace through the public `daw://app/`
-path; long-media/VST/recording/export acceptance remains open below.
+build from `c5cf1aa` imported a deterministic six-minute, 48 kHz mono WAV
+through bounded capability reads, persisted and reopened the local project
+asset, and exported the full range as a 48 kHz stereo float WAV. The export
+completed at 138,240,044 bytes while the main process remained near 332 MiB
+RSS. Native playback with VST, practical recording soak, and the corrected
+Valhalla automation scenario remain open.
 
 ## Non-goals / real limits
 

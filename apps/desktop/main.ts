@@ -1667,9 +1667,9 @@ const registerIpc = () => {
   })
   ipcMain.handle("daw:audio-host:session:configure-recording", async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
-    const request = nativeSessionRecordingConfigurationSchema.safeParse(value)
-    if (!supervisor || !request.success) return nativeSessionFailure()
-    const configuration = nativeSessionRecordingConfiguration(request.data)
+    const envelope = nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)
+    if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
+    const configuration = nativeSessionRecordingConfiguration(envelope.data.value)
     try {
       await supervisor.configureRecording(configuration)
       return { ok: true as const }
@@ -1679,10 +1679,10 @@ const registerIpc = () => {
   })
   ipcMain.handle("daw:audio-host:session:stop-recording", async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
-    const endFrame = z.number().int().safe().min(0).optional().safeParse(value)
-    if (!supervisor || !endFrame.success) return nativeSessionFailure()
+    const envelope = nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)
+    if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
     try {
-      await supervisor.stopRecording(endFrame.data)
+      await supervisor.stopRecording(envelope.data.value)
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error instanceof NativeAudioHostCommandError ? error : undefined)

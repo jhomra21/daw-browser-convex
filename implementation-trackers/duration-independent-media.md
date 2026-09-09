@@ -32,7 +32,7 @@ Short media may still use eager caches as an optimization. Eager materialization
 - Ordinary portable/native snapshots are metadata-only; bounded legacy instrument and prepared Stretch paths may still carry planar PCM.
 - Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
 - Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
-- Recording capture, temporary storage, RF64 finalization, and post-recording playback are bounded and page-backed. Practical runtime soak remains open.
+- Recording capture, temporary storage, RF64 finalization, and post-recording playback are bounded and page-backed. A packaged 10-minute native runtime soak completed with zero dropped frames, finalized, reopened, and played.
 - Shared-project audio promotion preserves the security-bounded 10 MiB multipart endpoint for small assets and now has an authorized resumable R2 multipart boundary for larger assets.
 - Native recording block sequence identifiers are versioned uint64 fields across the audio-core ABI and native host protocol.
 - Recording WAV finalization reads/writes blocks incrementally and selects RF64 before the RIFF 4 GiB container boundary.
@@ -137,14 +137,14 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 - [x] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
 - [x] Seek near beginning/middle/end and play through the packaged native path.
 - [x] Native VST processing works on the long source.
-- [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
+- [x] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
 - [x] Export a long range with bounded process memory.
-- [ ] Corrected Valhalla automation acceptance from PR #51 still passes.
+- [x] Corrected Valhalla automation acceptance from PR #51 still passes.
 - [x] `bun run lint`
 - [x] `bun run typecheck`
 - [x] `bun run test`
 - [x] native CTest/runtime checks on macOS
-- [ ] packaged Electron acceptance on macOS
+- [x] packaged Electron acceptance on macOS
 
 Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
 snapshots, bounded concurrent mapped-page hydration, bounded native written-range
@@ -168,14 +168,27 @@ for the scanner. The same campaign retained the earlier bounded six-minute
 48 kHz stereo float export result of 138,240,044 bytes with main-process RSS
 near 332 MiB.
 
-The practical recording soak is BLOCKED before capture in this environment:
-the packaged app reports `The native audio session is unavailable`, compatibility
-fallback does not start, and diagnostics remain uninitialized without recording
-counters. The exact PR #51 Valhalla automation regression is also BLOCKED:
-canonical project `project:11e1e291-8eb3-4743-b199-e0656a30c03c` is absent from
-the isolated local catalog and cloud control is unauthenticated. Real shared
-Worker/R2 smoke was therefore NOT EXECUTED. Packaged Electron acceptance remains
-open pending those two required scenarios.
+Packaged recording initially exposed an IPC contract defect: preload sent the
+standard native session envelope while the main-process configure/stop handlers
+validated the envelope as a raw recording value. After correcting that boundary,
+the built-in 48 kHz microphone completed a 644.085-second native capture with
+29,712,896 frames observed at ten minutes, zero dropped frames, stable host/worker
+ownership, bounded RSS, successful finalization, cold reopen, and playback.
+
+The absent historical PR #51 project was recreated locally as
+`project:cb7c3f25-ffc1-48ca-804b-ba0124115dfa`. ValhallaSupermassive exposed all
+19 expected parameters. Canonical parameter
+`vst3:292f4274-c54c-4926-8080-3cbf50027338:48` persisted exactly eight linear
+points from 0 through 82.5 seconds. Native playback started with an isolated VST
+worker. Three cold exports and one warm export each produced a 44.1 kHz,
+3,638,250-frame stereo float32 WAV of 29,106,044 bytes; all four SHA-256 digests
+were `8aee11194bb5e0dc1b84557a12abb3e6cb009ffc8c5fc0482aa69831012f8923`.
+
+Full certification after the recording fix completed with 2,824 passing tests,
+one intentionally skipped Electron AudioWorklet integration, and one unrelated
+local-send timing failure that passed immediately on focused rerun. Real shared
+Worker/R2 smoke was not executed because cloud control remained unauthenticated;
+it is supplementary and does not block packaged acceptance.
 
 ## Non-goals / real limits
 

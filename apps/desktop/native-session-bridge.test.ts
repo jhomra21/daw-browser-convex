@@ -62,6 +62,33 @@ test("keeps spectrum selection on the native session envelope contract", async (
   expect(main).not.toContain('[native-spectrum]')
 })
 
+test("routes recording IPC through production native session envelopes", async () => {
+  const [main, preload] = await Promise.all([
+    readFile(mainPath, "utf8"),
+    readFile(preloadPath, "utf8"),
+  ])
+
+  expect(preload).toContain('configureRecording: (input: NativeHostRecordingConfiguration) => invokeNativeSession("daw:audio-host:session:configure-recording", input)')
+  expect(preload).toContain('stopRecording: (stopFrame?: number) => invokeNativeSession("daw:audio-host:session:stop-recording", stopFrame)')
+
+  const configureStart = main.indexOf('ipcMain.handle("daw:audio-host:session:configure-recording"')
+  const stopStart = main.indexOf('ipcMain.handle("daw:audio-host:session:stop-recording"')
+  const controlStart = main.indexOf("  const registerNativeSessionControl", stopStart)
+  const configureHandler = main.slice(configureStart, stopStart)
+  const stopHandler = main.slice(stopStart, controlStart)
+
+  expect(configureHandler).toContain("nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)")
+  expect(configureHandler).toContain("envelope.data.transactionToken !== undefined")
+  expect(configureHandler).toContain("nativeSessionRecordingConfiguration(envelope.data.value)")
+  expect(configureHandler).toContain("await supervisor.configureRecording(configuration)")
+  expect(configureHandler).not.toContain("nativeSessionRecordingConfigurationSchema.safeParse(value)")
+
+  expect(stopHandler).toContain("nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)")
+  expect(stopHandler).toContain("envelope.data.transactionToken !== undefined")
+  expect(stopHandler).toContain("await supervisor.stopRecording(envelope.data.value)")
+  expect(stopHandler).not.toContain("const endFrame = z.number().int().safe().min(0).optional().safeParse(value)")
+})
+
 test("preserves renderer transport transition IDs through native IPC mapping", async () => {
   const main = await readFile(mainPath, "utf8")
 

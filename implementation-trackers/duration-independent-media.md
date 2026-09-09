@@ -135,8 +135,8 @@ Both source consumption and rendered output are block-streamed. Native `offlineP
 ### Phase 8 — acceptance
 
 - [x] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
-- [ ] Seek near beginning/middle/end and play through the packaged native path.
-- [ ] Native VST processing works on the long source.
+- [x] Seek near beginning/middle/end and play through the packaged native path.
+- [x] Native VST processing works on the long source.
 - [ ] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
 - [x] Export a long range with bounded process memory.
 - [ ] Corrected Valhalla automation acceptance from PR #51 still passes.
@@ -152,13 +152,30 @@ ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
 covered by focused tests. Native offline planning now emits metadata-only mapped
 ordinary-source descriptors, hydrates only their scheduled source ranges through
 bounded pages before graph publication, and retains `native-pcm-chunking` only
-for eagerly prepared Stretch/instrument PCM. A fresh unsigned packaged Electron
-build from `c5cf1aa` imported a deterministic six-minute, 48 kHz mono WAV
-through bounded capability reads, persisted and reopened the local project
-asset, and exported the full range as a 48 kHz stereo float WAV. The export
-completed at 138,240,044 bytes while the main process remained near 332 MiB
-RSS. Native playback with VST, practical recording soak, and the corrected
-Valhalla automation scenario remain open.
+for eagerly prepared Stretch/instrument PCM. An unsigned packaged Electron build
+from `94665eeb` imported a deterministic six-minute, 48 kHz mono WAV into fresh
+local project `project:76b4e135-a197-4ef2-ab27-1c9b63050ea2`. ValhallaSupermassive
+5.0.0 inserted on the long-source track as instance
+`a722f97f-71bb-4ed5-a175-628d3c87ed66`; its native rebuild succeeded, ParamID 48
+persisted at normalized value `0.5`, and the same native host/worker processes
+advanced playback from 0 to 2.08 seconds, 180 to 182.069 seconds, and 359 to
+361.048 seconds without paging, worker-fault, restart, or detach errors. The
+accepted package hashes are `d41cb89e71361cbe8338ea6fa9e79be5bfa27baa3544ea54d1456dcc33406a9d`
+for `app.asar`, `ab53077948e9ea37398cd4a0c8856018a02f7e3877e1cf12b9ccc895494d3d84`
+for the native audio host, `0d4d9c4c8d1e32efffe7d2ceaa208ccf5ccaebfe5897047feb19a4d658a6e1e2`
+for the VST worker, and `1644deb9c854605509dc90efe792e6ce622d2417eef474c969fc6e1e305fe69f`
+for the scanner. The same campaign retained the earlier bounded six-minute
+48 kHz stereo float export result of 138,240,044 bytes with main-process RSS
+near 332 MiB.
+
+The practical recording soak is BLOCKED before capture in this environment:
+the packaged app reports `The native audio session is unavailable`, compatibility
+fallback does not start, and diagnostics remain uninitialized without recording
+counters. The exact PR #51 Valhalla automation regression is also BLOCKED:
+canonical project `project:11e1e291-8eb3-4743-b199-e0656a30c03c` is absent from
+the isolated local catalog and cloud control is unauthenticated. Real shared
+Worker/R2 smoke was therefore NOT EXECUTED. Packaged Electron acceptance remains
+open pending those two required scenarios.
 
 ## Non-goals / real limits
 

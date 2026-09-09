@@ -28,14 +28,19 @@ import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from
 import type { HistoryEntry, TrackAutomationSnapshot, TrackEffectSnapshot } from '~/lib/undo/types'
 import { z } from 'zod'
 import { ResumableAudioUploadHttpError, uploadAudioFile } from './resumable-audio-uploader'
+import { isCapabilityFile } from '~/lib/desktop/capability-file'
+import { materializeLocalRetryFile, readLocalRetryFile, removeLocalRetryFile } from '~/lib/local-assets'
 
-type SharedOutboxStatus = 'pending' | 'failed' | 'dead-letter'
+type SharedOutboxStatus = 'pending' | 'failed' | 'dead-letter' | 'completed'
 type SharedOutboxKind = SharedTimelineOperationKind | 'clips.createUploadedAudio'
 
 type UploadedAudioClipPayload = {
   projectId: string
   assetKey: string
   file: File
+  materializedPath?: string
+  fileName?: string
+  mimeType?: string
   duration?: number
   clipPayload: SharedTimelineClipCreatePayload
 }
@@ -55,6 +60,7 @@ type SharedOutboxEntry = {
   claimOwner?: string
   claimToken?: string
   leaseExpiresAt?: number
+  retryFileCleanup?: { projectId: string; storagePath: string }
   createdAt: number
   updatedAt: number
 }
@@ -392,7 +398,10 @@ class SharedOutboxRejectedError extends Error {
 export const isPermanentSharedOperationError = (error: SharedOperationFailure) => (
   error instanceof SharedTimelineOperationRejectedError
   || (error instanceof SharedTimelineOperationHttpError && (
-    error.status === 400 || error.status === 403
+    error.status === 400 || error.status === 403 || error.status === 413
+  ))
+  || (error instanceof ResumableAudioUploadHttpError && (
+    error.status === 400 || error.status === 403 || error.status === 413
   ))
   || (error instanceof Error && error.message === 'Queued operation is incompatible with current validation and cannot be published.')
   || (error instanceof Error && error.message === 'Invalid queued shared audio clip.')
@@ -420,7 +429,10 @@ const outboxSequence = (value: LocalProjectStoredValue) => (
 const uploadedAudioClipPayloadSchema = z.object({
   projectId: z.string(),
   assetKey: z.string(),
-  file: z.instanceof(File),
+  file: z.instanceof(File).optional(),
+  materializedPath: z.string().min(1).max(256).optional(),
+  fileName: z.string().min(1).max(256).optional(),
+  mimeType: z.string().min(1).max(128).optional(),
   duration: finiteNumberSchema.optional(),
   clipPayload: z.custom<SharedTimelineClipCreatePayload>((value) => (
     (() => {
@@ -429,7 +441,7 @@ const uploadedAudioClipPayloadSchema = z.object({
         && readSharedTimelineClipCreatePayload(parsed.data, { requireAudioSampleUrl: false, durable: true }) !== null
     })()
   )),
-})
+}).refine((value) => value.file !== undefined || value.materializedPath !== undefined)
 const sharedOutboxKindSchema = z.custom<SharedOutboxKind>((value) => (
   value === 'clips.createUploadedAudio'
   || (() => {
@@ -444,7 +456,7 @@ const sharedOutboxEntrySchema = z.object({
   userId: z.string(),
   payload: z.union([z.json(), uploadedAudioClipPayloadSchema]),
   completion: sharedOutboxCompletionSchema.optional(),
-  status: z.enum(['pending', 'failed', 'dead-letter']),
+  status: z.enum(['pending', 'failed', 'dead-letter', 'completed']),
   attempts: z.number(),
   nextAttemptAt: z.number(),
   lastError: z.string().optional(),
@@ -452,6 +464,10 @@ const sharedOutboxEntrySchema = z.object({
   claimOwner: z.string().optional(),
   claimToken: z.string().optional(),
   leaseExpiresAt: z.number().optional(),
+  retryFileCleanup: z.object({
+    projectId: z.string(),
+    storagePath: z.string().min(1).max(256),
+  }).optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -475,6 +491,7 @@ const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => 
     claimOwner: entry.claimOwner,
     claimToken: entry.claimToken,
     leaseExpiresAt: entry.leaseExpiresAt,
+    retryFileCleanup: entry.retryFileCleanup,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
   }
@@ -482,9 +499,9 @@ const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => 
 
 const summarizeOutboxRows = (rows: LocalProjectSyncStateRow[], userId: string) => (
   readOutboxEntries(rows, userId).reduce<SharedOutboxSummary>((acc, entry) => {
-    return entry.status === 'pending'
-      ? { ...acc, pending: acc.pending + 1 }
-      : { ...acc, failed: acc.failed + 1 }
+    if (entry.status === 'pending') return { ...acc, pending: acc.pending + 1 }
+    if (entry.status === 'failed' || entry.status === 'dead-letter') return { ...acc, failed: acc.failed + 1 }
+    return acc
   }, { pending: 0, failed: 0 })
 )
 
@@ -570,9 +587,9 @@ const ensureOutboxSequences = async (projectId: string) => {
   await tx.done
 }
 
-const readUploadedAudioClipPayload = (
+const readUploadedAudioClipPayload = async (
   value: SharedOutboxEntry['payload'],
-): UploadedAudioClipPayload | null => {
+): Promise<UploadedAudioClipPayload | null> => {
   const parsed = uploadedAudioClipPayloadSchema.safeParse(value)
   if (!parsed.success) return null
   const parsedClipPayload = z.json().safeParse(parsed.data.clipPayload)
@@ -582,10 +599,20 @@ const readUploadedAudioClipPayload = (
     { requireAudioSampleUrl: false, durable: true },
   )
   if (!clipPayload) return null
+  const file = parsed.data.materializedPath
+    ? await readLocalRetryFile(
+      parsed.data.projectId,
+      parsed.data.materializedPath,
+      parsed.data.fileName,
+      parsed.data.mimeType,
+    ) ?? parsed.data.file
+    : parsed.data.file
+  if (!file) return null
   return {
     projectId: parsed.data.projectId,
     assetKey: parsed.data.assetKey,
-    file: parsed.data.file,
+    file,
+    materializedPath: parsed.data.materializedPath,
     duration: parsed.data.duration,
     clipPayload,
   }
@@ -691,13 +718,14 @@ const listEntries = async (projectId: string, userId: string) => {
 
 const publishEntry = async (entry: SharedOutboxEntry) => {
   if (entry.kind === 'clips.createUploadedAudio') {
-    const payload = readUploadedAudioClipPayload(entry.payload)
+    const payload = await readUploadedAudioClipPayload(entry.payload)
     if (!payload) throw new Error('Invalid queued shared audio clip.')
     const upload = await uploadSharedAudioClipAsset(payload, `outbox-${entry.id}`)
-    return await publishSharedTimelineOperation(entry.projectId, {
+    const result = await publishSharedTimelineOperation(entry.projectId, {
       kind: 'clips.create',
       payload: { ...payload.clipPayload, sampleUrl: upload.url, assetKey: upload.assetKey },
     })
+    return result
   }
   const storedOperation = z.json().safeParse({ kind: entry.kind, payload: entry.payload })
   const operation = storedOperation.success
@@ -778,19 +806,45 @@ export const publishDurableSharedTimelineOperation = async <T = undefined>(
 
 export const enqueueSharedAudioClipCreateOnFailure = async (
   input: { projectId: string; userId: string; assetKey: string; file: File; duration?: number; clipPayload: UploadedAudioClipPayload['clipPayload']; error?: unknown },
-) => (await enqueueSharedOutboxOperation({
-  projectId: input.projectId,
-  userId: input.userId,
-  kind: 'clips.createUploadedAudio',
-  payload: {
-    projectId: input.projectId,
-    assetKey: input.assetKey,
-    file: input.file,
-    duration: input.duration,
-    clipPayload: input.clipPayload,
-  },
-  error: input.error,
-})).id
+) => {
+  if (input.error !== undefined && isPermanentSharedOperationError(input.error)) {
+    throw input.error
+  }
+  const materialized = isCapabilityFile(input.file)
+    ? await materializeLocalRetryFile(input.projectId, input.file)
+    : undefined
+  try {
+    return (await enqueueSharedOutboxOperation({
+      projectId: input.projectId,
+      userId: input.userId,
+      kind: 'clips.createUploadedAudio',
+      payload: {
+        projectId: input.projectId,
+        assetKey: input.assetKey,
+        file: materialized ? undefined : input.file,
+        materializedPath: materialized?.storagePath,
+        fileName: input.file.name,
+        mimeType: input.file.type,
+        duration: input.duration,
+        clipPayload: input.clipPayload,
+      },
+      error: input.error,
+    })).id
+  } catch (error) {
+    if (materialized) {
+      try {
+        await removeLocalRetryFile(input.projectId, materialized.storagePath)
+      } catch (cleanupError) {
+        throw new Error(
+          `Retry file cleanup failed after queue admission failed: ${
+            cleanupError instanceof Error ? cleanupError.message : 'project storage cleanup failed.'
+          }`,
+        )
+      }
+    }
+    throw error
+  }
+}
 
 type ClaimedOutboxEntry = SharedOutboxEntry & { claimToken: string }
 
@@ -839,7 +893,7 @@ const claimNextEntry = async (
       return entry && entry.userId === userId ? [entry] : []
     })
     .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
-  const head = entries.find((entry) => entry.status !== 'dead-letter')
+  const head = entries.find((entry) => entry.status === 'pending' || entry.status === 'failed')
   if (
     !head
     || (
@@ -946,7 +1000,31 @@ const completeClaimedEntry = async (
       value: { result, createdAt: timestamp, expiresAt: timestamp + OUTBOX_COMPLETION_TTL_MS, completionOwner },
       updatedAt: timestamp,
     })
-    store.delete(keyFor(entry.id))
+    if (entry.kind === 'clips.createUploadedAudio') {
+      const payload = uploadedAudioClipPayloadSchema.safeParse(current.payload)
+      if (payload.success && payload.data.materializedPath) {
+        store.put({
+          key: keyFor(current.id),
+          value: {
+            ...current,
+            status: 'completed',
+            claimOwner: undefined,
+            claimToken: undefined,
+            leaseExpiresAt: undefined,
+            retryFileCleanup: {
+              projectId: current.projectId,
+              storagePath: payload.data.materializedPath,
+            },
+            updatedAt: timestamp,
+          },
+          updatedAt: timestamp,
+        })
+      } else {
+        store.delete(keyFor(entry.id))
+      }
+    } else {
+      store.delete(keyFor(entry.id))
+    }
   }
   await tx.done
 }
@@ -981,6 +1059,15 @@ const settleClaimedEntryFailure = async (
       claimToken: undefined,
       leaseExpiresAt: undefined,
       updatedAt: timestamp,
+    }
+    if (permanent && current.kind === 'clips.createUploadedAudio') {
+      const payload = uploadedAudioClipPayloadSchema.safeParse(current.payload)
+      if (payload.success && payload.data.materializedPath) {
+        settled.retryFileCleanup = {
+          projectId: current.projectId,
+          storagePath: payload.data.materializedPath,
+        }
+      }
     }
     store.put({ key: keyFor(current.id), value: settled, updatedAt: timestamp })
   }
@@ -1017,6 +1104,43 @@ const drainSharedOutbox = async (
     if (targetOperationId === entry.id) break
   }
   return { summary: await writeSummary(projectId, userId), results }
+}
+
+const retryOutboxFileCleanup = async (projectId: string, userId: string) => {
+  const db = await openLocalProjectDb(projectId)
+  const rows = await db.getAll('syncState', outboxKeyRange())
+  const candidates = rows.flatMap((row) => {
+    const entry = readEntry(row.value)
+    return entry
+      && entry.userId === userId
+      && (entry.status === 'completed' || entry.status === 'dead-letter')
+      && entry.retryFileCleanup
+      ? [entry]
+      : []
+  })
+  for (const entry of candidates) {
+    const cleanup = entry.retryFileCleanup
+    if (!cleanup) continue
+    try {
+      await removeLocalRetryFile(cleanup.projectId, cleanup.storagePath)
+      if (entry.status === 'completed') {
+        await db.delete('syncState', keyFor(entry.id))
+      } else {
+        await db.put('syncState', {
+          key: keyFor(entry.id),
+          value: { ...entry, retryFileCleanup: undefined, updatedAt: now() },
+          updatedAt: now(),
+        })
+      }
+    } catch (error) {
+      const lastError = error instanceof Error ? error.message : 'Retry file cleanup failed.'
+      await db.put('syncState', {
+        key: keyFor(entry.id),
+        value: { ...entry, lastError, updatedAt: now() },
+        updatedAt: now(),
+      })
+    }
+  }
 }
 
 const serializeSharedOutboxFlush = <T>(
@@ -1092,11 +1216,16 @@ export const flushSharedOutbox = async (
     async () => await withSharedOutboxPublicationLock(
       projectId,
       userId,
-      async (allowExpiredClaimRecovery) => await drainSharedOutbox(
-        projectId,
-        userId,
-        { ...options, allowExpiredClaimRecovery },
-      ),
+      async (allowExpiredClaimRecovery) => {
+        await retryOutboxFileCleanup(projectId, userId)
+        const drained = await drainSharedOutbox(
+          projectId,
+          userId,
+          { ...options, allowExpiredClaimRecovery },
+        )
+        await retryOutboxFileCleanup(projectId, userId)
+        return { summary: await writeSummary(projectId, userId), results: drained.results }
+      },
     ),
   )
   return result.summary
@@ -1110,6 +1239,7 @@ export const flushSharedOutboxOperation = async (
 ): Promise<SharedOutboxOperationResult> => {
   return await serializeSharedOutboxFlush(projectId, userId, async () => {
     return await withSharedOutboxPublicationLock(projectId, userId, async (allowExpiredClaimRecovery) => {
+      await retryOutboxFileCleanup(projectId, userId)
       const before = (await listEntries(projectId, userId)).find((entry) => entry.id === operationId)
       if (!before) {
         const db = await openLocalProjectDb(projectId)

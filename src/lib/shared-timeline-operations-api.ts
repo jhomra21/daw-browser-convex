@@ -51,12 +51,13 @@ const assertValidClipCreateResult = (
 export const publishSharedTimelineOperation = async (
   projectId: string,
   operation: SharedTimelineOperation,
-  options?: { fetch?: typeof fetch },
+  options?: { fetch?: typeof fetch; signal?: AbortSignal },
 ): Promise<JsonValue> => {
   const response = await (options?.fetch ?? fetch)(`/api/projects/${encodeURIComponent(projectId)}/timeline/operations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(operation),
+    signal: options?.signal,
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')

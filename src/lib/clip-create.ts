@@ -34,12 +34,12 @@ type UploadedAudioClipInput = {
   source: AudioSourceMetadata
   sourceAssetKey: string
   sourceKind: AudioSourceKind
-  createServerClip: (payload: SharedTimelineClipCreatePayload) => Promise<string | null>
+  createServerClip: (payload: SharedTimelineClipCreatePayload, signal?: AbortSignal) => Promise<string | null>
   insertLocalClip: (trackId: TrackId, clip: RuntimeClip) => void
   removeLocalClips?: (clipIds: Iterable<string>) => void
   selectClip?: (trackId: TrackId, clipId: string) => void
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number) => Promise<{ assetKey: string; url: string } | null>
+  uploadToR2: (projectId: string, assetKey: string, file: File, duration?: number, signal?: AbortSignal) => Promise<{ assetKey: string; url: string } | null>
   audioBufferCache: ClipBufferWriter
   grantClipWrite?: (clipId: string, scope?: OptimisticGrantScope | null) => void
   grantScope?: OptimisticGrantScope
@@ -47,6 +47,8 @@ type UploadedAudioClipInput = {
   pushHistory?: boolean
   canProject?: () => boolean
   onClipCreated?: (clip: RuntimeClip) => void
+  canCommit?: () => boolean
+  signal?: AbortSignal
 }
 
 type UploadedAudioClipResult = {
@@ -169,8 +171,10 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     file: input.file,
     duration,
     uploadToR2: input.uploadToR2,
+    signal: input.signal,
   }).catch(async (error) => {
     removePendingClip()
+    if (input.signal?.aborted) throw input.signal.reason ?? new DOMException('The audio upload was canceled.', 'AbortError')
     if (isPermanentSharedOperationError(error)) throw error
     await enqueueSharedAudioClipCreateOnFailure({
       projectId: input.projectId,
@@ -193,10 +197,18 @@ export async function createUploadedAudioClip(input: UploadedAudioClipInput): Pr
     assetKey: upload.assetKey,
   }
   try {
+    input.signal?.throwIfAborted()
+    if (input.canCommit?.() === false) {
+      throw new DOMException('The audio clip creation was canceled.', 'AbortError')
+    }
+    // The semantic clip publication is not abortable. The signal check immediately
+    // before this call makes cancellation win before publication; once started,
+    // completion is allowed to report the committed outcome truthfully.
     const createdClipId = await input.createServerClip(payload)
     clipId = assertDefined(createdClipId, 'Failed to create clip')
   } catch (error) {
     removePendingClip()
+    if (input.signal?.aborted) throw input.signal.reason ?? new DOMException('The audio clip creation was canceled.', 'AbortError')
     if (isPermanentSharedOperationError(error)) throw error
     await enqueueSharedTimelineOperationOnFailure({
       projectId: input.projectId,

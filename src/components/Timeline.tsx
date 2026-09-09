@@ -130,6 +130,7 @@ import { createAttachedHostController, registerAttachedHostController } from "~/
 import { createNativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { createVstParameterFeedbackController } from "~/lib/desktop/vst-parameter-feedback-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
+import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
@@ -151,6 +152,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
   const navigate = useNavigate();
   const exportQueue = createExportQueue();
+  const importQueue = createImportJobQueue();
   onCleanup(exportQueue.dispose);
   const nativeOfflineBridge = requiresNativeAudio
     ? window.dawDesktop?.audioHost?.offlineRender
@@ -1226,6 +1228,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     playheadSec,
     projectId,
+    mountedProjectGeneration,
     userId,
     clipBuffers,
     getScrollElement: () => scrollRef,
@@ -1533,6 +1536,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
   recordingStopRef.activeTrackId = audioRecordingTrackId;
   setProjectTransitionSettlement(async () => {
+    importQueue.cancelAll();
     if (untrack(isAudioRecording)) await stopAudioRecording();
     if (untrack(midiRecording.isRecording)) await midiRecording.stopRecording();
     if (untrack(provisionalMidiClipId)) throw new Error("MIDI recording remains protected until it can be finalized.");
@@ -2129,6 +2133,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         }
       },
       exportQueue,
+      importQueue,
       exportService,
       importFiles,
       enqueueNativeVstParameter: nativeVstParameterQueue

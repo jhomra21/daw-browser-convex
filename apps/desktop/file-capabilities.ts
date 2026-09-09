@@ -4,6 +4,7 @@ import * as nodeFileSystem from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { FileHandle } from "node:fs/promises"
+import { desktopCapabilityMaximumChunkBytes } from "@daw-browser/desktop-protocol"
 import {
   NativeFileCapabilityError,
   type FileIdentity,
@@ -13,8 +14,7 @@ import {
 
 const capabilityLifetimeMs = 4 * 60 * 60 * 1_000
 const maximumActiveCapabilities = 16
-const maximumReadBytes = 10 * 1024 * 1024
-const maximumChunkBytes = 1024 * 1024
+const maximumChunkBytes = desktopCapabilityMaximumChunkBytes
 const maximumOutputFiles = 1024
 
 const supportedAudioTypes = new Map([
@@ -139,6 +139,8 @@ type ReadCapability = CapabilityBase & {
   mime: string
   device: number
   inode: number
+  mtimeMs: number
+  ctimeMs: number
 }
 
 type WriteCapability = CapabilityBase & {
@@ -499,11 +501,31 @@ export const createFileCapabilityManager = ({
       throw new FileCapabilityError("unsupported-file", "The selected path is not a regular file.")
     }
     await requireUnchangedRealPath(filePath)
-    if (status.size > maximumReadBytes) {
-      throw new FileCapabilityError("unsupported-file", "The selected file exceeds 10 MiB.")
+    if (!Number.isSafeInteger(status.size) || status.size < 0) {
+      throw new FileCapabilityError("unsupported-file", "The selected file has an invalid size.")
     }
-    return { byteLength: status.size, mime, device: status.dev, inode: status.ino }
+    if (!Number.isFinite(status.mtimeMs) || !Number.isFinite(status.ctimeMs)) {
+      throw new FileCapabilityError("unsupported-file", "The selected file has invalid identity metadata.")
+    }
+    return {
+      byteLength: status.size,
+      mime,
+      device: status.dev,
+      inode: status.ino,
+      mtimeMs: status.mtimeMs,
+      ctimeMs: status.ctimeMs,
+    }
   }
+
+  const readIdentityMatches = (
+    current: Awaited<ReturnType<typeof validateReadFile>>,
+    capability: ReadCapability,
+  ) => current.byteLength === capability.byteLength
+    && current.mime === capability.mime
+    && current.device === capability.device
+    && current.inode === capability.inode
+    && current.mtimeMs === capability.mtimeMs
+    && current.ctimeMs === capability.ctimeMs
 
   const validateDirectory = async (directoryPath: string) => {
     requireSafeReparseProtection()
@@ -644,7 +666,7 @@ export const createFileCapabilityManager = ({
       const reservation = reserveCapacity(scope, 1)
       try {
         await pruneExpired()
-        const { byteLength, mime, device, inode } = await validateReadFile(filePath)
+        const { byteLength, mime, device, inode, mtimeMs, ctimeMs } = await validateReadFile(filePath)
         reservation.assertActive()
         const capability: ReadCapability = {
           ...createBase(scope),
@@ -654,6 +676,8 @@ export const createFileCapabilityManager = ({
           mime,
           device,
           inode,
+          mtimeMs,
+          ctimeMs,
         }
         capabilities.set(capability.token, capability)
         return { token: capability.token, basename: path.basename(filePath), byteLength, mime }
@@ -713,7 +737,7 @@ export const createFileCapabilityManager = ({
         const filePath = selection.filePaths[0]
         const validated = [{ filePath, ...await validateReadFile(filePath) }]
         reservation.assertActive()
-        const files = validated.map(({ filePath, byteLength, mime, device, inode }) => {
+        const files = validated.map(({ filePath, byteLength, mime, device, inode, mtimeMs, ctimeMs }) => {
           const capability: ReadCapability = {
             ...createBase(scope),
             kind: "read",
@@ -722,6 +746,8 @@ export const createFileCapabilityManager = ({
             mime,
             device,
             inode,
+            mtimeMs,
+            ctimeMs,
           }
           capabilities.set(capability.token, capability)
           return {
@@ -807,18 +833,24 @@ export const createFileCapabilityManager = ({
       }
     },
 
-    async readFile(scope: FileCapabilityScope, token: string) {
+    async readFile(scope: FileCapabilityScope, token: string, offset: number, length: number) {
       const capability = await requireCapability(scope, token)
       if (capability.kind !== "read") {
         throw new FileCapabilityError("invalid-capability", "The capability does not permit reads.")
       }
-      const current = await validateReadFile(capability.filePath)
       if (
-        current.byteLength !== capability.byteLength
-        || current.mime !== capability.mime
-        || current.device !== capability.device
-        || current.inode !== capability.inode
+        !Number.isSafeInteger(offset)
+        || offset < 0
+        || !Number.isSafeInteger(length)
+        || length <= 0
+        || length > maximumChunkBytes
+        || offset > capability.byteLength
+        || length > capability.byteLength - offset
       ) {
+        throw new FileCapabilityError("invalid-chunk", "The requested file range is invalid.")
+      }
+      const current = await validateReadFile(capability.filePath)
+      if (!readIdentityMatches(current, capability)) {
         throw new FileCapabilityError("unsupported-file", "The selected file changed after access was granted.")
       }
       const noFollow = process.platform === "win32" ? 0 : (constants.O_NOFOLLOW ?? 0)
@@ -833,7 +865,28 @@ export const createFileCapabilityManager = ({
         ) {
           throw new FileCapabilityError("unsupported-file", "The selected file changed after access was granted.")
         }
-        return await handle.readFile()
+        const buffer = Buffer.alloc(length)
+        let bytesRead = 0
+        while (bytesRead < length) {
+          const result = await handle.read(buffer, bytesRead, length - bytesRead, offset + bytesRead)
+          if (result.bytesRead === 0) {
+            throw new FileCapabilityError("unsupported-file", "The selected file changed while it was being read.")
+          }
+          bytesRead += result.bytesRead
+        }
+        const after = await handle.stat()
+        if (
+          !after.isFile()
+          || after.size !== capability.byteLength
+          || after.dev !== capability.device
+          || after.ino !== capability.inode
+          || after.mtimeMs !== capability.mtimeMs
+          || after.ctimeMs !== capability.ctimeMs
+        ) {
+          throw new FileCapabilityError("unsupported-file", "The selected file changed while it was being read.")
+        }
+        capability.expiresAt = now() + capabilityLifetimeMs
+        return buffer
       } finally {
         await handle.close()
       }

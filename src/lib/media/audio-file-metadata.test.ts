@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { readAudioFileMetadata } from './audio-file-metadata'
+import { CapabilityFile } from '~/lib/desktop/capability-file'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)
@@ -41,4 +42,27 @@ test('reads audio metadata without calling File.arrayBuffer()', async () => {
     sampleRate: 48_000,
     channelCount: 1,
   })
+})
+
+test('reads capability-backed metadata through bounded ranges', async () => {
+  const bytes = tinyWave()
+  const reads: Array<{ offset: number; length: number }> = []
+  const file = new CapabilityFile({
+    requestId: 'metadata-test',
+    token: '0'.repeat(64),
+    size: bytes.byteLength,
+    signal: new AbortController().signal,
+    readChunk: async (_requestId, _token, offset, length) => {
+      reads.push({ offset, length })
+      return bytes.slice(offset, offset + length)
+    },
+  }, 'tiny.wav', 'audio/wav')
+
+  await expect(readAudioFileMetadata(file)).resolves.toEqual({
+    durationSec: 2 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+  })
+  expect(reads.length).toBeGreaterThan(0)
+  expect(reads.every((read) => read.length <= 1024 * 1024)).toBe(true)
 })

@@ -9,6 +9,8 @@ export const desktopOperations = (nativeMediaAvailable: boolean): DesktopOperati
     nativeMediaAvailable
     || !operation.startsWith("host.vst.")
       && operation !== "host.import.audio"
+      && operation !== "host.import.status"
+      && operation !== "host.import.cancel"
       && operation !== "host.export.run"
       && operation !== "host.export.status"
       && operation !== "host.export.cancel"

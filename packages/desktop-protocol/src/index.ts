@@ -30,6 +30,7 @@ export const maxDesktopReplyPayloadBase64Characters = 4 * Math.ceil(maxDesktopRe
 export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktopReplyPayloadBytes)
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
+export const desktopCapabilityMaximumChunkBytes = 1024 * 1024
 
 export type DesktopJsonValue =
   | null
@@ -71,6 +72,8 @@ export const desktopOperationSchemaV1 = z.enum([
   "host.vst.instances",
   "host.vst.parameters",
   "host.import.audio",
+  "host.import.status",
+  "host.import.cancel",
   "host.export.run",
   "host.export.status",
   "host.export.cancel",
@@ -216,6 +219,8 @@ const requestInputs = {
   ]),
   "host.export.status": desktopEmptyInputSchemaV1,
   "host.export.cancel": z.object({ jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/) }).strict(),
+  "host.import.status": desktopEmptyInputSchemaV1,
+  "host.import.cancel": z.object({ jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/) }).strict(),
   "transport.status": desktopEmptyInputSchemaV1,
   "transport.play": desktopEmptyInputSchemaV1,
   "transport.pause": desktopEmptyInputSchemaV1,
@@ -232,6 +237,7 @@ const requestInputs = {
 } as const
 
 export const desktopHostImportInputSchemaV1 = requestInputs["host.import.audio"]
+export const desktopHostImportCancelInputSchemaV1 = requestInputs["host.import.cancel"]
 const mixdownExtensionMatchesFormat = (format: string, filePath: string) => {
   const extension = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
   return (format === "wav" && extension === ".wav")
@@ -256,10 +262,12 @@ const capabilityFile = z.object({
   token: capabilityToken,
   basename: z.string().min(1).max(256),
 }).strict()
+const capabilityFileByteLength = z.number().int().nonnegative().safe()
 export const desktopRendererImportInputSchemaV1 = z.object({
   canceled: z.boolean(),
   files: z.array(capabilityFile.extend({
     mime: z.string().min(1).max(128),
+    byteLength: capabilityFileByteLength,
   }).strict()).min(1).max(1).optional(),
 }).strict().superRefine((value, context) => {
   if (!value.canceled && value.files === undefined) context.addIssue({ code: "custom", message: "A non-canceled import requires a file capability." })
@@ -336,6 +344,16 @@ const safeExportOutputSchema = z.object({ name: z.string().min(1).max(256), size
 export const desktopHostImportResultSchemaV1 = z.object({
   status: z.enum(["created", "queued", "canceled", "failed"]),
   count: z.number().int().min(0).max(1),
+  jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/).optional(),
+}).strict()
+export const desktopHostImportStatusSchemaV1 = z.object({
+  status: z.enum(["idle", "queued", "running", "completed", "canceled", "failed"]),
+  job: z.object({
+    id: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+    name: z.string().min(1).max(256),
+    count: z.number().int().min(0).max(1).optional(),
+    error: z.string().min(1).max(512).optional(),
+  }).strict().optional(),
 }).strict()
 export const desktopHostExportRunResultSchemaV1 = z.object({
   status: z.enum(["queued", "canceled"]),
@@ -434,6 +452,18 @@ export const desktopHostOperationCatalog = {
     output: desktopHostImportResultSchemaV1,
     effect: "write",
   },
+  "host.import.status": {
+    id: "host.import.status",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopHostImportStatusSchemaV1,
+    effect: "read",
+  },
+  "host.import.cancel": {
+    id: "host.import.cancel",
+    input: z.object({ jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/) }).strict(),
+    output: desktopHostImportStatusSchemaV1,
+    effect: "write",
+  },
   "host.export.run": {
     id: "host.export.run",
     input: desktopHostExportRunInputSchemaV1,
@@ -509,6 +539,8 @@ export type DesktopOperationMapV1 = {
   "host.vst.instances": { input: z.infer<typeof desktopHostVstInstancesInputSchemaV1>; result: z.infer<typeof desktopHostVstInstancesResultSchemaV1> }
   "host.vst.parameters": { input: z.infer<typeof desktopHostVstParametersInputSchemaV1>; result: z.infer<typeof desktopHostVstParametersResultSchemaV1> }
   "host.import.audio": { input: z.infer<typeof requestInputs["host.import.audio"]>; result: z.infer<typeof desktopHostImportResultSchemaV1> }
+  "host.import.status": { input: Record<string, never>; result: z.infer<typeof desktopHostImportStatusSchemaV1> }
+  "host.import.cancel": { input: z.infer<typeof requestInputs["host.import.cancel"]>; result: z.infer<typeof desktopHostImportStatusSchemaV1> }
   "host.export.run": { input: z.infer<typeof requestInputs["host.export.run"]>; result: z.infer<typeof desktopHostExportRunResultSchemaV1> }
   "host.export.status": { input: Record<string, never>; result: z.infer<typeof desktopHostExportStatusSchemaV1> }
   "host.export.cancel": { input: z.infer<typeof requestInputs["host.export.cancel"]>; result: z.infer<typeof desktopHostExportStatusSchemaV1> }
@@ -619,10 +651,15 @@ export const desktopExportTerminalSchemaV1 = z.object({
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
   status: z.enum(["success", "canceled", "error"]),
 }).strict()
+export const desktopImportTerminalSchemaV1 = z.object({
+  version,
+  type: z.literal("import-terminal"),
+  jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+}).strict()
 export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128), actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) }).strict()
 export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length) }).strict()
 export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
-export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
+export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopImportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
 
 const requestInputsV2 = {
@@ -689,9 +726,10 @@ export const desktopHelloAckSchemaV2 = z.object({
   capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length),
 }).strict()
 export const desktopLifecycleSchemaV2 = desktopLifecycleSchemaV1.extend({ version: versionV2 })
+export const desktopImportTerminalSchemaV2 = desktopImportTerminalSchemaV1.extend({ version: versionV2 })
 export const desktopFrameSchemaV2 = z.discriminatedUnion("type", [
   desktopRequestSchemaV2, desktopReplySchemaV2, desktopReplyChunkSchemaV2,
-  desktopCancelSchemaV2, desktopProgressSchemaV2, desktopExportTerminalSchemaV2,
+  desktopCancelSchemaV2, desktopProgressSchemaV2, desktopExportTerminalSchemaV2, desktopImportTerminalSchemaV2,
   desktopHelloSchemaV2, desktopHelloAckSchemaV2, desktopLifecycleSchemaV2,
 ])
 export type DesktopFrameV2 = z.infer<typeof desktopFrameSchemaV2>
@@ -713,6 +751,8 @@ const nonControlResultSchemas = {
   "host.vst.instances": desktopHostVstInstancesResultSchemaV1,
   "host.vst.parameters": desktopHostVstParametersResultSchemaV1,
   "host.import.audio": desktopHostImportResultSchemaV1,
+  "host.import.status": desktopHostImportStatusSchemaV1,
+  "host.import.cancel": desktopHostImportStatusSchemaV1,
   "host.export.run": desktopHostExportRunResultSchemaV1,
   "host.export.status": desktopHostExportStatusSchemaV1,
   "host.export.cancel": desktopHostExportStatusSchemaV1,

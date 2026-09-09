@@ -11,8 +11,10 @@ import {
   desktopHelloSchemaV1,
   desktopHelloSchemaV2,
   desktopHostExportRunInputSchemaV1,
+  desktopCapabilityMaximumChunkBytes,
   desktopHostExportRunResultSchemaV1,
   desktopHostImportInputSchemaV1,
+  desktopHostImportResultSchemaV1,
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
   desktopProtocolVersion,
@@ -278,6 +280,8 @@ const outputFilePickerSchema = z.object({
 const capabilityReadSchema = z.object({
   requestId: requestIdSchema,
   token: z.string(),
+  offset: z.number().int().nonnegative().safe(),
+  length: z.number().int().positive().max(desktopCapabilityMaximumChunkBytes).safe(),
 }).passthrough()
 const capabilityBeginWriteSchema = z.object({
   requestId: requestIdSchema,
@@ -355,12 +359,21 @@ let generation = rendererLifecycle.generation()
 const rendererPending = new Map<string, PendingRendererRequest>()
 const preparationRegistry = createPreparationRegistry()
 const exportScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
+const importScopes = new Map<string, { requestId: string; rendererGeneration: number }>()
+const importCandidates = new Map<string, { requestId: string; rendererGeneration: number }>()
 const preparedExportModes = new Map<string, "mixdown" | "stems">()
 const terminalExportsAwaitingScope = new Set<string>()
+const terminalImportsAwaitingScope = new Set<string>()
 const exportScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
   [...exportScopes.values()].some((exportScope) => (
     exportScope.requestId === scope.requestId
     && exportScope.rendererGeneration === scope.rendererGeneration
+  ))
+)
+const importScopesHasScope = (scope: { requestId: string; rendererGeneration: number }) => (
+  [...importScopes.values()].some((importScope) => (
+    importScope.requestId === scope.requestId
+    && importScope.rendererGeneration === scope.rendererGeneration
   ))
 )
 const instanceId = randomBytes(16).toString("hex")
@@ -521,6 +534,11 @@ const applyRendererInvalidation = (
 ) => {
   const previousGeneration = invalidation.previousGeneration
   generation = invalidation.generation
+  for (const scope of importScopes.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
+  for (const scope of importCandidates.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
+  importScopes.clear()
+  importCandidates.clear()
+  terminalImportsAwaitingScope.clear()
   rejectEditorStateAcks(message)
   abortOfflineRenderJobs()
   applicationMenuController.reset()
@@ -610,7 +628,7 @@ const prepareRendererInput = async (
         ? { canceled: true }
         : {
           canceled: false,
-          files: selection.files.map(({ token, basename, mime }) => ({ token, basename, mime })),
+          files: selection.files.map(({ token, basename, byteLength, mime }) => ({ token, basename, byteLength, mime })),
         },
     )
   }
@@ -717,6 +735,7 @@ const handleSocket = (socket: Socket) => {
   const correlation = createRequestCorrelation()
   const preparationControllers = new Map<string, AbortController>()
   const finalExportCandidates = new Set<string>()
+  const finalImportCandidates = new Set<string>()
   const sessionId = randomBytes(16).toString("hex")
   acceptedSockets.add(socket)
   let closed = false
@@ -732,11 +751,15 @@ const handleSocket = (socket: Socket) => {
     const rendererIds = [...correlation.internalIds()]
     for (const rendererId of rendererIds) {
       cancelPreparedRendererExport(rendererId)
-      if (!finalExportCandidates.has(rendererId)) rejectRendererRequest(rendererId, "Desktop host connection closed.")
+      if (!finalExportCandidates.has(rendererId) && !finalImportCandidates.has(rendererId)) {
+        rejectRendererRequest(rendererId, "Desktop host connection closed.")
+      }
     }
     correlation.clear()
     for (const rendererId of rendererIds) {
-      if (finalExportCandidates.has(rendererId)) continue
+      if (finalExportCandidates.has(rendererId)
+        || finalImportCandidates.has(rendererId)
+        || importScopesHasScope({ requestId: rendererId, rendererGeneration: generation })) continue
       settleCapabilityRevocation(fileCapabilities.revokeRequest({ requestId: rendererId, rendererGeneration: generation }))
     }
   }
@@ -776,6 +799,8 @@ const handleSocket = (socket: Socket) => {
       const rendererId = correlation.removeExternal(frame.id)
       if (rendererId) {
         finalExportCandidates.delete(rendererId)
+        finalImportCandidates.delete(rendererId)
+        importCandidates.delete(rendererId)
         cancelPreparedRendererExport(rendererId)
         const controller = preparationControllers.get(rendererId)
         controller?.abort()
@@ -808,11 +833,24 @@ const handleSocket = (socket: Socket) => {
           const parsed = desktopRendererExportInputSchemaV1.parse(input)
           if (!parsed.canceled && !parsed.preflightOnly) finalExportCandidates.add(rendererId)
         }
+        if (frame.operation === "host.import.audio") {
+          const parsed = desktopRendererImportInputSchemaV1.parse(input)
+          if (!parsed.canceled) {
+            finalImportCandidates.add(rendererId)
+            importCandidates.set(rendererId, scope)
+          }
+        }
         return renderRequest(frame.operation, input, rendererId, frame.deadlineMs, actorSubject)
       }).then(async (reply) => {
       preparationControllers.delete(rendererId)
       preparationRegistry.delete(preparation)
       finalExportCandidates.delete(rendererId)
+      finalImportCandidates.delete(rendererId)
+      importCandidates.delete(rendererId)
+      if (scope.rendererGeneration !== generation) {
+        await fileCapabilities.revokeRequest(scope)
+        return
+      }
       if (frame.operation === "host.export.run" && !reply.error) {
         const result = desktopHostExportRunResultSchemaV1.safeParse(reply.result)
         if (result.success && result.data.status === "queued" && result.data.jobId) {
@@ -823,21 +861,40 @@ const handleSocket = (socket: Socket) => {
           }
         }
       }
+      if (frame.operation === "host.import.audio" && !reply.error) {
+        const result = desktopHostImportResultSchemaV1.safeParse(reply.result)
+        if (result.success && result.data.status === "queued" && result.data.jobId) {
+          importScopes.set(result.data.jobId, scope)
+          if (terminalImportsAwaitingScope.delete(result.data.jobId)) {
+            importScopes.delete(result.data.jobId)
+            await fileCapabilities.revokeRequest(scope)
+          }
+        }
+      }
       const externalId = correlation.getExternal(rendererId)
       if (!externalId) {
-        if (frame.operation !== "host.export.run" || ![...exportScopes.values()].some((exportScope) => exportScope.requestId === scope.requestId && exportScope.rendererGeneration === scope.rendererGeneration)) {
+        if (
+          (frame.operation !== "host.export.run" || !exportScopesHasScope(scope))
+          && (frame.operation !== "host.import.audio" || !importScopesHasScope(scope))
+        ) {
           await fileCapabilities.revokeRequest(scope)
         }
         return
       }
       correlation.removeExternal(externalId)
       if (socket.destroyed) {
-        if (frame.operation !== "host.export.run" || ![...exportScopes.values()].some((exportScope) => exportScope.requestId === scope.requestId && exportScope.rendererGeneration === scope.rendererGeneration)) {
+        if (
+          (frame.operation !== "host.export.run" || !exportScopesHasScope(scope))
+          && (frame.operation !== "host.import.audio" || !importScopesHasScope(scope))
+        ) {
           await fileCapabilities.revokeRequest(scope)
         }
         return
       }
-      if (frame.operation === "host.import.audio" || (frame.operation === "host.export.run" && !exportScopesHasScope(scope))) {
+      if (
+        (frame.operation === "host.import.audio" && !importScopesHasScope(scope))
+        || (frame.operation === "host.export.run" && !exportScopesHasScope(scope))
+      ) {
         await fileCapabilities.revokeRequest(scope)
       }
       try {
@@ -862,6 +919,8 @@ const handleSocket = (socket: Socket) => {
       preparationControllers.delete(rendererId)
       preparationRegistry.delete(preparation)
       finalExportCandidates.delete(rendererId)
+      finalImportCandidates.delete(rendererId)
+      importCandidates.delete(rendererId)
       await fileCapabilities.revokeRequest(scope)
       const externalId = correlation.getExternal(rendererId)
       if (!externalId) return
@@ -944,6 +1003,16 @@ const registerIpc = () => {
         exportScopes.delete(parsed.data.frame.jobId)
         settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
       } else if (terminalExportsAwaitingScope.size < 1024) terminalExportsAwaitingScope.add(parsed.data.frame.jobId)
+      return
+    }
+    if (parsed.data.frame.type === "import-terminal") {
+      const scope = importScopes.get(parsed.data.frame.jobId)
+      if (scope) {
+        importScopes.delete(parsed.data.frame.jobId)
+        settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
+      } else if (terminalImportsAwaitingScope.size < 1024) {
+        terminalImportsAwaitingScope.add(parsed.data.frame.jobId)
+      }
       return
     }
     if (parsed.data.frame.type !== "reply") return
@@ -1816,7 +1885,7 @@ const registerIpc = () => {
     const request = capabilityReadSchema.safeParse(value)
     const scope = request.success ? scopeFor(event, request.data.requestId) : undefined
     if (!scope || !request.success) throw new Error("Invalid capability request.")
-    return fileCapabilities.readFile(scope, request.data.token)
+    return fileCapabilities.readFile(scope, request.data.token, request.data.offset, request.data.length)
   })
   ipcMain.handle("daw:capability:beginWrite", async (event, value) => {
     if (!scopeAllowed(event)) throw new Error("Invalid capability request.")

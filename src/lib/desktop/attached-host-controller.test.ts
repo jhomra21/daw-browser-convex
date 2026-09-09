@@ -20,6 +20,7 @@ import {
   createAttachedHostController,
   registerAttachedHostController,
 } from "~/lib/desktop/attached-host-controller"
+import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type {
   PreparedTimelineExport,
   TimelineExportJobStatus,
@@ -93,7 +94,7 @@ const installBridge = (terminalJobs: string[]) => {
       dawDesktop: {
         setRequestHandler: () => undefined,
         onPrepareToClose: () => undefined,
-        readChunk: async () => new Uint8Array(),
+        readChunk: async (_requestId: string, _token: string, _offset: number, _length: number) => new Uint8Array(),
         beginWrite: async () => ({ writerId: "writer-1" }),
         writeChunk: async (_requestId: string, _writerId: string, offset: number, chunk: Uint8Array) => ({
           nextOffset: offset + chunk.byteLength,
@@ -126,6 +127,7 @@ const createController = (
     mountedProjectGeneration: number;
     signal: AbortSignal;
   }) => Promise<void>,
+  importQueue?: ImportJobQueue,
 ) => {
   const queue = createExportQueue()
   return {
@@ -141,6 +143,7 @@ const createController = (
       stop: async () => undefined,
       finishRecording: async () => undefined,
       exportQueue: queue,
+      importQueue,
       exportService: {
         enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
         enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
@@ -405,6 +408,227 @@ test("returns the authoritative stopped transport state after stop settles", asy
     signal: new AbortController().signal,
   })).result).toEqual({ state: "stopped", playheadSec: 0 })
   unregister()
+  queue.dispose()
+})
+
+test("imports desktop capabilities lazily in bounded ranges", async () => {
+  const reads: Array<{ offset: number; length: number }> = []
+  let importedFile: File | undefined
+  const bytes = new Uint8Array(2 * 1024 * 1024 + 1)
+  bridgeCleanups.add(installHermeticWindow({
+    dawDesktop: {
+      setRequestHandler: () => undefined,
+      onPrepareToClose: () => undefined,
+      readChunk: async (_requestId: string, _token: string, offset: number, length: number) => {
+        reads.push({ offset, length })
+        return bytes.slice(offset, offset + length)
+      },
+      beginWrite: async () => ({ writerId: "writer-1" }),
+      writeChunk: async (_requestId: string, _writerId: string, offset: number, chunk: Uint8Array) => ({ nextOffset: offset + chunk.byteLength }),
+      commit: async () => ({ basename: "output.wav", byteLength: 1, mime: "audio/wav" }),
+      abort: async () => undefined,
+      exportTerminal: () => undefined,
+    },
+  }))
+  const queue = createExportQueue()
+  const controller = createAttachedHostController({
+    projectId: () => "project-1",
+    mountedProjectGeneration: () => 0,
+    isPlaying: () => false,
+    playheadSec: () => 0,
+    tracks: () => [],
+    audioEngine: new AudioEngine(),
+    requestPlay: async () => undefined,
+    pause: async () => undefined,
+    stop: async () => undefined,
+    finishRecording: async () => undefined,
+    exportService: {
+      enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      submitTimelineExport: async () => { throw new Error("unused") },
+      submitStemExport: async () => { throw new Error("unused") },
+      prepareTimelineExport: async () => { throw new Error("unused") },
+      prepareStemExport: async () => { throw new Error("unused") },
+      submitPreparedTimelineExport: () => { throw new Error("unused") },
+      submitPreparedStemExport: () => { throw new Error("unused") },
+      cancel: () => undefined,
+      status: () => undefined,
+    },
+    exportQueue: queue,
+    importFiles: async (files) => {
+      importedFile = files[0]
+      expect(importedFile?.size).toBe(bytes.byteLength)
+      expect(importedFile?.name).toBe("large.wav")
+      expect(importedFile?.type).toBe("audio/wav")
+      expect(reads).toEqual([])
+      const reader = importedFile?.stream().getReader()
+      if (!reader) throw new Error("Expected a capability-backed file.")
+      const first = await reader.read()
+      expect(first.value?.byteLength).toBe(1024 * 1024)
+      expect(reads).toEqual([{ offset: 0, length: 1024 * 1024 }])
+      await reader.cancel()
+      return { outcomes: [{ fileName: "large.wav", status: "created", assetId: "asset-1", clipId: "clip-1" }] }
+    },
+    setPlayhead: () => undefined,
+  })
+  const unregister = registerController(controller)
+  const result = await controller.request({
+    id: "lazy-import",
+    operation: "host.import.audio",
+    input: {
+      canceled: false,
+      files: [{ token: "0".repeat(64), basename: "large.wav", byteLength: bytes.byteLength, mime: "audio/wav" }],
+    },
+    signal: new AbortController().signal,
+  })
+  expect(result.result).toMatchObject({ status: "queued", count: 0 })
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(importedFile).toBeDefined()
+  expect(reads.every((read) => read.length <= 1024 * 1024)).toBe(true)
+  unregister()
+  queue.dispose()
+})
+
+test("does not start a queued import after its project binding changes", async () => {
+  installBridge([])
+  let projectId = "project-a"
+  let projectGeneration = 1
+  let nextImportId = 0
+  const importQueue = createImportJobQueue(() => `import-${++nextImportId}`)
+  const releaseFirst = Promise.withResolvers<void>()
+  let importCalls = 0
+  const queue = createExportQueue()
+  const controller = createAttachedHostController({
+    projectId: () => projectId,
+    mountedProjectGeneration: () => projectGeneration,
+    isPlaying: () => false,
+    playheadSec: () => 0,
+    tracks: () => [],
+    audioEngine: new AudioEngine(),
+    requestPlay: async () => undefined,
+    pause: async () => undefined,
+    stop: async () => undefined,
+    finishRecording: async () => undefined,
+    exportService: {
+      enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      submitTimelineExport: async () => { throw new Error("unused") },
+      submitStemExport: async () => { throw new Error("unused") },
+      prepareTimelineExport: async () => { throw new Error("unused") },
+      prepareStemExport: async () => { throw new Error("unused") },
+      submitPreparedTimelineExport: () => { throw new Error("unused") },
+      submitPreparedStemExport: () => { throw new Error("unused") },
+      cancel: () => undefined,
+      status: () => undefined,
+    },
+    exportQueue: queue,
+    importQueue,
+    importFiles: async (_files, signal) => {
+      importCalls += 1
+      await releaseFirst.promise
+      signal?.throwIfAborted()
+      return { outcomes: [] }
+    },
+    setPlayhead: () => undefined,
+  })
+  const unregister = registerController(controller)
+
+  const first = await controller.request({
+    id: "stale-first",
+    operation: "host.import.audio",
+    input: { canceled: false, files: [{ token, basename: "first.wav", byteLength: 1, mime: "audio/wav" }] },
+    signal: new AbortController().signal,
+  })
+  const second = await controller.request({
+    id: "stale-second",
+    operation: "host.import.audio",
+    input: { canceled: false, files: [{ token, basename: "second.wav", byteLength: 1, mime: "audio/wav" }] },
+    signal: new AbortController().signal,
+  })
+  await Promise.resolve()
+  expect(first.result).toMatchObject({ status: "queued" })
+  expect(second.result).toMatchObject({ status: "queued" })
+  projectId = "project-b"
+  projectGeneration = 2
+  releaseFirst.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  expect(importCalls).toBe(1)
+  expect(importQueue.status("import-1")?.status).toBe("canceled")
+  expect(importQueue.status("import-2")?.status).toBe("canceled")
+  unregister()
+  controller.dispose()
+  queue.dispose()
+})
+
+test("cancels active import file work during project transition", async () => {
+  installBridge([])
+  let projectId = "project-a"
+  let projectGeneration = 1
+  const importQueue = createImportJobQueue(() => "active-import")
+  const release = Promise.withResolvers<void>()
+  let observedAbort = false
+  const queue = createExportQueue()
+  const controller = createAttachedHostController({
+    projectId: () => projectId,
+    mountedProjectGeneration: () => projectGeneration,
+    isPlaying: () => false,
+    playheadSec: () => 0,
+    tracks: () => [],
+    audioEngine: new AudioEngine(),
+    requestPlay: async () => undefined,
+    pause: async () => undefined,
+    stop: async () => undefined,
+    finishRecording: async () => undefined,
+    exportService: {
+      enqueueTimelineExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      enqueueStemExport: async () => ({ type: "error", message: "unused", outputs: [] }),
+      submitTimelineExport: async () => { throw new Error("unused") },
+      submitStemExport: async () => { throw new Error("unused") },
+      prepareTimelineExport: async () => { throw new Error("unused") },
+      prepareStemExport: async () => { throw new Error("unused") },
+      submitPreparedTimelineExport: () => { throw new Error("unused") },
+      submitPreparedStemExport: () => { throw new Error("unused") },
+      cancel: () => undefined,
+      status: () => undefined,
+    },
+    exportQueue: queue,
+    importQueue,
+    importFiles: async (_files, signal) => {
+      await release.promise
+      observedAbort = signal?.aborted ?? false
+      signal?.throwIfAborted()
+      return { outcomes: [{ fileName: "audio.wav", status: "created", assetId: "asset", clipId: "clip" }] }
+    },
+    setPlayhead: () => undefined,
+  })
+  const unregister = registerController(controller)
+
+  const response = await controller.request({
+    id: "active-import",
+    operation: "host.import.audio",
+    input: { canceled: false, files: [{ token, basename: "active.wav", byteLength: 1, mime: "audio/wav" }] },
+    signal: new AbortController().signal,
+  })
+  await Promise.resolve()
+  projectId = "project-b"
+  projectGeneration = 2
+  importQueue.cancelAll()
+  release.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  expect(response.result).toMatchObject({ status: "queued", jobId: "active-import" })
+  expect(observedAbort).toBe(true)
+  expect(importQueue.status("active-import")?.status).toBe("canceled")
+  unregister()
+  controller.dispose()
   queue.dispose()
 })
 

@@ -12,13 +12,17 @@ const createAssetStorage = () => {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name) ?? new File([], name),
       createWritable: async () => {
-        let written: File | undefined
+        const chunks: Uint8Array[] = []
         return {
-          write: async (file: File) => {
-            written = file
-          },
+          write: async (chunk: Uint8Array) => { chunks.push(chunk) },
           close: async () => {
-            if (written) files.set(name, written)
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
         }

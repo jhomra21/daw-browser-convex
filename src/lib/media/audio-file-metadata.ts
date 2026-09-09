@@ -17,15 +17,22 @@ const fail = (message: string): never => {
   throw new AudioFileMetadataError(message)
 }
 
-export const readAudioFileMetadata = async (file: File): Promise<AudioSourceMetadata> => {
+export const readAudioFileMetadata = async (
+  file: File,
+  signal?: AbortSignal,
+): Promise<AudioSourceMetadata> => {
+  signal?.throwIfAborted()
   if (file.size < 1) fail('Audio file is empty.')
 
   const input = new Input({
     source: new BlobSource(file, { maxCacheSize: metadataReadCacheBytes }),
     formats: ALL_FORMATS,
   })
+  const abortInput = () => input.dispose()
+  signal?.addEventListener('abort', abortInput, { once: true })
 
   try {
+    signal?.throwIfAborted()
     if (!(await input.canRead())) fail('Audio file has an unsupported or unrecognizable format.')
     const track = await input.getPrimaryAudioTrack()
     if (!track) throw new AudioFileMetadataError('File does not contain an audio track.')
@@ -50,6 +57,7 @@ export const readAudioFileMetadata = async (file: File): Promise<AudioSourceMeta
 
     return { durationSec, sampleRate, channelCount }
   } finally {
+    signal?.removeEventListener('abort', abortInput)
     input.dispose()
   }
 }

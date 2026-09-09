@@ -194,12 +194,13 @@ type DesktopBridge = {
     requestId: string,
   ): Promise<{ canceled: true } | { canceled: false; directory: { token: string; basename: string } }>
   releaseExportOutput(requestId: string): Promise<void>
-  readChunk(requestId: string, token: string): Promise<Uint8Array>
+  readChunk(requestId: string, token: string, offset: number, length: number): Promise<Uint8Array>
   beginWrite(requestId: string, token: string, relativePath?: string): Promise<{ writerId: string }>
   writeChunk(requestId: string, writerId: string, offset: number, chunk: Uint8Array): Promise<{ nextOffset: number }>
   commit(requestId: string, writerId: string): Promise<{ basename: string; byteLength: number; mime: string }>
   abort(requestId: string, writerId: string): Promise<void>
   exportTerminal(jobId: string, status: "success" | "canceled" | "error"): void
+  importTerminal(jobId: string): void
   audioHost?: {
     diagnostics(): Promise<NativeAudioHostDiagnosticsReply>
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>

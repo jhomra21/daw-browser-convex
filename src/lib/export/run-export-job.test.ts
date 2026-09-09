@@ -152,13 +152,24 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   const files = new Map<string, File>()
   const assets = {
     getFileHandle: async (name: string) => ({
-      createWritable: async () => ({
-        write: async (file: File) => {
-          files.set(name, file)
-        },
-        close: async () => undefined,
-        abort: async () => undefined,
-      }),
+      createWritable: async () => {
+        const chunks: Uint8Array[] = []
+        return {
+          write: async (chunk: Uint8Array) => {
+            chunks.push(chunk)
+          },
+          close: async () => {
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
+          },
+          abort: async () => undefined,
+        }
+      },
       getFile: async () => {
         const file = files.get(name)
         if (!file) throw new Error(`Missing retained file ${name}`)
@@ -656,13 +667,24 @@ test("instrument export preload reads local-asset bytes with the project context
   const files = new Map<string, File>()
   const assets = {
     getFileHandle: async (name: string) => ({
-      createWritable: async () => ({
-        write: async (file: File) => {
-          files.set(name, file)
-        },
-        close: async () => undefined,
-        abort: async () => undefined,
-      }),
+      createWritable: async () => {
+        const chunks: Uint8Array[] = []
+        return {
+          write: async (chunk: Uint8Array) => {
+            chunks.push(chunk)
+          },
+          close: async () => {
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
+          },
+          abort: async () => undefined,
+        }
+      },
       getFile: async () => {
         const file = files.get(name)
         if (!file) throw new Error(`Missing retained file ${name}`)

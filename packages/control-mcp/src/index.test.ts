@@ -60,6 +60,8 @@ const hostTools: HostToolService = {
   seek: async ({ seconds }) => ({ state: "paused", playheadSec: seconds }),
   diagnostics: async () => ({ audio: { state: "running", sampleRate: 48_000 }, recording: { transport: null, capturedFrames: null, droppedFrames: null, deviceLost: false }, counts: { tracks: 0, clips: 0 } }),
   importAudio: async () => ({ status: "created", count: 1 }),
+  importStatus: async () => ({ status: "idle" }),
+  importCancel: async () => ({ status: "canceled", job: { id: "import-1", name: "Import" } }),
   exportRun: async () => ({ jobId: "export-1", status: "queued" }),
   exportStatus: async () => ({ status: "idle" }),
   exportCancel: async () => ({ status: "canceled", job: { id: "export-1" } }),
@@ -155,7 +157,7 @@ describe("control MCP tools", () => {
 
   test("adds local host tools only when explicitly composed", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
-    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-13)).toEqual([
+    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-15)).toEqual([
       "host_status",
       "host_transport_status",
       "host_play",
@@ -164,6 +166,8 @@ describe("control MCP tools", () => {
       "host_seek",
       "host_diagnostics",
       "host_import_audio",
+      "host_import_status",
+      "host_import_cancel",
       "host_export_run",
       "host_export_status",
       "host_export_cancel",

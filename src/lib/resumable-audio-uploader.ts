@@ -1,6 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { z } from 'zod'
 import { controlLimitsV1, resumableUploadMaximumBytes } from '@daw-browser/control'
+import { isCapabilityFile } from '~/lib/desktop/capability-file'
 
 const startResponseSchema = z.object({
   assetKey: z.string(),
@@ -157,7 +158,7 @@ const uploadPart = async (input: {
   assetKey: string
   sessionId: string
   partNumber: number
-  part: Blob
+  part: Blob | Uint8Array<ArrayBuffer>
   signal?: AbortSignal
 }) => {
   let lastStatus = 500
@@ -167,8 +168,8 @@ const uploadPart = async (input: {
       `/api/resumable-uploads/${encodeURIComponent(input.projectId)}/${encodeURIComponent(input.assetKey)}/${encodeURIComponent(input.sessionId)}/${input.partNumber}`,
       {
         method: 'PUT',
-        headers: { 'Content-Length': String(input.part.size) },
-        body: input.part,
+        headers: { 'Content-Length': String(input.part instanceof Blob ? input.part.size : input.part.byteLength) },
+        body: input.part instanceof Blob ? input.part : new Blob([input.part]),
         signal: input.signal,
       },
     )
@@ -196,7 +197,7 @@ const uploadAudioFileInternal = async (input: {
 }, terminalRestarted = false): Promise<ResumableAudioUploadResult> => {
   throwIfAborted(input.signal)
   const fetcher = input.fetch ?? fetch
-  if (input.file.size <= controlLimitsV1.maxAssetUploadBytes) {
+  if (!isCapabilityFile(input.file) && input.file.size <= controlLimitsV1.maxAssetUploadBytes) {
     const form = new FormData()
     form.append('projectId', input.projectId)
     form.append('assetKey', input.assetKey)
@@ -304,7 +305,10 @@ const uploadAudioFileInternal = async (input: {
   for (let partNumber = 1; partNumber <= status.data.partCount; partNumber += 1) {
     if (accepted.has(partNumber)) continue
     const offset = (partNumber - 1) * status.data.partSizeBytes
-    const part = input.file.slice(offset, Math.min(input.file.size, offset + status.data.partSizeBytes))
+    const part = new Uint8Array(await input.file.slice(
+      offset,
+      Math.min(input.file.size, offset + status.data.partSizeBytes),
+    ).arrayBuffer())
     await uploadPart({
       fetch: fetcher, projectId: input.projectId, assetKey: status.data.assetKey,
       sessionId: status.data.sessionId, partNumber, part,

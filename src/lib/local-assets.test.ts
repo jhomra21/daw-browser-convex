@@ -6,16 +6,24 @@ import { createLocalAsset } from './local-assets'
 
 const createRoot = () => {
   const files = new Map<string, File>()
+  const writes: number[] = []
   const assets = {
     getFileHandle: async (name: string) => ({
       createWritable: async () => {
-        let written: File | undefined
+        const chunks: Uint8Array[] = []
         return {
-          write: async (file: File) => {
-            written = file
+          write: async (chunk: Uint8Array) => {
+            writes.push(chunk.byteLength)
+            chunks.push(chunk)
           },
           close: async () => {
-            if (written) files.set(name, written)
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
         }
@@ -28,7 +36,7 @@ const createRoot = () => {
   const root = {
     getDirectoryHandle: async (name: string) => name === 'assets' ? assets : root,
   }
-  return { files, root }
+  return { files, root, writes }
 }
 
 test('hashes streamed local asset bytes and ignores caller hash metadata', async () => {
@@ -90,6 +98,33 @@ test('hashes large chunked streams without reading a whole-file buffer', async (
     })
     const created = await createLocalAsset({ projectId: project.id, file })
     expect(created.contentHash).toMatch(/^[0-9a-f]{64}$/)
+  } finally {
+    if (storage) Object.defineProperty(navigator, 'storage', storage)
+    else Reflect.deleteProperty(navigator, 'storage')
+  }
+})
+
+test('persists large local assets as bounded writable chunks', async () => {
+  const { root, writes } = createRoot()
+  const storage = Object.getOwnPropertyDescriptor(navigator, 'storage')
+  Object.defineProperty(navigator, 'storage', {
+    configurable: true,
+    value: { getDirectory: async () => root },
+  })
+  try {
+    const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
+    const chunk = new Uint8Array(2 * 1024 * 1024 + 1)
+    const file = new File([chunk], 'large.wav', { type: 'audio/wav' })
+    Object.defineProperty(file, 'stream', {
+      value: () => new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk)
+          controller.close()
+        },
+      }),
+    })
+    await createLocalAsset({ projectId: project.id, file })
+    expect(writes).toEqual([1024 * 1024, 1024 * 1024, 1])
   } finally {
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')

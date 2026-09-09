@@ -5,6 +5,8 @@ import {
 import {
   desktopRequestSchemaV1,
   desktopHostImportInputSchemaV1,
+  desktopHostImportCancelInputSchemaV1,
+  desktopHostImportStatusSchemaV1,
   desktopHostExportRunInputSchemaV1,
   desktopProtocolVersion,
   type DesktopControlOperationV1,
@@ -107,6 +109,24 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
     const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
     try {
       const data = await client.request(operation, input)
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+      return 0
+    } finally { client.close() }
+  }
+  if (action === "import-status" || action === "import-cancel") {
+    if ((action === "import-status" && arguments_.length !== 1) || (action === "import-cancel" && arguments_.length !== 2)) throw new Error("Invalid host import command.")
+    const operation = action === "import-status" ? "host.import.status" : "host.import.cancel"
+    const input = desktopRequestSchemaV1.parse({
+      version: desktopProtocolVersion,
+      type: "request",
+      id: "cli-validation",
+      operation,
+      input: action === "import-status" ? {} : desktopHostImportCancelInputSchemaV1.parse({ jobId: value }),
+    }).input
+    const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+    try {
+      const data = await client.request(operation, input)
+      desktopHostImportStatusSchemaV1.parse(data)
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
       return 0
     } finally { client.close() }

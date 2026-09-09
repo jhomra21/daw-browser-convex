@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import {
   desktopCancelSchemaV1,
   desktopExportTerminalSchemaV1,
+  desktopImportTerminalSchemaV1,
   desktopReplySchemaV1,
   desktopTrustedRendererRequestSchemaV1,
   desktopVstParameterEditPayloadSchema,
@@ -193,8 +194,8 @@ const desktopBridge = {
     if (!validExportRequestId(requestId)) return invalidExportRequest()
     return ipcRenderer.invoke("daw:export:release-output", { requestId })
   },
-  readChunk(requestId: string, token: string) {
-    return ipcRenderer.invoke("daw:capability:readChunk", { requestId, token })
+  readChunk(requestId: string, token: string, offset: number, length: number) {
+    return ipcRenderer.invoke("daw:capability:readChunk", { requestId, token, offset, length })
   },
   beginWrite(requestId: string, token: string, relativePath?: string) {
     return ipcRenderer.invoke("daw:capability:beginWrite", { requestId, token, relativePath })
@@ -210,6 +211,10 @@ const desktopBridge = {
   },
   exportTerminal(jobId: string, status: "success" | "canceled" | "error") {
     const frame = desktopExportTerminalSchemaV1.parse({ version: "v1", type: "export-terminal", jobId, status })
+    ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
+  },
+  importTerminal(jobId: string) {
+    const frame = desktopImportTerminalSchemaV1.parse({ version: "v1", type: "import-terminal", jobId })
     ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
   },
   applicationMenu: {

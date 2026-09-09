@@ -11,7 +11,7 @@ import {
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import { createAudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
-import { uploadAudioFile } from '~/lib/resumable-audio-uploader'
+import { ResumableAudioUploadHttpError, uploadAudioFile } from '~/lib/resumable-audio-uploader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -115,6 +115,7 @@ export type UploadToR2 = (
   assetKey: string,
   file: File,
   durationSec?: number,
+  signal?: AbortSignal,
 ) => Promise<UploadToR2Result>
 
 type ClipBufferOptions = {
@@ -178,16 +179,20 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     publishBufferUpdate()
   }
 
-  const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec) => {
+  const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec, signal) => {
     try {
+      signal?.throwIfAborted()
       return await uploadAudioFile({
         projectId: room,
         idempotencyKey: `browser-${assetKey}`,
         assetKey,
         file,
         durationSec,
+        signal,
       })
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error
+      if (error instanceof ResumableAudioUploadHttpError && error.status === 413) throw error
       return null
     }
   }

@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { uploadAudioFile, type ResumableAudioUploadHttpError } from './resumable-audio-uploader'
+import { CapabilityFile } from './desktop/capability-file'
+import { resumableUploadMaximumBytes } from '@daw-browser/control'
 
 test('resumable uploader resumes accepted parts and completes without client-owned part lists', async () => {
   const file = new File([new Uint8Array(16 * 1024 * 1024 + 12)], 'long.wav', { type: 'audio/wav' })
@@ -286,6 +288,35 @@ test('resumable uploader preserves HTTP status in typed failures', async () => {
     name: 'ResumableAudioUploadHttpError',
     status: 413,
   } satisfies Partial<ResumableAudioUploadHttpError>)
+})
+
+test('rejects an oversized capability file before reading or starting a session', async () => {
+  let reads = 0
+  let requests = 0
+  const controller = new AbortController()
+  const file = new CapabilityFile({
+    requestId: 'request-1',
+    token: '0'.repeat(64),
+    size: resumableUploadMaximumBytes + 1,
+    readChunk: async () => {
+      reads += 1
+      return new Uint8Array()
+    },
+    signal: controller.signal,
+  }, 'oversized.wav', 'audio/wav')
+
+  await expect(uploadAudioFile({
+    projectId: 'project-1',
+    idempotencyKey: 'oversized-capability-key',
+    assetKey: 'oversized-asset',
+    file,
+    fetch: async () => {
+      requests += 1
+      return new Response('{}', { status: 500 })
+    },
+  })).rejects.toMatchObject({ name: 'ResumableAudioUploadHttpError', status: 413 })
+  expect(reads).toBe(0)
+  expect(requests).toBe(0)
 })
 
 test('resumable uploader retries transient verification responses within its deadline', async () => {

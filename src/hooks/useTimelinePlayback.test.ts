@@ -7,7 +7,10 @@ import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDefaultDrumRackParams } from '@daw-browser/shared'
+import { externalProcessorSchema, type ExternalProcessor } from '@daw-browser/external-plugins'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
+import { compileNativeExternalAttachmentPlan } from '~/lib/desktop/native-external-attachment-plan'
+import { resolveNativeLivePlaybackProcessors } from '~/lib/desktop/native-live-playback-processors'
 import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 import {
@@ -66,6 +69,48 @@ const track: Track = {
   volume: 1,
   clips: [],
 }
+
+const insertedExternalProcessor = (): ExternalProcessor => externalProcessorSchema.parse({
+  instanceId: '33333333-3333-4333-8333-333333333333',
+  targetId: 'track-2',
+  index: 0,
+  manifest: {
+    identity: {
+      format: 'vst3',
+      classId: 'example',
+      vendor: 'Example',
+      name: 'Example',
+      version: '1',
+      architecture: 'arm64',
+      binaryFingerprint: 'a'.repeat(64),
+    },
+    role: 'effect',
+    audioInputs: [{ name: 'Input', channels: 2, enabled: true }],
+    audioOutputs: [{ name: 'Output', channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: false,
+    supportsEditor: false,
+    supportsState: false,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  launchReference: {
+    version: 1,
+    classId: 'example',
+    vendorId: 'Example',
+    architecture: 'arm64',
+    bundleFingerprint: 'b'.repeat(64),
+    binaryFingerprint: 'a'.repeat(64),
+    scannerCatalogVersion: 2,
+  },
+  health: { state: 'ready', updatedAt: 1 },
+  updatedAt: 1,
+})
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 4 / 48_000
@@ -1979,6 +2024,95 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
     })
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('carries the latest inserted processor through coalesced paused rebuild compilation', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const inserted = insertedExternalProcessor()
+  const compileContexts: Array<unknown> = []
+  const longTrack: Track = {
+    id: 'track-2',
+    name: 'Track 2',
+    volume: 1,
+    clips: [],
+  }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => 'project',
+          compileSnapshot: async (transport, context) => {
+            compileContexts.push(context)
+            const result = compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: [longTrack],
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+              sidechainRoutes: [],
+            })
+            if (!result.supported) return result
+            const processors = await resolveNativeLivePlaybackProcessors({
+              projectId: 'project',
+              persisted: [],
+              seed: context?.externalProcessor,
+              readPersisted: async () => undefined,
+            })
+            const plan = compileNativeExternalAttachmentPlan({
+              target: 'native',
+              graph: result.snapshot.mixer.graph,
+              processors,
+              workerTransport: { slotCount: 2, maximumFrames: 8_192, maximumEventsPerBlock: 128 },
+            })
+            if (!plan.supported) return {
+              supported: true as const,
+              snapshot: { ...result.snapshot, requiresNativePlayback: true },
+            }
+            return {
+              supported: true as const,
+              snapshot: {
+                ...result.snapshot,
+                nativeExternalAttachmentPlan: plan.plan,
+                requiresNativePlayback: true,
+              },
+            }
+          },
+        })
+        const first = playback.restartTimelineSchedule([longTrack], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        const second = playback.restartTimelineSchedule([longTrack], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        await Promise.all([first, second])
+        expect(compileContexts).toContainEqual({
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        expect(compileContexts.at(-1)).toEqual({
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
 

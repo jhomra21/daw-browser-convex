@@ -85,15 +85,16 @@ test("keeps graph revisions stable during compilation and bumps them at structur
 test("hands an inserted processor to the bound rebuild compiler and verifies current persistence", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
   const playbackSource = await readFile(new URL("../hooks/useTimelinePlayback.ts", import.meta.url), "utf8");
-  expect(source).toContain("getLocalExternalProcessor(");
+  expect(source).toContain("readPersisted: getLocalExternalProcessor,");
   expect(source).toContain("externalProcessor: {");
   expect(source).toContain("projectId: insertedProjectId,");
   expect(source).toContain("processor,");
   expect(source).toContain("await rebuildPlaybackBackend(renderTracks(), insertionIntent);");
   expect(source).toContain("await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);");
-  expect(source).toContain("processorsById.delete(externalProcessorSeed.processor.instanceId);");
-  expect(playbackSource).toContain("externalProcessor?: LivePlaybackCompileContext[\"externalProcessor\"]");
+  expect(source).toContain("externalProcessor: undefined,");
   expect(playbackSource).toContain("externalProcessor: options.externalProcessor,");
+  expect(source).toContain("resolveNativeLivePlaybackProcessors");
+  expect(playbackSource).toContain("externalProcessor?: LivePlaybackCompileContext[\"externalProcessor\"]");
   expect(playbackSource).toContain("const compileContext = requestedIntent?.instrumentOverride !== undefined");
 });
 

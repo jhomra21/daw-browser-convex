@@ -105,6 +105,7 @@ import {
 } from "~/lib/external-plugins";
 import { localVstStateOwnerId } from "~/lib/external-plugin-artifacts";
 import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
+import { resolveNativeLivePlaybackProcessors } from "~/lib/desktop/native-live-playback-processors";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -449,23 +450,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
     const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
       .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
-    const processorsById = new Map<string, ExternalProcessor>();
-    for (const processor of liveProcessors) {
-      processorsById.set(processor.instanceId, processor);
-    }
-    const externalProcessorSeed = context?.externalProcessor;
-    if (externalProcessorSeed?.projectId === compiledProjectId) {
-      const persistedProcessor = await getLocalExternalProcessor(
-        compiledProjectId,
-        externalProcessorSeed.processor.instanceId,
-      );
-      if (persistedProcessor && !persistedProcessor.bypassed && persistedProcessor.health.state !== "degraded") {
-        processorsById.set(persistedProcessor.instanceId, persistedProcessor);
-      } else {
-        processorsById.delete(externalProcessorSeed.processor.instanceId);
-      }
-    }
-    const processors = [...processorsById.values()];
+    const processors = await resolveNativeLivePlaybackProcessors({
+      projectId: compiledProjectId,
+      persisted: liveProcessors,
+      seed: context?.externalProcessor,
+      readPersisted: getLocalExternalProcessor,
+    });
     if (processors.length === 0) return result;
     const attachmentPlan = compileNativeExternalAttachmentPlan({
       target: "native",
@@ -2041,6 +2031,7 @@ const Timeline: Component<TimelineProps> = (props) => {
             resumePlayback: insertionIntent.resumePlayback,
             projectId: insertedProjectId,
             projectGeneration: intent.projectGeneration,
+            externalProcessor: undefined,
           });
         } catch (rollbackError) {
           const detail = rollbackError instanceof Error

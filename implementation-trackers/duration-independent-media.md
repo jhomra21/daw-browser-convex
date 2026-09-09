@@ -152,19 +152,28 @@ ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
 covered by focused tests. Native offline planning now emits metadata-only mapped
 ordinary-source descriptors, hydrates only their scheduled source ranges through
 bounded pages before graph publication, and retains `native-pcm-chunking` only
-for eagerly prepared Stretch/instrument PCM. An unsigned packaged Electron build
-from `94665eeb` imported a deterministic six-minute, 48 kHz mono WAV into fresh
+for eagerly prepared Stretch/instrument PCM. The final accepted unsigned packaged
+Electron build is from `448e442a67c3d1aac8b5b23cbce84030783ff0b7`.
+Its `app.asar` SHA-256 is
+`da8a2e78b914e9387eb356706d8e27f0eeb0bae1c3f49be104b64adb762cc96b`;
+the native audio host is
+`ab53077948e9ea37398cd4a0c8856018a02f7e3877e1cf12b9ccc895494d3d84`,
+the VST worker is
+`0d4d9c4c8d1e32efffe7d2ceaa208ccf5ccaebfe5897047feb19a4d658a6e1e2`,
+and the scanner is
+`1644deb9c854605509dc90efe792e6ce622d2417eef474c969fc6e1e305fe69f`.
+
+The packaged long-media campaign, first completed on the intermediate
+`94665eeb` build, imported a deterministic six-minute, 48 kHz mono WAV into fresh
 local project `project:76b4e135-a197-4ef2-ab27-1c9b63050ea2`. ValhallaSupermassive
 5.0.0 inserted on the long-source track as instance
 `a722f97f-71bb-4ed5-a175-628d3c87ed66`; its native rebuild succeeded, ParamID 48
 persisted at normalized value `0.5`, and the same native host/worker processes
 advanced playback from 0 to 2.08 seconds, 180 to 182.069 seconds, and 359 to
-361.048 seconds without paging, worker-fault, restart, or detach errors. The
-accepted package hashes are `d41cb89e71361cbe8338ea6fa9e79be5bfa27baa3544ea54d1456dcc33406a9d`
-for `app.asar`, `ab53077948e9ea37398cd4a0c8856018a02f7e3877e1cf12b9ccc895494d3d84`
-for the native audio host, `0d4d9c4c8d1e32efffe7d2ceaa208ccf5ccaebfe5897047feb19a4d658a6e1e2`
-for the VST worker, and `1644deb9c854605509dc90efe792e6ce622d2417eef474c969fc6e1e305fe69f`
-for the scanner. The same campaign retained the earlier bounded six-minute
+361.048 seconds without paging, worker-fault, restart, or detach errors. That
+intermediate build's historical `app.asar` SHA-256 was
+`d41cb89e71361cbe8338ea6fa9e79be5bfa27baa3544ea54d1456dcc33406a9d`;
+it is not the final accepted package. The same campaign retained the bounded six-minute
 48 kHz stereo float export result of 138,240,044 bytes with main-process RSS
 near 332 MiB.
 
@@ -184,11 +193,12 @@ worker. Three cold exports and one warm export each produced a 44.1 kHz,
 3,638,250-frame stereo float32 WAV of 29,106,044 bytes; all four SHA-256 digests
 were `8aee11194bb5e0dc1b84557a12abb3e6cb009ffc8c5fc0482aa69831012f8923`.
 
-Full certification after the recording fix completed with 2,824 passing tests,
-one intentionally skipped Electron AudioWorklet integration, and one unrelated
-local-send timing failure that passed immediately on focused rerun. Real shared
-Worker/R2 smoke was not executed because cloud control remained unauthenticated;
-it is supplementary and does not block packaged acceptance.
+Final certification on the docs-only acceptance head completed with 2,825
+passing tests across 353 files, 372,276 assertions, one intentionally skipped
+Electron AudioWorklet integration, and zero failures. The prior
+local-send timing failure did not recur under the correctly configured isolated
+run. Real shared Worker/R2 smoke was not executed because cloud control remained
+unauthenticated; it is supplementary and does not block packaged acceptance.
 
 ## Non-goals / real limits
 

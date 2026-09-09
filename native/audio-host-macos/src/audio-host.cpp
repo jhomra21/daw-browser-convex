@@ -628,12 +628,19 @@ struct NativeVstWorkerAttachment {
       WriteFallback(render);
       return;
     }
+    const auto port = worker.callbackPort();
+    // CoreAudio can begin callbacks before the isolated worker has completed
+    // plugin instantiation. Do not occupy a worker slot while it is starting:
+    // the startup watchdog is intentionally finite.
+    if (port.health() != daw::plugin_host::WorkerHealth::kReady) {
+      WriteFallback(render);
+      return;
+    }
     if (input_channels > 0) {
       for (std::uint32_t channel = 0; channel < input_channels; ++channel) {
         std::memcpy(input.data() + channel * render.frame_count, render.planes[channel], render.frame_count * sizeof(float));
       }
     }
-    const auto port = worker.callbackPort();
     for (std::uint32_t slot = 0; slot < metadata.transport.slot_count; ++slot) {
       const std::uint64_t sequence = pending_sequences[slot];
       if (sequence == 0) continue;

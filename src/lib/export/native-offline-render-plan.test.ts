@@ -505,6 +505,46 @@ test('preserves the existing no-warp native source projection', () => {
   })
 })
 
+test('maps a six-minute mono local asset instead of retaining its full PCM', () => {
+  const frameCount = 6 * 60 * 48_000
+  const localTrack: Track<AudioBuffer> = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      sourceAssetKey: 'asset:local-6-minute',
+      sourceKind: 'upload',
+      duration: frameCount / 48_000,
+      sourceDurationSec: frameCount / 48_000,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 1,
+      buffer: new TestAudioBuffer([new Float32Array(frameCount)]),
+    } satisfies Clip<AudioBuffer>],
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [localTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 1,
+    tailFrames: 0,
+    projectId: 'project:local',
+    projectGeneration: 1,
+  })
+
+  expect(plan.assets).toHaveLength(0)
+  expect(plan.mappedAssets).toEqual([expect.objectContaining({
+    sourceAssetKey: 'asset:local-6-minute',
+    projectId: 'project:local',
+    frameCount,
+    sampleRateHz: 48_000,
+    channelCount: 1,
+    ranges: [{ startFrame: 0, frameCount }],
+  })])
+})
+
 test('represents an unhydrated source as a bounded mapped asset', () => {
   const plan = compileNativeOfflineRenderPlan({
     tracks: [{

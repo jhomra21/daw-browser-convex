@@ -329,7 +329,12 @@ const collectAssets = (
         continue
       }
       if (clip.midi || !clip.sourceAssetKey) continue
-      if (retainOrdinaryPcm && clip.buffer) addAsset(clip.sourceAssetKey, clip.buffer)
+      if (clip.buffer && (
+        retainOrdinaryPcm
+        || !rawAssetsBySourceAssetKey.has(clip.sourceAssetKey)
+      )) {
+        addAsset(clip.sourceAssetKey, clip.buffer)
+      }
     }
   }
   for (const entry of Object.values(fx?.trackFx ?? {})) {

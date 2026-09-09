@@ -259,6 +259,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     projectGeneration: input.projectGeneration,
     preparedStretchAssets: input.preparedStretchAssets,
     capabilityTarget: 'native',
+    retainOrdinaryPcm: false,
     metadataSourceAssets: input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
       clip.midi || !clip.sourceAssetKey || clip.sourceDurationSec === undefined
         || clip.sourceSampleRate === undefined || clip.sourceChannelCount === undefined

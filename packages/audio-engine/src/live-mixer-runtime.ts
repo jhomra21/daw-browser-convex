@@ -51,7 +51,9 @@ export function resolveLiveMixerGraph(
     channels: createMixerChannels(tracks),
     sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
       track.id,
-      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
+      track.clips.flatMap((clip) => clip.buffer
+        ? [clip.buffer.numberOfChannels]
+        : clip.sourceChannelCount !== undefined ? [clip.sourceChannelCount] : []),
     ])),
     trackFx,
     ...masterFx,

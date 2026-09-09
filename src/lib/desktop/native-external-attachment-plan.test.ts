@@ -46,10 +46,30 @@ const snapshotInput: LivePlaybackSnapshotInput = {
   sidechainRoutes: [],
 }
 
-const graph = (trackKind: "audio" | "instrument" = "audio") => {
+const metadataMonoSnapshotInput: LivePlaybackSnapshotInput = {
+  ...snapshotInput,
+  tracks: snapshotInput.tracks.map((track, index) => index === 0
+    ? {
+      ...track,
+      clips: track.clips.map((clip) => ({
+        ...clip,
+        duration: 360,
+        buffer: null,
+        sourceDurationSec: 360,
+        sourceSampleRate: 48_000,
+        sourceChannelCount: 1,
+      })),
+    }
+    : track),
+}
+
+const graph = (
+  trackKind: "audio" | "instrument" = "audio",
+  sourceInput: LivePlaybackSnapshotInput = snapshotInput,
+) => {
   const result = compileLivePlaybackSnapshot({
-    ...snapshotInput,
-    tracks: snapshotInput.tracks.map((track, index) => index === 0 ? { ...track, kind: trackKind } : track),
+    ...sourceInput,
+    tracks: sourceInput.tracks.map((track, index) => index === 0 ? { ...track, kind: trackKind } : track),
   })
   if (!result.supported) throw new Error(result.reasons.join("\n"))
   return result.snapshot.mixer.graph
@@ -103,11 +123,40 @@ const input = (
   processors: readonly ExternalProcessor[],
   target: "native" | "browser" = "native",
   trackKind: "audio" | "instrument" = "audio",
+  sourceInput: LivePlaybackSnapshotInput = snapshotInput,
 ) => ({
   target,
-  graph: graph(trackKind),
+  graph: graph(trackKind, sourceInput),
   processors,
   workerTransport: { slotCount: 2, maximumFrames: 512, maximumEventsPerBlock: 128 },
+})
+
+test("accepts a stereo VST on a metadata-backed mono track", () => {
+  const result = compileLivePlaybackSnapshot(metadataMonoSnapshotInput)
+  expect(result.supported).toBeTrue()
+  if (!result.supported) return
+  expect(result.snapshot.assets).toEqual([expect.objectContaining({
+    assetId: "asset-a",
+    source: { durationSec: 360, sampleRate: 48_000, channelCount: 1 },
+  })])
+  expect(result.snapshot.mixer.graph.channels[0]).toMatchObject({
+    sourceLayout: "mono",
+    inputLayout: "stereo",
+    outputLayout: "stereo",
+  })
+
+  const attachment = compileNativeExternalAttachmentPlan(input(
+    [processor()],
+    "native",
+    "audio",
+    metadataMonoSnapshotInput,
+  ))
+  expect(attachment.supported).toBeTrue()
+  if (!attachment.supported) return
+  expect(attachment.plan.attachments[0]?.workerTransport).toMatchObject({
+    inputChannels: 2,
+    outputChannels: 2,
+  })
 })
 
 test("maps resolved mixer nodes and deterministically orders external chains", () => {

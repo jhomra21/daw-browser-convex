@@ -124,6 +124,30 @@ test('keeps long ordinary sources as one metadata asset', () => {
   expect(result.events).toHaveLength(1)
 })
 
+test('keeps long mono source assets mono while projecting a stereo mixer bus', () => {
+  const frameCount = 12 * 48_000
+  const longClip = {
+    ...clip,
+    duration: frameCount / 48_000,
+    buffer: new TestAudioBuffer([new Float32Array(frameCount)]),
+  }
+  const result = compile([track({ clips: [longClip] })])
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.assets).toEqual([expect.objectContaining({
+    asset: expect.objectContaining({
+      assetId: 'portable-export:source',
+      frameCount,
+      channelCount: 1,
+    }),
+    pcm: undefined,
+  })])
+  expect(result.nativePcmChunkDescriptors).toHaveLength(0)
+  expect(result.graph.nodes.find((node) => node.id === 'track')).toMatchObject({
+    inputLayout: 'stereo',
+    outputLayout: 'stereo',
+  })
+})
+
 test('skips source-exhausted clips without rejecting the native projection', () => {
   const result = compile([track({
     clips: [

@@ -22,19 +22,19 @@ const channel = (id: string, role: MixerChannel['role'] = 'track'): MixerChannel
 })
 
 describe('runtime channel layouts', () => {
-  test('preserves mono sources and treats mixed mono/stereo clips as stereo', () => {
+  test('keeps source metadata while presenting ordinary tracks as stereo buses', () => {
     const graph = resolveMixerGraph({
       channels: [channel('mono'), channel('mixed')],
       sourceChannelCounts: { mono: [1, 1], mixed: [1, 2] },
     })
     expect(graph.channels[0]?.sourceLayout).toBe('mono')
-    expect(graph.channels[0]?.inputLayout).toBe('mono')
-    expect(graph.channels[0]?.outputLayout).toBe('mono')
+    expect(graph.channels[0]?.inputLayout).toBe('stereo')
+    expect(graph.channels[0]?.outputLayout).toBe('stereo')
     expect(graph.channels[1]?.sourceLayout).toBe('stereo')
     expect(graph.channels[1]?.inputLayout).toBe('stereo')
   })
 
-  test('keeps gain, EQ, compressor, and saturator mono until an effect explicitly expands', () => {
+  test('keeps ordinary processing stereo until an effect explicitly collapses or expands', () => {
     const baseFx: MixerTrackFx = {
       instances: [
         { id: 'eq', kind: 'eq', params: createDefaultEqParams() },
@@ -47,7 +47,22 @@ describe('runtime channel layouts', () => {
       sourceChannelCounts: { mono: [1] },
       trackFx: { mono: baseFx },
     })
-    expect(mono.channels[0]?.outputLayout).toBe('mono')
+    expect(mono.channels[0]?.inputLayout).toBe('stereo')
+    expect(mono.channels[0]?.outputLayout).toBe('stereo')
+
+    const monoEq = resolveMixerGraph({
+      channels: [channel('mono-eq')],
+      sourceChannelCounts: { 'mono-eq': [1] },
+      trackFx: {
+        'mono-eq': {
+          instances: [
+            { id: 'eq', kind: 'eq', params: { ...createDefaultEqParams(), channelMode: 'mono' } },
+          ],
+        },
+      },
+    })
+    expect(monoEq.channels[0]?.inputLayout).toBe('stereo')
+    expect(monoEq.channels[0]?.outputLayout).toBe('mono')
 
     const delay = resolveMixerGraph({
       channels: [channel('delay')],
@@ -61,7 +76,7 @@ describe('runtime channel layouts', () => {
         },
       },
     })
-    expect(delay.channels[0]?.inputLayout).toBe('mono')
+    expect(delay.channels[0]?.inputLayout).toBe('stereo')
     expect(delay.channels[0]?.outputLayout).toBe('stereo')
 
     const reverb = resolveMixerGraph({
@@ -108,11 +123,11 @@ describe('runtime channel layouts', () => {
     })
 
     expect(graph.channels.map((entry) => [entry.channel.id, entry.inputLayout, entry.outputLayout])).toEqual([
-      ['mono', 'mono', 'mono'],
+      ['mono', 'stereo', 'stereo'],
       ['stereo', 'stereo', 'stereo'],
       ['inner', 'stereo', 'stereo'],
       ['outer', 'stereo', 'stereo'],
-      ['return', 'mono', 'mono'],
+      ['return', 'stereo', 'stereo'],
     ])
     expect(graph.master.inputLayout).toBe('stereo')
   })

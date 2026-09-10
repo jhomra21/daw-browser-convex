@@ -408,6 +408,35 @@ test('installs an acknowledged MIDI schedule before starting portable output onc
   expect(controller.isActive()).toBe(true)
 })
 
+test('reports the portable playhead inside the active loop without changing raw transport frames', async () => {
+  const calls: string[] = []
+  const session = createSession(calls, async () => undefined)
+  const loopTransport = {
+    ...compilation().snapshot.transport,
+    loopEnabled: true,
+    loopStartSec: 1.5,
+    loopEndSec: 3.5,
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => {
+      const base = compilation()
+      return { ...base, snapshot: { ...base.snapshot, transport } }
+    },
+    getAudioContext: () => context,
+    backend: { createPlaybackSession: async () => session },
+    select: async () => selected,
+  })
+
+  await expect(controller.start(loopTransport)).resolves.toBe("started")
+  session.emitPosition(48_000, 1)
+  expect(controller.currentPositionSec()).toBe(1)
+  session.emitPosition(168_000, 2)
+  expect(controller.currentPositionSec()).toBe(1.5)
+  session.emitPosition(348_000, 3)
+  expect(controller.currentPositionSec()).toBe(3.25)
+  controller.dispose()
+})
+
 test('refreshes the portable schedule before its installed range ends', async () => {
   const calls: string[] = []
   const sessions = [

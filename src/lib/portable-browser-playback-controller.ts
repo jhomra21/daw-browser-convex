@@ -23,6 +23,7 @@ import {
 } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import { arrangementFrameForLoop, loopFramesForTransport } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
 import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
@@ -151,6 +152,15 @@ const isInstalledSnapshotAsset = (
   )))
   return !usedByStretch || usedByInstalledSource || instrumentKeys.has(assetId)
 }
+
+const reportedPositionFrame = (
+  frame: number,
+  transport: LivePlaybackTransport | undefined,
+  sampleRateHz: number,
+) => arrangementFrameForLoop(
+  frame,
+  transport ? loopFramesForTransport(transport, sampleRateHz) : undefined,
+)
 
 const assetRegistry = (
   snapshot: LivePlaybackSnapshot,
@@ -2069,7 +2079,9 @@ export const createPortableBrowserPlaybackController = (input: {
     refreshSchedule,
     currentPositionSec: () => {
       const context = input.getAudioContext()
-      return context ? positionFrame / context.sampleRate : undefined
+      return context
+        ? reportedPositionFrame(positionFrame, activeTransport, context.sampleRate) / context.sampleRate
+        : undefined
     },
   }
 }

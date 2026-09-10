@@ -11,8 +11,9 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
-    "build": "vite build",
+    "build": "bun run validate:portable-wasm && vite build",
     "build:portable-wasm": "sh native/audio-core/scripts/build-wasm.sh",
+    "validate:portable-wasm": "bun native/audio-core/scripts/validate-wasm-artifact.ts public/audio-core/daw-audio-core.wasm public/audio-core/daw-audio-core.manifest.json",
     "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/control' --filter '@daw-browser/control-core' --filter '@daw-browser/control-sdk' --filter '@daw-browser/control-mcp' --filter '@daw-browser/control-cli' --filter '@daw-browser/desktop-protocol' --filter '@daw-browser/plugin-host-protocol' --filter '@daw-browser/external-plugins' --filter '@daw-browser/desktop' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
     "lint:fix": "oxlint --fix .",

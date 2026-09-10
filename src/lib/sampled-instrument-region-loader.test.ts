@@ -114,6 +114,52 @@ test('passes exact integer frame bounds through to page decoding', async () => {
   }])
 })
 
+test('copies non-page-aligned coverage from source-aligned pages', async () => {
+  const result = await loadSampledInstrumentRegion(
+    input,
+    { sourceStartFrame: 1, sourceEndFrame: 7 },
+    64,
+    undefined,
+    {
+      decodePages: decoder([page(0, [0, 1, 2, 3]), page(4, [4, 5, 6, 7])]),
+      createBuffer: (channels, frames, rate) => new TestAudioBuffer(channels, frames, rate),
+    },
+  )
+  expect([...result?.buffer.getChannelData(0) ?? []]).toEqual([1, 2, 3, 4, 5, 6])
+  expect([...result?.buffer.getChannelData(1) ?? []]).toEqual([10, 20, 30, 40, 50, 60])
+})
+
+test('accepts exact tail coverage when the final page ends at the region', async () => {
+  const result = await loadSampledInstrumentRegion(
+    input,
+    { sourceStartFrame: 1, sourceEndFrame: 7 },
+    64,
+    undefined,
+    {
+      decodePages: decoder([page(0, [0, 1, 2, 3]), page(4, [4, 5, 6])]),
+      createBuffer: (channels, frames, rate) => new TestAudioBuffer(channels, frames, rate),
+    },
+  )
+  expect([...result?.buffer.getChannelData(0) ?? []]).toEqual([1, 2, 3, 4, 5, 6])
+})
+
+test('rejects gaps and duplicate overlap after clipping page bounds', async () => {
+  await expect(loadSampledInstrumentRegion(
+    input,
+    { sourceStartFrame: 1, sourceEndFrame: 7 },
+    64,
+    undefined,
+    { decodePages: decoder([page(0, [1, 2, 3]), page(5, [4, 5, 6])]) },
+  )).rejects.toThrow()
+  await expect(loadSampledInstrumentRegion(
+    input,
+    { sourceStartFrame: 1, sourceEndFrame: 7 },
+    64,
+    undefined,
+    { decodePages: decoder([page(0, [1, 2, 3, 4]), page(3, [5, 6, 7, 8, 9])]) },
+  )).rejects.toThrow()
+})
+
 test('rejects budget before reading or allocating', async () => {
   let reads = 0
   let allocations = 0

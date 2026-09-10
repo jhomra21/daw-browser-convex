@@ -273,6 +273,83 @@ const supportsPortableExport = (
   typeof environment.Worker === 'function'
   && typeof environment.AudioBuffer === 'function'
 
+export const readPortableDescriptorPage = async (
+  descriptor: AudioPcmSourceDescriptor,
+  input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal },
+): Promise<readonly Float32Array[]> => {
+  const endFrame = input.startFrame + input.frameCount
+  if (
+    !Number.isSafeInteger(input.startFrame)
+    || input.startFrame < 0
+    || !Number.isSafeInteger(input.frameCount)
+    || input.frameCount <= 0
+    || !Number.isSafeInteger(endFrame)
+    || endFrame > descriptor.frameCount
+  ) {
+    throw new Error(`Portable export source page "${input.assetId}" has invalid requested bounds.`)
+  }
+
+  const planes = Array.from(
+    { length: descriptor.channelCount },
+    () => new Float32Array(input.frameCount),
+  )
+  let nextFrame = input.startFrame
+  let hasAcceptedPage = false
+  for await (const page of descriptor.readPages({
+    startFrame: input.startFrame,
+    endFrame,
+    signal: input.signal,
+  })) {
+    const pageEndFrame = page.startFrame + page.frameCount
+    if (
+      !Number.isSafeInteger(page.startFrame)
+      || page.startFrame < 0
+      || !Number.isSafeInteger(page.frameCount)
+      || page.frameCount <= 0
+      || !Number.isSafeInteger(pageEndFrame)
+      || pageEndFrame > descriptor.frameCount
+      || page.sampleRate !== descriptor.sampleRate
+      || page.channelCount !== descriptor.channelCount
+      || page.planes.length !== descriptor.channelCount
+      || page.planes.some((plane) => plane.length !== page.frameCount)
+    ) {
+      throw new Error(`Portable export source page "${input.assetId}" has invalid metadata or bounds.`)
+    }
+
+    const coveredStart = Math.max(input.startFrame, page.startFrame)
+    const coveredEnd = Math.min(endFrame, pageEndFrame)
+    if (coveredStart > nextFrame) {
+      throw new Error(`Portable export source page "${input.assetId}" has a gap before frame ${nextFrame}.`)
+    }
+    if (coveredEnd <= nextFrame || (hasAcceptedPage && page.startFrame < nextFrame)) {
+      throw new Error(`Portable export source page "${input.assetId}" overlaps or misses frame ${nextFrame}.`)
+    }
+
+    const sourceOffset = nextFrame - page.startFrame
+    const copyFrameCount = coveredEnd - nextFrame
+    const destinationOffset = nextFrame - input.startFrame
+    for (let channel = 0; channel < descriptor.channelCount; channel += 1) {
+      const sourcePlane = page.planes[channel]
+      const destinationPlane = planes[channel]
+      if (!sourcePlane || !destinationPlane) {
+        throw new Error(`Portable export source page "${input.assetId}" has invalid channel data.`)
+      }
+      destinationPlane.set(
+        sourcePlane.subarray(sourceOffset, sourceOffset + copyFrameCount),
+        destinationOffset,
+      )
+    }
+    nextFrame = coveredEnd
+    hasAcceptedPage = true
+    if (nextFrame === endFrame) break
+  }
+
+  if (nextFrame !== endFrame) {
+    throw new Error(`Portable export source page "${input.assetId}" is missing coverage through frame ${endFrame}.`)
+  }
+  return planes
+}
+
 const selectPortableMixdown = async (
   req: ExportRequest,
   prepared: PreparedExportRender,
@@ -379,10 +456,7 @@ const selectPortableMixdown = async (
         throw new Error(`Prepared Stretch page "${input.assetId}" was not found.`)
       }
       if (!descriptor) throw new Error(`Portable export source "${input.assetId}" is unavailable.`)
-      for await (const page of descriptor.readPages({ startFrame: input.startFrame, endFrame: input.startFrame + input.frameCount, signal: input.signal })) {
-        if (page.startFrame === input.startFrame && page.frameCount === input.frameCount) return page.planes
-      }
-      throw new Error(`Portable export source page "${input.assetId}" was not found.`)
+      return readPortableDescriptorPage(descriptor, input)
     }
     let cleanupStarted = false
     const cleanup = async () => {

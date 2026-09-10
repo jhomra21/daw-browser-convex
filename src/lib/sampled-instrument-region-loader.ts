@@ -9,6 +9,7 @@ import {
   sampledInstrumentRegionBytes,
   sampledInstrumentRegionFrameCount,
   sampledInstrumentRegionIdentity,
+  sourceFrameCount,
   type SampledInstrumentBuffer,
   type SampledInstrumentRegion,
   type SampledInstrumentSource,
@@ -109,21 +110,22 @@ const resolveSource = async (
 const validatePage = (
   page: DecodedAudioPage,
   source: SampledInstrumentSource,
-  expectedStartFrame: number,
-  expectedEndFrame: number,
-  nextFrame: number,
+  sourceEndFrame: number,
 ) => {
-  if (page.startFrame !== nextFrame
-    || page.startFrame < expectedStartFrame
-    || page.startFrame + page.frameCount > expectedEndFrame
+  const pageEndFrame = page.startFrame + page.frameCount
+  if (!Number.isSafeInteger(page.startFrame)
+    || page.startFrame < 0
     || !Number.isSafeInteger(page.frameCount)
     || page.frameCount <= 0
+    || !Number.isSafeInteger(pageEndFrame)
+    || pageEndFrame > sourceEndFrame
     || page.sampleRate !== source.sampleRate
     || page.channelCount !== source.channelCount
     || page.planes.length !== source.channelCount
-    || page.planes.some((plane) => plane.length !== page.frameCount)) {
+    || page.planes.some((plane) => !(plane instanceof Float32Array) || plane.length !== page.frameCount)) {
     throw new Error('Decoded sampled instrument page coverage or metadata is invalid.')
   }
+  return pageEndFrame
 }
 
 export const loadSampledInstrumentRegion = async (
@@ -149,6 +151,7 @@ export const loadSampledInstrumentRegion = async (
   throwIfAborted(signal)
   const source = await resolveSource(input, options, signal)
   if (!source) return null
+  const sourceEndFrame = sourceFrameCount(input.source)
   const isRemote = !input.url.startsWith(LOCAL_ASSET_PREFIX)
   const deadline = isRemote
     ? createLoadDeadline(
@@ -171,7 +174,30 @@ export const loadSampledInstrumentRegion = async (
     let nextFrame = region.sourceStartFrame
     for await (const page of pages) {
       throwIfAborted(loadSignal)
-      validatePage(page, input.source, region.sourceStartFrame, region.sourceEndFrame, nextFrame)
+      const pageEndFrame = validatePage(page, input.source, sourceEndFrame)
+      if (pageEndFrame <= region.sourceStartFrame) {
+        if (nextFrame !== region.sourceStartFrame) {
+          throw new Error('Decoded sampled instrument page coverage or metadata is invalid.')
+        }
+        continue
+      }
+      if (page.startFrame >= region.sourceEndFrame) {
+        if (nextFrame < region.sourceEndFrame) {
+          throw new Error('Decoded sampled instrument pages do not exactly cover the requested region.')
+        }
+        continue
+      }
+      const copyStartFrame = Math.max(page.startFrame, region.sourceStartFrame)
+      const copyEndFrame = Math.min(pageEndFrame, region.sourceEndFrame)
+      if (copyEndFrame <= copyStartFrame) {
+        throw new Error('Decoded sampled instrument page coverage or metadata is invalid.')
+      }
+      if (copyStartFrame < nextFrame) {
+        throw new Error('Decoded sampled instrument page coverage or metadata is invalid.')
+      }
+      if (copyStartFrame > nextFrame) {
+        throw new Error('Decoded sampled instrument pages do not exactly cover the requested region.')
+      }
       if (!buffer) {
         buffer = (options.createBuffer ?? defaultCreateBuffer)(
           input.source.channelCount,
@@ -179,13 +205,18 @@ export const loadSampledInstrumentRegion = async (
           input.source.sampleRate,
         )
       }
-      const localOffset = page.startFrame - region.sourceStartFrame
+      const pageOffset = copyStartFrame - page.startFrame
+      const localOffset = copyStartFrame - region.sourceStartFrame
+      const copyFrameCount = copyEndFrame - copyStartFrame
       for (let channel = 0; channel < input.source.channelCount; channel += 1) {
         const plane = page.planes[channel]
         if (!plane) throw new Error('Decoded sampled instrument page is missing a channel plane.')
-        buffer.getChannelData(channel).set(plane, localOffset)
+        buffer.getChannelData(channel).set(
+          plane.subarray(pageOffset, pageOffset + copyFrameCount),
+          localOffset,
+        )
       }
-      nextFrame += page.frameCount
+      nextFrame = copyEndFrame
     }
     if (!buffer || nextFrame !== region.sourceEndFrame) {
       throw new Error('Decoded sampled instrument pages do not exactly cover the requested region.')

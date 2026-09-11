@@ -13,7 +13,13 @@ import {
 } from './clip-fade-interaction'
 
 type ClipFadeOverlayProps = {
-  clip: { duration: number; fades?: ClipFades; midi?: unknown }
+  clip: {
+    duration: number
+    fades?: ClipFades
+    midi?: unknown
+    sliceStartSec?: number
+    sliceDurationSec?: number
+  }
   canEdit: Accessor<boolean>
   onCommit: (fades: ClipFades, baseline: ClipFades) => void
 }
@@ -67,6 +73,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
       overlayHeight: active.height,
       currentX: position.x,
       currentY: position.y,
+      overlayStartSec: sliceStartSec(),
+      overlayDurationSec: sliceDurationSec(),
     }))
   }
   const up = (event: PointerEvent) => {
@@ -120,15 +128,31 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     window.addEventListener('blur', cancel)
   }
 
-  const point = (time: number) => (time / Math.max(props.clip.duration, 0.000001)) * 100
+  const sliceStartSec = () => Math.max(0, Math.min(
+    props.clip.duration,
+    props.clip.sliceStartSec ?? 0,
+  ))
+  const sliceDurationSec = () => Math.max(
+    0.000001,
+    Math.min(
+      props.clip.duration - sliceStartSec(),
+      props.clip.sliceDurationSec ?? props.clip.duration,
+    ),
+  )
+  const sliceEndSec = () => sliceStartSec() + sliceDurationSec()
+  const pointInSlice = (time: number) => (
+    ((time - sliceStartSec()) / sliceDurationSec()) * 100
+  )
   const path = (side: 'fadeIn' | 'fadeOut') => {
     const fades = currentFades()
-    const start = side === 'fadeIn'
+    const logicalStart = side === 'fadeIn'
       ? fades.fadeInStartSec
       : props.clip.duration - fades.fadeOutSec
-    const end = side === 'fadeIn'
+    const logicalEnd = side === 'fadeIn'
       ? fades.fadeInSec
       : props.clip.duration - fades.fadeOutEndSec
+    const start = Math.max(sliceStartSec(), logicalStart)
+    const end = Math.min(sliceEndSec(), logicalEnd)
     if (end <= start) return ''
     const isolated = side === 'fadeIn'
       ? { ...fades, fadeOutSec: 0, fadeOutEndSec: 0 }
@@ -137,7 +161,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     for (let index = 0; index <= 16; index += 1) {
       const time = start + ((end - start) * index) / 16
       const gain = normalizedFadeGainAtClipTime(isolated, props.clip.duration, time)
-      parts.push(`${index === 0 ? 'M' : 'L'} ${point(time)} ${100 - gain * 100}`)
+      parts.push(`${index === 0 ? 'M' : 'L'} ${pointInSlice(time)} ${100 - gain * 100}`)
     }
     return parts.join(' ')
   }
@@ -147,14 +171,14 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
   }))
   const endpointPosition = (mode: Exclude<FadeInteractionMode, 'curve'>) => {
     const fades = currentFades()
-    if (mode === 'fadeInStart') return point(fades.fadeInStartSec)
-    if (mode === 'fadeInEnd') return point(fades.fadeInSec)
-    if (mode === 'fadeOutStart') return point(props.clip.duration - fades.fadeOutSec)
-    return point(props.clip.duration - fades.fadeOutEndSec)
+    if (mode === 'fadeInStart') return pointInSlice(fades.fadeInStartSec)
+    if (mode === 'fadeInEnd') return pointInSlice(fades.fadeInSec)
+    if (mode === 'fadeOutStart') return pointInSlice(props.clip.duration - fades.fadeOutSec)
+    return pointInSlice(props.clip.duration - fades.fadeOutEndSec)
   }
   const curvePosition = (side: 'fadeIn' | 'fadeOut') => {
     const control = getNormalizedClipFadeBezierControlPoint(currentFades(), props.clip.duration, side)
-    return { left: `${point(control.x)}%`, top: `${100 - control.y * 100}%` }
+    return { left: `${pointInSlice(control.x)}%`, top: `${100 - control.y * 100}%` }
   }
   const commitKeyboard = (side: 'fadeIn' | 'fadeOut', mode: FadeInteractionMode, event: KeyboardEvent) => {
     const interaction = keyboard?.side === side && keyboard.mode === mode

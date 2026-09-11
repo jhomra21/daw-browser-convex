@@ -52,6 +52,7 @@ import {
   type TimelineTrackLayout,
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
+import { intersectTimelineRangeWithViewport } from "~/lib/timeline-viewport-geometry";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
 
 const createViewportRedrawVersion = () => {
@@ -102,7 +103,13 @@ type Props = {
   pixelsPerSecond: number;
   viewport: {
     visibleRange: { startSec: number; endSec: number };
+    overscanRange: { startSec: number; endSec: number };
     width: number;
+    pixelsPerSecond: number;
+    timeToX: (timeSec: number) => number;
+    xToTime: (x: number) => number;
+    runwayWidth: number;
+    runwayOffset: number;
     previewVisibleRange: (range: { startSec: number; endSec: number }) => void;
     commitVisibleRange: (range: { startSec: number; endSec: number }) => void;
     onWheel: (event: WheelEvent) => void;
@@ -335,6 +342,10 @@ export default function TimelineWorkspace(props: Props) {
             resolveAudioSource={props.resolveAudioSource}
             bpm={props.bpm}
             pixelsPerSecond={props.pixelsPerSecond}
+            visibleRange={props.viewport.visibleRange}
+            clipVisibleRange={props.viewport.overscanRange}
+            viewportWidthPx={props.viewport.width}
+            timeToX={props.viewport.timeToX}
             viewportRedrawVersion={viewportRedrawVersion()}
             automation={{
               projectId: props.automation.projectId,
@@ -394,7 +405,7 @@ export default function TimelineWorkspace(props: Props) {
           <div
             class="relative flex select-none"
             style={{
-              width: `${props.durationSec * props.pixelsPerSecond + props.sidebarWidth}px`,
+              width: `${props.viewport.runwayWidth + props.sidebarWidth}px`,
               height: `${scrollContentHeight()}px`,
               "min-height": "100%",
             }}
@@ -403,7 +414,8 @@ export default function TimelineWorkspace(props: Props) {
               class="relative flex shrink-0 flex-col"
               ref={props.timelineSurfaceRef}
               style={{
-                width: `${props.durationSec * props.pixelsPerSecond}px`,
+                width: `${props.viewport.width}px`,
+                "margin-left": `${props.viewport.runwayOffset}px`,
               }}
                onPointerDown={(event) => props.onLanePointerDown(event)}
             >
@@ -422,6 +434,9 @@ export default function TimelineWorkspace(props: Props) {
                 gridEnabled={props.gridEnabled}
                 pixelsPerSecond={props.pixelsPerSecond}
                 visibleRange={props.viewport.visibleRange}
+                viewportWidthPx={props.viewport.width}
+                timeToX={props.viewport.timeToX}
+                xToTime={props.viewport.xToTime}
                 onPointerDown={props.onRulerPointerDown}
                 loopEnabled={props.loopEnabled}
                 loopStartSec={props.loopStartSec}
@@ -459,6 +474,8 @@ export default function TimelineWorkspace(props: Props) {
                     trackLookup: props.trackLookup,
                     durationSec: props.durationSec,
                     pixelsPerSecond: props.pixelsPerSecond,
+                    visibleStartSec: props.viewport.visibleRange.startSec,
+                    viewportWidthPx: props.viewport.width,
                     bpm: props.bpm,
                     gridDenominator: props.gridDenominator,
                     gridEnabled: props.gridEnabled,
@@ -487,7 +504,7 @@ export default function TimelineWorkspace(props: Props) {
               <div
                 class="sticky z-30 box-border shrink-0 border-t border-neutral-800 bg-timeline-background"
                 style={{
-                  width: `${props.durationSec * props.pixelsPerSecond}px`,
+                  width: `${props.viewport.width}px`,
                   height: `${stickyFooterHeight()}px`,
                   bottom: `${props.bottomPanelOffsetPx}px`,
                 }}
@@ -526,6 +543,8 @@ export default function TimelineWorkspace(props: Props) {
                   <GridOverlay
                     durationSec={props.durationSec}
                     pixelsPerSecond={props.pixelsPerSecond}
+                    visibleStartSec={props.viewport.visibleRange.startSec}
+                    viewportWidthPx={props.viewport.width}
                     bpm={props.bpm}
                     denom={props.gridDenominator}
                     enabled={props.gridEnabled}
@@ -551,23 +570,32 @@ export default function TimelineWorkspace(props: Props) {
                   </Show>
                   <Show when={props.selection.rangeSelection()}>
                     {(range) => (
-                      <For
-                        each={props.trackLayout.returnRows.filter((row) =>
-                          range().trackIds.includes(row.trackId),
+                      <Show when={intersectTimelineRangeWithViewport({
+                        range: range(),
+                        visibleStartSec: props.viewport.visibleRange.startSec,
+                        viewportWidthPx: props.viewport.width,
+                        pixelsPerSecond: props.pixelsPerSecond,
+                      })}>
+                        {(projection) => (
+                          <For
+                            each={props.trackLayout.returnRows.filter((row) =>
+                              range().trackIds.includes(row.trackId),
+                            )}
+                          >
+                            {(row) => (
+                              <div
+                                class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
+                                style={{
+                                  left: `${projection().leftPx}px`,
+                                  top: `${row.topPx}px`,
+                                  width: `${projection().widthPx}px`,
+                                  height: `${row.heightPx}px`,
+                                }}
+                              />
+                            )}
+                          </For>
                         )}
-                      >
-                        {(row) => (
-                          <div
-                            class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
-                            style={{
-                              left: `${range().startSec * props.pixelsPerSecond}px`,
-                              top: `${row.topPx}px`,
-                              width: `${(range().endSec - range().startSec) * props.pixelsPerSecond}px`,
-                              height: `${row.heightPx}px`,
-                            }}
-                          />
-                        )}
-                      </For>
+                      </Show>
                     )}
                   </Show>
                 </div>
@@ -580,6 +608,8 @@ export default function TimelineWorkspace(props: Props) {
                     <GridOverlay
                       durationSec={props.durationSec}
                       pixelsPerSecond={props.pixelsPerSecond}
+                      visibleStartSec={props.viewport.visibleRange.startSec}
+                      viewportWidthPx={props.viewport.width}
                       bpm={props.bpm}
                       denom={props.gridDenominator}
                       enabled={props.gridEnabled}
@@ -602,6 +632,8 @@ export default function TimelineWorkspace(props: Props) {
                         )}
                         durationSec={props.durationSec}
                         pixelsPerSecond={props.pixelsPerSecond}
+                        visibleStartSec={props.viewport.visibleRange.startSec}
+                        viewportWidthPx={props.viewport.width}
                         heightPx={props.automation.lanes.masterHeight}
                         onPreview={props.automation.envelopes.preview}
                         onCommit={props.automation.envelopes.commit}

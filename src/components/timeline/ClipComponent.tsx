@@ -2,13 +2,15 @@ import {
   type Component,
   createEffect,
   createMemo,
+  Show,
 } from "solid-js";
 
-import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
+import { drawWaveformPeaks, drawWaveformPcmLine } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
+import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
 import { cn } from "~/lib/utils";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
@@ -20,6 +22,7 @@ import {
 } from "@daw-browser/timeline-core/clip-fades";
 import ClipFadeOverlay from "./ClipFadeOverlay";
 import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
+import { getVisibleMidiBarIndices } from "~/lib/timeline-midi-rendering";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 export type ClipContextMenuActions = {
@@ -52,13 +55,15 @@ type ClipComponentProps = {
   resolveAudioSource: AudioPcmSourceResolver;
   bpm: number;
   pixelsPerSecond: number;
+  visibleRange: { startSec: number; endSec: number };
+  timeToX: (timeSec: number) => number;
   viewportRedrawVersion: number;
   rangeOverlap: ClipRangeOverlap | null;
   canEditFades: () => boolean;
   onCommitFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
 };
 
-const MIN_CLIP_PX = 6;
+const MIN_CLIP_PX = 1;
 const WAVEFORM_PAD_Y = 6;
 const CLIP_TITLE_HEADER_H = 20;
 const AUDIO_WAVEFORM_PADDING_Y = 4;
@@ -66,6 +71,28 @@ const AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION = 0.9;
 const DOUBLE_TAP_MS = 700;
 const DOUBLE_TAP_DISTANCE_PX = 8;
 const SELECTED_TAP_MS = 700;
+const createFadeScale = (
+  fades: ReturnType<typeof normalizeClipFades>,
+  duration: number,
+  canvasStartSec: number,
+  canvasDurationSec: number,
+  cssW: number,
+) => (column: number) => normalizedFadeGainAtClipTime(
+  fades,
+  duration,
+  canvasStartSec + ((column + 0.5) / Math.max(1, cssW)) * canvasDurationSec,
+);
+const createFadeSampleScale = (
+  fades: ReturnType<typeof normalizeClipFades>,
+  duration: number,
+  canvasStartSec: number,
+  canvasDurationSec: number,
+  sampleCount: number,
+) => (index: number) => normalizedFadeGainAtClipTime(
+  fades,
+  duration,
+  canvasStartSec + (index / Math.max(1, sampleCount - 1)) * canvasDurationSec,
+);
 type ClipTapState = { key: string; at: number; x: number; y: number; pointerType: string };
 type ClipOpenState = { key: string; at: number };
 // Native dblclick can be lost when selection remounts the clip; keep the tap window outside the component.
@@ -83,8 +110,21 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     | { x: number; y: number; at: number }
     | undefined;
 
+  const renderSlice = createMemo(() => getTimelineClipViewportSlice({
+    clipStartSec: props.clip.startSec,
+    clipDurationSec: props.clip.duration,
+    visibleRange: props.visibleRange,
+    pixelsPerSecond: props.pixelsPerSecond,
+  }));
+  const renderStartSec = () => renderSlice()?.startSec ?? props.clip.startSec;
+  const renderEndSec = () => renderSlice()?.endSec ?? props.clip.startSec;
   const clipWidthPx = () =>
-    Math.max(MIN_CLIP_PX, Math.floor(props.clip.duration * props.pixelsPerSecond));
+    Math.max(
+      MIN_CLIP_PX,
+      Math.ceil(Math.max(0, renderEndSec() - renderStartSec()) * props.pixelsPerSecond),
+    );
+  const hasLeftBoundary = () => renderSlice()?.hasLeftBoundary === true;
+  const hasRightBoundary = () => renderSlice()?.hasRightBoundary === true;
   const handleWidthPx = () =>
     clipWidthPx() < 18 ? 2 : clipWidthPx() < 28 ? 3 : 6;
   const isGhost = () => props.clip.id.startsWith("__dup_preview:");
@@ -103,6 +143,19 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     cssWidthPx: () => clipWidthPx(),
     projectBpm: () => props.bpm,
     resolveAudioSource: () => props.resolveAudioSource,
+    visibleRange: () => props.visibleRange,
+    priorityRange: () => props.visibleRange,
+  });
+  const overlapProjection = createMemo(() => {
+    const overlap = props.rangeOverlap;
+    if (!overlap) return null;
+    const sliceStart = renderStartSec() - props.clip.startSec;
+    const left = Math.max(0, (overlap.offsetSec - sliceStart) * props.pixelsPerSecond);
+    const right = Math.min(
+      clipWidthPx(),
+      (overlap.offsetSec + overlap.durationSec - sliceStart) * props.pixelsPerSecond,
+    );
+    return { left, width: Math.max(0, right - left) };
   });
   const openClip = () => props.onDblClick?.(props.trackId, props.clip.id);
   const selectClipForMenu = () => props.contextMenu.selectClip(props.trackId, props.clip.id);
@@ -251,18 +304,20 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         const startBeats = Math.max(0, noteBeat - midiOffsetBeats);
         const startSec = startBeats * spb;
         const endSec = Math.max(startSec, startSec + effectiveLength * spb);
+        const windowStart = renderStartSec() - props.clip.startSec;
+        const windowDuration = Math.max(1e-6, renderEndSec() - renderStartSec());
         const left = Math.max(
           0,
           Math.min(
             cssW,
-            Math.floor((startSec / Math.max(1e-6, props.clip.duration)) * cssW),
+            Math.floor(((startSec - windowStart) / windowDuration) * cssW),
           ),
         );
         const right = Math.max(
           left + 1,
           Math.min(
             cssW,
-            Math.floor((endSec / Math.max(1e-6, props.clip.duration)) * cssW),
+            Math.floor(((endSec - windowStart) / windowDuration) * cssW),
           ),
         );
         const frac = 1 - (note.pitch - minP) / range;
@@ -273,12 +328,21 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
       ctx.strokeStyle = timelineGridMajor;
       ctx.lineWidth = 1;
-      const bars = Math.max(1, Math.floor(props.clip.duration / (spb * 4)));
-      for (let b = 1; b <= bars; b++) {
+      const windowStart = renderStartSec() - props.clip.startSec;
+      const windowDuration = Math.max(1e-6, renderEndSec() - renderStartSec());
+      const barDurationSec = spb * 4;
+      const visibleBars = getVisibleMidiBarIndices({
+        clipDurationSec: props.clip.duration,
+        windowStartSec: windowStart,
+        windowEndSec: windowStart + windowDuration,
+        barDurationSec,
+      });
+      for (let b = visibleBars?.firstBar ?? 1; b <= (visibleBars?.lastBar ?? 0); b++) {
         const x =
           Math.floor(
-            ((b * spb * 4) / Math.max(1e-6, props.clip.duration)) * cssW,
+            ((b * barDurationSec - windowStart) / windowDuration) * cssW,
           ) + 0.5;
+        if (x < 0 || x > cssW) continue;
         ctx.beginPath();
         ctx.moveTo(x, padTop);
         ctx.lineTo(x, padTop + innerH);
@@ -313,6 +377,91 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       ctx.fillRect(Math.max(0, audioEndPx), 0, cssW - Math.max(0, audioEndPx), cssH);
     }
 
+    const waveformTop = CLIP_TITLE_HEADER_H + AUDIO_WAVEFORM_PADDING_Y;
+    const waveformBoxH = cssH - waveformTop - AUDIO_WAVEFORM_PADDING_Y;
+    const fades = normalizeClipFades(props.clip.fades, props.clip.duration);
+    const hasEffectiveFade = fades.fadeInStartSec > 0
+      || fades.fadeInSec > 0
+      || fades.fadeOutSec > 0
+      || fades.fadeOutEndSec > 0;
+    const waveformSegments = waveform.segments();
+    if (waveformSegments.length > 0) {
+      for (const segment of waveformSegments) {
+        const segmentWidth = Math.max(1, segment.endPx - segment.startPx);
+        const segmentPcm = segment.pcm;
+        const scaleAtColumn = hasEffectiveFade
+          ? createFadeScale(
+            fades,
+            props.clip.duration,
+            segment.canvasStartSec - props.clip.startSec,
+            segment.canvasEndSec - segment.canvasStartSec,
+            segmentWidth,
+          )
+          : undefined;
+        if (segmentPcm?.mode === "pcm-envelope") {
+          const laneHeight = waveformBoxH / Math.max(1, segmentPcm.channels.length);
+          segmentPcm.channels.forEach((channelPeaks, channel) => {
+            drawWaveformPeaks({
+              ctx,
+              peaks: channelPeaks,
+              drawCols: segmentPcm.columns,
+              padPx: 0,
+              xOffsetPx: segment.startPx,
+              topY: waveformTop + channel * laneHeight,
+              contentH: laneHeight,
+              cssW,
+              cssH,
+              fillStyle: contentColor,
+              boundaryStyle: timelineGridMajor,
+              maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
+              amplitudeScaleAtColumn: scaleAtColumn,
+            });
+          });
+        } else if (segmentPcm?.mode === "pcm-line") {
+          drawWaveformPcmLine({
+            ctx,
+            pcm: segmentPcm,
+            topY: waveformTop,
+            contentH: waveformBoxH,
+            cssW: segmentWidth,
+            xOffsetPx: segment.startPx,
+            fillStyle: contentColor,
+            pointRadius: 1,
+            showPoints: segment.showPoints,
+            amplitudeScaleAtSample: hasEffectiveFade
+              ? createFadeSampleScale(
+                fades,
+                props.clip.duration,
+                segment.canvasStartSec - props.clip.startSec,
+                segment.canvasEndSec - segment.canvasStartSec,
+                segmentPcm.channels[0]?.length ?? 1,
+              )
+              : undefined,
+          });
+        } else if (segment.peaks) {
+          const laneHeight = waveformBoxH / Math.max(1, segment.peaks.channels.length);
+          segment.peaks.channels.forEach((channelPeaks, channel) => {
+            drawWaveformPeaks({
+              ctx,
+              peaks: channelPeaks,
+              drawCols: segment.peaks?.columns ?? 0,
+              padPx: 0,
+              xOffsetPx: segment.startPx,
+              topY: waveformTop + channel * laneHeight,
+              contentH: laneHeight,
+              cssW,
+              cssH,
+              fillStyle: contentColor,
+              boundaryStyle: timelineGridMajor,
+              maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
+              amplitudeScaleAtColumn: scaleAtColumn,
+            });
+          });
+        }
+      }
+      return;
+    }
+
     if (!peaks) {
       ctx.strokeStyle = timelineGridMinor;
       for (let x = audioStartPx; x < audioEndPx; x += 6) {
@@ -324,35 +473,35 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const waveformTop = CLIP_TITLE_HEADER_H + AUDIO_WAVEFORM_PADDING_Y;
-    const waveformBoxH = cssH - waveformTop - AUDIO_WAVEFORM_PADDING_Y;
-    const duration = Math.max(0, props.clip.duration);
-    const fades = normalizeClipFades(props.clip.fades, duration);
-    const hasEffectiveFade = fades.fadeInStartSec > 0
-      || fades.fadeInSec > 0
-      || fades.fadeOutSec > 0
-      || fades.fadeOutEndSec > 0;
-
-    drawWaveformPeaks({
-      ctx,
-      peaks,
-      drawCols,
-      padPx,
-      topY: waveformTop,
-      contentH: waveformBoxH,
-      cssW,
-      cssH,
-      fillStyle: contentColor,
-      boundaryStyle: timelineGridMajor,
-      maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
-      amplitudeScaleAtColumn: hasEffectiveFade
-        ? (column) => normalizedFadeGainAtClipTime(
-          fades,
-          duration,
-          ((padPx + column + 0.5) / cssW) * duration,
-        )
-        : undefined,
-    });
+    if (peaks) {
+      const laneHeight = waveformBoxH / Math.max(1, peaks.channels.length);
+      peaks.channels.forEach((channelPeaks, channel) => {
+        drawWaveformPeaks({
+          ctx,
+          peaks: channelPeaks,
+          drawCols,
+          padPx,
+          topY: waveformTop + channel * laneHeight,
+          contentH: laneHeight,
+          cssW,
+          cssH,
+          fillStyle: contentColor,
+          boundaryStyle: timelineGridMajor,
+          maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
+          amplitudeScaleAtColumn: hasEffectiveFade
+            ? createFadeScale(
+              fades,
+              props.clip.duration,
+              (layout.canvasStartSec ?? props.clip.startSec) - props.clip.startSec
+                + padPx / Math.max(1, cssW)
+                  * Math.max(0, (layout.canvasEndSec ?? props.clip.startSec + props.clip.duration) - (layout.canvasStartSec ?? props.clip.startSec)),
+              Math.max(0, (layout.canvasEndSec ?? props.clip.startSec + props.clip.duration) - (layout.canvasStartSec ?? props.clip.startSec)),
+              cssW,
+            )
+            : undefined,
+        });
+      });
+    }
   }
 
   createEffect(() => {
@@ -380,6 +529,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void midiSignature;
     void props.bpm;
     void waveform.peaks();
+    void waveform.pcm();
     void props.viewportRedrawVersion;
     drawWaveform();
   });
@@ -396,8 +546,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       )}
       style={{
         top: "0px",
-        left: `${props.clip.startSec * props.pixelsPerSecond}px`,
-        width: `${Math.max(MIN_CLIP_PX, props.clip.duration * props.pixelsPerSecond)}px`,
+        left: `${props.timeToX(renderStartSec())}px`,
+        width: `${clipWidthPx()}px`,
         height: `${LANE_HEIGHT - 1}px`,
         ...clipVisualColors(),
       }}
@@ -443,49 +593,53 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       }}
       title={`${props.clip.name}`}
     >
-      <div
-        class="absolute inset-y-0 left-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
-        style={{ width: `${handleWidthPx()}px` }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          if (e.button !== 0) return;
-          props.onResizeStart(props.trackId, props.clip.id, "left", e);
-        }}
-      >
-        <span class="opacity-0 group-hover:opacity-100 pointer-events-none">
-          [
-        </span>
-      </div>
-      <div
-        class="absolute inset-y-0 right-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
-        style={{ width: `${handleWidthPx()}px` }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          if (e.button !== 0) return;
-          props.onResizeStart(props.trackId, props.clip.id, "right", e);
-        }}
-      >
-        <span class="opacity-0 group-hover:opacity-100 pointer-events-none">
-          ]
-        </span>
-      </div>
+      <Show when={hasLeftBoundary()}>
+        <div
+          class="absolute inset-y-0 left-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
+          style={{ width: `${handleWidthPx()}px` }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            if (e.button !== 0) return;
+            props.onResizeStart(props.trackId, props.clip.id, "left", e);
+          }}
+        >
+          <span class="opacity-0 group-hover:opacity-100 pointer-events-none">[</span>
+        </div>
+      </Show>
+      <Show when={hasRightBoundary()}>
+        <div
+          class="absolute inset-y-0 right-0 z-20 flex cursor-ew-resize items-center justify-center select-none text-xs text-foreground/80"
+          style={{ width: `${handleWidthPx()}px` }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            if (e.button !== 0) return;
+            props.onResizeStart(props.trackId, props.clip.id, "right", e);
+          }}
+        >
+          <span class="opacity-0 group-hover:opacity-100 pointer-events-none">]</span>
+        </div>
+      </Show>
 
       <canvas
         ref={(el) => (canvasRef = el || undefined)}
         class="absolute inset-0 size-full pointer-events-none z-10"
       />
       <ClipFadeOverlay
-        clip={props.clip}
+        clip={{
+          ...props.clip,
+          sliceStartSec: renderStartSec() - props.clip.startSec,
+          sliceDurationSec: Math.max(0, renderEndSec() - renderStartSec()),
+        }}
         canEdit={() => props.canEditFades()}
         onCommit={(fades, baseline) => props.onCommitFades(props.clip.id, fades, baseline)}
       />
-      {!props.isSelected && props.rangeOverlap && (
+      {!props.isSelected && overlapProjection() && (
         <>
           <div
             class="absolute inset-y-0 z-0 pointer-events-none bg-timeline-background"
             style={{
-              left: `${props.rangeOverlap.offsetSec * props.pixelsPerSecond}px`,
-              width: `${Math.max(1, props.rangeOverlap.durationSec * props.pixelsPerSecond)}px`,
+              left: `${overlapProjection()?.left ?? 0}px`,
+              width: `${overlapProjection()?.width ?? 0}px`,
             }}
           >
             <div class="absolute inset-0 bg-blue-500/25" />
@@ -493,8 +647,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
           <div
             class="absolute inset-y-0 z-20 pointer-events-none border-x border-blue-400"
             style={{
-              left: `${props.rangeOverlap.offsetSec * props.pixelsPerSecond}px`,
-              width: `${Math.max(1, props.rangeOverlap.durationSec * props.pixelsPerSecond)}px`,
+              left: `${overlapProjection()?.left ?? 0}px`,
+              width: `${overlapProjection()?.width ?? 0}px`,
             }}
           />
         </>

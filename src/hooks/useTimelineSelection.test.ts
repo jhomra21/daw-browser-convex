@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   rangeTrackIdsThroughDisplayOrder,
   timelinePointerCoordinates,
+  timelineTimeAtViewportX,
 } from "./useTimelineSelection";
 
 describe("rangeTrackIdsThroughDisplayOrder", () => {
@@ -81,5 +82,12 @@ describe("timelinePointerCoordinates", () => {
     );
 
     expect(coordinates).toEqual({ x: 40, y: 28 });
+  });
+});
+
+describe("timelineTimeAtViewportX", () => {
+  test("keeps marquee and range times anchored to a scrolled viewport", () => {
+    expect(timelineTimeAtViewportX(240, 120, 12.5)).toBe(14.5);
+    expect(timelineTimeAtViewportX(0, 120, 12.5)).toBe(12.5);
   });
 });

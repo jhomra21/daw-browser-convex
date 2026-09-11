@@ -117,3 +117,19 @@ test('maps pointer movement against the initial overlay geometry', () => {
   expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
   expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
 })
+
+test('commits slice-relative fade pointer movement in absolute clip time', () => {
+  const next = updateFadeDraft({
+    baseline,
+    side: 'fadeIn',
+    mode: 'fadeInEnd',
+    duration: 20,
+    overlayWidth: 100,
+    overlayHeight: 40,
+    currentX: 50,
+    currentY: 0,
+    overlayStartSec: 8,
+    overlayDurationSec: 4,
+  })
+  expect(next.fadeInSec).toBe(10)
+})

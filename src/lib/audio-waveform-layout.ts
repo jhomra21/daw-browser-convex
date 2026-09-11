@@ -6,9 +6,15 @@ type AudioWaveformLayoutSegment = {
   drawCols: number
   sourceStartSec: number
   sourceEndSec: number
+  startPx: number
+  endPx: number
+  canvasStartSec: number
+  canvasEndSec: number
 }
 
 type AudioWaveformLayout = {
+  canvasStartSec?: number
+  canvasEndSec?: number
   sourceDurationSec: number
   padPx: number
   drawCols: number
@@ -60,6 +66,7 @@ export function getAudioWaveformLayout(
   cssW: number,
   bufferDurationSec?: number,
   projectBpm = 120,
+  window?: { startSec: number; endSec: number },
 ): AudioWaveformLayout {
   const sourceDurationSec = Math.max(
     bufferDurationSec ?? clip.sourceDurationSec ?? 0,
@@ -84,16 +91,22 @@ export function getAudioWaveformLayout(
     }
   }
 
-  const pixelsPerSecond = cssW / Math.max(1e-6, clip.duration)
-  const padPx = Math.max(0, Math.floor((map.timelineStartSec - clip.startSec) * pixelsPerSecond))
+  const legacyPixelsPerSecond = cssW / Math.max(1e-6, clip.duration)
+  const canvasStartSec = Math.max(clip.startSec, window?.startSec ?? clip.startSec)
+  const canvasEndSec = Math.min(clip.startSec + clip.duration, window?.endSec ?? clip.startSec + clip.duration)
+  const windowStartSec = window ? Math.max(map.timelineStartSec, canvasStartSec) : map.timelineStartSec
+  const windowEndSec = window ? Math.min(map.timelineEndSec, canvasEndSec) : map.timelineStartSec + map.timelineDurationSec
+  const windowDurationSec = Math.max(1e-6, canvasEndSec - canvasStartSec)
+  const pixelsPerWindowSecond = window ? cssW / windowDurationSec : legacyPixelsPerSecond
+  const padPx = Math.max(0, Math.floor((windowStartSec - canvasStartSec) * pixelsPerWindowSecond))
   const drawCols = Math.max(
     0,
-    Math.min(cssW - padPx, Math.floor(map.timelineDurationSec * pixelsPerSecond)),
+    Math.min(cssW - padPx, Math.floor((windowEndSec - windowStartSec) * pixelsPerWindowSecond)),
   )
-  const sourceStartSec = roundSeconds(map.sourceStartSec)
+  const sourceStartSec = window ? roundSeconds(map.timelineToSourceSec(windowStartSec)) : roundSeconds(map.sourceStartSec)
   const sourceEndSec = Math.min(
     sourceDurationSec,
-    roundSeconds(map.timelineToSourceSec(map.timelineStartSec + drawCols / pixelsPerSecond)),
+    roundSeconds(map.timelineToSourceSec(window ? windowEndSec : map.timelineStartSec + drawCols / legacyPixelsPerSecond)),
   )
   const audioStartPx = padPx
   const audioEndPx = Math.min(cssW, audioStartPx + drawCols)
@@ -101,18 +114,24 @@ export function getAudioWaveformLayout(
     clip,
     map,
     projectBpm,
-    timelineEndSec: map.timelineStartSec + drawCols / pixelsPerSecond,
+    timelineEndSec: windowEndSec,
   }).flatMap((segment) => {
     const timelineStartSec = segment.timelineStartSec
     const timelineEndSec = segment.timelineEndSec
-    const segmentStartPx = Math.floor((timelineStartSec - clip.startSec) * pixelsPerSecond)
-    const segmentEndPx = Math.floor((timelineEndSec - clip.startSec) * pixelsPerSecond)
+    const segmentWindowStart = Math.max(timelineStartSec, canvasStartSec)
+    const segmentWindowEnd = Math.min(timelineEndSec, canvasEndSec)
+    const segmentStartPx = Math.floor((segmentWindowStart - canvasStartSec) * pixelsPerWindowSecond)
+    const segmentEndPx = Math.floor((segmentWindowEnd - canvasStartSec) * pixelsPerWindowSecond)
     const segmentDrawCols = Math.max(0, segmentEndPx - segmentStartPx)
     if (segmentDrawCols <= 0) return []
     return [{
       drawCols: segmentDrawCols,
-      sourceStartSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineStartSec)))),
-      sourceEndSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(timelineEndSec)))),
+      sourceStartSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(segmentWindowStart)))),
+      sourceEndSec: Math.max(0, Math.min(sourceDurationSec, roundSeconds(map.timelineToSourceSec(segmentWindowEnd)))),
+      startPx: segmentStartPx,
+      endPx: segmentEndPx,
+      canvasStartSec: segmentWindowStart,
+      canvasEndSec: segmentWindowEnd,
     }]
   })
 
@@ -125,5 +144,6 @@ export function getAudioWaveformLayout(
     sourceStartSec,
     sourceEndSec,
   }
-  return segments.length > 1 ? { ...layout, segments } : layout
+  const windowedLayout = window ? { ...layout, canvasStartSec, canvasEndSec } : layout
+  return segments.length > 1 ? { ...windowedLayout, segments } : windowedLayout
 }

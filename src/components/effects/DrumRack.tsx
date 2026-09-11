@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, onCleanup, Show, type Component, untrack } from "solid-js";
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
+import type { WaveformPeakChannelSlice } from "@daw-browser/waveforms/types";
 import {
   sampledInstrumentRegion,
   sampledInstrumentRegionIdentity,
@@ -73,7 +74,7 @@ const SampleWaveform: Component<{
 }> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
-  const [peaks, setPeaks] = createSignal<Uint8Array | null>(null);
+  const [peaks, setPeaks] = createSignal<WaveformPeakChannelSlice | null>(null);
   const [canvasSize, setCanvasSize] = createSignal({ width: SAMPLE_WAVEFORM_BINS, height: 56 });
   let waveformRequestKey: string | undefined;
 
@@ -162,18 +163,20 @@ const SampleWaveform: Component<{
       return;
     }
 
-    const drawCols = Math.min(Math.floor(data.length / 2), cssW);
-    drawWaveformPeaks({
-      ctx,
-      peaks: data,
-      drawCols,
-      padPx: 0,
-      topY: 0,
-      contentH: cssH,
-      cssW,
-      cssH,
-      fillStyle: waveformColor,
-      boundaryStyle: gridColor,
+    const channelHeight = cssH / Math.max(1, data.channels.length);
+    data.channels.forEach((channel, index) => {
+      drawWaveformPeaks({
+        ctx,
+        peaks: channel,
+        drawCols: Math.min(data.columns, cssW),
+        padPx: 0,
+        topY: index * channelHeight,
+        contentH: channelHeight,
+        cssW,
+        cssH,
+        fillStyle: waveformColor,
+        boundaryStyle: gridColor,
+      });
     });
   });
 

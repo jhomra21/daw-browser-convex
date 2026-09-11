@@ -7,6 +7,8 @@ type GridOverlayProps = {
   denom: number
   enabled: boolean
   pixelsPerSecond: number
+  visibleStartSec: number
+  viewportWidthPx: number
 }
 
 const GridOverlay: Component<GridOverlayProps> = (props) => {
@@ -45,8 +47,9 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
       <div
         class="absolute left-0 top-0 pointer-events-none z-10"
         style={{
-          width: `${Math.max(0, props.durationSec * props.pixelsPerSecond)}px`,
+          width: `${Math.max(0, props.viewportWidthPx)}px`,
           height: '100%',
+          'background-position': `${-props.visibleStartSec * props.pixelsPerSecond}px 0px`,
           ...backgroundStyle(),
         }}
       />

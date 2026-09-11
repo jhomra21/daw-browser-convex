@@ -35,6 +35,22 @@ const dataUrl = (bytes: Uint8Array) => {
   return `data:audio/wav;base64,${btoa(binary)}`
 }
 
+const deferred = <Value>() => {
+  let resolve: (value: Value) => void = () => {}
+  const promise = new Promise<Value>((nextResolve) => { resolve = nextResolve })
+  return { promise, resolve }
+}
+
+const installFetch = (handler: () => Promise<Response>) => {
+  const originalFetch = globalThis.fetch
+  const fetchForTest: typeof fetch = async () => handler()
+  fetchForTest.preconnect = () => {}
+  globalThis.fetch = fetchForTest
+  return () => {
+    globalThis.fetch = originalFetch
+  }
+}
+
 const clip = (input: {
   id?: string
   sourceAssetKey?: string
@@ -67,6 +83,20 @@ test('resolves a metadata-only cloud asset through its canonical project URL', a
 
   expect(calls).toEqual(['/api/samples/project%2Fcloud/asset%2Fcloud'])
   expect(result.identity).toBe('asset:project/cloud:asset/cloud')
+})
+
+test('deduplicates stable cloud source descriptor resolution', async () => {
+  let resolves = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => 'project/cloud',
+    resolveUrl: () => {
+      resolves += 1
+      return dataUrl(wave())
+    },
+  })
+  await resolver(clip({ sourceAssetKey: 'asset/stable' }))
+  await resolver(clip({ sourceAssetKey: 'asset/stable' }))
+  expect(resolves).toBe(1)
 })
 
 test('resolves a local asset from its local File without deriving a cloud URL', async () => {
@@ -195,4 +225,74 @@ test('reports a missing project ID for a metadata-only cloud asset', async () =>
 
   await expect(resolver(clip({ sourceAssetKey: 'cloud-asset' })))
     .rejects.toThrow('requires a project ID to resolve cloud audio asset "cloud-asset"')
+})
+
+test('keeps a shared descriptor resolution alive for a remaining subscriber', async () => {
+  const gate = deferred<{ status: 'ready'; file: File }>()
+  const restoreFetch = installFetch(async () => {
+    const result = await gate.promise
+    return new Response(await result.file.arrayBuffer(), {
+      headers: { 'content-type': 'audio/wav' },
+    })
+  })
+  try {
+    const resolver = createAudioPcmSourceResolver({
+      projectId: () => 'project/shared',
+      resolveUrl: () => 'https://resolver.test/shared.wav',
+    })
+  const firstController = new AbortController()
+  const secondController = new AbortController()
+  const first = resolver(clip({ sampleUrl: 'shared://sample' }), firstController.signal)
+  await Promise.resolve()
+  const second = resolver(clip({ sampleUrl: 'shared://sample' }), secondController.signal)
+  firstController.abort()
+  await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+  gate.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  await expect(second).resolves.toMatchObject({ identity: 'remote:https://resolver.test/shared.wav' })
+  } finally {
+    restoreFetch()
+  }
+})
+
+test('replaces a shared resolution after its final subscriber aborts', async () => {
+  const gates = [deferred<{ status: 'ready'; file: File }>(), deferred<{ status: 'ready'; file: File }>()]
+  let reads = 0
+  const restoreFetch = installFetch(async () => {
+    const gate = gates[reads]
+    reads += 1
+    if (!gate) throw new Error('Unexpected extra source fetch.')
+    const result = await gate.promise
+    return new Response(await result.file.arrayBuffer(), {
+      headers: { 'content-type': 'audio/wav' },
+    })
+  })
+  try {
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => 'project/replace',
+    resolveUrl: () => 'https://resolver.test/replace.wav',
+  })
+  const firstController = new AbortController()
+  const first = resolver(clip({ sampleUrl: 'replace://sample' }), firstController.signal)
+  await Promise.resolve()
+  firstController.abort()
+  await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+
+  const replacement = resolver(clip({ sampleUrl: 'replace://sample' }))
+  await Promise.resolve()
+  expect(reads).toBe(2)
+  gates[1]!.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  await expect(replacement).resolves.toMatchObject({ identity: 'remote:https://resolver.test/replace.wav' })
+  gates[0]!.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  } finally {
+    restoreFetch()
+  }
 })

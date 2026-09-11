@@ -12,6 +12,24 @@ import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-st
 
 type RuntimeClip = AudioStretchRuntimeClip
 
+const MAX_DESCRIPTOR_CACHE_ENTRIES = 32
+const descriptorCache = new Map<string, AudioPcmSourceDescriptor>()
+
+type PendingSubscriber = {
+  resolve: (value: AudioPcmSourceDescriptor) => void
+  reject: (reason?: Error) => void
+  signal?: AbortSignal
+  onAbort: () => void
+}
+
+type PendingDescriptorResolution = {
+  controller: AbortController
+  promise: Promise<AudioPcmSourceDescriptor>
+  subscribers: Set<PendingSubscriber>
+}
+
+const pendingDescriptorResolutions = new Map<string, PendingDescriptorResolution>()
+
 const canonicalContentHash = (value: string | undefined) => (
   value !== undefined && /^[0-9a-f]{64}$/u.test(value)
 )
@@ -92,6 +110,25 @@ const deriveCloudSampleUrl = (
   return `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(clip.sourceAssetKey)}`
 }
 
+const descriptorCacheKey = (clip: RuntimeClip, projectId: string | undefined) => [
+  projectId ?? '',
+  clip.sourceAssetKey ?? '',
+  clip.sampleUrl ?? '',
+  clip.sourceDurationSec ?? '',
+  clip.sourceSampleRate ?? '',
+  clip.sourceChannelCount ?? '',
+].join('|')
+
+const rememberDescriptor = (key: string, descriptor: AudioPcmSourceDescriptor) => {
+  descriptorCache.delete(key)
+  descriptorCache.set(key, descriptor)
+  while (descriptorCache.size > MAX_DESCRIPTOR_CACHE_ENTRIES) {
+    const oldest = descriptorCache.keys().next().value
+    if (oldest === undefined) break
+    descriptorCache.delete(oldest)
+  }
+}
+
 export const createAudioPcmSourceResolver = (input: {
   projectId?: () => string | undefined
   readLocalAsset?: typeof readLocalAssetBytes
@@ -99,11 +136,12 @@ export const createAudioPcmSourceResolver = (input: {
 } = {}): AudioPcmSourceResolver => {
   const readLocalAsset = input.readLocalAsset ?? readLocalAssetBytes
   const resolveUrl = input.resolveUrl ?? resolveSamplePlaybackUrlForRuntime
-  return async (clip, signal) => {
-    signal?.throwIfAborted()
-    const eager = descriptorFromBuffer(clip)
-    if (eager) return eager
-    const projectId = input.projectId?.()
+  const abortReason = (signal?: AbortSignal) => (
+    signal?.reason instanceof Error
+      ? signal.reason
+      : new DOMException('The operation was aborted.', 'AbortError')
+  )
+  const resolveDescriptor = async (clip: RuntimeClip, projectId: string | undefined, signal?: AbortSignal) => {
     const localId = clip.sourceAssetKey && isLocalProjectAssetKey(clip.sourceAssetKey)
       ? clip.sourceAssetKey
       : undefined
@@ -137,7 +175,7 @@ export const createAudioPcmSourceResolver = (input: {
           ? `${clip.sourceAssetKey}:${actualHash}`
           : canonicalContentHash(claimedHash)
             ? `${clip.sourceAssetKey}:${claimedHash}`
-          : `${clip.sourceAssetKey}:session:${crypto.randomUUID()}`,
+            : `${clip.sourceAssetKey}:session:${crypto.randomUUID()}`,
         contentHash: verified ? actualHash : undefined,
         contentHashVerified: verified,
         persistable: verified,
@@ -161,4 +199,113 @@ export const createAudioPcmSourceResolver = (input: {
       source: url,
     })
   }
+
+  const removeSubscriber = (entry: PendingDescriptorResolution, subscriber: PendingSubscriber) => {
+    subscriber.signal?.removeEventListener('abort', subscriber.onAbort)
+    entry.subscribers.delete(subscriber)
+  }
+
+  const settlePending = (
+    entry: PendingDescriptorResolution,
+    result: AudioPcmSourceDescriptor | undefined,
+    error?: Error,
+  ) => {
+    for (const subscriber of Array.from(entry.subscribers)) {
+      removeSubscriber(entry, subscriber)
+      if (error !== undefined) subscriber.reject(error)
+      else if (subscriber.signal?.aborted) subscriber.reject(abortReason(subscriber.signal))
+      else if (result) subscriber.resolve(result)
+    }
+  }
+
+  const subscribePending = (
+    key: string,
+    entry: PendingDescriptorResolution,
+    signal?: AbortSignal,
+  ) => new Promise<AudioPcmSourceDescriptor>((resolve, reject) => {
+    const subscriber: PendingSubscriber = {
+      resolve,
+      reject,
+      signal,
+      onAbort: () => {
+        if (!entry.subscribers.has(subscriber)) return
+        removeSubscriber(entry, subscriber)
+        reject(abortReason(signal))
+        if (entry.subscribers.size === 0) {
+          entry.controller.abort(abortReason(signal))
+          if (pendingDescriptorResolutions.get(key) === entry) {
+            pendingDescriptorResolutions.delete(key)
+          }
+        }
+      },
+    }
+    entry.subscribers.add(subscriber)
+    signal?.addEventListener('abort', subscriber.onAbort, { once: true })
+    if (signal?.aborted) subscriber.onAbort()
+  })
+
+  return async (clip, signal) => {
+    signal?.throwIfAborted()
+    const eager = descriptorFromBuffer(clip)
+    if (eager) return eager
+    const projectId = input.projectId?.()
+    const localId = clip.sourceAssetKey && isLocalProjectAssetKey(clip.sourceAssetKey)
+      ? clip.sourceAssetKey
+      : undefined
+    const cacheKey = descriptorCacheKey(clip, projectId)
+    const cacheable = localId === undefined
+    if (cacheable) {
+      const cached = descriptorCache.get(cacheKey)
+      if (cached) return cached
+      const pending = pendingDescriptorResolutions.get(cacheKey)
+      if (pending) return subscribePending(cacheKey, pending, signal)
+    }
+    if (!cacheable) return resolveDescriptor(clip, projectId, signal)
+
+    const controller = new AbortController()
+    const entry = {
+      controller,
+      promise: resolveDescriptor(clip, projectId, controller.signal),
+      subscribers: new Set<PendingSubscriber>(),
+    }
+    pendingDescriptorResolutions.set(cacheKey, entry)
+    void entry.promise.then((resolved) => {
+      if (pendingDescriptorResolutions.get(cacheKey) === entry && !controller.signal.aborted) {
+        rememberDescriptor(cacheKey, resolved)
+      }
+      settlePending(entry, resolved)
+    }).catch((error) => {
+      settlePending(
+        entry,
+        undefined,
+        error instanceof Error ? error : new Error(String(error)),
+      )
+    }).finally(() => {
+      if (pendingDescriptorResolutions.get(cacheKey) === entry) {
+        pendingDescriptorResolutions.delete(cacheKey)
+      }
+    })
+    return subscribePending(cacheKey, entry, signal)
+  }
+}
+
+export function clearAudioPcmSourceResolverCache() {
+  descriptorCache.clear()
+  for (const entry of pendingDescriptorResolutions.values()) {
+    entry.controller.abort()
+    settleClearedPending(entry)
+  }
+  pendingDescriptorResolutions.clear()
+}
+
+const settleClearedPending = (entry: PendingDescriptorResolution) => {
+  for (const subscriber of Array.from(entry.subscribers)) {
+    subscriber.signal?.removeEventListener('abort', subscriber.onAbort)
+    entry.subscribers.delete(subscriber)
+    subscriber.reject(new DOMException('The operation was aborted.', 'AbortError'))
+  }
+}
+
+export const audioPcmSourceResolverCacheLimits = {
+  descriptorEntries: MAX_DESCRIPTOR_CACHE_ENTRIES,
 }

@@ -9,6 +9,9 @@ type TimelineRulerProps = {
   gridEnabled: boolean
   pixelsPerSecond: number
   visibleRange: { startSec: number; endSec: number }
+  viewportWidthPx: number
+  timeToX: (timeSec: number) => number
+  xToTime: (x: number) => number
   onPointerDown: (e: PointerEvent) => void
   loopEnabled?: boolean
   loopStartSec?: number
@@ -23,14 +26,19 @@ type Marker = {
 
 const isMarker = (marker: Marker | null): marker is Marker => marker !== null
 const filterMarkers = (markers: Array<Marker | null>): Marker[] => markers.filter(isMarker)
+const formatTimeInterval = (seconds: number) => {
+  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)}µs`
+  if (seconds < 1) return `${Math.round(seconds * 1_000)}ms`
+  return `${seconds}s`
+}
 
 const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled))
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
-  const rulerWidthPx = () => Math.max(0, props.durationSec * props.pixelsPerSecond)
-  const loopStartPx = () => Math.max(0, (props.loopStartSec ?? 0) * props.pixelsPerSecond)
-  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), (props.loopEndSec ?? 0) * props.pixelsPerSecond))
+  const rulerWidthPx = () => Math.max(0, props.viewportWidthPx)
+  const loopStartPx = () => Math.max(0, props.timeToX(props.loopStartSec ?? 0))
+  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), props.timeToX(props.loopEndSec ?? 0)))
   const loopWidthPx = () => Math.max(0, loopEndPx() - loopStartPx())
   const showLoop = () => props.loopEnabled && loopWidthPx() > 1
 
@@ -63,7 +71,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const rect = rootEl?.getBoundingClientRect()
     if (!rect) return 0
     const x = clientX - rect.left
-    return Math.max(0, x / props.pixelsPerSecond)
+    return props.xToTime(x)
   }
 
   const onPointerMove = (e: PointerEvent) => {
@@ -123,7 +131,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const sec = clientXToSecLocal(e.clientX)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
-    const xPx = (sec * props.pixelsPerSecond)
+    const xPx = props.timeToX(sec)
     const near = 6 // px threshold for grabbing edges
     const hasLoop = props.loopEnabled && (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0) > 0.05
     if (hasLoop && Math.abs(xPx - startPx) <= near) {
@@ -149,7 +157,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const inTopHalf = (e.clientY - rect.top) <= (RULER_HEIGHT / 2)
     if (!inTopHalf || !props.loopEnabled) { rootEl.style.cursor = '' ; return }
     const sec = clientXToSecLocal(e.clientX)
-    const xPx = sec * props.pixelsPerSecond
+    const xPx = props.timeToX(sec)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
     const near = 6
@@ -210,11 +218,11 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
       const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
       const rulerWidth = rulerWidthPx()
-      const pixelsPerSecond = props.pixelsPerSecond
+      const timeToX = props.timeToX
       const bpm = props.bpm
       return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
         const idx = first + index
-        const positionPx = idx * step * pixelsPerSecond
+        const positionPx = timeToX(idx * step)
         if (positionPx > rulerWidth) return null
         return { positionPx, label: `${musicalBarLabelAtTime(idx * step, bpm)}` }
       }))
@@ -224,13 +232,13 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
-    const pixelsPerSecond = props.pixelsPerSecond
+    const timeToX = props.timeToX
     return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
       const idx = first + index
-      const positionPx = idx * step * pixelsPerSecond
+      const positionPx = timeToX(idx * step)
       if (positionPx > rulerWidth) return null
       const seconds = idx * step
-      return { positionPx, label: `${seconds}s` }
+      return { positionPx, label: formatTimeInterval(seconds) }
     }))
   })
 
@@ -244,10 +252,10 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / stepSec) - 1)
       const last = Math.min(Math.ceil(props.durationSec / stepSec), Math.ceil(props.visibleRange.endSec / stepSec) + 1)
       const rulerWidth = rulerWidthPx()
-      const pixelsPerSecond = props.pixelsPerSecond
+      const timeToX = props.timeToX
       return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
         const idx = first + index
-        const positionPx = idx * stepSec * pixelsPerSecond
+        const positionPx = timeToX(idx * stepSec)
         if (positionPx > rulerWidth) return null
         if (majorLookup.has(Math.round(positionPx))) return null
         return { positionPx }
@@ -258,10 +266,10 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
     const rulerWidth = rulerWidthPx()
-    const pixelsPerSecond = props.pixelsPerSecond
+    const timeToX = props.timeToX
     return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
       const idx = first + index
-      const positionPx = idx * step * pixelsPerSecond
+      const positionPx = timeToX(idx * step)
       if (positionPx > rulerWidth) return null
       if (majorLookup.has(Math.round(positionPx))) return null
       return { positionPx }
@@ -272,7 +280,13 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     <div
       data-timeline-ruler="1"
       class="sticky z-30 border-b border-border bg-timeline-surface"
-      style={{ top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`, width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
+      style={{
+        top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`,
+        width: `${rulerWidthPx()}px`,
+        height: `${RULER_HEIGHT}px`,
+        'background-position': `${-props.visibleRange.startSec * props.pixelsPerSecond}px 0px`,
+        ...backgroundStyle(),
+      }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}
       onPointerMove={onLocalPointerMove}

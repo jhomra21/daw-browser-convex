@@ -172,7 +172,7 @@ export const createAudioPcmSourceResolver = (input: {
       return createAudioPcmSourceDescriptor({
         identity: verified
           ? `${clip.sourceAssetKey}:${actualHash}`
-          : `${clip.sourceAssetKey}:session`,
+          : `local:${projectId}:${clip.sourceAssetKey}:session`,
         contentHash: verified ? actualHash : undefined,
         contentHashVerified: verified,
         persistable: verified,

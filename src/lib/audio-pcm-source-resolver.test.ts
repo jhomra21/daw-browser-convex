@@ -159,7 +159,7 @@ test('resolves a local asset from its local File without deriving a cloud URL', 
   const result = await resolver(clip({ sourceAssetKey: 'asset:local' }))
 
   expect(calls).toEqual([])
-  expect(result.identity).toBe('asset:local:session')
+  expect(result.identity).toBe(`local:${project.id}:asset:local:session`)
   expect(result.persistable).toBe(false)
 })
 
@@ -195,8 +195,46 @@ test('deduplicates repeated local descriptor resolution with a stable session id
 
   expect(reads).toBe(1)
   expect(second).toBe(first)
-  expect(second.identity).toBe('asset:stable-local:session')
+  expect(second.identity).toBe(`local:${project.id}:asset:stable-local:session`)
   expect(second.persistable).toBe(false)
+})
+
+test('isolates unverified local identities between projects with equal asset keys', async () => {
+  const firstProject = await createLocalProject(`First identity project ${crypto.randomUUID()}`)
+  const secondProject = await createLocalProject(`Second identity project ${crypto.randomUUID()}`)
+  for (const projectId of [firstProject.id, secondProject.id]) {
+    const db = await openLocalProjectDb(projectId)
+    await db.put('assets', {
+      id: 'asset:shared-local',
+      name: 'sample.wav',
+      mimeType: 'audio/wav',
+      sizeBytes: wave().byteLength,
+      storagePath: 'sample.wav',
+      durationSec: 5 / 48_000,
+      sampleRate: 48_000,
+      channelCount: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }
+  let projectId = firstProject.id
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => projectId,
+    readLocalAsset: async () => ({
+      status: 'ready',
+      file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+    }),
+  })
+
+  const first = await resolver(clip({ sourceAssetKey: 'asset:shared-local' }))
+  projectId = secondProject.id
+  const second = await resolver(clip({ sourceAssetKey: 'asset:shared-local' }))
+
+  expect(first.persistable).toBe(false)
+  expect(second.persistable).toBe(false)
+  expect(first.identity).toBe(`local:${firstProject.id}:asset:shared-local:session`)
+  expect(second.identity).toBe(`local:${secondProject.id}:asset:shared-local:session`)
+  expect(first.identity).not.toBe(second.identity)
 })
 
 test('admits a local content hash only after verifying the resolved File bytes', async () => {

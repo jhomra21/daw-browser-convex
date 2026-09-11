@@ -122,3 +122,73 @@
 - Actual Safari 26.3 is installed. The `AllowRemoteAutomation` preference is absent, so WebDriver automation is not proven enabled and no simulated Safari result is claimed.
 - Fresh browser and packaged-Electron automation could create clean local projects and confirmed the 200,336 px bounded runway. Automated bundled-audio drag/import then stopped responding before a representative playback fixture or valid telemetry campaign could complete. This is unresolved acceptance evidence, not a readiness pass.
 - Browser playback stress, four LOD screenshots, objective destination PCM telemetry, actual-Safari bounce/recenter, and packaged Electron native playback stress remain required. The branch is not declared ready.
+
+## Recursion fix and runtime acceptance
+
+- Recursion-fix source head: `04bd307caac9f71aaa8ac9766ebac378abc963f4`.
+- `useClipWaveformViewModel` no longer subscribes its waveform-loading effect to the
+  `segments` value that the same effect writes. Browser-condition regression tests
+  cover initial rendering and repeated zoom updates.
+- Exact-head static validation passed: focused browser-condition tests, typecheck,
+  lint with zero warnings, anti-slop, production build, `git diff --check`, and an
+  independent review. The full suite passed 2,905 tests with one intentional
+  Electron-only skip and zero failures.
+- Cloudflare build `42ccfc11-4516-415a-9dab-d4aa54093990` succeeded. Version-only
+  preview `5528f401-ac04-436f-981d-58b874794518` was used without routing production
+  traffic.
+- Factory in-app browser acceptance used eight tracks, one six-minute WAV, and
+  sixteen short WAV clips. Playback advanced beyond 141 seconds through twelve
+  extreme zoom cycles with no captured JavaScript errors.
+- Browser runtime measurements after settlement:
+  - rAF median approximately 8.3 ms, p95 approximately 8.9 ms, and p99
+    approximately 9.3 ms.
+  - Five observed long tasks at or above 100 ms; telemetry maximum approximately
+    166 ms.
+  - Heap started near 50.6 MiB, peaked near 295.8 MiB, and settled near
+    139–151 MiB while playback continued.
+  - Physical runway remained 200,336 px. Maximum observed canvas backing area was
+    163,904 pixels.
+- Browser screenshot evidence is stored in
+  `acceptance-reports/deep-zoom-04bd307/`. The cached-peaks and PCM-envelope
+  transitions are visually distinct. The raw-PCM and sample-points captures are
+  visually indistinguishable, so this tracker does not claim four independently
+  proven visual LOD states.
+- The exact-source arm64 Electron package was rebuilt with the existing local
+  Convex build configuration and accepted VST3 SDK. The first package attempt
+  omitted `VITE_CONVEX_URL`, causing a startup `ZodError`; that artifact was
+  discarded and the configured rebuild mounted correctly at `daw://app/`.
+- Packaged Electron acceptance created a fresh local project and imported a
+  six-minute WAV plus a short WAV through the public desktop adapter. The native
+  audio-host process launched, transport advanced from 360 seconds to beyond
+  432 seconds during twelve deep-zoom cycles, no JavaScript error was captured,
+  the physical runway stayed at 200,336 px, and renderer heap was approximately
+  85 MiB after stress. Renderer rAF median was approximately 8.3 ms, p95 9.3 ms,
+  and p99 9.4 ms; the single 15.8-second first-sample gap includes pre-observation
+  attachment time and is not classified as an in-campaign frame interval.
+- Packaged process RSS during continuing playback was approximately 183 MiB for
+  Electron main, 180 MiB for the renderer, and 14 MiB for the native host.
+- The public diagnostic snapshot continued to report the audio device as
+  `uninitialized` with no sample rate even while native transport and the
+  playhead advanced. Objective device/output PCM evidence is therefore not
+  proven.
+- Actual Safari 26.3 remains installed but Remote Automation is not enabled. Per
+  the selected acceptance path, no Chromium result is labeled as Safari.
+- Remaining readiness blockers are objective native output/device initialization,
+  independently proven raw-PCM versus sample-point visual evidence, and actual
+  Safari bounce/recenter acceptance. The branch remains not ready and PR #54
+  must remain open and unmerged.
+
+## Final security follow-up
+
+- This security follow-up is the final branch commit recorded by Git history.
+- The branch security scan found one cross-project cache-isolation issue:
+  unverified local descriptor identities included only the local asset key.
+- Unverified local identities now include the required project ID, while verified
+  Stretch content-hash identities remain unchanged. Equal local asset keys in
+  different projects are covered by a focused regression and no longer produce
+  equal scheduler identities.
+- The resolver and scheduler focused validation passed 29 tests, application
+  typecheck passed, changed-file lint reported zero warnings, and
+  `git diff --check` passed.
+- The follow-up STRIDE scan analyzed 46 changed production files and reported no
+  remaining vulnerability with confidence at or above 0.8.

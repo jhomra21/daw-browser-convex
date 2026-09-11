@@ -149,10 +149,10 @@
   - Physical runway remained 200,336 px. Maximum observed canvas backing area was
     163,904 pixels.
 - Browser screenshot evidence is stored in
-  `acceptance-reports/deep-zoom-04bd307/`. The cached-peaks and PCM-envelope
-  transitions are visually distinct. The raw-PCM and sample-points captures are
-  visually indistinguishable, so this tracker does not claim four independently
-  proven visual LOD states.
+  `acceptance-reports/deep-zoom-04bd307/`. The raw-PCM capture was verified with
+  zero canvas point-arc calls and 1,726 line calls. The sample-points capture was
+  verified with 432 point-arc calls and 918 line calls. The two captures are now
+  visually distinct and independently prove the raw-line and point LODs.
 - The exact-source arm64 Electron package was rebuilt with the existing local
   Convex build configuration and accepted VST3 SDK. The first package attempt
   omitted `VITE_CONVEX_URL`, causing a startup `ZodError`; that artifact was
@@ -167,16 +167,26 @@
   attachment time and is not classified as an in-campaign frame interval.
 - Packaged process RSS during continuing playback was approximately 183 MiB for
   Electron main, 180 MiB for the renderer, and 14 MiB for the native host.
-- The public diagnostic snapshot continued to report the audio device as
-  `uninitialized` with no sample rate even while native transport and the
-  playhead advanced. Objective device/output PCM evidence is therefore not
-  proven.
+- Exact-head native diagnostics report artifact verification `verified`, ABI 4,
+  active graph revision 1, one installed asset, advancing callback/render epochs,
+  and zero rejected blocks. A bounded native meter capture reported stereo RMS
+  between approximately 0.122 and 0.126 over sounding content.
+- An isolated ten-cycle Electron zoom reproduction kept the same native-host PID,
+  advanced playback beyond 22 seconds, retained the 200,336 px runway, and ended
+  with 2,153 callbacks and zero rejected blocks. Earlier PID changes were caused
+  by overlapping timed-out automation evaluations and are not reproduced by the
+  bounded campaign.
 - Actual Safari 26.3 remains installed but Remote Automation is not enabled. Per
   the selected acceptance path, no Chromium result is labeled as Safari.
-- Remaining readiness blockers are objective native output/device initialization,
-  independently proven raw-PCM versus sample-point visual evidence, and actual
-  Safari bounce/recenter acceptance. The branch remains not ready and PR #54
-  must remain open and unmerged.
+- Actual Safari bounce/recenter acceptance remains unavailable: Safari 26.3 is
+  installed, the `AllowRemoteAutomation` preference is absent, SafariDriver
+  diagnostics do not complete, no repository-supported WebKit harness exists,
+  and the available desktop-control driver is not installed. No Chromium result
+  is labeled as Safari.
+- Browser and packaged Electron runtime gates are green. Safari remains an
+  explicitly unproven platform limitation, so the branch is not declared fully
+  ready under the original all-platform acceptance contract. PR #54 must remain
+  open and unmerged.
 
 ## Final security follow-up
 

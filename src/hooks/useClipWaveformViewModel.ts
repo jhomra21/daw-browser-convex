@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { batch, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { getCachedWaveformSlice, getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { arrangementWaveformPcmScheduler } from '@daw-browser/waveforms/arrangement-waveform-pcm'
@@ -150,9 +150,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         showPoints: previous?.showPoints ?? false,
       }
     })
-    setSegments([])
-    setPeaks(null)
-    setPcm(null)
     const controller = new AbortController()
     setLoading(true)
     const sourceKey = [
@@ -166,14 +163,12 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     ].join('|')
     const sourcePromise = resolvedSourceKey === sourceKey && resolvedSource
       ? Promise.resolve(resolvedSource)
-      : options.resolveAudioSource()(current.clip, controller.signal).then((source) => {
-        resolvedSourceKey = sourceKey
-        resolvedSource = source
-        return source
-      })
+      : options.resolveAudioSource()(current.clip, controller.signal)
     void sourcePromise
       .then(async (source) => {
         if (currentRequestId !== requestId) return
+        resolvedSourceKey = sourceKey
+        resolvedSource = source
         const sourceIdentity = {
           assetKey,
           identity: source.identity,
@@ -201,6 +196,19 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           pcm: null,
           showPoints: false,
         }))
+        if (preserveResolvedSource) {
+          batch(() => {
+            setSegments(preservedSegments)
+            setPeaks(preservedSegments.length === 1 ? preservedSegments[0]?.peaks ?? null : null)
+            setPcm(preservedSegments.length === 1 ? preservedSegments[0]?.pcm ?? null : null)
+          })
+        } else {
+          batch(() => {
+            setSegments([])
+            setPeaks(null)
+            setPcm(null)
+          })
+        }
         const lods = layoutSegments.map((segment) => selectWaveformLod({
           sampleRate: source.sampleRate,
           sourceStartSec: segment.sourceStartSec,
@@ -221,20 +229,38 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
             : getCachedWaveformSlice(request).catch(() => null)
         }))
         if (currentRequestId !== requestId) return
-        const initialSegments = layoutSegments.map((segment, index) => ({
-          startPx: segment.startPx,
-          endPx: segment.endPx,
-          canvasStartSec: segment.canvasStartSec,
-          canvasEndSec: segment.canvasEndSec,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          peaks: cachedPeaks[index] ?? null,
-          pcm: preservedSegments[index]?.pcm ?? null,
-          showPoints: preservedSegments[index]?.showPoints ?? false,
-        }))
-        setSegments(initialSegments)
-        setPeaks(initialSegments.length === 1 ? initialSegments[0]?.peaks ?? null : null)
-        setPcm(null)
+        const projectSegments = (
+          peakResults: readonly (WaveformPeakChannelSlice | null)[],
+          pcmResults: readonly (WaveformPcmResult | null)[],
+        ) => layoutSegments.map((segment, index) => {
+          const preserved = preservedSegments[index]
+          const peaksResult = peakResults[index]
+          const pcmResult = pcmResults[index]
+          const keepPreserved = peaksResult === null
+            && pcmResult === null
+            && (preserved?.peaks !== null || preserved?.pcm !== null)
+          return {
+            ...(keepPreserved && preserved ? preserved : {
+              startPx: segment.startPx,
+              endPx: segment.endPx,
+              canvasStartSec: segment.canvasStartSec,
+              canvasEndSec: segment.canvasEndSec,
+              sourceStartSec: segment.sourceStartSec,
+              sourceEndSec: segment.sourceEndSec,
+            }),
+            peaks: peaksResult ?? (keepPreserved ? preserved?.peaks ?? null : null),
+            pcm: pcmResult ?? (keepPreserved ? preserved?.pcm ?? null : null),
+            showPoints: pcmResult
+              ? lods[index]?.mode === 'pcm-line' && lods[index].showPoints === true
+              : keepPreserved ? preserved?.showPoints ?? false : false,
+          }
+        })
+        const initialSegments = projectSegments(cachedPeaks, layoutSegments.map(() => null))
+        batch(() => {
+          setSegments(initialSegments)
+          setPeaks(initialSegments.length === 1 ? initialSegments[0]?.peaks ?? null : null)
+          setPcm(initialSegments.length === 1 ? initialSegments[0]?.pcm ?? null : null)
+        })
         const pcmResults = await Promise.all(layoutSegments.map((segment, index) => {
           const lod = lods[index]
           if (!lod
@@ -266,20 +292,12 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           })
         }))
         if (currentRequestId !== requestId) return
-        const readySegments = layoutSegments.map((segment, index) => ({
-          startPx: segment.startPx,
-          endPx: segment.endPx,
-          canvasStartSec: segment.canvasStartSec,
-          canvasEndSec: segment.canvasEndSec,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          peaks: cachedPeaks[index] ?? null,
-          pcm: pcmResults[index] ?? null,
-          showPoints: lods[index]?.mode === 'pcm-line' && lods[index].showPoints === true,
-        }))
-        setSegments(readySegments)
-        setPeaks(readySegments.length === 1 ? readySegments[0]?.peaks ?? null : null)
-        setPcm(readySegments.length === 1 ? readySegments[0]?.pcm ?? null : null)
+        const readySegments = projectSegments(cachedPeaks, pcmResults)
+        batch(() => {
+          setSegments(readySegments)
+          setPeaks(readySegments.length === 1 ? readySegments[0]?.peaks ?? null : null)
+          setPcm(readySegments.length === 1 ? readySegments[0]?.pcm ?? null : null)
+        })
         setLoading(false)
       })
       .catch(() => {

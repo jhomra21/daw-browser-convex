@@ -236,4 +236,30 @@ describe('ensurePeakAsset', () => {
     })
     expect(slice?.channels).toHaveLength(1)
   })
+
+  test('reloads a persisted six-minute overview after clearing memory caches', async () => {
+    const assetKey = `overview:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(408)
+    const source = createPersistableSource(buffer)
+    const initial = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 408,
+      bins: 960,
+    })
+    expect(initial?.columns).toBe(960)
+
+    clearWaveformAssetCache()
+
+    const reopened = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 408,
+      bins: 960,
+    })
+    expect(reopened?.columns).toBe(960)
+    expect(reopened?.channels).toHaveLength(1)
+  })
 })

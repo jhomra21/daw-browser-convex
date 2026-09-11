@@ -1,9 +1,9 @@
 {
-  "scan_id": "scan-2026-09-11-zoom",
-  "scan_date": "2026-09-11T19:48:30Z",
-  "scan_type": "range",
-  "commit_range": "origin/master...HEAD",
-  "pr_number": null,
+  "scan_id": "scan-2026-09-11-waveform-preservation",
+  "scan_date": "2026-09-11T21:57:59Z",
+  "scan_type": "working",
+  "commit_range": "0c010c6166fcddeb921fd387bd6a1e3ce089e0e2+working-tree",
+  "pr_number": 54,
   "threat_model_version": "1.0.0",
   "findings": [],
   "summary": {
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 46
+    "files_analyzed": 3
   }
 }

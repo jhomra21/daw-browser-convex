@@ -202,3 +202,15 @@
   `git diff --check` passed.
 - The follow-up STRIDE scan analyzed 46 changed production files and reported no
   remaining vulnerability with confidence at or above 0.8.
+
+## Waveform fallback correction (`8ee079c`)
+
+- Corrected two distinct causes behind the long-audio hatch report. Same-source pan/zoom now preserves only overlapping ready segments while bounded replacement work is pending. Long local waveform generation now requests a byte-verified source identity, allowing peak chunks evicted from the 64-entry memory cache to persist and reload safely.
+- Added behavioral coverage for pending pan/zoom replacements, source changes, rejection, cancellation, atomic replacement, verified/session cache separation, forged hash rejection, long non-persistable cache exhaustion, and persisted six-minute cold reopen.
+- Final static gates passed: focused regressions 23/23, package/root/API typechecks, lint with zero warnings, anti-slop, production build, portable Wasm validation, Workers dry-run, desktop check/package, security scan with zero findings, and `git diff --check`.
+- Full suite reached 2,908 passed, one intentional Electron-only skip, and one unrelated five-second timeout in the 129th protected-recovery fixture. Its complete file passed immediately afterward, 14/14, with the timed fixture completing in 3.993 seconds.
+- Exact-head Cloudflare build `d8d91a66-1a7a-43f9-87e9-637e6dc939dd` succeeded and uploaded version `9e0207b2-1631-4251-8072-8adad386bb08` without routing production traffic.
+- Exact-head arm64 Electron packaging succeeded with `/Users/juan/Documents/vst3sdk-3.8.0`.
+- Packaged Electron fresh import produced one persisted peak asset and 540 peak chunks. A full app restart restored the clip from those persisted peaks. Forced canvas redraw recorded 988 waveform strokes, confirming actual waveform geometry rather than the diagonal fallback. Playback advanced to 1.365 seconds without renderer errors.
+- Evidence: `acceptance-reports/deep-zoom-8ee079c/electron-waveform-confirmed.png` and `acceptance-reports/deep-zoom-8ee079c/electron-true-cold-reopen.png`.
+- The exact-head browser preview loaded and accepted a local six-minute import, but desktop-sized visual/zoom stress could not be completed in the available isolated browser session because it remained constrained to a narrow viewport. Safari remains UNPROVEN. These browser-specific gaps are reported separately and are not represented as passes.

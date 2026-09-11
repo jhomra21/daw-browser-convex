@@ -32,8 +32,16 @@ const canonicalContentHash = (value: string | undefined) => (
 )
 
 export type AudioPcmSourceResolver = {
-  (clip: RuntimeClip, signal?: AbortSignal): Promise<AudioPcmSourceDescriptor>
+  (
+    clip: RuntimeClip,
+    signal?: AbortSignal,
+    options?: AudioPcmSourceResolveOptions,
+  ): Promise<AudioPcmSourceDescriptor>
   clear?: () => void
+}
+
+export type AudioPcmSourceResolveOptions = {
+  verifyContentHash?: boolean
 }
 
 const persistedMetadata = (
@@ -107,14 +115,18 @@ const deriveCloudSampleUrl = (
   return `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(clip.sourceAssetKey)}`
 }
 
-const descriptorCacheKey = (clip: RuntimeClip, projectId: string | undefined) => [
+const descriptorCacheKey = (
+  clip: RuntimeClip,
+  projectId: string | undefined,
+  verifyContentHash: boolean,
+) => [
   projectId ?? '',
   clip.sourceAssetKey ?? '',
   clip.sampleUrl ?? '',
   clip.sourceDurationSec ?? '',
   clip.sourceSampleRate ?? '',
   clip.sourceChannelCount ?? '',
-  clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
+  verifyContentHash ? 'verified' : 'session',
 ].join('|')
 
 export const createAudioPcmSourceResolver = (input: {
@@ -140,7 +152,12 @@ export const createAudioPcmSourceResolver = (input: {
       ? signal.reason
       : new DOMException('The operation was aborted.', 'AbortError')
   )
-  const resolveDescriptor = async (clip: RuntimeClip, projectId: string | undefined, signal?: AbortSignal) => {
+  const resolveDescriptor = async (
+    clip: RuntimeClip,
+    projectId: string | undefined,
+    signal: AbortSignal | undefined,
+    verifyContentHash: boolean,
+  ) => {
     const localId = clip.sourceAssetKey && isLocalProjectAssetKey(clip.sourceAssetKey)
       ? clip.sourceAssetKey
       : undefined
@@ -163,12 +180,14 @@ export const createAudioPcmSourceResolver = (input: {
       const encoded = await inspectAudioSourceMetadata(result.file, { signal })
       assertEncodedMetadataMatchesPersisted(metadata, encoded, localId)
       const claimedHash = row.contentHash
-      const requiresVerifiedIdentity = clip.audioWarp?.enabled === true
-        && clip.audioWarp.mode === 'stretch'
-      const actualHash = requiresVerifiedIdentity && canonicalContentHash(claimedHash)
+      const requiresVerifiedIdentity = verifyContentHash
+        || (clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
+      const actualHash = requiresVerifiedIdentity
         ? await sha256File(result.file, signal)
         : undefined
-      const verified = actualHash !== undefined && actualHash === claimedHash
+      const verified = actualHash !== undefined
+        && canonicalContentHash(claimedHash)
+        && actualHash === claimedHash
       return createAudioPcmSourceDescriptor({
         identity: verified
           ? `${clip.sourceAssetKey}:${actualHash}`
@@ -241,12 +260,14 @@ export const createAudioPcmSourceResolver = (input: {
     if (signal?.aborted) subscriber.onAbort()
   })
 
-  const resolve = async (clip: RuntimeClip, signal?: AbortSignal) => {
+  const resolve: AudioPcmSourceResolver = async (clip, signal, options) => {
+    const verifyContentHash = options?.verifyContentHash === true
+      || (clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
     signal?.throwIfAborted()
     const eager = descriptorFromBuffer(clip)
     if (eager) return eager
     const projectId = input.projectId?.()
-    const cacheKey = descriptorCacheKey(clip, projectId)
+    const cacheKey = descriptorCacheKey(clip, projectId, verifyContentHash)
     const cached = descriptorCache.get(cacheKey)
     if (cached) return cached
     const pending = pendingDescriptorResolutions.get(cacheKey)
@@ -255,7 +276,7 @@ export const createAudioPcmSourceResolver = (input: {
     const controller = new AbortController()
     const entry = {
       controller,
-      promise: resolveDescriptor(clip, projectId, controller.signal),
+      promise: resolveDescriptor(clip, projectId, controller.signal, verifyContentHash),
       subscribers: new Set<PendingSubscriber>(),
     }
     pendingDescriptorResolutions.set(cacheKey, entry)

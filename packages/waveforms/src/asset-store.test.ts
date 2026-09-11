@@ -262,4 +262,48 @@ describe('ensurePeakAsset', () => {
     expect(reopened?.columns).toBe(960)
     expect(reopened?.channels).toHaveLength(1)
   })
+
+  test('requires persistent chunks for a long overview to survive memory eviction', async () => {
+    const assetKey = `long-session:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(408)
+    const sessionSource = createAudioPcmSourceDescriptor({
+      identity: 'long-session-source',
+      durationSec: buffer.duration,
+      frameCount: buffer.length,
+      sampleRate: buffer.sampleRate,
+      channelCount: buffer.numberOfChannels,
+      source: buffer,
+    })
+
+    await expect(getWaveformSlice({
+      assetKey,
+      source: sessionSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })).rejects.toThrow('Waveform peak storage is incomplete or malformed.')
+
+    clearWaveformAssetCache()
+
+    const persistableSource = createPersistableSource(buffer)
+    const initial = await getWaveformSlice({
+      assetKey,
+      source: persistableSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })
+    expect(initial?.columns).toBe(960)
+
+    clearWaveformAssetCache()
+
+    const reopened = await getWaveformSlice({
+      assetKey,
+      source: persistableSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })
+    expect(reopened?.columns).toBe(960)
+  })
 })

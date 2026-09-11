@@ -45,7 +45,7 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
       return
     }
     const controller = new AbortController()
-    void options.resolveAudioSource()(current.clip, controller.signal)
+    void options.resolveAudioSource()(current.clip, controller.signal, { verifyContentHash: true })
       .then(async (source) => {
         const layout = getAudioWaveformLayout(
           current.clip,

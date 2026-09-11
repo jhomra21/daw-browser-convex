@@ -393,4 +393,86 @@ describe('useClipWaveformViewModel browser reactivity', () => {
       })
     }))
   })
+
+  test('requests verified source identity for waveform resolution', async () => {
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      let receivedOptions: { verifyContentHash?: boolean } | undefined
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal, options?) => {
+        receivedOptions = options
+        signal?.throwIfAborted()
+        return source
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => clip,
+        cssWidthPx: () => 500,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+      })
+      void (async () => {
+        await waitForReady(waveform)
+        expect(receivedOptions).toEqual({ verifyContentHash: true })
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
+
+  test('exposes non-abort first-load failures but keeps superseded failures quiet', async () => {
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const waveform = useClipWaveformViewModel({
+        clip: () => clip,
+        cssWidthPx: () => 500,
+        projectBpm: () => 120,
+        resolveAudioSource: () => (async () => {
+          throw new Error('decoder failed')
+        }),
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+      })
+      void (async () => {
+        await new Promise<void>((settle) => {
+          createEffect(() => {
+            if (waveform.error()) settle()
+          })
+        })
+        expect(waveform.error()).toBe('Waveform loading failed.')
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [width, setWidth] = createSignal(500)
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        await new Promise<void>((_, rejectPromise) => {
+          signal?.addEventListener('abort', () => rejectPromise(new DOMException('aborted', 'AbortError')), { once: true })
+        })
+        return source
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => clip,
+        cssWidthPx: width,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+      })
+      void (async () => {
+        await flushEffects()
+        setWidth(600)
+        await flushEffects()
+        expect(waveform.error()).toBeUndefined()
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
 })

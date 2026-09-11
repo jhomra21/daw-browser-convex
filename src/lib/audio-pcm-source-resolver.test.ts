@@ -259,12 +259,55 @@ test('admits a local content hash only after verifying the resolved File bytes',
     readLocalAsset: async () => ({ status: 'ready', file }),
   })
 
-  const result = await resolver(clip({ sourceAssetKey: 'asset:verified', stretch: true }))
+  const result = await resolver(
+    clip({ sourceAssetKey: 'asset:verified' }),
+    undefined,
+    { verifyContentHash: true },
+  )
 
   expect(result.contentHashVerified).toBe(true)
   expect(result.persistable).toBe(true)
   expect(result.contentHash).toMatch(/^[0-9a-f]{64}$/u)
   expect(result.identity).toBe(`asset:verified:${result.contentHash}`)
+})
+
+test('keeps ordinary and verified local descriptor cache entries separate', async () => {
+  const project = await createLocalProject(`Resolver cache modes ${crypto.randomUUID()}`)
+  const file = new File([wave()], 'sample.wav', { type: 'audio/wav' })
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'asset:cache-modes',
+    name: file.name,
+    mimeType: file.type,
+    sizeBytes: file.size,
+    storagePath: 'sample.wav',
+    contentHash: await sha256File(file),
+    durationSec: 5 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  let reads = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async () => {
+      reads += 1
+      return { status: 'ready', file }
+    },
+  })
+
+  const ordinary = await resolver(clip({ sourceAssetKey: 'asset:cache-modes' }))
+  const verified = await resolver(
+    clip({ sourceAssetKey: 'asset:cache-modes' }),
+    undefined,
+    { verifyContentHash: true },
+  )
+
+  expect(reads).toBe(2)
+  expect(ordinary.persistable).toBe(false)
+  expect(verified.persistable).toBe(true)
+  expect(ordinary).not.toBe(verified)
 })
 
 test('does not alias different files that carry the same forged canonical hash', async () => {
@@ -296,8 +339,16 @@ test('does not alias different files that carry the same forged canonical hash',
     }),
   })
 
-  const first = await resolver(clip({ sourceAssetKey: 'asset:forged-a' }))
-  const second = await resolver(clip({ sourceAssetKey: 'asset:forged-b' }))
+  const first = await resolver(
+    clip({ sourceAssetKey: 'asset:forged-a' }),
+    undefined,
+    { verifyContentHash: true },
+  )
+  const second = await resolver(
+    clip({ sourceAssetKey: 'asset:forged-b' }),
+    undefined,
+    { verifyContentHash: true },
+  )
 
   expect(first.persistable).toBe(false)
   expect(second.persistable).toBe(false)

@@ -51,6 +51,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   const [pcm, setPcm] = createSignal<WaveformPcmResult | null>(null)
   const [segments, setSegments] = createSignal<ClipWaveformSegment[]>([])
   const [loading, setLoading] = createSignal(false)
+  const [error, setError] = createSignal<string>()
   let requestId = 0
   let lastSourceIdentityKey: string | undefined
   let resolvedSourceKey: string | undefined
@@ -88,6 +89,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
 
     if (current.midi) {
       setLoading(false)
+      setError(undefined)
       setPeaks(null)
       setPcm(null)
       setSegments([])
@@ -95,6 +97,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     }
     if (current.layout.drawCols <= 0 || current.layout.sourceDurationSec <= 0 || !current.assetKey) {
       setLoading(false)
+      setError(undefined)
       setPeaks(null)
       setPcm(null)
       setSegments([])
@@ -152,6 +155,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     })
     const controller = new AbortController()
     setLoading(true)
+    setError(undefined)
     const sourceKey = [
       current.clip.id,
       current.clip.sourceAssetKey ?? '',
@@ -159,11 +163,11 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       current.clip.sourceDurationSec ?? '',
       current.clip.sourceSampleRate ?? '',
       current.clip.sourceChannelCount ?? '',
-      current.clip.audioWarp?.enabled === true && current.clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
+      'verified',
     ].join('|')
     const sourcePromise = resolvedSourceKey === sourceKey && resolvedSource
       ? Promise.resolve(resolvedSource)
-      : options.resolveAudioSource()(current.clip, controller.signal)
+      : options.resolveAudioSource()(current.clip, controller.signal, { verifyContentHash: true })
     void sourcePromise
       .then(async (source) => {
         if (currentRequestId !== requestId) return
@@ -300,9 +304,13 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         })
         setLoading(false)
       })
-      .catch(() => {
-        if (currentRequestId !== requestId) return
+      .catch((error) => {
+        const waveformError = error instanceof Error
+          ? error
+          : new Error('Waveform loading failed.')
+        if (currentRequestId !== requestId || controller.signal.aborted || isAbortError(waveformError)) return
         setLoading(false)
+        setError(sanitizeWaveformError(waveformError))
       })
     onCleanup(() => controller.abort())
   })
@@ -348,5 +356,16 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     segments,
     renderSegments,
     loading,
+    error,
   }
 }
+
+const sanitizeWaveformError = (error: Error) => {
+  const message = error.message
+  if (message.includes('incomplete or malformed')) return 'Waveform peak storage is incomplete or malformed.'
+  if (message.toLowerCase().includes('permission')) return 'Waveform source permission was denied.'
+  if (message.toLowerCase().includes('missing')) return 'Waveform source is unavailable.'
+  return 'Waveform loading failed.'
+}
+
+const isAbortError = (error: Error) => error.name === 'AbortError'

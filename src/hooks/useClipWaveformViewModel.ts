@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { getCachedWaveformSlice, getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { arrangementWaveformPcmScheduler } from '@daw-browser/waveforms/arrangement-waveform-pcm'
@@ -112,7 +112,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         canvasStartSec: current.layout.canvasStartSec ?? current.clip.startSec,
         canvasEndSec: current.layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
       }]
-    const previousSegments = segments()
+    const previousSegments = untrack(segments)
     const currentCanvasStartSec = current.layout.canvasStartSec ?? current.clip.startSec
     const currentCanvasEndSec = current.layout.canvasEndSec
       ?? current.clip.startSec + current.clip.duration

@@ -10,7 +10,10 @@ import type { AutomationTargetDeviceInstance } from '@daw-browser/shared'
 import RecordingPreview, { clipRecordingPreviewToViewport } from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
 import MidiEditorCard from '~/components/midi/MidiEditorCard'
-import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
+import {
+  intersectTimelineRangeWithViewport,
+  projectTimelineTimeToViewport,
+} from '~/lib/timeline-viewport-geometry'
 
 type MarqueeRect = { x: number; y: number; width: number; height: number } | null
 
@@ -124,6 +127,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       pixelsPerSecond: props.timeline.pixelsPerSecond,
     })
   })
+  const playheadProjection = createMemo(() => projectTimelineTimeToViewport({
+    visibleStartSec: props.timeline.visibleStartSec,
+    viewportWidthPx: props.timeline.viewportWidthPx,
+    pixelsPerSecond: props.timeline.pixelsPerSecond,
+    durationSec: props.timeline.durationSec,
+  }, props.timeline.playheadSec))
 
   return (
     <>
@@ -194,7 +203,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           />
         )}
       </Show>
-      <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${(props.timeline.playheadSec - props.timeline.visibleStartSec) * props.timeline.pixelsPerSecond}px` }} />
+      <Show when={playheadProjection() !== null}>
+        <div
+          class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none"
+          style={{ left: `${playheadProjection() ?? 0}px` }}
+        />
+      </Show>
       <Show when={midiClip()}>
         {(clip) => (
           <MidiEditorCard

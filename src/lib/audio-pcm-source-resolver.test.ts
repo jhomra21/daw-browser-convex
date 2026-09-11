@@ -131,8 +131,44 @@ test('resolves a local asset from its local File without deriving a cloud URL', 
   const result = await resolver(clip({ sourceAssetKey: 'asset:local' }))
 
   expect(calls).toEqual([])
-  expect(result.identity).toMatch(/^asset:local:session:[0-9a-f-]{36}$/u)
+  expect(result.identity).toBe('asset:local:session')
   expect(result.persistable).toBe(false)
+})
+
+test('deduplicates repeated local descriptor resolution with a stable session identity', async () => {
+  const project = await createLocalProject(`Stable local resolver ${crypto.randomUUID()}`)
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'asset:stable-local',
+    name: 'sample.wav',
+    mimeType: 'audio/wav',
+    sizeBytes: wave().byteLength,
+    storagePath: 'sample.wav',
+    durationSec: 5 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  let reads = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async () => {
+      reads += 1
+      return {
+        status: 'ready',
+        file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+      }
+    },
+  })
+
+  const first = await resolver(clip({ sourceAssetKey: 'asset:stable-local' }))
+  const second = await resolver(clip({ sourceAssetKey: 'asset:stable-local' }))
+
+  expect(reads).toBe(1)
+  expect(second).toBe(first)
+  expect(second.identity).toBe('asset:stable-local:session')
+  expect(second.persistable).toBe(false)
 })
 
 test('admits a local content hash only after verifying the resolved File bytes', async () => {

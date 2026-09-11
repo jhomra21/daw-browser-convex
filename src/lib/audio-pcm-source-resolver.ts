@@ -117,6 +117,7 @@ const descriptorCacheKey = (clip: RuntimeClip, projectId: string | undefined) =>
   clip.sourceDurationSec ?? '',
   clip.sourceSampleRate ?? '',
   clip.sourceChannelCount ?? '',
+  clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
 ].join('|')
 
 const rememberDescriptor = (key: string, descriptor: AudioPcmSourceDescriptor) => {
@@ -173,9 +174,7 @@ export const createAudioPcmSourceResolver = (input: {
       return createAudioPcmSourceDescriptor({
         identity: verified
           ? `${clip.sourceAssetKey}:${actualHash}`
-          : canonicalContentHash(claimedHash)
-            ? `${clip.sourceAssetKey}:${claimedHash}`
-            : `${clip.sourceAssetKey}:session:${crypto.randomUUID()}`,
+          : `${clip.sourceAssetKey}:session`,
         contentHash: verified ? actualHash : undefined,
         contentHashVerified: verified,
         persistable: verified,
@@ -249,18 +248,11 @@ export const createAudioPcmSourceResolver = (input: {
     const eager = descriptorFromBuffer(clip)
     if (eager) return eager
     const projectId = input.projectId?.()
-    const localId = clip.sourceAssetKey && isLocalProjectAssetKey(clip.sourceAssetKey)
-      ? clip.sourceAssetKey
-      : undefined
     const cacheKey = descriptorCacheKey(clip, projectId)
-    const cacheable = localId === undefined
-    if (cacheable) {
-      const cached = descriptorCache.get(cacheKey)
-      if (cached) return cached
-      const pending = pendingDescriptorResolutions.get(cacheKey)
-      if (pending) return subscribePending(cacheKey, pending, signal)
-    }
-    if (!cacheable) return resolveDescriptor(clip, projectId, signal)
+    const cached = descriptorCache.get(cacheKey)
+    if (cached) return cached
+    const pending = pendingDescriptorResolutions.get(cacheKey)
+    if (pending) return subscribePending(cacheKey, pending, signal)
 
     const controller = new AbortController()
     const entry = {

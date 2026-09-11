@@ -157,6 +157,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       current.clip.sourceDurationSec ?? '',
       current.clip.sourceSampleRate ?? '',
       current.clip.sourceChannelCount ?? '',
+      current.clip.audioWarp?.enabled === true && current.clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
     ].join('|')
     if (lastSourceIdentityKey !== undefined && lastSourceIdentityKey !== clipIdentityKey) {
       setSegments([])
@@ -176,6 +177,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       current.clip.sourceDurationSec ?? '',
       current.clip.sourceSampleRate ?? '',
       current.clip.sourceChannelCount ?? '',
+      current.clip.audioWarp?.enabled === true && current.clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
     ].join('|')
     const sourcePromise = resolvedSourceKey === sourceKey && resolvedSource
       ? Promise.resolve(resolvedSource)

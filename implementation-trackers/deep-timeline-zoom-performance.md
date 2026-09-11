@@ -77,6 +77,14 @@
 - [x] Sample Detail overview captures CSS width and project BPM synchronously inside the reactive effect before asynchronous source work.
 - [ ] Runtime browser acceptance, six-minute canvas measurements, and full-suite fixture-backed acceptance remain pending.
 
+## Runtime regression fix
+
+- [x] Local waveform source descriptors now use subscriber-aware bounded caching for local assets; non-verified files retain an asset-scoped session identity instead of generating a new identity for every resolution, while verified stretch sources retain content-hash identities.
+- [x] Waveform view-model source reuse includes the stretch verification mode, so enabling Stretch cannot reuse a non-verified descriptor.
+- [x] Clip media-cache teardown clears the bounded local descriptor cache so file-backed descriptors do not outlive the active media generation.
+- [x] The arrangement playhead is omitted when it is outside the logical viewport, preventing distant playhead coordinates from expanding the physical timeline surface during deep zoom.
+- [x] Focused resolver, viewport, waveform, and timeline tests pass; browser runtime acceptance remains pending.
+
 ## Exact-commit release evidence
 
 - Feature commit: `9f701ff69cd77955e8e4048100079f05a62db6d8`.

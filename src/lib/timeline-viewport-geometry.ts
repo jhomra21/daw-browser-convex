@@ -104,6 +104,14 @@ export const viewportXToTime = (input: TimelineViewportGeometry, viewportX: numb
   clampedVisibleStartSec(input) + Math.max(0, Number.isFinite(viewportX) ? viewportX : 0) / safePixelsPerSecond(input.pixelsPerSecond)
 )
 
+export const projectTimelineTimeToViewport = (input: TimelineViewportGeometry, timeSec: number) => {
+  const geometry = safeGeometry(input)
+  const startSec = clampedVisibleStartSec(geometry)
+  const endSec = startSec + visibleDurationSec(geometry)
+  if (!Number.isFinite(timeSec) || timeSec < startSec || timeSec > endSec) return null
+  return Math.max(0, Math.min(geometry.viewportWidthPx, (timeSec - startSec) * geometry.pixelsPerSecond))
+}
+
 export const createTimelineViewport = (input: TimelineViewportGeometry): TimelineViewport => {
   const geometry = safeGeometry(input)
   const startSec = clampedVisibleStartSec(geometry)

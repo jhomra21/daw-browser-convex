@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import {
   getTimelineClipViewportSlice,
   intersectTimelineRangeWithViewport,
+  projectTimelineTimeToViewport,
 } from './timeline-viewport-geometry'
 import { clampSampleDetailWaveformViewport } from './sample-detail-waveform-viewport'
 
@@ -79,4 +80,18 @@ test('bounds a collapsed long clip overlay to the viewport', () => {
   })
   expect(projection).toEqual({ leftPx: 0, widthPx: 800 })
   expect(projection?.widthPx).toBeLessThanOrEqual(800)
+})
+
+test('does not project a distant playhead outside the viewport', () => {
+  const geometry = {
+    visibleStartSec: 360,
+    viewportWidthPx: 1_000,
+    pixelsPerSecond: 480_000,
+    durationSec: 600,
+  }
+
+  expect(projectTimelineTimeToViewport(geometry, 359)).toBeNull()
+  expect(projectTimelineTimeToViewport(geometry, 360)).toBe(0)
+  expect(projectTimelineTimeToViewport(geometry, 360 + 1_000 / 480_000)).toBe(1_000)
+  expect(projectTimelineTimeToViewport(geometry, 600)).toBeNull()
 })

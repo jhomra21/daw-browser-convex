@@ -85,6 +85,16 @@
 - [x] The arrangement playhead is omitted when it is outside the logical viewport, preventing distant playhead coordinates from expanding the physical timeline surface during deep zoom.
 - [x] Focused resolver, viewport, waveform, and timeline tests pass; browser runtime acceptance remains pending.
 
+## Final audit hardening
+
+- [x] Arrangement PCM cache and dedupe keys include the canonical asset key, preventing cross-project reuse when source identities and ranges match.
+- [x] Long multi-tile PCM requests submit work incrementally within scheduler capacity instead of saturating their own two-active and 64-queued budget.
+- [x] Partial final source tiles size envelope columns from the clipped frame count, preserving sample placement at end-of-file.
+- [x] Audio source descriptor and pending-resolution caches are resolver-instance scoped; clip media teardown clears only the active resolver.
+- [x] Waveform view models preserve prior PCM only after the newly resolved source identity matches, preventing stale media after source replacement.
+- [x] Automation viewport boundaries retain active hold interpolation, and MIDI notes are culled before deep-slice projection.
+- [x] Focused audit regressions pass, and an independent final review reported no remaining P0/P1/P2 finding.
+
 ## Exact-commit release evidence
 
 - Feature commit: `9f701ff69cd77955e8e4048100079f05a62db6d8`.
@@ -100,3 +110,15 @@
 - The final isolated full suite passed: 2,896 passed, one intentional Electron-only skip, zero failed, 2,897 tests across 364 files, and 372,463 assertions.
 - Desktop TypeScript checks pass. Packaging is blocked in this disposable worktree because no `VST3_SDK_PATH` is configured and no VST3 SDK is vendored.
 - Full audio-project browser stress, four LOD screenshots, Safari bounce behavior, and packaged Electron playback acceptance remain outstanding. This tracker does not claim those runtime checks.
+
+## Latest exact-head evidence
+
+- Final source head: `d9b0400d0cb4643ea359054fee75f2288dfc72e8`.
+- Cloudflare build `be0a27a1-3ee5-490b-a90c-19d61a95dabe` succeeded.
+- Version-only preview: `5d26eb00-b537-4e3c-be50-818435776f88`; no production traffic was routed.
+- Exact-head arm64 Electron packaging succeeded with the accepted SDK at `/Users/juan/Documents/vst3sdk-3.8.0`, including the VST3 scanner, VST3 worker, native audio host, and packaged application.
+- Exact-head static gates pass: focused tests, package/root/API typechecks, lint with zero warnings, anti-slop, production build, portable Wasm validation, and `git diff --check`.
+- Full suite result: 2,903 passed, one intentional Electron-only skip, and one unrelated five-second timeout in the 129th protected-recovery fixture. Its complete file passed immediately afterward with 14 passed and zero failed; the timed test completed in 4.216 seconds.
+- Actual Safari 26.3 is installed. The `AllowRemoteAutomation` preference is absent, so WebDriver automation is not proven enabled and no simulated Safari result is claimed.
+- Fresh browser and packaged-Electron automation could create clean local projects and confirmed the 200,336 px bounded runway. Automated bundled-audio drag/import then stopped responding before a representative playback fixture or valid telemetry campaign could complete. This is unresolved acceptance evidence, not a readiness pass.
+- Browser playback stress, four LOD screenshots, objective destination PCM telemetry, actual-Safari bounce/recenter, and packaged Electron native playback stress remain required. The branch is not declared ready.

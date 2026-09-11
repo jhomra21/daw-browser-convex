@@ -4,7 +4,7 @@
 
 - Exact implementation base: `91188e0be185b60b624c08034f4fa9440de873ad`.
 - Target branch: `feat/deep-timeline-zoom-performance`.
-- Frozen rule: PR #52 and `fix/native-asset-capacity` are frozen; this wave must not touch or merge them, and must not commit or push.
+- Frozen rule: PR #52 and `fix/native-asset-capacity` are frozen; this branch must not modify or merge them.
 - Reference branch heads (read-only through `git show`/`git diff`):
   - `c034f1c4733ac20508e893f05417bbedfcd6177f`
   - `a139c3da011329f1229e6a25d05a0d6272c06da1`
@@ -18,7 +18,10 @@
 - Current viewport behavior derives scroll/time from a duration-sized timeline surface and clamps against `durationSec * pixelsPerSecond`; Wave A adds duration-independent logical geometry and a bounded physical runway/recentering contract but does not migrate UI consumers.
 - Current DOM layout uses duration-scaled surfaces in `src/components/timeline/timeline-workspace.tsx:397,406`, `src/components/timeline/TimelineRuler.tsx:31,275`, and `src/components/timeline/GridOverlay.tsx:48`; clip DOM widths are duration-scaled in `src/components/timeline/ClipComponent.tsx:400`.
 - Current canvas consumers size and draw per component canvas (`src/components/timeline/ClipComponent.tsx:197-201`) and current waveform requests derive draw columns and source windows from the full-duration clip/layout (`src/lib/audio-waveform-layout.ts:87-126`, `src/hooks/useClipWaveformViewModel.ts:75-88`). This is the current DOM/canvas/request limitation surface. Wave A keeps current Arrangement, Sample Detail, and Drum Rack consumers unchanged; migration remains integration work.
-- Runtime baseline measurements are pending. No runtime numbers are invented here.
+- Frozen-source baseline:
+  - `MAX_PIXELS_PER_SECOND` is 800 px/sec.
+  - Timeline, ruler, grid, clips, and waveform canvases derive physical geometry from duration multiplied by pixels/sec.
+  - A six-minute source therefore reaches 288,000 px at the old maximum; a two-hour project reaches 5,760,000 px.
 
 ## Intended resource budgets
 
@@ -73,3 +76,19 @@
 - [x] MIDI bar-line indices are bounded to the visible clip slice and use the same slice origin/duration as notes.
 - [x] Sample Detail overview captures CSS width and project BPM synchronously inside the reactive effect before asynchronous source work.
 - [ ] Runtime browser acceptance, six-minute canvas measurements, and full-suite fixture-backed acceptance remain pending.
+
+## Exact-commit release evidence
+
+- Feature commit: `9f701ff69cd77955e8e4048100079f05a62db6d8`.
+- Cloudflare build `85958d22-2c53-42e0-98fb-26fc051e86e8` succeeded.
+- Version-only preview: `18712a70-9495-441e-a677-325029086139`; no production traffic was routed.
+- Empty-project extreme-zoom smoke test on the exact preview:
+  - Physical scroll runway: 200,336 px.
+  - Visible timeline workspace: 552 px.
+  - Largest DOM width: 200,336 px, independent of project duration.
+  - JavaScript heap after the zoom stress: 41,754,017 bytes.
+- Full static release gates passed: package/root/API typechecks, lint with zero warnings, anti-slop, production build, portable Wasm validation, Workers dry-run, and `git diff --check`.
+- Focused deep-zoom suites passed, including 43 waveform package tests, 133 affected timeline tests, and all final audit detectors.
+- The final isolated full suite passed: 2,896 passed, one intentional Electron-only skip, zero failed, 2,897 tests across 364 files, and 372,463 assertions.
+- Desktop TypeScript checks pass. Packaging is blocked in this disposable worktree because no `VST3_SDK_PATH` is configured and no VST3 SDK is vendored.
+- Full audio-project browser stress, four LOD screenshots, Safari bounce behavior, and packaged Electron playback acceptance remain outstanding. This tracker does not claim those runtime checks.

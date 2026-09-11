@@ -13,8 +13,18 @@ export const windowAutomationPoints = (
     .filter((point) => point.timeSec >= startSec && point.timeSec <= endSec)
     .sort((left, right) => left.timeSec - right.timeSec)
   const boundaryPoints = [
-    { id: 'automation-window-start', timeSec: startSec, value: valueAtAutomationTime(points, startSec, defaultValue), interpolation: 'linear' as const },
-    { id: 'automation-window-end', timeSec: endSec, value: valueAtAutomationTime(points, endSec, defaultValue), interpolation: 'linear' as const },
+    {
+      id: 'automation-window-start',
+      timeSec: startSec,
+      value: valueAtAutomationTime(points, startSec, defaultValue),
+      interpolation: points.findLast((point) => point.timeSec <= startSec)?.interpolation ?? 'linear',
+    },
+    {
+      id: 'automation-window-end',
+      timeSec: endSec,
+      value: valueAtAutomationTime(points, endSec, defaultValue),
+      interpolation: points.findLast((point) => point.timeSec <= endSec)?.interpolation ?? 'linear',
+    },
   ]
   const unique = new Map<number, AutomationPoint>()
   for (const point of [...windowed, ...boundaryPoints]) {

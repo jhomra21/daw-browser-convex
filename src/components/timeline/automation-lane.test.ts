@@ -25,3 +25,15 @@ test("orders and deduplicates automation viewport boundaries", () => {
   expect(points.map((point) => point.timeSec)).toEqual([4, 8])
   expect(new Set(points.map((point) => point.timeSec)).size).toBe(points.length)
 })
+
+test("preserves hold interpolation at a synthetic viewport boundary", () => {
+  const points = windowAutomationPoints([
+    { id: "hold", timeSec: 2, value: 0.2, interpolation: "hold" },
+    { id: "next", timeSec: 8, value: 0.8, interpolation: "linear" },
+  ], 4, 6, 0)
+  expect(points[0]).toMatchObject({
+    timeSec: 4,
+    value: 0.2,
+    interpolation: "hold",
+  })
+})

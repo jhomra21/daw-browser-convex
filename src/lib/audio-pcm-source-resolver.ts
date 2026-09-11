@@ -13,7 +13,6 @@ import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-st
 type RuntimeClip = AudioStretchRuntimeClip
 
 const MAX_DESCRIPTOR_CACHE_ENTRIES = 32
-const descriptorCache = new Map<string, AudioPcmSourceDescriptor>()
 
 type PendingSubscriber = {
   resolve: (value: AudioPcmSourceDescriptor) => void
@@ -28,16 +27,14 @@ type PendingDescriptorResolution = {
   subscribers: Set<PendingSubscriber>
 }
 
-const pendingDescriptorResolutions = new Map<string, PendingDescriptorResolution>()
-
 const canonicalContentHash = (value: string | undefined) => (
   value !== undefined && /^[0-9a-f]{64}$/u.test(value)
 )
 
-export type AudioPcmSourceResolver = (
-  clip: RuntimeClip,
-  signal?: AbortSignal,
-) => Promise<AudioPcmSourceDescriptor>
+export type AudioPcmSourceResolver = {
+  (clip: RuntimeClip, signal?: AbortSignal): Promise<AudioPcmSourceDescriptor>
+  clear?: () => void
+}
 
 const persistedMetadata = (
   clip: RuntimeClip,
@@ -120,21 +117,22 @@ const descriptorCacheKey = (clip: RuntimeClip, projectId: string | undefined) =>
   clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
 ].join('|')
 
-const rememberDescriptor = (key: string, descriptor: AudioPcmSourceDescriptor) => {
-  descriptorCache.delete(key)
-  descriptorCache.set(key, descriptor)
-  while (descriptorCache.size > MAX_DESCRIPTOR_CACHE_ENTRIES) {
-    const oldest = descriptorCache.keys().next().value
-    if (oldest === undefined) break
-    descriptorCache.delete(oldest)
-  }
-}
-
 export const createAudioPcmSourceResolver = (input: {
   projectId?: () => string | undefined
   readLocalAsset?: typeof readLocalAssetBytes
   resolveUrl?: (value: string) => string | null
 } = {}): AudioPcmSourceResolver => {
+  const descriptorCache = new Map<string, AudioPcmSourceDescriptor>()
+  const pendingDescriptorResolutions = new Map<string, PendingDescriptorResolution>()
+  const rememberDescriptor = (key: string, descriptor: AudioPcmSourceDescriptor) => {
+    descriptorCache.delete(key)
+    descriptorCache.set(key, descriptor)
+    while (descriptorCache.size > MAX_DESCRIPTOR_CACHE_ENTRIES) {
+      const oldest = descriptorCache.keys().next().value
+      if (oldest === undefined) break
+      descriptorCache.delete(oldest)
+    }
+  }
   const readLocalAsset = input.readLocalAsset ?? readLocalAssetBytes
   const resolveUrl = input.resolveUrl ?? resolveSamplePlaybackUrlForRuntime
   const abortReason = (signal?: AbortSignal) => (
@@ -243,7 +241,7 @@ export const createAudioPcmSourceResolver = (input: {
     if (signal?.aborted) subscriber.onAbort()
   })
 
-  return async (clip, signal) => {
+  const resolve = async (clip: RuntimeClip, signal?: AbortSignal) => {
     signal?.throwIfAborted()
     const eager = descriptorFromBuffer(clip)
     if (eager) return eager
@@ -279,15 +277,17 @@ export const createAudioPcmSourceResolver = (input: {
     })
     return subscribePending(cacheKey, entry, signal)
   }
-}
 
-export function clearAudioPcmSourceResolverCache() {
-  descriptorCache.clear()
-  for (const entry of pendingDescriptorResolutions.values()) {
-    entry.controller.abort()
-    settleClearedPending(entry)
+  const clear = () => {
+    descriptorCache.clear()
+    for (const entry of pendingDescriptorResolutions.values()) {
+      entry.controller.abort()
+      settleClearedPending(entry)
+    }
+    pendingDescriptorResolutions.clear()
   }
-  pendingDescriptorResolutions.clear()
+
+  return Object.assign(resolve, { clear })
 }
 
 const settleClearedPending = (entry: PendingDescriptorResolution) => {

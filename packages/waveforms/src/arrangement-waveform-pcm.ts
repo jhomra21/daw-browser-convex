@@ -148,6 +148,7 @@ const requestKey = (
   tileStartFrame: number,
   tileEndFrame: number,
 ) => JSON.stringify([
+  request.assetKey,
   request.sourceIdentity,
   request.sampleRate,
   request.channelCount,
@@ -200,7 +201,7 @@ export async function decodeArrangementWaveformPcm(
     ? createPcmEnvelopeAccumulator({
       startFrame,
       endFrame,
-      columns: request.columns,
+      columns: request.exactRange ? request.columns : endFrame - startFrame,
       sampleRate: source.sampleRate,
       channelCount: source.channelCount,
       sourceStartSec: startFrame / source.sampleRate,
@@ -566,7 +567,15 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
   const request = async (input: ArrangementWaveformPcmRequest) => {
     const bounds = requestBounds(input)
     if (!bounds || input.signal?.aborted) return null
-    const results = await Promise.all(bounds.tiles.map((tile) => requestTile(input, tile)))
+    const results: Array<WaveformPcmResult | null> = []
+    const maxOutstanding = maxConcurrent + maxQueued
+    for (let offset = 0; offset < bounds.tiles.length; offset += maxOutstanding) {
+      if (input.signal?.aborted) return null
+      const batch = bounds.tiles.slice(offset, offset + maxOutstanding)
+      const batchResults = await Promise.all(batch.map((tile) => requestTile(input, tile)))
+      results.push(...batchResults)
+      if (batchResults.some((result) => result === null)) return null
+    }
     if (results.some((result) => result === null)) return null
     if (input.exactRange && results.length === 1) {
       const result = results[0]
@@ -577,7 +586,13 @@ export function createArrangementWaveformPcmScheduler(options: SchedulerOptions 
       if (!result) return []
       const tile = bounds.tiles[index]
       if (!tile) return []
-      return [{ result, startFrame: tile.tileStartFrame, endFrame: tile.tileEndFrame }]
+      const startFrame = result.sourceStartSec === undefined
+        ? tile.tileStartFrame
+        : Math.max(tile.tileStartFrame, Math.floor(result.sourceStartSec * input.sampleRate))
+      const endFrame = result.sourceEndSec === undefined
+        ? tile.tileEndFrame
+        : Math.min(tile.tileEndFrame, Math.ceil(result.sourceEndSec * input.sampleRate))
+      return endFrame > startFrame ? [{ result, startFrame, endFrame }] : []
     })
     if (tileResults.length !== bounds.tiles.length) return null
     if (mode === 'pcm-envelope') {

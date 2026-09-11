@@ -22,7 +22,10 @@ import {
 } from "@daw-browser/timeline-core/clip-fades";
 import ClipFadeOverlay from "./ClipFadeOverlay";
 import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
-import { getVisibleMidiBarIndices } from "~/lib/timeline-midi-rendering";
+import {
+  getVisibleMidiBarIndices,
+  getVisibleMidiNoteProjection,
+} from "~/lib/timeline-midi-rendering";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 
 export type ClipContextMenuActions = {
@@ -282,6 +285,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       const color = props.isSelected
         ? clipSelected
         : contentColor;
+      const midiWindowStart = renderStartSec() - props.clip.startSec;
+      const midiWindowDuration = Math.max(1e-6, renderEndSec() - renderStartSec());
+      const midiWindowEnd = midiWindowStart + midiWindowDuration;
       let minP = Infinity;
       let maxP = -Infinity;
       for (const note of midi.notes) {
@@ -298,26 +304,28 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       ctx.fillStyle = color;
       for (const note of midi.notes) {
         const noteBeat = note.beat || 0;
-        const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeat);
-        const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats);
-        if (effectiveLength <= 0) continue;
-        const startBeats = Math.max(0, noteBeat - midiOffsetBeats);
-        const startSec = startBeats * spb;
-        const endSec = Math.max(startSec, startSec + effectiveLength * spb);
-        const windowStart = renderStartSec() - props.clip.startSec;
-        const windowDuration = Math.max(1e-6, renderEndSec() - renderStartSec());
+        const projection = getVisibleMidiNoteProjection({
+          noteBeat,
+          noteLength: note.length || 0,
+          midiOffsetBeats,
+          secondsPerBeat: spb,
+          windowStartSec: midiWindowStart,
+          windowEndSec: midiWindowEnd,
+        });
+        if (!projection) continue;
+        const { startSec, endSec } = projection;
         const left = Math.max(
           0,
           Math.min(
             cssW,
-            Math.floor(((startSec - windowStart) / windowDuration) * cssW),
+            Math.floor(((startSec - midiWindowStart) / midiWindowDuration) * cssW),
           ),
         );
         const right = Math.max(
           left + 1,
           Math.min(
             cssW,
-            Math.floor(((endSec - windowStart) / windowDuration) * cssW),
+            Math.floor(((endSec - midiWindowStart) / midiWindowDuration) * cssW),
           ),
         );
         const frac = 1 - (note.pitch - minP) / range;

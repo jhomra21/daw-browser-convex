@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import { encodePeakByte } from './extract-peaks'
 import {
+  ARRANGEMENT_PCM_MAX_CONCURRENT,
   ARRANGEMENT_PCM_TILE_FRAMES,
   createArrangementWaveformPcmScheduler,
   decodeArrangementWaveformPcm,
@@ -222,6 +223,39 @@ describe('arrangement waveform PCM scheduler', () => {
     expect(overview.channels[0]?.[impulseColumn * 2 + 1]).toBe(255)
   })
 
+  test('clips a partial final envelope tile before projecting its columns', async () => {
+    const frameCount = 100
+    const result = await createArrangementWaveformPcmScheduler().request(request('partial-final', {
+      sourceEndSec: frameCount / 48_000,
+      columns: 2,
+      channelCount: 1,
+      source: async () => ({
+        identity: 'partial-final',
+        durationSec: frameCount / 48_000,
+        frameCount,
+        sampleRate: 48_000,
+        channelCount: 1,
+        readPages: async function* ({ startFrame = 0, endFrame = frameCount } = {}) {
+          yield {
+            startFrame,
+            frameCount: endFrame - startFrame,
+            sampleRate: 48_000,
+            channelCount: 1,
+            planes: [Float32Array.from(
+              { length: endFrame - startFrame },
+              (_, index) => startFrame + index === frameCount - 1 ? 1 : 0,
+            )],
+          }
+        },
+      }),
+    }))
+    expect(result?.mode).toBe('pcm-envelope')
+    if (!result || result.mode !== 'pcm-envelope') throw new Error('Expected PCM envelope')
+    expect(result.columns).toBe(2)
+    expect(result.channels[0]?.[1]).toBe(128)
+    expect(result.channels[0]?.[3]).toBe(255)
+  })
+
   test('uses aligned tiles, dedupes equivalent requests, and preserves stereo envelopes', async () => {
     let calls = 0
     const scheduler = createArrangementWaveformPcmScheduler({
@@ -304,6 +338,61 @@ describe('arrangement waveform PCM scheduler', () => {
     const pending = scheduler.request(request('pending', { signal: activeController.signal }))
     activeController.abort()
     expect(await pending).toBeNull()
+  })
+
+  test('submits large tile requests in bounded batches', async () => {
+    let calls = 0
+    let active = 0
+    let peakActive = 0
+    const scheduler = createArrangementWaveformPcmScheduler({
+      decode: async (input) => {
+        calls += 1
+        active += 1
+        peakActive = Math.max(peakActive, active)
+        await Promise.resolve()
+        active -= 1
+        return {
+          mode: 'pcm-line',
+          firstFrame: input.tileStartFrame,
+          sampleRate: input.sampleRate,
+          sourceStartSec: input.tileStartFrame / input.sampleRate,
+          sourceEndSec: input.tileEndFrame / input.sampleRate,
+          channels: [new Float32Array(input.tileEndFrame - input.tileStartFrame)],
+        }
+      },
+    })
+    const tileCount = 67
+    const result = await scheduler.request(request('many-tiles', {
+      mode: 'pcm-line',
+      sourceEndSec: tileCount * ARRANGEMENT_PCM_TILE_FRAMES / 48_000,
+    }))
+    expect(result?.mode).toBe('pcm-line')
+    expect(calls).toBe(tileCount)
+    expect(peakActive).toBeLessThanOrEqual(ARRANGEMENT_PCM_MAX_CONCURRENT)
+    expect(scheduler.getDiagnostics().peakQueued).toBeLessThanOrEqual(64)
+  })
+
+  test('does not share tiles across asset keys', async () => {
+    let calls = 0
+    const scheduler = createArrangementWaveformPcmScheduler({
+      decode: async (input) => {
+        calls += 1
+        return {
+          mode: 'pcm-envelope',
+          columns: input.columns,
+          channels: [new Uint8Array(input.columns * 2)],
+        }
+      },
+    })
+    await scheduler.request(request('asset-a', {
+      sourceIdentity: 'same-source',
+      source: async () => source('same-source'),
+    }))
+    await scheduler.request(request('asset-b', {
+      sourceIdentity: 'same-source',
+      source: async () => source('same-source'),
+    }))
+    expect(calls).toBe(2)
   })
 
   test('bounds cache by bytes and retries null and failures', async () => {

@@ -18,3 +18,20 @@ export const getVisibleMidiBarIndices = (input: {
   )
   return lastBar >= firstBar ? { firstBar, lastBar } : null
 }
+
+export const getVisibleMidiNoteProjection = (input: {
+  noteBeat: number
+  noteLength: number
+  midiOffsetBeats: number
+  secondsPerBeat: number
+  windowStartSec: number
+  windowEndSec: number
+}) => {
+  const trimmedBeats = Math.max(0, input.midiOffsetBeats - input.noteBeat)
+  const effectiveLength = Math.max(0, input.noteLength - trimmedBeats)
+  if (effectiveLength <= 0) return null
+  const startSec = Math.max(0, input.noteBeat - input.midiOffsetBeats) * input.secondsPerBeat
+  const endSec = startSec + effectiveLength * input.secondsPerBeat
+  if (endSec <= input.windowStartSec || startSec >= input.windowEndSec) return null
+  return { startSec, endSec }
+}

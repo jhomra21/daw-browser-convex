@@ -150,24 +150,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         showPoints: previous?.showPoints ?? false,
       }
     })
-    const clipIdentityKey = [
-      assetKey,
-      current.clip.sourceAssetKey ?? '',
-      current.clip.sampleUrl ?? '',
-      current.clip.sourceDurationSec ?? '',
-      current.clip.sourceSampleRate ?? '',
-      current.clip.sourceChannelCount ?? '',
-      current.clip.audioWarp?.enabled === true && current.clip.audioWarp.mode === 'stretch' ? 'verified' : 'session',
-    ].join('|')
-    if (lastSourceIdentityKey !== undefined && lastSourceIdentityKey !== clipIdentityKey) {
-      setSegments([])
-      setPeaks(null)
-      setPcm(null)
-    } else {
-      setSegments(preserve)
-      setPeaks(preserve.length === 1 ? preserve[0]?.peaks ?? null : null)
-      setPcm(preserve.length === 1 ? preserve[0]?.pcm ?? null : null)
-    }
+    setSegments([])
+    setPeaks(null)
+    setPcm(null)
     const controller = new AbortController()
     setLoading(true)
     const sourceKey = [
@@ -188,6 +173,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       })
     void sourcePromise
       .then(async (source) => {
+        if (currentRequestId !== requestId) return
         const sourceIdentity = {
           assetKey,
           identity: source.identity,
@@ -202,12 +188,19 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           source.sampleRate,
           source.channelCount,
         ].join('|')
-        if (lastSourceIdentityKey !== sourceIdentityKey) {
-          setSegments([])
-          setPeaks(null)
-          setPcm(null)
-        }
+        const preserveResolvedSource = lastSourceIdentityKey === sourceIdentityKey
         lastSourceIdentityKey = sourceIdentityKey
+        const preservedSegments = preserveResolvedSource ? preserve : layoutSegments.map((segment) => ({
+          startPx: segment.startPx,
+          endPx: segment.endPx,
+          canvasStartSec: segment.canvasStartSec,
+          canvasEndSec: segment.canvasEndSec,
+          sourceStartSec: segment.sourceStartSec,
+          sourceEndSec: segment.sourceEndSec,
+          peaks: null,
+          pcm: null,
+          showPoints: false,
+        }))
         const lods = layoutSegments.map((segment) => selectWaveformLod({
           sampleRate: source.sampleRate,
           sourceStartSec: segment.sourceStartSec,
@@ -236,8 +229,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           sourceStartSec: segment.sourceStartSec,
           sourceEndSec: segment.sourceEndSec,
           peaks: cachedPeaks[index] ?? null,
-          pcm: preserve[index]?.pcm ?? null,
-          showPoints: preserve[index]?.showPoints ?? false,
+          pcm: preservedSegments[index]?.pcm ?? null,
+          showPoints: preservedSegments[index]?.showPoints ?? false,
         }))
         setSegments(initialSegments)
         setPeaks(initialSegments.length === 1 ? initialSegments[0]?.peaks ?? null : null)
@@ -281,7 +274,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           sourceStartSec: segment.sourceStartSec,
           sourceEndSec: segment.sourceEndSec,
           peaks: cachedPeaks[index] ?? null,
-          pcm: pcmResults[index] ?? preserve[index]?.pcm ?? null,
+          pcm: pcmResults[index] ?? null,
           showPoints: lods[index]?.mode === 'pcm-line' && lods[index].showPoints === true,
         }))
         setSegments(readySegments)

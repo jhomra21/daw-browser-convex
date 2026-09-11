@@ -10,7 +10,6 @@ import {
 } from '~/lib/renderer-api-url'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
 import {
-  clearAudioPcmSourceResolverCache,
   createAudioPcmSourceResolver,
 } from '~/lib/audio-pcm-source-resolver'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
@@ -363,7 +362,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     audioBufferCache.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
-    clearAudioPcmSourceResolverCache()
+    resolveAudioSource.clear?.()
     audioEngine.invalidateAudioSourceCache()
   }
 

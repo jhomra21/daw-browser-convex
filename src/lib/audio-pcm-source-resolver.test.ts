@@ -99,6 +99,34 @@ test('deduplicates stable cloud source descriptor resolution', async () => {
   expect(resolves).toBe(1)
 })
 
+test('isolates descriptor caches between resolver instances', async () => {
+  let firstResolves = 0
+  let secondResolves = 0
+  const first = createAudioPcmSourceResolver({
+    projectId: () => 'project/isolation',
+    resolveUrl: () => {
+      firstResolves += 1
+      return dataUrl(wave())
+    },
+  })
+  const second = createAudioPcmSourceResolver({
+    projectId: () => 'project/isolation',
+    resolveUrl: () => {
+      secondResolves += 1
+      return dataUrl(wave())
+    },
+  })
+
+  await first(clip({ sourceAssetKey: 'asset/isolation' }))
+  await second(clip({ sourceAssetKey: 'asset/isolation' }))
+  first.clear?.()
+  await first(clip({ sourceAssetKey: 'asset/isolation' }))
+  await second(clip({ sourceAssetKey: 'asset/isolation' }))
+
+  expect(firstResolves).toBe(2)
+  expect(secondResolves).toBe(1)
+})
+
 test('resolves a local asset from its local File without deriving a cloud URL', async () => {
   const project = await createLocalProject(`Resolver ${crypto.randomUUID()}`)
   const db = await openLocalProjectDb(project.id)
